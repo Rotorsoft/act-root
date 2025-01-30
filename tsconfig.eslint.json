@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "module": "ES2022",
+    "target": "ESNext",
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "preserveConstEnums": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noImplicitAny": true,
+    "baseUrl": ".",
+    "types": [
+      "vitest/globals"
+    ]
+  },
+  "include": [
+    "**/src/**/*.ts",
+    "**/test/**/*.ts",
+    "vite.config.ts",
+    "eslint.config.mjs",
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/dist",
+    "**/*.d.ts"
+  ]
+}

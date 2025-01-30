@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "esModuleInterop": true
+  },
+  "files": [],
+  "references": [
+    {
+      "path": "./libs/act"
+    },
+    {
+      "path": "./libs/calculator"
+    }
+  ]
+}

@@ -1,0 +1,71 @@
+{
+  "name": "@rotorsoft/act-root",
+  "description": "TypeScript root monorepo of *act* libraries",
+  "version": "0.0.1",
+  "author": {
+    "name": "rotorsoft",
+    "email": "rotorsoft@outlook.com"
+  },
+  "license": "MIT",
+  "keywords": [
+    "typescript",
+    "event sourcing",
+    "cqrs",
+    "ddd",
+    "framework",
+    "agent",
+    "actor",
+    "library"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.0.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git"
+  },
+  "bugs": {
+    "url": "https://github.com/rotorsoft/act-root/issues"
+  },
+  "homepage": "https://github.com/rotorsoft/act-root#readme",
+  "scripts": {
+    "clean": "pnpm -r clean",
+    "build": "pnpm -r build",
+    "check-types": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
+    "test": "vitest run --coverage",
+    "lint": "pnpm eslint '**/src/**/*.ts'",
+    "pretty": "pnpm prettier --check '**/src/*.{ts,json,md,yaml,yml}'",
+    "fix": "pnpm lint --fix && pnpm pretty --write --ignore-path ./.prettierignore",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.19.0",
+    "@total-typescript/ts-reset": "^0.6.1",
+    "@types/chance": "^1.1.6",
+    "@types/minimist": "^1.2.5",
+    "@types/node": "^22.12.0",
+    "@typescript-eslint/eslint-plugin": "^8.22.0",
+    "@typescript-eslint/parser": "^8.22.0",
+    "@vitest/coverage-istanbul": "^3.0.4",
+    "chance": "^1.1.12",
+    "dotenv": "^16.4.7",
+    "eslint": "^9.19.0",
+    "eslint-config-prettier": "^10.0.1",
+    "eslint-plugin-prettier": "^5.2.3",
+    "husky": "^9.1.7",
+    "pinst": "^3.0.0",
+    "prettier": "^3.4.2",
+    "prettier-plugin-organize-imports": "^4.1.0",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.11",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^3.0.4"
+  },
+  "dependencies": {
+    "@rotorsoft/act": "workspace:*"
+  }
+}

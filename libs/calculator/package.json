@@ -1,0 +1,30 @@
+{
+  "name": "@rotorsoft/calculator",
+  "type": "module",
+  "version": "0.0.1",
+  "description": "calculator library",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/calculator"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "devmode": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npx tsc --build"
+  },
+  "dependencies": {
+    "@rotorsoft/act": "workspace:*",
+    "zod": "^3.24.1"
+  }
+}

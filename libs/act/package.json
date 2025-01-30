@@ -1,0 +1,32 @@
+{
+  "name": "@rotorsoft/act",
+  "type": "module",
+  "version": "0.0.1",
+  "description": "act core library",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "devmode": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npx tsc --build"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "zod": "^3.24.1"
+  }
+}

@@ -1,0 +1,10 @@
+**/node_modules
+**/dist
+**/templates
+**/.github
+**/*.env
+**/.stylelintrc
+**/coverage
+**/*.d.ts
+**/.eslintrc.js
+pnpm-lock.yaml
