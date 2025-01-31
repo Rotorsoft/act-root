@@ -1,46 +1,49 @@
 import pino from "pino";
-import { InMemoryApp } from "./adapters/InMemoryApp";
 import { InMemoryStore } from "./adapters/InMemoryStore";
-import { Builder } from "./builder";
-import { config as c } from "./config";
-import type { Disposable, Disposer, ExitCode, Store } from "./types";
+import { config } from "./config";
+import type { Disposable, Disposer, Store } from "./types";
+
+export const ExitCodes = ["ERROR", "EXIT"] as const;
+export type ExitCode = (typeof ExitCodes)[number];
 
 export const logger = pino({
-  transport: {
-    target: "pino-pretty",
-    options: {
-      colorize: c().env === "development",
-      ignore: "pid,hostname,name",
-      errorLikeObjectKeys: ["e", "err", "error"],
-      sync: c().env === "test",
-      singleLine: c().env !== "development"
-    }
-  },
-  level: c().env === "test" ? "fatal" : c().logLevel
+  transport:
+    config().env !== "production"
+      ? {
+          target: "pino-pretty",
+          options: {
+            ignore: "pid,hostname",
+            singleLine: config().logSingleLine,
+            colorize: true,
+          },
+        }
+      : undefined,
+  level: config().logLevel,
 });
 
+type Injector<Port extends Disposable> = (adapter?: Port) => Port;
 const adapters = new Map<string, Disposable>();
-export function port<T extends Disposable>(adapterFactory: (arg?: T) => T) {
-  return function (arg?: T): T {
-    if (!adapters.has(adapterFactory.name)) {
-      const adapter = adapterFactory(arg);
-      adapters.set(adapterFactory.name, adapter);
-      logger.info(undefined, `>>> ${adapter.name}`);
+export function port<Port extends Disposable>(injector: Injector<Port>) {
+  return function (adapter?: Port): Port {
+    if (!adapters.has(injector.name)) {
+      const injected = injector(adapter);
+      adapters.set(injector.name, injected);
+      logger.info(`🔌 injected ${injector.name}:${injected.constructor.name}`);
     }
-    return adapters.get(adapterFactory.name) as T;
+    return adapters.get(injector.name) as Port;
   };
 }
 
 const disposers: Disposer[] = [];
 export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   // ignore when errors are caught in production
-  if (code === "ERROR" && c().env === "production") return;
+  if (code === "ERROR" && config().env === "production") return;
 
   await Promise.all(disposers.map((disposer) => disposer()));
   await Promise.all(
-    [...adapters].reverse().map(async ([, adapter]) => {
+    [...adapters.values()].reverse().map(async (adapter) => {
       await adapter.dispose();
-      logger.info(undefined, `<<< ${adapter.name}`);
+      logger.info(`🔌 disposed ${adapter.constructor.name}`);
     })
   );
   adapters.clear();
@@ -60,14 +63,8 @@ export function dispose(
 }
 
 // singleton ports
-export const config = port(function config() {
-  return { ...c(), name: "config", dispose: () => Promise.resolve() };
+const store = port(function store(adapter?: Store) {
+  return adapter || new InMemoryStore();
 });
 
-export const app = port(function app<T extends Builder>(app?: T): T {
-  return app || (new InMemoryApp() as T);
-});
-
-export const store = port(function store(store?: Store) {
-  return store || InMemoryStore();
-});
+export { store };

@@ -10,10 +10,10 @@ export default defineConfig({
   test: {
     globals: true,
     coverage: {
-      include: ["**/src/**/*.ts"],
-      exclude: ["**/src/**/*.d.ts", "**/node_modules", "**/test"],
+      include: ["libs/**/src/**/*.ts"],
+      exclude: ["**/node_modules", "libs/act-examples"],
       provider: "istanbul",
-      reportsDirectory: "./coverage"
-    }
-  }
+      reportsDirectory: "./coverage",
+    },
+  },
 });

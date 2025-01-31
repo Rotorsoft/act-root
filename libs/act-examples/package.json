@@ -1,0 +1,39 @@
+{
+  "name": "@rotorsoft/act-examples",
+  "type": "module",
+  "version": "0.0.1",
+  "description": "act examples library",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act-examples"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "devmode": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev:calculator": "tsx watch src/calculator/main.ts",
+    "dev:wolfdesk": "tsx watch src/wolfdesk/main.ts",
+    "seed": "npx drizzle-kit push",
+    "studio": "npx drizzle-kit studio",
+    "clean": "rm -rf dist",
+    "build": "npx tsc --build"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.14.0",
+    "@rotorsoft/act": "workspace:*",
+    "drizzle-orm": "^0.39.3",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.30.4"
+  }
+}

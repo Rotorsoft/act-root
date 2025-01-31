@@ -1,5 +1,6 @@
 import { ZodError, type ZodType } from "zod";
-import { ValidationError, type Patch, type Rec } from "./types";
+import { config } from "./config";
+import { ValidationError, type Patch, type Schema } from "./types";
 
 /** These objects are copied instead of deep merged */
 const UNMERGEABLES = [
@@ -21,10 +22,10 @@ const UNMERGEABLES = [
   Int32Array,
   Uint32Array,
   Float32Array,
-  Float64Array
+  Float64Array,
 ];
 
-const mergeable = (value: any): boolean =>
+const is_mergeable = (value: any): boolean =>
   !!value &&
   typeof value === "object" &&
   !UNMERGEABLES.some((t) => value instanceof t);
@@ -32,46 +33,44 @@ const mergeable = (value: any): boolean =>
 /**
  * Copies state with patches recursively.
  * Keys with `undefined` or `null` values in patch are deleted.
- * @param prev original state
- * @param curr patches to merge
+ * @param original original state
+ * @param patches patches to merge
  * @returns a new patched state
  */
-export const patch = <T extends Rec>(
-  prev: Readonly<Patch<T>>,
-  curr: Readonly<Patch<T>>
-): Readonly<Patch<T>> => {
+export const patch = <S extends Schema>(
+  original: Readonly<S>,
+  patches: Readonly<Patch<S>>
+): Readonly<S> => {
   const copy = {} as Record<string, any>;
-  Object.keys({ ...prev, ...curr }).forEach((key) => {
-    const curr_value = curr[key as keyof typeof curr];
-    const prev_value = prev[key as keyof typeof prev];
-    const patched = curr && key in curr;
+  Object.keys({ ...original, ...patches }).forEach((key) => {
+    const patched_value = patches[key as keyof typeof patches];
+    const original_value = original[key as keyof typeof original];
+    const patched = patches && key in patches;
     const deleted =
-      patched && (typeof curr_value === "undefined" || curr_value === null);
-    const value = patched && !deleted ? curr_value : prev_value;
-
-    if (!deleted) {
-      if (mergeable(value)) {
-        copy[key] = patch(prev_value || {}, curr_value || {});
-      } else {
-        copy[key] = value;
-      }
-    }
+      patched &&
+      (typeof patched_value === "undefined" || patched_value === null);
+    const value = patched && !deleted ? patched_value : original_value;
+    !deleted &&
+      (copy[key] = is_mergeable(value)
+        ? patch(original_value || {}, patched_value || {})
+        : value);
   });
-  return copy as Patch<T>;
+  return copy as S;
 };
 
-export const validate = <T>(
-  payload: Readonly<T>,
-  schema?: ZodType<T>
-): Readonly<T> => {
+export const validate = <S>(
+  target: string,
+  payload: Readonly<S>,
+  schema?: ZodType<S>
+): Readonly<S> => {
   try {
     return schema ? schema.parse(payload) : payload;
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
       const { _errors, ...details } = (error as ZodError).format();
-      throw new ValidationError(details);
+      throw new ValidationError(target, payload, details);
     }
-    throw new ValidationError(error);
+    throw new ValidationError(target, payload, error);
   }
 };
 
@@ -79,13 +78,17 @@ export const validate = <T>(
  * Extends target payload with source payload after validating source
  */
 export const extend = <
+  S extends Record<string, unknown>,
   T extends Record<string, unknown>,
-  U extends Record<string, unknown>
 >(
-  source: Readonly<T>,
-  schema: ZodType<T>,
-  target?: Readonly<U>
-): Readonly<T & U> => {
-  const value = validate(source, schema);
-  return Object.assign(target || {}, value) as Readonly<T & U>;
+  source: Readonly<S>,
+  schema: ZodType<S>,
+  target?: Readonly<T>
+): Readonly<S & T> => {
+  const value = validate("config", source, schema);
+  return Object.assign(target || {}, value) as Readonly<S & T>;
 };
+
+export async function sleep(ms?: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms ?? config().sleepMs));
+}

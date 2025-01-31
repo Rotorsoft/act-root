@@ -1,6 +1,6 @@
 {
   "name": "@rotorsoft/act-root",
-  "description": "TypeScript root monorepo of *act* libraries",
+  "description": "Act monorepo",
   "version": "0.0.1",
   "author": {
     "name": "rotorsoft",
@@ -31,41 +31,44 @@
   },
   "homepage": "https://github.com/rotorsoft/act-root#readme",
   "scripts": {
+    "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
+    "dev:calculator": "pnpm -F act-examples dev:calculator",
+    "dev:wolfdesk": "pnpm -F act-examples dev:wolfdesk",
     "clean": "pnpm -r clean",
     "build": "pnpm -r build",
     "check-types": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
     "test": "vitest run --coverage",
-    "lint": "pnpm eslint '**/src/**/*.ts'",
-    "pretty": "pnpm prettier --check '**/src/*.{ts,json,md,yaml,yml}'",
-    "fix": "pnpm lint --fix && pnpm pretty --write --ignore-path ./.prettierignore",
+    "lint": "eslint '**/*.{ts,json}' --ignore-pattern '**/*.d.ts'",
+    "lint:fix": "pnpm lint --fix",
     "prepare": "husky"
+  },
+  "dependencies": {
+    "@rotorsoft/act": "workspace:*",
+    "@rotorsoft/act-examples": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.2.0",
-    "@eslint/js": "^9.19.0",
+    "@eslint/js": "^9.20.0",
     "@total-typescript/ts-reset": "^0.6.1",
     "@types/chance": "^1.1.6",
     "@types/minimist": "^1.2.5",
-    "@types/node": "^22.12.0",
-    "@typescript-eslint/eslint-plugin": "^8.22.0",
-    "@typescript-eslint/parser": "^8.22.0",
-    "@vitest/coverage-istanbul": "^3.0.4",
+    "@types/node": "^22.13.4",
+    "@typescript-eslint/eslint-plugin": "^8.24.1",
+    "@typescript-eslint/parser": "^8.24.1",
+    "@vitest/coverage-istanbul": "^3.0.6",
     "chance": "^1.1.12",
     "dotenv": "^16.4.7",
-    "eslint": "^9.19.0",
+    "eslint": "^9.20.1",
     "eslint-config-prettier": "^10.0.1",
     "eslint-plugin-prettier": "^5.2.3",
     "husky": "^9.1.7",
-    "pinst": "^3.0.0",
-    "prettier": "^3.4.2",
+    "prettier": "^3.5.1",
     "prettier-plugin-organize-imports": "^4.1.0",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.19.3",
     "typescript": "^5.7.3",
-    "vite": "^6.0.11",
+    "vite": "^6.1.1",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.4"
-  },
-  "dependencies": {
-    "@rotorsoft/act": "workspace:*"
+    "vitest": "^3.0.6"
   }
 }

@@ -1,11 +1,12 @@
+import { config } from "./config";
 import { disposeAndExit, logger } from "./ports";
 
 /** @module act */
-export * from "./builder";
+export * from "./builders";
 export * from "./ports";
-export * from "./state";
 export * from "./types";
 export * from "./utils";
+export { config };
 
 // exit on signals
 process.once("SIGINT", async (arg?: any) => {

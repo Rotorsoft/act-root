@@ -1,14 +1,10 @@
-import { app, ConcurrencyError, dispose, store, type Msg } from "../src";
-import { InMemoryApp } from "../src/adapters/InMemoryApp";
+import { ConcurrencyError, dispose, store } from "../src";
 import { InMemoryStore } from "../src/adapters/InMemoryStore";
 
 describe("adapters", () => {
   beforeAll(async () => {
-    store(InMemoryStore());
+    store(new InMemoryStore());
     await store().seed();
-    app(new InMemoryApp());
-    app().build();
-    await app().listen();
   });
 
   afterAll(async () => {
@@ -23,11 +19,11 @@ describe("adapters", () => {
     const events = [
       { name: "A", data: { a: 1 } },
       { name: "B", data: { b: 2 } },
-      { name: "C", data: { c: 3 } }
-    ] as Msg[];
+      { name: "C", data: { c: 3 } },
+    ];
     const meta = {
       correlation: "1",
-      causation: { action: { name: "A", stream } }
+      causation: { action: { name: "A", stream } },
     };
 
     it("should throw concurrency error", async () => {

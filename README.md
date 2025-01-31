@@ -4,11 +4,9 @@
 ![CodeQL Status](https://github.com/rotorsoft/act-root/actions/workflows/codeql-analysis.yml/badge.svg?branch=master)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 
-With the advent of “agentic AI” heralding a new wave of autonomous systems, I’ve been reflecting on the foundational essence of software systems and their core building blocks. It seems to me that building these new agents at scale requires a “constrained” and well-defined set of primitives expressed through a high-level language that is intuitive and capable of generating systems that are reliable, scalable, verifiable, and, ultimately, easy to understand.
+The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. This project is an attempt to distill the basic building blocks of modern software design into a small, simple, and composable library.
 
-The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. Over many years in software development, I’ve embraced many revolutionary paradigms and patterns, and while these have incrementally transformed how we think about systems, they often feel overwhelming, especially for new developers just starting to learn the ropes.
-
-## `State`, `Actions`, and `Reactions`
+## `Actions` -> `{ State }` <- `Reactions`
 
 Looking back at the history of software development, a few fundamental questions arise:
 
@@ -49,8 +47,16 @@ To tie everything together, this approach requires a robust integration layer to
 2. Event Delivery: Reliable event queues ensure that events are delivered to the correct agents in a timely and guaranteed manner. This includes mechanisms for retries, ensuring delivery even in the face of failures, and maintaining the correct order of events.
 3. Scalability: As new agents or state instances are introduced, the system can expand without introducing tight dependencies or bottlenecks, enabling efficient handling of growing loads and complex interactions.
 
-## Complexity Emerges from Simplicity
+## Complexity Emerging from Simplicity
 
 Living systems demonstrate that intricate behaviors and complex structures can emerge from simple, foundational building blocks. This natural principle suggests that advanced systems can be constructed from a few elemental components. The key question is whether focusing on the core concepts of state, actions, and reactions, while layering in reliability and scalability through event-driven design, provides all the essential ingredients needed to build the next generation of software agents.
 
-Thoughts?
+## Examples
+
+To demonstrate the capabilities of this framework, we provide a library of examples with test cases:
+
+- The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the “9” and “=” keys have been pressed in response to events.
+- The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
+- Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
+
+Enjoy!

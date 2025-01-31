@@ -1,7 +1,8 @@
 import { FlatCompat } from "@eslint/eslintrc";
 import js from "@eslint/js";
-import typescriptEslint from "@typescript-eslint/eslint-plugin";
-import tsParser from "@typescript-eslint/parser";
+import typescriptPlugin from "@typescript-eslint/eslint-plugin";
+import typescriptParser from "@typescript-eslint/parser";
+import prettierPlugin from "eslint-plugin-prettier";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +11,7 @@ const __dirname = path.dirname(__filename);
 const compat = new FlatCompat({
   baseDirectory: __dirname,
   recommendedConfig: js.configs.recommended,
-  allConfig: js.configs.all
+  allConfig: js.configs.all,
 });
 
 export default [
@@ -23,45 +24,51 @@ export default [
   ),
   {
     plugins: {
-      "@typescript-eslint": typescriptEslint
+      "@typescript-eslint": typescriptPlugin,
+      prettier: prettierPlugin,
     },
 
     languageOptions: {
-      globals: {},
-      parser: tsParser,
-      ecmaVersion: 5,
-      sourceType: "script",
-
+      parser: typescriptParser,
+      ecmaVersion: 2022,
+      sourceType: "module",
       parserOptions: {
-        project: "./tsconfig.eslint.json"
-      }
+        project: "./tsconfig.eslint.json",
+      },
     },
 
     rules: {
+      "prettier/prettier": [
+        "error",
+        {
+          tabWidth: 2,
+          semi: true,
+          singleQuote: false,
+          bracketSpacing: true,
+          trailingComma: "es5",
+          plugins: ["prettier-plugin-organize-imports"],
+        },
+      ],
+
+      "newline-per-chained-call": "off",
+
       "require-await": "off",
       "@typescript-eslint/require-await": "error",
 
       "@typescript-eslint/no-misused-promises": [
         "error",
-        {
-          checksVoidReturn: false
-        }
+        { checksVoidReturn: false },
       ],
 
       "no-unused-vars": "off",
-
       "@typescript-eslint/no-unused-vars": [
         "error",
-        {
-          varsIgnorePattern: "^_.*"
-        }
+        { varsIgnorePattern: "^_.*" },
       ],
 
       "@typescript-eslint/no-unused-expressions": [
         "error",
-        {
-          allowShortCircuit: true
-        }
+        { allowShortCircuit: true },
       ],
 
       "@typescript-eslint/no-explicit-any": 0,
@@ -73,7 +80,7 @@ export default [
       "@typescript-eslint/restrict-template-expressions": "off",
       "@typescript-eslint/no-unsafe-declaration-merging": "off",
       "@typescript-eslint/no-redundant-type-constituents": "off",
-      "@typescript-eslint/no-duplicate-type-constituents": "off"
-    }
-  }
+      "@typescript-eslint/no-duplicate-type-constituents": "off",
+    },
+  },
 ];

@@ -15,14 +15,11 @@
     ]
   },
   "include": [
-    "**/src/**/*.ts",
-    "**/test/**/*.ts",
-    "vite.config.ts",
-    "eslint.config.mjs",
+    "**/*.ts",
   ],
   "exclude": [
     "**/node_modules",
     "**/dist",
-    "**/*.d.ts"
+    "**/*.d.ts",
   ]
 }

@@ -12,20 +12,22 @@ describe("utils", () => {
     it("should patch state correctly", () => {
       const prevState = { a: 1, b: 2, c: { d: 10 } };
       const currState = { b: 3, c: { e: 4 } };
+      // @ts-expect-error invalid currState
       const patchedState = patch(prevState, currState);
       expect(patchedState).toEqual({
         a: 1,
         b: 3,
         c: {
           d: 10,
-          e: 4
-        }
+          e: 4,
+        },
       });
     });
 
     it("should delete keys with undefined or null values", () => {
       const prevState = { a: 1, b: 2, c: 10 };
       const currState = { b: undefined, c: null, d: null };
+      // @ts-expect-error invalid currState
       const patchedState = patch(prevState, currState);
       expect(patchedState).toEqual({ a: 1 });
     });
@@ -38,32 +40,32 @@ describe("utils", () => {
         a: new Map([["a", 1]]),
         b: 3,
         c: new Map([["c", 4]]),
-        d: new Map()
+        d: new Map(),
       });
     });
   });
 
   describe("validate", () => {
     const schema = z.object({
-      key: z.string()
+      key: z.string(),
     });
 
     it("should validate payload correctly", () => {
       const payload = { key: "value" };
-      const validated = validate(payload, schema);
+      const validated = validate("test", payload, schema);
       expect(validated).toEqual(payload);
     });
 
     it("should throw ValidationError on invalid payload", () => {
       const payload = { key: 123 };
       // @ts-expect-error invalid payload
-      expect(() => validate(payload, schema)).toThrow(ValidationError);
+      expect(() => validate("test", payload, schema)).toThrow(ValidationError);
     });
   });
 
   describe("extend", () => {
     const schema = z.object({
-      key: z.string()
+      key: z.string(),
     });
 
     it("should extend target with validated source", () => {

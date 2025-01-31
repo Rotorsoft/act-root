@@ -1,59 +1,53 @@
-import type { Msg, RecRec, Target } from "../types";
+import type { Message, Schema, Schemas, Target } from "./action";
 
 /**
  * Application error types
  * - `ERR_VALIDATION` schema validation error
  * - `ERR_INVARIANT` invariant validation error
  * - `ERR_CONCURRENCY` optimistic concurrency validation error on commits
- * - `ERR_REGISTRATION` schema registration error
  */
 export const Errors = {
   ValidationError: "ERR_VALIDATION",
   InvariantError: "ERR_INVARIANT",
   ConcurrencyError: "ERR_CONCURRENCY",
-  ActorConcurrencyError: "ERR_ACTOR_CONCURRENCY",
-  RegistrationError: "ERR_REGISTRATION"
 } as const;
 
 export class ValidationError extends Error {
-  constructor(public details: any) {
-    super("Invalid message payload");
+  constructor(
+    public readonly target: string,
+    public readonly payload: any,
+    public readonly details: any
+  ) {
+    super(`Invalid ${target} payload`);
     this.name = Errors.ValidationError;
   }
 }
 
-export class InvariantError<M extends RecRec> extends Error {
+export class InvariantError extends Error {
   public readonly details;
   constructor(
-    name: keyof M,
-    data: Readonly<M[keyof M]>,
+    name: string,
+    payload: Schema,
     target: Target,
     description: string
   ) {
-    super(`${name as string} failed invariant: ${description}`);
+    super(`${name} failed invariant: ${description}`);
     this.name = Errors.InvariantError;
-    this.details = { name, data, target, description };
+    this.details = { name, payload, target, description };
   }
 }
 
-export class ConcurrencyError<E extends RecRec> extends Error {
+export class ConcurrencyError extends Error {
   constructor(
     public readonly lastVersion: number,
-    public readonly events: Msg<E, keyof E>[],
+    public readonly events: Message<Schemas, keyof Schemas>[],
     public readonly expectedVersion: number
   ) {
     super(
       `Concurrency error committing event "${
-        events.at(0)?.name as string
+        events.at(0)?.name
       }". Expected version ${expectedVersion} but found version ${lastVersion}.`
     );
     this.name = Errors.ConcurrencyError;
-  }
-}
-
-export class RegistrationError extends Error {
-  constructor(message: string) {
-    super(`Message "${message}" not registered with app builder!`);
-    this.name = Errors.RegistrationError;
   }
 }

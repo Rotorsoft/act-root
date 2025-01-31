@@ -6,56 +6,45 @@ import { extend } from "./utils";
 
 dotenv.config();
 
-export type Package = {
-  name: string;
-  version: string;
-  description: string;
-  author: {
-    name: string;
-    email: string;
-  };
-  license: string;
-  dependencies: Record<string, string>;
-};
+export const PackageSchema = z.object({
+  name: z.string().min(1),
+  version: z.string().min(1),
+  description: z.string().min(1),
+  author: z
+    .object({ name: z.string().min(1), email: z.string().optional() })
+    .or(z.string().min(1)),
+  license: z.string().min(1),
+  dependencies: z.record(z.string()),
+});
+export type Package = z.infer<typeof PackageSchema>;
 
 const getPackage = (): Package => {
   const pkg = fs.readFileSync("package.json");
   return JSON.parse(pkg.toString()) as Package;
 };
 
-const pkg = getPackage();
-const parts = pkg.name.split("/");
-const service = parts.at(-1) || "";
-
-/**
- * Base configuration
- */
-const Schema = z.object({
+const BaseSchema = PackageSchema.extend({
   env: z.enum(Environments),
   logLevel: z.enum(LogLevels),
-  service: z.string().min(1),
-  version: z.string().min(1),
-  description: z.string().min(1),
-  author: z.object({ name: z.string().min(1), email: z.string() }),
-  license: z.string().min(1),
-  dependencies: z.record(z.string())
+  logSingleLine: z.boolean(),
+  sleepMs: z.number().int().min(0).max(5000),
 });
-export type Config = z.infer<typeof Schema>;
+export type Config = z.infer<typeof BaseSchema>;
 
-const { NODE_ENV, LOG_LEVEL } = process.env;
+const { NODE_ENV, LOG_LEVEL, LOG_SINGLE_LINE, SLEEP_MS } = process.env;
+
+const env = (NODE_ENV || "development") as Environment;
+const logLevel = (LOG_LEVEL ||
+  (NODE_ENV === "test"
+    ? "error"
+    : LOG_LEVEL === "production"
+      ? "info"
+      : "trace")) as LogLevel;
+const logSingleLine = (LOG_SINGLE_LINE || "true") === "true";
+const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"));
+
+const pkg = getPackage();
 
 export const config = (): Config => {
-  return extend(
-    {
-      env: (NODE_ENV as Environment) || "development",
-      logLevel: (LOG_LEVEL as LogLevel) || "error",
-      service,
-      version: pkg.version,
-      description: pkg.description,
-      author: { name: pkg.author?.name, email: pkg.author?.email },
-      license: pkg.license,
-      dependencies: pkg.dependencies
-    },
-    Schema
-  );
+  return extend({ ...pkg, env, logLevel, logSingleLine, sleepMs }, BaseSchema);
 };

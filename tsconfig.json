@@ -8,7 +8,7 @@
       "path": "./libs/act"
     },
     {
-      "path": "./libs/calculator"
+      "path": "./libs/act-examples"
     }
   ]
 }

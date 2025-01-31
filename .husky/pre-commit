@@ -1,6 +1,2 @@
-#!/bin/sh
-. "$(dirname "$0")/_/husky.sh"
-
-echo ">>> lint and pretty before commit..."
-pnpm lint
-pnpm pretty
+echo ">>> lint before commit..."
+pnpm lint:fix
