@@ -1,2 +1,2 @@
 echo ">>> unit testing before pushing..."
-pnpm jest --coverage --bail
+pnpm test
