@@ -1,5 +1,5 @@
 import { dispose } from "@rotorsoft/act";
-import { act, connect } from "../../src/wolfdesk/app";
+import { act, connect_broker } from "../../src/wolfdesk/bootstrap";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
   addMessage,
@@ -9,7 +9,7 @@ import {
 } from "./actions";
 
 describe("reactions", () => {
-  const broker = connect();
+  const broker = connect_broker();
 
   afterAll(async () => {
     await dispose()();

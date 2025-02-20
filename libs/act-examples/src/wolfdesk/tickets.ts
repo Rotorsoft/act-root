@@ -1,7 +1,7 @@
 import { type AsCommitted } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
 import { db, tickets } from "../drizzle";
-import { act } from "./app";
+import { act } from "./bootstrap";
 
 export async function opened(event: AsCommitted<typeof act, "TicketOpened">) {
   const { closeAfter, ...other } = event.data;

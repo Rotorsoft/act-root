@@ -1,6 +1,6 @@
 import { type Target } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { act } from "../../src/wolfdesk/app";
+import { act } from "../../src/wolfdesk/bootstrap";
 import { Priority } from "../../src/wolfdesk/ticket";
 
 const chance = new Chance();

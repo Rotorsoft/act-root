@@ -37,7 +37,7 @@
     "clean": "pnpm -r clean",
     "build": "pnpm -r build",
     "check-types": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
-    "test": "vitest run --coverage",
+    "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.{ts,json}' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
     "prepare": "husky"

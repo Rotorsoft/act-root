@@ -1,0 +1,112 @@
+name: CI-CD
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    # services:
+    #   postgres:
+    #     image: postgres:12.3-alpine
+    #     env:
+    #       POSTGRES_PASSWORD: postgres
+    #     # health checks to wait until postgres has started
+    #     options: >-
+    #       --health-cmd pg_isready
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+    #     ports:
+    #       - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: install and build
+        run: pnpm install && pnpm build
+
+      - name: unit test
+        run: pnpm test
+        # env:
+        #   PG_HOST: localhost
+        #   PG_USER: postgres
+        #   PG_PASSWORD: postgres
+        #   PG_DATABASE: postgres
+
+      - name: coveralls
+        uses: coverallsapp/github-action@master
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+  cd:
+    runs-on: ubuntu-latest
+    needs: ci
+    strategy:
+      max-parallel: 1 # to avoid git conflicts
+      matrix:
+        lib:
+          - act
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: analyze ${{ matrix.lib }}
+        id: analyze
+        uses: rotorsoft/semrel-analyze@v3.0.0
+        with:
+          package: "@rotorsoft/${{ matrix.lib }}"
+          directory: "libs/${{ matrix.lib }}"
+
+      - name: analysis
+        run: |
+          echo "last-tag: ${{ steps.analyze.outputs.last-tag }}"
+          echo "next-tag: ${{ steps.analyze.outputs.next-tag }}"
+          echo "next-version: ${{ steps.analyze.outputs.next-version }}"
+          echo "${{ steps.analyze.outputs.change-log }}"
+
+      # - name: release ${{ matrix.lib }}
+      #   uses: rotorsoft/semrel-release@v3.0.1
+      #   with:
+      #     github-token: "${{ secrets.GITHUB_TOKEN }}"
+      #     npm-registry: "registry.npmjs.org"
+      #     npm-token: "${{ secrets.NPM_TOKEN }}"
+      #     npm-access: "public"
+      #     user: "rotorsoft"
+      #     email: "rotorsoft@outlook.com"
+      #     package: "@rotorsoft/${{ matrix.lib }}"
+      #     directory: "libs/${{ matrix.lib }}"
+      #     tag: "${{ steps.analyze.outputs.next-tag }}"
+      #     version: "${{ steps.analyze.outputs.next-version }}"
+      #     change-log: "${{ steps.analyze.outputs.change-log }}"

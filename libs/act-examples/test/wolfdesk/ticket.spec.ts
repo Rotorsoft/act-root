@@ -1,6 +1,6 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { act } from "../../src/wolfdesk/app";
+import { act } from "../../src/wolfdesk/bootstrap";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
   acknowledgeMessage,

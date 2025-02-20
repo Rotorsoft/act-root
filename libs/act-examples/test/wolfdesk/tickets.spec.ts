@@ -1,8 +1,8 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { db, tickets } from "../../src/drizzle";
-import { act, connect, Priority } from "../../src/wolfdesk/app";
+import { db, init_tickets_db, tickets } from "../../src/drizzle";
+import { act, connect_broker, Priority } from "../../src/wolfdesk/bootstrap";
 import { AutoClose, AutoEscalate, AutoReassign } from "../../src/wolfdesk/jobs";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
@@ -19,9 +19,10 @@ import {
 const chance = new Chance();
 
 describe("ticket projection", () => {
-  const broker = connect(true);
+  const broker = connect_broker(true);
 
   beforeAll(async () => {
+    await init_tickets_db();
     await db.delete(tickets);
     // broker.on("drained", (value) =>
     //   console.log(

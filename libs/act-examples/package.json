@@ -22,10 +22,11 @@
   "scripts": {
     "dev:calculator": "tsx watch src/calculator/main.ts",
     "dev:wolfdesk": "tsx watch src/wolfdesk/main.ts",
-    "seed": "npx drizzle-kit push",
-    "studio": "npx drizzle-kit studio",
     "clean": "rm -rf dist",
-    "build": "npx tsc --build"
+    "build": "npx tsc --build",
+    "drizzle:migrate": "npx drizzle-kit generate && npx drizzle-kit migrate",
+    "drizzle:push": "npx drizzle-kit push",
+    "drizzle:studio": "npx drizzle-kit studio"
   },
   "dependencies": {
     "@libsql/client": "^0.14.0",

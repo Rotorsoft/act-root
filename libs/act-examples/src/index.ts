@@ -1,2 +1,2 @@
 export * from "./calculator";
-export * from "./wolfdesk/app";
+export * from "./wolfdesk/bootstrap";

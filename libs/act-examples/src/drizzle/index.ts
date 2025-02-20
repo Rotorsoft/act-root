@@ -1,12 +1,18 @@
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import path from "path";
-import { tickets } from "./schema";
+import { fileURLToPath } from "url";
 
-const db_path = path.join(import.meta.dirname ?? __dirname, "../../local.db");
+const db_path = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../local.db"
+);
+
 const client = createClient({ url: `file:${db_path}` });
-const db = drizzle({ client });
+export const db = drizzle(client);
 
-void db.run("PRAGMA journal_mode=WAL;");
+export async function init_tickets_db() {
+  await db.run("PRAGMA journal_mode=WAL;");
+}
 
-export { db, tickets };
+export { tickets } from "./schema";

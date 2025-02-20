@@ -1,5 +1,5 @@
 import type { AsCommitted } from "@rotorsoft/act";
-import { act } from "./app";
+import { act } from "./bootstrap";
 import { assignAgent } from "./services/agent";
 import { deliverMessage } from "./services/notification";
 

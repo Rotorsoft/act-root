@@ -10,7 +10,7 @@ export * from "./ticket";
 export const act = new ActBuilder().with(Ticket).build();
 
 // prettier-ignore
-export function connect(withProjection = false) {
+export function connect_broker(withProjection = false) {
   const builder = new BrokerBuilder(act.events)
     .when("TicketOpened").do(r.assign)
     .when("MessageAdded").do(r.deliver)
@@ -29,7 +29,7 @@ export function connect(withProjection = false) {
   return builder.build();
 }
 
-export function startJobs() {
+export function start_jobs() {
   setInterval(j.AutoReassign, 30_000);
   setInterval(j.AutoEscalate, 30_000);
   setInterval(j.AutoClose, 30_000);
