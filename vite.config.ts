@@ -13,6 +13,7 @@ export default defineConfig({
       include: ["libs/**/src/**/*.ts"],
       exclude: ["**/node_modules", "libs/act-examples"],
       provider: "istanbul",
+      reporter: ["text", "lcov", "html"],
       reportsDirectory: "./coverage",
     },
   },
