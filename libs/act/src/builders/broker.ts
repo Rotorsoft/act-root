@@ -32,9 +32,6 @@ class CorrelatedStream<E extends Schemas> {
   get first() {
     return this._queue.at(0);
   }
-  get last() {
-    return this._queue.at(-1);
-  }
   push(reaction: Reaction<E>, event: Committed<E, keyof E>) {
     event.id > this._position &&
       this._queue.push({ ...reaction, event } as ReactionPayload<E>);
@@ -144,6 +141,11 @@ export class Broker<E extends Schemas> {
   ): Promise<{ stream: CorrelatedStream<E>; first?: number; last?: number }> {
     let first: number | undefined;
     let last: number | undefined;
+
+    retry > 0 &&
+      logger.error(
+        `Retrying stream ${stream.stream} @ ${stream.position} (${retry}).`
+      );
     while (stream.first) {
       const { event, options } = stream.first;
       try {
@@ -157,9 +159,6 @@ export class Broker<E extends Schemas> {
         else logger.error(error);
 
         if (retry < options.maxRetries) {
-          logger.error(
-            `Retrying stream ${stream.stream} @ ${stream.position} (${retry}).`
-          );
           setTimeout(
             () => this.handle(stream, retry + 1),
             options.retryDelayMs * (retry + 1)
@@ -229,18 +228,21 @@ export class Broker<E extends Schemas> {
         "⚡️ drain"
       );
 
+    let drained = 0;
     await Promise.allSettled(streams.map((stream) => this.handle(stream))).then(
       (promise) => {
         promise.forEach((result) => {
           if (result.status === "rejected") logger.error(result.reason);
-          else if (result.value.first && result.value.last)
+          else if (result.value.first && result.value.last) {
+            drained++;
             this.emit("drained", result.value);
+          }
         });
       },
       (error) => logger.error(error)
     );
 
     this.drainLocked = false;
-    return streams.length;
+    return drained;
   }
 }

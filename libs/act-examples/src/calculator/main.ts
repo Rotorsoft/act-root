@@ -61,7 +61,7 @@ async function main() {
     .when("EqualCounted").do(async function ShowMessage({ stream }) {
       await sleep();
       console.log(`Equals counted on ${stream}`);
-    }).toVoid()
+    }).void()
     .build();
 
   // drain on commit

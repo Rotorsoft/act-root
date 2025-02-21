@@ -29,7 +29,7 @@ interface IDoBuilder<E extends Schemas, K extends keyof E>
 interface IToBuilder<E extends Schemas, K extends keyof E>
   extends IDoBuilder<E, K> {
   to(resolver: ReactionResolver<E, K>): IDoBuilder<E, K>;
-  toVoid(): IDoBuilder<E, K>;
+  void(): IDoBuilder<E, K>;
 }
 
 export class BrokerBuilder<E extends Schemas> implements IBrokerBuilder<E> {
@@ -92,7 +92,7 @@ class ToBuilder<E extends Schemas, K extends keyof E>
     return new DoBuilder(this.events, this.event);
   }
 
-  toVoid<K extends keyof E>(): IDoBuilder<E, K> {
+  void<K extends keyof E>(): IDoBuilder<E, K> {
     this.events[this.event].reactions.set(this.reaction.handler.name, {
       handler: this.reaction.handler,
       resolver: _void_,

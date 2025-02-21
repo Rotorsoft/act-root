@@ -1,21 +1,33 @@
+import { z } from "zod";
 import {
   ActBuilder,
   Actor,
+  BrokerBuilder,
   dispose,
+  Infer,
   type Schema,
   type Schemas,
   type State,
   ZodEmpty,
 } from "../src";
 
-function A1(): State<Schemas, Schemas, Schema> {
+const events = {
+  Event1: z.object({}),
+  Event2: z.object({}),
+};
+const actions = {
+  Act1: z.object({}),
+  Act2: z.object({}),
+};
+const schemas = {
+  events,
+  actions,
+  state: z.object({}),
+};
+
+function A1(): Infer<typeof schemas> {
   return {
-    events: { Event1: ZodEmpty, Event2: ZodEmpty },
-    actions: {
-      Act1: ZodEmpty,
-      Act2: ZodEmpty,
-    },
-    state: ZodEmpty,
+    ...schemas,
     init: () => ({}),
     patch: { Event1: () => ({}), Event2: () => ({}) },
     on: {
@@ -60,11 +72,20 @@ describe("Builder", () => {
 
   it("should act ok, but no events emitted", async () => {
     const act = new ActBuilder().with(A1).build();
+    new BrokerBuilder(act.events)
+      .when("Event1")
+      .do(() => Promise.resolve())
+      .void()
+      .when("Event2")
+      .do(() => Promise.resolve())
+      .to("abc")
+      .build();
+
     const result = await act.do("Act1", { stream: "A", actor }, {});
     expect(result).toBeDefined();
     expect(act.events["Event1"]).toBeDefined();
     expect(act.events["Event2"]).toBeDefined();
-    expect(act.events["Event1"].schema).toMatchObject(ZodEmpty);
+    expect(act.events["Event1"].schema).toMatchObject(events.Event1);
   });
 
   it("should throw duplicate action", () => {
