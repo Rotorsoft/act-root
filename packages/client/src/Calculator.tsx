@@ -7,25 +7,25 @@ export default function Calculator() {
 
   const pressKey = trpc.PressKey.useMutation({
     onSuccess: (snap) => {
-      console.log(snap);
+      console.log(snap.state);
       setDisplay(
         `${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${snap.state.right ?? ""}`
       );
     },
-    onError: console.error
+    onError: console.error,
   });
 
   const clear = trpc.Clear.useMutation({
     onSuccess: (snap) => {
-      console.log(snap);
+      console.log(snap.state);
       setDisplay("0");
     },
-    onError: console.error
+    onError: console.error,
   });
 
   const handleKey = (key: string) => {
     if (!key) return;
-    if (key === "C") clear.mutate({});
+    if (key === "C") clear.mutate();
     else pressKey.mutate({ key: key as Digits | Operators });
   };
 
@@ -53,9 +53,9 @@ export default function Calculator() {
           "",
           "0",
           ".",
-          "="
-        ].map((key) => (
-          <button key={key} onClick={() => handleKey(key)}>
+          "=",
+        ].map((key, index) => (
+          <button key={index} onClick={() => handleKey(key)}>
             {key}
           </button>
         ))}

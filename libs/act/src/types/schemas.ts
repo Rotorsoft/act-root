@@ -1,4 +1,4 @@
-import { z, ZodNever, ZodObject, ZodRawShape, ZodRecord, ZodString } from "zod";
+import { z, ZodObject, ZodRawShape } from "zod";
 
 export const ZodEmpty = z.record(z.never());
 
@@ -44,14 +44,8 @@ export const CommittedMetaSchema = z
   .readonly();
 
 export type StateSchema = Readonly<{
-  events: Record<
-    string,
-    ZodObject<ZodRawShape> | ZodRecord<ZodString, ZodNever>
-  >;
-  actions: Record<
-    string,
-    ZodObject<ZodRawShape> | ZodRecord<ZodString, ZodNever>
-  >;
+  events: Record<string, ZodObject<ZodRawShape> | typeof ZodEmpty>;
+  actions: Record<string, ZodObject<ZodRawShape> | typeof ZodEmpty>;
   state: ZodObject<ZodRawShape>;
 }>;
 
