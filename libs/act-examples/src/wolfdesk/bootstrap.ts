@@ -30,7 +30,7 @@ export function connect_broker(withProjection = false) {
 }
 
 export function start_jobs() {
-  setInterval(j.AutoReassign, 30_000);
-  setInterval(j.AutoEscalate, 30_000);
-  setInterval(j.AutoClose, 30_000);
+  setInterval(j.AutoReassign, 10_000);
+  setInterval(j.AutoEscalate, 10_000);
+  setInterval(j.AutoClose, 15_000);
 }

@@ -54,8 +54,68 @@ Living systems demonstrate that intricate behaviors and complex structures can e
 
 To demonstrate the capabilities of this framework, we provide a library of examples with test cases:
 
-- The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the “9” and “=” keys have been pressed in response to events.
-- The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
-- Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
+### Calculator
+
+The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the “9” and “=” keys have been pressed in response to events.
+
+```ts
+const act = new ActBuilder().with(NineCounter).with(Calculator).build();
+
+// prettier-ignore
+const broker = new BrokerBuilder(act.events)
+  .when("DigitPressed").do(async function CountNines(event, stream) {
+    await act.do("Count", { stream }, { key: event.data.digit }, event); }).to(() => "Counter")
+  .when("EqualsPressed").do(async function CountEquals(event, stream) {
+    await act.do("Count", { stream }, { key: "=" }, event); }).to("Counter")
+  .when("EqualCounted").do(async function ShowMessage({ stream }) {
+    await sleep();
+    console.log(`Equals counted on ${stream}`); }).toVoid()
+  .build();
+
+// drain on commit
+act.on("committed", () => {
+  void broker.drain();
+});
+// drain on a schedule
+setInterval(() => {
+  void broker.drain();
+}, 1_000);
+```
+
+### WolfDesk
+
+The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
+
+```ts
+export const act = new ActBuilder().with(Ticket).build();
+
+// reactions
+// prettier-ignore
+const builder = new BrokerBuilder(act.events)
+  .when("TicketOpened").do(r.assign)
+  .when("MessageAdded").do(r.deliver)
+  .when("TicketEscalationRequested").do(r.escalate)
+
+// projections
+// prettier-ignore
+builder
+  .when("TicketOpened").do(p.opened).to("tickets")
+  .when("TicketClosed").do(p.closed).to("tickets")
+  .when("TicketAssigned").do(p.assigned).to("tickets")
+  .when("MessageAdded").do(p.messageAdded).to("tickets")
+  .when("TicketEscalated").do(p.escalated).to("tickets")
+  .when("TicketReassigned").do(p.reassigned).to("tickets")
+  .when("TicketResolved").do(p.resolved).to("tickets")
+
+export function start_jobs() {
+  setInterval(AutoReassign, 30_000);
+  setInterval(AutoEscalate, 30_000);
+  setInterval(AutoClose, 30_000);
+}
+```
+
+## tRPC Integration
+
+Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
 
 Enjoy!

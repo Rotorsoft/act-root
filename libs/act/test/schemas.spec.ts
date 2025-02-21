@@ -40,6 +40,7 @@ const expectedSnapshot = {
         action: {
           name: "Action",
           stream: "stream",
+          actor: { id: "1", name: "Actor" },
         },
       },
     },

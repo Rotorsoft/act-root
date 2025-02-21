@@ -1,5 +1,6 @@
 import {
   ActBuilder,
+  Actor,
   dispose,
   InvariantError,
   ValidationError,
@@ -7,6 +8,7 @@ import {
 import { Calculator } from "../../src/calculator";
 
 describe("calculator invariants", () => {
+  const actor: Actor = { id: "1", name: "Calculator" };
   const stream = "I";
   const act = new ActBuilder().with(Calculator).build();
 
@@ -15,9 +17,9 @@ describe("calculator invariants", () => {
   });
 
   it("should throw invariant error", async () => {
-    await act.do("PressKey", { stream }, { key: "1" });
-    await act.do("Clear", { stream }, {});
-    await expect(act.do("Clear", { stream }, {})).rejects.toThrow(
+    await act.do("PressKey", { stream, actor }, { key: "1" });
+    await act.do("Clear", { stream, actor }, {});
+    await expect(act.do("Clear", { stream, actor }, {})).rejects.toThrow(
       InvariantError
     );
   });
@@ -25,13 +27,13 @@ describe("calculator invariants", () => {
   it("should throw validation error", async () => {
     await expect(
       // @ts-expect-error invalid action
-      act.do("PressKey", { stream }, { key: 123 })
+      act.do("PressKey", { stream, actor }, { key: 123 })
     ).rejects.toThrow(ValidationError);
   });
 
   it("should throw no operator error", async () => {
     await expect(
-      act.do("PressKey", { stream: "C" }, { key: "=" })
+      act.do("PressKey", { stream: "C", actor }, { key: "=" })
     ).rejects.toThrow("no operator");
   });
 

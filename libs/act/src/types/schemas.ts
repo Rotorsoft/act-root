@@ -12,8 +12,8 @@ export const ActorSchema = z
 export const TargetSchema = z
   .object({
     stream: z.string(),
+    actor: ActorSchema,
     expectedVersion: z.number().optional(),
-    actor: ActorSchema.optional(),
   })
   .readonly();
 

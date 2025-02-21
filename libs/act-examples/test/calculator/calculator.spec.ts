@@ -1,9 +1,10 @@
-import { ActBuilder, dispose, sleep, store } from "@rotorsoft/act";
+import { ActBuilder, Actor, dispose, sleep, store } from "@rotorsoft/act";
 import { Calculator } from "../../src/calculator";
 
 describe("calculator lifecycle", () => {
+  const actor_a: Actor = { id: "A", name: "A" };
+  const actor_x: Actor = { id: "X", name: "X" };
   const stream = "A";
-  const actor = { id: "A", name: "B" };
   const expected = {
     state: { result: -5.62, left: "-5.62" },
     patches: 5,
@@ -23,29 +24,33 @@ describe("calculator lifecycle", () => {
   });
 
   it("should compute results", async () => {
-    await act.do("PressKey", { stream }, { key: "-" });
-    await act.do("PressKey", { stream }, { key: "1" });
-    await act.do("PressKey", { stream }, { key: "2" });
-    await act.do("PressKey", { stream }, { key: "+" });
-    await act.do("PressKey", { stream }, { key: "2" });
-    await act.do("PressKey", { stream }, { key: "." });
-    await act.do("PressKey", { stream }, { key: "3" });
-    await act.do("PressKey", { stream }, { key: "*" });
-    await act.do("PressKey", { stream }, { key: "4" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "-" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "1" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "2" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "+" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "2" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "." });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "3" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "*" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "4" });
 
     await sleep(5);
     midpoint = new Date();
     await sleep(5);
 
-    await act.do("PressKey", { stream }, { key: "-" });
-    await act.do("PressKey", { stream }, { key: "5" });
-    await act.do("PressKey", { stream }, { key: "." });
-    await act.do("PressKey", { stream }, { key: "6" });
-    await act.do("PressKey", { stream, actor }, { key: "/" });
-    await act.do("PressKey", { stream, actor }, { key: "7" });
-    await act.do("PressKey", { stream, actor }, { key: "." });
-    await act.do("PressKey", { stream, actor }, { key: "9" });
-    const result = await act.do("PressKey", { stream }, { key: "=" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "-" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "5" });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "." });
+    await act.do("PressKey", { stream, actor: actor_x }, { key: "6" });
+    await act.do("PressKey", { stream, actor: actor_a }, { key: "/" });
+    await act.do("PressKey", { stream, actor: actor_a }, { key: "7" });
+    await act.do("PressKey", { stream, actor: actor_a }, { key: "." });
+    await act.do("PressKey", { stream, actor: actor_a }, { key: "9" });
+    const result = await act.do(
+      "PressKey",
+      { stream, actor: actor_x },
+      { key: "=" }
+    );
     expect(result).toMatchObject(expected);
     correlation = result.event!.meta.correlation;
   });
@@ -189,11 +194,23 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by stream and actor after acting on a second stream", async () => {
-    await act.do("PressKey", { stream: "B" }, { key: "1" }, undefined, true);
-    await act.do("PressKey", { stream: "B" }, { key: "1" }, undefined, true);
     await act.do(
       "PressKey",
-      { stream: "B", expectedVersion: 1 },
+      { stream: "B", actor: actor_x },
+      { key: "1" },
+      undefined,
+      true
+    );
+    await act.do(
+      "PressKey",
+      { stream: "B", actor: actor_x },
+      { key: "1" },
+      undefined,
+      true
+    );
+    await act.do(
+      "PressKey",
+      { stream: "B", actor: actor_x, expectedVersion: 1 },
       { key: "1" },
       undefined,
       true

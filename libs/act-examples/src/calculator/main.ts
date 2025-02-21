@@ -1,10 +1,12 @@
 import {
   ActBuilder,
+  Actor,
   BrokerBuilder,
   sleep,
   ZodEmpty,
   type Infer,
 } from "@rotorsoft/act";
+import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Calculator, KEYS } from ".";
 
@@ -42,6 +44,8 @@ export function NineCounter(): Infer<typeof NineCounterSchemas> {
 
 // prettier-ignore
 async function main() {
+  const actor: Actor = { id: randomUUID(), name: "Calculator" };
+  
   const act = new ActBuilder()
     .with(NineCounter)
     .with(Calculator)
@@ -49,10 +53,10 @@ async function main() {
 
   const broker = new BrokerBuilder(act.events)
     .when("DigitPressed").do(async function CountNines(event, stream) {
-      await act.do("Count", { stream }, { key: event.data.digit }, event);
+      await act.do("Count", { stream, actor }, { key: event.data.digit }, event);
     }).to(() => "Counter")
     .when("EqualsPressed").do(async function CountEquals(event, stream) {
-      await act.do( "Count", { stream }, { key: "=" }, event);
+      await act.do( "Count", { stream, actor }, { key: "=" }, event);
     }).to("Counter")
     .when("EqualCounted").do(async function ShowMessage({ stream }) {
       await sleep();
@@ -81,20 +85,20 @@ async function main() {
   const calc1 = "A";
   const calc2 = "B";
 
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "+" });
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "*" });
-  await act.do("PressKey", { stream: calc2 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc2 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc2 }, { key: "+" });
-  await act.do("PressKey", { stream: calc2 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "9" });
-  await act.do("PressKey", { stream: calc1 }, { key: "=" });
-  await act.do("PressKey", { stream: calc2 }, { key: "=" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "+" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "*" });
+  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc2, actor }, { key: "+" });
+  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await act.do("PressKey", { stream: calc1, actor }, { key: "=" });
+  await act.do("PressKey", { stream: calc2, actor }, { key: "=" });
 
   console.log(calc1, await act.load(Calculator, calc1));
   console.log(calc2, await act.load(Calculator, calc2));

@@ -1,5 +1,6 @@
 import {
   ActBuilder,
+  Actor,
   dispose,
   type Schema,
   type Schemas,
@@ -51,13 +52,15 @@ function A3(): State<Schemas, Schemas, Schema> {
 }
 
 describe("Builder", () => {
+  const actor: Actor = { id: "1", name: "Actor" };
+
   afterEach(async () => {
     await dispose()();
   });
 
   it("should act ok, but no events emitted", async () => {
     const act = new ActBuilder().with(A1).build();
-    const result = await act.do("Act1", { stream: "A" }, {});
+    const result = await act.do("Act1", { stream: "A", actor }, {});
     expect(result).toBeDefined();
     expect(act.events["Event1"]).toBeDefined();
     expect(act.events["Event2"]).toBeDefined();

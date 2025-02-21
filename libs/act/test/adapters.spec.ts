@@ -23,7 +23,9 @@ describe("adapters", () => {
     ];
     const meta = {
       correlation: "1",
-      causation: { action: { name: "A", stream } },
+      causation: {
+        action: { name: "A", stream, actor: { id: "1", name: "A" } },
+      },
     };
 
     it("should throw concurrency error", async () => {

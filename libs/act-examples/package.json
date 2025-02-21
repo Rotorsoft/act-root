@@ -21,7 +21,7 @@
   },
   "scripts": {
     "dev:calculator": "tsx watch src/calculator/main.ts",
-    "dev:wolfdesk": "tsx watch src/wolfdesk/main.ts",
+    "dev:wolfdesk": "pnpm drizzle:migrate && tsx watch src/wolfdesk/main.ts",
     "clean": "rm -rf dist",
     "build": "npx tsc --build",
     "drizzle:migrate": "npx drizzle-kit generate && npx drizzle-kit migrate",
