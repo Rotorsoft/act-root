@@ -89,20 +89,20 @@ export function Ticket(): Infer<typeof TicketSchemas> {
           "TicketOpened",
           {
             ...data,
-            userId: actor!.id,
+            userId: actor.id,
             messageId: randomUUID(),
           },
         ]);
       },
       CloseTicket: (_, __, { actor }) =>
-        Promise.resolve(["TicketClosed", { closedById: actor!.id }]),
+        Promise.resolve(["TicketClosed", { closedById: actor.id }]),
       AssignTicket: (data) => Promise.resolve(["TicketAssigned", data]),
       AddMessage: (data, _, { actor }) =>
         Promise.resolve([
           "MessageAdded",
           {
             ...data,
-            from: actor!.id,
+            from: actor.id,
             messageId: randomUUID(),
           },
         ]),
@@ -117,7 +117,7 @@ export function Ticket(): Infer<typeof TicketSchemas> {
         return Promise.resolve([
           "TicketEscalationRequested",
           {
-            requestedById: actor!.id,
+            requestedById: actor.id,
             requestId: randomUUID(),
           },
         ]);
@@ -182,7 +182,7 @@ export function Ticket(): Infer<typeof TicketSchemas> {
         return Promise.resolve(["MessageRead", data]);
       },
       MarkTicketResolved: (_, __, { actor }) =>
-        Promise.resolve(["TicketResolved", { resolvedById: actor!.id }]),
+        Promise.resolve(["TicketResolved", { resolvedById: actor.id }]),
     },
   };
 }
