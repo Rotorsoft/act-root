@@ -10,6 +10,9 @@ import type {
 import { ValidationError } from "../types/errors";
 import { sleep } from "../utils";
 
+/**
+ * In memory cache of a correlated stream  (broker key, stream name)
+ */
 class CorrelatedStream<E extends Schemas> {
   private _position = -1;
   private _blocked = false;
@@ -29,10 +32,10 @@ class CorrelatedStream<E extends Schemas> {
   get blocked() {
     return this._blocked;
   }
-  get first() {
+  get next() {
     return this._queue.at(0);
   }
-  push(reaction: Reaction<E>, event: Committed<E, keyof E>) {
+  enqueue(reaction: Reaction<E>, event: Committed<E, keyof E>) {
     event.id > this._position &&
       this._queue.push({ ...reaction, event } as ReactionPayload<E>);
   }
@@ -43,13 +46,15 @@ class CorrelatedStream<E extends Schemas> {
     const { event, handler } = payload;
     await handler(event, this.stream);
 
-    // TODO: simulating a remote operation to store the watermark (ack)
+    // TODO: port to atomically persist the watermark (ack) of this stream by broker key
     this._queue.shift();
     this._position = event.id;
+    logger.trace({ stream: this.stream, position: this._position }, "⚡️ ack");
     return true;
   }
+  // TODO: port to persist blocked state of this stream by broker key
   async block() {
-    await sleep(); // TODO: simulating a remote operation
+    await sleep();
     this._blocked = true;
   }
 }
@@ -63,9 +68,6 @@ interface DrainedArgs<E extends Schemas> {
 export class Broker<E extends Schemas> {
   private _emitter = new EventEmitter();
   private _streams: Map<string, CorrelatedStream<E>> = new Map();
-
-  // TODO: watermark port to persistent stores
-  // How to store watermaks by correlation id, so that we continue from where we left off in the next run?
   private _watermark = -1;
 
   emit(event: "drained", args: DrainedArgs<E>): boolean {
@@ -86,9 +88,8 @@ export class Broker<E extends Schemas> {
    */
   private async query() {
     const unblocked = [...this._streams.values()].filter((s) => !s.blocked);
-    const after = unblocked.length
+    this._watermark = unblocked.length
       ? unblocked // start from the minimum position of all streams
-          .values()
           .reduce(
             (min, stream) => Math.min(min, stream.position),
             Number.MAX_SAFE_INTEGER
@@ -96,7 +97,7 @@ export class Broker<E extends Schemas> {
       : this._watermark;
     const events = [] as Committed<E, keyof E>[];
     await store().query<E>((e) => events.push(e), {
-      after,
+      after: this._watermark,
       limit: this.drainLimit,
     });
     return events;
@@ -105,7 +106,7 @@ export class Broker<E extends Schemas> {
   /**
    * Enqueues events into correlated streams.
    */
-  private enqueue(
+  private correlate(
     event: Committed<E, keyof E>,
     reactions: Map<string, Reaction<E>>
   ) {
@@ -117,14 +118,14 @@ export class Broker<E extends Schemas> {
             ? reaction.resolver
             : reaction.resolver(event);
         if (target) {
-          let stream = this._streams.get(
-            target
-          ) as unknown as CorrelatedStream<E>;
+          let stream = this._streams.get(target);
           if (!stream) {
+            // TODO: port to load stream from persistent store by broker key, stream name
+            // - should we load all streams at once or lazily?
             stream = new CorrelatedStream(target);
             this._streams.set(target, stream);
           }
-          !stream.blocked && stream.push(reaction, event);
+          !stream.blocked && stream.enqueue(reaction, event);
           streams.add(stream.stream);
         }
       }
@@ -146,8 +147,8 @@ export class Broker<E extends Schemas> {
       logger.error(
         `Retrying stream ${stream.stream} @ ${stream.position} (${retry}).`
       );
-    while (stream.first) {
-      const { event, options } = stream.first;
+    while (stream.next) {
+      const { event, options } = stream.next;
       try {
         if (await stream.handle()) {
           !first && (first = event.id);
@@ -175,36 +176,14 @@ export class Broker<E extends Schemas> {
     return { stream, first, last };
   }
 
-  /**
-   * Pulls events from the store and pushes them to the broker
-   */
-  private async pull() {
-    const events = await this.query();
-    if (events.length) {
-      for (const event of events) {
-        const reactions = this._register[event.name].reactions;
-        const correlated = this.enqueue(event, reactions);
-        // update position of uncorrelated streams
-        for (const stream of this._streams.values())
-          !correlated.has(stream.stream) && (stream.position = event.id);
-      }
-      this._watermark = events.at(0)!.id;
-    }
-    // returns unblocked streams with pending events
-    const streams = [...this._streams.values()]
-      .filter((s) => s.size && !s.blocked)
-      .map((s) => s as unknown as CorrelatedStream<E>);
-
-    return { events, streams };
-  }
-
   private drainLocked = false;
   async drain(): Promise<number> {
     if (this.drainLocked) return 0;
     this.drainLocked = true;
 
-    const { events, streams } = await this.pull();
-    events.length &&
+    let drained = 0;
+    const events = await this.query();
+    if (events.length) {
       logger.trace(
         events
           .map(({ id, stream, name }) => ({ id, stream, name }))
@@ -214,33 +193,59 @@ export class Broker<E extends Schemas> {
           ),
         "⚡️ pull"
       );
-    streams.length &&
-      logger.trace(
-        streams
-          .map(({ stream, position, size }) => ({ stream, position, size }))
-          .reduce(
-            (a, { stream, position, size }) => ({
-              ...a,
-              [stream]: { position, size },
-            }),
-            {}
-          ),
-        "⚡️ drain"
-      );
 
-    let drained = 0;
-    await Promise.allSettled(streams.map((stream) => this.handle(stream))).then(
-      (promise) => {
-        promise.forEach((result) => {
-          if (result.status === "rejected") logger.error(result.reason);
-          else if (result.value.first && result.value.last) {
-            drained++;
-            this.emit("drained", result.value);
-          }
-        });
-      },
-      (error) => logger.error(error)
-    );
+      const uncorrelated_positions = new Map<string, number>();
+      for (const event of events) {
+        const reactions = this._register[event.name].reactions;
+        const correlated = this.correlate(event, reactions);
+        for (const stream of this._streams.values())
+          !correlated.has(stream.stream) &&
+            uncorrelated_positions.set(stream.stream, event.id);
+      }
+
+      const streams = [...this._streams.values()].filter(
+        (s) => s.size && !s.blocked
+      );
+      if (streams.length) {
+        logger.trace(
+          streams
+            .map(({ stream, position, size }) => ({ stream, position, size }))
+            .reduce(
+              (a, { stream, position, size }) => ({
+                ...a,
+                [stream]: { position, size },
+              }),
+              {}
+            ),
+          "⚡️ drain"
+        );
+
+        await Promise.allSettled(
+          streams.map((stream) => this.handle(stream))
+        ).then(
+          (promise) => {
+            promise.forEach((result) => {
+              if (result.status === "rejected") logger.error(result.reason);
+              else if (result.value.first && result.value.last) {
+                drained++;
+                this.emit("drained", result.value);
+              }
+            });
+          },
+          (error) => logger.error(error)
+        );
+      }
+
+      // TODO: port to update position of locally uncorrelated streams so that all move in sync
+      // and the local watermark keeps moving
+      uncorrelated_positions.entries().forEach(([stream, position]) => {
+        const s = this._streams.get(stream)!;
+        if (s.position < position) {
+          s.position = position;
+          logger.trace({ stream, position }, "⚡️ move");
+        }
+      });
+    }
 
     this.drainLocked = false;
     return drained;
