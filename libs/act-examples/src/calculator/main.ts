@@ -73,10 +73,10 @@ async function main() {
     void broker.drain();
   }, 1_000);
   // log drains
-  broker.on("drained", ({ stream, first, last }) => {
+  broker.on("drained", ({ queue, first, last }) => {
     console.log("Drained:", {
-      stream: stream.stream,
-      position: stream.position,
+      stream: queue.stream,
+      position: queue.position,
       first,
       last,
     });

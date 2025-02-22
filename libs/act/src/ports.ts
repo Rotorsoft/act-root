@@ -1,7 +1,8 @@
 import pino from "pino";
+import { InMemoryQueueStore } from "./adapters/InMemoryQueueStore";
 import { InMemoryStore } from "./adapters/InMemoryStore";
 import { config } from "./config";
-import type { Disposable, Disposer, Store } from "./types";
+import type { Disposable, Disposer, QueueStore, Store } from "./types";
 
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 export type ExitCode = (typeof ExitCodes)[number];
@@ -66,5 +67,8 @@ export function dispose(
 const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
+const queues = port(function queues(adapter?: QueueStore) {
+  return adapter || new InMemoryQueueStore();
+});
 
-export { store };
+export { queues, store };

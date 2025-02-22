@@ -1,73 +1,23 @@
 import EventEmitter from "events";
-import { logger, store } from "../ports";
+import { logger, queues, store } from "../ports";
 import type {
   Committed,
   EventRegister,
+  Queue,
   Reaction,
-  ReactionPayload,
   Schemas,
 } from "../types";
 import { ValidationError } from "../types/errors";
-import { sleep } from "../utils";
-
-/**
- * In memory cache of a correlated stream  (broker key, stream name)
- */
-class CorrelatedStream<E extends Schemas> {
-  private _position = -1;
-  private _blocked = false;
-  private _queue: ReactionPayload<E>[] = [];
-
-  constructor(public readonly stream: string) {}
-
-  get position() {
-    return this._position;
-  }
-  set position(value: number) {
-    this._position = value;
-  }
-  get size() {
-    return this._queue.length;
-  }
-  get blocked() {
-    return this._blocked;
-  }
-  get next() {
-    return this._queue.at(0);
-  }
-  enqueue(reaction: Reaction<E>, event: Committed<E, keyof E>) {
-    event.id > this._position &&
-      this._queue.push({ ...reaction, event } as ReactionPayload<E>);
-  }
-  async handle() {
-    if (this._blocked) return false;
-    const payload = this._queue.at(0);
-    if (!payload) return false;
-    const { event, handler } = payload;
-    await handler(event, this.stream);
-
-    // TODO: port to atomically persist the watermark (ack) of this stream by broker key
-    this._queue.shift();
-    this._position = event.id;
-    logger.trace({ stream: this.stream, position: this._position }, "⚡️ ack");
-    return true;
-  }
-  // TODO: port to persist blocked state of this stream by broker key
-  async block() {
-    await sleep();
-    this._blocked = true;
-  }
-}
 
 interface DrainedArgs<E extends Schemas> {
-  stream: CorrelatedStream<E>;
+  queue: Queue<E>;
   first?: number;
   last?: number;
 }
 
 export class Broker<E extends Schemas> {
   private _emitter = new EventEmitter();
-  private _streams: Map<string, CorrelatedStream<E>> = new Map();
+  private _queues: Map<string, Queue<E>> = new Map();
   private _watermark = -1;
 
   emit(event: "drained", args: DrainedArgs<E>): boolean {
@@ -87,11 +37,13 @@ export class Broker<E extends Schemas> {
    * Loads events from the event store *after* the watermark
    */
   private async query() {
-    const unblocked = [...this._streams.values()].filter((s) => !s.blocked);
+    const unblocked = [...this._queues.values()].filter(
+      (queue) => !queue.blocked
+    );
     this._watermark = unblocked.length
-      ? unblocked // start from the minimum position of all streams
+      ? unblocked // start from the minimum position of all queues
           .reduce(
-            (min, stream) => Math.min(min, stream.position),
+            (min, queue) => Math.min(min, queue.position),
             Number.MAX_SAFE_INTEGER
           )
       : this._watermark;
@@ -104,76 +56,70 @@ export class Broker<E extends Schemas> {
   }
 
   /**
-   * Enqueues events into correlated streams.
+   * Enqueues events by resolved correlated streams
    */
-  private correlate(
+  private async correlate(
     event: Committed<E, keyof E>,
     reactions: Map<string, Reaction<E>>
   ) {
     const streams = new Set<string>();
     if (reactions.size) {
       for (const reaction of reactions.values()) {
-        const target =
+        const stream =
           typeof reaction.resolver === "string"
             ? reaction.resolver
             : reaction.resolver(event);
-        if (target) {
-          let stream = this._streams.get(target);
-          if (!stream) {
-            // TODO: port to load stream from persistent store by broker key, stream name
-            // - should we load all streams at once or lazily?
-            stream = new CorrelatedStream(target);
-            this._streams.set(target, stream);
+        if (stream) {
+          let queue = this._queues.get(stream);
+          if (!queue) {
+            queue = await queues().load("TODO", stream); // TODO: broker key
+            this._queues.set(stream, queue);
           }
-          !stream.blocked && stream.enqueue(reaction, event);
-          streams.add(stream.stream);
+          !queue.blocked && queue.enqueue(event, reaction);
+          streams.add(queue.stream);
         }
       }
     }
     return streams;
   }
 
-  /**
-   * Handles events in correlated streams
-   */
   private async handle<E extends Schemas>(
-    stream: CorrelatedStream<E>,
+    queue: Queue<E>,
     retry = 0
-  ): Promise<{ stream: CorrelatedStream<E>; first?: number; last?: number }> {
+  ): Promise<{ queue: Queue<E>; first?: number; last?: number }> {
+    const stream = queue.stream;
     let first: number | undefined;
     let last: number | undefined;
 
     retry > 0 &&
-      logger.error(
-        `Retrying stream ${stream.stream} @ ${stream.position} (${retry}).`
-      );
-    while (stream.next) {
-      const { event, options } = stream.next;
+      logger.error(`Retrying stream ${stream}@${queue.position} (${retry}).`);
+    while (queue.next) {
+      const { event, handler, options } = queue.next;
       try {
-        if (await stream.handle()) {
+        await handler(event, stream);
+        if (await queue.ack(event.id)) {
+          logger.trace({ stream, position: event.id }, "⚡️ ack");
           !first && (first = event.id);
           last = event.id;
         }
       } catch (error) {
         if (error instanceof ValidationError)
-          logger.error({ stream: stream.stream, error }, error.message);
+          logger.error({ stream, error }, error.message);
         else logger.error(error);
 
         if (retry < options.maxRetries) {
           setTimeout(
-            () => this.handle(stream, retry + 1),
+            () => this.handle(queue, retry + 1),
             options.retryDelayMs * (retry + 1)
           );
         } else if (options.blockOnError) {
-          logger.error(
-            `Blocking stream ${stream.stream} after ${retry} retries.`
-          );
-          await stream.block();
+          logger.error(`Blocking stream ${stream} after ${retry} retries.`);
+          await queue.block();
         }
         break; // stop pushing after max retries
       }
     }
-    return { stream, first, last };
+    return { queue, first, last };
   }
 
   private drainLocked = false;
@@ -194,21 +140,21 @@ export class Broker<E extends Schemas> {
         "⚡️ pull"
       );
 
-      const uncorrelated_positions = new Map<string, number>();
+      const uncorrelated = new Map<string, [Queue<E>, number]>();
       for (const event of events) {
         const reactions = this._register[event.name].reactions;
-        const correlated = this.correlate(event, reactions);
-        for (const stream of this._streams.values())
-          !correlated.has(stream.stream) &&
-            uncorrelated_positions.set(stream.stream, event.id);
+        const correlated = await this.correlate(event, reactions);
+        for (const queue of this._queues.values())
+          !correlated.has(queue.stream) &&
+            uncorrelated.set(queue.stream, [queue, event.id]);
       }
 
-      const streams = [...this._streams.values()].filter(
-        (s) => s.size && !s.blocked
+      const queues = [...this._queues.values()].filter(
+        (queue) => queue.size && !queue.blocked
       );
-      if (streams.length) {
+      if (queues.length) {
         logger.trace(
-          streams
+          queues
             .map(({ stream, position, size }) => ({ stream, position, size }))
             .reduce(
               (a, { stream, position, size }) => ({
@@ -221,7 +167,7 @@ export class Broker<E extends Schemas> {
         );
 
         await Promise.allSettled(
-          streams.map((stream) => this.handle(stream))
+          queues.map((queue) => this.handle(queue))
         ).then(
           (promise) => {
             promise.forEach((result) => {
@@ -236,15 +182,15 @@ export class Broker<E extends Schemas> {
         );
       }
 
-      // TODO: port to update position of locally uncorrelated streams so that all move in sync
-      // and the local watermark keeps moving
-      uncorrelated_positions.entries().forEach(([stream, position]) => {
-        const s = this._streams.get(stream)!;
-        if (s.position < position) {
-          s.position = position;
-          logger.trace({ stream, position }, "⚡️ move");
-        }
-      });
+      await Promise.all(
+        // TODO: batch acks?
+        uncorrelated.values().map(async ([queue, position]) => {
+          if (queue.position < position) {
+            if (await queue.ack(position, false))
+              logger.trace({ stream: queue.stream, position }, "⚡️ move");
+          }
+        })
+      ).catch((error) => logger.error(error));
     }
 
     this.drainLocked = false;
