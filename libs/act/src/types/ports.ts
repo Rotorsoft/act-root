@@ -1,5 +1,5 @@
 import type { Committed, EventMeta, Message, Query, Schemas } from "./action";
-import { Reaction, ReactionPayload } from "./reaction";
+import { EventRegister, Reaction, ReactionPayload } from "./reaction";
 
 export type Disposer = () => Promise<void>;
 export type Disposable = { dispose: Disposer };
@@ -20,10 +20,8 @@ export interface Store extends Disposable {
 }
 
 export interface Queue<E extends Schemas> {
-  readonly broker: string;
   readonly stream: string;
   readonly position: number;
-  readonly size: number;
   readonly blocked: boolean;
   get next(): ReactionPayload<E> | undefined;
   enqueue(event: Committed<E, keyof E>, reaction: Reaction<E>): void;
@@ -32,8 +30,8 @@ export interface Queue<E extends Schemas> {
 }
 
 export interface QueueStore extends Disposable {
-  load: <E extends Schemas>(
-    broker: string,
-    stream: string
-  ) => Promise<Queue<E>>;
+  fetch: <E extends Schemas>(
+    register: EventRegister<E>,
+    limit: number
+  ) => Promise<{ events: Committed<E, keyof E>[]; queues: Queue<E>[] }>;
 }

@@ -67,8 +67,8 @@ export function dispose(
 const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
-const queues = port(function queues(adapter?: QueueStore) {
+const queuestore = port(function queuestore(adapter?: QueueStore) {
   return adapter || new InMemoryQueueStore();
 });
 
-export { queues, store };
+export { queuestore, store };
