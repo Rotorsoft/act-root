@@ -14,19 +14,19 @@ jobs:
   ci:
     runs-on: ubuntu-latest
 
-    # services:
-    #   postgres:
-    #     image: postgres:12.3-alpine
-    #     env:
-    #       POSTGRES_PASSWORD: postgres
-    #     # health checks to wait until postgres has started
-    #     options: >-
-    #       --health-cmd pg_isready
-    #       --health-interval 10s
-    #       --health-timeout 5s
-    #       --health-retries 5
-    #     ports:
-    #       - 5432:5432
+    services:
+      postgres:
+        image: postgres:15.1-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        # health checks to wait until postgres has started
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
 
     steps:
       - uses: actions/checkout@v4
@@ -47,11 +47,11 @@ jobs:
 
       - name: unit test
         run: pnpm test
-        # env:
-        #   PG_HOST: localhost
-        #   PG_USER: postgres
-        #   PG_PASSWORD: postgres
-        #   PG_DATABASE: postgres
+        env:
+          PG_HOST: localhost
+          PG_USER: postgres
+          PG_PASSWORD: postgres
+          PG_DATABASE: postgres
 
       - name: coveralls
         uses: coverallsapp/github-action@master
@@ -66,6 +66,7 @@ jobs:
       matrix:
         lib:
           - act
+          - act-pg
 
     steps:
       - uses: actions/checkout@v4

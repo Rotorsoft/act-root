@@ -32,3 +32,18 @@ export type EventRegister<E extends Schemas> = {
     reactions: Map<string, Reaction<E, K>>;
   };
 };
+
+export type Fetch<E extends Schemas> = {
+  streams: string[];
+  events: Committed<E, keyof E>[];
+};
+
+export type Lease = {
+  stream: string;
+  by: string;
+  at: number;
+  retry: number;
+  block: boolean;
+  error?: unknown;
+  count?: number;
+};

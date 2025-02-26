@@ -38,7 +38,7 @@
     "build": "pnpm -r build",
     "check-types": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
     "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
-    "lint": "eslint '**/*.{ts,json}' --ignore-pattern '**/*.d.ts'",
+    "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
     "prepare": "husky"
   },
@@ -53,13 +53,13 @@
     "@types/chance": "^1.1.6",
     "@types/minimist": "^1.2.5",
     "@types/node": "^22.13.5",
-    "@typescript-eslint/eslint-plugin": "^8.24.1",
-    "@typescript-eslint/parser": "^8.24.1",
-    "@vitest/coverage-istanbul": "^3.0.6",
+    "@typescript-eslint/eslint-plugin": "^8.25.0",
+    "@typescript-eslint/parser": "^8.25.0",
+    "@vitest/coverage-istanbul": "^3.0.7",
     "chance": "^1.1.12",
     "dotenv": "^16.4.7",
     "eslint": "^9.21.0",
-    "eslint-config-prettier": "^10.0.1",
+    "eslint-config-prettier": "^10.0.2",
     "eslint-plugin-prettier": "^5.2.3",
     "husky": "^9.1.7",
     "prettier": "^3.5.2",
@@ -67,8 +67,8 @@
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
-    "vite": "^6.1.1",
+    "vite": "^6.2.0",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.6"
+    "vitest": "^3.0.7"
   }
 }

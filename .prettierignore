@@ -8,3 +8,4 @@
 **/*.d.ts
 **/.eslintrc.js
 pnpm-lock.yaml
+.postgres

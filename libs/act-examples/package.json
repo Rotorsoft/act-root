@@ -31,10 +31,11 @@
   "dependencies": {
     "@libsql/client": "^0.14.0",
     "@rotorsoft/act": "workspace:*",
-    "drizzle-orm": "^0.39.3",
+    "@rotorsoft/act-pg": "workspace:*",
+    "drizzle-orm": "^0.40.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.30.4"
+    "drizzle-kit": "^0.30.5"
   }
 }

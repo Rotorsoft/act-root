@@ -11,3 +11,4 @@ assets
 README.md
 tsconfig.json
 pnpm-lock.yaml
+.postgres

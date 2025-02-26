@@ -3,9 +3,11 @@ import {
   Actor,
   BrokerBuilder,
   sleep,
+  store,
   ZodEmpty,
   type Infer,
 } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Calculator, KEYS } from ".";
@@ -44,6 +46,10 @@ export function NineCounter(): Infer<typeof NineCounterSchemas> {
 
 // prettier-ignore
 async function main() {
+  store(new PostgresStore("calculator", 30_000));
+  await store().drop();
+  await store().seed();
+
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
   
   const act = new ActBuilder()
@@ -73,13 +79,8 @@ async function main() {
     void broker.drain();
   }, 1_000);
   // log drains
-  broker.on("drained", ({ queue, first, last }) => {
-    console.log("Drained:", {
-      stream: queue.stream,
-      position: queue.position,
-      first,
-      last,
-    });
+  broker.on("drained", (drained) => {
+    console.log("Drained:", drained);
   });
 
   const calc1 = "A";

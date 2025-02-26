@@ -93,5 +93,4 @@ export const QuerySchema = z.object({
   created_after: z.date().optional(),
   backward: z.boolean().optional(),
   correlation: z.string().optional(),
-  actor: z.string().optional(),
 });

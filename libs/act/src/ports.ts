@@ -1,8 +1,7 @@
 import pino from "pino";
-import { InMemoryQueueStore } from "./adapters/InMemoryQueueStore";
 import { InMemoryStore } from "./adapters/InMemoryStore";
 import { config } from "./config";
-import type { Disposable, Disposer, QueueStore, Store } from "./types";
+import type { Disposable, Disposer, Store } from "./types";
 
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 export type ExitCode = (typeof ExitCodes)[number];
@@ -64,11 +63,7 @@ export function dispose(
 }
 
 // singleton ports
-const store = port(function store(adapter?: Store) {
+export const SNAP_EVENT = "__snapshot__";
+export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
-const queuestore = port(function queuestore(adapter?: QueueStore) {
-  return adapter || new InMemoryQueueStore();
-});
-
-export { queuestore, store };

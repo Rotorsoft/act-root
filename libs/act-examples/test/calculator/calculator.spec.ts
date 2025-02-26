@@ -103,21 +103,6 @@ describe("calculator lifecycle", () => {
     });
   });
 
-  it("should query by actor", async () => {
-    const { first, last, count } = await act.query({ actor: "A" });
-    expect(count).toBe(4);
-    expect(first).toMatchObject({
-      name: "OperatorPressed",
-      data: { operator: "/" },
-      version: 14,
-    });
-    expect(last).toMatchObject({
-      name: "DigitPressed",
-      data: { digit: "9" },
-      version: 17,
-    });
-  });
-
   it("should query by correlation", async () => {
     const { first, last, count } = await act.query({ correlation });
     expect(count).toBe(1);
@@ -191,31 +176,5 @@ describe("calculator lifecycle", () => {
       data: { digit: "4" },
       version: 8,
     });
-  });
-
-  it("should query by stream and actor after acting on a second stream", async () => {
-    await act.do(
-      "PressKey",
-      { stream: "B", actor: actor_x },
-      { key: "1" },
-      undefined,
-      true
-    );
-    await act.do(
-      "PressKey",
-      { stream: "B", actor: actor_x },
-      { key: "1" },
-      undefined,
-      true
-    );
-    await act.do(
-      "PressKey",
-      { stream: "B", actor: actor_x, expectedVersion: 1 },
-      { key: "1" },
-      undefined,
-      true
-    );
-    const { count } = await act.query({ stream, actor: "A" });
-    expect(count).toBe(4);
   });
 });

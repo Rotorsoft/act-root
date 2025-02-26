@@ -1,6 +1,7 @@
 import { ZodError, type ZodType } from "zod";
 import { config } from "./config";
-import { ValidationError, type Patch, type Schema } from "./types";
+import type { Patch, Schema } from "./types";
+import { ValidationError } from "./types";
 
 /** These objects are copied instead of deep merged */
 const UNMERGEABLES = [

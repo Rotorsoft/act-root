@@ -10,10 +10,7 @@
   ],
   "references": [
     {
-      "path": "../act",
-    },
-    {
-      "path": "../act-pg",
+      "path": "../act"
     }
   ]
 }

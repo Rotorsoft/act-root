@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { logger, store } from "./ports";
+import { logger, SNAP_EVENT, store } from "./ports";
 import type {
   Committed,
   Emitted,
@@ -13,7 +13,6 @@ import type {
 import { InvariantError } from "./types/errors";
 import { patch, validate } from "./utils";
 
-export const SNAP_EVENT = "__snapshot__";
 export async function snap<E extends Schemas, S extends Schema>(
   snapshot: Snapshot<E, S>
 ): Promise<void> {
@@ -60,7 +59,8 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream }
+    { stream },
+    true
   );
   logger.trace({ stream, patches, snaps, state }, "🟢 load");
   return { event, state, patches, snaps };
