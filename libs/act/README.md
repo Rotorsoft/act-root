@@ -1,89 +1,166 @@
 # [act](https://rotorsoft.github.io/act-root/modules/act.html) [![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
 
-## TODO
+## Event Store
 
-## Event-Driven Queue Store and Broker Architecture
+The event store in this architecture serves as the single source of truth for system state, persisting all changes as immutable events. It acts as both a storage mechanism and a queryable event history, enabling efficient replayability, debugging, and distributed event-driven processing.
 
-### Overview
+### Append-Only, Immutable Event Log
 
-The system is designed to handle event delivery to consumers using different queue storage backends, ensuring message delivery guarantees, prioritization, and synchronization between event streams.
+Unlike traditional databases that update records in place, the event store follows an append-only model, meaning:
 
-### Interfaces
+- All state changes are recorded as new events, never modifying past data.
+- Events are immutable, ensuring a complete historical record of all changes.
+- Each event is time-stamped and versioned, allowing precise state reconstruction at any point in time.
 
-The system defines two key interfaces:
+This immutability is critical for auditability, debugging, and ensuring consistent state reconstruction across distributed systems.
 
-#### `Queue<E>`
+### Event Streams for State Aggregation
 
-A queue represents a stream of ordered events that consumers process sequentially. The interface ensures minimal yet necessary operations:
+Events are not stored in a single, monolithic table but are instead grouped into event streams, each representing a unique entity or domain process.
 
-- `stream`: Identifies the queue’s stream.
-- `position`: Tracks the last acknowledged event position.
-- `blocked`: Indicates whether the queue is blocked due to errors.
-- `next`: Retrieves the next event to be processed.
-- `enqueue(event, reaction)`: Adds an event to the queue.
-- `ack(position, dequeue)`: Acknowledges event processing and optionally removes it.
-- `block()`: Marks the queue as blocked due to failures.
+- Each entity instance (e.g., a user, order, or transaction) has its own stream.
+- Events within a stream maintain a strict order, ensuring that state is replayed correctly.
+- Streams can be dynamically created and partitioned, allowing for horizontal scalability.
 
-#### `QueueStore`
+For example, an Order aggregate might have a stream containing:
 
-The queue store manages multiple queues and fetches events from an event store:
+1. OrderCreated
+2. OrderItemAdded
+3. OrderItemRemoved
+4. OrderShipped
 
-- `fetch(register, limit)`: Retrieves new events and updates queues accordingly.
-- Implements its own correlation strategy to determine how events should be assigned to different queues.
+A consumer reconstructing the order’s state would replay these events in order, rather than relying on a snapshot-based approach.
 
-These interfaces ensure that the complexity of managing queues, event correlation, and storage backends is encapsulated within their implementations.
+### Optimistic Concurrency and Versioning
 
-### In-Memory Adapter Implementation
+Each event stream supports optimistic concurrency control by maintaining a version number per stream.
 
-The `InMemoryQueueStore` is a simple implementation used for testing. It manages an in-memory queue of events and correlates them based on predefined reactions. The implementation includes:
+- When appending an event, the system verifies that the stream’s version matches the expected version.
+- If another process has written an event in the meantime, the append operation is rejected to prevent race conditions.
+- Consumers can retry with the latest stream state, preventing lost updates.
 
-- Managing stream positions via a `_watermark`.
-- Ensuring uncorrelated queues advance with new events.
-- Providing a simple locking mechanism to block faulty queues.
+This ensures strong consistency in distributed systems without requiring heavyweight locks.
 
-While this implementation works for local development, real-world systems require more robust persistence mechanisms like Redis or PostgreSQL.
+### Querying and Subscription-Based Reads
 
-### Challenges in Queue Store Implementations
+Events in the store can be retrieved via two primary methods:
 
-Implementing a production-grade queue store involves addressing several challenges:
+- Stream-based retrieval (load): Fetching all events for a given entity or aggregate in order.
+- Query: Provides multiple ways to filter and sort events, enabling efficient state reconstruction.
 
-1. **Correlated Streams and Prioritization**
-   Events might need to be delivered to multiple correlated queues based on event relationships. A strategy is required to determine:
+This enables both on-demand querying for state reconstruction and real-time processing for event-driven architectures.
 
-- Which queues should receive new events?
-- How to prioritize event delivery across multiple queues?
+### Snapshots for Efficient State Reconstruction
 
-2. **Advancing Watermarks in Unaffected Queues**
-   Not all queues receive new events on every fetch. However, to maintain system-wide consistency, all queues need to advance their positions based on the latest known event. Otherwise, uncorrelated queues could fall behind, causing delays in processing.
+Replaying all events from the beginning for every request can be inefficient. To optimize state reconstruction:
 
-3. **Concurrency and Multiple Brokers**
-   When multiple brokers are fetching from the queue store and delivering events, they must:
+- Snapshots are periodically stored, capturing the computed state of an entity.
+- When retrieving an entity’s state, the system first loads the latest snapshot and replays only newer events.
+- This reduces query time while maintaining full event traceability.
 
-- Ensure events are not delivered multiple times.
-- Handle distributed locks or optimistic concurrency to prevent race conditions.
-- Load balance event distribution among multiple brokers.
+For example, instead of replaying 1,000 events for an account balance, the system might load a snapshot with the latest balance and only apply the last few transactions.
 
-4. **Handling Failures and Retries**
-   When an event fails to be processed:
+## Implementation Considerations
 
-- The system should retry with an exponential backoff.
-- If an event repeatedly fails, the queue should be blocked to prevent further processing.
+### Event Storage Backend
 
-5. **Efficient Fetching and Delivery**
-   Fetching events should be optimized to:
+The event store can be implemented using different storage solutions, depending on system requirements:
 
-- Reduce database load by fetching only required events.
-- Prioritize queues with pending events.
-- Handle fetching across multiple storage backends seamlessly.
+- Relational Databases (PostgreSQL, MySQL): Storing events in an append-only table with indexing for fast retrieval.
+- NoSQL Databases (Cassandra, DynamoDB, MongoDB): Using key-value or document stores to manage streams efficiently.
+- Event-Specific Databases (EventStoreDB, Kafka, Pulsar): Purpose-built for high-performance event sourcing with built-in subscriptions and replication.
 
-## Broker Implementation
+### Indexing and Retrieval Optimization
 
-The `Broker` class processes events fetched from the `QueueStore` by:
+To ensure high performance when querying events:
 
-- Iterating over `Queue` instances and invoking handlers.
-- Handling retries and blocking queues when needed.
-- Ensuring atomic acknowledgment of processed events.
+- Events are indexed by stream ID and timestamp for fast lookups.
+- Materialized views can be used for common queries (e.g., the latest event per stream).
+- Partitioning strategies help distribute event streams across multiple nodes, improving scalability.
 
-The broker works alongside the queue store to ensure events are delivered in an efficient and fault-tolerant manner.
+### Retention and Archival
 
-The system is designed to be backend-agnostic, with a minimal interface for defining queues and queue stores while allowing complex implementations for persistence, concurrency control, and prioritization. By keeping the interfaces simple and pushing complexity into the adapters, the system remains flexible and scalable across different infrastructure choices.
+Since event data grows indefinitely, a retention policy is needed:
+
+- Active event streams remain in fast storage for quick access.
+- Older events are archived in cold storage while keeping snapshots for quick recovery.
+- Event compression techniques can be used to reduce storage overhead without losing historical data.
+
+## Event-Driven Processing with Stream Leasing and Correlation
+
+This architecture is designed to handle event-driven workflows efficiently while ensuring ordered and non-duplicated event processing. Instead of a queueing system, it dynamically processes events from an event store and correlates them with specific event streams. The approach improves scalability, fault tolerance, and event visibility while maintaining strong guarantees for event processing.
+
+### Event-Centric Processing Instead of Queues
+
+Rather than storing messages in a queue and tracking explicit positions, this architecture treats the event store as the single source of truth. Events are written once and can be consumed by multiple independent consumers. This decoupling allows:
+
+- Independent consumers that can process the same event stream in different ways.
+- Efficient event querying without maintaining redundant queue states.
+- Flexible event correlation, where consumers can derive dependencies dynamically rather than following a strict order.
+
+### Stream Leasing for Ordered Event Processing
+
+Each consumer does not simply fetch and process events immediately; instead, it acquires a lease for a subset of events. Leasing prevents multiple consumers from processing the same event concurrently, ensuring:
+
+- Per-stream ordering, where events related to a specific stream are processed sequentially.
+- Temporary ownership of events, allowing retries if a lease expires before acknowledgment.
+- Backpressure control, as only a limited number of leases can be active at a time, preventing overwhelming consumers.
+
+If a lease expires due to failure or unresponsiveness, the event can be re-leased to another consumer, ensuring no event is permanently lost.
+
+### Event Correlation and Dynamic Stream Resolution
+
+A key challenge in event-driven systems is understanding which stream an event belongs to and how it should be processed. Instead of hardcoding event routing logic, this system enables:
+
+- Dynamic correlation, where events are linked to streams based on resolver functions.
+- Multi-stream dependency tracking, allowing one event to trigger multiple related processes.
+- Implicit event grouping, ensuring that related events are processed in the correct sequence.
+
+For example, if an event pertains to a transaction across multiple users, the system can determine which user streams should handle it dynamically.
+
+### Parallel Execution with Retry and Blocking Strategies
+
+While events are processed in an ordered fashion within a stream, multiple streams can be processed concurrently. The architecture includes:
+
+- Parallel event handling, improving throughput by distributing processing load.
+- Retry mechanisms with exponential backoff, ensuring transient failures do not cause data loss.
+- Blocking strategies, where streams with consistent failures can be temporarily halted to prevent cascading errors.
+
+A stream is only blocked after exhausting a configurable number of retries, reducing the risk of infinite failure loops.
+
+### Draining and Acknowledgment for Fault Tolerance
+
+Once an event has been successfully processed, it is acknowledged to release its lease.
+This design ensures:
+
+- Consumers only process new work, reducing idle resource usage.
+- Failure recovery without manual intervention, as failed events can be re-leased automatically.
+- Clear event lifecycle management, with visibility into pending, processing, and completed events.
+
+### Persistent Event Store with Optimized Querying
+
+Since events are stored persistently rather than transiently queued, the system must efficiently query and retrieve relevant events. The event store supports:
+
+- Efficient filtering, allowing consumers to retrieve only the events relevant to them.
+- Indexing strategies for fast lookups, optimizing performance for high-volume event processing.
+- Retention policies, ensuring historical event data is accessible for audits without overloading the system.
+
+### Real-Time Notifications and Asynchronous Processing
+
+To reduce polling overhead, the system can utilize real-time event notifications via database triggers or a pub-sub mechanism. This allows consumers to:
+
+- React to new events immediately, improving responsiveness.
+- Reduce unnecessary database queries, optimizing system performance.
+- Enable distributed event processing, where multiple instances can coordinate workload distribution.
+
+### Scalable Consumer Management
+
+As the system scales, multiple consumer instances may need to process events in parallel. The architecture ensures that:
+
+- Each consumer instance handles an exclusive subset of events, avoiding conflicts.
+- Leases distribute events evenly across consumers, preventing hotspots.
+- Idle consumers are dynamically assigned new workloads, ensuring efficient resource utilization.
+
+## Summary
+
+This architecture balances event-driven flexibility, strong ordering guarantees, and dynamic stream resolution while minimizing processing overhead. By using event leasing, correlation-based processing, parallel execution, and retry mechanisms, it provides a robust and scalable foundation for handling real-time data flows in distributed systems.
