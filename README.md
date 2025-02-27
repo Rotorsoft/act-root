@@ -69,7 +69,7 @@ const broker = new BrokerBuilder(act.events)
     await act.do("Count", { stream }, { key: "=" }, event); }).to("Counter")
   .when("EqualCounted").do(async function ShowMessage({ stream }) {
     await sleep();
-    console.log(`Equals counted on ${stream}`); }).toVoid()
+    console.log(`Equals counted on ${stream}`); }).void()
   .build();
 
 // drain on commit
