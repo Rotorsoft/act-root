@@ -2,7 +2,7 @@ import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { db, init_tickets_db, tickets } from "../../src/drizzle";
-import { act, connect_broker, Priority } from "../../src/wolfdesk/bootstrap";
+import { act, Priority } from "../../src/wolfdesk/bootstrap";
 import { AutoClose, AutoEscalate, AutoReassign } from "../../src/wolfdesk/jobs";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
@@ -19,12 +19,10 @@ import {
 const chance = new Chance();
 
 describe("ticket projection", () => {
-  const broker = connect_broker(true);
-
   beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets);
-    // broker.on("drained", (value) =>
+    // act.on("drained", (value) =>
     //   console.log(
     //     `drained ${value.stream.stream} ${value.first}:${value.last} @ ${value.stream.position}`
     //   )
@@ -42,15 +40,15 @@ describe("ticket projection", () => {
 
     await openTicket(t, title, message);
     await addMessage(t, "first message");
-    await broker.drain();
+    await act.drain();
 
     await escalateTicket(t);
-    await broker.drain();
+    await act.drain();
 
     await reassignTicket(t);
     await markTicketResolved(t);
     await closeTicket(t);
-    await broker.drain();
+    await act.drain();
 
     const state = (
       await db.select().from(tickets).where(eq(tickets.id, t.stream)).limit(1)
@@ -76,10 +74,10 @@ describe("ticket projection", () => {
 
       await openTicket(t, "auto escalate", "Hello");
       await assignTicket(t, chance.guid(), new Date(), new Date());
-      await broker.drain();
+      await act.drain();
 
       await AutoEscalate(1).catch(console.error);
-      await broker.drain();
+      await act.drain();
 
       const snapshot = await act.load(Ticket, t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
@@ -97,10 +95,10 @@ describe("ticket projection", () => {
         Priority.High,
         new Date()
       );
-      await broker.drain();
+      await act.drain();
 
       await AutoClose(1).catch(console.error);
-      await broker.drain();
+      await act.drain();
 
       const snapshot = await act.load(Ticket, t.stream);
       expect(snapshot.state.closedById).toBeDefined();
@@ -113,13 +111,13 @@ describe("ticket projection", () => {
 
       await openTicket(t, "auto re-assign me", "Hello");
       await assignTicket(t, agentId, now, now);
-      await broker.drain();
+      await act.drain();
 
       await escalateTicket(t);
-      await broker.drain();
+      await act.drain();
 
       await AutoReassign(1).catch(console.error);
-      await broker.drain();
+      await act.drain();
 
       const snapshot = await act.load(Ticket, t.stream);
       expect(snapshot.state.agentId).toBeDefined();

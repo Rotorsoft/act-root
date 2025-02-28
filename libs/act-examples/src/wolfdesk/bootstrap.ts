@@ -1,36 +1,63 @@
-import { ActBuilder, BrokerBuilder } from "@rotorsoft/act";
-import * as j from "./jobs";
-import * as r from "./reactions";
+import { ActBuilder, type Actor, type AsCommitted } from "@rotorsoft/act";
+import { randomUUID } from "crypto";
+import { assignAgent } from "./services/agent";
+import { deliverMessage } from "./services/notification";
 import { Ticket } from "./ticket";
 import * as p from "./tickets";
 
 export * from "./errors";
 export * from "./ticket";
 
-export const act = new ActBuilder().with(Ticket).build();
+export const builder = new ActBuilder().with(Ticket);
 
 // prettier-ignore
-export function connect_broker(withProjection = false) {
-  const builder = new BrokerBuilder(act.events)
-    .when("TicketOpened").do(r.assign)
-    .when("MessageAdded").do(r.deliver)
-    .when("TicketEscalationRequested").do(r.escalate)
+export const act = builder
+  // reactions
+  .on("TicketOpened").do(assign)
+  .on("MessageAdded").do(deliver)
+  .on("TicketEscalationRequested").do(escalate)
+  // tickets projection
+  .on("TicketOpened").do(p.opened).to("tickets")
+  .on("TicketClosed").do(p.closed).to("tickets")
+  .on("TicketAssigned").do(p.assigned).to("tickets")
+  .on("MessageAdded").do(p.messageAdded).to("tickets")
+  .on("TicketEscalated").do(p.escalated).to("tickets")
+  .on("TicketReassigned").do(p.reassigned).to("tickets")
+  .on("TicketResolved").do(p.resolved).to("tickets")
+  .build();
 
-  // tickets
-  withProjection && builder
-    .when("TicketOpened").do(p.opened).to("tickets")
-    .when("TicketClosed").do(p.closed).to("tickets")
-    .when("TicketAssigned").do(p.assigned).to("tickets")
-    .when("MessageAdded").do(p.messageAdded).to("tickets")
-    .when("TicketEscalated").do(p.escalated).to("tickets")
-    .when("TicketReassigned").do(p.reassigned).to("tickets")
-    .when("TicketResolved").do(p.resolved).to("tickets")
+const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
 
-  return builder.build();
+export async function assign(
+  event: AsCommitted<typeof builder.events, "TicketOpened">
+) {
+  const agent = assignAgent(
+    event.stream,
+    event.data.supportCategoryId,
+    event.data.priority
+  );
+  await act.do("AssignTicket", { stream: event.stream, actor }, agent, event);
 }
 
-export function start_jobs() {
-  setInterval(j.AutoReassign, 10_000);
-  setInterval(j.AutoEscalate, 10_000);
-  setInterval(j.AutoClose, 15_000);
+export async function deliver(
+  event: AsCommitted<typeof builder.events, "MessageAdded">
+) {
+  await deliverMessage(event.data);
+  await act.do(
+    "MarkMessageDelivered",
+    { stream: event.stream, actor },
+    { messageId: event.data.messageId },
+    event
+  );
+}
+
+export async function escalate(
+  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
+) {
+  await act.do(
+    "EscalateTicket",
+    { stream: event.stream, actor },
+    event.data,
+    event
+  );
 }

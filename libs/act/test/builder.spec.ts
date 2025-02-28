@@ -2,7 +2,6 @@ import { z } from "zod";
 import {
   ActBuilder,
   Actor,
-  BrokerBuilder,
   dispose,
   Infer,
   type Schema,
@@ -71,21 +70,18 @@ describe("Builder", () => {
   });
 
   it("should act ok, but no events emitted", async () => {
-    const act = new ActBuilder().with(A1).build();
-    new BrokerBuilder(act.events)
-      .when("Event1")
+    const act = new ActBuilder()
+      .with(A1)
+      .on("Event1")
       .do(() => Promise.resolve())
       .void()
-      .when("Event2")
+      .on("Event2")
       .do(() => Promise.resolve())
       .to("abc")
       .build();
 
     const result = await act.do("Act1", { stream: "A", actor }, {});
     expect(result).toBeDefined();
-    expect(act.events["Event1"]).toBeDefined();
-    expect(act.events["Event2"]).toBeDefined();
-    expect(act.events["Event1"].schema).toMatchObject(events.Event1);
   });
 
   it("should throw duplicate action", () => {

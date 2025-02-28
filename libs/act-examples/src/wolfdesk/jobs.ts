@@ -84,3 +84,9 @@ export function AutoReassign(batchSize: number) {
       .catch(reject)
   );
 }
+
+export function start_jobs() {
+  setInterval(AutoReassign, 10_000);
+  setInterval(AutoEscalate, 10_000);
+  setInterval(AutoClose, 15_000);
+}

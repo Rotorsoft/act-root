@@ -41,11 +41,11 @@ Each event stream supports optimistic concurrency control by maintaining a versi
 
 This ensures strong consistency in distributed systems without requiring heavyweight locks.
 
-### Querying and Subscription-Based Reads
+### Querying
 
 Events in the store can be retrieved via two primary methods:
 
-- Stream-based retrieval (load): Fetching all events for a given entity or aggregate in order.
+- Stream-based retrieval (load): Fetching all events for a given stream in order.
 - Query: Provides multiple ways to filter and sort events, enabling efficient state reconstruction.
 
 This enables both on-demand querying for state reconstruction and real-time processing for event-driven architectures.
@@ -59,8 +59,6 @@ Replaying all events from the beginning for every request can be inefficient. To
 - This reduces query time while maintaining full event traceability.
 
 For example, instead of replaying 1,000 events for an account balance, the system might load a snapshot with the latest balance and only apply the last few transactions.
-
-## Implementation Considerations
 
 ### Event Storage Backend
 
@@ -100,7 +98,7 @@ Rather than storing messages in a queue and tracking explicit positions, this ar
 
 ### Stream Leasing for Ordered Event Processing
 
-Each consumer does not simply fetch and process events immediately; instead, it acquires a lease for a subset of events. Leasing prevents multiple consumers from processing the same event concurrently, ensuring:
+Each consumer does not simply fetch and process events immediately; instead, events are fetched by the application and pushed to consumers by leasing the events of each correlated stream. Leasing prevents multiple consumers from processing the same event concurrently, ensuring:
 
 - Per-stream ordering, where events related to a specific stream are processed sequentially.
 - Temporary ownership of events, allowing retries if a lease expires before acknowledgment.

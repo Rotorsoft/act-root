@@ -1,5 +1,5 @@
 import { dispose } from "@rotorsoft/act";
-import { act, connect_broker } from "../../src/wolfdesk/bootstrap";
+import { act } from "../../src/wolfdesk/bootstrap";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
   addMessage,
@@ -9,8 +9,6 @@ import {
 } from "./actions";
 
 describe("reactions", () => {
-  const broker = connect_broker();
-
   afterAll(async () => {
     await dispose()();
   });
@@ -18,7 +16,7 @@ describe("reactions", () => {
   it("should assign agent to new ticket", async () => {
     const t = target();
     await openTicket(t, "assign agent", "Hello");
-    await broker.drain();
+    await act.drain();
 
     const snapshot = await act.load(Ticket, t.stream);
     expect(snapshot.state.agentId).toBeDefined();
@@ -28,7 +26,7 @@ describe("reactions", () => {
     const t = target();
     await openTicket(t, "deliver", "Hello");
     await addMessage(t, "the body");
-    await broker.drain();
+    await act.drain();
 
     const snapshot = await act.load(Ticket, t.stream);
     expect(
@@ -40,7 +38,7 @@ describe("reactions", () => {
     const t = target();
     await openTicket(t, "request escalation", "Hello");
     await requestTicketEscalation(t);
-    await broker.drain();
+    await act.drain();
 
     const snapshot = await act.load(Ticket, t.stream);
     expect(snapshot.state.escalationId).toBeDefined();

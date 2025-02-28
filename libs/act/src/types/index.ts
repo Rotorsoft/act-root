@@ -2,6 +2,7 @@ export type * from "./action";
 export * from "./errors";
 export type * from "./ports";
 export type * from "./reaction";
+export type * from "./registry";
 export * from "./schemas";
 
 export const Environments = [

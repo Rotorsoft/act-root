@@ -2,7 +2,8 @@ import { config } from "./config";
 import { disposeAndExit, logger } from "./ports";
 
 /** @module act */
-export * from "./builders";
+export * from "./act";
+export * from "./builder";
 export * from "./ports";
 export * from "./types";
 export * from "./utils";

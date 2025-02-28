@@ -1,4 +1,3 @@
-import { ZodType } from "zod";
 import type { Committed, Schema, Schemas, Snapshot } from "./action";
 
 export type ReactionHandler<E extends Schemas, K extends keyof E> = (
@@ -24,13 +23,6 @@ export type Reaction<E extends Schemas, K extends keyof E = keyof E> = {
 
 export type ReactionPayload<E extends Schemas> = Reaction<E> & {
   readonly event: Committed<E, keyof E>;
-};
-
-export type EventRegister<E extends Schemas> = {
-  [K in keyof E]: {
-    schema: ZodType<E[K]>;
-    reactions: Map<string, Reaction<E, K>>;
-  };
 };
 
 export type Fetch<E extends Schemas> = {

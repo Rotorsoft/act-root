@@ -1,24 +1,30 @@
-import { Actor, sleep } from "@rotorsoft/act";
+import { Actor, sleep, store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { randomUUID } from "crypto";
 import { db, tickets } from "../drizzle";
-import { act, connect_broker, Priority, start_jobs } from "./bootstrap";
+import { act, Priority } from "./bootstrap";
+import { start_jobs } from "./jobs";
 
 const chance = new Chance();
 const rand_sleep = (max = 10_000) => sleep(chance.integer({ min: 100, max }));
 
 async function main() {
+  // to use pg, run `docker-compose up -d`
+  store(new PostgresStore("wolfdesk"));
+  await store().drop();
+  await store().seed();
+
   await db.delete(tickets).execute();
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
-  const broker = connect_broker(true);
   start_jobs();
-  broker.on("drained", async () => {
+  act.on("drained", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });
   act.on("committed", () => {
-    void broker.drain();
+    void act.drain();
   });
 
   const t1 = await act.do(

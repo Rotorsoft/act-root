@@ -59,27 +59,53 @@ To demonstrate the capabilities of this framework, we provide a library of examp
 The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the “9” and “=” keys have been pressed in response to events.
 
 ```ts
-const act = new ActBuilder().with(NineCounter).with(Calculator).build();
+// to test with postgres
+// store(new PostgresStore("calculator", 30_000));
+// await store().drop();
+// await store().seed();
 
-// prettier-ignore
-const broker = new BrokerBuilder(act.events)
-  .when("DigitPressed").do(async function CountNines(event, stream) {
-    await act.do("Count", { stream }, { key: event.data.digit }, event); }).to(() => "Counter")
-  .when("EqualsPressed").do(async function CountEquals(event, stream) {
-    await act.do("Count", { stream }, { key: "=" }, event); }).to("Counter")
-  .when("EqualCounted").do(async function ShowMessage({ stream }) {
+const actor: Actor = { id: randomUUID(), name: "Calculator" };
+
+const act = new ActBuilder()
+  .with(Calculator)
+
+  .on("DigitPressed")
+  .do(async function CountNines(event, stream) {
+    await act.do("Count", { stream, actor }, { key: event.data.digit }, event);
+  })
+  .to(() => "Counter")
+
+  .on("EqualsPressed")
+  .do(async function CountEquals(event, stream) {
+    await act.do("Count", { stream, actor }, { key: "=" }, event);
+  })
+  .to(() => "Counter")
+
+  .with(NineCounter)
+
+  .on("EqualCounted")
+  .do(async function ShowMessage({ stream }) {
     await sleep();
-    console.log(`Equals counted on ${stream}`); }).void()
+    console.log(`Equals counted on ${stream}`);
+  })
+  .void()
+
   .build();
 
 // drain on commit
 act.on("committed", () => {
-  void broker.drain();
+  void act.drain();
 });
+
 // drain on a schedule
 setInterval(() => {
-  void broker.drain();
+  void act.drain();
 }, 1_000);
+
+// log drains
+act.on("drained", (drained) => {
+  console.log("Drained:", drained);
+});
 ```
 
 ### WolfDesk
@@ -87,35 +113,87 @@ setInterval(() => {
 The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
 
 ```ts
-export const act = new ActBuilder().with(Ticket).build();
+export const builder = new ActBuilder().with(Ticket);
 
-// reactions
 // prettier-ignore
-const builder = new BrokerBuilder(act.events)
-  .when("TicketOpened").do(r.assign)
-  .when("MessageAdded").do(r.deliver)
-  .when("TicketEscalationRequested").do(r.escalate)
+export const act = builder
+  // reactions
+  .on("TicketOpened").do(assign)
+  .on("MessageAdded").do(deliver)
+  .on("TicketEscalationRequested").do(escalate)
+  
+  // tickets projection
+  .on("TicketOpened").do(p.opened).to("tickets")
+  .on("TicketClosed").do(p.closed).to("tickets")
+  .on("TicketAssigned").do(p.assigned).to("tickets")
+  .on("MessageAdded").do(p.messageAdded).to("tickets")
+  .on("TicketEscalated").do(p.escalated).to("tickets")
+  .on("TicketReassigned").do(p.reassigned).to("tickets")
+  .on("TicketResolved").do(p.resolved).to("tickets")
+  .build();
 
-// projections
-// prettier-ignore
-builder
-  .when("TicketOpened").do(p.opened).to("tickets")
-  .when("TicketClosed").do(p.closed).to("tickets")
-  .when("TicketAssigned").do(p.assigned).to("tickets")
-  .when("MessageAdded").do(p.messageAdded).to("tickets")
-  .when("TicketEscalated").do(p.escalated).to("tickets")
-  .when("TicketReassigned").do(p.reassigned).to("tickets")
-  .when("TicketResolved").do(p.resolved).to("tickets")
+const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
 
-export function start_jobs() {
-  setInterval(AutoReassign, 30_000);
-  setInterval(AutoEscalate, 30_000);
-  setInterval(AutoClose, 30_000);
+export async function assign(
+  event: AsCommitted<typeof builder.events, "TicketOpened">
+) {
+  const agent = assignAgent(
+    event.stream,
+    event.data.supportCategoryId,
+    event.data.priority
+  );
+  await act.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+}
+
+export async function deliver(
+  event: AsCommitted<typeof builder.events, "MessageAdded">
+) {
+  await deliverMessage(event.data);
+  await act.do(
+    "MarkMessageDelivered",
+    { stream: event.stream, actor },
+    { messageId: event.data.messageId },
+    event
+  );
+}
+
+export async function escalate(
+  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
+) {
+  await act.do(
+    "EscalateTicket",
+    { stream: event.stream, actor },
+    event.data,
+    event
+  );
 }
 ```
 
 ## tRPC Integration
 
 Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
+
+```ts
+import { ActBuilder, Target } from "@rotorsoft/act";
+import { Calculator, Digits, Operators } from "@rotorsoft/act-examples";
+import { initTRPC } from "@trpc/server";
+
+const act = new ActBuilder().with(Calculator).build();
+const t = initTRPC.create();
+const target: Target = {
+  stream: "calculator",
+  actor: { id: "1", name: "Calculator" },
+};
+
+export const router = t.router({
+  PressKey: t.procedure
+    .input(Calculator().actions.PressKey)
+    .mutation(({ input }) => act.do("PressKey", target, input)),
+  Clear: t.procedure.mutation(() => act.do("Clear", target, {})),
+});
+
+export type Router = typeof router;
+export type { Digits, Operators };
+```
 
 Enjoy!

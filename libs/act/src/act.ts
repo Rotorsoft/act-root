@@ -1,24 +1,93 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
-import { logger, store } from "../ports";
-import type { EventRegister, Lease, ReactionPayload, Schemas } from "../types";
-import { ValidationError } from "../types/errors";
+import * as es from "./event-sourcing";
+import { logger, store } from "./ports";
+import type {
+  Committed,
+  Lease,
+  Query,
+  ReactionPayload,
+  Registry,
+  Schema,
+  SchemaRegister,
+  Schemas,
+  Snapshot,
+  StateFactory,
+  Target,
+} from "./types";
+import { ValidationError } from "./types/errors";
 
-export class Broker<E extends Schemas> {
+type SnapshotArgs = Snapshot<Schemas, Schema>;
+
+export class Act<
+  E extends Schemas,
+  A extends Schemas,
+  S extends SchemaRegister<A>,
+> {
   private _emitter = new EventEmitter();
 
-  emit(event: "drained", args: Lease[]): boolean {
+  emit(event: "committed", args: SnapshotArgs): boolean;
+  emit(event: "drained", args: Lease[]): boolean;
+  emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
   }
-  on(event: "drained", listener: (args: Lease[]) => void): this {
+
+  on(event: "committed", listener: (args: SnapshotArgs) => void): this;
+  on(event: "drained", listener: (args: Lease[]) => void): this;
+  on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
     return this;
   }
 
   constructor(
-    private readonly _register: EventRegister<E>,
-    readonly drainLimit: number
+    public readonly registry: Registry<E, A, S>,
+    public readonly drainLimit: number
   ) {}
+
+  async do<K extends keyof A>(
+    action: K,
+    target: Target,
+    payload: Readonly<A[K]>,
+    reactingTo?: Committed<E, keyof E>,
+    skipValidation = false
+  ) {
+    const snapshot = await es.action(
+      this.registry.actions[action],
+      action,
+      target,
+      payload,
+      reactingTo as Committed<Schemas, keyof Schemas>,
+      skipValidation
+    );
+    this.emit("committed", snapshot as SnapshotArgs);
+    return snapshot;
+  }
+
+  async load<EX extends Schemas, AX extends Schemas, SX extends Schema>(
+    factory: StateFactory<EX, AX, SX>,
+    stream: string,
+    callback?: (snapshot: Snapshot<EX, SX>) => void
+  ): Promise<Snapshot<EX, SX>> {
+    return await es.load(factory(), stream, callback);
+  }
+
+  async query(
+    query: Query,
+    callback?: (event: Committed<E, keyof E>) => void
+  ): Promise<{
+    first?: Committed<E, keyof E>;
+    last?: Committed<E, keyof E>;
+    count: number;
+  }> {
+    let first: Committed<E, keyof E> | undefined = undefined,
+      last: Committed<E, keyof E> | undefined = undefined;
+    const count = await store().query<E>((e) => {
+      !first && (first = e);
+      last = e;
+      callback && callback(e);
+    }, query);
+    return { first, last, count };
+  }
 
   private async handle(
     lease: Lease,
@@ -75,7 +144,9 @@ export class Broker<E extends Schemas> {
       const resolved = new Set<string>(streams);
       const correlated = new Map<string, ReactionPayload<E>[]>();
       for (const event of events)
-        for (const reaction of this._register[event.name].reactions.values()) {
+        for (const reaction of this.registry.events[
+          event.name
+        ].reactions.values()) {
           const stream =
             typeof reaction.resolver === "string"
               ? reaction.resolver

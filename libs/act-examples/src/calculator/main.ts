@@ -1,13 +1,4 @@
-import {
-  ActBuilder,
-  Actor,
-  BrokerBuilder,
-  sleep,
-  store,
-  ZodEmpty,
-  type Infer,
-} from "@rotorsoft/act";
-import { PostgresStore } from "@rotorsoft/act-pg";
+import { ActBuilder, Actor, sleep, ZodEmpty, type Infer } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Calculator, KEYS } from ".";
@@ -46,40 +37,45 @@ export function NineCounter(): Infer<typeof NineCounterSchemas> {
 
 // prettier-ignore
 async function main() {
-  store(new PostgresStore("calculator", 30_000));
-  await store().drop();
-  await store().seed();
+  // to test with postgres
+  // store(new PostgresStore("calculator", 30_000));
+  // await store().drop();
+  // await store().seed();
 
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
   
   const act = new ActBuilder()
-    .with(NineCounter)
     .with(Calculator)
-    .build();
 
-  const broker = new BrokerBuilder(act.events)
-    .when("DigitPressed").do(async function CountNines(event, stream) {
+    .on("DigitPressed").do(async function CountNines(event, stream) {
       await act.do("Count", { stream, actor }, { key: event.data.digit }, event);
     }).to(() => "Counter")
-    .when("EqualsPressed").do(async function CountEquals(event, stream) {
+
+    .on("EqualsPressed").do(async function CountEquals(event, stream) {
       await act.do( "Count", { stream, actor }, { key: "=" }, event);
-    }).to("Counter")
-    .when("EqualCounted").do(async function ShowMessage({ stream }) {
+    }).to(() => "Counter")
+
+    .with(NineCounter)
+
+    .on("EqualCounted").do(async function ShowMessage({ stream }) { 
       await sleep();
       console.log(`Equals counted on ${stream}`);
     }).void()
+
     .build();
 
   // drain on commit
   act.on("committed", () => {
-    void broker.drain();
+    void act.drain();
   });
+
   // drain on a schedule
   setInterval(() => {
-    void broker.drain();
+    void act.drain();
   }, 1_000);
+
   // log drains
-  broker.on("drained", (drained) => {
+  act.on("drained", (drained) => {
     console.log("Drained:", drained);
   });
 
