@@ -44,6 +44,7 @@
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
+    "@rotorsoft/act-pg": "workspace:*",
     "@rotorsoft/act-examples": "workspace:*"
   },
   "devDependencies": {
