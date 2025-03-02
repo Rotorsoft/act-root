@@ -98,17 +98,17 @@ jobs:
           echo "next-version: ${{ steps.analyze.outputs.next-version }}"
           echo "${{ steps.analyze.outputs.change-log }}"
 
-      # - name: release ${{ matrix.lib }}
-      #   uses: rotorsoft/semrel-release@v3.0.1
-      #   with:
-      #     github-token: "${{ secrets.GITHUB_TOKEN }}"
-      #     npm-registry: "registry.npmjs.org"
-      #     npm-token: "${{ secrets.NPM_TOKEN }}"
-      #     npm-access: "public"
-      #     user: "rotorsoft"
-      #     email: "rotorsoft@outlook.com"
-      #     package: "@rotorsoft/${{ matrix.lib }}"
-      #     directory: "libs/${{ matrix.lib }}"
-      #     tag: "${{ steps.analyze.outputs.next-tag }}"
-      #     version: "${{ steps.analyze.outputs.next-version }}"
-      #     change-log: "${{ steps.analyze.outputs.change-log }}"
+      - name: release ${{ matrix.lib }}
+        uses: rotorsoft/semrel-release@v3.0.1
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+          npm-registry: "registry.npmjs.org"
+          npm-token: "${{ secrets.NPM_TOKEN }}"
+          npm-access: "public"
+          user: "rotorsoft"
+          email: "rotorsoft@outlook.com"
+          package: "@rotorsoft/${{ matrix.lib }}"
+          directory: "libs/${{ matrix.lib }}"
+          tag: "${{ steps.analyze.outputs.next-tag }}"
+          version: "${{ steps.analyze.outputs.next-version }}"
+          change-log: "${{ steps.analyze.outputs.change-log }}"
