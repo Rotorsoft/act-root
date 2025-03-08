@@ -17,18 +17,18 @@ export const TargetSchema = z
   })
   .readonly();
 
+export const CausationEventSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  stream: z.string(),
+});
+
 export const EventMetaSchema = z
   .object({
     correlation: z.string(),
     causation: z.object({
       action: TargetSchema.and(z.object({ name: z.string() })).optional(),
-      event: z
-        .object({
-          id: z.number(),
-          name: z.string(),
-          stream: z.string(),
-        })
-        .optional(),
+      event: CausationEventSchema.optional(),
     }),
   })
   .readonly();

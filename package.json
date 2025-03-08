@@ -20,7 +20,7 @@
   "engines": {
     "node": ">=22"
   },
-  "packageManager": "pnpm@10.0.0",
+  "packageManager": "pnpm@10.6.1",
   "type": "module",
   "repository": {
     "type": "git",
@@ -44,32 +44,32 @@
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
-    "@rotorsoft/act-pg": "workspace:*",
-    "@rotorsoft/act-examples": "workspace:*"
+    "@rotorsoft/act-examples": "workspace:*",
+    "@rotorsoft/act-pg": "workspace:*"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.0",
-    "@eslint/js": "^9.21.0",
+    "@eslint/js": "^9.22.0",
     "@total-typescript/ts-reset": "^0.6.1",
     "@types/chance": "^1.1.6",
     "@types/minimist": "^1.2.5",
-    "@types/node": "^22.13.5",
-    "@typescript-eslint/eslint-plugin": "^8.25.0",
-    "@typescript-eslint/parser": "^8.25.0",
-    "@vitest/coverage-istanbul": "^3.0.7",
+    "@types/node": "^22.13.10",
+    "@typescript-eslint/eslint-plugin": "^8.26.0",
+    "@typescript-eslint/parser": "^8.26.0",
+    "@vitest/coverage-istanbul": "^3.0.8",
     "chance": "^1.1.12",
     "dotenv": "^16.4.7",
-    "eslint": "^9.21.0",
-    "eslint-config-prettier": "^10.0.2",
+    "eslint": "^9.22.0",
+    "eslint-config-prettier": "^10.1.1",
     "eslint-plugin-prettier": "^5.2.3",
     "husky": "^9.1.7",
-    "prettier": "^3.5.2",
+    "prettier": "^3.5.3",
     "prettier-plugin-organize-imports": "^4.1.0",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.19.3",
-    "typescript": "^5.7.3",
-    "vite": "^6.2.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.1",
     "vite-tsconfig-paths": "^5.1.4",
-    "vitest": "^3.0.7"
+    "vitest": "^3.0.8"
   }
 }

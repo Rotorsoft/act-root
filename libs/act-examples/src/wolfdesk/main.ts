@@ -1,4 +1,4 @@
-import { Actor, sleep, store } from "@rotorsoft/act";
+import { Actor, Committed, Schemas, sleep, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { randomUUID } from "crypto";
@@ -71,6 +71,32 @@ async function main() {
       attachments: {},
     }
   );
+
+  await rand_sleep(10_000);
+  // show t1 correlated events
+  const correlated = {} as Record<string, Committed<Schemas, keyof Schemas>[]>;
+  await act.query(
+    {
+      stream: t1.event!.stream,
+    },
+    (e) => {
+      if (!correlated[e.meta.correlation]) {
+        correlated[e.meta.correlation] = [];
+      }
+      correlated[e.meta.correlation].push(e);
+    }
+  );
+  Object.entries(correlated).forEach(([correlation, events]) => {
+    console.log(`=== ${correlation} ===`);
+    console.log(
+      events
+        .map(
+          ({ id, name, meta }, index) =>
+            `${" ".repeat(index * 3)}${id}: ${name}${meta.causation.action ? ` (${meta.causation.action.name} by ${meta.causation.action.actor.name})` : ""}${meta.causation.event?.id ? ` <- ${meta.causation.event.id}` : ""}`
+        )
+        .join("\n")
+    );
+  });
 }
 
 void main();

@@ -62,7 +62,7 @@ export const REASSIGN_ID = "00000000-0000-1000-0000-300000000000";
 export function AutoReassign(batchSize: number) {
   const actor: Actor = {
     id: CLOSING_ID,
-    name: "AutoClose",
+    name: "AutoReassign",
   };
   return new Promise((resolve, reject) =>
     db

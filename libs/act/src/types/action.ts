@@ -1,6 +1,7 @@
 import { z, ZodSchema } from "zod";
 import {
   ActorSchema,
+  CausationEventSchema,
   CommittedMetaSchema,
   EventMetaSchema,
   QuerySchema,
@@ -9,6 +10,7 @@ import {
 
 export type Actor = z.infer<typeof ActorSchema>;
 export type Target = z.infer<typeof TargetSchema>;
+export type CausationEvent = z.infer<typeof CausationEventSchema>;
 export type EventMeta = z.infer<typeof EventMetaSchema>;
 export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 export type Query = z.infer<typeof QuerySchema>;

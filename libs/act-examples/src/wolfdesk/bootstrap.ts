@@ -1,5 +1,5 @@
-import { ActBuilder, type Actor, type AsCommitted } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
+import { ActBuilder, type AsCommitted } from "@rotorsoft/act";
+import { randomUUID } from "node:crypto";
 import { assignAgent } from "./services/agent";
 import { deliverMessage } from "./services/notification";
 import { Ticket } from "./ticket";
@@ -26,8 +26,6 @@ export const act = builder
   .on("TicketResolved").do(p.resolved).to("tickets")
   .build();
 
-const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
-
 export async function assign(
   event: AsCommitted<typeof builder.events, "TicketOpened">
 ) {
@@ -36,7 +34,15 @@ export async function assign(
     event.data.supportCategoryId,
     event.data.priority
   );
-  await act.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+  await act.do(
+    "AssignTicket",
+    {
+      stream: event.stream,
+      actor: { id: randomUUID(), name: "assign reaction" },
+    },
+    agent,
+    event
+  );
 }
 
 export async function deliver(
@@ -45,7 +51,10 @@ export async function deliver(
   await deliverMessage(event.data);
   await act.do(
     "MarkMessageDelivered",
-    { stream: event.stream, actor },
+    {
+      stream: event.stream,
+      actor: { id: randomUUID(), name: "deliver reaction" },
+    },
     { messageId: event.data.messageId },
     event
   );
@@ -56,7 +65,10 @@ export async function escalate(
 ) {
   await act.do(
     "EscalateTicket",
-    { stream: event.stream, actor },
+    {
+      stream: event.stream,
+      actor: { id: randomUUID(), name: "escalate reaction" },
+    },
     event.data,
     event
   );
