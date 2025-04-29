@@ -29,13 +29,13 @@
     "drizzle:studio": "npx drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.0",
+    "@libsql/client": "^0.15.4",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
-    "drizzle-orm": "^0.41.0",
-    "zod": "^3.24.2"
+    "drizzle-orm": "^0.43.1",
+    "zod": "^3.24.3"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.30.5"
+    "drizzle-kit": "^0.31.0"
   }
 }
