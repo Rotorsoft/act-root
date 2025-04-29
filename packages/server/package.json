@@ -18,7 +18,7 @@
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-examples": "workspace:*",
-    "@trpc/server": "11.0.0",
+    "@trpc/server": "11.1.1",
     "cors": "^2.8.5",
     "zod": "^3.24.2"
   },
