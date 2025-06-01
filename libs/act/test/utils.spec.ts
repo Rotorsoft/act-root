@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 import { config, extend, patch, validate, ValidationError } from "../src";
 
 describe("utils", () => {

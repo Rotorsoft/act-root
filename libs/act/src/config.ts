@@ -1,6 +1,6 @@
 import * as dotenv from "dotenv";
 import * as fs from "node:fs";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { Environment, Environments, LogLevel, LogLevels } from "./types";
 import { extend } from "./utils";
 
@@ -14,7 +14,7 @@ export const PackageSchema = z.object({
     .object({ name: z.string().min(1), email: z.string().optional() })
     .or(z.string().min(1)),
   license: z.string().min(1),
-  dependencies: z.record(z.string()),
+  dependencies: z.record(z.string(), z.string()),
 });
 export type Package = z.infer<typeof PackageSchema>;
 

@@ -1,6 +1,6 @@
 import { ActBuilder, Actor, sleep, ZodEmpty, type Infer } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { Calculator, KEYS } from ".";
 
 const NineCounterSchemas = {

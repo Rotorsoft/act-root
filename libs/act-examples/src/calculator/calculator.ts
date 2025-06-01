@@ -1,5 +1,5 @@
 import { type Infer, type Patch } from "@rotorsoft/act";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { CalculatorSchemas, DIGITS, Digits, Operators } from "./schemas";
 
 const round = (n: number): number => Math.round(n * 100) / 100;

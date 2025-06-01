@@ -1,4 +1,4 @@
-import { z } from "zod";
+import { z } from "zod/v4";
 
 export enum Priority {
   Low = "Low",
@@ -7,32 +7,32 @@ export enum Priority {
 }
 
 export const Attachment = z.object({
-  url: z.string().url(),
+  url: z.url(),
 });
 
 export const Message = z.object({
-  messageId: z.string().uuid(),
+  messageId: z.uuid(),
   body: z.string().min(1),
-  from: z.string().uuid(),
-  to: z.string().uuid().optional(),
+  from: z.uuid(),
+  to: z.uuid().optional(),
   wasDelivered: z.boolean().optional(),
   wasRead: z.boolean().optional(),
-  attachments: z.record(z.string().url(), Attachment),
+  attachments: z.record(z.url(), Attachment),
 });
 
 export const Ticket = z.object({
-  productId: z.string().uuid(),
-  supportCategoryId: z.string().uuid(),
-  priority: z.nativeEnum(Priority),
+  productId: z.uuid(),
+  supportCategoryId: z.uuid(),
+  priority: z.enum(Priority),
   title: z.string().min(1),
-  userId: z.string().uuid(),
-  messages: z.record(z.string().uuid(), Message),
-  agentId: z.string().uuid().optional(),
-  requestId: z.string().uuid().optional(),
-  requestedById: z.string().uuid().optional(),
-  escalationId: z.string().uuid().optional(),
-  resolvedById: z.string().uuid().optional(),
-  closedById: z.string().uuid().optional(),
+  userId: z.uuid(),
+  messages: z.record(z.uuid(), Message),
+  agentId: z.uuid().optional(),
+  requestId: z.uuid().optional(),
+  requestedById: z.uuid().optional(),
+  escalationId: z.uuid().optional(),
+  resolvedById: z.uuid().optional(),
+  closedById: z.uuid().optional(),
   reassignAfter: z.date().optional(),
   escalateAfter: z.date().optional(),
   closeAfter: z.date().optional(),

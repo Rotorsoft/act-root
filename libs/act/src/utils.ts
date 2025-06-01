@@ -1,4 +1,4 @@
-import { ZodError, type ZodType } from "zod";
+import { ZodError, type ZodType, prettifyError } from "zod/v4";
 import { config } from "./config";
 import type { Patch, Schema } from "./types";
 import { ValidationError } from "./types";
@@ -68,8 +68,11 @@ export const validate = <S>(
     return schema ? schema.parse(payload) : payload;
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      const { _errors, ...details } = (error as ZodError).format();
-      throw new ValidationError(target, payload, details);
+      throw new ValidationError(
+        target,
+        payload,
+        prettifyError(error as ZodError)
+      );
     }
     throw new ValidationError(target, payload, error);
   }

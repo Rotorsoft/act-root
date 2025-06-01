@@ -6,7 +6,7 @@ import { act } from "./bootstrap";
 import { reassignAgent } from "./services/agent";
 
 // Escalates ticket when expected response time is not met
-export const AUTO_ESCALATION_ID = "00000000-0000-1000-0000-100000000000";
+export const AUTO_ESCALATION_ID = randomUUID();
 export function AutoEscalate(batchSize: number) {
   const actor: Actor = {
     id: AUTO_ESCALATION_ID,
@@ -18,16 +18,14 @@ export function AutoEscalate(batchSize: number) {
       .from(tickets)
       .where(lt(tickets.escalateAfter, Date.now()))
       .limit(batchSize)
-      .then((tickets) => {
-        tickets.forEach((ticket) => {
-          act
-            .do(
-              "EscalateTicket",
-              { stream: ticket.id, actor },
-              { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
-            )
-            .catch(reject);
-        });
+      .then(async (tickets) => {
+        for (const ticket of tickets) {
+          await act.do(
+            "EscalateTicket",
+            { stream: ticket.id, actor },
+            { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
+          );
+        }
         resolve(tickets.length);
       })
       .catch(reject)
@@ -35,7 +33,7 @@ export function AutoEscalate(batchSize: number) {
 }
 
 // Closes tickets after inactivity period
-export const CLOSING_ID = "00000000-0000-1000-0000-200000000000";
+export const CLOSING_ID = randomUUID();
 export function AutoClose(batchSize: number) {
   const actor: Actor = {
     id: CLOSING_ID,
@@ -47,10 +45,10 @@ export function AutoClose(batchSize: number) {
       .from(tickets)
       .where(lt(tickets.closeAfter, Date.now()))
       .limit(batchSize)
-      .then((tickets) => {
-        tickets.forEach((ticket) => {
-          act.do("CloseTicket", { stream: ticket.id, actor }, {}).catch(reject);
-        });
+      .then(async (tickets) => {
+        for (const ticket of tickets) {
+          await act.do("CloseTicket", { stream: ticket.id, actor }, {});
+        }
         resolve(tickets.length);
       })
       .catch(reject)
@@ -58,7 +56,7 @@ export function AutoClose(batchSize: number) {
 }
 
 // Reassigns ticket after agent inactivity period
-export const REASSIGN_ID = "00000000-0000-1000-0000-300000000000";
+export const REASSIGN_ID = randomUUID();
 export function AutoReassign(batchSize: number) {
   const actor: Actor = {
     id: CLOSING_ID,
@@ -72,13 +70,11 @@ export function AutoReassign(batchSize: number) {
         and(isNull(tickets.closedById), lt(tickets.reassignAfter, Date.now()))
       )
       .limit(batchSize)
-      .then((tickets) => {
-        tickets.forEach((ticket) => {
+      .then(async (tickets) => {
+        for (const ticket of tickets) {
           const agent = reassignAgent(ticket.id);
-          act
-            .do("ReassignTicket", { stream: ticket.id, actor }, agent)
-            .catch(reject);
-        });
+          await act.do("ReassignTicket", { stream: ticket.id, actor }, agent);
+        }
         resolve(tickets.length);
       })
       .catch(reject)

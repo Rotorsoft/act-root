@@ -1,6 +1,6 @@
-import { z, ZodObject, ZodRawShape } from "zod";
+import { z, ZodObject, ZodRawShape } from "zod/v4";
 
-export const ZodEmpty = z.record(z.never());
+export const ZodEmpty = z.record(z.string(), z.never());
 
 export const ActorSchema = z
   .object({

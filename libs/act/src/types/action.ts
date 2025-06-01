@@ -1,4 +1,4 @@
-import { z, ZodSchema } from "zod";
+import { z, ZodType } from "zod/v4";
 import {
   ActorSchema,
   CausationEventSchema,
@@ -51,9 +51,9 @@ export type StateSchemas<
   A extends Schemas,
   S extends Schema,
 > = {
-  readonly events: { [K in keyof E]: ZodSchema<E[K]> };
-  readonly actions: { [K in keyof A]: ZodSchema<A[K]> };
-  readonly state: ZodSchema<S>;
+  readonly events: { [K in keyof E]: ZodType<E[K]> };
+  readonly actions: { [K in keyof A]: ZodType<A[K]> };
+  readonly state: ZodType<S>;
 };
 
 export type ActionHandler<

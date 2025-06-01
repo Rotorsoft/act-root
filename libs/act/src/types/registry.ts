@@ -1,4 +1,4 @@
-import { z, ZodType } from "zod";
+import { z, ZodType } from "zod/v4";
 import type { CommittedMeta, Schema, Schemas, State } from "./action";
 import type { Reaction } from "./reaction";
 

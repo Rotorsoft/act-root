@@ -1,6 +1,6 @@
 import { InvariantError, type Infer, type Invariant } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod";
+import { z } from "zod/v4";
 import * as errors from "./errors";
 import { Priority, TicketSchemas } from "./schemas";
 

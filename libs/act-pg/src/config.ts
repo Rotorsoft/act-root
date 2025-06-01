@@ -1,5 +1,5 @@
 import { extend, config as target } from "@rotorsoft/act";
-import { z } from "zod";
+import { z } from "zod/v4";
 
 const { PG_HOST, PG_USER, PG_PASSWORD, PG_DATABASE, PG_PORT } = process.env;
 
