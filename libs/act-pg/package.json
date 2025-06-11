@@ -26,9 +26,9 @@
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
     "pg": "^8.16.0",
-    "zod": "^3.25.46"
+    "zod": "^3.25.62"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.2"
+    "@types/pg": "^8.15.4"
   }
 }
