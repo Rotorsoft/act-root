@@ -33,7 +33,7 @@
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
     "drizzle-orm": "^0.44.2",
-    "zod": "^3.25.63"
+    "zod": "^3.25.64"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.1"
