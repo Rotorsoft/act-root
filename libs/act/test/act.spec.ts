@@ -3,8 +3,8 @@ import {
   ActBuilder,
   Actor,
   AsCommitted,
+  AsState,
   dispose,
-  Infer,
   sleep,
   store,
 } from "../src";
@@ -19,14 +19,14 @@ const actions = {
 };
 const schemas = { events, actions, state: z.object({}) };
 
-function A1(): Infer<typeof schemas> {
+function A1(): AsState<typeof schemas> {
   return {
     ...schemas,
     init: () => ({}),
     patch: { Event1: () => ({}), Event2: () => ({}) },
     on: {
-      Act1: () => Promise.resolve(["Event1", { e1: 1 }]),
-      Act2: () => Promise.resolve(["Event2", { e2: "2" }]),
+      Act1: () => ["Event1", { e1: 1 }],
+      Act2: () => ["Event2", { e2: "2" }],
     },
   };
 }

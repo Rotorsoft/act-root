@@ -1,4 +1,4 @@
-import { type Infer, type Patch } from "@rotorsoft/act";
+import { type AsState, type Patch } from "@rotorsoft/act";
 import { z } from "zod/v4";
 import { CalculatorSchemas, DIGITS, Digits, Operators } from "./schemas";
 
@@ -45,7 +45,7 @@ const compute = (
   return new_op === "-" && !left ? { left: "-" } : { operator: new_op };
 };
 
-export function Calculator(): Infer<typeof CalculatorSchemas> {
+export function Calculator(): AsState<typeof CalculatorSchemas> {
   return {
     ...CalculatorSchemas,
     init: () => ({ result: 0 }),
@@ -62,8 +62,7 @@ export function Calculator(): Infer<typeof CalculatorSchemas> {
       }),
     },
     on: {
-      PressKey: async ({ key }, state) => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      PressKey: ({ key }, state) => {
         if (key === ".") return ["DotPressed", {}];
         if (key === "=") {
           if (!state.operator) throw Error("no operator");
@@ -73,8 +72,7 @@ export function Calculator(): Infer<typeof CalculatorSchemas> {
           ? ["DigitPressed", { digit: key as Digits }]
           : ["OperatorPressed", { operator: key as Operators }];
       },
-      Clear: async () => {
-        await new Promise((resolve) => setTimeout(resolve, 10));
+      Clear: () => {
         return ["Cleared", {}];
       },
     },

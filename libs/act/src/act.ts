@@ -101,7 +101,7 @@ export class Act<
     for (const reaction of reactions) {
       const { event, handler, options } = reaction;
       try {
-        await handler(event, lease.stream); // the actual reaction
+        await handler(event, stream); // the actual reaction
         lease.at = event.id;
         lease.count = (lease.count || 0) + 1;
       } catch (error) {

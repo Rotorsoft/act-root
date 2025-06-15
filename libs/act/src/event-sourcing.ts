@@ -105,7 +105,7 @@ export async function action<
   }
 
   let { state, patches } = snapshot;
-  const result = await me.on[action](payload, state, target);
+  const result = me.on[action](payload, state, target);
   if (!result) return snapshot;
 
   const tuples = Array.isArray(result[0])

@@ -2,8 +2,8 @@ import { z } from "zod/v4";
 import {
   ActBuilder,
   Actor,
+  AsState,
   dispose,
-  Infer,
   type Schema,
   type Schemas,
   type State,
@@ -24,14 +24,14 @@ const schemas = {
   state: z.object({}),
 };
 
-function A1(): Infer<typeof schemas> {
+function A1(): AsState<typeof schemas> {
   return {
     ...schemas,
     init: () => ({}),
     patch: { Event1: () => ({}), Event2: () => ({}) },
     on: {
-      Act1: () => Promise.resolve(["Event1", {}]),
-      Act2: () => Promise.resolve(["Event1", {}]),
+      Act1: () => ["Event1", {}],
+      Act2: () => ["Event1", {}],
     },
   };
 }
@@ -45,7 +45,7 @@ function A2(): State<Schemas, Schemas, Schema> {
     state: ZodEmpty,
     init: () => ({}),
     patch: { Event22: () => ({}) },
-    on: { Act1: () => Promise.resolve(["Event22", {}]) },
+    on: { Act1: () => ["Event22", {}] },
   };
 }
 
@@ -58,7 +58,7 @@ function A3(): State<Schemas, Schemas, Schema> {
     state: ZodEmpty,
     init: () => ({}),
     patch: { Event1: () => ({}), Event2: () => ({}) },
-    on: { Act3: () => Promise.resolve(["Event1", {}]) },
+    on: { Act3: () => ["Event1", {}] },
   };
 }
 

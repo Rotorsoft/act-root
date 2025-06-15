@@ -1,4 +1,10 @@
-import { ActBuilder, Actor, sleep, ZodEmpty, type Infer } from "@rotorsoft/act";
+import {
+  ActBuilder,
+  Actor,
+  sleep,
+  ZodEmpty,
+  type AsState,
+} from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 import { Calculator, KEYS } from ".";
@@ -17,7 +23,7 @@ const NineCounterSchemas = {
   },
 };
 
-export function NineCounter(): Infer<typeof NineCounterSchemas> {
+export function NineCounter(): AsState<typeof NineCounterSchemas> {
   return {
     ...NineCounterSchemas,
     init: () => ({ nines: 0, equals: 0 }),
@@ -26,8 +32,7 @@ export function NineCounter(): Infer<typeof NineCounterSchemas> {
       EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
     },
     on: {
-      Count: async ({ key }) => {
-        await sleep();
+      Count: ({ key }) => {
         if (key === "9") return ["NineCounted", {}];
         if (key === "=") return ["EqualCounted", {}];
       },

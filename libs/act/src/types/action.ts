@@ -65,7 +65,7 @@ export type ActionHandler<
   action: Readonly<A[K]>,
   state: Readonly<S>,
   target: Target
-) => Promise<Emitted<E> | Emitted<E>[] | undefined>;
+) => Emitted<E> | Emitted<E>[] | undefined;
 
 export type State<
   E extends Schemas,
@@ -90,5 +90,5 @@ export type StateFactory<
   S extends Schema = Schema,
 > = () => State<E, A, S>;
 
-export type Infer<X> =
+export type AsState<X> =
   X extends StateSchemas<infer E, infer A, infer S> ? State<E, A, S> : never;

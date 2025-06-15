@@ -1,4 +1,4 @@
-import { InvariantError, type Infer, type Invariant } from "@rotorsoft/act";
+import { InvariantError, type AsState, type Invariant } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 import * as errors from "./errors";
@@ -24,7 +24,7 @@ const mustBeUserOrAgent: Invariant<TicketState> = {
 
 export { Priority };
 
-export function Ticket(): Infer<typeof TicketSchemas> {
+export function Ticket(): AsState<typeof TicketSchemas> {
   return {
     ...TicketSchemas,
     init: () => ({
@@ -85,27 +85,28 @@ export function Ticket(): Infer<typeof TicketSchemas> {
       OpenTicket: (data, state, { stream, actor }) => {
         if (state.productId)
           throw new errors.TicketCannotOpenTwiceError(stream);
-        return Promise.resolve([
+        return [
           "TicketOpened",
           {
             ...data,
             userId: actor.id,
             messageId: randomUUID(),
           },
-        ]);
+        ];
       },
-      CloseTicket: (_, __, { actor }) =>
-        Promise.resolve(["TicketClosed", { closedById: actor.id }]),
-      AssignTicket: (data) => Promise.resolve(["TicketAssigned", data]),
-      AddMessage: (data, _, { actor }) =>
-        Promise.resolve([
-          "MessageAdded",
-          {
-            ...data,
-            from: actor.id,
-            messageId: randomUUID(),
-          },
-        ]),
+      CloseTicket: (_, __, { actor }) => [
+        "TicketClosed",
+        { closedById: actor.id },
+      ],
+      AssignTicket: (data) => ["TicketAssigned", data],
+      AddMessage: (data, _, { actor }) => [
+        "MessageAdded",
+        {
+          ...data,
+          from: actor.id,
+          messageId: randomUUID(),
+        },
+      ],
       RequestTicketEscalation: (_, state, { stream, actor }) => {
         // escalation can only be requested after window expired
         if (state.escalateAfter && state.escalateAfter > new Date())
@@ -114,13 +115,13 @@ export function Ticket(): Infer<typeof TicketSchemas> {
             actor?.id || "",
             "Cannot escalate before due date"
           );
-        return Promise.resolve([
+        return [
           "TicketEscalationRequested",
           {
             requestedById: actor.id,
             requestId: randomUUID(),
           },
-        ]);
+        ];
       },
       EscalateTicket: (data, state, { stream, actor }) => {
         // only if ticket has not been escalated before?
@@ -130,10 +131,7 @@ export function Ticket(): Infer<typeof TicketSchemas> {
             actor?.id || "",
             "Cannot escalate more than once"
           );
-        return Promise.resolve([
-          "TicketEscalated",
-          { ...data, escalationId: randomUUID() },
-        ]);
+        return ["TicketEscalated", { ...data, escalationId: randomUUID() }];
       },
       ReassignTicket: (data, state, { stream, actor }) => {
         // is escalated
@@ -160,12 +158,12 @@ export function Ticket(): Infer<typeof TicketSchemas> {
             actor?.id || "",
             "Cannot reassign after agent acknowledged"
           );
-        return Promise.resolve(["TicketReassigned", data]);
+        return ["TicketReassigned", data];
       },
       MarkMessageDelivered: (data, state) => {
         if (!state.messages[data.messageId])
           throw new errors.MessageNotFoundError(data.messageId);
-        return Promise.resolve(["MessageDelivered", data]);
+        return ["MessageDelivered", data];
       },
       AcknowledgeMessage: (data, state, { stream, actor }) => {
         const msg = state.messages[data.messageId];
@@ -179,10 +177,12 @@ export function Ticket(): Infer<typeof TicketSchemas> {
             { stream, actor },
             "Must be receiver to ack"
           );
-        return Promise.resolve(["MessageRead", data]);
+        return ["MessageRead", data];
       },
-      MarkTicketResolved: (_, __, { actor }) =>
-        Promise.resolve(["TicketResolved", { resolvedById: actor.id }]),
+      MarkTicketResolved: (_, __, { actor }) => [
+        "TicketResolved",
+        { resolvedById: actor.id },
+      ],
     },
   };
 }
