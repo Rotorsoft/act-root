@@ -20,7 +20,9 @@ export type Registry<
   readonly events: EventRegister<E>;
 };
 
-export type AsCommitted<R extends EventRegister<any>, K extends keyof R> = {
-  readonly name: K;
-  readonly data: z.infer<R[K]["schema"]>;
-} & CommittedMeta;
+export type AsCommitted<R, K extends keyof R> = R[K] extends { schema: infer S }
+  ? {
+      readonly name: K;
+      readonly data: z.infer<S>;
+    } & CommittedMeta
+  : never;

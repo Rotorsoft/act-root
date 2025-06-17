@@ -2,7 +2,7 @@ import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { db, init_tickets_db, tickets } from "../../src/drizzle";
-import { act, Priority } from "../../src/wolfdesk/bootstrap";
+import { app, Priority } from "../../src/wolfdesk/bootstrap";
 import { AutoClose, AutoEscalate, AutoReassign } from "../../src/wolfdesk/jobs";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
@@ -40,15 +40,15 @@ describe("ticket projection", () => {
 
     await openTicket(t, title, message);
     await addMessage(t, "first message");
-    await act.drain();
+    await app.drain();
 
     await escalateTicket(t);
-    await act.drain();
+    await app.drain();
 
     await reassignTicket(t);
     await markTicketResolved(t);
     await closeTicket(t);
-    await act.drain();
+    await app.drain();
 
     const state = (
       await db.select().from(tickets).where(eq(tickets.id, t.stream)).limit(1)
@@ -74,12 +74,12 @@ describe("ticket projection", () => {
 
       await openTicket(t, "auto escalate", "Hello");
       await assignTicket(t, chance.guid(), new Date(), new Date());
-      await act.drain();
+      await app.drain();
 
       await AutoEscalate(1).catch(console.error);
-      await act.drain();
+      await app.drain();
 
-      const snapshot = await act.load(Ticket, t.stream);
+      const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
@@ -95,12 +95,12 @@ describe("ticket projection", () => {
         Priority.High,
         new Date()
       );
-      await act.drain();
+      await app.drain();
 
       await AutoClose(1).catch(console.error);
-      await act.drain();
+      await app.drain();
 
-      const snapshot = await act.load(Ticket, t.stream);
+      const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.closedById).toBeDefined();
     });
 
@@ -111,15 +111,15 @@ describe("ticket projection", () => {
 
       await openTicket(t, "auto re-assign me", "Hello");
       await assignTicket(t, agentId, now, now);
-      await act.drain();
+      await app.drain();
 
       await escalateTicket(t);
-      await act.drain();
+      await app.drain();
 
       await AutoReassign(1).catch(console.error);
-      await act.drain();
+      await app.drain();
 
-      const snapshot = await act.load(Ticket, t.stream);
+      const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.agentId).toBeDefined();
       expect(snapshot.state.agentId).not.toEqual(agentId);
       expect(snapshot.state.reassignAfter?.getTime()).toBeGreaterThan(

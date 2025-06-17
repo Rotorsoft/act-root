@@ -2,7 +2,7 @@ import { Actor } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { and, isNull, lt } from "drizzle-orm";
 import { db, tickets } from "../drizzle";
-import { act } from "./bootstrap";
+import { app } from "./bootstrap";
 import { reassignAgent } from "./services/agent";
 
 // Escalates ticket when expected response time is not met
@@ -20,7 +20,7 @@ export function AutoEscalate(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
-          await act.do(
+          await app.do(
             "EscalateTicket",
             { stream: ticket.id, actor },
             { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
@@ -47,7 +47,7 @@ export function AutoClose(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
-          await act.do("CloseTicket", { stream: ticket.id, actor }, {});
+          await app.do("CloseTicket", { stream: ticket.id, actor }, {});
         }
         resolve(tickets.length);
       })
@@ -73,7 +73,7 @@ export function AutoReassign(batchSize: number) {
       .then(async (tickets) => {
         for (const ticket of tickets) {
           const agent = reassignAgent(ticket.id);
-          await act.do("ReassignTicket", { stream: ticket.id, actor }, agent);
+          await app.do("ReassignTicket", { stream: ticket.id, actor }, agent);
         }
         resolve(tickets.length);
       })

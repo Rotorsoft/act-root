@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import {
-  ActBuilder,
+  act,
   Actor,
   AsState,
   dispose,
@@ -70,7 +70,7 @@ describe("Builder", () => {
   });
 
   it("should act ok, but no events emitted", async () => {
-    const act = new ActBuilder()
+    const app = act()
       .with(A1)
       .on("Event1")
       .do(() => Promise.resolve())
@@ -80,17 +80,17 @@ describe("Builder", () => {
       .to("abc")
       .build();
 
-    const result = await act.do("Act1", { stream: "A", actor }, {});
+    const result = await app.do("Act1", { stream: "A", actor }, {});
     expect(result).toBeDefined();
   });
 
   it("should throw duplicate action", () => {
-    const builder = new ActBuilder().with(A1);
+    const builder = act().with(A1);
     expect(() => builder.with(A2)).toThrow('Duplicate action "Act1"');
   });
 
   it("should throw duplicate event", () => {
-    const builder = new ActBuilder().with(A1);
+    const builder = act().with(A1);
     expect(() => builder.with(A3)).toThrow('Duplicate event "Event1"');
   });
 });

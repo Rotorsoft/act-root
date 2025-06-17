@@ -1,4 +1,4 @@
-import { ActBuilder, type AsCommitted } from "@rotorsoft/act";
+import { act, type AsCommitted } from "@rotorsoft/act";
 import { randomUUID } from "node:crypto";
 import { assignAgent } from "./services/agent";
 import { deliverMessage } from "./services/notification";
@@ -8,10 +8,10 @@ import * as p from "./tickets";
 export * from "./errors";
 export * from "./ticket";
 
-export const builder = new ActBuilder().with(Ticket);
+export const builder = act().with(Ticket);
 
 // prettier-ignore
-export const act = builder
+export const app = builder
   // reactions
   .on("TicketOpened").do(assign)
   .on("MessageAdded").do(deliver)
@@ -34,7 +34,7 @@ export async function assign(
     event.data.supportCategoryId,
     event.data.priority
   );
-  await act.do(
+  await app.do(
     "AssignTicket",
     {
       stream: event.stream,
@@ -49,7 +49,7 @@ export async function deliver(
   event: AsCommitted<typeof builder.events, "MessageAdded">
 ) {
   await deliverMessage(event.data);
-  await act.do(
+  await app.do(
     "MarkMessageDelivered",
     {
       stream: event.stream,
@@ -63,7 +63,7 @@ export async function deliver(
 export async function escalate(
   event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
 ) {
-  await act.do(
+  await app.do(
     "EscalateTicket",
     {
       stream: event.stream,

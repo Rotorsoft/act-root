@@ -3,7 +3,7 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { randomUUID } from "crypto";
 import { db, tickets } from "../drizzle";
-import { act, Priority } from "./bootstrap";
+import { app, Priority } from "./bootstrap";
 import { start_jobs } from "./jobs";
 
 const chance = new Chance();
@@ -19,15 +19,15 @@ async function main() {
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
   start_jobs();
-  act.on("drained", async () => {
+  app.on("drained", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });
-  act.on("committed", () => {
-    void act.drain();
+  app.on("committed", () => {
+    void app.drain();
   });
 
-  const t1 = await act.do(
+  const t1 = await app.do(
     "OpenTicket",
     { stream: randomUUID(), actor },
     {
@@ -40,7 +40,7 @@ async function main() {
   );
 
   await rand_sleep(5_000);
-  await act.do(
+  await app.do(
     "AssignTicket",
     { stream: t1.event!.stream, actor },
     {
@@ -51,7 +51,7 @@ async function main() {
   );
 
   await rand_sleep(5_000);
-  await act.do(
+  await app.do(
     "AddMessage",
     { stream: t1.event!.stream, actor },
     {
@@ -62,7 +62,7 @@ async function main() {
   );
 
   await rand_sleep(15_000);
-  await act.do(
+  await app.do(
     "AddMessage",
     { stream: t1.event!.stream, actor },
     {
@@ -75,7 +75,7 @@ async function main() {
   await rand_sleep(10_000);
   // show t1 correlated events
   const correlated = {} as Record<string, Committed<Schemas, keyof Schemas>[]>;
-  await act.query(
+  await app.query(
     {
       stream: t1.event!.stream,
     },

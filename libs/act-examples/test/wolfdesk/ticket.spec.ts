@@ -1,6 +1,6 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { act } from "../../src/wolfdesk/bootstrap";
+import { app } from "../../src/wolfdesk/bootstrap";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
   acknowledgeMessage,
@@ -41,7 +41,7 @@ describe("ticket without reactions", () => {
     await requestTicketEscalation(t);
     await escalateTicket(t);
 
-    const snapshot = await act.load(Ticket, t.stream);
+    const snapshot = await app.load(Ticket, t.stream);
     expect(snapshot.state.title).toEqual(title);
     expect(snapshot.state.agentId).toBeDefined();
     expect(Object.keys(snapshot.state.messages).length).toBe(2);
@@ -55,7 +55,7 @@ describe("ticket without reactions", () => {
     await markTicketResolved(t);
     await closeTicket(t);
 
-    const snapshot2 = await act.load(Ticket, t.stream);
+    const snapshot2 = await app.load(Ticket, t.stream);
     const message2 = Object.values(snapshot2.state.messages).at(-1);
 
     expect(snapshot2.state.agentId).not.toEqual(agentId);

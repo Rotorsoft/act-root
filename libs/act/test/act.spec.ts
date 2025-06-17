@@ -1,6 +1,6 @@
 import { z } from "zod/v4";
 import {
-  ActBuilder,
+  act,
   Actor,
   AsCommitted,
   AsState,
@@ -33,8 +33,8 @@ function A1(): AsState<typeof schemas> {
 
 describe("Broker", () => {
   const actor: Actor = { id: "1", name: "Actor" };
-  const builder = new ActBuilder().with(A1);
-  const act = builder
+  const builder = act().with(A1);
+  const app = builder
     .on("Event1")
     .do(R1, {
       maxRetries: 2,
@@ -43,7 +43,7 @@ describe("Broker", () => {
     .build();
 
   async function R1(event: AsCommitted<typeof builder.events, "Event1">) {
-    await act.do("Act1", { stream: "A", actor }, event.data, event);
+    await app.do("Act1", { stream: "A", actor }, event.data, event);
   }
 
   afterEach(async () => {
@@ -57,9 +57,9 @@ describe("Broker", () => {
       causation: {},
     });
 
-    const d1 = await act.drain();
+    const d1 = await app.drain();
     await sleep(1_000);
-    const d2 = await act.drain();
+    const d2 = await app.drain();
     await sleep();
 
     expect(d1).toEqual(0);

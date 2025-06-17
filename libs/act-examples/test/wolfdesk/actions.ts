@@ -1,6 +1,6 @@
 import { type Target } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { act } from "../../src/wolfdesk/bootstrap";
+import { app } from "../../src/wolfdesk/bootstrap";
 import { Priority } from "../../src/wolfdesk/ticket";
 
 const chance = new Chance();
@@ -24,7 +24,7 @@ export const openTicket = (
   priority = Priority.Low,
   closeAfter = oneDay()
 ) =>
-  act.do("OpenTicket", target, {
+  app.do("OpenTicket", target, {
     productId,
     supportCategoryId,
     priority,
@@ -39,21 +39,21 @@ export const assignTicket = (
   escalateAfter = oneDay(),
   reassignAfter = oneDay()
 ) =>
-  act.do("AssignTicket", target, {
+  app.do("AssignTicket", target, {
     agentId,
     escalateAfter,
     reassignAfter,
   });
 
 export const closeTicket = (target: Target) =>
-  act.do("CloseTicket", target, {});
+  app.do("CloseTicket", target, {});
 
 export const addMessage = (
   target: Target,
   body: string,
   to = chance.guid()
 ) => {
-  const snap = act.do("AddMessage", target, {
+  const snap = app.do("AddMessage", target, {
     body,
     to,
     attachments: {},
@@ -62,13 +62,13 @@ export const addMessage = (
 };
 
 export const requestTicketEscalation = (target: Target) =>
-  act.do("RequestTicketEscalation", target, {});
+  app.do("RequestTicketEscalation", target, {});
 
 export const escalateTicket = (
   target: Target,
   requestId = chance.guid(),
   requestedById = chance.guid()
-) => act.do("EscalateTicket", target, { requestId, requestedById });
+) => app.do("EscalateTicket", target, { requestId, requestedById });
 
 export const reassignTicket = (
   target: Target,
@@ -76,17 +76,17 @@ export const reassignTicket = (
   escalateAfter = oneDay(),
   reassignAfter = oneDay()
 ) =>
-  act.do("ReassignTicket", target, {
+  app.do("ReassignTicket", target, {
     agentId,
     escalateAfter,
     reassignAfter,
   });
 
 export const markMessageDelivered = (target: Target, messageId: string) =>
-  act.do("MarkMessageDelivered", target, { messageId });
+  app.do("MarkMessageDelivered", target, { messageId });
 
 export const acknowledgeMessage = (target: Target, messageId: string) =>
-  act.do("AcknowledgeMessage", target, { messageId });
+  app.do("AcknowledgeMessage", target, { messageId });
 
 export const markTicketResolved = (target: Target) =>
-  act.do("MarkTicketResolved", target, {});
+  app.do("MarkTicketResolved", target, {});

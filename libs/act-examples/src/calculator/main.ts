@@ -1,10 +1,4 @@
-import {
-  ActBuilder,
-  Actor,
-  sleep,
-  ZodEmpty,
-  type AsState,
-} from "@rotorsoft/act";
+import { act, Actor, sleep, ZodEmpty, type AsState } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 import { Calculator, KEYS } from ".";
@@ -49,64 +43,61 @@ async function main() {
 
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
   
-  const act = new ActBuilder()
+  const app = act()
     .with(Calculator)
-
     .on("DigitPressed").do(async function CountNines(event, stream) {
-      await act.do("Count", { stream, actor }, { key: event.data.digit }, event);
+      await app.do("Count", { stream, actor }, { key: event.data.digit }, event);
     }).to(() => "Counter")
-
     .on("EqualsPressed").do(async function CountEquals(event, stream) {
-      await act.do( "Count", { stream, actor }, { key: "=" }, event);
+      await app.do( "Count", { stream, actor }, { key: "=" }, event);
     }).to(() => "Counter")
 
     .with(NineCounter)
-
     .on("EqualCounted").do(async function ShowMessage({ stream }) { 
       await sleep();
       console.log(`Equals counted on ${stream}`);
     }).void()
-
+    
     .build();
 
   // drain on commit
-  act.on("committed", () => {
-    void act.drain();
+  app.on("committed", () => {
+    void app.drain();
   });
 
   // drain on a schedule
   setInterval(() => {
-    void act.drain();
+    void app.drain();
   }, 1_000);
 
   // log drains
-  act.on("drained", (drained) => {
+  app.on("drained", (drained) => {
     console.log("Drained:", drained);
   });
 
   const calc1 = "A";
   const calc2 = "B";
 
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "+" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "*" });
-  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc2, actor }, { key: "+" });
-  await act.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await act.do("PressKey", { stream: calc1, actor }, { key: "=" });
-  await act.do("PressKey", { stream: calc2, actor }, { key: "=" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "+" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "*" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "+" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "=" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "=" });
 
-  console.log(calc1, await act.load(Calculator, calc1));
-  console.log(calc2, await act.load(Calculator, calc2));
+  console.log(calc1, await app.load(Calculator, calc1));
+  console.log(calc2, await app.load(Calculator, calc2));
 
   setInterval(async () => {
-    const counter = await act.load(NineCounter, "Counter");
+    const counter = await app.load(NineCounter, "Counter");
     console.log("Counter", counter.state);
   }, 1_000);
 }

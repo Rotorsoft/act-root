@@ -1,4 +1,4 @@
-import { ActBuilder, Actor, dispose, sleep, store } from "@rotorsoft/act";
+import { act, Actor, dispose, sleep, store } from "@rotorsoft/act";
 import { Calculator } from "../../src/calculator";
 
 describe("calculator lifecycle", () => {
@@ -13,7 +13,7 @@ describe("calculator lifecycle", () => {
   let correlation = "";
   let midpoint: Date = new Date();
 
-  const act = new ActBuilder().with(Calculator).build();
+  const app = act().with(Calculator).build();
 
   beforeAll(async () => {
     await store().seed();
@@ -24,29 +24,29 @@ describe("calculator lifecycle", () => {
   });
 
   it("should compute results", async () => {
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "-" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "1" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "2" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "+" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "2" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "." });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "3" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "*" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "4" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "-" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "1" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "2" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "+" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "2" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "." });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "3" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "*" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "4" });
 
     await sleep(5);
     midpoint = new Date();
     await sleep(5);
 
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "-" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "5" });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "." });
-    await act.do("PressKey", { stream, actor: actor_x }, { key: "6" });
-    await act.do("PressKey", { stream, actor: actor_a }, { key: "/" });
-    await act.do("PressKey", { stream, actor: actor_a }, { key: "7" });
-    await act.do("PressKey", { stream, actor: actor_a }, { key: "." });
-    await act.do("PressKey", { stream, actor: actor_a }, { key: "9" });
-    const result = await act.do(
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "-" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "5" });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "." });
+    await app.do("PressKey", { stream, actor: actor_x }, { key: "6" });
+    await app.do("PressKey", { stream, actor: actor_a }, { key: "/" });
+    await app.do("PressKey", { stream, actor: actor_a }, { key: "7" });
+    await app.do("PressKey", { stream, actor: actor_a }, { key: "." });
+    await app.do("PressKey", { stream, actor: actor_a }, { key: "9" });
+    const result = await app.do(
       "PressKey",
       { stream, actor: actor_x },
       { key: "=" }
@@ -56,13 +56,13 @@ describe("calculator lifecycle", () => {
   });
 
   it("should load the state", async () => {
-    const snapshot = await act.load(Calculator, stream);
+    const snapshot = await app.load(Calculator, stream);
     expect(snapshot).toMatchObject(expected);
   });
 
   it("should load the state with callback", async () => {
     let max = 0;
-    await act.load(Calculator, stream, (snap) => {
+    await app.load(Calculator, stream, (snap) => {
       max = Math.max(max, snap.snaps);
     });
     expect(max).toBe(1);
@@ -70,7 +70,7 @@ describe("calculator lifecycle", () => {
 
   it("should query by stream", async () => {
     const events = [];
-    const { first, last, count } = await act.query({ stream }, (e) =>
+    const { first, last, count } = await app.query({ stream }, (e) =>
       events.push(e)
     );
     // console.table(events);
@@ -89,7 +89,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by event name", async () => {
-    const { first, last, count } = await act.query({ names: ["DigitPressed"] });
+    const { first, last, count } = await app.query({ names: ["DigitPressed"] });
     expect(count).toBe(9);
     expect(first).toMatchObject({
       name: "DigitPressed",
@@ -104,7 +104,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by correlation", async () => {
-    const { first, last, count } = await act.query({ correlation });
+    const { first, last, count } = await app.query({ correlation });
     expect(count).toBe(1);
     expect(first).toMatchObject({
       name: "EqualsPressed",
@@ -119,7 +119,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by created before", async () => {
-    const { last, count } = await act.query({
+    const { last, count } = await app.query({
       created_before: midpoint,
     });
     expect(count).toBe(9);
@@ -131,7 +131,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by created after", async () => {
-    const { first, count } = await act.query({
+    const { first, count } = await app.query({
       created_after: midpoint,
     });
     expect(count).toBe(10);
@@ -143,7 +143,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query before with limit", async () => {
-    const { first, last, count } = await act.query({
+    const { first, last, count } = await app.query({
       before: 6,
       limit: 3,
     });
@@ -161,7 +161,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query after with limit", async () => {
-    const { first, last, count } = await act.query({
+    const { first, last, count } = await app.query({
       after: 6,
       limit: 2,
     });
