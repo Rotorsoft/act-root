@@ -1,3 +1,5 @@
+#### 2025-06-18 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.1.0...@rotorsoft/act-pg-v0.2.0) @rotorsoft/act-pg-v0.2.0
+  - MINOR [63a83dea](https://github.com/Rotorsoft/act-root/commit/63a83dea07ed289551b286f5213dad2beb599d6d) feat: fluent builders
 #### 2025-06-18 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.2.0...@rotorsoft/act-v0.3.0) @rotorsoft/act-v0.3.0
   - MINOR [63a83dea](https://github.com/Rotorsoft/act-root/commit/63a83dea07ed289551b286f5213dad2beb599d6d) feat: fluent builders
 #### 2025-06-17 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.1.0...@rotorsoft/act-v0.2.0) @rotorsoft/act-v0.2.0
