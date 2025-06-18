@@ -9,7 +9,7 @@ import type {
   Schema,
   SchemaRegister,
   Schemas,
-  StateFactory,
+  State,
 } from "./types";
 
 // resolves to the event stream (default)
@@ -17,49 +17,48 @@ const _this_ = ({ stream }: { stream: string }) => stream;
 // resolves to nothing
 const _void_ = () => undefined;
 
-export type Builder<
+export type ActBuilder<
+  S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  S extends SchemaRegister<A>,
 > = {
-  with: <EX extends Schemas, AX extends Schemas, SX extends Schema>(
-    factory: StateFactory<EX, AX, SX>
-  ) => Builder<E & EX, A & AX, S & { [K in keyof AX]: SX }>;
+  with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
+    state: State<SX, EX, AX>
+  ) => ActBuilder<S & { [K in keyof AX]: SX }, E & EX, A & AX>;
   on: <K extends keyof E>(
     event: K
   ) => {
     do: (
       handler: ReactionHandler<E, K>,
       options?: Partial<ReactionOptions>
-    ) => Builder<E, A, S> & {
-      to: (resolver: ReactionResolver<E, K>) => Builder<E, A, S>;
-      void: () => Builder<E, A, S>;
+    ) => ActBuilder<S, E, A> & {
+      to: (resolver: ReactionResolver<E, K>) => ActBuilder<S, E, A>;
+      void: () => ActBuilder<S, E, A>;
     };
   };
-  build: (drainLimit?: number) => Act<E, A, S>;
+  build: (drainLimit?: number) => Act<S, E, A>;
   readonly events: EventRegister<E>;
 };
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 export function act<
-  E extends Schemas = {},
-  A extends Schemas = {},
   // @ts-expect-error empty schema
   S extends SchemaRegister<A> = {},
+  E extends Schemas = {},
+  A extends Schemas = {},
 >(
-  factories: Set<string> = new Set(),
-  registry: Registry<E, A, S> = {
+  states: Set<string> = new Set(),
+  registry: Registry<S, E, A> = {
     actions: {} as any,
     events: {} as any,
   }
-): Builder<E, A, S> {
-  const builder: Builder<E, A, S> = {
-    with: <EX extends Schemas, AX extends Schemas, SX extends Schema>(
-      factory: StateFactory<EX, AX, SX>
+): ActBuilder<S, E, A> {
+  const builder: ActBuilder<S, E, A> = {
+    with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
+      state: State<SX, EX, AX>
     ) => {
-      if (!factories.has(factory.name)) {
-        factories.add(factory.name);
-        const state = factory();
+      if (!states.has(state.name)) {
+        states.add(state.name);
         for (const name of Object.keys(state.actions)) {
           if (registry.actions[name])
             throw new Error(`Duplicate action "${name}"`);
@@ -76,12 +75,12 @@ export function act<
           };
         }
       }
-      return act<E & EX, A & AX, S & { [K in keyof AX]: SX }>(
-        factories,
+      return act<S & { [K in keyof AX]: SX }, E & EX, A & AX>(
+        states,
         registry as unknown as Registry<
+          S & { [K in keyof AX]: SX },
           E & EX,
-          A & AX,
-          S & { [K in keyof AX]: SX }
+          A & AX
         >
       );
     },
@@ -119,7 +118,7 @@ export function act<
         };
       },
     }),
-    build: (drainLimit = 10) => new Act<E, A, S>(registry, drainLimit),
+    build: (drainLimit = 10) => new Act<S, E, A>(registry, drainLimit),
     events: registry.events,
   };
   return builder;

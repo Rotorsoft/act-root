@@ -2,8 +2,9 @@ import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { db, init_tickets_db, tickets } from "../../src/drizzle";
-import { app, Priority } from "../../src/wolfdesk/bootstrap";
+import { app } from "../../src/wolfdesk/bootstrap";
 import { AutoClose, AutoEscalate, AutoReassign } from "../../src/wolfdesk/jobs";
+import { Priority } from "../../src/wolfdesk/schemas";
 import { Ticket } from "../../src/wolfdesk/ticket";
 import {
   addMessage,

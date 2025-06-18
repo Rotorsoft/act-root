@@ -3,8 +3,9 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { randomUUID } from "crypto";
 import { db, tickets } from "../drizzle";
-import { app, Priority } from "./bootstrap";
+import { app } from "./bootstrap";
 import { start_jobs } from "./jobs";
+import { Priority } from "./schemas";
 
 const chance = new Chance();
 const rand_sleep = (max = 10_000) => sleep(chance.integer({ min: 100, max }));

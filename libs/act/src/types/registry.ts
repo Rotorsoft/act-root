@@ -12,11 +12,11 @@ export type EventRegister<E extends Schemas> = {
 export type SchemaRegister<A> = { [K in keyof A]: Schema };
 
 export type Registry<
+  S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  S extends SchemaRegister<A>,
 > = {
-  readonly actions: { [K in keyof A]: State<E, A, S[K]> };
+  readonly actions: { [K in keyof A]: State<S[K], E, A> };
   readonly events: EventRegister<E>;
 };
 

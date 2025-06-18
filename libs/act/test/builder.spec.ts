@@ -1,66 +1,31 @@
 import { z } from "zod/v4";
-import {
-  act,
-  Actor,
-  AsState,
-  dispose,
-  type Schema,
-  type Schemas,
-  type State,
-  ZodEmpty,
-} from "../src";
+import { act, Actor, dispose, state, ZodEmpty } from "../src";
 
-const events = {
-  Event1: z.object({}),
-  Event2: z.object({}),
-};
-const actions = {
-  Act1: z.object({}),
-  Act2: z.object({}),
-};
-const schemas = {
-  events,
-  actions,
-  state: z.object({}),
-};
+const A1 = state("A1", z.object({}))
+  .init(() => ({}))
+  .emits({ Event1: z.object({}), Event2: z.object({}) })
+  .patch({ Event1: () => ({}), Event2: () => ({}) })
+  .on("Act1", z.object({}))
+  .emit(() => ["Event1", {}])
+  .on("Act2", z.object({}))
+  .emit(() => ["Event2", {}])
+  .build();
 
-function A1(): AsState<typeof schemas> {
-  return {
-    ...schemas,
-    init: () => ({}),
-    patch: { Event1: () => ({}), Event2: () => ({}) },
-    on: {
-      Act1: () => ["Event1", {}],
-      Act2: () => ["Event1", {}],
-    },
-  };
-}
+const A2 = state("A2", ZodEmpty)
+  .init(() => ({}))
+  .emits({ Event22: ZodEmpty })
+  .patch({ Event22: () => ({}) })
+  .on("Act1", ZodEmpty)
+  .emit(() => ["Event22", {}])
+  .build();
 
-function A2(): State<Schemas, Schemas, Schema> {
-  return {
-    events: { Event22: ZodEmpty },
-    actions: {
-      Act1: ZodEmpty,
-    },
-    state: ZodEmpty,
-    init: () => ({}),
-    patch: { Event22: () => ({}) },
-    on: { Act1: () => ["Event22", {}] },
-  };
-}
-
-function A3(): State<Schemas, Schemas, Schema> {
-  return {
-    events: { Event1: ZodEmpty, Event2: ZodEmpty },
-    actions: {
-      Act3: ZodEmpty,
-    },
-    state: ZodEmpty,
-    init: () => ({}),
-    patch: { Event1: () => ({}), Event2: () => ({}) },
-    on: { Act3: () => ["Event1", {}] },
-  };
-}
+const A3 = state("A3", ZodEmpty)
+  .init(() => ({}))
+  .emits({ Event1: ZodEmpty, Event2: ZodEmpty })
+  .patch({ Event1: () => ({}), Event2: () => ({}) })
+  .on("Act3", ZodEmpty)
+  .emit(() => ["Event1", {}])
+  .build();
 
 describe("Builder", () => {
   const actor: Actor = { id: "1", name: "Actor" };

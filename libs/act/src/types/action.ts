@@ -21,6 +21,9 @@ export type EmptySchema = Record<string, never>;
 export type Patch<T> = {
   [K in keyof T]?: T[K] extends Schema ? Patch<T[K]> : T[K];
 };
+export type ZodTypes<T extends Schemas> = {
+  [K in keyof T]: ZodType<T[K]>;
+};
 
 export type Message<E extends Schemas, K extends keyof E> = {
   readonly name: K;
@@ -30,7 +33,7 @@ export type Message<E extends Schemas, K extends keyof E> = {
 export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
   CommittedMeta;
 
-export type Snapshot<E extends Schemas, S extends Schema> = {
+export type Snapshot<S extends Schema, E extends Schemas> = {
   readonly state: S;
   readonly event?: Committed<E, keyof E>; // undefined when initialized
   readonly patches: number;
@@ -47,19 +50,29 @@ export type Emitted<E extends Schemas> = {
 }[keyof E];
 
 export type StateSchemas<
+  S extends Schema,
   E extends Schemas,
   A extends Schemas,
-  S extends Schema,
 > = {
-  readonly events: { [K in keyof E]: ZodType<E[K]> };
-  readonly actions: { [K in keyof A]: ZodType<A[K]> };
+  readonly events: ZodTypes<E>;
+  readonly actions: ZodTypes<A>;
   readonly state: ZodType<S>;
 };
 
+export type PatchHandler<
+  S extends Schema,
+  E extends Schemas,
+  K extends keyof E,
+> = (event: Committed<E, K>, state: Readonly<S>) => Readonly<Patch<S>>;
+
+export type PatchHandlers<S extends Schema, E extends Schemas> = {
+  [K in keyof E]: PatchHandler<S, E, K>;
+};
+
 export type ActionHandler<
+  S extends Schema,
   E extends Schemas,
   A extends Schemas,
-  S extends Schema,
   K extends keyof A,
 > = (
   action: Readonly<A[K]>,
@@ -67,28 +80,27 @@ export type ActionHandler<
   target: Target
 ) => Emitted<E> | Emitted<E>[] | undefined;
 
-export type State<
+export type ActionHandlers<
+  S extends Schema,
   E extends Schemas,
   A extends Schemas,
-  S extends Schema,
-> = StateSchemas<E, A, S> & {
-  init: () => Readonly<S>;
-  patch: {
-    [K in keyof E]: (
-      event: Committed<E, K>,
-      state: Readonly<S>
-    ) => Readonly<Patch<S>>;
-  };
-  on: { [K in keyof A]: ActionHandler<E, A, S, K> };
-  given?: { [K in keyof A]?: Invariant<S>[] };
-  snap?: (snapshot: Snapshot<E, S>) => boolean;
+> = {
+  [K in keyof A]: ActionHandler<S, E, A, K>;
 };
 
-export type StateFactory<
-  E extends Schemas = Schemas,
-  A extends Schemas = Schemas,
-  S extends Schema = Schema,
-> = () => State<E, A, S>;
+export type GivenHandlers<S extends Schema, A extends Schemas> = {
+  [K in keyof A]?: Invariant<S>[];
+};
 
-export type AsState<X> =
-  X extends StateSchemas<infer E, infer A, infer S> ? State<E, A, S> : never;
+export type State<
+  S extends Schema,
+  E extends Schemas,
+  A extends Schemas,
+> = StateSchemas<S, E, A> & {
+  name: string;
+  init: () => Readonly<S>;
+  patch: PatchHandlers<S, E>;
+  on: ActionHandlers<S, E, A>;
+  given?: GivenHandlers<S, A>;
+  snap?: (snapshot: Snapshot<S, E>) => boolean;
+};

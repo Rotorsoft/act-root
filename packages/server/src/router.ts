@@ -11,7 +11,7 @@ const target: Target = {
 
 export const router = t.router({
   PressKey: t.procedure
-    .input(Calculator().actions.PressKey)
+    .input(Calculator.actions.PressKey)
     .mutation(({ input }) => app.do("PressKey", target, input)),
   Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
 });

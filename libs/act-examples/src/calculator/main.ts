@@ -1,38 +1,30 @@
-import { act, Actor, sleep, ZodEmpty, type AsState } from "@rotorsoft/act";
+import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
 import { Calculator, KEYS } from ".";
 
-const NineCounterSchemas = {
-  state: z.object({
+export const NineCounter = state(
+  "NineCounter",
+  z.object({
     nines: z.number().int(),
     equals: z.number().int(),
-  }),
-  events: {
+  })
+)
+  .init(() => ({ nines: 0, equals: 0 }))
+  .emits({
     NineCounted: ZodEmpty,
     EqualCounted: ZodEmpty,
-  },
-  actions: {
-    Count: z.object({ key: z.enum(KEYS) }),
-  },
-};
-
-export function NineCounter(): AsState<typeof NineCounterSchemas> {
-  return {
-    ...NineCounterSchemas,
-    init: () => ({ nines: 0, equals: 0 }),
-    patch: {
-      NineCounted: (_, state) => ({ nines: (state.nines || 0) + 1 }),
-      EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
-    },
-    on: {
-      Count: ({ key }) => {
-        if (key === "9") return ["NineCounted", {}];
-        if (key === "=") return ["EqualCounted", {}];
-      },
-    },
-  };
-}
+  })
+  .patch({
+    NineCounted: (_, state) => ({ nines: (state.nines || 0) + 1 }),
+    EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
+  })
+  .on("Count", z.object({ key: z.enum(KEYS) }))
+  .emit(({ key }) => {
+    if (key === "9") return ["NineCounted", {}];
+    if (key === "=") return ["EqualCounted", {}];
+  })
+  .build();
 
 // prettier-ignore
 async function main() {
@@ -45,6 +37,8 @@ async function main() {
   
   const app = act()
     .with(Calculator)
+    .with(NineCounter)
+    
     .on("DigitPressed").do(async function CountNines(event, stream) {
       await app.do("Count", { stream, actor }, { key: event.data.digit }, event);
     }).to(() => "Counter")
@@ -52,7 +46,6 @@ async function main() {
       await app.do( "Count", { stream, actor }, { key: "=" }, event);
     }).to(() => "Counter")
 
-    .with(NineCounter)
     .on("EqualCounted").do(async function ShowMessage({ stream }) { 
       await sleep();
       console.log(`Equals counted on ${stream}`);

@@ -12,7 +12,7 @@ import type {
   SchemaRegister,
   Schemas,
   Snapshot,
-  StateFactory,
+  State,
   Target,
 } from "./types";
 import { ValidationError } from "./types/errors";
@@ -20,9 +20,9 @@ import { ValidationError } from "./types/errors";
 type SnapshotArgs = Snapshot<Schemas, Schema>;
 
 export class Act<
+  S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  S extends SchemaRegister<A>,
 > {
   private _emitter = new EventEmitter();
 
@@ -40,7 +40,7 @@ export class Act<
   }
 
   constructor(
-    public readonly registry: Registry<E, A, S>,
+    public readonly registry: Registry<S, E, A>,
     public readonly drainLimit: number
   ) {}
 
@@ -63,12 +63,12 @@ export class Act<
     return snapshot;
   }
 
-  async load<EX extends Schemas, AX extends Schemas, SX extends Schema>(
-    factory: StateFactory<EX, AX, SX>,
+  async load<SX extends Schema, EX extends Schemas, AX extends Schemas>(
+    state: State<SX, EX, AX>,
     stream: string,
-    callback?: (snapshot: Snapshot<EX, SX>) => void
-  ): Promise<Snapshot<EX, SX>> {
-    return await es.load(factory(), stream, callback);
+    callback?: (snapshot: Snapshot<SX, EX>) => void
+  ): Promise<Snapshot<SX, EX>> {
+    return await es.load(state, stream, callback);
   }
 
   async query(

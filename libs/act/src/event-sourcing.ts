@@ -13,8 +13,8 @@ import type {
 import { InvariantError } from "./types/errors";
 import { patch, validate } from "./utils";
 
-export async function snap<E extends Schemas, S extends Schema>(
-  snapshot: Snapshot<E, S>
+export async function snap<S extends Schema, E extends Schemas>(
+  snapshot: Snapshot<S, E>
 ): Promise<void> {
   try {
     const { id, stream, name, meta, version } = snapshot.event!;
@@ -34,14 +34,14 @@ export async function snap<E extends Schemas, S extends Schema>(
 }
 
 export async function load<
+  S extends Schema,
   E extends Schemas,
   A extends Schemas,
-  S extends Schema,
 >(
-  me: State<E, A, S>,
+  me: State<S, E, A>,
   stream: string,
-  callback?: (snapshot: Snapshot<E, S>) => void
-): Promise<Snapshot<E, S>> {
+  callback?: (snapshot: Snapshot<S, E>) => void
+): Promise<Snapshot<S, E>> {
   let state = me.init();
   let patches = 0;
   let snaps = 0;
@@ -67,18 +67,18 @@ export async function load<
 }
 
 export async function action<
+  S extends Schema,
   E extends Schemas,
   A extends Schemas,
-  S extends Schema,
   K extends keyof A,
 >(
-  me: State<E, A, S>,
+  me: State<S, E, A>,
   action: K,
   target: Target,
   payload: Readonly<A[K]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false
-): Promise<Snapshot<E, S>> {
+): Promise<Snapshot<S, E>> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 

@@ -3,8 +3,9 @@ import { disposeAndExit, logger } from "./ports";
 
 /** @module act */
 export * from "./act";
-export * from "./builder";
+export * from "./act-builder";
 export * from "./ports";
+export * from "./state-builder";
 export * from "./types";
 export * from "./utils";
 export { config };

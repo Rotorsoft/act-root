@@ -1,35 +1,21 @@
 import { z } from "zod/v4";
-import {
-  act,
-  Actor,
-  AsCommitted,
-  AsState,
-  dispose,
-  sleep,
-  store,
-} from "../src";
+import { act, Actor, AsCommitted, dispose, sleep, state, store } from "../src";
 
-const events = {
-  Event1: z.object({ e1: z.number() }),
-  Event2: z.object({ e2: z.string() }),
-};
-const actions = {
-  Act1: z.object({ e1: z.number() }),
-  Act2: z.object({ e2: z.string() }),
-};
-const schemas = { events, actions, state: z.object({}) };
-
-function A1(): AsState<typeof schemas> {
-  return {
-    ...schemas,
-    init: () => ({}),
-    patch: { Event1: () => ({}), Event2: () => ({}) },
-    on: {
-      Act1: () => ["Event1", { e1: 1 }],
-      Act2: () => ["Event2", { e2: "2" }],
-    },
-  };
-}
+const A1 = state("A1", z.object({}))
+  .init(() => ({}))
+  .emits({
+    Event1: z.object({ e1: z.number() }),
+    Event2: z.object({ e2: z.string() }),
+  })
+  .patch({
+    Event1: () => ({}),
+    Event2: () => ({}),
+  })
+  .on("Act1", z.object({ e1: z.number() }))
+  .emit(() => ["Event1", { e1: 1 }])
+  .on("Act2", z.object({ e2: z.string() }))
+  .emit(() => ["Event2", { e2: "2" }])
+  .build();
 
 describe("Broker", () => {
   const actor: Actor = { id: "1", name: "Actor" };

@@ -1,3 +1,4 @@
+// @rotorsoft/act@0.3.0
 import type {
   Committed,
   EventMeta,

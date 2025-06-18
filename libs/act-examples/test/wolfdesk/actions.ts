@@ -1,7 +1,7 @@
 import { type Target } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { app } from "../../src/wolfdesk/bootstrap";
-import { Priority } from "../../src/wolfdesk/ticket";
+import { Priority } from "../../src/wolfdesk/schemas";
 
 const chance = new Chance();
 const DAY = 24 * 60 * 60 * 1000;
