@@ -8,7 +8,7 @@
 
 > **StateBuilder**\<`S`\> = `object`
 
-Defined in: [libs/act/src/state-builder.ts:16](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L16)
+Defined in: [libs/act/src/state-builder.ts:16](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L16)
 
 ## Type Parameters
 
@@ -22,7 +22,7 @@ Defined in: [libs/act/src/state-builder.ts:16](https://github.com/Rotorsoft/act-
 
 > **init**: (`init`) => `object`
 
-Defined in: [libs/act/src/state-builder.ts:17](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L17)
+Defined in: [libs/act/src/state-builder.ts:17](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L17)
 
 #### Parameters
 

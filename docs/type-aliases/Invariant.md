@@ -8,7 +8,7 @@
 
 > **Invariant**\<`S`\> = `object`
 
-Defined in: [libs/act/src/types/action.ts:43](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L43)
+Defined in: [libs/act/src/types/action.ts:43](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L43)
 
 ## Type Parameters
 
@@ -22,7 +22,7 @@ Defined in: [libs/act/src/types/action.ts:43](https://github.com/Rotorsoft/act-r
 
 > **description**: `string`
 
-Defined in: [libs/act/src/types/action.ts:44](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L44)
+Defined in: [libs/act/src/types/action.ts:44](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L44)
 
 ***
 
@@ -30,7 +30,7 @@ Defined in: [libs/act/src/types/action.ts:44](https://github.com/Rotorsoft/act-r
 
 > **valid**: (`state`, `actor?`) => `boolean`
 
-Defined in: [libs/act/src/types/action.ts:45](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L45)
+Defined in: [libs/act/src/types/action.ts:45](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L45)
 
 #### Parameters
 

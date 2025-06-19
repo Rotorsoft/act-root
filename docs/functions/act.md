@@ -8,7 +8,7 @@
 
 > **act**\<`S`, `E`, `A`\>(`states`, `registry`): [`ActBuilder`](../type-aliases/ActBuilder.md)\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/act-builder.ts:60](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L60)
+Defined in: [libs/act/src/act-builder.ts:60](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L60)
 
 Creates an ActBuilder instance.
 

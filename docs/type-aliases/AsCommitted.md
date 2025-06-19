@@ -8,7 +8,7 @@
 
 > **AsCommitted**\<`R`, `K`\> = `R`\[`K`\] *extends* `object` ? `object` & [`CommittedMeta`](CommittedMeta.md) : `never`
 
-Defined in: [libs/act/src/types/registry.ts:23](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/registry.ts#L23)
+Defined in: [libs/act/src/types/registry.ts:23](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/registry.ts#L23)
 
 ## Type Parameters
 

@@ -6,7 +6,7 @@
 
 # Class: ValidationError
 
-Defined in: [libs/act/src/types/errors.ts:15](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L15)
+Defined in: [libs/act/src/types/errors.ts:15](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L15)
 
 ## Extends
 
@@ -18,7 +18,7 @@ Defined in: [libs/act/src/types/errors.ts:15](https://github.com/Rotorsoft/act-r
 
 > **new ValidationError**(`target`, `payload`, `details`): `ValidationError`
 
-Defined in: [libs/act/src/types/errors.ts:16](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L16)
+Defined in: [libs/act/src/types/errors.ts:16](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L16)
 
 #### Parameters
 
@@ -48,7 +48,7 @@ Defined in: [libs/act/src/types/errors.ts:16](https://github.com/Rotorsoft/act-r
 
 > `readonly` **target**: `string`
 
-Defined in: [libs/act/src/types/errors.ts:17](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L17)
+Defined in: [libs/act/src/types/errors.ts:17](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L17)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: [libs/act/src/types/errors.ts:17](https://github.com/Rotorsoft/act-r
 
 > `readonly` **payload**: `any`
 
-Defined in: [libs/act/src/types/errors.ts:18](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L18)
+Defined in: [libs/act/src/types/errors.ts:18](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L18)
 
 ***
 
@@ -64,4 +64,4 @@ Defined in: [libs/act/src/types/errors.ts:18](https://github.com/Rotorsoft/act-r
 
 > `readonly` **details**: `any`
 
-Defined in: [libs/act/src/types/errors.ts:19](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L19)
+Defined in: [libs/act/src/types/errors.ts:19](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L19)

@@ -6,6 +6,10 @@
 
 ***
 
+**Act Framework Documentation v0.3.0**
+
+***
+
 # Act Framework Documentation
 
 Welcome to the Act Framework documentation! Act is a modern, event-sourced framework for building scalable, maintainable applications using the principles of Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing.

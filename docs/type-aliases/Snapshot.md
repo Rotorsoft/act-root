@@ -8,7 +8,7 @@
 
 > **Snapshot**\<`S`, `E`\> = `object`
 
-Defined in: [libs/act/src/types/action.ts:36](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L36)
+Defined in: [libs/act/src/types/action.ts:36](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L36)
 
 ## Type Parameters
 
@@ -26,7 +26,7 @@ Defined in: [libs/act/src/types/action.ts:36](https://github.com/Rotorsoft/act-r
 
 > `readonly` **state**: `S`
 
-Defined in: [libs/act/src/types/action.ts:37](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L37)
+Defined in: [libs/act/src/types/action.ts:37](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L37)
 
 ***
 
@@ -34,7 +34,7 @@ Defined in: [libs/act/src/types/action.ts:37](https://github.com/Rotorsoft/act-r
 
 > `readonly` `optional` **event**: [`Committed`](Committed.md)\<`E`, keyof `E`\>
 
-Defined in: [libs/act/src/types/action.ts:38](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L38)
+Defined in: [libs/act/src/types/action.ts:38](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L38)
 
 ***
 
@@ -42,7 +42,7 @@ Defined in: [libs/act/src/types/action.ts:38](https://github.com/Rotorsoft/act-r
 
 > `readonly` **patches**: `number`
 
-Defined in: [libs/act/src/types/action.ts:39](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L39)
+Defined in: [libs/act/src/types/action.ts:39](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L39)
 
 ***
 
@@ -50,4 +50,4 @@ Defined in: [libs/act/src/types/action.ts:39](https://github.com/Rotorsoft/act-r
 
 > `readonly` **snaps**: `number`
 
-Defined in: [libs/act/src/types/action.ts:40](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L40)
+Defined in: [libs/act/src/types/action.ts:40](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L40)

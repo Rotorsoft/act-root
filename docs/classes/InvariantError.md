@@ -6,7 +6,7 @@
 
 # Class: InvariantError
 
-Defined in: [libs/act/src/types/errors.ts:26](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L26)
+Defined in: [libs/act/src/types/errors.ts:26](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L26)
 
 ## Extends
 
@@ -18,7 +18,7 @@ Defined in: [libs/act/src/types/errors.ts:26](https://github.com/Rotorsoft/act-r
 
 > **new InvariantError**(`name`, `payload`, `target`, `description`): `InvariantError`
 
-Defined in: [libs/act/src/types/errors.ts:28](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L28)
+Defined in: [libs/act/src/types/errors.ts:28](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L28)
 
 #### Parameters
 
@@ -52,7 +52,7 @@ Defined in: [libs/act/src/types/errors.ts:28](https://github.com/Rotorsoft/act-r
 
 > `readonly` **details**: `object`
 
-Defined in: [libs/act/src/types/errors.ts:27](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/errors.ts#L27)
+Defined in: [libs/act/src/types/errors.ts:27](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/errors.ts#L27)
 
 #### name
 

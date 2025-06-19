@@ -8,7 +8,7 @@
 
 > **PatchHandlers**\<`S`, `E`\> = `{ [K in keyof E]: PatchHandler<S, E, K> }`
 
-Defined in: [libs/act/src/types/action.ts:68](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/action.ts#L68)
+Defined in: [libs/act/src/types/action.ts:68](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/action.ts#L68)
 
 ## Type Parameters
 

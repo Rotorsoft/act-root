@@ -8,7 +8,7 @@
 
 > **ActionBuilder**\<`S`, `E`, `A`\> = `object`
 
-Defined in: [libs/act/src/state-builder.ts:26](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L26)
+Defined in: [libs/act/src/state-builder.ts:26](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L26)
 
 ## Type Parameters
 
@@ -30,7 +30,7 @@ Defined in: [libs/act/src/state-builder.ts:26](https://github.com/Rotorsoft/act-
 
 > **on**: \<`K`, `AX`\>(`action`, `schema`) => `object`
 
-Defined in: [libs/act/src/state-builder.ts:31](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L31)
+Defined in: [libs/act/src/state-builder.ts:31](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L31)
 
 #### Type Parameters
 
@@ -104,7 +104,7 @@ Defined in: [libs/act/src/state-builder.ts:31](https://github.com/Rotorsoft/act-
 
 > **snap**: (`snap`) => `ActionBuilder`\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/state-builder.ts:44](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L44)
+Defined in: [libs/act/src/state-builder.ts:44](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L44)
 
 #### Parameters
 
@@ -122,7 +122,7 @@ Defined in: [libs/act/src/state-builder.ts:44](https://github.com/Rotorsoft/act-
 
 > **build**: () => [`State`](State.md)\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/state-builder.ts:45](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/state-builder.ts#L45)
+Defined in: [libs/act/src/state-builder.ts:45](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/state-builder.ts#L45)
 
 #### Returns
 

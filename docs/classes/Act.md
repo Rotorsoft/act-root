@@ -6,7 +6,7 @@
 
 # Class: Act\<S, E, A\>
 
-Defined in: [libs/act/src/act.ts:30](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L30)
+Defined in: [libs/act/src/act.ts:30](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L30)
 
 Act is the main orchestrator for event-sourced state machines.
 It manages actions, reactions, event streams, and provides APIs for loading, querying, and draining events.
@@ -37,7 +37,7 @@ Schemas for actions
 
 > **new Act**\<`S`, `E`, `A`\>(`registry`, `drainLimit`): `Act`\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/act.ts:50](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L50)
+Defined in: [libs/act/src/act.ts:50](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L50)
 
 #### Parameters
 
@@ -59,7 +59,7 @@ Defined in: [libs/act/src/act.ts:50](https://github.com/Rotorsoft/act-root/blob/
 
 > `readonly` **registry**: [`Registry`](../type-aliases/Registry.md)\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/act.ts:51](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L51)
+Defined in: [libs/act/src/act.ts:51](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L51)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: [libs/act/src/act.ts:51](https://github.com/Rotorsoft/act-root/blob/
 
 > `readonly` **drainLimit**: `number`
 
-Defined in: [libs/act/src/act.ts:52](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L52)
+Defined in: [libs/act/src/act.ts:52](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L52)
 
 ## Methods
 
@@ -77,7 +77,7 @@ Defined in: [libs/act/src/act.ts:52](https://github.com/Rotorsoft/act-root/blob/
 
 > **emit**(`event`, `args`): `boolean`
 
-Defined in: [libs/act/src/act.ts:37](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L37)
+Defined in: [libs/act/src/act.ts:37](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L37)
 
 ##### Parameters
 
@@ -97,7 +97,7 @@ Defined in: [libs/act/src/act.ts:37](https://github.com/Rotorsoft/act-root/blob/
 
 > **emit**(`event`, `args`): `boolean`
 
-Defined in: [libs/act/src/act.ts:38](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L38)
+Defined in: [libs/act/src/act.ts:38](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L38)
 
 ##### Parameters
 
@@ -121,7 +121,7 @@ Defined in: [libs/act/src/act.ts:38](https://github.com/Rotorsoft/act-root/blob/
 
 > **on**(`event`, `listener`): `this`
 
-Defined in: [libs/act/src/act.ts:43](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L43)
+Defined in: [libs/act/src/act.ts:43](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L43)
 
 ##### Parameters
 
@@ -141,7 +141,7 @@ Defined in: [libs/act/src/act.ts:43](https://github.com/Rotorsoft/act-root/blob/
 
 > **on**(`event`, `listener`): `this`
 
-Defined in: [libs/act/src/act.ts:44](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L44)
+Defined in: [libs/act/src/act.ts:44](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L44)
 
 ##### Parameters
 
@@ -163,7 +163,7 @@ Defined in: [libs/act/src/act.ts:44](https://github.com/Rotorsoft/act-root/blob/
 
 > **do**\<`K`\>(`action`, `target`, `payload`, `reactingTo?`, `skipValidation?`): `Promise`\<[`Snapshot`](../type-aliases/Snapshot.md)\<`S`\[`K`\], `E`\>\>
 
-Defined in: [libs/act/src/act.ts:68](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L68)
+Defined in: [libs/act/src/act.ts:68](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L68)
 
 Executes an action and emits an event to be committed by the store.
 
@@ -219,7 +219,7 @@ The snapshot of the committed Event
 
 > **load**\<`SX`, `EX`, `AX`\>(`state`, `stream`, `callback?`): `Promise`\<[`Snapshot`](../type-aliases/Snapshot.md)\<`SX`, `EX`\>\>
 
-Defined in: [libs/act/src/act.ts:98](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L98)
+Defined in: [libs/act/src/act.ts:98](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L98)
 
 Loads a snapshot of the state from the store.
 
@@ -275,7 +275,7 @@ The snapshot of the loaded state
 
 > **query**(`query`, `callback?`): `Promise`\<\{ `first?`: [`Committed`](../type-aliases/Committed.md)\<`E`, keyof `E`\>; `last?`: [`Committed`](../type-aliases/Committed.md)\<`E`, keyof `E`\>; `count`: `number`; \}\>
 
-Defined in: [libs/act/src/act.ts:113](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L113)
+Defined in: [libs/act/src/act.ts:113](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L113)
 
 Queries the store for events.
 
@@ -339,7 +339,7 @@ The query result
 
 > **drain**(): `Promise`\<`number`\>
 
-Defined in: [libs/act/src/act.ts:177](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act.ts#L177)
+Defined in: [libs/act/src/act.ts:177](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act.ts#L177)
 
 Drains events from the store.
 

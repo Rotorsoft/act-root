@@ -6,7 +6,7 @@
 
 # Interface: Store
 
-Defined in: [libs/act/src/types/ports.ts:7](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L7)
+Defined in: [libs/act/src/types/ports.ts:7](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L7)
 
 ## Extends
 
@@ -18,7 +18,7 @@ Defined in: [libs/act/src/types/ports.ts:7](https://github.com/Rotorsoft/act-roo
 
 > **dispose**: [`Disposer`](../type-aliases/Disposer.md)
 
-Defined in: [libs/act/src/types/ports.ts:5](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L5)
+Defined in: [libs/act/src/types/ports.ts:5](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L5)
 
 #### Inherited from
 
@@ -30,7 +30,7 @@ Defined in: [libs/act/src/types/ports.ts:5](https://github.com/Rotorsoft/act-roo
 
 > **seed**: () => `Promise`\<`void`\>
 
-Defined in: [libs/act/src/types/ports.ts:8](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L8)
+Defined in: [libs/act/src/types/ports.ts:8](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L8)
 
 #### Returns
 
@@ -42,7 +42,7 @@ Defined in: [libs/act/src/types/ports.ts:8](https://github.com/Rotorsoft/act-roo
 
 > **drop**: () => `Promise`\<`void`\>
 
-Defined in: [libs/act/src/types/ports.ts:9](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L9)
+Defined in: [libs/act/src/types/ports.ts:9](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L9)
 
 #### Returns
 
@@ -54,7 +54,7 @@ Defined in: [libs/act/src/types/ports.ts:9](https://github.com/Rotorsoft/act-roo
 
 > **commit**: \<`E`\>(`stream`, `msgs`, `meta`, `expectedVersion?`) => `Promise`\<[`Committed`](../type-aliases/Committed.md)\<`E`, keyof `E`\>[]\>
 
-Defined in: [libs/act/src/types/ports.ts:12](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L12)
+Defined in: [libs/act/src/types/ports.ts:12](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L12)
 
 #### Type Parameters
 
@@ -90,7 +90,7 @@ Defined in: [libs/act/src/types/ports.ts:12](https://github.com/Rotorsoft/act-ro
 
 > **query**: \<`E`\>(`callback`, `query?`, `withSnaps?`) => `Promise`\<`number`\>
 
-Defined in: [libs/act/src/types/ports.ts:18](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L18)
+Defined in: [libs/act/src/types/ports.ts:18](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L18)
 
 #### Type Parameters
 
@@ -156,7 +156,7 @@ Defined in: [libs/act/src/types/ports.ts:18](https://github.com/Rotorsoft/act-ro
 
 > **fetch**: \<`E`\>(`limit`) => `Promise`\<[`Fetch`](../type-aliases/Fetch.md)\<`E`\>\>
 
-Defined in: [libs/act/src/types/ports.ts:25](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L25)
+Defined in: [libs/act/src/types/ports.ts:25](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L25)
 
 #### Type Parameters
 
@@ -180,7 +180,7 @@ Defined in: [libs/act/src/types/ports.ts:25](https://github.com/Rotorsoft/act-ro
 
 > **lease**: (`leases`) => `Promise`\<[`Lease`](../type-aliases/Lease.md)[]\>
 
-Defined in: [libs/act/src/types/ports.ts:26](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L26)
+Defined in: [libs/act/src/types/ports.ts:26](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L26)
 
 #### Parameters
 
@@ -198,7 +198,7 @@ Defined in: [libs/act/src/types/ports.ts:26](https://github.com/Rotorsoft/act-ro
 
 > **ack**: (`leases`) => `Promise`\<`void`\>
 
-Defined in: [libs/act/src/types/ports.ts:27](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/types/ports.ts#L27)
+Defined in: [libs/act/src/types/ports.ts:27](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/types/ports.ts#L27)
 
 #### Parameters
 

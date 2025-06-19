@@ -8,7 +8,7 @@
 
 > **ActBuilder**\<`S`, `E`, `A`\> = `object`
 
-Defined in: [libs/act/src/act-builder.ts:28](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L28)
+Defined in: [libs/act/src/act-builder.ts:28](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L28)
 
 Fluent builder for composing event-sourced state machines with actions and reactions.
 Provides a chainable API for registering states, events, and reaction handlers.
@@ -39,7 +39,7 @@ Schemas for actions
 
 > **with**: \<`SX`, `EX`, `AX`\>(`state`) => `ActBuilder`\<`S` & `{ [K in keyof AX]: SX }`, `E` & `EX`, `A` & `AX`\>
 
-Defined in: [libs/act/src/act-builder.ts:33](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L33)
+Defined in: [libs/act/src/act-builder.ts:33](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L33)
 
 #### Type Parameters
 
@@ -71,7 +71,7 @@ Defined in: [libs/act/src/act-builder.ts:33](https://github.com/Rotorsoft/act-ro
 
 > **on**: \<`K`\>(`event`) => `object`
 
-Defined in: [libs/act/src/act-builder.ts:36](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L36)
+Defined in: [libs/act/src/act-builder.ts:36](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L36)
 
 #### Type Parameters
 
@@ -113,7 +113,7 @@ Defined in: [libs/act/src/act-builder.ts:36](https://github.com/Rotorsoft/act-ro
 
 > **build**: (`drainLimit?`) => [`Act`](../classes/Act.md)\<`S`, `E`, `A`\>
 
-Defined in: [libs/act/src/act-builder.ts:47](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L47)
+Defined in: [libs/act/src/act-builder.ts:47](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L47)
 
 #### Parameters
 
@@ -131,4 +131,4 @@ Defined in: [libs/act/src/act-builder.ts:47](https://github.com/Rotorsoft/act-ro
 
 > `readonly` **events**: [`EventRegister`](EventRegister.md)\<`E`\>
 
-Defined in: [libs/act/src/act-builder.ts:48](https://github.com/Rotorsoft/act-root/blob/b40f67575d048d860d7c67a52d36c927803922d7/libs/act/src/act-builder.ts#L48)
+Defined in: [libs/act/src/act-builder.ts:48](https://github.com/Rotorsoft/act-root/blob/44434ac9e20b81fc5bbda127e1633a974aa78bcb/libs/act/src/act-builder.ts#L48)
