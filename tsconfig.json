@@ -9,6 +9,9 @@
     },
     {
       "path": "./libs/act-examples"
+    },
+    {
+      "path": "./packages/betblox"
     }
   ]
 }
