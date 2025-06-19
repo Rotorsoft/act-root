@@ -3,7 +3,7 @@
 ![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 
-👉 **[View the Interactive Landing Page](./docs/index.html)** 👈
+👉 **[View the Interactive Landing Page](https://rotorsoft.github.io/act-root/)** 👈
 
 The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. This project is an attempt to distill the basic building blocks of modern software design into a small, simple, and composable library.
 
