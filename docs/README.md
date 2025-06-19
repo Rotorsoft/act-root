@@ -1,14 +1,6 @@
 **Act Framework Documentation v0.3.0**
 
-***
-
-**Act Framework Documentation v0.3.0**
-
-***
-
-**Act Framework Documentation v0.3.0**
-
-***
+---
 
 # Act Framework Documentation
 
