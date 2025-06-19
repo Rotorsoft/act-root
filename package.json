@@ -43,7 +43,7 @@
     "prepare": "husky",
     "docs:generate": "typedoc",
     "docs:serve": "npx http-server docs -p 8080 -o",
-    "docs:clean": "find docs -mindepth 1 ! -name 'examples' -exec rm -rf {} +"
+    "docs:clean": "find docs -mindepth 1 ! -name 'examples' ! -name 'index.html' -exec rm -rf {} +"
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
