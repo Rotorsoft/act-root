@@ -19,6 +19,14 @@ import { ValidationError } from "./types/errors";
 
 type SnapshotArgs = Snapshot<Schemas, Schema>;
 
+/**
+ * Act is the main orchestrator for event-sourced state machines.
+ * It manages actions, reactions, event streams, and provides APIs for loading, querying, and draining events.
+ *
+ * @template S SchemaRegister for state
+ * @template E Schemas for events
+ * @template A Schemas for actions
+ */
 export class Act<
   S extends SchemaRegister<A>,
   E extends Schemas,
@@ -44,6 +52,19 @@ export class Act<
     public readonly drainLimit: number
   ) {}
 
+  /**
+   * Executes an action and emits an event to be committed by the store.
+   *
+   * @template K The type of action to execute
+   * @template T The type of target
+   * @template P The type of payloads
+   * @param action The action to execute
+   * @param target The target of the action
+   * @param payload The payload of the action
+   * @param reactingTo The event that the action is reacting to
+   * @param skipValidation Whether to skip validation
+   * @returns The snapshot of the committed Event
+   */
   async do<K extends keyof A>(
     action: K,
     target: Target,
@@ -63,6 +84,17 @@ export class Act<
     return snapshot;
   }
 
+  /**
+   * Loads a snapshot of the state from the store.
+   *
+   * @template SX The type of state
+   * @template EX The type of events
+   * @template AX The type of actions
+   * @param state The state to load
+   * @param stream The stream to load
+   * @param callback The callback to call with the snapshot
+   * @returns The snapshot of the loaded state
+   */
   async load<SX extends Schema, EX extends Schemas, AX extends Schemas>(
     state: State<SX, EX, AX>,
     stream: string,
@@ -71,6 +103,13 @@ export class Act<
     return await es.load(state, stream, callback);
   }
 
+  /**
+   * Queries the store for events.
+   *
+   * @param query The query to execute
+   * @param callback The callback to call with the events
+   * @returns The query result
+   */
   async query(
     query: Query,
     callback?: (event: Committed<E, keyof E>) => void
@@ -89,6 +128,13 @@ export class Act<
     return { first, last, count };
   }
 
+  /**
+   * Handles leased reactions.
+   *
+   * @param lease The lease to handle
+   * @param reactions The reactions to handle
+   * @returns The lease
+   */
   private async handle(
     lease: Lease,
     reactions: ReactionPayload<E>[]
@@ -122,6 +168,12 @@ export class Act<
   }
 
   private drainLocked = false;
+
+  /**
+   * Drains events from the store.
+   *
+   * @returns The number of drained events
+   */
   async drain(): Promise<number> {
     if (this.drainLocked) return 0;
     this.drainLocked = true;

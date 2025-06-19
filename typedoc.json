@@ -1,0 +1,32 @@
+{
+  "entryPoints": [
+    "libs/act/src/index.ts"
+  ],
+  "out": "docs",
+  "exclude": [
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/node_modules/**"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "defaultCategory": "Other",
+  "theme": "default",
+  "name": "Act Framework Documentation",
+  "readme": "docs/README.md",
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
+  "hideGenerator": true,
+  "sort": [
+    "source-order"
+  ],
+  "searchInComments": true,
+  "validation": {
+    "invalidLink": true,
+    "notExported": true
+  }
+}

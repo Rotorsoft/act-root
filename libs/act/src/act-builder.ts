@@ -17,6 +17,14 @@ const _this_ = ({ stream }: { stream: string }) => stream;
 // resolves to nothing
 const _void_ = () => undefined;
 
+/**
+ * Fluent builder for composing event-sourced state machines with actions and reactions.
+ * Provides a chainable API for registering states, events, and reaction handlers.
+ *
+ * @template S SchemaRegister for state
+ * @template E Schemas for events
+ * @template A Schemas for actions
+ */
 export type ActBuilder<
   S extends SchemaRegister<A>,
   E extends Schemas,
@@ -41,6 +49,14 @@ export type ActBuilder<
 };
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
+
+/**
+ * Creates an ActBuilder instance.
+ *
+ * @template S The type of state
+ * @template E The type of events
+ * @template A The type of actions
+ */
 export function act<
   // @ts-expect-error empty schema
   S extends SchemaRegister<A> = {},
@@ -54,6 +70,15 @@ export function act<
   }
 ): ActBuilder<S, E, A> {
   const builder: ActBuilder<S, E, A> = {
+    /**
+     * Adds a state to the builder.
+     *
+     * @template SX The type of state
+     * @template EX The type of events
+     * @template AX The type of actions
+     * @param state The state to add
+     * @returns The builder
+     */
     with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
       state: State<SX, EX, AX>
     ) => {
@@ -84,6 +109,13 @@ export function act<
         >
       );
     },
+    /**
+     * Adds a reaction to an event.
+     *
+     * @template K The type of event
+     * @param event The event to add a reaction to
+     * @returns The builder
+     */
     on: <K extends keyof E>(event: K) => ({
       do: (
         handler: ReactionHandler<E, K>,

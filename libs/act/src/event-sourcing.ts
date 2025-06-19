@@ -13,6 +13,18 @@ import type {
 import { InvariantError } from "./types/errors";
 import { patch, validate } from "./utils";
 
+/**
+ * Event sourcing utilities for snapshotting, loading, and committing actions/events.
+ * Used internally by Act and state machines.
+ */
+
+/**
+ * Saves a snapshot of the state to the store.
+ *
+ * @template S The type of state
+ * @template E The type of events
+ * @param snapshot The snapshot to save
+ */
 export async function snap<S extends Schema, E extends Schemas>(
   snapshot: Snapshot<S, E>
 ): Promise<void> {
@@ -33,6 +45,16 @@ export async function snap<S extends Schema, E extends Schemas>(
   }
 }
 
+/**
+ * Loads a snapshot of the state from the store.
+ *
+ * @template S The type of state
+ * @template E The type of events
+ * @param me The state machine
+ * @param stream The stream to load
+ * @param callback The callback to call with the snapshot
+ * @returns The snapshot of the loaded state
+ */
 export async function load<
   S extends Schema,
   E extends Schemas,
@@ -66,6 +88,21 @@ export async function load<
   return { event, state, patches, snaps };
 }
 
+/**
+ * Executes an action and emits an event to be committed by the store.
+ *
+ * @template S The type of state
+ * @template E The type of events
+ * @template A The type of actionSchemas
+ * @template K The type of action to execute
+ * @param me The state machine
+ * @param action The action to execute
+ * @param target The target of the action
+ * @param payload The payload of the action
+ * @param reactingTo The event that the action is reacting to
+ * @param skipValidation Whether to skip validation
+ * @returns The snapshot of the committed Event
+ */
 export async function action<
   S extends Schema,
   E extends Schemas,

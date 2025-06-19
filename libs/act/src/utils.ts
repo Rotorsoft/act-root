@@ -32,6 +32,10 @@ const is_mergeable = (value: any): boolean =>
   !UNMERGEABLES.some((t) => value instanceof t);
 
 /**
+ * Utility functions for patching state, validation, extending objects, and async helpers.
+ */
+
+/**
  * Copies state with patches recursively.
  * Keys with `undefined` or `null` values in patch are deleted.
  * @param original original state

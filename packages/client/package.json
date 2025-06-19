@@ -13,9 +13,9 @@
     "@rotorsoft/act-examples": "workspace:*",
     "@tanstack/react-query": "^5.80.7",
     "@tanstack/react-query-devtools": "^5.80.7",
-    "@trpc/client": "11.4.1",
-    "@trpc/next": "11.4.1",
-    "@trpc/react-query": "11.4.1",
+    "@trpc/client": "11.4.2",
+    "@trpc/next": "11.4.2",
+    "@trpc/react-query": "11.4.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
@@ -29,7 +29,7 @@
     "eslint-plugin-react-refresh": "^0.4.20",
     "globals": "^16.2.0",
     "typescript": "~5.8.3",
-    "typescript-eslint": "^8.34.0",
+    "typescript-eslint": "^8.34.1",
     "vite": "^6.3.5"
   }
 }

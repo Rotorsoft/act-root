@@ -3,6 +3,11 @@ import { InMemoryStore } from "./adapters/InMemoryStore";
 import { config } from "./config";
 import type { Disposable, Disposer, Store } from "./types";
 
+/**
+ * Port and adapter utilities for logging, store management, and resource disposal.
+ * Provides singleton store and logger instances.
+ */
+
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 export type ExitCode = (typeof ExitCodes)[number];
 

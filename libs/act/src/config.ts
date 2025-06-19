@@ -6,6 +6,11 @@ import { extend } from "./utils";
 
 dotenv.config();
 
+/**
+ * Configuration utilities for environment, logging, and package metadata.
+ * Uses dotenv and zod for validation.
+ */
+
 export const PackageSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),

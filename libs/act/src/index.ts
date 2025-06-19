@@ -1,7 +1,10 @@
 import { config } from "./config";
 import { disposeAndExit, logger } from "./ports";
 
-/** @module act */
+/**
+ * @module act
+ * Main entry point for the Act framework. Re-exports all core APIs.
+ */
 export * from "./act";
 export * from "./act-builder";
 export * from "./ports";

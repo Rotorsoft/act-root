@@ -21,7 +21,7 @@ When you break it all down, any system seems to distill into three fundamental c
 
 ## Timeless Ideas, Modern Context
 
-In the earliest days of computing, the “Actor Model” offered a simple yet powerful mental framework: entities with their own state, processing messages asynchronously. Similarly, event-driven programming showed how reactions to changes could create more dynamic and decoupled systems. Could we take inspiration from the simplicity of the “Actor Model” while integrating modern concepts like “Event Sourcing” and “CQRS” to form the backbone of consistency and integration for the next generation of autonomous systems?
+In the earliest days of computing, the "Actor Model" offered a simple yet powerful mental framework: entities with their own state, processing messages asynchronously. Similarly, event-driven programming showed how reactions to changes could create more dynamic and decoupled systems. Could we take inspiration from the simplicity of the "Actor Model" while integrating modern concepts like "Event Sourcing" and "CQRS" to form the backbone of consistency and integration for the next generation of autonomous systems?
 
 At its core, any software system is a collection of "consistent states" interacting with one another. Each instance has its unique identity, clear boundaries serving as the authority over its data, and a well-defined lifecycle. Examples include a user profile, an order, or an inventory item. While we often call these "entities", "aggregates", or "domain objects", at their essence, they are all distinct islands of state.
 
@@ -40,7 +40,7 @@ Reactions, on the other hand, define how the system responds to these changes. T
 
 ## Integration
 
-To tie everything together, this approach requires a robust integration layer to route events reliably and ensure agents stay informed about system changes. A message “broker” serves as the communication backbone, facilitating event-driven interactions across the system. The integration layer must provide several key capabilities:
+To tie everything together, this approach requires a robust integration layer to route events reliably and ensure agents stay informed about system changes. A message "broker" serves as the communication backbone, facilitating event-driven interactions across the system. The integration layer must provide several key capabilities:
 
 1. Subscriptions: Agents subscribe to relevant events, enabling them to reactively trigger workflows based on the events they receive. This allows for flexibility in processing and ensures that agents are always in sync with the latest state changes.
 2. Event Delivery: Reliable event queues ensure that events are delivered to the correct agents in a timely and guaranteed manner. This includes mechanisms for retries, ensuring delivery even in the face of failures, and maintaining the correct order of events.
@@ -56,7 +56,7 @@ To demonstrate the capabilities of this framework, we provide a library of examp
 
 ### Calculator
 
-The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the “9” and “=” keys have been pressed in response to events.
+The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the "9" and "=" keys have been pressed in response to events.
 
 ```ts
 // to test with postgres
@@ -64,48 +64,114 @@ The first example is a simple [calculator](./libs/act-examples/src/calculator/) 
 // await store().drop();
 // await store().seed();
 
-const actor: Actor = { id: randomUUID(), name: "Calculator" };
+import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
+import { randomUUID } from "crypto";
+import { z } from "zod/v4";
+import { Calculator, KEYS } from ".";
 
-const act = new ActBuilder()
-  .with(Calculator)
-
-  .on("DigitPressed")
-  .do(async function CountNines(event, stream) {
-    await act.do("Count", { stream, actor }, { key: event.data.digit }, event);
+export const NineCounter = state(
+  "NineCounter",
+  z.object({
+    nines: z.number().int(),
+    equals: z.number().int(),
   })
-  .to(() => "Counter")
-
-  .on("EqualsPressed")
-  .do(async function CountEquals(event, stream) {
-    await act.do("Count", { stream, actor }, { key: "=" }, event);
+)
+  .init(() => ({ nines: 0, equals: 0 }))
+  .emits({
+    NineCounted: ZodEmpty,
+    EqualCounted: ZodEmpty,
   })
-  .to(() => "Counter")
-
-  .with(NineCounter)
-
-  .on("EqualCounted")
-  .do(async function ShowMessage({ stream }) {
-    await sleep();
-    console.log(`Equals counted on ${stream}`);
+  .patch({
+    NineCounted: (_, state) => ({ nines: (state.nines || 0) + 1 }),
+    EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
   })
-  .void()
-
+  .on("Count", z.object({ key: z.enum(KEYS) }))
+  .emit(({ key }) => {
+    if (key === "9") return ["NineCounted", {}];
+    if (key === "=") return ["EqualCounted", {}];
+  })
   .build();
 
-// drain on commit
-act.on("committed", () => {
-  void act.drain();
-});
+async function main() {
+  // to test with postgres
+  // store(new PostgresStore("calculator", 30_000));
+  // await store().drop();
+  // await store().seed();
 
-// drain on a schedule
-setInterval(() => {
-  void act.drain();
-}, 1_000);
+  const actor: Actor = { id: randomUUID(), name: "Calculator" };
 
-// log drains
-act.on("drained", (drained) => {
-  console.log("Drained:", drained);
-});
+  const app = act()
+    .with(Calculator)
+    .with(NineCounter)
+
+    .on("DigitPressed")
+    .do(async function CountNines(event, stream) {
+      await app.do(
+        "Count",
+        { stream, actor },
+        { key: event.data.digit },
+        event
+      );
+    })
+    .to(() => "Counter")
+    .on("EqualsPressed")
+    .do(async function CountEquals(event, stream) {
+      await app.do("Count", { stream, actor }, { key: "=" }, event);
+    })
+    .to(() => "Counter")
+
+    .on("EqualCounted")
+    .do(async function ShowMessage({ stream }) {
+      await sleep();
+      console.log(`Equals counted on ${stream}`);
+    })
+    .void()
+
+    .build();
+
+  // drain on commit
+  app.on("committed", () => {
+    void app.drain();
+  });
+
+  // drain on a schedule
+  setInterval(() => {
+    void app.drain();
+  }, 1_000);
+
+  // log drains
+  app.on("drained", (drained) => {
+    console.log("Drained:", drained);
+  });
+
+  const calc1 = "A";
+  const calc2 = "B";
+
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "+" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "*" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "+" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
+  await app.do("PressKey", { stream: calc1, actor }, { key: "=" });
+  await app.do("PressKey", { stream: calc2, actor }, { key: "=" });
+
+  console.log(calc1, await app.load(Calculator, calc1));
+  console.log(calc2, await app.load(Calculator, calc2));
+
+  setInterval(async () => {
+    const counter = await app.load(NineCounter, "Counter");
+    console.log("Counter", counter.state);
+  }, 1_000);
+}
+
+void main();
 ```
 
 ### WolfDesk
@@ -113,23 +179,43 @@ act.on("drained", (drained) => {
 The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
 
 ```ts
-export const builder = new ActBuilder().with(Ticket);
+import { act, Actor } from "@rotorsoft/act";
+import { randomUUID } from "crypto";
+import { Ticket } from "./ticket";
 
-// prettier-ignore
-export const act = builder
+export const builder = act().with(Ticket);
+
+export const app = builder
   // reactions
-  .on("TicketOpened").do(assign)
-  .on("MessageAdded").do(deliver)
-  .on("TicketEscalationRequested").do(escalate)
-  
+  .on("TicketOpened")
+  .do(assign)
+  .on("MessageAdded")
+  .do(deliver)
+  .on("TicketEscalationRequested")
+  .do(escalate)
+
   // tickets projection
-  .on("TicketOpened").do(p.opened).to("tickets")
-  .on("TicketClosed").do(p.closed).to("tickets")
-  .on("TicketAssigned").do(p.assigned).to("tickets")
-  .on("MessageAdded").do(p.messageAdded).to("tickets")
-  .on("TicketEscalated").do(p.escalated).to("tickets")
-  .on("TicketReassigned").do(p.reassigned).to("tickets")
-  .on("TicketResolved").do(p.resolved).to("tickets")
+  .on("TicketOpened")
+  .do(p.opened)
+  .to("tickets")
+  .on("TicketClosed")
+  .do(p.closed)
+  .to("tickets")
+  .on("TicketAssigned")
+  .do(p.assigned)
+  .to("tickets")
+  .on("MessageAdded")
+  .do(p.messageAdded)
+  .to("tickets")
+  .on("TicketEscalated")
+  .do(p.escalated)
+  .to("tickets")
+  .on("TicketReassigned")
+  .do(p.reassigned)
+  .to("tickets")
+  .on("TicketResolved")
+  .do(p.resolved)
+  .to("tickets")
   .build();
 
 const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
@@ -142,14 +228,14 @@ export async function assign(
     event.data.supportCategoryId,
     event.data.priority
   );
-  await act.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+  await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
 }
 
 export async function deliver(
   event: AsCommitted<typeof builder.events, "MessageAdded">
 ) {
   await deliverMessage(event.data);
-  await act.do(
+  await app.do(
     "MarkMessageDelivered",
     { stream: event.stream, actor },
     { messageId: event.data.messageId },
@@ -160,7 +246,7 @@ export async function deliver(
 export async function escalate(
   event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
 ) {
-  await act.do(
+  await app.do(
     "EscalateTicket",
     { stream: event.stream, actor },
     event.data,
@@ -174,11 +260,11 @@ export async function escalate(
 Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
 
 ```ts
-import { ActBuilder, Target } from "@rotorsoft/act";
+import { act, Target } from "@rotorsoft/act";
 import { Calculator, Digits, Operators } from "@rotorsoft/act-examples";
 import { initTRPC } from "@trpc/server";
 
-const act = new ActBuilder().with(Calculator).build();
+const app = act().with(Calculator).build();
 const t = initTRPC.create();
 const target: Target = {
   stream: "calculator",
@@ -187,9 +273,9 @@ const target: Target = {
 
 export const router = t.router({
   PressKey: t.procedure
-    .input(Calculator().actions.PressKey)
-    .mutation(({ input }) => act.do("PressKey", target, input)),
-  Clear: t.procedure.mutation(() => act.do("Clear", target, {})),
+    .input(Calculator.actions.PressKey)
+    .mutation(({ input }) => app.do("PressKey", target, input)),
+  Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
 });
 
 export type Router = typeof router;
