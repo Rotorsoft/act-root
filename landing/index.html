@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Act - Functional Event Sourcing</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg-main: #181a20;
+        --bg-panel: #23262f;
+        --bg-glass: rgba(36, 37, 42, 0.85);
+        --border-glass: rgba(255, 255, 255, 0.06);
+        --accent: #ffb300;
+        --accent-fade: #ffb30033;
+        --text-main: #f5f6fa;
+        --text-muted: #a0a3b1;
+        --text-accent: #ffb300;
+        --shadow: 0 4px 32px 0 rgba(0, 0, 0, 0.25);
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        background: var(--bg-main);
+        color: var(--text-main);
+        min-height: 100vh;
+        overflow-x: hidden;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      .hero {
+        text-align: center;
+        margin-bottom: 3rem;
+      }
+      .hero h1 {
+        font-size: 3.2rem;
+        font-weight: 800;
+        letter-spacing: -2px;
+        color: var(--text-main);
+        margin-bottom: 0.5rem;
+      }
+      .hero p {
+        font-size: 1.25rem;
+        color: var(--text-muted);
+        margin-bottom: 2rem;
+      }
+      .demo-container {
+        background: var(--bg-glass);
+        border-radius: 18px;
+        padding: 2rem;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--border-glass);
+        margin-bottom: 3rem;
+      }
+      .code-demo {
+        display: flex;
+        gap: 0.7rem;
+        align-items: stretch;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+      }
+      .code-panel {
+        flex: 1;
+        min-width: 260px;
+        background: var(--bg-panel);
+        border-radius: 10px;
+        padding: 0.3rem 0.3rem 0.3rem 0.4rem;
+        border: 1px solid var(--border-glass);
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        min-height: 340px;
+        max-width: 100%;
+      }
+      .code-panel h3 {
+        margin-bottom: 0.3rem;
+        color: var(--accent);
+        font-size: 1.1rem;
+        font-weight: 600;
+        text-align: left;
+      }
+      pre {
+        margin: 0.02rem 0 0.02rem 0;
+        padding: 0.1rem 0.1rem 0.1rem 0.1rem;
+        background: var(--bg-panel) !important;
+        border: none;
+        box-shadow: none;
+        font-size: 0.75rem;
+        font-family: "Fira Mono", "JetBrains Mono", "Menlo", "monospace";
+        line-height: 1.6;
+        color: #eaeaea;
+        text-align: left;
+        font-weight: 300;
+        overflow-x: auto;
+        border-radius: 6px;
+        flex: 1 1 auto;
+        max-width: 100%;
+      }
+      code {
+        background: none;
+        font-size: 0.85rem;
+        font-family: inherit;
+        color: inherit;
+        padding: 0;
+      }
+      .flow-diagram {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 2rem;
+        margin: 3rem 0 1rem 0;
+        flex-wrap: wrap;
+      }
+      .flow-step {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        opacity: 0.5;
+        transition: all 0.3s cubic-bezier(0.4, 2, 0.6, 1);
+      }
+      .flow-step.active {
+        opacity: 1;
+        transform: scale(1.12);
+      }
+      .flow-step .icon {
+        width: 60px;
+        height: 60px;
+        border-radius: 50%;
+        background: var(--bg-panel);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 0.5rem;
+        font-size: 2.1rem;
+        border: 2px solid var(--border-glass);
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+      }
+      .flow-step.active .icon {
+        background: var(--accent);
+        color: #181a20;
+        border-color: var(--accent-fade);
+      }
+      .arrow {
+        font-size: 2.2rem;
+        color: var(--accent);
+        opacity: 0.5;
+        transition: opacity 0.2s;
+      }
+      .arrow.active {
+        opacity: 1;
+        animation: pulse 1s infinite;
+      }
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.18);
+        }
+      }
+      .features {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 2rem;
+        margin-top: 2.5rem;
+      }
+      .feature {
+        background: var(--bg-panel);
+        border-radius: 10px;
+        padding: 1.5rem;
+        border: 1px solid var(--border-glass);
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+      }
+      .feature h3 {
+        color: var(--accent);
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+      }
+      .feature p {
+        color: var(--text-muted);
+      }
+      .cta {
+        text-align: center;
+        margin-top: 3rem;
+      }
+      .cta-button {
+        display: inline-block;
+        background: var(--accent);
+        color: #181a20;
+        padding: 1rem 2rem;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: bold;
+        transition: all 0.3s cubic-bezier(0.4, 2, 0.6, 1);
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+      }
+      .cta-button:hover {
+        transform: translateY(-2px) scale(1.04);
+        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+      }
+      @media (max-width: 768px) {
+        .hero h1 {
+          font-size: 2.1rem;
+        }
+        .code-demo {
+          flex-direction: column;
+        }
+        .flow-diagram {
+          flex-direction: column;
+          gap: 1rem;
+        }
+        .arrow {
+          transform: rotate(90deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="hero">
+        <h1>Act</h1>
+        <p>Functional event sourcing and state machines in TypeScript</p>
+      </div>
+      <div class="demo-container">
+        <div class="code-demo">
+          <div class="code-panel">
+            <pre><code class="language-ts">// Define a state machine
+const Counter = state("Counter", z.object({
+  count: z.number()
+}))
+  .init(() => ({ count: 0 }))
+  .emits({ 
+    Incremented: z.object({ amount: z.number() }) 
+  })
+  .patch({
+    Incremented: (event, state) => ({
+      count: state.count + event.amount
+    })
+  })
+  .on("increment", z.object({ by: z.number() }))
+  .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+</code></pre>
+          </div>
+          <div class="code-panel">
+            <pre><code class="language-ts">// Create and use your app
+const app = act().with(Counter).build();
+
+// Execute actions
+await app.do("increment", {
+  stream: "counter1",
+  actor: { id: "user1" }
+}, { by: 5 });
+
+// Load current state
+const state = await app.load(Counter, "counter1");
+console.log(state.state); // { count: 5 }
+</code></pre>
+          </div>
+        </div>
+        <div class="flow-diagram">
+          <div class="flow-step" id="step1">
+            <div class="icon">🎯</div>
+            <div>Action</div>
+          </div>
+          <div class="arrow" id="arrow1">→</div>
+          <div class="flow-step" id="step2">
+            <div class="icon">🗃️</div>
+            <div>State</div>
+          </div>
+          <div class="arrow" id="arrow2">→</div>
+          <div class="flow-step" id="step3">
+            <div class="icon">📝</div>
+            <div>Event</div>
+          </div>
+          <div class="arrow" id="arrow3">→</div>
+          <div class="flow-step" id="step4">
+            <div class="icon">🔌</div>
+            <div>Reaction</div>
+          </div>
+        </div>
+      </div>
+      <div class="features">
+        <div class="feature">
+          <h3>⚡ Functional Event Sourcing</h3>
+          <p>
+            Every state change is a pure function of previous state and events.
+            Immutability and replayability by design.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>💡 State Machines</h3>
+          <p>
+            Model your domain as composable, strongly-typed state machines. No
+            classes, just functions and data.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>🛡️ TypeScript Native</h3>
+          <p>
+            Type safety and inference everywhere. Catch errors at compile time,
+            not at runtime.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>🔄 Reactive by Default</h3>
+          <p>
+            Reactions let you build event-driven flows and side effects with
+            ease.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>🔌 Pluggable Storage</h3>
+          <p>
+            Swap out storage backends without changing your domain logic.
+            In-memory, Postgres, and more.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>🧩 Minimal & Composable</h3>
+          <p>
+            Small API surface, no magic. Compose, extend, and test with
+            confidence.
+          </p>
+        </div>
+      </div>
+      <div class="cta">
+        <a href="https://github.com/rotorsoft/act-root" class="cta-button"
+          >Get Started</a
+        >
+      </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+    <script>
+      // Animation logic
+      const steps = ["step1", "step2", "step3", "step4"];
+      const arrows = ["arrow1", "arrow2", "arrow3"];
+      let currentStep = 0;
+      function animateStep() {
+        steps.forEach((step) => {
+          document.getElementById(step).classList.remove("active");
+        });
+        arrows.forEach((arrow) => {
+          document.getElementById(arrow).classList.remove("active");
+        });
+        document.getElementById(steps[currentStep]).classList.add("active");
+        if (currentStep < arrows.length) {
+          document.getElementById(arrows[currentStep]).classList.add("active");
+        }
+        currentStep = (currentStep + 1) % steps.length;
+      }
+      setInterval(animateStep, 2000);
+      animateStep();
+      document.querySelectorAll(".feature").forEach((feature) => {
+        feature.addEventListener("mouseenter", () => {
+          feature.style.transform = "translateY(-5px)";
+          feature.style.transition = "transform 0.3s cubic-bezier(.4,2,.6,1)";
+        });
+        feature.addEventListener("mouseleave", () => {
+          feature.style.transform = "translateY(0)";
+        });
+      });
+    </script>
+  </body>
+</html>
