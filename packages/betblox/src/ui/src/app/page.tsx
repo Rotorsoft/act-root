@@ -1,4 +1,4 @@
-import Image from "next/image";
+import Link from "next/link";
 
 export default function Home() {
   return (
@@ -16,18 +16,18 @@ export default function Home() {
           a transparent, trustless environment—no middlemen, no limits.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <a
+          <Link
             href="/poll/create"
             className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold shadow transition"
           >
             Create Market
-          </a>
-          <a
+          </Link>
+          <Link
             href="/my-bets"
             className="bg-zinc-800 hover:bg-zinc-700 text-zinc-100 px-6 py-3 rounded-lg font-semibold border border-zinc-700 transition"
           >
             My Bets
-          </a>
+          </Link>
         </div>
       </section>
 

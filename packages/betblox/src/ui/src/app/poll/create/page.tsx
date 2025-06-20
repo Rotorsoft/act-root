@@ -29,8 +29,10 @@ export default function CreatePollPage() {
       setSuccess("Poll created!");
       setQuestion("");
       setOptions(["", ""]);
-    } catch (err: any) {
-      setError(err.message || "Failed to create poll");
+    } catch (err: unknown) {
+      setError(
+        (err instanceof Error && err.message) || "Failed to create poll"
+      );
     }
   };
 

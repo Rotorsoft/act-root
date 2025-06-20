@@ -50,8 +50,10 @@ export default function PollDetailPage() {
       setVoteMsg("Vote cast!");
       setAmount("");
       setSelectedOption("");
-    } catch (err: any) {
-      setVoteMsg(String((err && err.message) ?? "Failed to cast vote"));
+    } catch (err: unknown) {
+      setVoteMsg(
+        String((err instanceof Error && err.message) ?? "Failed to cast vote")
+      );
     }
   };
 
