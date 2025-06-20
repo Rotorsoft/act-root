@@ -7,13 +7,29 @@ A blockchain-agnostic, event-driven prediction market platform. Users create and
 ## Architecture Diagram
 
 ```mermaid
-graph TD;
-  User["User (Wallet)"] -->|Create Poll/Vote| UI["Next.js UI"]
-  UI -->|tRPC| Backend["Node.js Backend"]
-  Backend -->|Event Listener| Blockchain["Solana/Other Chain"]
-  Blockchain -->|Events| Backend
-  Backend -->|Projections| PG[("Postgres (Drizzle)")]
-  UI -->|Read| PG
+flowchart LR
+  subgraph Blockchain Integration
+    A["Blockchain (or Mock Integration)"]
+  end
+  subgraph Act Event Store
+    B["Act Event Stream"]
+  end
+  subgraph Act Projections
+    C["Projection Handlers"]
+    D["Read Model (Drizzle DB)"]
+  end
+  subgraph API
+    E["tRPC (Queries Only)"]
+  end
+  subgraph UI
+    F["Next.js UI (Eventually Consistent)"]
+  end
+
+  A -- emits events --> B
+  B -- routes events --> C
+  C -- updates --> D
+  E -- queries --> D
+  F -- fetches data --> E
 ```
 
 ---
