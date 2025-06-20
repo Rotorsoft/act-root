@@ -10,7 +10,7 @@ export const config = extend(
       user: PG_USER || "postgres",
       password: PG_PASSWORD || "postgres",
       database: PG_DATABASE || "postgres",
-      port: Number.parseInt(PG_PORT || "5432"),
+      port: Number.parseInt(PG_PORT || "5431"),
     },
   },
   z.object({

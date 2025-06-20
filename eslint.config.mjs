@@ -15,9 +15,6 @@ const compat = new FlatCompat({
 });
 
 export default [
-  {
-    ignores: ["**/.next/"],
-  },
   ...compat.extends(
     "eslint:recommended",
     "plugin:@typescript-eslint/eslint-recommended",

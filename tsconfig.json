@@ -8,10 +8,10 @@
       "path": "./libs/act"
     },
     {
-      "path": "./libs/act-examples"
+      "path": "./libs/act-pg"
     },
     {
-      "path": "./packages/betblox"
-    }
+      "path": "./libs/act-examples"
+    },
   ]
 }
