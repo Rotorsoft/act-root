@@ -2,6 +2,7 @@
 import { useParams } from "next/navigation";
 import { trpc } from "../../../trpc";
 import { useState } from "react";
+import { blockchainClient } from "blockchain/client";
 
 export default function PollDetailPage() {
   const params = useParams();
@@ -19,7 +20,7 @@ export default function PollDetailPage() {
   } = trpc.getPollById.useQuery({ pollId }, { enabled: !!pollId });
   const { data: votes, isLoading: votesLoading } =
     trpc.getVotesForPoll.useQuery({ pollId }, { enabled: !!pollId });
-  const castVote = trpc.castVote.useMutation();
+  const placeBet = blockchainClient.usePlaceBet();
   const [selectedOption, setSelectedOption] = useState("");
   const [amount, setAmount] = useState("");
   const [voteMsg, setVoteMsg] = useState<string>("");
@@ -41,11 +42,15 @@ export default function PollDetailPage() {
     e.preventDefault();
     setVoteMsg("");
     try {
-      await castVote.mutateAsync({
+      const now = new Date();
+      await placeBet.mutateAsync({
+        type: "VoteCast",
         pollId,
         voter: "dev", // placeholder
         option: selectedOption,
         amount,
+        txHash: crypto.randomUUID(),
+        castAt: now.toISOString(),
       });
       setVoteMsg("Vote cast!");
       setAmount("");
@@ -94,9 +99,9 @@ export default function PollDetailPage() {
             <button
               type="submit"
               className="bg-blue-600 text-white px-4 py-2 rounded font-semibold mt-2"
-              disabled={castVote.status === "pending"}
+              disabled={placeBet.status === "pending"}
             >
-              {castVote.status === "pending" ? "Voting..." : "Cast Vote"}
+              {placeBet.status === "pending" ? "Voting..." : "Cast Vote"}
             </button>
             {voteMsg && <p className="mt-2 text-green-600">{voteMsg}</p>}
           </form>

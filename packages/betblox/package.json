@@ -23,7 +23,8 @@
     "fastify": "^5.2.0",
     "pg": "^8.16.1",
     "uuid": "^11.1.0",
-    "zod": "^3.25.67"
+    "zod": "^3.25.67",
+    "@rotorsoft/act": "workspace:*"
   },
   "devDependencies": {
     "@types/pg": "^8.15.4",

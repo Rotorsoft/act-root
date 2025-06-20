@@ -1,7 +1,7 @@
 import { fastifyTRPCPlugin } from "@trpc/server/adapters/fastify";
 import "dotenv/config";
 import Fastify from "fastify";
-import { z } from "zod";
+import { z } from "zod/v4";
 import { BetBloxEvent } from "../act/schemas";
 import { projectEvent } from "./projection";
 import { mockContractEvents } from "./smart-contract-mock";

@@ -2,9 +2,9 @@ import { initTRPC } from "@trpc/server";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { v4 as uuidv4 } from "uuid";
-import { z } from "zod";
+import { z } from "zod/v4";
 import * as schema from "../act/schema.drizzle";
+import { mockedBlockchainRouter } from "./trpc-mocked-blockchain";
 
 const t = initTRPC.create();
 
@@ -28,7 +28,7 @@ export const appRouter = t.router({
   health: t.procedure.query(() => ({ status: "ok" })),
 
   getPolls: t.procedure
-    .input(paginationInput.default({}))
+    .input(paginationInput.default({ limit: 20, offset: 0 }))
     .query(async ({ input }) => {
       const { limit, offset } = input;
       return await db.select().from(schema.polls).limit(limit).offset(offset);
@@ -88,93 +88,8 @@ export const appRouter = t.router({
         .offset(offset);
     }),
 
-  createPoll: t.procedure
-    .input(
-      z.object({
-        question: z.string().min(1).max(200),
-        options: z.array(z.string().min(1).max(100)).min(2).max(10),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const pollId = uuidv4();
-      const now = new Date().toISOString();
-      await db.insert(schema.polls).values({
-        id: pollId,
-        creator: "dev",
-        question: input.question,
-        options: JSON.stringify(input.options),
-        closeTime: "",
-        resolutionCriteria: "",
-        createdAt: now,
-      });
-      return {
-        id: pollId,
-        creator: "dev",
-        question: input.question,
-        options: JSON.stringify(input.options),
-        closeTime: "",
-        resolutionCriteria: "",
-        createdAt: now,
-      };
-    }),
-
-  castVote: t.procedure
-    .input(
-      z.object({
-        pollId: z.string(),
-        voter: z.string(),
-        option: z.string(),
-        amount: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const txHash = uuidv4();
-      const castAt = new Date().toISOString();
-      await db.insert(schema.votes).values({
-        pollId: input.pollId,
-        voter: input.voter,
-        option: input.option,
-        amount: input.amount,
-        txHash,
-        castAt,
-      });
-      return {
-        pollId: input.pollId,
-        voter: input.voter,
-        option: input.option,
-        amount: input.amount,
-        txHash,
-        castAt,
-      };
-    }),
-
-  claimWinnings: t.procedure
-    .input(
-      z.object({
-        pollId: z.string(),
-        voter: z.string(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const txHash = uuidv4();
-      const claimedAt = new Date().toISOString();
-      // For demo, set amount to '100'. In real app, calculate based on poll outcome and bet.
-      const amount = "100";
-      await db.insert(schema.winnings).values({
-        pollId: input.pollId,
-        voter: input.voter,
-        amount,
-        claimedAt,
-        txHash,
-      });
-      return {
-        pollId: input.pollId,
-        voter: input.voter,
-        amount,
-        claimedAt,
-        txHash,
-      };
-    }),
+  blockchain: mockedBlockchainRouter,
 });
 
 export type AppRouter = typeof appRouter;
+export { t };
