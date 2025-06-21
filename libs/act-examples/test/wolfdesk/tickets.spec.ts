@@ -101,9 +101,10 @@ describe("ticket projection", () => {
         Priority.High,
         new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day in the past
       );
+      await markTicketResolved(t);
       await app.drain();
 
-      await retry(() => AutoClose(1));
+      await AutoClose(1);
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
@@ -127,7 +128,7 @@ describe("ticket projection", () => {
       await escalateTicket(t);
       await app.drain();
 
-      await retry(() => AutoReassign(1));
+      await AutoReassign(1);
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
@@ -142,15 +143,3 @@ describe("ticket projection", () => {
     });
   });
 });
-
-async function retry<T>(fn: () => Promise<T>, timeout = 5000, delay = 100) {
-  const start = Date.now();
-  while (true) {
-    const result = await fn();
-    if (result) return result;
-    if (Date.now() - start > timeout) {
-      throw new Error("retry timeout");
-    }
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-}

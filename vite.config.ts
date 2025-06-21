@@ -10,11 +10,17 @@ export default defineConfig({
   test: {
     globals: true,
     coverage: {
-      include: ["libs/**/src/**/*.ts"],
-      exclude: ["**/node_modules", "libs/act-examples"],
       provider: "istanbul",
       reporter: ["text", "lcov", "html"],
       reportsDirectory: "./coverage",
+      include: ["libs/**/src/**/*.ts"],
+      exclude: ["**/node_modules/**", "libs/act-examples"],
+      thresholds: {
+        branches: 90,
+        functions: 90,
+        lines: 95,
+        statements: 95,
+      },
     },
   },
 });
