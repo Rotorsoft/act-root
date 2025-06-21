@@ -24,7 +24,7 @@ import {
 
 const chance = new Chance();
 
-describe("ticket projection", () => {
+describe.sequential("ticket projection", () => {
   beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets);
@@ -70,7 +70,7 @@ describe("ticket projection", () => {
     // console.table(state);
   });
 
-  describe("automations", () => {
+  describe.sequential("automations", () => {
     it("should escalate ticket", async () => {
       const t = target();
 
