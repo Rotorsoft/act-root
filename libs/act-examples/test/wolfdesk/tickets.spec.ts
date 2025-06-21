@@ -99,7 +99,7 @@ describe("ticket projection", () => {
         chance.guid(),
         chance.guid(),
         Priority.High,
-        new Date()
+        new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day in the past
       );
       await app.drain();
 
@@ -116,7 +116,12 @@ describe("ticket projection", () => {
       const agentId = chance.guid();
 
       await openTicket(t, "auto re-assign me", "Hello");
-      await assignTicket(t, agentId, now, now);
+      await assignTicket(
+        t,
+        agentId,
+        now,
+        new Date(Date.now() - 24 * 60 * 60 * 1000)
+      ); // 1 day in the past
       await app.drain();
 
       await escalateTicket(t);
