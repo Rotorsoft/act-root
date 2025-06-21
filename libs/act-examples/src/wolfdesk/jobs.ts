@@ -20,11 +20,13 @@ export function AutoEscalate(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
-          await app.do(
-            "EscalateTicket",
-            { stream: ticket.id, actor },
-            { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
-          );
+          await app
+            .do(
+              "EscalateTicket",
+              { stream: ticket.id, actor },
+              { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
+            )
+            .catch(console.error);
         }
         resolve(tickets.length);
       })
@@ -47,7 +49,9 @@ export function AutoClose(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
-          await app.do("CloseTicket", { stream: ticket.id, actor }, {});
+          await app
+            .do("CloseTicket", { stream: ticket.id, actor }, {})
+            .catch(console.error);
         }
         resolve(tickets.length);
       })
@@ -59,7 +63,7 @@ export function AutoClose(batchSize: number) {
 export const REASSIGN_ID = randomUUID();
 export function AutoReassign(batchSize: number) {
   const actor: Actor = {
-    id: CLOSING_ID,
+    id: REASSIGN_ID,
     name: "AutoReassign",
   };
   return new Promise((resolve, reject) =>
@@ -73,7 +77,9 @@ export function AutoReassign(batchSize: number) {
       .then(async (tickets) => {
         for (const ticket of tickets) {
           const agent = reassignAgent(ticket.id);
-          await app.do("ReassignTicket", { stream: ticket.id, actor }, agent);
+          await app
+            .do("ReassignTicket", { stream: ticket.id, actor }, agent)
+            .catch(console.error);
         }
         resolve(tickets.length);
       })
