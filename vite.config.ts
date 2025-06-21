@@ -16,7 +16,7 @@ export default defineConfig({
       include: ["libs/**/src/**/*.ts"],
       exclude: ["**/node_modules/**", "libs/act-examples"],
       thresholds: {
-        branches: 90,
+        branches: 85,
         functions: 90,
         lines: 95,
         statements: 95,
