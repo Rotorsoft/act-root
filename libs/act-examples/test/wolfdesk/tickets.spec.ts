@@ -1,7 +1,7 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db, init_tickets_db, tickets } from "../../src/drizzle/index.js";
 import { app } from "../../src/wolfdesk/bootstrap.js";
 import {
@@ -25,14 +25,10 @@ import {
 const chance = new Chance();
 
 describe("ticket projection", () => {
-  beforeEach(async () => {
+  beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets);
-    // act.on("drained", (value) =>
-    //   console.log(
-    //     `drained ${value.stream.stream} ${value.first}:${value.last} @ ${value.stream.position}`
-    //   )
-    // );
+    app.on("drained", (leases) => console.log("drained", leases));
   });
 
   afterAll(async () => {
@@ -99,7 +95,7 @@ describe("ticket projection", () => {
         chance.guid(),
         chance.guid(),
         Priority.High,
-        new Date(Date.now() - 24 * 60 * 60 * 1000) // 1 day in the past
+        new Date()
       );
       await markTicketResolved(t);
       await app.drain();
@@ -117,12 +113,7 @@ describe("ticket projection", () => {
       const agentId = chance.guid();
 
       await openTicket(t, "auto re-assign me", "Hello");
-      await assignTicket(
-        t,
-        agentId,
-        now,
-        new Date(Date.now() - 24 * 60 * 60 * 1000)
-      ); // 1 day in the past
+      await assignTicket(t, agentId, now, now);
       await app.drain();
 
       await escalateTicket(t);
