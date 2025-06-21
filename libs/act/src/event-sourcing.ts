@@ -64,7 +64,7 @@ export async function load<
   stream: string,
   callback?: (snapshot: Snapshot<S, E>) => void
 ): Promise<Snapshot<S, E>> {
-  let state = me.init();
+  let state = me.init ? me.init() : ({} as S);
   let patches = 0;
   let snaps = 0;
   let event: Committed<E, string> | undefined;
@@ -145,14 +145,20 @@ export async function action<
   const result = me.on[action](payload, state, target);
   if (!result) return snapshot;
 
+  // An empty array means no events were emitted
+  if (Array.isArray(result) && result.length === 0) {
+    return snapshot;
+  }
+
   const tuples = Array.isArray(result[0])
     ? (result as Emitted<E>[]) // array of tuples
     : ([result] as Emitted<E>[]); // single tuple
-  if (!tuples.length) return snapshot;
 
   const emitted = tuples.map(([name, data]) => ({
     name,
-    data: validate(name as string, data, me.events[name]),
+    data: skipValidation
+      ? data
+      : validate(name as string, data, me.events[name]),
   }));
 
   const meta: EventMeta = {

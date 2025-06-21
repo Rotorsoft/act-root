@@ -18,7 +18,7 @@ class InMemoryStream {
 
   constructor(public readonly stream: string) {}
 
-  lease(lease: Lease) {
+  lease(lease: Lease): Lease | undefined {
     if (!this._blocked && lease.at > this._at) {
       this._lease = { ...lease, retry: this._retry + 1 };
       return this._lease;
@@ -27,9 +27,11 @@ class InMemoryStream {
 
   ack(lease: Lease) {
     if (this._lease && lease.at >= this._at) {
-      this._at = lease.at;
       this._retry = lease.retry;
       this._blocked = lease.block;
+      if (!this._retry && !this._blocked) {
+        this._at = lease.at;
+      }
       this._lease = undefined;
     }
   }
@@ -146,16 +148,17 @@ export class InMemoryStore implements Store {
 
   async lease(leases: Lease[]) {
     await sleep();
-    leases.forEach((lease) => {
-      const stream =
-        this._streams.get(lease.stream) ||
-        // store new correlations
-        this._streams
-          .set(lease.stream, new InMemoryStream(lease.stream))
-          .get(lease.stream)!;
-      stream.lease(lease);
-    });
-    return leases;
+    return leases
+      .map((lease) => {
+        const stream =
+          this._streams.get(lease.stream) ||
+          // store new correlations
+          this._streams
+            .set(lease.stream, new InMemoryStream(lease.stream))
+            .get(lease.stream)!;
+        return stream.lease(lease);
+      })
+      .filter((l): l is Lease => !!l);
   }
 
   async ack(leases: Lease[]) {
