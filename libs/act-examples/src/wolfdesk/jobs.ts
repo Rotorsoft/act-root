@@ -48,10 +48,12 @@ export function AutoClose(batchSize: number) {
       .where(lt(tickets.closeAfter, Date.now()))
       .limit(batchSize)
       .then(async (tickets) => {
+        console.log("closing", tickets);
         for (const ticket of tickets) {
-          await app
+          const result = await app
             .do("CloseTicket", { stream: ticket.id, actor }, {})
             .catch(console.error);
+          console.log("closed", result);
         }
         resolve(tickets.length);
       })
@@ -75,11 +77,13 @@ export function AutoReassign(batchSize: number) {
       )
       .limit(batchSize)
       .then(async (tickets) => {
+        console.log("reassigning", tickets);
         for (const ticket of tickets) {
           const agent = reassignAgent(ticket.id);
-          await app
+          const result = await app
             .do("ReassignTicket", { stream: ticket.id, actor }, agent)
             .catch(console.error);
+          console.log("reassigned", result);
         }
         resolve(tickets.length);
       })
