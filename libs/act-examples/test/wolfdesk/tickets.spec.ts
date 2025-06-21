@@ -99,11 +99,11 @@ describe("ticket projection", () => {
         chance.guid(),
         chance.guid(),
         Priority.High,
-        new Date(Date.now() - DAY) // in the past
+        new Date()
       );
       await app.drain();
 
-      await AutoClose(1).catch(console.error);
+      await retry(() => AutoClose(1));
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
@@ -116,13 +116,13 @@ describe("ticket projection", () => {
       const agentId = chance.guid();
 
       await openTicket(t, "auto re-assign me", "Hello");
-      await assignTicket(t, agentId, now, new Date(Date.now() - DAY)); // in the past
+      await assignTicket(t, agentId, now, now);
       await app.drain();
 
       await escalateTicket(t);
       await app.drain();
 
-      await AutoReassign(1).catch(console.error);
+      await retry(() => AutoReassign(1));
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
@@ -138,4 +138,14 @@ describe("ticket projection", () => {
   });
 });
 
-const DAY = 24 * 60 * 60 * 1000;
+async function retry<T>(fn: () => Promise<T>, timeout = 5000, delay = 100) {
+  const start = Date.now();
+  while (true) {
+    const result = await fn();
+    if (result) return result;
+    if (Date.now() - start > timeout) {
+      throw new Error("retry timeout");
+    }
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+}
