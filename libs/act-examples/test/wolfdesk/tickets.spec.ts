@@ -119,9 +119,6 @@ describe("ticket projection", () => {
       await assignTicket(t, agentId, now, now);
       await app.drain();
 
-      await escalateTicket(t);
-      await app.drain();
-
       await AutoReassign(1).catch(console.error);
       await app.drain();
 
