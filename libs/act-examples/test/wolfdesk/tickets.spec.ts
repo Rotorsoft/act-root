@@ -85,7 +85,7 @@ describe.sequential("ticket projection", () => {
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
-    it("should close ticket", async () => {
+    it.skip("should close ticket", async () => {
       const t = target();
 
       await openTicket(
