@@ -1,3 +1,5 @@
+#### 2025-06-21 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.3.0...@rotorsoft/act-v0.4.0) @rotorsoft/act-v0.4.0
+  - MINOR [64d531b1](https://github.com/Rotorsoft/act-root/commit/64d531b17692c53332f5dfa611323fa8ebc47bb2) feat: build using tsup and resolve nodenext
 #### 2025-06-18 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.1.0...@rotorsoft/act-pg-v0.2.0) @rotorsoft/act-pg-v0.2.0
   - MINOR [63a83dea](https://github.com/Rotorsoft/act-root/commit/63a83dea07ed289551b286f5213dad2beb599d6d) feat: fluent builders
 #### 2025-06-18 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.2.0...@rotorsoft/act-v0.3.0) @rotorsoft/act-v0.3.0
