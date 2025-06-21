@@ -1,4 +1,4 @@
-import type { Committed, Schema, Schemas, Snapshot } from "./action";
+import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
 
 export type ReactionHandler<E extends Schemas, K extends keyof E> = (
   event: Committed<E, K>,

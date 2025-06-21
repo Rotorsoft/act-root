@@ -1,7 +1,8 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
-import * as es from "./event-sourcing";
-import { logger, store } from "./ports";
+import * as es from "./event-sourcing.js";
+import { logger, store } from "./ports.js";
+import { ValidationError } from "./types/errors.js";
 import type {
   Committed,
   Lease,
@@ -14,8 +15,7 @@ import type {
   Snapshot,
   State,
   Target,
-} from "./types";
-import { ValidationError } from "./types/errors";
+} from "./types/index.js";
 
 type SnapshotArgs = Snapshot<Schemas, Schema>;
 
@@ -232,12 +232,15 @@ export class Act<
       );
 
       const handling = leased
-        .map((lease) => ({ lease, reactions: correlated.get(lease.stream) }))
-        .filter(({ reactions }) => reactions);
+        .map((lease) => ({
+          lease,
+          reactions: correlated.get(lease.stream) || [],
+        }))
+        .filter(({ reactions }) => reactions.length);
 
       if (handling.length) {
         await Promise.allSettled(
-          handling.map(({ lease, reactions }) => this.handle(lease, reactions!))
+          handling.map(({ lease, reactions }) => this.handle(lease, reactions))
         ).then(
           (promise) => {
             promise.forEach((result) => {

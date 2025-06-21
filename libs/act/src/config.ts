@@ -1,8 +1,13 @@
 import * as dotenv from "dotenv";
 import * as fs from "node:fs";
 import { z } from "zod/v4";
-import { Environment, Environments, LogLevel, LogLevels } from "./types";
-import { extend } from "./utils";
+import {
+  Environment,
+  Environments,
+  LogLevel,
+  LogLevels,
+} from "./types/index.js";
+import { extend } from "./utils.js";
 
 dotenv.config();
 

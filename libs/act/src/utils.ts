@@ -1,7 +1,7 @@
 import { ZodError, type ZodType, prettifyError } from "zod/v4";
-import { config } from "./config";
-import type { Patch, Schema } from "./types";
-import { ValidationError } from "./types";
+import { config } from "./config.js";
+import type { Patch, Schema } from "./types/index.js";
+import { ValidationError } from "./types/index.js";
 
 /** These objects are copied instead of deep merged */
 const UNMERGEABLES = [

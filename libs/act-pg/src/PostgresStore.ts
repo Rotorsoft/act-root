@@ -1,4 +1,3 @@
-// @rotorsoft/act@0.3.0
 import type {
   Committed,
   EventMeta,
@@ -10,9 +9,9 @@ import type {
 } from "@rotorsoft/act";
 import { ConcurrencyError, SNAP_EVENT, logger } from "@rotorsoft/act";
 import pg from "pg";
-import { config } from "./config";
-import { seed_store } from "./seed";
-import { dateReviver } from "./utils";
+import { config } from "./config.js";
+import { seed_store } from "./seed.js";
+import { dateReviver } from "./utils.js";
 
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>

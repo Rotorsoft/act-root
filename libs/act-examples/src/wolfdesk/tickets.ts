@@ -1,7 +1,7 @@
 import { type AsCommitted } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
-import { db, tickets } from "../drizzle";
-import { builder } from "./bootstrap";
+import { db, tickets } from "../drizzle/index.js";
+import { builder } from "./bootstrap.js";
 
 export async function opened({
   stream,

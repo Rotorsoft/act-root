@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { actions } from "./ticket.action.schemas";
+import { actions } from "./ticket.action.schemas.js";
 
 export const events = {
   TicketOpened: actions.OpenTicket.and(

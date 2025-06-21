@@ -1,5 +1,6 @@
+import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
-import { buildSnapshotSchema, validate } from "../src";
+import { buildSnapshotSchema, validate } from "../src/index.js";
 
 const A = {
   state: z.object({ a: z.string(), b: z.number().int().min(0).max(100) }),

@@ -1,9 +1,10 @@
 import { dispose, InvariantError } from "@rotorsoft/act";
 import { Chance } from "chance";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   MessageNotFoundError,
   TicketCannotOpenTwiceError,
-} from "../../src/wolfdesk/errors";
+} from "../../src/wolfdesk/errors.js";
 import {
   acknowledgeMessage,
   addMessage,
@@ -16,7 +17,7 @@ import {
   reassignTicket,
   requestTicketEscalation,
   target,
-} from "./actions";
+} from "./actions.js";
 
 const chance = new Chance();
 

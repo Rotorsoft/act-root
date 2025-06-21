@@ -2,10 +2,10 @@ import { Actor, Committed, Schemas, sleep, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { randomUUID } from "crypto";
-import { db, tickets } from "../drizzle";
-import { app } from "./bootstrap";
-import { start_jobs } from "./jobs";
-import { Priority } from "./schemas";
+import { db, tickets } from "../drizzle/index.js";
+import { app } from "./bootstrap.js";
+import { start_jobs } from "./jobs.js";
+import { Priority } from "./schemas/index.js";
 
 const chance = new Chance();
 const rand_sleep = (max = 10_000) => sleep(chance.integer({ min: 100, max }));

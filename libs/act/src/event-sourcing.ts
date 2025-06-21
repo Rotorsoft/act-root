@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
-import { logger, SNAP_EVENT, store } from "./ports";
+import { logger, SNAP_EVENT, store } from "./ports.js";
+import { InvariantError } from "./types/errors.js";
 import type {
   Committed,
   Emitted,
@@ -9,9 +10,8 @@ import type {
   Snapshot,
   State,
   Target,
-} from "./types";
-import { InvariantError } from "./types/errors";
-import { patch, validate } from "./utils";
+} from "./types/index.js";
+import { patch, validate } from "./utils.js";
 
 /**
  * Event sourcing utilities for snapshotting, loading, and committing actions/events.

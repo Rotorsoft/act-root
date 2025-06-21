@@ -1,19 +1,20 @@
 {
-  "extends": "../tsconfig.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
     "outDir": "dist",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "declarationDir": "dist/@types",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "include": [
     "src"
   ],
   "references": [
     {
-      "path": "../act",
+      "path": "../act"
     },
     {
-      "path": "../act-pg",
+      "path": "../act-pg"
     }
   ]
 }

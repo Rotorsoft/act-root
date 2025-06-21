@@ -13,23 +13,36 @@
   "files": [
     "dist"
   ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/@types/index.d.ts",
   "exports": {
     ".": {
-      "default": "./dist/index.js",
-      "devmode": "./src/index.ts"
+      "types": "./dist/@types/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
+    "clean": "rm -rf dist",
+    "types": "tsc --build --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types",
     "dev:calculator": "tsx watch src/calculator/main.ts",
     "dev:wolfdesk": "pnpm drizzle:migrate && tsx watch src/wolfdesk/main.ts",
-    "clean": "rm -rf dist",
-    "build": "npx tsc --build",
     "drizzle:migrate": "npx drizzle-kit generate && npx drizzle-kit migrate",
     "drizzle:push": "npx drizzle-kit push",
     "drizzle:studio": "npx drizzle-kit studio"
   },
   "dependencies": {
     "@libsql/client": "^0.15.9",
+    "@trpc/server": "11.4.2",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
     "drizzle-orm": "^0.44.2",

@@ -1,6 +1,6 @@
 import { z, ZodType } from "zod/v4";
-import type { CommittedMeta, Schema, Schemas, State } from "./action";
-import type { Reaction } from "./reaction";
+import type { CommittedMeta, Schema, Schemas, State } from "./action.js";
+import type { Reaction } from "./reaction.js";
 
 export type EventRegister<E extends Schemas> = {
   [K in keyof E]: {

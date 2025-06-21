@@ -1,12 +1,12 @@
 import { act, type AsCommitted } from "@rotorsoft/act";
 import { randomUUID } from "node:crypto";
-import { assignAgent } from "./services/agent";
-import { deliverMessage } from "./services/notification";
-import { Ticket } from "./ticket";
-import * as p from "./tickets";
+import { assignAgent } from "./services/agent.js";
+import { deliverMessage } from "./services/notification.js";
+import { Ticket } from "./ticket.js";
+import * as p from "./tickets.js";
 
-export * from "./errors";
-export * from "./ticket";
+export * from "./errors.js";
+export * from "./ticket.js";
 
 export const builder = act().with(Ticket);
 

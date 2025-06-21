@@ -10,7 +10,7 @@ import {
   Snapshot,
   State,
   ZodTypes,
-} from "./types";
+} from "./types/index.js";
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 export type StateBuilder<S extends Schema> = {

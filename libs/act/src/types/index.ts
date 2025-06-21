@@ -1,9 +1,9 @@
-export type * from "./action";
-export * from "./errors";
-export type * from "./ports";
-export type * from "./reaction";
-export type * from "./registry";
-export * from "./schemas";
+export type * from "./action.js";
+export * from "./errors.js";
+export type * from "./ports.js";
+export type * from "./reaction.js";
+export type * from "./registry.js";
+export * from "./schemas.js";
 
 export const Environments = [
   "development",

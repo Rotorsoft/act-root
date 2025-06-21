@@ -1,16 +1,16 @@
-import { config } from "./config";
-import { disposeAndExit, logger } from "./ports";
+import { config } from "./config.js";
+import { disposeAndExit, logger } from "./ports.js";
 
 /**
  * @module act
  * Main entry point for the Act framework. Re-exports all core APIs.
  */
-export * from "./act";
-export * from "./act-builder";
-export * from "./ports";
-export * from "./state-builder";
-export * from "./types";
-export * from "./utils";
+export * from "./act-builder.js";
+export * from "./act.js";
+export * from "./ports.js";
+export * from "./state-builder.js";
+export * from "./types/index.js";
+export * from "./utils.js";
 export { config };
 
 // exit on signals

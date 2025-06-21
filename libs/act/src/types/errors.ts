@@ -1,4 +1,4 @@
-import type { Message, Schema, Schemas, Target } from "./action";
+import type { Message, Schema, Schemas, Target } from "./action.js";
 
 /**
  * Application error types

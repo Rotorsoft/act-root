@@ -1,12 +1,13 @@
 import { dispose } from "@rotorsoft/act";
-import { app } from "../../src/wolfdesk/bootstrap";
-import { Ticket } from "../../src/wolfdesk/ticket";
+import { afterAll, describe, expect, it } from "vitest";
+import { app } from "../../src/wolfdesk/bootstrap.js";
+import { Ticket } from "../../src/wolfdesk/ticket.js";
 import {
   addMessage,
   openTicket,
   requestTicketEscalation,
   target,
-} from "./actions";
+} from "./actions.js";
 
 describe("reactions", () => {
   afterAll(async () => {

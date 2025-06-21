@@ -1,5 +1,5 @@
 import { z } from "zod/v4";
-import { Message } from "../schemas";
+import { Message } from "../schemas/index.js";
 
 export const deliverMessage = (
   message: z.infer<typeof Message>

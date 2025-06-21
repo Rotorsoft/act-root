@@ -1,5 +1,12 @@
+import { describe, expect, it } from "vitest";
 import { z } from "zod/v4";
-import { config, extend, patch, validate, ValidationError } from "../src";
+import {
+  config,
+  extend,
+  patch,
+  validate,
+  ValidationError,
+} from "../src/index.js";
 
 describe("utils", () => {
   describe("config", () => {

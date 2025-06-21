@@ -2,15 +2,14 @@
   "name": "server",
   "version": "0.0.1",
   "description": "sample trpc server",
+  "type": "module",
   "author": {
     "name": "rotorsoft",
     "email": "rotorsoft@outlook.com"
   },
-  "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
     "build": "tsc --build",
-    "clean": "rm -rf dist",
+    "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js"
   },
   "keywords": [],

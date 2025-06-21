@@ -1,3 +1,3 @@
 /** @module act-pg */
-export * from "./config";
-export * from "./PostgresStore";
+export * from "./config.js";
+export * from "./PostgresStore.js";

@@ -1,5 +1,14 @@
+import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod/v4";
-import { act, Actor, AsCommitted, dispose, sleep, state, store } from "../src";
+import {
+  act,
+  Actor,
+  AsCommitted,
+  dispose,
+  sleep,
+  state,
+  store,
+} from "../src/index.js";
 
 const A1 = state("A1", z.object({}))
   .init(() => ({}))

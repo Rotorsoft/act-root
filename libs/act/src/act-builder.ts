@@ -1,4 +1,4 @@
-import { Act } from "./act";
+import { Act } from "./act.js";
 import type {
   EventRegister,
   Reaction,
@@ -10,7 +10,7 @@ import type {
   SchemaRegister,
   Schemas,
   State,
-} from "./types";
+} from "./types/index.js";
 
 // resolves to the event stream (default)
 const _this_ = ({ stream }: { stream: string }) => stream;

@@ -1,5 +1,11 @@
-import type { Committed, EventMeta, Message, Query, Schemas } from "./action";
-import type { Fetch, Lease } from "./reaction";
+import type {
+  Committed,
+  EventMeta,
+  Message,
+  Query,
+  Schemas,
+} from "./action.js";
+import type { Fetch, Lease } from "./reaction.js";
 
 export type Disposer = () => Promise<void>;
 export type Disposable = { dispose: Disposer };

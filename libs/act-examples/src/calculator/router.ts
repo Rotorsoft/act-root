@@ -1,6 +1,6 @@
 import { act, Target } from "@rotorsoft/act";
-import { Calculator, Digits, Operators } from "@rotorsoft/act-examples";
 import { initTRPC } from "@trpc/server";
+import { Calculator } from "./calculator.js";
 
 const app = act().with(Calculator).build();
 const t = initTRPC.create();
@@ -9,12 +9,11 @@ const target: Target = {
   actor: { id: "1", name: "Calculator" },
 };
 
-export const router = t.router({
+export const calculatorRouter = t.router({
   PressKey: t.procedure
     .input(Calculator.actions.PressKey)
     .mutation(({ input }) => app.do("PressKey", target, input)),
   Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
 });
 
-export type Router = typeof router;
-export type { Digits, Operators };
+export type CalculatorRouter = typeof calculatorRouter;

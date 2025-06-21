@@ -1,5 +1,6 @@
-import { act, Actor, dispose, sleep, store } from "@rotorsoft/act";
-import { Calculator } from "../../src/calculator";
+import { act, Actor, Committed, dispose, sleep, store } from "@rotorsoft/act";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { Calculator } from "../../src/calculator/index.js";
 
 describe("calculator lifecycle", () => {
   const actor_a: Actor = { id: "A", name: "A" };
@@ -13,7 +14,8 @@ describe("calculator lifecycle", () => {
   let correlation = "";
   let midpoint: Date = new Date();
 
-  const app = act().with(Calculator).build();
+  const builder = act().with(Calculator);
+  const app = builder.build();
 
   beforeAll(async () => {
     await store().seed();
@@ -69,7 +71,7 @@ describe("calculator lifecycle", () => {
   });
 
   it("should query by stream", async () => {
-    const events = [];
+    const events: Committed<any, any>[] = [];
     const { first, last, count } = await app.query({ stream }, (e) =>
       events.push(e)
     );

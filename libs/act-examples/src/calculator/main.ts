@@ -1,7 +1,7 @@
 import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
-import { Calculator, KEYS } from ".";
+import { Calculator, KEYS } from "./calculator.js";
 
 export const NineCounter = state(
   "NineCounter",

@@ -1,8 +1,13 @@
+import { type CalculatorRouter } from "@rotorsoft/act-examples";
 import { QueryClient } from "@tanstack/react-query";
-import { createTRPCReact, httpLink } from "@trpc/react-query";
-import type { Router } from "../../server/src/router";
+import {
+  type CreateTRPCReact,
+  createTRPCReact,
+  httpLink,
+} from "@trpc/react-query";
 
-export const trpc = createTRPCReact<Router>();
+export const trpc: CreateTRPCReact<CalculatorRouter, unknown> =
+  createTRPCReact<CalculatorRouter>();
 export const queryClient = new QueryClient({});
 export const client = trpc.createClient({
   links: [httpLink({ url: "http://localhost:4000" })],

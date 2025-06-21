@@ -1,6 +1,6 @@
 import { ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod/v4";
-import { Attachment, Priority } from "./ticket.state.schemas";
+import { Attachment, Priority } from "./ticket.state.schemas.js";
 
 export const actions = {
   OpenTicket: z

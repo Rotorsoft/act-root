@@ -1,6 +1,7 @@
 import { Committed, dispose, Schemas } from "@rotorsoft/act";
 import { Pool, QueryResult } from "pg";
-import { PostgresStore } from "../src";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { PostgresStore } from "../src/index.js";
 
 const db = new PostgresStore("commit_error_test");
 

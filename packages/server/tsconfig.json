@@ -1,16 +1,9 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2020",
-    "module": "CommonJS",
-    "lib": [
-      "ES2020"
-    ],
-    "strict": true,
     "outDir": "dist",
     "rootDir": "src",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "esModuleInterop": true,
-    "skipLibCheck": true,
     "paths": {
       "@rotorsoft/*": [
         "../../libs/*/src"

@@ -6,7 +6,7 @@ import {
   EventMetaSchema,
   QuerySchema,
   TargetSchema,
-} from "./schemas";
+} from "./schemas.js";
 
 export type Actor = z.infer<typeof ActorSchema>;
 export type Target = z.infer<typeof TargetSchema>;

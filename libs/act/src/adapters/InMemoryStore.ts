@@ -1,3 +1,4 @@
+import { ConcurrencyError } from "../types/errors.js";
 import type {
   Committed,
   EventMeta,
@@ -6,9 +7,8 @@ import type {
   Query,
   Schemas,
   Store,
-} from "../types";
-import { ConcurrencyError } from "../types/errors";
-import { sleep } from "../utils";
+} from "../types/index.js";
+import { sleep } from "../utils.js";
 
 class InMemoryStream {
   _at = -1;

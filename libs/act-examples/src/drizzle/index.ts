@@ -15,4 +15,4 @@ export async function init_tickets_db() {
   await db.run("PRAGMA journal_mode=WAL;");
 }
 
-export { tickets } from "./schema";
+export { tickets } from "./schema.js";

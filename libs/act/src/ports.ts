@@ -1,7 +1,7 @@
-import pino from "pino";
-import { InMemoryStore } from "./adapters/InMemoryStore";
-import { config } from "./config";
-import type { Disposable, Disposer, Store } from "./types";
+import { pino } from "pino";
+import { InMemoryStore } from "./adapters/InMemoryStore.js";
+import { config } from "./config.js";
+import type { Disposable, Disposer, Store } from "./types/index.js";
 
 /**
  * Port and adapter utilities for logging, store management, and resource disposal.

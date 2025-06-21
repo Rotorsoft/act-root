@@ -7,7 +7,8 @@ import {
   store,
 } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { PostgresStore } from "../src";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PostgresStore } from "../src/index.js";
 
 const table = "store_test";
 store(new PostgresStore(table));

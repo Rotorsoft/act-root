@@ -1,6 +1,7 @@
 import { dispose, sleep } from "@rotorsoft/act";
 import { randomUUID } from "node:crypto";
-import { PostgresStore } from "../src";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PostgresStore } from "../src/index.js";
 
 const table = "streams_test";
 const store = new PostgresStore(table, 1_000);

@@ -1,8 +1,10 @@
-const exitSpy = vi.spyOn(await import("../src/ports"), "disposeAndExit");
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+const exitSpy = vi.spyOn(await import("../src/ports.js"), "disposeAndExit");
 const disposeSpy = vi.fn();
 
 // to register signal handlers
-import { dispose } from "../src";
+import { dispose } from "../src/index.js";
 
 describe("exit signal handlers", () => {
   beforeAll(() => {

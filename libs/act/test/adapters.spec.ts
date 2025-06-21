@@ -1,5 +1,6 @@
-import { ConcurrencyError, dispose, store } from "../src";
-import { InMemoryStore } from "../src/adapters/InMemoryStore";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { ConcurrencyError, dispose, store } from "../src/index.js";
 
 describe("adapters", () => {
   beforeAll(async () => {

@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { Priority } from "../schemas";
+import { Priority } from "../schemas/index.js";
 
 export type AvailableAgent = {
   agentId: string;

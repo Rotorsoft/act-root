@@ -13,15 +13,27 @@
   "files": [
     "dist"
   ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/@types/index.d.ts",
   "exports": {
     ".": {
-      "default": "./dist/index.js",
-      "devmode": "./src/index.ts"
+      "types": "./dist/@types/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "npx tsc --build"
+    "types": "tsc --build --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
     "dotenv": "^16.5.0",

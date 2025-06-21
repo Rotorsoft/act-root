@@ -3,9 +3,8 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
+    "build": "vite build",
     "dev": "vite --host",
-    "clean": "rm -rf dist",
-    "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"
   },
