@@ -1,7 +1,7 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db, init_tickets_db, tickets } from "../../src/drizzle/index.js";
 import { app } from "../../src/wolfdesk/bootstrap.js";
 import {
@@ -25,7 +25,7 @@ import {
 const chance = new Chance();
 
 describe("ticket projection", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     await init_tickets_db();
     await db.delete(tickets);
     // act.on("drained", (value) =>
