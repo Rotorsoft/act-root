@@ -16,14 +16,19 @@ export async function opened({
       closeAfter: closeAfter?.getTime() ?? null,
       ...other,
     })
-    .onConflictDoNothing();
+    .onConflictDoNothing()
+    .then(() => console.log(`${stream} => opened`));
 }
 
 export async function closed({
   stream,
   data,
 }: AsCommitted<typeof builder.events, "TicketClosed">) {
-  await db.update(tickets).set(data).where(eq(tickets.id, stream));
+  await db
+    .update(tickets)
+    .set(data)
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => closed`));
 }
 
 export async function assigned({
@@ -38,7 +43,8 @@ export async function assigned({
       escalateAfter: escalateAfter?.getTime() ?? null,
       ...other,
     })
-    .where(eq(tickets.id, stream));
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => assigned`));
 }
 
 export async function messageAdded({
@@ -47,7 +53,8 @@ export async function messageAdded({
   await db
     .update(tickets)
     .set({ messages: sql`${tickets.messages} + 1` })
-    .where(eq(tickets.id, stream));
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => messageAdded`));
 }
 
 export async function escalated({
@@ -57,7 +64,8 @@ export async function escalated({
   await db
     .update(tickets)
     .set({ escalationId: data.requestId })
-    .where(eq(tickets.id, stream));
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => escalated`));
 }
 
 export async function reassigned({
@@ -72,12 +80,17 @@ export async function reassigned({
       escalateAfter: escalateAfter?.getTime() ?? null,
       ...other,
     })
-    .where(eq(tickets.id, stream));
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => reassigned`));
 }
 
 export async function resolved({
   stream,
   data,
 }: AsCommitted<typeof builder.events, "TicketResolved">) {
-  await db.update(tickets).set(data).where(eq(tickets.id, stream));
+  await db
+    .update(tickets)
+    .set(data)
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => resolved`));
 }

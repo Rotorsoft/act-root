@@ -6,6 +6,7 @@ import { ZodEmpty } from "../src/types/schemas.js";
 
 const fakeLogger = {
   trace: vi.fn(),
+  warn: vi.fn(),
   error: vi.fn(),
 };
 
@@ -26,6 +27,7 @@ describe("Act coverage", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     fakeLogger.trace.mockClear();
+    fakeLogger.warn.mockClear();
     fakeLogger.error.mockClear();
     store = new InMemoryStore();
 
@@ -94,11 +96,11 @@ describe("Act coverage", () => {
     ]);
     await act.drain();
     expect(fakeLogger.trace).toHaveBeenCalled();
-    expect(fakeLogger.error).not.toHaveBeenCalled();
+    expect(fakeLogger.warn).not.toHaveBeenCalled();
     expect(emitSpy).toHaveBeenCalledWith("drained", expect.any(Array));
   });
 
-  it("should handle drain with reaction error and block", async () => {
+  it("should handle drain with reaction warning and block", async () => {
     await store.commit("s", [{ name: "E", data: {} }], {
       correlation: "c",
       causation: {},
@@ -142,7 +144,7 @@ describe("Act coverage", () => {
     // Second drain: should fail again, hit maxRetries, and block
     await act.drain();
 
-    expect(fakeLogger.error).toHaveBeenCalledWith(
+    expect(fakeLogger.warn).toHaveBeenCalledWith(
       expect.stringContaining("Retrying")
     );
     expect(fakeLogger.error).toHaveBeenCalledWith(

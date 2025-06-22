@@ -29,8 +29,9 @@ class InMemoryStream {
     if (this._lease && lease.at >= this._at) {
       this._retry = lease.retry;
       this._blocked = lease.block;
-      if (!this._retry && !this._blocked) {
+      if (!this._blocked && !lease.error) {
         this._at = lease.at;
+        this._retry = 0;
       }
       this._lease = undefined;
     }

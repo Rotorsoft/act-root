@@ -37,5 +37,4 @@ export type Lease = {
   retry: number;
   block: boolean;
   error?: unknown;
-  count?: number;
 };

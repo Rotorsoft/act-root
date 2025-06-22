@@ -24,7 +24,14 @@ import {
 
 const chance = new Chance();
 
-describe.sequential("ticket projection", () => {
+// finds projected ticket by stream
+async function findTicket(stream: string) {
+  return (
+    await db.select().from(tickets).where(eq(tickets.id, stream)).limit(1)
+  ).at(0);
+}
+
+describe("ticket projection", () => {
   beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets);
@@ -36,9 +43,9 @@ describe.sequential("ticket projection", () => {
   });
 
   it("should project tickets", async () => {
-    const t = target();
+    const t = target(chance.guid(), "projecting");
     const title = "projecting";
-    const message = "openting a new ticket for projection";
+    const message = "opening a new ticket for projection";
 
     await openTicket(t, title, message);
     await addMessage(t, "first message");
@@ -52,43 +59,56 @@ describe.sequential("ticket projection", () => {
     await closeTicket(t);
     await app.drain();
 
-    const state = (
-      await db.select().from(tickets).where(eq(tickets.id, t.stream)).limit(1)
-    ).at(0);
-    expect(state?.id).toBe(t.stream);
-    expect(state?.userId).toBeDefined();
-    expect(state?.agentId).toBeDefined();
-    expect(state?.title).toBe(title);
-    expect(state?.messages).toBe(1);
-    expect(state?.closedById).toBeDefined();
-    expect(state?.resolvedById).toBeDefined();
-    expect(state?.escalationId).toBeDefined();
-    expect(state?.closeAfter).toBeDefined();
-    expect(state?.escalateAfter).toBeDefined();
-    expect(state?.reassignAfter).toBeDefined();
+    const ticket = await findTicket(t.stream);
+    expect(ticket?.id).toBe(t.stream);
+    expect(ticket?.userId).toBeDefined();
+    expect(ticket?.agentId).toBeDefined();
+    expect(ticket?.title).toBe(title);
+    expect(ticket?.messages).toBe(1);
+    expect(ticket?.closedById).toBeDefined();
+    expect(ticket?.resolvedById).toBeDefined();
+    expect(ticket?.escalationId).toBeDefined();
+    expect(ticket?.closeAfter).toBeDefined();
+    expect(ticket?.escalateAfter).toBeDefined();
+    expect(ticket?.reassignAfter).toBeDefined();
     // just to check projection while preparing test
-    // console.table(state);
+    console.table(ticket);
   });
 
-  describe.sequential("automations", () => {
+  describe("automations", () => {
     it("should escalate ticket", async () => {
-      const t = target();
+      const now = new Date();
+      const t = target(chance.guid(), "auto escalate");
 
+      // open and assign with immediate escalate and reassign dates
       await openTicket(t, "auto escalate", "Hello");
-      await assignTicket(t, chance.guid(), new Date(), new Date());
-      await app.drain();
+      await assignTicket(t, chance.guid(), now, now);
 
+      // project and verify agent and escalate after
+      await app.drain();
+      let ticket = await findTicket(t.stream);
+      expect(ticket?.agentId).toBeDefined();
+      expect(ticket?.escalateAfter).toBe(now.getTime());
+      expect(ticket?.reassignAfter).toBe(now.getTime());
+
+      // trigger automation
       await AutoEscalate(1).catch(console.error);
-      await app.drain();
 
+      // project and verify escalation id
+      await app.drain();
+      ticket = await findTicket(t.stream);
+      expect(ticket?.escalationId).toBeDefined();
+
+      // load state and verify escalation id
       const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
-    // TODO: fix this test
-    it.skip("should close ticket", async () => {
-      const t = target();
+    it("should close ticket", async () => {
+      const t = target(chance.guid(), "auto close me");
+      const now = new Date();
 
+      // open and resolve with immediate close after date
       await openTicket(
         t,
         "auto close me",
@@ -96,34 +116,69 @@ describe.sequential("ticket projection", () => {
         chance.guid(),
         chance.guid(),
         Priority.High,
-        new Date()
+        now
       );
-      await markTicketResolved(t);
-      await app.drain();
+      const snap = await markTicketResolved(t);
+      expect(snap.state.resolvedById).toBeDefined();
 
+      // project and verify
+      const drained = await app.drain();
+      expect(drained).toBeGreaterThan(0);
+
+      let ticket = await findTicket(t.stream);
+      console.table(ticket);
+      expect(ticket?.resolvedById).toBeDefined();
+      expect(ticket?.closeAfter).toBe(now.getTime());
+
+      // trigger automation
       await AutoClose(1);
-      await app.drain();
 
+      // project and verify closed by
+      await app.drain();
+      ticket = await findTicket(t.stream);
+      expect(ticket?.closedById).toBeDefined();
+
+      // load state and verify closed by
       const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.closedById).toBeDefined();
     });
 
-    // TODO: fix this test
-    it.skip("should reassign ticket", async () => {
+    it("should reassign ticket", async () => {
       const now = new Date();
-      const t = target();
+      const t = target(chance.guid(), "auto re-assign me");
       const agentId = chance.guid();
 
+      // open and assign with immediate escalate and reassign dates
       await openTicket(t, "auto re-assign me", "Hello");
       await assignTicket(t, agentId, now, now);
-      await app.drain();
 
+      // project and verify agent and escalate after
+      await app.drain();
+      let ticket = await findTicket(t.stream);
+      expect(ticket?.agentId).toBeDefined();
+      expect(ticket?.escalateAfter).toBe(now.getTime());
+      expect(ticket?.reassignAfter).toBe(now.getTime());
+
+      // manually escalate
       await escalateTicket(t);
-      await app.drain();
 
+      // project and verify escalation id
+      await app.drain();
+      ticket = await findTicket(t.stream);
+      expect(ticket?.escalationId).toBeDefined();
+
+      // trigger automation
       await AutoReassign(1);
-      await app.drain();
 
+      // project and verify new agent and reassign after date
+      await app.drain();
+      ticket = await findTicket(t.stream);
+      expect(ticket?.agentId).toBeDefined();
+      expect(ticket?.agentId).not.toEqual(agentId);
+      expect(ticket?.reassignAfter).toBeGreaterThan(now.getTime());
+      expect(ticket?.escalateAfter).toBeGreaterThan(now.getTime());
+
+      // load state and verify new agent and reassign after date
       const snapshot = await app.load(Ticket, t.stream);
       expect(snapshot.state.agentId).toBeDefined();
       expect(snapshot.state.agentId).not.toEqual(agentId);

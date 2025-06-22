@@ -142,14 +142,13 @@ export class Act<
     const stream = lease.stream;
 
     lease.retry > 0 &&
-      logger.error(`Retrying ${stream}@${lease.at} (${lease.retry}).`);
+      logger.warn(`Retrying ${stream}@${lease.at} (${lease.retry}).`);
 
     for (const reaction of reactions) {
       const { event, handler, options } = reaction;
       try {
         await handler(event, stream); // the actual reaction
         lease.at = event.id;
-        lease.count = (lease.count || 0) + 1;
       } catch (error) {
         lease.error = error;
         if (error instanceof ValidationError)
@@ -245,7 +244,7 @@ export class Act<
           (promise) => {
             promise.forEach((result) => {
               if (result.status === "rejected") logger.error(result.reason);
-              else if (result.value.count) drained.push(result.value);
+              else if (!result.value.error) drained.push(result.value);
             });
           },
           (error) => logger.error(error)
@@ -257,17 +256,17 @@ export class Act<
       await store().ack(leased);
       logger.trace(
         leased
-          .map(({ stream, at, retry, block, count: handled }) => ({
+          .map(({ stream, at, retry, block, error }) => ({
             stream,
             at,
             retry,
             block,
-            handled,
+            error,
           }))
           .reduce(
-            (a, { stream, at, retry, block, handled }) => ({
+            (a, { stream, at, retry, block, error }) => ({
               ...a,
-              [stream]: { at, retry, block, handled },
+              [stream]: { at, retry, block, error },
             }),
             {}
           ),
