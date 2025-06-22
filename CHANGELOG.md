@@ -1,3 +1,5 @@
+#### 2025-06-22 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.4.0...@rotorsoft/act-v0.4.1) @rotorsoft/act-v0.4.1
+  - PATCH [43c809aa](https://github.com/Rotorsoft/act-root/commit/43c809aa3769d4a8f4bd72599f1dea20d255d301) fix: act leases and draining
 #### 2025-06-21 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.2.0...@rotorsoft/act-pg-v0.3.0) @rotorsoft/act-pg-v0.3.0
   - MINOR [64d531b1](https://github.com/Rotorsoft/act-root/commit/64d531b17692c53332f5dfa611323fa8ebc47bb2) feat: build using tsup and resolve nodenext
 #### 2025-06-21 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.3.0...@rotorsoft/act-v0.4.0) @rotorsoft/act-v0.4.0
