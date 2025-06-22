@@ -37,4 +37,11 @@ describe("exit signal handlers", () => {
     process.emit("unhandledRejection");
     expect(exitSpy).toHaveBeenCalledWith("ERROR");
   });
+
+  it("should not exit in production on error", async () => {
+    vi.resetModules();
+    const { disposeAndExit } = await import("../src/ports.js");
+    process.env.NODE_ENV = "production";
+    await expect(disposeAndExit("ERROR")).resolves.toBeUndefined();
+  });
 });

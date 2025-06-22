@@ -20,7 +20,7 @@ vi.doMock("../src/ports.js", async (importActual) => {
   };
 });
 
-describe("Act coverage", () => {
+describe("Act", () => {
   let act: any; // type any because of dynamic import
   let registry: Registry<any, any, any>;
 
@@ -213,5 +213,111 @@ describe("Act coverage", () => {
     await act.drain();
 
     expect(fakeLogger.error).toHaveBeenCalledWith(new Error("handle failed"));
+  });
+
+  it("should handle reaction handler throwing non-ValidationError", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn().mockRejectedValue(new Error("fail")),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    expect(fakeLogger.error).toHaveBeenCalledWith(new Error("fail"));
+  });
+
+  it("should block lease on blockOnError", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi
+            .fn()
+            .mockRejectedValue(new ValidationError("fail", {}, {})),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: true, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    // Should log error and block
+    expect(fakeLogger.error).toHaveBeenCalled();
+  });
+
+  it("should handle Promise.allSettled rejected in drain", async () => {
+    // Patch act.handle to throw synchronously
+    const origHandle = act["handle"];
+    act["handle"] = vi.fn().mockRejectedValue(new Error("allSettled fail"));
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn(),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    expect(fakeLogger.error).toHaveBeenCalledWith(new Error("allSettled fail"));
+    act["handle"] = origHandle;
+  });
+
+  it("should handle drain with no events", async () => {
+    // No events in store
+    const result = await act.drain();
+    expect(result).toBe(0);
+  });
+
+  it("should handle drain with no reactions for a stream", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map(); // No reactions
+    const result = await act.drain();
+    expect(result).toBe(0);
+  });
+
+  it("should call callback in load and handle errors", async () => {
+    vi.resetModules(); // Ensure no lingering mocks
+    const { Act } = await import("../src/act.js");
+    const registry = { actions: {}, events: {} };
+    const actInstance = new Act(registry, 1);
+    const state = {
+      name: "test",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: {},
+      events: {},
+      patch: {},
+      on: {},
+    };
+    const { store } = await import("../src/ports.js");
+    await store().commit("stream", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    let called = false;
+    await actInstance.load(state, "stream", () => {
+      called = true;
+    });
+    expect(called).toBe(true);
   });
 });

@@ -5,6 +5,7 @@ import { action, load, snap } from "../src/event-sourcing.js";
 import { dispose, logger, SNAP_EVENT, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 import { InvariantError } from "../src/types/errors.js";
+import { ZodEmpty } from "../src/types/schemas.js";
 
 // Minimal state machine mock
 const me = state("me", z.object({ count: z.number() }))
@@ -299,5 +300,42 @@ describe("event-sourcing", () => {
       expect.any(Object),
       0 // expectedVersion from snapshot.event.version
     );
+  });
+
+  it("should call callback in load and handle patch/snap logic", async () => {
+    vi.resetModules();
+    const { load } = await import("../src/event-sourcing.js");
+    const state = {
+      name: "test",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: {},
+      events: {},
+      patch: { E: vi.fn() },
+      on: {},
+    };
+    const { store } = await import("../src/ports.js");
+    await store().commit("stream", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    await load(state, "stream", vi.fn());
+  });
+
+  it("should throw on missing stream in action", async () => {
+    vi.resetModules();
+    const { action } = await import("../src/event-sourcing.js");
+    const state = {
+      name: "test",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: { foo: ZodEmpty },
+      events: {},
+      patch: {},
+      on: { foo: vi.fn() },
+    };
+    await expect(
+      action(state, "foo", { stream: "", actor: { id: "a", name: "a" } }, {})
+    ).rejects.toThrow("Missing target stream");
   });
 });

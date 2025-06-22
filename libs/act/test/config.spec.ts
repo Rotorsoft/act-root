@@ -73,4 +73,18 @@ describe("config", () => {
     const config = loadConfig();
     expect(config.sleepMs).toBe(500);
   });
+
+  it("should set logLevel based on NODE_ENV and LOG_LEVEL", async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = "test";
+    process.env.LOG_LEVEL = "warn";
+    const { config } = await import("../src/config.js");
+    // The config logic uses LOG_LEVEL if set, even in test mode
+    expect(config().logLevel).toBe("warn");
+    process.env.NODE_ENV = "production";
+    process.env.LOG_LEVEL = "info";
+    vi.resetModules();
+    const { config: config2 } = await import("../src/config.js");
+    expect(config2().logLevel).toBe("info");
+  });
 });

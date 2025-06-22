@@ -137,5 +137,15 @@ describe("adapters", () => {
       expect(result.streams.length).toBe(1);
       expect(result.events.length).toBeGreaterThan(0);
     });
+
+    it("should fetch with no streams", async () => {
+      const { InMemoryStore } = await import(
+        "../src/adapters/InMemoryStore.js"
+      );
+      const store = new InMemoryStore();
+      const result = await store.fetch(1);
+      expect(result.streams).toEqual([]);
+      expect(result.events).toEqual([]);
+    });
   });
 });

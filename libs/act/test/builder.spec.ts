@@ -59,4 +59,29 @@ describe("Builder", () => {
     const builder = act().with(A1);
     expect(() => builder.with(A3)).toThrow('Duplicate event "Event1"');
   });
+
+  it("should throw on duplicate action or event", () => {
+    const builder = act();
+    // Use two different state objects with the same action name
+    const state1 = {
+      name: "foo1",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: { a: ZodEmpty },
+      events: { e: ZodEmpty },
+      patch: { e: () => ({}) },
+      on: { a: () => ["e", {}] as [string, object] },
+    };
+    const state2 = {
+      name: "foo2",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: { a: ZodEmpty },
+      events: { e: ZodEmpty },
+      patch: { e: () => ({}) },
+      on: { a: () => ["e", {}] as [string, object] },
+    };
+    builder.with(state1);
+    expect(() => builder.with(state2)).toThrow("Duplicate action");
+  });
 });
