@@ -39,7 +39,7 @@
     "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
-    "prepare": "husky",
+    "prepare": "simple-git-hooks",
     "docs:generate": "typedoc",
     "docs:serve": "npx http-server docs -p 8080 -o",
     "docs:clean": "find docs -mindepth 1 ! -name 'examples' ! -name 'index.html' -exec rm -rf {} +"
@@ -64,9 +64,9 @@
     "eslint": "^9.29.0",
     "eslint-config-prettier": "^10.1.5",
     "eslint-plugin-prettier": "^5.5.0",
-    "husky": "^9.1.7",
     "prettier": "^3.5.3",
     "prettier-plugin-organize-imports": "^4.1.0",
+    "simple-git-hooks": "^2.12.0",
     "tsconfig-paths": "^4.2.0",
     "tsup": "^8.0.0",
     "tsx": "^4.20.3",
@@ -76,5 +76,10 @@
     "vite": "^6.3.5",
     "vite-tsconfig-paths": "^5.1.4",
     "vitest": "^3.2.4"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "bash scripts/pre-commit.sh",
+    "commit-msg": "bash scripts/commit-msg.sh $1",
+    "pre-push": "bash scripts/pre-push.sh"
   }
 }

@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Reset
 Color_Off='\033[0m'       # Text Reset
 
@@ -38,4 +40,4 @@ else
     echo "   ${Green}<prefix>${Color_Off}: message";
     echo "   ${Green}<prefix>${Red}!${Color_Off}: BREAKING CHANGES message";
     exit 1;
-fi;
+fi; 

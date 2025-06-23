@@ -1,3 +1,5 @@
 packages:
-  - "libs/**"
-  - "packages/**"
+  - libs/**
+  - packages/**
+onlyBuiltDependencies:
+  - simple-git-hooks
