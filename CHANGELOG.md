@@ -1,3 +1,5 @@
+#### 2025-06-25 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.3.0...@rotorsoft/act-pg-v0.4.0) @rotorsoft/act-pg-v0.4.0
+  - MINOR [64286d32](https://github.com/Rotorsoft/act-root/commit/64286d32f5513df3b964cca45ef96cc559e9574b) feat: support direct pg config with schema
 #### 2025-06-25 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.4.1...@rotorsoft/act-v0.5.0) @rotorsoft/act-v0.5.0
   - MINOR [64286d32](https://github.com/Rotorsoft/act-root/commit/64286d32f5513df3b964cca45ef96cc559e9574b) feat: support direct pg config with schema
 #### 2025-06-22 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.4.0...@rotorsoft/act-v0.4.1) @rotorsoft/act-v0.4.1
