@@ -8,7 +8,7 @@ export const NineCounter = state(
   z.object({
     nines: z.number().int(),
     equals: z.number().int(),
-  }),
+  })
 )
   .init(() => ({ nines: 0, equals: 0 }))
   .emits({

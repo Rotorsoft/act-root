@@ -18,15 +18,15 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     await expect(
       store.commit(
         "s",
         [{ name: "E", data: {} }],
         { correlation: "c", causation: {} },
-        1,
-      ),
+        1
+      )
     ).rejects.toThrow();
   });
 
@@ -38,10 +38,10 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     await expect(
-      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }]),
+      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }])
     ).resolves.toBeUndefined();
   });
 
@@ -56,11 +56,11 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     // Should not throw, but should cover the catch and fallback
     await expect(
-      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }]),
+      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }])
     ).resolves.toBeUndefined();
     expect(fakeClient.query).toHaveBeenCalled();
     expect(fakeClient.release).toHaveBeenCalled();
@@ -77,10 +77,10 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     await expect(
-      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }]),
+      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }])
     ).resolves.toBeUndefined();
     expect(fakeClient.query).toHaveBeenCalledTimes(2);
     expect(fakeClient.release).toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     let thrown = false;
     try {
@@ -120,11 +120,11 @@ describe("PostgresStore error branches", () => {
     };
     vi.spyOn((await import("pg")).Pool.prototype, "connect").mockResolvedValue(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      fakeClient as any,
+      fakeClient as any
     );
     // Should not throw, but should cover the catch and fallback
     await expect(
-      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }]),
+      store.ack([{ stream: "s", by: "b", at: 1, retry: 0, block: false }])
     ).resolves.toBeUndefined();
     expect(fakeClient.query).toHaveBeenCalled();
     expect(fakeClient.release).toHaveBeenCalled();

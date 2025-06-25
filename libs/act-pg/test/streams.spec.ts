@@ -30,7 +30,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} },
+      { correlation: "", causation: {} }
     );
 
     const { streams, events } = await store.fetch(3);
@@ -63,7 +63,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} },
+      { correlation: "", causation: {} }
     );
 
     const { events } = await store.fetch(3);
@@ -102,7 +102,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} },
+      { correlation: "", causation: {} }
     );
     await store.commit(
       stream2,
@@ -110,7 +110,7 @@ describe("streams", () => {
         { name: "event", data: { value: "1" } },
         { name: "event", data: { value: "2" } },
       ],
-      { correlation: "", causation: {} },
+      { correlation: "", causation: {} }
     );
 
     const by = randomUUID();

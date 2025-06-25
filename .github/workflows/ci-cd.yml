@@ -9,6 +9,7 @@ on:
 
 env:
   NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+  HUSKY_SKIP_HOOKS: 1
 
 jobs:
   ci:
@@ -47,11 +48,6 @@ jobs:
 
       - name: unit test
         run: pnpm test
-        env:
-          PG_HOST: localhost
-          PG_USER: postgres
-          PG_PASSWORD: postgres
-          PG_DATABASE: postgres
 
       - name: coveralls
         uses: coverallsapp/github-action@master

@@ -12,7 +12,7 @@ import {
 import { PostgresStore } from "../src/index.js";
 
 const query = (
-  sql: string,
+  sql: string
 ): Promise<QueryResult<Committed<Schemas, keyof Schemas>>> => {
   const commit = sql.indexOf("COMMIT");
   if (commit > 0) return Promise.reject(Error("mocked commit error"));
@@ -63,7 +63,7 @@ describe("commit error", () => {
       db.commit("stream", [{ name: "test", data: {} }], {
         correlation: "",
         causation: {},
-      }),
+      })
     ).rejects.toThrow();
   });
 });
