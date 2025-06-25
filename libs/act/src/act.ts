@@ -47,9 +47,16 @@ export class Act<
     return this;
   }
 
+  off(event: "committed", listener: (args: SnapshotArgs) => void): this;
+  off(event: "drained", listener: (args: Lease[]) => void): this;
+  off(event: string, listener: (args: any) => void): this {
+    this._emitter.off(event, listener);
+    return this;
+  }
+
   constructor(
     public readonly registry: Registry<S, E, A>,
-    public readonly drainLimit: number
+    public readonly drainLimit: number,
   ) {}
 
   /**
@@ -70,7 +77,7 @@ export class Act<
     target: Target,
     payload: Readonly<A[K]>,
     reactingTo?: Committed<E, keyof E>,
-    skipValidation = false
+    skipValidation = false,
   ) {
     const snapshot = await es.action(
       this.registry.actions[action],
@@ -78,7 +85,7 @@ export class Act<
       target,
       payload,
       reactingTo as Committed<Schemas, keyof Schemas>,
-      skipValidation
+      skipValidation,
     );
     this.emit("committed", snapshot as SnapshotArgs);
     return snapshot;
@@ -98,7 +105,7 @@ export class Act<
   async load<SX extends Schema, EX extends Schemas, AX extends Schemas>(
     state: State<SX, EX, AX>,
     stream: string,
-    callback?: (snapshot: Snapshot<SX, EX>) => void
+    callback?: (snapshot: Snapshot<SX, EX>) => void,
   ): Promise<Snapshot<SX, EX>> {
     return await es.load(state, stream, callback);
   }
@@ -112,7 +119,7 @@ export class Act<
    */
   async query(
     query: Query,
-    callback?: (event: Committed<E, keyof E>) => void
+    callback?: (event: Committed<E, keyof E>) => void,
   ): Promise<{
     first?: Committed<E, keyof E>;
     last?: Committed<E, keyof E>;
@@ -137,7 +144,7 @@ export class Act<
    */
   private async handle(
     lease: Lease,
-    reactions: ReactionPayload<E>[]
+    reactions: ReactionPayload<E>[],
   ): Promise<Lease> {
     const stream = lease.stream;
 
@@ -186,9 +193,9 @@ export class Act<
           .map(({ id, stream, name }) => ({ id, stream, name }))
           .reduce(
             (a, { id, stream, name }) => ({ ...a, [id]: { [stream]: name } }),
-            {}
+            {},
           ),
-        "⚡️ fetch"
+        "⚡️ fetch",
       );
 
       // correlate events to streams by reaction resolvers
@@ -225,9 +232,9 @@ export class Act<
           .map(({ stream, at, retry }) => ({ stream, at, retry }))
           .reduce(
             (a, { stream, at, retry }) => ({ ...a, [stream]: { at, retry } }),
-            {}
+            {},
           ),
-        "⚡️ lease"
+        "⚡️ lease",
       );
 
       const handling = leased
@@ -239,7 +246,7 @@ export class Act<
 
       if (handling.length) {
         await Promise.allSettled(
-          handling.map(({ lease, reactions }) => this.handle(lease, reactions))
+          handling.map(({ lease, reactions }) => this.handle(lease, reactions)),
         ).then(
           (promise) => {
             promise.forEach((result) => {
@@ -247,7 +254,7 @@ export class Act<
               else if (!result.value.error) drained.push(result.value);
             });
           },
-          (error) => logger.error(error)
+          (error) => logger.error(error),
         );
         drained.length && this.emit("drained", drained);
       }
@@ -268,9 +275,9 @@ export class Act<
               ...a,
               [stream]: { at, retry, block, error },
             }),
-            {}
+            {},
           ),
-        "⚡️ ack"
+        "⚡️ ack",
       );
     }
 
