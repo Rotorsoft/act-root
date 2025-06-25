@@ -10,8 +10,9 @@ import { Chance } from "chance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
 
-const table = "store_test";
-store(new PostgresStore(table));
+store(
+  new PostgresStore({ port: 5431, schema: "schema_test", table: "store_test" }),
+);
 
 const chance = new Chance();
 const a1 = chance.guid();
@@ -77,7 +78,7 @@ describe("pg store", () => {
         { name: "test3", data: { value: "3" } },
       ],
       { correlation: query_correlation, causation: {} },
-      undefined
+      undefined,
     );
 
     let first = 0;
@@ -87,7 +88,7 @@ describe("pg store", () => {
         first = first || e.id;
         events.push(e);
       },
-      { stream: a1 }
+      { stream: a1 },
     );
     expect(first).toBeGreaterThan(0);
     const l = events.length;
@@ -108,7 +109,7 @@ describe("pg store", () => {
     events3.map((evt) => expect(evt.name).toBe("test1"));
 
     expect(
-      await store().query(() => 0, { after: first, before: first + 4 })
+      await store().query(() => 0, { after: first, before: first + 4 }),
     ).toBe(3);
 
     expect(
@@ -116,7 +117,7 @@ describe("pg store", () => {
         stream: a1,
         created_after,
         created_before,
-      })
+      }),
     ).toBe(2);
 
     expect(await store().query(() => 0, { limit: 5 })).toBe(5);
@@ -125,7 +126,7 @@ describe("pg store", () => {
       await store().query(() => 0, {
         limit: 10,
         correlation: query_correlation,
-      })
+      }),
     ).toBe(4);
 
     await expect(
@@ -133,8 +134,8 @@ describe("pg store", () => {
         a1,
         [{ name: "test2", data: { value: "" } }],
         { correlation: "", causation: {} },
-        1
-      )
+        1,
+      ),
     ).rejects.toThrow();
   });
 
@@ -146,7 +147,7 @@ describe("pg store", () => {
         { name: "test3", data: { value: "2", date: new Date() } },
         { name: "test3", data: { value: "3", date: new Date() } },
       ],
-      { correlation: "", causation: {} }
+      { correlation: "", causation: {} },
     );
     await store().commit(
       a5,
@@ -157,7 +158,7 @@ describe("pg store", () => {
       {
         correlation: "",
         causation: {},
-      }
+      },
     );
     await store().commit(
       a4,
@@ -169,7 +170,7 @@ describe("pg store", () => {
       {
         correlation: "",
         causation: {},
-      }
+      },
     );
 
     const count = await store().query(
@@ -177,7 +178,7 @@ describe("pg store", () => {
         if (e.name === "test3") expect(e.data.date).toBeInstanceOf(Date);
       },
       { stream: a4 },
-      true
+      true,
     );
     expect(count).toBe(3);
     const count2 = await store().query(() => {}, { stream: a5 }, true);

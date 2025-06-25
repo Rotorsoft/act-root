@@ -9,40 +9,146 @@ import type {
 } from "@rotorsoft/act";
 import { ConcurrencyError, SNAP_EVENT, logger } from "@rotorsoft/act";
 import pg from "pg";
-import { config } from "./config.js";
-import { seed_store } from "./seed.js";
 import { dateReviver } from "./utils.js";
 
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>
-  JSON.parse(val, dateReviver)
+  JSON.parse(val, dateReviver),
 );
 
-export class PostgresStore implements Store {
-  private _pool = new Pool(config.pg);
+type Config = Readonly<{
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  schema: string;
+  table: string;
+  leaseMillis: number;
+}>;
 
-  constructor(
-    readonly table: string,
-    readonly leaseMillis = 30_000
-  ) {}
+const DEFAULT_CONFIG: Config = {
+  host: "localhost",
+  port: 5432,
+  database: "postgres",
+  user: "postgres",
+  password: "postgres",
+  schema: "public",
+  table: "events",
+  leaseMillis: 30_000,
+};
+
+export class PostgresStore implements Store {
+  private _pool;
+  readonly config: Config;
+
+  constructor(config: Partial<Config> = {}) {
+    this.config = { ...DEFAULT_CONFIG, ...config };
+    this._pool = new Pool(this.config);
+  }
+
   async dispose() {
     await this._pool.end();
   }
 
   async seed() {
-    const seed = seed_store(this.table);
-    await this._pool.query(seed);
+    const client = await this._pool.connect();
+
+    try {
+      await client.query("BEGIN");
+
+      // Create schema
+      await client.query(
+        `CREATE SCHEMA IF NOT EXISTS "${this.config.schema}";`,
+      );
+
+      // Events table
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS "${this.config.schema}"."${this.config.table}" (
+          id serial PRIMARY KEY,
+          name varchar(100) COLLATE pg_catalog."default" NOT NULL,
+          data jsonb,
+          stream varchar(100) COLLATE pg_catalog."default" NOT NULL,
+          version int NOT NULL,
+          created timestamptz NOT NULL DEFAULT now(),
+          meta jsonb
+        ) TABLESPACE pg_default;`,
+      );
+
+      // Indexes on events
+      await client.query(
+        `CREATE UNIQUE INDEX IF NOT EXISTS "${this.config.table}_stream_ix" 
+        ON "${this.config.schema}"."${this.config.table}" (stream COLLATE pg_catalog."default", version);`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_name_ix" 
+        ON "${this.config.schema}"."${this.config.table}" (name COLLATE pg_catalog."default");`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_created_id_ix" 
+        ON "${this.config.schema}"."${this.config.table}" (created, id);`,
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_correlation_ix" 
+        ON "${this.config.schema}"."${this.config.table}" ((meta ->> 'correlation') COLLATE pg_catalog."default");`,
+      );
+
+      // Streams table
+      await client.query(
+        `CREATE TABLE IF NOT EXISTS "${this.config.schema}"."${this.config.table}_streams" (
+          stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
+          at int NOT NULL DEFAULT -1,
+          retry smallint NOT NULL DEFAULT 0,
+          blocked boolean NOT NULL DEFAULT false,
+          leased_at int,
+          leased_by uuid,
+          leased_until timestamptz
+        ) TABLESPACE pg_default;`,
+      );
+
+      // Index for fetching streams
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_fetch_ix" 
+        ON "${this.config.schema}"."${this.config.table}_streams" (blocked, at);`,
+      );
+
+      await client.query("COMMIT");
+      logger.info(
+        `Seeded schema "${this.config.schema}" with table "${this.config.table}"`,
+      );
+    } catch (error) {
+      await client.query("ROLLBACK");
+      logger.error("Failed to seed store:", error);
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async drop() {
-    await this._pool.query(`DROP TABLE IF EXISTS "${this.table}"`);
-    await this._pool.query(`DROP TABLE IF EXISTS "${this.table}_streams"`);
+    await this._pool.query(
+      `
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM information_schema.schemata
+          WHERE schema_name = '${this.config.schema}'
+        ) THEN
+          EXECUTE 'DROP TABLE IF EXISTS "${this.config.schema}"."${this.config.table}"';
+          EXECUTE 'DROP TABLE IF EXISTS "${this.config.schema}"."${this.config.table}_streams"';
+          IF '${this.config.schema}' <> 'public' THEN
+            EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
+          END IF;
+        END IF;
+      END
+      $$;
+    `,
+    );
   }
 
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
     query?: Query,
-    withSnaps = false
+    withSnaps = false,
   ) {
     const {
       stream,
@@ -56,16 +162,16 @@ export class PostgresStore implements Store {
       correlation,
     } = query || {};
 
-    let sql = `SELECT * FROM "${this.table}" WHERE`;
+    let sql = `SELECT * FROM "${this.config.schema}"."${this.config.table}" WHERE`;
     const values: any[] = [];
 
     if (withSnaps)
       sql = sql.concat(
         ` id>=COALESCE((SELECT id
-            FROM "${this.table}"
+            FROM "${this.config.schema}"."${this.config.table}"
             WHERE stream='${stream}' AND name='${SNAP_EVENT}'
             ORDER BY id DESC LIMIT 1), 0)
-            AND stream='${stream}'`
+            AND stream='${stream}'`,
       );
     else if (query) {
       if (typeof after !== "undefined") {
@@ -113,7 +219,7 @@ export class PostgresStore implements Store {
     stream: string,
     msgs: Message<E, keyof E>[],
     meta: EventMeta,
-    expectedVersion?: number
+    expectedVersion?: number,
   ) {
     const client = await this._pool.connect();
     let version = -1;
@@ -121,46 +227,48 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
 
       const last = await client.query<Committed<E, keyof E>>(
-        `SELECT version FROM "${this.table}" WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
-        [stream]
+        `SELECT version
+        FROM "${this.config.schema}"."${this.config.table}"
+        WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
+        [stream],
       );
       version = last.rowCount ? last.rows[0].version : -1;
       if (expectedVersion && version !== expectedVersion)
         throw new ConcurrencyError(
           version,
           msgs as unknown as Message<Schemas, string>[],
-          expectedVersion
+          expectedVersion,
         );
 
       const committed = await Promise.all(
         msgs.map(async ({ name, data }) => {
           version++;
           const sql = `
-          INSERT INTO "${this.table}"(name, data, stream, version, meta) 
+          INSERT INTO "${this.config.schema}"."${this.config.table}"(name, data, stream, version, meta) 
           VALUES($1, $2, $3, $4, $5) RETURNING *`;
           const vals = [name, data, stream, version, meta];
           const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
           return rows.at(0)!;
-        })
+        }),
       );
 
       await client
         .query(
           `
-            NOTIFY "${this.table}", '${JSON.stringify({
+            NOTIFY "${this.config.table}", '${JSON.stringify({
               operation: "INSERT",
               id: committed[0].name,
               position: committed[0].id,
             })}';
             COMMIT;
-            `
+            `,
         )
         .catch((error) => {
           logger.error(error);
           throw new ConcurrencyError(
             version,
             msgs as unknown as Message<Schemas, string>[],
-            expectedVersion || -1
+            expectedVersion || -1,
           );
         });
       return committed;
@@ -176,12 +284,12 @@ export class PostgresStore implements Store {
     const { rows } = await this._pool.query<{ stream: string; at: number }>(
       `
       SELECT stream, at
-      FROM "${this.table}_streams"
+      FROM "${this.config.schema}"."${this.config.table}_streams"
       WHERE blocked=false
       ORDER BY at ASC
       LIMIT $1::integer
       `,
-      [limit]
+      [limit],
     );
 
     const after = rows.length
@@ -203,11 +311,11 @@ export class PostgresStore implements Store {
       // insert new streams
       await client.query(
         `
-        INSERT INTO "${this.table}_streams" (stream)
+        INSERT INTO "${this.config.schema}"."${this.config.table}_streams" (stream)
         SELECT UNNEST($1::text[])
         ON CONFLICT (stream) DO NOTHING
         `,
-        [streams]
+        [streams],
       );
       // set leases
       const { rows } = await client.query<{
@@ -217,11 +325,11 @@ export class PostgresStore implements Store {
       }>(
         `
         WITH free AS (
-          SELECT * FROM "${this.table}_streams" 
+          SELECT * FROM "${this.config.schema}"."${this.config.table}_streams" 
           WHERE stream = ANY($1::text[]) AND (leased_by IS NULL OR leased_until <= NOW())
           FOR UPDATE
         )
-        UPDATE "${this.table}_streams" U
+        UPDATE "${this.config.schema}"."${this.config.table}_streams" U
         SET
           leased_by = $2::uuid,
           leased_at = $3::integer,
@@ -230,7 +338,7 @@ export class PostgresStore implements Store {
         WHERE U.stream = free.stream
         RETURNING U.stream, U.leased_at, U.retry
         `,
-        [streams, by, at, this.leaseMillis]
+        [streams, by, at, this.config.leaseMillis],
       );
       await client.query("COMMIT");
 
@@ -256,7 +364,7 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       for (const { stream, by, at, retry, block } of leases) {
         await client.query(
-          `UPDATE "${this.table}_streams"
+          `UPDATE "${this.config.schema}"."${this.config.table}_streams"
           SET
             at = $3::integer,
             retry = $4::integer,
@@ -267,7 +375,7 @@ export class PostgresStore implements Store {
           WHERE
             stream = $1::text
             AND leased_by = $2::uuid`,
-          [stream, by, at, retry, block]
+          [stream, by, at, retry, block],
         );
       }
       await client.query("COMMIT");

@@ -8,7 +8,7 @@ export const NineCounter = state(
   z.object({
     nines: z.number().int(),
     equals: z.number().int(),
-  })
+  }),
 )
   .init(() => ({ nines: 0, equals: 0 }))
   .emits({
@@ -29,7 +29,7 @@ export const NineCounter = state(
 // prettier-ignore
 async function main() {
   // to test with postgres
-  // store(new PostgresStore("calculator", 30_000));
+  // store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
   // await store().drop();
   // await store().seed();
 

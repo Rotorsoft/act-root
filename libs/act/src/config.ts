@@ -1,4 +1,3 @@
-import * as dotenv from "dotenv";
 import * as fs from "node:fs";
 import { z } from "zod/v4";
 import {
@@ -8,8 +7,6 @@ import {
   LogLevels,
 } from "./types/index.js";
 import { extend } from "./utils.js";
-
-dotenv.config();
 
 /**
  * Configuration utilities for environment, logging, and package metadata.

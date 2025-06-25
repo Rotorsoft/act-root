@@ -1,12 +1,18 @@
 import { Committed, dispose, Schemas } from "@rotorsoft/act";
 import { Pool, QueryResult } from "pg";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 import { PostgresStore } from "../src/index.js";
 
-const db = new PostgresStore("commit_error_test");
-
 const query = (
-  sql: string
+  sql: string,
 ): Promise<QueryResult<Committed<Schemas, keyof Schemas>>> => {
   const commit = sql.indexOf("COMMIT");
   if (commit > 0) return Promise.reject(Error("mocked commit error"));
@@ -30,6 +36,14 @@ const query = (
 };
 
 describe("commit error", () => {
+  let db;
+
+  beforeAll(async () => {
+    db = new PostgresStore({ port: 5431, table: "commit_error_test" });
+    await db.drop();
+    await db.seed();
+  });
+
   afterAll(async () => {
     await dispose()();
   });
@@ -49,7 +63,7 @@ describe("commit error", () => {
       db.commit("stream", [{ name: "test", data: {} }], {
         correlation: "",
         causation: {},
-      })
+      }),
     ).rejects.toThrow();
   });
 });

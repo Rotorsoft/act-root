@@ -12,7 +12,13 @@ const rand_sleep = (max = 10_000) => sleep(chance.integer({ min: 100, max }));
 
 async function main() {
   // to use pg, run `docker-compose up -d`
-  store(new PostgresStore("wolfdesk"));
+  store(
+    new PostgresStore({
+      port: 5431,
+      schema: "act",
+      table: "wolfdesk",
+    }),
+  );
   await store().drop();
   await store().seed();
 
@@ -37,7 +43,7 @@ async function main() {
       productId: randomUUID(),
       priority: chance.pickone([Priority.Low, Priority.Medium, Priority.High]),
       supportCategoryId: randomUUID(),
-    }
+    },
   );
 
   await rand_sleep(5_000);
@@ -48,7 +54,7 @@ async function main() {
       agentId: randomUUID(),
       reassignAfter: new Date(),
       escalateAfter: new Date(),
-    }
+    },
   );
 
   await rand_sleep(5_000);
@@ -59,7 +65,7 @@ async function main() {
       body: chance.name(),
       to: t1.state.userId,
       attachments: {},
-    }
+    },
   );
 
   await rand_sleep(15_000);
@@ -70,7 +76,7 @@ async function main() {
       body: chance.name(),
       to: t1.state.userId,
       attachments: {},
-    }
+    },
   );
 
   await rand_sleep(10_000);
@@ -85,7 +91,7 @@ async function main() {
         correlated[e.meta.correlation] = [];
       }
       correlated[e.meta.correlation].push(e);
-    }
+    },
   );
   Object.entries(correlated).forEach(([correlation, events]) => {
     console.log(`=== ${correlation} ===`);
@@ -93,9 +99,9 @@ async function main() {
       events
         .map(
           ({ id, name, meta }, index) =>
-            `${" ".repeat(index * 3)}${id}: ${name}${meta.causation.action ? ` (${meta.causation.action.name} by ${meta.causation.action.actor.name})` : ""}${meta.causation.event?.id ? ` <- ${meta.causation.event.id}` : ""}`
+            `${" ".repeat(index * 3)}${id}: ${name}${meta.causation.action ? ` (${meta.causation.action.name} by ${meta.causation.action.actor.name})` : ""}${meta.causation.event?.id ? ` <- ${meta.causation.event.id}` : ""}`,
         )
-        .join("\n")
+        .join("\n"),
     );
   });
 }

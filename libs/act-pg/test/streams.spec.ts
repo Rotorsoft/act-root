@@ -3,13 +3,18 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
 
-const table = "streams_test";
-const store = new PostgresStore(table, 1_000);
-
 describe("streams", () => {
+  let store;
+
   beforeAll(async () => {
-    await store.drop();
-    await store.seed();
+    store = new PostgresStore({
+      port: 5431,
+      schema: "streams_test_schema",
+      table: "streams_test",
+      leaseMillis: 1_000,
+    });
+    await store.drop(); // drop schema
+    await store.seed(); // create schema
   });
 
   afterAll(async () => {
@@ -25,7 +30,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} }
+      { correlation: "", causation: {} },
     );
 
     const { streams, events } = await store.fetch(3);
@@ -58,7 +63,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} }
+      { correlation: "", causation: {} },
     );
 
     const { events } = await store.fetch(3);
@@ -97,7 +102,7 @@ describe("streams", () => {
         { name: "event", data: { value: "2" } },
         { name: "event", data: { value: "3" } },
       ],
-      { correlation: "", causation: {} }
+      { correlation: "", causation: {} },
     );
     await store.commit(
       stream2,
@@ -105,7 +110,7 @@ describe("streams", () => {
         { name: "event", data: { value: "1" } },
         { name: "event", data: { value: "2" } },
       ],
-      { correlation: "", causation: {} }
+      { correlation: "", causation: {} },
     );
 
     const by = randomUUID();

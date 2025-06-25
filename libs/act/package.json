@@ -36,7 +36,6 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
-    "dotenv": "^16.5.0",
     "pino": "^9.7.0",
     "pino-pretty": "^13.0.0",
     "zod": "^3.25.67"
