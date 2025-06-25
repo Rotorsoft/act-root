@@ -9,6 +9,7 @@ on:
 
 env:
   NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+  SKIP_SIMPLE_GIT_HOOKS: 1
 
 jobs:
   ci:
