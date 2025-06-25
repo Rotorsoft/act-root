@@ -39,7 +39,7 @@
     "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
-    "prepare": "simple-git-hooks",
+    "prepare": "[ \"$CI\" != \"true\" ] && simple-git-hooks",
     "docs:generate": "typedoc",
     "docs:serve": "npx http-server docs -p 8080 -o",
     "docs:clean": "find docs -mindepth 1 ! -name 'examples' ! -name 'index.html' -exec rm -rf {} +"

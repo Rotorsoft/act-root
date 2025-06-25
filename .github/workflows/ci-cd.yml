@@ -9,7 +9,6 @@ on:
 
 env:
   NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-  HUSKY_SKIP_HOOKS: 1
 
 jobs:
   ci:
