@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
 
 describe("streams", () => {
-  let store;
+  let store: PostgresStore;
 
   beforeAll(async () => {
     store = new PostgresStore({

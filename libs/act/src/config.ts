@@ -10,7 +10,6 @@ import { extend } from "./utils.js";
 
 /**
  * Configuration utilities for environment, logging, and package metadata.
- * Uses dotenv and zod for validation.
  */
 
 export const PackageSchema = z.object({

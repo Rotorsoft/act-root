@@ -36,7 +36,7 @@ const query = (
 };
 
 describe("commit error", () => {
-  let db;
+  let db: PostgresStore;
 
   beforeAll(async () => {
     db = new PostgresStore({ port: 5431, table: "commit_error_test" });

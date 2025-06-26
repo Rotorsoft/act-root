@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod/v4";
-import { act, Actor, dispose, state, ZodEmpty } from "../src/index.js";
+import { act, type Actor, dispose, state, ZodEmpty } from "../src/index.js";
 
 const A1 = state("A1", z.object({}))
   .init(() => ({}))
@@ -102,11 +102,31 @@ describe("Builder", () => {
     const builder = act()
       .with(A1)
       .on("Event1")
-      .do(() => Promise.resolve())
+      .do(function voidHandler() {
+        return Promise.resolve();
+      })
       .void();
     // Access the event registry before build()
-    const reaction = builder.events.Event1.reactions.values().next().value;
-    expect(reaction.resolver({})).toBeUndefined();
+    const reaction = builder.events.Event1.reactions.get("voidHandler");
+    // The resolver should be the _void_ function from act-builder
+    const { resolver } = reaction || {};
+    // _void_ always returns undefined
+    expect(typeof resolver).toBe("function");
+    if (typeof resolver === "function") {
+      expect(
+        resolver({
+          name: "Event1",
+          data: {},
+          id: 1,
+          stream: "s",
+          version: 1,
+          created: new Date(),
+          meta: { correlation: "c", causation: {} },
+        })
+      ).toBeUndefined();
+    } else {
+      expect(resolver).toBeUndefined();
+    }
   });
 
   it("should trigger the void resolver through the Act API", async () => {
@@ -143,27 +163,125 @@ describe("Builder", () => {
       .build();
 
     const customResolver = vi.fn(() => "custom-stream");
+    function customHandler() {
+      return Promise.resolve();
+    }
 
     const builder = act()
       .with(testState)
       .on("E")
-      .do(() => Promise.resolve())
+      .do(customHandler)
       .to(customResolver);
 
     // Access the reaction and call the resolver directly
-    const reaction = builder.events.E.reactions.values().next().value;
-    reaction.resolver({ stream: "s" });
-    expect(customResolver).toHaveBeenCalled();
+    const reaction = builder.events.E.reactions.get("customHandler");
+    expect(reaction?.resolver).toBe(customResolver);
+    if (typeof reaction?.resolver === "function") {
+      expect(
+        reaction.resolver({
+          name: "E",
+          data: {},
+          id: 1,
+          stream: "s",
+          version: 1,
+          created: new Date(),
+          meta: { correlation: "c", causation: {} },
+        })
+      ).toBe("custom-stream");
+    } else {
+      expect(reaction?.resolver).toBe("custom-stream");
+    }
   });
 
   it("should execute a reaction with the default resolver (_this_)", () => {
+    function defaultHandler() {
+      return Promise.resolve();
+    }
+    const builder = act().with(A1).on("Event1").do(defaultHandler);
+
+    const reaction = builder.events.Event1.reactions.get("defaultHandler");
+    // The resolver should be the _this_ function from act-builder
+    expect(typeof reaction?.resolver).toBe("function");
+    if (typeof reaction?.resolver === "function") {
+      expect(
+        reaction.resolver({
+          name: "Event1",
+          data: {},
+          id: 1,
+          stream: "foo",
+          version: 1,
+          created: new Date(),
+          meta: { correlation: "c", causation: {} },
+        })
+      ).toBe("foo");
+    } else {
+      expect(reaction?.resolver).toBe("foo");
+    }
+  });
+
+  it("should set custom reaction options", () => {
+    function optHandler() {
+      return Promise.resolve();
+    }
+    const builder = act().with(A1).on("Event1").do(optHandler, {
+      blockOnError: false,
+      maxRetries: 1,
+      retryDelayMs: 123,
+    });
+    const reaction = builder.events.Event1.reactions.get("optHandler");
+    expect(reaction?.options).toEqual({
+      blockOnError: false,
+      maxRetries: 1,
+      retryDelayMs: 123,
+    });
+  });
+
+  it("should allow multiple reactions for the same event with different handlers", () => {
+    function handlerA() {
+      return Promise.resolve();
+    }
+    function handlerB() {
+      return Promise.resolve();
+    }
     const builder = act()
       .with(A1)
       .on("Event1")
-      .do(() => Promise.resolve());
-
-    const reaction = builder.events.Event1.reactions.values().next().value;
-    // The default resolver returns the stream property
-    expect(reaction.resolver({ stream: "abc" })).toBe("abc");
+      .do(handlerA)
+      .to(() => "streamA")
+      .on("Event1")
+      .do(handlerB)
+      .to(() => "streamB");
+    const reactionA = builder.events.Event1.reactions.get("handlerA");
+    const reactionB = builder.events.Event1.reactions.get("handlerB");
+    if (typeof reactionA?.resolver === "function") {
+      expect(
+        reactionA.resolver({
+          name: "Event1",
+          data: {},
+          id: 1,
+          stream: "streamA",
+          version: 1,
+          created: new Date(),
+          meta: { correlation: "c", causation: {} },
+        })
+      ).toBe("streamA");
+    } else {
+      expect(reactionA?.resolver).toBe("streamA");
+    }
+    if (typeof reactionB?.resolver === "function") {
+      expect(
+        reactionB.resolver({
+          name: "Event1",
+          data: {},
+          id: 1,
+          stream: "streamB",
+          version: 1,
+          created: new Date(),
+          meta: { correlation: "c", causation: {} },
+        })
+      ).toBe("streamB");
+    } else {
+      expect(reactionB?.resolver).toBe("streamB");
+    }
   });
 });
