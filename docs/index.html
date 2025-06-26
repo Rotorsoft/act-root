@@ -3,27 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Act - Functional Event Sourcing</title>
+    <title>Act - Functional Event Sourcing for TypeScript</title>
     <link
-      href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css"
+      href="https://fonts.googleapis.com/css?family=Inter:400,700,900&display=swap"
       rel="stylesheet"
     />
     <style>
       :root {
         --bg-main: #181a20;
         --bg-panel: #23262f;
-        --bg-glass: rgba(36, 37, 42, 0.85);
-        --border-glass: rgba(255, 255, 255, 0.06);
-        --accent: #ffb300;
-        --accent-fade: #ffb30033;
+        --accent: #3bb0ff;
+        --accent-fade: #3bb0ff33;
         --text-main: #f5f6fa;
         --text-muted: #a0a3b1;
-        --text-accent: #ffb300;
-        --shadow: 0 4px 32px 0 rgba(0, 0, 0, 0.25);
+        --code-green: #7cffb2;
+        --radius: 18px;
+        --shadow: 0 4px 22px 0 rgba(0, 0, 0, 0.18);
       }
       * {
-        margin: 0;
-        padding: 0;
         box-sizing: border-box;
       }
       body {
@@ -31,349 +28,469 @@
         background: var(--bg-main);
         color: var(--text-main);
         min-height: 100vh;
+        margin: 0;
         overflow-x: hidden;
       }
-      .container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 2rem;
+      a {
+        color: var(--accent);
+        text-decoration: none;
       }
+      .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.5rem;
+      }
+      /* HERO */
       .hero {
         text-align: center;
-        margin-bottom: 3rem;
+        margin-bottom: 2.2rem;
+        padding-top: 1.2rem;
+        padding-bottom: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .hero-row {
+        display: flex;
+        flex-direction: row;
+        align-items: baseline;
+        justify-content: center;
+        gap: 0.2rem;
+        flex-wrap: wrap;
+      }
+      .logo {
+        width: 64px;
+        height: 64px;
+        margin-bottom: 0.5rem;
+        display: inline-block;
+        vertical-align: middle;
       }
       .hero h1 {
-        font-size: 3.2rem;
+        font-size: 2.3rem;
         font-weight: 800;
         letter-spacing: -2px;
-        color: var(--text-main);
+        color: var(--accent);
+        margin-bottom: 0.2rem;
+        display: inline-block;
+        text-shadow:
+          0 0 16px #3bb0ff,
+          0 0 32px #3bb0ff66,
+          0 2px 8px #101114;
+        filter: brightness(1.2) drop-shadow(0 0 8px #3bb0ff88);
+        margin-right: 0.7rem;
+      }
+      .hero .subtitle {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 1.1rem;
+        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        letter-spacing: -1px;
+        text-shadow: 0 0 8px #3bb0ff44;
+        text-align: center;
+        max-width: 700px;
+        margin-left: auto;
+        margin-right: auto;
+        margin-bottom: 0;
+        margin-top: 0.1rem;
+        display: inline-block;
+      }
+      .hero-btn {
+        display: inline-block;
+        margin: 1.1rem auto 0.5rem auto;
+        padding: 0.7em 2.1em;
+        font-size: 1.13rem;
+        font-weight: 700;
+        color: #fff;
+        background: var(--accent);
+        border: none;
+        border-radius: 8px;
+        background: #04508f;
+        box-shadow: 0 2px 12px 0 #3bb0ff33;
+        cursor: pointer;
+        text-decoration: none;
+        transition:
+          background 0.18s,
+          box-shadow 0.18s,
+          transform 0.12s;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.7em;
+      }
+      .hero-btn:hover,
+      .hero-btn:focus {
+        background: #033b6a;
+        box-shadow: 0 4px 24px 0 #3bb0ff55;
+        transform: translateY(-2px) scale(1.04);
+        color: #fff;
+      }
+      /* SANDBOX */
+      .sandbox {
+        background: var(--bg-panel);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 2.2rem 1.2rem 2.2rem 1.2rem;
+        margin: 2.5rem 0 2.5rem 0;
+        text-align: center;
+      }
+      .sandbox h2 {
+        font-size: 1.5rem;
+        font-weight: 800;
+        color: var(--accent);
         margin-bottom: 0.5rem;
       }
-      .hero p {
-        font-size: 1.25rem;
+      .sandbox-desc {
         color: var(--text-muted);
-        margin-bottom: 2rem;
+        font-size: 1.13rem;
+        margin-bottom: 1.2rem;
       }
-      .demo-container {
-        background: var(--bg-glass);
-        border-radius: 18px;
-        padding: 2rem;
-        box-shadow: var(--shadow);
-        border: 1px solid var(--border-glass);
-        margin-bottom: 3rem;
+      .sandbox-iframe {
+        width: 100%;
+        height: 540px;
+        border: 0;
+        border-radius: 14px;
+        box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.18);
+        background: #101114;
+        margin-bottom: 0.5rem;
       }
-      .code-demo {
-        display: flex;
-        gap: 0.7rem;
-        align-items: stretch;
-        justify-content: flex-start;
-        flex-wrap: wrap;
-      }
-      .code-panel {
-        flex: 1;
-        min-width: 260px;
+      .sandbox-instructions {
         background: var(--bg-panel);
         border-radius: 10px;
-        padding: 0.3rem 0.3rem 0.3rem 0.4rem;
-        border: 1px solid var(--border-glass);
-        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--accent-fade);
+        color: var(--code-green);
+        font-size: 1.08rem;
+        margin: 1.2rem auto 1.7rem auto;
+        max-width: 520px;
+        padding: 0.7rem 1.2rem 0.7rem 1.2rem;
         text-align: left;
-        display: flex;
-        flex-direction: column;
-        min-height: 340px;
-        max-width: 100%;
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.08);
+        font-family:
+          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        white-space: pre-line;
+        user-select: all;
+        cursor: pointer;
       }
-      .code-panel h3 {
-        margin-bottom: 0.3rem;
-        color: var(--accent);
-        font-size: 1.1rem;
-        font-weight: 600;
-        text-align: left;
-      }
-      pre {
-        margin: 0.02rem 0 0.02rem 0;
-        padding: 0.1rem 0.1rem 0.1rem 0.1rem;
-        background: var(--bg-panel) !important;
-        border: none;
-        box-shadow: none;
-        font-size: 0.75rem;
-        font-family: "Fira Mono", "JetBrains Mono", "Menlo", "monospace";
-        line-height: 1.6;
-        color: #eaeaea;
-        text-align: left;
-        font-weight: 300;
-        overflow-x: auto;
-        border-radius: 6px;
-        flex: 1 1 auto;
-        max-width: 100%;
-      }
-      code {
+      .sandbox-instructions code {
         background: none;
-        font-size: 0.85rem;
-        font-family: inherit;
-        color: inherit;
+        color: var(--code-green);
+        border-radius: 0;
         padding: 0;
+        font-size: 1em;
+        font-family: inherit;
       }
-      .flow-diagram {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        gap: 2rem;
-        margin: 3rem 0 1rem 0;
-        flex-wrap: wrap;
-      }
-      .flow-step {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        text-align: center;
-        opacity: 0.5;
-        transition: all 0.3s cubic-bezier(0.4, 2, 0.6, 1);
-      }
-      .flow-step.active {
-        opacity: 1;
-        transform: scale(1.12);
-      }
-      .flow-step .icon {
-        width: 60px;
-        height: 60px;
-        border-radius: 50%;
-        background: var(--bg-panel);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin-bottom: 0.5rem;
-        font-size: 2.1rem;
-        border: 2px solid var(--border-glass);
-        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
-      }
-      .flow-step.active .icon {
-        background: var(--accent);
-        color: #181a20;
-        border-color: var(--accent-fade);
-      }
-      .arrow {
-        font-size: 2.2rem;
-        color: var(--accent);
-        opacity: 0.5;
-        transition: opacity 0.2s;
-      }
-      .arrow.active {
-        opacity: 1;
-        animation: pulse 1s infinite;
-      }
-      @keyframes pulse {
-        0%,
-        100% {
-          transform: scale(1);
-        }
-        50% {
-          transform: scale(1.18);
-        }
-      }
+      /* Features (trpc.io style) */
       .features {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-        gap: 2rem;
-        margin-top: 2.5rem;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2.2rem 2.2rem;
+        margin: 3.5rem 0 2.5rem 0;
+        justify-items: center;
       }
-      .feature {
+      .feature-card {
         background: var(--bg-panel);
-        border-radius: 10px;
-        padding: 1.5rem;
-        border: 1px solid var(--border-glass);
+        border-radius: 18px;
         box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+        padding: 1.2rem 1.7rem 1.2rem 1.7rem;
+        min-width: 0;
+        max-width: 370px;
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        border: 1px solid var(--accent-fade);
+        transition:
+          box-shadow 0.2s,
+          transform 0.2s;
+        justify-content: flex-start;
       }
-      .feature h3 {
-        color: var(--accent);
-        margin-bottom: 0.5rem;
-        font-weight: 600;
+      .feature-card:hover {
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.18);
+        transform: translateY(-6px) scale(1.04);
       }
-      .feature p {
-        color: var(--text-muted);
+      .feature-card-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.7em;
+        margin-bottom: 0.3rem;
+        margin-top: 0;
+        font-family:
+          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        color: var(--code-green);
       }
-      .cta {
-        text-align: center;
-        margin-top: 3rem;
+      .feature-card .icon {
+        font-size: 1.5rem;
+        margin-bottom: 0;
+        display: flex;
+        align-items: center;
+        color: var(--code-green);
+        font-family: inherit;
+        height: 1.5em;
+        padding-right: 0.2em;
       }
-      .cta-button {
+      .feature-card h3 {
+        color: var(--code-green);
+        margin-bottom: 0;
+        font-weight: 700;
+        font-size: 1.2rem;
         display: inline-block;
-        background: var(--accent);
-        color: #181a20;
-        padding: 1rem 2rem;
-        border-radius: 8px;
-        text-decoration: none;
-        font-weight: bold;
-        transition: all 0.3s cubic-bezier(0.4, 2, 0.6, 1);
-        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+        font-family: inherit;
+        line-height: 1.5em;
+        margin: 0;
       }
-      .cta-button:hover {
-        transform: translateY(-2px) scale(1.04);
-        box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+      .feature-card p {
+        color: var(--text-muted);
+        font-size: 1rem;
+        margin-bottom: 0;
+        line-height: 1.6;
+        font-family: "Menlo", "Consolas", monospace;
       }
-      @media (max-width: 768px) {
+      @media (max-width: 900px) {
+        .container {
+          padding: 0.7rem;
+        }
+        .features {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 600px) {
         .hero h1 {
-          font-size: 2.1rem;
+          font-size: 1.1rem;
         }
-        .code-demo {
-          flex-direction: column;
+        .features {
+          grid-template-columns: 1fr;
         }
-        .flow-diagram {
-          flex-direction: column;
-          gap: 1rem;
+        .feature-card {
+          padding: 0.7rem 0.4rem;
         }
-        .arrow {
-          transform: rotate(90deg);
-        }
+      }
+      /* Footer */
+      .footer {
+        margin-top: 2.5rem;
+        padding: 1.2rem 0 0.7rem 0;
+        text-align: center;
+        color: var(--text-muted);
+        font-size: 1rem;
+      }
+      /* Quickstart code panel */
+      .quickstart-panel {
+        width: 100%;
+        background: #181a20;
+        border-radius: 14px;
+        box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.18);
+        border: 1px solid var(--accent-fade);
+        margin: 2.5rem 0 2.5rem 0;
+        padding: 1.5rem 1.5rem 1.2rem 1.5rem;
+        font-family:
+          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        color: var(--code-green);
+        font-size: 1.08rem;
+        overflow-x: auto;
+        position: relative;
+      }
+      .quickstart-panel-title {
+        font-size: 1.35rem;
+        font-weight: 700;
+        color: var(--code-green);
+        margin-bottom: 0.2rem;
+        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+        letter-spacing: -1px;
+        text-shadow: 0 0 8px #3bff8392;
+      }
+      .quickstart-panel pre {
+        margin: 0;
+        background: none;
+        color: inherit;
+        font-family: inherit;
+        font-size: inherit;
+      }
+      .quickstart-panel code {
+        background: none;
+        color: inherit;
+        font-family: inherit;
+        font-size: inherit;
+        white-space: pre;
+        display: block;
+        font-size: smaller;
       }
     </style>
   </head>
   <body>
     <div class="container">
-      <div class="hero">
-        <h1>Act</h1>
-        <p>Functional event sourcing and state machines in TypeScript</p>
-      </div>
-      <div class="demo-container">
-        <div class="code-demo">
-          <div class="code-panel">
-            <pre><code class="language-ts">// Define a state machine
-const Counter = state("Counter", z.object({
-  count: z.number()
-}))
-  .init(() => ({ count: 0 }))
-  .emits({ 
-    Incremented: z.object({ amount: z.number() }) 
-  })
-  .patch({
-    Incremented: (event, state) => ({
-      count: state.count + event.amount
-    })
-  })
-  .on("increment", z.object({ by: z.number() }))
-  .emit((action) => ["Incremented", { amount: action.by }])
-  .build();
-</code></pre>
-          </div>
-          <div class="code-panel">
-            <pre><code class="language-ts">// Create and use your app
-const app = act().with(Counter).build();
-
-// Execute actions
-await app.do("increment", {
-  stream: "counter1",
-  actor: { id: "user1" }
-}, { by: 5 });
-
-// Load current state
-const state = await app.load(Counter, "counter1");
-console.log(state.state); // { count: 5 }
-</code></pre>
-          </div>
+      <!-- HERO -->
+      <section class="hero section">
+        <div class="hero-row">
+          <!-- SVG LOGO: 3D box with triangles inside -->
+          <svg
+            class="logo"
+            viewBox="0 0 64 64"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <rect x="8" y="16" width="48" height="32" rx="8" fill="#23262f" />
+            <polygon
+              points="24,44 16,32 32,32"
+              fill="#2196f3"
+              fill-opacity="0.85"
+            />
+            <polygon
+              points="40,44 32,32 48,32"
+              fill="#ffb300"
+              fill-opacity="0.85"
+            />
+            <polygon
+              points="32,20 24,32 40,32"
+              fill="#43a047"
+              fill-opacity="0.85"
+            />
+          </svg>
+          <h1>Act</h1>
+          <div class="subtitle">Fluent Event Sourcing for Typescript</div>
         </div>
-        <div class="flow-diagram">
-          <div class="flow-step" id="step1">
-            <div class="icon">🎯</div>
-            <div>Action</div>
-          </div>
-          <div class="arrow" id="arrow1">→</div>
-          <div class="flow-step" id="step2">
-            <div class="icon">🗃️</div>
-            <div>State</div>
-          </div>
-          <div class="arrow" id="arrow2">→</div>
-          <div class="flow-step" id="step3">
-            <div class="icon">📝</div>
-            <div>Event</div>
-          </div>
-          <div class="arrow" id="arrow3">→</div>
-          <div class="flow-step" id="step4">
-            <div class="icon">🔌</div>
-            <div>Reaction</div>
-          </div>
+        <a
+          class="hero-btn"
+          href="https://github.com/rotorsoft/act-root"
+          target="_blank"
+          rel="noopener"
+        >
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+            style="
+              display: inline-block;
+              vertical-align: middle;
+              fill: currentColor;
+            "
+          >
+            <path
+              d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.157-1.11-1.465-1.11-1.465-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.987 1.029-2.686-.103-.254-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.295 2.748-1.025 2.748-1.025.546 1.378.202 2.396.1 2.65.64.699 1.028 1.593 1.028 2.686 0 3.847-2.338 4.695-4.566 4.944.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.749 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2Z"
+            />
+          </svg>
+          GitHub Repo
+        </a>
+      </section>
+
+      <!-- QUICKSTART PANEL -->
+      <section class="quickstart-panel" aria-label="Quickstart">
+        <div class="quickstart-panel-title">StackBlitz Quickstart</div>
+        <pre><code>
+# After StackBlitz finishes installing dependencies, build the monorepo...
+$ pnpm build
+
+# Run the calculator example (with verbose logging)...
+$ LOG_LEVEL=trace pnpm dev:calculator
+</code></pre>
+      </section>
+
+      <!-- SANDBOX SECTION: Calculator Example -->
+      <section class="sandbox section">
+        <iframe
+          class="sandbox-iframe"
+          src="https://stackblitz.com/github/rotorsoft/act-root?embed=1&view=editor&file=libs/act-examples/src/calculator/main.ts&hideNavigation=1"
+          allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+          sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+        ></iframe>
+        <div style="margin-top: 0.7rem">
+          <a
+            href="https://stackblitz.com/github/rotorsoft/act-root?file=libs/act-examples/src/calculator/main.ts"
+            target="_blank"
+            class="btn btn-primary"
+            style="margin-right: 0.7rem"
+            >Open in StackBlitz</a
+          >
+          <a
+            href="https://github.com/rotorsoft/act-root/tree/master/libs/act-examples/src/calculator"
+            target="_blank"
+            class="btn btn-secondary"
+            >Source on GitHub</a
+          >
         </div>
-      </div>
-      <div class="features">
-        <div class="feature">
-          <h3>⚡ Functional Event Sourcing</h3>
+      </section>
+
+      <!-- FEATURES (trpc.io style, compact, modern) -->
+      <section class="features section">
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">⚡</span>
+            <h3>Functional Event Sourcing</h3>
+          </div>
           <p>
             Every state change is a pure function of previous state and events.
             Immutability and replayability by design.
           </p>
         </div>
-        <div class="feature">
-          <h3>💡 State Machines</h3>
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">💡</span>
+            <h3>Composable State Machines</h3>
+          </div>
           <p>
             Model your domain as composable, strongly-typed state machines. No
             classes, just functions and data.
           </p>
         </div>
-        <div class="feature">
-          <h3>🛡️ TypeScript Native</h3>
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">🛡️</span>
+            <h3>TypeScript Native</h3>
+          </div>
           <p>
             Type safety and inference everywhere. Catch errors at compile time,
             not at runtime.
           </p>
         </div>
-        <div class="feature">
-          <h3>🔄 Reactive by Default</h3>
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">🔄</span>
+            <h3>Reactive by Default</h3>
+          </div>
           <p>
             Reactions let you build event-driven flows and side effects with
             ease.
           </p>
         </div>
-        <div class="feature">
-          <h3>🔌 Pluggable Storage</h3>
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">🔌</span>
+            <h3>Postgres Adapter Included</h3>
+          </div>
           <p>
-            Swap out storage backends without changing your domain logic.
-            In-memory, Postgres, and more.
+            Production-ready Postgres adapter for scalable, persistent event
+            storage. Switch between in-memory and Postgres with a single line of
+            code.
           </p>
         </div>
-        <div class="feature">
-          <h3>🧩 Minimal & Composable</h3>
+        <div class="feature-card">
+          <div class="feature-card-row">
+            <span class="icon">🧩</span>
+            <h3>Minimal Footprint</h3>
+          </div>
           <p>
-            Small API surface, no magic. Compose, extend, and test with
-            confidence.
+            Minimal and dependency-light. No codegen, no runtime bloat, and a
+            tiny bundle size.
           </p>
         </div>
-      </div>
-      <div class="cta">
-        <a href="https://github.com/rotorsoft/act-root" class="cta-button"
-          >Get Started</a
-        >
-      </div>
+      </section>
+      <!-- FOOTER -->
+      <footer class="footer">
+        <div>
+          <a
+            href="https://github.com/Rotorsoft/act-root/tree/master/docs"
+            target="_blank"
+            >Docs</a
+          >
+          &bull;
+          <a href="https://github.com/rotorsoft/act-root" target="_blank"
+            >GitHub</a
+          >
+          &bull; MIT License
+        </div>
+        <div style="margin-top: 0.5rem">
+          &copy; 2024 Rotorsoft. All rights reserved.
+        </div>
+      </footer>
     </div>
-    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
-    <script>
-      // Animation logic
-      const steps = ["step1", "step2", "step3", "step4"];
-      const arrows = ["arrow1", "arrow2", "arrow3"];
-      let currentStep = 0;
-      function animateStep() {
-        steps.forEach((step) => {
-          document.getElementById(step).classList.remove("active");
-        });
-        arrows.forEach((arrow) => {
-          document.getElementById(arrow).classList.remove("active");
-        });
-        document.getElementById(steps[currentStep]).classList.add("active");
-        if (currentStep < arrows.length) {
-          document.getElementById(arrows[currentStep]).classList.add("active");
-        }
-        currentStep = (currentStep + 1) % steps.length;
-      }
-      setInterval(animateStep, 2000);
-      animateStep();
-      document.querySelectorAll(".feature").forEach((feature) => {
-        feature.addEventListener("mouseenter", () => {
-          feature.style.transform = "translateY(-5px)";
-          feature.style.transition = "transform 0.3s cubic-bezier(.4,2,.6,1)";
-        });
-        feature.addEventListener("mouseleave", () => {
-          feature.style.transform = "translateY(0)";
-        });
-      });
-    </script>
   </body>
 </html>
