@@ -1,8 +1,8 @@
-node_modules
-dist
-coverage
+node_modules/
+dist/
+coverage/
+.postgres/
 *.env
-.DS_Store
 .npmrc
 local.db*
-.postgres
+.DS_Store
