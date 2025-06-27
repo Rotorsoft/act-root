@@ -27,4 +27,4 @@ This example demonstrates a ticketing system (WolfDesk) built with the Act Frame
 
 See the source files above for implementation details and usage examples.
 
-[API Reference (act)](../api/act.src.md)
+[API Reference (act)](../api/act.src)

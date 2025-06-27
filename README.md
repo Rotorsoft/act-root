@@ -71,7 +71,7 @@ export const NineCounter = state(
   z.object({
     nines: z.number().int(),
     equals: z.number().int(),
-  }),
+  })
 )
   .init(() => ({ nines: 0, equals: 0 }))
   .emits({
@@ -107,7 +107,7 @@ async function main() {
         "Count",
         { stream, actor },
         { key: event.data.digit },
-        event,
+        event
       );
     })
     .to(() => "Counter")
@@ -218,36 +218,36 @@ export const app = builder
 const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
 
 export async function assign(
-  event: AsCommitted<typeof builder.events, "TicketOpened">,
+  event: AsCommitted<typeof builder.events, "TicketOpened">
 ) {
   const agent = assignAgent(
     event.stream,
     event.data.supportCategoryId,
-    event.data.priority,
+    event.data.priority
   );
   await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
 }
 
 export async function deliver(
-  event: AsCommitted<typeof builder.events, "MessageAdded">,
+  event: AsCommitted<typeof builder.events, "MessageAdded">
 ) {
   await deliverMessage(event.data);
   await app.do(
     "MarkMessageDelivered",
     { stream: event.stream, actor },
     { messageId: event.data.messageId },
-    event,
+    event
   );
 }
 
 export async function escalate(
-  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">,
+  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
 ) {
   await app.do(
     "EscalateTicket",
     { stream: event.stream, actor },
     event.data,
-    event,
+    event
   );
 }
 ```

@@ -12,6 +12,6 @@ A fluent API for composing applications with states and reactions. Use ActBuilde
 
 Define state machines with actions, events, and validation logic. StateBuilder provides a type-safe way to model your domain, specify how actions produce events, and how events update state.
 
-[API Reference (act)](../api/act.src.md)
+[API Reference (act)](../api/act.src)
 
-[API Reference (act-pg)](../api/act-pg.md)
+[API Reference (act-pg)](../api/act-pg)

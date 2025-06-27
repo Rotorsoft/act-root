@@ -12,4 +12,4 @@ Configure your application for different environments (development, production, 
 
 Structured logging and debugging tools are provided to help you monitor and troubleshoot your application.
 
-[API Reference (act)](../api/act.src.md)
+[API Reference (act)](../api/act.src)

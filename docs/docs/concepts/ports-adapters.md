@@ -12,4 +12,4 @@ Pluggable storage backends allow you to use different databases or event stores 
 
 Lifecycle management for external resources, such as database connections or message queues, is handled through a consistent interface.
 
-[API Reference (act)](../api/act.src.md)
+[API Reference (act)](../api/act.src)

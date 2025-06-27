@@ -15,15 +15,15 @@ const config: Config = {
   },
 
   // Set the production url of your site here
-  url: "https://your-docusaurus-site.example.com",
+  url: "https://rotorsoft.github.io",
   // Set the /<baseUrl>/ pathname under which your site is served
   // For GitHub pages deployment, it is often '/<projectName>/'
-  baseUrl: "/",
+  baseUrl: "/act-root/docs/",
 
   // GitHub pages deployment config.
   // If you aren't using GitHub pages, you don't need these.
-  organizationName: "facebook", // Usually your GitHub org/user name.
-  projectName: "docusaurus", // Usually your repo name.
+  organizationName: "rotorsoft", // Usually your GitHub org/user name.
+  projectName: "act-root", // Usually your repo name.
 
   onBrokenLinks: "warn",
   onBrokenMarkdownLinks: "warn",
@@ -42,8 +42,7 @@ const config: Config = {
       {
         docs: {
           sidebarPath: require.resolve("./sidebars.ts"),
-          editUrl:
-            "https://github.com/facebook/docusaurus/tree/main/packages/create-docusaurus/templates/shared/",
+          editUrl: "https://github.com/rotorsoft/act-root/edit/master/docs/",
         },
         theme: {
           customCss: "./src/css/custom.css",
@@ -53,13 +52,13 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: "img/docusaurus-social-card.jpg",
+    image: "img/logo.svg",
     navbar: {
       title: "Act",
       logo: {
         alt: "Act Logo",
         src: "img/logo.svg",
-        href: "https://github.com/rotorsoft/act-root/",
+        href: "https://rotorsoft.github.io/act-root/",
       },
       items: [
         {

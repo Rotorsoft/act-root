@@ -1,6 +1,7 @@
 # Event Sourcing
 
 ## Background
+
 Event sourcing is a design pattern in which all changes to application state are stored as a sequence of events. This provides a complete audit trail, enables state reconstruction at any point in time, and supports advanced scenarios like temporal queries and projections. By persisting events in an append-only store, the framework ensures data integrity and enables powerful analytics and debugging capabilities.
 
 ## Event Storage
@@ -15,4 +16,4 @@ Snapshots can be used to optimize state reconstruction for aggregates with long 
 
 Query event streams for analysis, debugging, or building projections.
 
-[API Reference (act)](../api/act.src.md)
+[API Reference (act)](../api/act.src)
