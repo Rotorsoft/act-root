@@ -1,0 +1,65 @@
+name: Deploy Docusaurus Docs
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docs:
+              - 'libs/act/src/**'
+              - 'libs/act-pg/src/**'
+              - 'docs/typedoc.json'
+              - 'docs/docs/**'
+              - 'docs/docusaurus.config.ts'
+              - 'docs/package.json'
+              - 'docs/sidebars.ts'
+
+  deploy:
+    needs: filter
+    if: needs.filter.outputs.docs == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install dependencies
+        run: |
+          cd docs
+          pnpm install
+
+      - name: Generate API docs with TypeDoc
+        run: |
+          cd docs
+          pnpm run typedoc
+
+      - name: Build Docusaurus site
+        run: |
+          cd docs
+          pnpm run build
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: docs/build 
