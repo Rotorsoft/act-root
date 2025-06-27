@@ -11,6 +11,12 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@rotorsoft/*": [
+        "libs/*/src"
+      ],
+    }
   },
   "exclude": [
     "**/node_modules",
