@@ -201,10 +201,10 @@ export class Act<
       // correlate events to streams by reaction resolvers
       const resolved = new Set<string>(streams);
       const correlated = new Map<string, ReactionPayload<E>[]>();
-      for (const event of events)
-        for (const reaction of this.registry.events[
-          event.name
-        ].reactions.values()) {
+      for (const event of events) {
+        const register = this.registry.events[event.name];
+        if (!register) continue; // skip events with no registered reactions
+        for (const reaction of register.reactions.values()) {
           const stream =
             typeof reaction.resolver === "string"
               ? reaction.resolver
@@ -216,6 +216,7 @@ export class Act<
             ).push({ ...reaction, event: event });
           }
         }
+      }
 
       // lease fetched & resolved streams to the position of the last fetched event
       const last = events.at(-1)!.id;

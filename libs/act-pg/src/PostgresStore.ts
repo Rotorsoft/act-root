@@ -297,7 +297,10 @@ export class PostgresStore implements Store {
       : -1;
 
     const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => events.push(e), { after, limit });
+    await this.query<E>((e) => e.name !== SNAP_EVENT && events.push(e), {
+      after,
+      limit,
+    });
     return { streams: rows.map(({ stream }) => stream), events };
   }
 

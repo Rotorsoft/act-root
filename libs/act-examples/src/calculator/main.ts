@@ -1,98 +1,134 @@
-import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
+import {
+  act,
+  Actor,
+  config,
+  InvariantError,
+  sleep,
+  state,
+} from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod/v4";
-import { Calculator, KEYS } from "./calculator.js";
+import { Calculator, DIGITS, KEYS } from "./calculator.js";
 
-export const NineCounter = state(
-  "NineCounter",
-  z.object({
-    nines: z.number().int(),
-    equals: z.number().int(),
-  })
+/**
+ * Type for the projection board state: a count for each digit key (0-9)
+ */
+export type BoardState = Record<(typeof DIGITS)[number], number>;
+
+/**
+ * DigitBoard state: tracks the count of each digit key pressed (0-9)
+ */
+export const DigitBoard = state(
+  "DigitBoard",
+  z.object(
+    Object.fromEntries(DIGITS.map((d) => [d, z.number().int().default(0)]))
+  )
 )
-  .init(() => ({ nines: 0, equals: 0 }))
-  .emits({
-    NineCounted: ZodEmpty,
-    EqualCounted: ZodEmpty,
-  })
+  .init(() => Object.fromEntries(DIGITS.map((d) => [d, 0])) as BoardState)
+  .emits({ DigitCounted: z.object({ digit: z.enum(DIGITS) }) })
   .patch({
-    NineCounted: (_, state) => ({ nines: (state.nines || 0) + 1 }),
-    EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
+    DigitCounted: ({ data }, state) => ({
+      ...state,
+      [data.digit]: (state as BoardState)[data.digit] + 1,
+    }),
   })
-  .on("Count", z.object({ key: z.enum(KEYS) }))
-  .emit(({ key }) => {
-    if (key === "9") return ["NineCounted", {}];
-    if (key === "=") return ["EqualCounted", {}];
-  })
+  .on("CountDigit", z.object({ digit: z.enum(DIGITS) }))
+  .emit(({ digit }) => ["DigitCounted", { digit }])
   .build();
 
-// prettier-ignore
 async function main() {
   // to test with postgres
   // store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
   // await store().drop();
   // await store().seed();
 
+  console.log(config());
+
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
-  
+
+  // Build the app with Calculator and DigitBoard
   const app = act()
     .with(Calculator)
-    .with(NineCounter)
-    
-    .on("DigitPressed").do(async function CountNines(event, stream) {
-      await app.do("Count", { stream, actor }, { key: event.data.digit }, event);
-    }).to(() => "Counter")
-    .on("EqualsPressed").do(async function CountEquals(event, stream) {
-      await app.do( "Count", { stream, actor }, { key: "=" }, event);
-    }).to(() => "Counter")
-
-    .on("EqualCounted").do(async function ShowMessage({ stream }) { 
-      await sleep();
-      console.log(`Equals counted on ${stream}`);
-    }).void()
-    
+    .with(DigitBoard)
+    // React to every digit pressed and update the projection board
+    .on("DigitPressed")
+    .do(async function CountDigits(event) {
+      await app.do(
+        "CountDigit",
+        { stream: "Board", actor },
+        { digit: event.data.digit },
+        event
+      );
+    })
+    .to(() => "Board")
     .build();
 
-  // drain on commit
-  app.on("committed", () => {
-    void app.drain();
+  // On every drain, print the digit counts as a table
+  app.on("drained", async () => {
+    const board = await app.load(DigitBoard, "Board");
+    const state = board.state as BoardState;
+    console.clear();
+    console.log("\n=== Digit Board ===");
+    // Print as a 3x3 matrix (digits 1-9)
+    let matrix = "";
+    for (let row = 0; row < 3; row++) {
+      let line = "";
+      for (let col = 0; col < 3; col++) {
+        const digit = (row * 3 + col + 1).toString() as keyof BoardState;
+        line += (state[digit] ?? 0).toString().padStart(3, " ") + " ";
+      }
+      matrix += line + "\n";
+    }
+    console.log(matrix);
+    // Print the calculator state after the digit board
+    const calc = await app.load(Calculator, "A");
+    console.log("=== Calculator State ===");
+    console.table(calc.state);
   });
 
-  // drain on a schedule
-  setInterval(() => {
-    void app.drain();
-  }, 1_000);
+  // Helper: pick a random key from KEYS
+  const randomKey = () => KEYS[Math.floor(Math.random() * KEYS.length)];
 
-  // log drains
-  app.on("drained", (drained) => {
-    console.log("Drained:", drained);
-  });
+  // Helper: when to stop the loop
+  async function shouldStop() {
+    const board = await app.load(DigitBoard, "Board");
+    const state = board.state as BoardState;
+    return DIGITS.some((d) => state[d] > 3);
+  }
 
-  const calc1 = "A";
-  const calc2 = "B";
+  // Main loop: press random keys until any digit reaches 10
+  while (true) {
+    const key = randomKey();
+    try {
+      await app.do("PressKey", { stream: "A", actor }, { key });
+    } catch (err) {
+      if (err instanceof InvariantError) {
+        console.log("[InvariantError]", err.message);
+        continue;
+      } else {
+        err instanceof Error && console.log(err.message);
+        continue;
+      }
+    }
+    await sleep(1000); // slow down for demo
+    await app.drain();
+    if (await shouldStop()) {
+      console.log("Stopping demo.\n");
+      break;
+    }
+  }
 
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "+" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "*" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "+" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "=" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "=" });
+  // Show final calculator state
+  const calc = await app.load(Calculator, "A");
+  console.log("\nFinal Calculator State:", calc.state);
 
-  console.log(calc1, await app.load(Calculator, calc1));
-  console.log(calc2, await app.load(Calculator, calc2));
-
-  setInterval(async () => {
-    const counter = await app.load(NineCounter, "Counter");
-    console.log("Counter", counter.state);
-  }, 1_000);
+  // Print a table of all recorded events for stream 'A'
+  const recorded: any[] = [];
+  await app.query({ stream: "A" }, (event) => recorded.push(event));
+  console.log("\nAll Recorded Events for stream 'A':");
+  console.table(
+    recorded.map((e) => ({ name: e.name, data: e.data, timestamp: e.created }))
+  );
 }
 
 void main();

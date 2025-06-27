@@ -34,7 +34,7 @@
     "clean": "rm -rf dist",
     "types": "tsc --build --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
-    "dev:calculator": "tsx watch src/calculator/main.ts",
+    "dev:calculator": "LOG_LEVEL=trace tsx watch src/calculator/main.ts",
     "dev:wolfdesk": "pnpm drizzle:migrate && tsx watch src/wolfdesk/main.ts",
     "drizzle:migrate": "npx drizzle-kit generate && npx drizzle-kit migrate",
     "drizzle:push": "npx drizzle-kit push",
