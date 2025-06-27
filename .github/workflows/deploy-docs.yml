@@ -24,6 +24,7 @@ jobs:
               - 'docs/docusaurus.config.ts'
               - 'docs/package.json'
               - 'docs/sidebars.ts'
+              - 'docs/static/**'
 
   deploy:
     needs: filter
