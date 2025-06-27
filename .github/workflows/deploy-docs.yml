@@ -32,31 +32,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'pnpm'
-
-      - name: Install pnpm
+      - name: install pnpm
         uses: pnpm/action-setup@v4
         with:
           run_install: false
 
+      - name: install node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
       - name: Install dependencies
-        run: |
-          cd docs
-          pnpm install
+        run: pnpm install
 
       - name: Generate API docs with TypeDoc
-        run: |
-          cd docs
-          pnpm run typedoc
+        run: pnpm -F docs typedoc
 
       - name: Build Docusaurus site
-        run: |
-          cd docs
-          pnpm run build
+        run: pnpm -F docs build
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
