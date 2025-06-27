@@ -53,14 +53,16 @@
       .hero-row {
         display: flex;
         flex-direction: row;
-        align-items: baseline;
+        align-items: center;
         justify-content: center;
         gap: 0.2rem;
         flex-wrap: wrap;
+        margin-top: 0.3rem;
+        margin-bottom: 0.3rem;
       }
       .logo {
-        width: 64px;
-        height: 64px;
+        width: 80px;
+        height: 80px;
         margin-bottom: 0.5rem;
         display: inline-block;
         vertical-align: middle;
@@ -70,14 +72,14 @@
         font-weight: 800;
         letter-spacing: -2px;
         color: var(--accent);
-        margin-bottom: 0.2rem;
         display: inline-block;
         text-shadow:
-          0 0 16px #3bb0ff,
-          0 0 32px #3bb0ff66,
-          0 2px 8px #101114;
-        filter: brightness(1.2) drop-shadow(0 0 8px #3bb0ff88);
+          0 0 10px #3bb0ff66,
+          0 2px 8px #10111444;
+        filter: brightness(1.12) drop-shadow(0 0 4px #3bb0ff44);
         margin-right: 0.7rem;
+        margin-top: 0.1em;
+        margin-bottom: 0.1em;
       }
       .hero .subtitle {
         font-size: 1.35rem;
@@ -97,7 +99,6 @@
       }
       .hero-btn {
         display: inline-block;
-        margin: 1.1rem auto 0.5rem auto;
         padding: 0.7em 2.1em;
         font-size: 1.13rem;
         font-weight: 700;
@@ -126,10 +127,6 @@
       }
       /* SANDBOX */
       .sandbox {
-        background: var(--bg-panel);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow);
-        padding: 2.2rem 1.2rem 2.2rem 1.2rem;
         margin: 2.5rem 0 2.5rem 0;
         text-align: center;
       }
@@ -256,9 +253,6 @@
         .hero h1 {
           font-size: 1.1rem;
         }
-        .features {
-          grid-template-columns: 1fr;
-        }
         .feature-card {
           padding: 0.7rem 0.4rem;
         }
@@ -274,12 +268,7 @@
       /* Quickstart code panel */
       .quickstart-panel {
         width: 100%;
-        background: #181a20;
-        border-radius: 14px;
-        box-shadow: 0 2px 16px 0 rgba(0, 0, 0, 0.18);
-        border: 1px solid var(--accent-fade);
         margin: 2.5rem 0 2.5rem 0;
-        padding: 1.5rem 1.5rem 1.2rem 1.5rem;
         font-family:
           "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
         color: var(--code-green);
@@ -291,7 +280,6 @@
         font-size: 1.35rem;
         font-weight: 700;
         color: var(--code-green);
-        margin-bottom: 0.2rem;
         font-family: "Inter", "Segoe UI", Arial, sans-serif;
         letter-spacing: -1px;
         text-shadow: 0 0 8px #3bff8392;
@@ -368,7 +356,7 @@
               d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.157-1.11-1.465-1.11-1.465-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.987 1.029-2.686-.103-.254-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.295 2.748-1.025 2.748-1.025.546 1.378.202 2.396.1 2.65.64.699 1.028 1.593 1.028 2.686 0 3.847-2.338 4.695-4.566 4.944.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.749 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2Z"
             />
           </svg>
-          GitHub Repo
+          GitHub
         </a>
       </section>
 
@@ -376,11 +364,7 @@
       <section class="quickstart-panel" aria-label="Quickstart">
         <div class="quickstart-panel-title">StackBlitz Quickstart</div>
         <pre><code>
-# After StackBlitz finishes installing dependencies, build the monorepo...
-$ pnpm build
-
-# Run the calculator example (with verbose logging)...
-$ LOG_LEVEL=trace pnpm dev:calculator
+> pnpm dev:calculator
 </code></pre>
       </section>
 
@@ -413,7 +397,23 @@ $ LOG_LEVEL=trace pnpm dev:calculator
       <section class="features section">
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">⚡</span>
+            <span class="icon">
+              <!-- zap (lightning bolt) -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon
+                  points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+                ></polygon>
+              </svg>
+            </span>
             <h3>Functional Event Sourcing</h3>
           </div>
           <p>
@@ -423,7 +423,23 @@ $ LOG_LEVEL=trace pnpm dev:calculator
         </div>
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">💡</span>
+            <span class="icon">
+              <!-- layers (stacked layers) -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+              </svg>
+            </span>
             <h3>Composable State Machines</h3>
           </div>
           <p>
@@ -433,7 +449,21 @@ $ LOG_LEVEL=trace pnpm dev:calculator
         </div>
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">🛡️</span>
+            <span class="icon">
+              <!-- shield -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              </svg>
+            </span>
             <h3>TypeScript Native</h3>
           </div>
           <p>
@@ -443,7 +473,24 @@ $ LOG_LEVEL=trace pnpm dev:calculator
         </div>
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">🔄</span>
+            <span class="icon">
+              <!-- refresh-cw (circular arrows) -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <polyline points="1 20 1 14 7 14"></polyline>
+                <path d="M3.51 9a9 9 0 0 1 14.13-3.36L23 10"></path>
+                <path d="M20.49 15a9 9 0 0 1-14.13 3.36L1 14"></path>
+              </svg>
+            </span>
             <h3>Reactive by Default</h3>
           </div>
           <p>
@@ -453,7 +500,23 @@ $ LOG_LEVEL=trace pnpm dev:calculator
         </div>
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">🔌</span>
+            <span class="icon">
+              <!-- database -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                <path d="M21 5v14c0 1.66-4.03 3-9 3s-9-1.34-9-3V5"></path>
+                <path d="M3 12c0 1.66 4.03 3 9 3s9-1.34 9-3"></path>
+              </svg>
+            </span>
             <h3>Postgres Adapter Included</h3>
           </div>
           <p>
@@ -464,7 +527,25 @@ $ LOG_LEVEL=trace pnpm dev:calculator
         </div>
         <div class="feature-card">
           <div class="feature-card-row">
-            <span class="icon">🧩</span>
+            <span class="icon">
+              <!-- package (puzzle/package) -->
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path
+                  d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73z"
+                ></path>
+                <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                <line x1="12" y1="22.08" x2="12" y2="12"></line>
+              </svg>
+            </span>
             <h3>Minimal Footprint</h3>
           </div>
           <p>
