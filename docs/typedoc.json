@@ -1,0 +1,37 @@
+{
+  "entryPoints": [
+    "../libs/act/src/index.ts",
+    "../libs/act-pg/src/index.ts"
+  ],
+  "out": "docs/api",
+  "exclude": [
+    "../packages/**",
+    "../libs/act-examples/**",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "**/node_modules/**"
+  ],
+  "excludePrivate": true,
+  "excludeProtected": true,
+  "excludeExternals": true,
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "defaultCategory": "Other",
+  "theme": "default",
+  "name": "Act Framework Documentation",
+  "readme": "none",
+  "plugin": [
+    "typedoc-plugin-markdown"
+  ],
+  "flattenOutputFiles": true,
+  "hideGenerator": true,
+  "sort": [
+    "source-order"
+  ],
+  "searchInComments": true,
+  "validation": {
+    "invalidLink": true,
+    "notExported": true
+  },
+  "tsconfig": "./tsconfig.json"
+}

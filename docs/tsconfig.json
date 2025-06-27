@@ -1,0 +1,17 @@
+{
+  // This file is not used in compilation. It is here just for a nice editor experience.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "baseUrl": "..",
+    "paths": {
+      "@rotorsoft/act": [
+        "libs/act/src/index.ts"
+      ],
+    }
+  },
+  "include": [
+    "../libs/act/src/**/*",
+    "../libs/act-pg/src/**/*"
+  ]
+}

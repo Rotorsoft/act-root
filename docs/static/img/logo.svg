@@ -1,0 +1,22 @@
+<svg class="logo"
+  viewBox="0 0 64 64"
+  fill="none"
+  xmlns="http://www.w3.org/2000/svg"
+>
+  <rect x="8" y="16" width="48" height="32" rx="8" fill="#23262f" />
+  <polygon
+    points="24,44 16,32 32,32"
+    fill="#2196f3"
+    fill-opacity="0.85"
+  />
+  <polygon
+    points="40,44 32,32 48,32"
+    fill="#ffb300"
+    fill-opacity="0.85"
+  />
+  <polygon
+    points="32,20 24,32 40,32"
+    fill="#43a047"
+    fill-opacity="0.85"
+  />
+</svg>

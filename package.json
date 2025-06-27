@@ -41,10 +41,7 @@
     "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
-    "prepare": "simple-git-hooks",
-    "docs:generate": "typedoc",
-    "docs:serve": "npx http-server docs -p 8080 -o",
-    "docs:clean": "find docs -mindepth 1 ! -name 'examples' ! -name 'index.html' -exec rm -rf {} +"
+    "prepare": "simple-git-hooks"
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
@@ -72,8 +69,6 @@
     "tsconfig-paths": "^4.2.0",
     "tsup": "^8.0.0",
     "tsx": "^4.20.3",
-    "typedoc": "^0.28.5",
-    "typedoc-plugin-markdown": "^4.7.0",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vite-tsconfig-paths": "^5.1.4",
