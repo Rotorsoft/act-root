@@ -19,12 +19,7 @@ jobs:
             docs:
               - 'libs/act/src/**'
               - 'libs/act-pg/src/**'
-              - 'docs/typedoc.json'
-              - 'docs/docs/**'
-              - 'docs/docusaurus.config.ts'
-              - 'docs/package.json'
-              - 'docs/sidebars.ts'
-              - 'docs/static/**'
+              - 'docs/**'
 
   deploy:
     needs: filter
@@ -47,11 +42,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Generate API docs with TypeDoc
-        run: pnpm -F docs typedoc
-
       - name: Build Docusaurus site
-        run: pnpm -F docs build
+        run: pnpm -F docs build:all
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
