@@ -11,7 +11,7 @@ export default defineConfig({
       reporter: ["text", "lcov", "html"],
       reportsDirectory: "./coverage",
       include: ["libs/**/src/**/*.ts"],
-      exclude: ["**/node_modules/**", "libs/act-examples"],
+      exclude: ["**/node_modules/**", "packages/**"],
       thresholds: {
         branches: 90,
         functions: 95,

@@ -1,4 +1,25 @@
-# Act
+# act
+
+Monorepo for the act framework and examples.
+
+## Packages
+
+- `libs/act` - Core act framework
+- `libs/act-pg` - PostgreSQL adapter for act
+- `packages/client` - Example client app
+- `packages/server` - Example server app
+- `packages/calculator` - Calculator example (standalone)
+- `packages/wolfdesk` - Wolfdesk example (standalone)
+
+## Development
+
+- Run `pnpm install` to install dependencies
+- Use `pnpm -F <package> build` to build a specific package
+- Use `pnpm dev` or `pnpm start` in the relevant package for development
+
+## Cleaning
+
+- Use `pnpm scrub` to clean all build artifacts and node_modules
 
 ![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
@@ -58,7 +79,7 @@ To demonstrate the capabilities of this framework, we provide a library of examp
 
 ### Calculator
 
-The first example is a simple [calculator](./libs/act-examples/src/calculator/) where actions represent key presses, and a counter tracks how many times the "9" and "=" keys have been pressed in response to events.
+The first example is a simple [calculator](./packages/calculator/src/) where actions represent key presses, and a counter tracks how many times the "9" and "=" keys have been pressed in response to events.
 
 ```ts
 import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
@@ -173,7 +194,7 @@ void main();
 
 ### WolfDesk
 
-The second example is a reference implementation of the [WolfDesk](./libs/act-examples/src//wolfdesk/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
+The second example is a reference implementation of the [WolfDesk](./packages/wolfdesk/src/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
 
 ```ts
 import { act, Actor } from "@rotorsoft/act";

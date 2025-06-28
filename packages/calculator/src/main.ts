@@ -122,12 +122,18 @@ async function main() {
   const calc = await app.load(Calculator, "A");
   console.log("\nFinal Calculator State:", calc.state);
 
-  // Print a table of all recorded events for stream 'A'
-  const recorded: any[] = [];
-  await app.query({ stream: "A" }, (event) => recorded.push(event));
-  console.log("\nAll Recorded Events for stream 'A':");
+  // Print a table of all recorded events for all streams
+  const allEvents: any[] = [];
+  await app.query({}, (event) => allEvents.push(event));
+  console.log("\nAll Recorded Events");
   console.table(
-    recorded.map((e) => ({ name: e.name, data: e.data, timestamp: e.created }))
+    allEvents.map((e) => ({
+      id: e.id,
+      stream: e.stream,
+      name: e.name,
+      data: e.data,
+      timestamp: e.created,
+    }))
   );
 }
 

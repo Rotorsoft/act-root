@@ -2,15 +2,11 @@ import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { db, init_tickets_db, tickets } from "../../src/drizzle/index.js";
-import { app } from "../../src/wolfdesk/bootstrap.js";
-import {
-  AutoClose,
-  AutoEscalate,
-  AutoReassign,
-} from "../../src/wolfdesk/jobs.js";
-import { Priority } from "../../src/wolfdesk/schemas/index.js";
-import { Ticket } from "../../src/wolfdesk/ticket.js";
+import { app } from "../src/bootstrap.js";
+import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
+import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
+import { Priority } from "../src/schemas/index.js";
+import { Ticket } from "../src/ticket.js";
 import {
   addMessage,
   assignTicket,

@@ -4,9 +4,9 @@ This example demonstrates a simple calculator implemented using the Act Framewor
 
 ## Source Files
 
-- [calculator.ts](../../../libs/act-examples/src/calculator/calculator.ts): Calculator state machine and logic
-- [main.ts](../../../libs/act-examples/src/calculator/main.ts): Example usage and entry point
-- [index.ts](../../../libs/act-examples/src/calculator/index.ts): Module entry
+- [calculator.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/calculator.ts): Calculator state machine and logic
+- [main.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/main.ts): Example usage and entry point
+- [index.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/index.ts): Module entry
 
 ## Usage
 

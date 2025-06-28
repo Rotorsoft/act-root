@@ -1,6 +1,6 @@
 import { act, Actor, Committed, dispose, sleep, store } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Calculator } from "../../src/calculator/index.js";
+import { Calculator } from "../src/index.js";
 
 describe("calculator lifecycle", () => {
   const actor_a: Actor = { id: "A", name: "A" };

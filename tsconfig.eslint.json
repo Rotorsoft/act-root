@@ -1,7 +1,20 @@
 {
-  "extends": "./tsconfig.base.json",
   "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
     "composite": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@act/calculator": [
+        "./packages/calculator/src/index.ts"
+      ],
+      "@act/wolfdesk": [
+        "./packages/wolfdesk/src/index.ts"
+      ]
+    }
   },
   "include": [
     "**/*.ts"

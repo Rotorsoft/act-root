@@ -15,7 +15,7 @@
     "paths": {
       "@rotorsoft/*": [
         "libs/*/src"
-      ],
+      ]
     }
   },
   "exclude": [

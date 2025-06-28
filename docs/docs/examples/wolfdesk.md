@@ -4,24 +4,24 @@ This example demonstrates a ticketing system (WolfDesk) built with the Act Frame
 
 ## Source Files
 
-- [main.ts](../../../libs/act-examples/src/wolfdesk/main.ts): Example usage and entry point
-- [ticket.ts](../../../libs/act-examples/src/wolfdesk/ticket.ts): Ticket domain logic
-- [tickets.ts](../../../libs/act-examples/src/wolfdesk/tickets.ts): Ticket collection logic
-- [bootstrap.ts](../../../libs/act-examples/src/wolfdesk/bootstrap.ts): Initialization logic
-- [jobs.ts](../../../libs/act-examples/src/wolfdesk/jobs.ts): Background jobs
-- [errors.ts](../../../libs/act-examples/src/wolfdesk/errors.ts): Error definitions
+- [main.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/main.ts): Example usage and entry point
+- [ticket.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/ticket.ts): Ticket domain logic
+- [tickets.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/tickets.ts): Ticket collection logic
+- [bootstrap.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/bootstrap.ts): Initialization logic
+- [jobs.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/jobs.ts): Background jobs
+- [errors.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/errors.ts): Error definitions
 
 ### Schemas
 
-- [external.schemas.ts](../../../libs/act-examples/src/wolfdesk/schemas/external.schemas.ts)
-- [ticket.state.schemas.ts](../../../libs/act-examples/src/wolfdesk/schemas/ticket.state.schemas.ts)
-- [ticket.action.schemas.ts](../../../libs/act-examples/src/wolfdesk/schemas/ticket.action.schemas.ts)
-- [ticket.event.schemas.ts](../../../libs/act-examples/src/wolfdesk/schemas/ticket.event.schemas.ts)
+- [external.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/external.schemas.ts)
+- [ticket.state.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.state.schemas.ts)
+- [ticket.action.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.action.schemas.ts)
+- [ticket.event.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.event.schemas.ts)
 
 ### Services
 
-- [agent.ts](../../../libs/act-examples/src/wolfdesk/services/agent.ts)
-- [notification.ts](../../../libs/act-examples/src/wolfdesk/services/notification.ts)
+- [agent.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/services/agent.ts)
+- [notification.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/services/notification.ts)
 
 ## Usage
 

@@ -3,6 +3,8 @@ packages:
   - packages/**
   - docs
 onlyBuiltDependencies:
+  - core-js
+  - core-js-pure
   - esbuild
   - sharp
   - simple-git-hooks

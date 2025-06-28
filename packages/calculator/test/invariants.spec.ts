@@ -6,7 +6,7 @@ import {
   ValidationError,
 } from "@rotorsoft/act";
 import { afterAll, describe, expect, it } from "vitest";
-import { Calculator } from "../../src/calculator/index.js";
+import { Calculator } from "../src/index.js";
 
 describe("calculator invariants", () => {
   const actor: Actor = { id: "1", name: "Calculator" };

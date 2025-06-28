@@ -1,15 +1,10 @@
 {
-  "extends": "./tsconfig.base.json",
-  "files": [],
   "references": [
     {
       "path": "./libs/act"
     },
     {
       "path": "./libs/act-pg"
-    },
-    {
-      "path": "./libs/act-examples"
     }
   ]
 }

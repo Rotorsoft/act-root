@@ -8,15 +8,14 @@
     "email": "rotorsoft@outlook.com"
   },
   "scripts": {
-    "build": "tsc --build",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js"
+    "dev": "tsx watch src/server.ts"
   },
   "keywords": [],
   "license": "ISC",
   "dependencies": {
-    "@rotorsoft/act": "workspace:*",
-    "@rotorsoft/act-examples": "workspace:*",
+    "@act/calculator": "workspace:../calculator",
+    "@rotorsoft/act": "^0.5.1",
+    "@rotorsoft/act-pg": "^0.4.1",
     "@trpc/server": "11.4.2",
     "cors": "^2.8.5",
     "zod": "^3.25.67"

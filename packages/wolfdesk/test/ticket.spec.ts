@@ -1,8 +1,8 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { afterAll, describe, expect, it } from "vitest";
-import { app } from "../../src/wolfdesk/bootstrap.js";
-import { Ticket } from "../../src/wolfdesk/ticket.js";
+import { app } from "../src/bootstrap.js";
+import { Ticket } from "../src/ticket.js";
 import {
   acknowledgeMessage,
   addMessage,

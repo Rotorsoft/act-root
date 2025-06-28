@@ -1,25 +1,19 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "lib": [
       "DOM",
+      "DOM.Iterable",
+      "ES6"
     ],
-    "jsx": "react-jsx",
-    "paths": {
-      "@rotorsoft/*": [
-        "../../libs/*/src"
-      ]
-    },
+    "noFallthroughCasesInSwitch": true,
   },
   "include": [
-    "src",
+    "src"
   ],
   "references": [
     {
-      "path": "../../libs/act-examples",
-    },
-    {
-      "path": "../../libs/act",
+      "path": "../calculator"
     }
   ]
 }

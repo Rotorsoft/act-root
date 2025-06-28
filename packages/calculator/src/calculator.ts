@@ -90,7 +90,11 @@ const Calculator = state("Calculator", State)
   .patch({
     DigitPressed: ({ data }, state) => append(state, data.digit),
     OperatorPressed: ({ data }, state) => compute(state, data.operator),
-    DotPressed: (_, state) => append(state, "."),
+    DotPressed: (_, state) => {
+      const current = state.operator ? state.right || "" : state.left || "";
+      if (current.includes(".")) return {};
+      return append(state, ".");
+    },
     EqualsPressed: (_, state) => compute(state),
     Cleared: () => ({
       result: 0,

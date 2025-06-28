@@ -15,12 +15,14 @@ import { extend } from "./utils.js";
 export const PackageSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
-  description: z.string().min(1),
+  description: z.string().min(1).optional(),
   author: z
     .object({ name: z.string().min(1), email: z.string().optional() })
-    .or(z.string().min(1)),
-  license: z.string().min(1),
-  dependencies: z.record(z.string(), z.string()),
+    .optional()
+    .or(z.string().min(1))
+    .optional(),
+  license: z.string().min(1).optional(),
+  dependencies: z.record(z.string(), z.string()).optional(),
 });
 export type Package = z.infer<typeof PackageSchema>;
 

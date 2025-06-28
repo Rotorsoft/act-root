@@ -1,0 +1,25 @@
+{
+  "name": "@act/wolfdesk",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Wolfdesk example",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "scripts": {
+    "dev": "pnpm drizzle:migrate && tsx watch src/main.ts",
+    "drizzle:migrate": "npx drizzle-kit generate && npx drizzle-kit migrate",
+    "drizzle:push": "npx drizzle-kit push",
+    "drizzle:studio": "npx drizzle-kit studio"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.15.9",
+    "@trpc/server": "11.4.2",
+    "@rotorsoft/act": "^0.5.1",
+    "@rotorsoft/act-pg": "^0.4.1",
+    "drizzle-orm": "^0.44.2",
+    "zod": "^3.25.67"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.1"
+  }
+}

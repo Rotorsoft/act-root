@@ -1,4 +1,4 @@
-import { calculatorRouter } from "@rotorsoft/act-examples";
+import { calculatorRouter } from "@act/calculator";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
 

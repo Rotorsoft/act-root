@@ -6,7 +6,6 @@
   "out": "docs/api",
   "exclude": [
     "../packages/**",
-    "../libs/act-examples/**",
     "**/*.test.ts",
     "**/*.spec.ts",
     "**/node_modules/**"

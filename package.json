@@ -32,20 +32,20 @@
   },
   "homepage": "https://github.com/rotorsoft/act-root#readme",
   "scripts": {
-    "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
-    "dev:calculator": "pnpm -F act-examples dev:calculator",
-    "dev:wolfdesk": "pnpm -F act-examples dev:wolfdesk",
     "clean": "pnpm -r clean",
     "build": "pnpm -r build",
-    "check-types": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
-    "test": "pnpm -F act-examples drizzle:migrate && vitest run --coverage",
+    "typecheck": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
+    "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
-    "prepare": "simple-git-hooks"
+    "prepare": "simple-git-hooks",
+    "dev:calculator": "pnpm -F calculator dev",
+    "dev:wolfdesk": "pnpm -F wolfdesk dev",
+    "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
+    "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
-    "@rotorsoft/act-examples": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*"
   },
   "devDependencies": {
@@ -83,8 +83,5 @@
     "*.{ts,tsx,js,jsx}": [
       "eslint --fix"
     ]
-  },
-  "stackblitz": {
-    "startCommand": "pnpm dev:calculator"
   }
 }

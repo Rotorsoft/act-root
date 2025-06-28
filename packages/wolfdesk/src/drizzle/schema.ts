@@ -1,5 +1,5 @@
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { Priority } from "../wolfdesk/schemas/index.js";
+import { Priority } from "../schemas/index.js";
 
 export const tickets = sqliteTable("tickets", {
   id: text("id").primaryKey(),

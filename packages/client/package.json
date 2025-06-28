@@ -3,13 +3,13 @@
   "version": "0.0.1",
   "type": "module",
   "scripts": {
-    "build": "vite build",
     "dev": "vite --host",
-    "lint": "eslint .",
-    "preview": "vite preview"
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@rotorsoft/act-examples": "workspace:*",
+    "@act/calculator": "workspace:../calculator",
+    "@rotorsoft/act": "^0.5.1",
+    "@rotorsoft/act-pg": "^0.4.1",
     "@tanstack/react-query": "^5.80.10",
     "@tanstack/react-query-devtools": "^5.80.10",
     "@trpc/client": "11.4.2",

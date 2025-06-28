@@ -1,21 +1,17 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist",
+    "lib": [
+      "ES2022"
+    ],
     "rootDir": "src",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
-    "paths": {
-      "@rotorsoft/*": [
-        "../../libs/*/src"
-      ]
-    },
   },
   "include": [
     "src"
   ],
   "references": [
     {
-      "path": "../../libs/act-examples",
+      "path": "../calculator"
     }
   ]
 }

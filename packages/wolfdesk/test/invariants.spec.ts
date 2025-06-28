@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import {
   MessageNotFoundError,
   TicketCannotOpenTwiceError,
-} from "../../src/wolfdesk/errors.js";
+} from "../src/errors.js";
 import {
   acknowledgeMessage,
   addMessage,

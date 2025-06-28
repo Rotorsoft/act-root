@@ -1,8 +1,8 @@
 import { Actor } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { and, isNull, lt } from "drizzle-orm";
-import { db, tickets } from "../drizzle/index.js";
 import { app } from "./bootstrap.js";
+import { db, tickets } from "./drizzle/index.js";
 import { reassignAgent } from "./services/agent.js";
 
 // Escalates ticket when expected response time is not met
