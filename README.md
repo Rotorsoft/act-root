@@ -256,7 +256,7 @@ Additionally, we include tRPC-based client and server packages that outline the 
 
 ```ts
 import { act, Target } from "@rotorsoft/act";
-import { Calculator, Digits, Operators } from "@rotorsoft/act-examples";
+import { Calculator, Digits, Operators } from "@act/calculator";
 import { initTRPC } from "@trpc/server";
 
 const app = act().with(Calculator).build();
