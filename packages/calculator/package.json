@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "LOG_LEVEL=trace tsx watch src/main.ts"
+    "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
+    "start": "pnpm dev"
   },
   "dependencies": {
     "@trpc/server": "11.4.2",
@@ -16,8 +17,5 @@
   "devDependencies": {
     "@types/node": "^24",
     "tsx": "^4.20.3"
-  },
-  "stackblitz": {
-    "startCommand": "pnpm dev"
   }
 }
