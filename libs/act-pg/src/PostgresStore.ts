@@ -38,19 +38,46 @@ const DEFAULT_CONFIG: Config = {
   leaseMillis: 30_000,
 };
 
+/**
+ * PostgresStore is a production-ready event store adapter for Act, using PostgreSQL as the backend.
+ *
+ * - Supports event sourcing, leasing, snapshots, and concurrency control.
+ * - Designed for high-throughput, scalable, and reliable event storage.
+ * - Implements the Act Store interface.
+ *
+ * @example
+ * import { PostgresStore } from "@act/pg";
+ * const store = new PostgresStore({ schema: "my_schema", table: "events" });
+ * await store.seed();
+ *
+ * @see https://github.com/rotorsoft/act-root
+ */
 export class PostgresStore implements Store {
   private _pool;
   readonly config: Config;
 
+  /**
+   * Create a new PostgresStore instance.
+   * @param config Partial configuration (host, port, user, password, schema, table, etc.)
+   */
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this._pool = new Pool(this.config);
   }
 
+  /**
+   * Dispose of the store and close all database connections.
+   * @returns Promise that resolves when all connections are closed
+   */
   async dispose() {
     await this._pool.end();
   }
 
+  /**
+   * Seed the database with required tables, indexes, and schema for event storage.
+   * @returns Promise that resolves when seeding is complete
+   * @throws Error if seeding fails
+   */
   async seed() {
     const client = await this._pool.connect();
 
@@ -125,6 +152,10 @@ export class PostgresStore implements Store {
     }
   }
 
+  /**
+   * Drop all tables and schema created by the store (for testing or cleanup).
+   * @returns Promise that resolves when the schema is dropped
+   */
   async drop() {
     await this._pool.query(
       `
@@ -145,6 +176,17 @@ export class PostgresStore implements Store {
     );
   }
 
+  /**
+   * Query events from the store, optionally filtered by stream, event name, time, etc.
+   *
+   * @param callback Function called for each event found
+   * @param query (Optional) Query filter (stream, names, before, after, etc.)
+   * @param withSnaps (Optional) If true, includes only events after the last snapshot
+   * @returns The number of events found
+   *
+   * @example
+   * await store.query((event) => console.log(event), { stream: "A" });
+   */
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
     query?: Query,
@@ -215,6 +257,16 @@ export class PostgresStore implements Store {
     return result.rowCount ?? 0;
   }
 
+  /**
+   * Commit new events to the store for a given stream, with concurrency control.
+   *
+   * @param stream The stream name
+   * @param msgs Array of messages (event name and data)
+   * @param meta Event metadata (correlation, causation, etc.)
+   * @param expectedVersion (Optional) Expected stream version for concurrency control
+   * @returns Array of committed events
+   * @throws ConcurrencyError if the expected version does not match
+   */
   async commit<E extends Schemas>(
     stream: string,
     msgs: Message<E, keyof E>[],
@@ -280,6 +332,12 @@ export class PostgresStore implements Store {
     }
   }
 
+  /**
+   * Fetch a batch of events and streams for processing (drain cycle).
+   *
+   * @param limit The maximum number of events to fetch
+   * @returns An object with arrays of streams and events
+   */
   async fetch<E extends Schemas>(limit: number) {
     const { rows } = await this._pool.query<{ stream: string; at: number }>(
       `
@@ -304,6 +362,12 @@ export class PostgresStore implements Store {
     return { streams: rows.map(({ stream }) => stream), events };
   }
 
+  /**
+   * Lease streams for reaction processing, marking them as in-progress.
+   *
+   * @param leases Array of lease objects (stream, at, etc.)
+   * @returns Array of leased objects with updated lease info
+   */
   async lease(leases: Lease[]) {
     const { by, at } = leases.at(0)!;
     const streams = leases.map(({ stream }) => stream);
@@ -360,6 +424,12 @@ export class PostgresStore implements Store {
     }
   }
 
+  /**
+   * Acknowledge and release leases after processing, updating stream positions.
+   *
+   * @param leases Array of lease objects to acknowledge
+   * @returns Promise that resolves when leases are acknowledged
+   */
   async ack(leases: Lease[]) {
     const client = await this._pool.connect();
 

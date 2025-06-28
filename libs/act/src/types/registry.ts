@@ -2,6 +2,10 @@ import { z, ZodType } from "zod/v4";
 import type { CommittedMeta, Schema, Schemas, State } from "./action.js";
 import type { Reaction } from "./reaction.js";
 
+/**
+ * Maps event names to their schema and registered reactions.
+ * @template E - Event schemas.
+ */
 export type EventRegister<E extends Schemas> = {
   [K in keyof E]: {
     schema: ZodType<E[K]>;
@@ -9,8 +13,20 @@ export type EventRegister<E extends Schemas> = {
   };
 };
 
+/**
+ * Maps action names to their schema definitions.
+ * @template A - Action schemas.
+ */
 export type SchemaRegister<A> = { [K in keyof A]: Schema };
 
+/**
+ * Registry of all actions and events for a domain.
+ * @template S - State schemas.
+ * @template E - Event schemas.
+ * @template A - Action schemas.
+ * @property actions - Map of action names to state definitions.
+ * @property events - Map of event names to event registration info.
+ */
 export type Registry<
   S extends SchemaRegister<A>,
   E extends Schemas,
@@ -20,6 +36,11 @@ export type Registry<
   readonly events: EventRegister<E>;
 };
 
+/**
+ * Utility type to convert a registry entry to a committed event type.
+ * @template R - Registry map.
+ * @template K - Event name.
+ */
 export type AsCommitted<R, K extends keyof R> = R[K] extends { schema: infer S }
   ? {
       readonly name: K;

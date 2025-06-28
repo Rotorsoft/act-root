@@ -21,9 +21,15 @@ import { patch, validate } from "./utils.js";
 /**
  * Saves a snapshot of the state to the store.
  *
+ * Snapshots are used to optimize state reconstruction for aggregates with long event streams.
+ *
  * @template S The type of state
  * @template E The type of events
  * @param snapshot The snapshot to save
+ * @returns Promise that resolves when the snapshot is saved
+ *
+ * @example
+ * await snap(snapshot);
  */
 export async function snap<S extends Schema, E extends Schemas>(
   snapshot: Snapshot<S, E>
@@ -46,14 +52,18 @@ export async function snap<S extends Schema, E extends Schemas>(
 }
 
 /**
- * Loads a snapshot of the state from the store.
+ * Loads a snapshot of the state from the store by replaying events and applying patches.
  *
  * @template S The type of state
  * @template E The type of events
- * @param me The state machine
- * @param stream The stream to load
- * @param callback The callback to call with the snapshot
+ * @template A The type of actions
+ * @param me The state machine definition
+ * @param stream The stream (instance) to load
+ * @param callback (Optional) Callback to receive the loaded snapshot as it is built
  * @returns The snapshot of the loaded state
+ *
+ * @example
+ * const snapshot = await load(Counter, "counter1");
  */
 export async function load<
   S extends Schema,
@@ -91,17 +101,22 @@ export async function load<
 /**
  * Executes an action and emits an event to be committed by the store.
  *
+ * This function validates the action, applies business invariants, emits events, and commits them to the event store.
+ *
  * @template S The type of state
  * @template E The type of events
  * @template A The type of actionSchemas
  * @template K The type of action to execute
- * @param me The state machine
+ * @param me The state machine definition
  * @param action The action to execute
- * @param target The target of the action
+ * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
- * @param reactingTo The event that the action is reacting to
- * @param skipValidation Whether to skip validation
- * @returns The snapshot of the committed Event
+ * @param reactingTo (Optional) The event that the action is reacting to
+ * @param skipValidation (Optional) Whether to skip validation (not recommended)
+ * @returns The snapshot of the committed event
+ *
+ * @example
+ * const snapshot = await action(Counter, "increment", { stream: "counter1", actor }, { by: 1 });
  */
 export async function action<
   S extends Schema,

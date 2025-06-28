@@ -33,14 +33,26 @@ const is_mergeable = (value: any): boolean =>
 
 /**
  * Utility functions for patching state, validation, extending objects, and async helpers.
+ *
+ * - Use `patch()` to immutably update state with patches.
+ * - Use `validate()` to validate payloads against Zod schemas.
+ * - Use `extend()` to merge and validate configuration objects.
+ * - Use `sleep()` for async delays.
+ *
+ * @module utils
  */
 
 /**
- * Copies state with patches recursively.
+ * Immutably copies state with patches recursively.
+ *
  * Keys with `undefined` or `null` values in patch are deleted.
- * @param original original state
- * @param patches patches to merge
- * @returns a new patched state
+ *
+ * @param original The original state object
+ * @param patches The patches to merge
+ * @returns A new patched state
+ *
+ * @example
+ * const newState = patch(oldState, { count: 5 });
  */
 export const patch = <S extends Schema>(
   original: Readonly<S>,
@@ -63,6 +75,18 @@ export const patch = <S extends Schema>(
   return copy as S;
 };
 
+/**
+ * Validates a payload against a Zod schema, throwing a ValidationError on failure.
+ *
+ * @param target The name of the target (for error reporting)
+ * @param payload The payload to validate
+ * @param schema (Optional) The Zod schema to validate against
+ * @returns The validated payload
+ * @throws ValidationError if validation fails
+ *
+ * @example
+ * const valid = validate("User", userPayload, userSchema);
+ */
 export const validate = <S>(
   target: string,
   payload: Readonly<S>,
@@ -83,7 +107,15 @@ export const validate = <S>(
 };
 
 /**
- * Extends target payload with source payload after validating source
+ * Extends the target payload with the source payload after validating the source.
+ *
+ * @param source The source object to validate and merge
+ * @param schema The Zod schema for the source
+ * @param target (Optional) The target object to extend
+ * @returns The merged and validated object
+ *
+ * @example
+ * const config = extend(envConfig, configSchema, defaultConfig);
  */
 export const extend = <
   S extends Record<string, unknown>,
@@ -97,6 +129,15 @@ export const extend = <
   return Object.assign(target || {}, value) as Readonly<S & T>;
 };
 
+/**
+ * Async helper to pause execution for a given number of milliseconds.
+ *
+ * @param ms (Optional) Milliseconds to sleep (defaults to config().sleepMs)
+ * @returns Promise that resolves after the delay
+ *
+ * @example
+ * await sleep(1000); // sleep for 1 second
+ */
 export async function sleep(ms?: number) {
   return new Promise((resolve) => setTimeout(resolve, ms ?? config().sleepMs));
 }

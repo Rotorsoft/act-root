@@ -19,43 +19,101 @@ const _void_ = () => undefined;
 
 /**
  * Fluent builder for composing event-sourced state machines with actions and reactions.
- * Provides a chainable API for registering states, events, and reaction handlers.
+ *
+ * Provides a chainable API for registering states, events, and reaction handlers, enabling you to declaratively build complex, reactive applications.
  *
  * @template S SchemaRegister for state
  * @template E Schemas for events
  * @template A Schemas for actions
+ *
+ * @example
+ * const app = act()
+ *   .with(Counter)
+ *   .on("Incremented").do(async (event) => { ... })
+ *   .to(() => "OtherStream")
+ *   .build();
  */
 export type ActBuilder<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
 > = {
+  /**
+   * Register a state machine with the builder.
+   *
+   * @template SX The type of state
+   * @template EX The type of events
+   * @template AX The type of actions
+   * @param state The state machine to add
+   * @returns The builder (for chaining)
+   */
   with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
     state: State<SX, EX, AX>
   ) => ActBuilder<S & { [K in keyof AX]: SX }, E & EX, A & AX>;
+  /**
+   * Register a reaction handler for a given event.
+   *
+   * @template K The event name
+   * @param event The event to react to
+   * @returns An object with .do(handler) to register the handler
+   */
   on: <K extends keyof E>(
     event: K
   ) => {
+    /**
+     * Register a reaction handler for the event.
+     *
+     * @param handler The reaction handler function
+     * @param options (Optional) Reaction options (retries, blocking, etc.)
+     * @returns The builder (for chaining), with .to(resolver) and .void() for advanced routing
+     */
     do: (
       handler: ReactionHandler<E, K>,
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A> & {
+      /**
+       * Route the reaction to a specific stream (resolver function).
+       * @param resolver The resolver function
+       * @returns The builder (for chaining)
+       */
       to: (resolver: ReactionResolver<E, K>) => ActBuilder<S, E, A>;
+      /**
+       * Mark the reaction as void (no routing).
+       * @returns The builder (for chaining)
+       */
       void: () => ActBuilder<S, E, A>;
     };
   };
+  /**
+   * Build the application and return an Act orchestrator.
+   *
+   * @param drainLimit (Optional) The maximum number of events to drain per cycle (default: 10)
+   * @returns The Act orchestrator instance
+   */
   build: (drainLimit?: number) => Act<S, E, A>;
+  /**
+   * The registered event schemas and reaction maps.
+   */
   readonly events: EventRegister<E>;
 };
 
 /* eslint-disable @typescript-eslint/no-empty-object-type */
 
 /**
- * Creates an ActBuilder instance.
+ * Creates an ActBuilder instance for composing event-sourced applications.
+ *
+ * Use this function to start building your application by chaining `.with()`, `.on()`, and `.build()` calls.
  *
  * @template S The type of state
  * @template E The type of events
  * @template A The type of actions
+ * @returns An ActBuilder instance
+ *
+ * @example
+ * const app = act()
+ *   .with(Counter)
+ *   .on("Incremented").do(async (event) => { ... })
+ *   .build();
  */
 export function act<
   // @ts-expect-error empty schema

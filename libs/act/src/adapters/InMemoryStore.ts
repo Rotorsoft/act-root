@@ -1,3 +1,11 @@
+/**
+ * In-memory event store adapter for the Act Framework.
+ *
+ * This adapter implements the Store interface and is suitable for development, testing, and demonstration purposes.
+ * All data is stored in memory and lost on process exit.
+ *
+ * @category Adapters
+ */
 import { SNAP_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
@@ -19,6 +27,11 @@ class InMemoryStream {
 
   constructor(public readonly stream: string) {}
 
+  /**
+   * Attempt to lease this stream for processing.
+   * @param lease - Lease request.
+   * @returns The granted lease or undefined if blocked.
+   */
   lease(lease: Lease): Lease | undefined {
     if (!this._blocked && lease.at > this._at) {
       this._lease = { ...lease, retry: this._retry + 1 };
@@ -26,6 +39,10 @@ class InMemoryStream {
     }
   }
 
+  /**
+   * Acknowledge completion of processing for this stream.
+   * @param lease - Lease to acknowledge.
+   */
   ack(lease: Lease) {
     if (this._lease && lease.at >= this._at) {
       this._retry = lease.retry;
@@ -40,8 +57,14 @@ class InMemoryStream {
 }
 
 /**
- * @category Adapters
- * @remarks In-memory event store
+ * In-memory implementation of the Store interface.
+ *
+ * Suitable for development, testing, and demonstration. Not for production use.
+ * All events and streams are stored in memory and lost on process exit.
+ *
+ * @example
+ *   const store = new InMemoryStore();
+ *   await store.commit('streamA', [{ name: 'event', data: {} }], meta);
  */
 export class InMemoryStore implements Store {
   // stored events
@@ -49,20 +72,35 @@ export class InMemoryStore implements Store {
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
 
+  /**
+   * Dispose of the store and clear all events.
+   */
   async dispose() {
     await sleep();
     this._events.length = 0;
   }
 
+  /**
+   * Seed the store with initial data (no-op for in-memory).
+   */
   async seed() {
     await sleep();
   }
 
+  /**
+   * Drop all data from the store.
+   */
   async drop() {
     await sleep();
     this._events.length = 0;
   }
 
+  /**
+   * Query events in the store, optionally filtered by query options.
+   * @param callback - Function to call for each event.
+   * @param query - Optional query options.
+   * @returns The number of events processed.
+   */
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
     query?: Query
@@ -95,6 +133,15 @@ export class InMemoryStore implements Store {
     return count;
   }
 
+  /**
+   * Commit one or more events to a stream.
+   * @param stream - The stream name.
+   * @param msgs - The events/messages to commit.
+   * @param meta - Event metadata.
+   * @param expectedVersion - Optional optimistic concurrency check.
+   * @returns The committed events with metadata.
+   * @throws ConcurrencyError if expectedVersion does not match.
+   */
   async commit<E extends Schemas>(
     stream: string,
     msgs: Message<E, keyof E>[],
@@ -128,7 +175,9 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Fetches new events from stream watermarks
+   * Fetches new events from stream watermarks for processing.
+   * @param limit - Maximum number of streams to fetch.
+   * @returns Fetched streams and events.
    */
   async fetch<E extends Schemas>(limit: number) {
     const streams = [...this._streams.values()]
@@ -151,6 +200,11 @@ export class InMemoryStore implements Store {
     return { streams: streams.map(({ stream }) => stream), events };
   }
 
+  /**
+   * Lease streams for processing (e.g., for distributed consumers).
+   * @param leases - Lease requests.
+   * @returns Granted leases.
+   */
   async lease(leases: Lease[]) {
     await sleep();
     return leases
@@ -166,6 +220,10 @@ export class InMemoryStore implements Store {
       .filter((l): l is Lease => !!l);
   }
 
+  /**
+   * Acknowledge completion of processing for leased streams.
+   * @param leases - Leases to acknowledge.
+   */
   async ack(leases: Lease[]) {
     await sleep();
     leases.forEach((lease) => this._streams.get(lease.stream)?.ack(lease));

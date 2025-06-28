@@ -5,17 +5,25 @@ title: Act Framework
 
 # Act Framework
 
-Welcome to the Act Framework documentation! Act is a modern, event-sourced framework for building scalable, maintainable applications using the principles of Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing.
+Welcome to the Act Framework documentation! Act is a modern, event-sourced framework for building scalable, maintainable, and auditable applications in TypeScript. Act is inspired by the best ideas from Domain-Driven Design (DDD), Command Query Responsibility Segregation (CQRS), and Event Sourcing, but is designed to be simple, composable, and highly type-safe.
 
-## 🎯 What is Act?
+## 🎯 Purpose & Philosophy
 
-Act is a TypeScript framework that simplifies the development of event-sourced applications by providing:
+**Act** aims to make event-sourced, reactive architectures accessible and productive for all TypeScript developers. It provides a minimal, functional core for modeling your domain as state machines, capturing every change as an immutable event, and reacting to those changes in a scalable, testable way.
 
-- **State Machines**: Define your domain models as strongly-typed state machines
-- **Event Sourcing**: Automatically capture all state changes as immutable events
-- **Reactions**: Build reactive systems that respond to events across your domain
-- **Type Safety**: Full TypeScript support with compile-time guarantees
-- **Scalability**: Designed for high-performance, distributed systems
+- **Simplicity:** Focus on the essentials—state, actions, and reactions—without boilerplate or code generation.
+- **Type Safety:** Leverage TypeScript and Zod for compile-time guarantees and runtime validation.
+- **Composability:** Build complex workflows by composing small, testable state machines and reactions.
+- **Auditability:** Every state change is an event, enabling time travel, debugging, and compliance.
+- **Adaptability:** Easily swap storage backends, integrate with external systems, and scale from in-memory to production databases.
+
+## 🚀 Why Act?
+
+- **Event Sourcing Made Easy:** Model your domain as a series of state transitions, with every change captured as an event.
+- **Functional State Machines:** Define state, actions, and events as pure functions—no classes or decorators required.
+- **Reactive by Default:** Build workflows and integrations by reacting to events, not just commands.
+- **Production-Ready:** Includes adapters for in-memory and Postgres event stores, with robust resource management.
+- **Minimal Footprint:** No codegen, no runtime bloat, and a tiny bundle size.
 
 ## 🏗️ Core Concepts
 
@@ -23,11 +31,11 @@ Act is a TypeScript framework that simplifies the development of event-sourced a
 
 Act follows a simple but powerful pattern:
 
-1. **Actions**: Commands that represent intent to change state
-2. **State**: The current state of your domain objects
-3. **Reactions**: Responses to state changes that can trigger additional actions
+1. **Actions:** Commands that represent intent to change state (e.g., user input, API calls).
+2. **State:** The current state of your domain objects, modeled as immutable data.
+3. **Reactions:** Responses to state changes that can trigger additional actions, side effects, or integrations.
 
-This pattern enables you to build complex, event-driven systems while maintaining clarity and testability.
+This pattern enables you to build complex, event-driven systems while maintaining clarity, testability, and auditability.
 
 ## 🚀 Quick Start
 
@@ -57,12 +65,27 @@ const state = await app.load(Counter, "counter1");
 console.log(state.state); // { count: 5 }
 ```
 
-## 📚 Documentation Structure
+## 📚 Documentation Map
 
+- [Core Concepts](concepts/core-framework): Framework architecture and philosophy
+- [State Management](concepts/state-management): Modeling state, actions, and events
+- [Event Sourcing](concepts/event-sourcing): Event storage, snapshots, and queries
+- [Builders](concepts/builders): Fluent APIs for composing applications
+- [Ports & Adapters](concepts/ports-adapters): Integrating with databases and external systems
+- [Configuration](concepts/configuration): Environment and logging
+- [Utilities](concepts/utilities): Helpers for patching, validation, and async
 - [Examples](examples/calculator): Calculator Example
 - [Examples](examples/wolfdesk): WolfDesk Example
 - [API Reference (act)](api/act.src.md)
 - [API Reference (act-pg)](api/act-pg.md)
+
+## ❓ FAQ
+
+**Q: Do I need to use Postgres?**  
+A: No. You can start with the in-memory store and switch to Postgres or another backend as needed.
+
+**Q: Is Act only for DDD experts?**  
+A: No. Act is designed to be approachable for all TypeScript developers, with a focus on simplicity and strong typing.
 
 ## 📄 License
 

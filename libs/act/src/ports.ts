@@ -5,12 +5,34 @@ import type { Disposable, Disposer, Store } from "./types/index.js";
 
 /**
  * Port and adapter utilities for logging, store management, and resource disposal.
- * Provides singleton store and logger instances.
+ *
+ * Provides singleton store and logger instances, and helpers for resource lifecycle management.
+ *
+ * - Use `store()` to get or inject the event store (in-memory or persistent).
+ * - Use `logger` for structured logging.
+ * - Use `dispose()` to register resource disposers for graceful shutdown.
+ *
+ * @module ports
  */
 
+/**
+ * List of exit codes for process termination.
+ */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
+
+/**
+ * Type for allowed exit codes.
+ */
 export type ExitCode = (typeof ExitCodes)[number];
 
+/**
+ * Singleton logger instance (Pino).
+ *
+ * Use for structured logging throughout your application.
+ *
+ * @example
+ * logger.info("Application started");
+ */
 export const logger = pino({
   transport:
     config().env !== "production"
@@ -26,6 +48,16 @@ export const logger = pino({
   level: config().logLevel,
 });
 
+/**
+ * Helper to create a singleton port (adapter) with optional injection.
+ *
+ * @param injector The function that creates the port/adapter
+ * @returns A function to get or inject the singleton instance
+ *
+ * @example
+ * const store = port((adapter) => adapter || new InMemoryStore());
+ * const myStore = store();
+ */
 type Injector<Port extends Disposable> = (adapter?: Port) => Port;
 const adapters = new Map<string, Disposable>();
 export function port<Port extends Disposable>(injector: Injector<Port>) {
@@ -56,9 +88,13 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 }
 
 /**
- * Registers resource disposers that are triggered on process exit
- * @param disposer the disposer function
- * @returns a function that triggers all registered disposers and terminates the process
+ * Registers resource disposers that are triggered on process exit.
+ *
+ * @param disposer The disposer function to register
+ * @returns A function that triggers all registered disposers and terminates the process
+ *
+ * @example
+ * dispose(async () => { await myResource.close(); });
  */
 export function dispose(
   disposer?: Disposer
@@ -67,8 +103,20 @@ export function dispose(
   return disposeAndExit;
 }
 
-// singleton ports
+/**
+ * Special event name for snapshot events in the event store.
+ */
 export const SNAP_EVENT = "__snapshot__";
+
+/**
+ * Singleton event store port. By default, uses the in-memory store.
+ *
+ * You can inject a persistent store (e.g., Postgres) by calling `store(myAdapter)`.
+ *
+ * @example
+ * const myStore = store();
+ * const customStore = store(new MyCustomStore());
+ */
 export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
