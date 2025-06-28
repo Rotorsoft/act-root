@@ -6,8 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
-    "start": "LOG_LEVEL=trace tsx watch src/main.ts"
+    "dev": "LOG_LEVEL=trace tsx watch src/main.ts"
   },
   "dependencies": {
     "@trpc/server": "11.4.2",
