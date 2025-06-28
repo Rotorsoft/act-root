@@ -1,26 +1,3 @@
-# act
-
-Monorepo for the act framework and examples.
-
-## Packages
-
-- `libs/act` - Core act framework
-- `libs/act-pg` - PostgreSQL adapter for act
-- `packages/client` - Example client app
-- `packages/server` - Example server app
-- `packages/calculator` - Calculator example (standalone)
-- `packages/wolfdesk` - Wolfdesk example (standalone)
-
-## Development
-
-- Run `pnpm install` to install dependencies
-- Use `pnpm -F <package> build` to build a specific package
-- Use `pnpm dev` or `pnpm start` in the relevant package for development
-
-## Cleaning
-
-- Use `pnpm scrub` to clean all build artifacts and node_modules
-
 ![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 

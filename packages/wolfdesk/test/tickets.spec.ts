@@ -30,7 +30,7 @@ async function findTicket(stream: string) {
 describe("ticket projection", () => {
   beforeAll(async () => {
     await init_tickets_db();
-    await db.delete(tickets);
+    await db.delete(tickets).catch(() => {});
     // app.on("drained", (leases) => console.log("drained", leases));
   });
 
