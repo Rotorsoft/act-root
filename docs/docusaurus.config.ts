@@ -12,6 +12,7 @@ const config: Config = {
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
     v4: true, // Improve compatibility with the upcoming Docusaurus v4
+    experimental_faster: true, // Enable Rust-based minifiers and faster build
   },
 
   // Set the production url of your site here
@@ -44,6 +45,7 @@ const config: Config = {
           sidebarPath: require.resolve("./sidebars.ts"),
           editUrl: "https://github.com/rotorsoft/act-root/edit/master/docs/",
         },
+        blog: false,
         theme: {
           customCss: "./src/css/custom.css",
         },

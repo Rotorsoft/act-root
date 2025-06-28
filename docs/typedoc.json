@@ -6,7 +6,6 @@
   "out": "docs/api",
   "exclude": [
     "../packages/**",
-    "**/*.test.ts",
     "**/*.spec.ts",
     "**/node_modules/**"
   ],
@@ -31,6 +30,5 @@
   "validation": {
     "invalidLink": true,
     "notExported": true
-  },
-  "tsconfig": "./tsconfig.json"
+  }
 }
