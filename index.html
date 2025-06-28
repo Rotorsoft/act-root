@@ -58,17 +58,23 @@
         gap: 0.2rem;
         flex-wrap: wrap;
         margin-top: 0.3rem;
-        margin-bottom: 0.3rem;
+        margin-bottom: 0.6rem;
+      }
+      .hero-main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
       }
       .logo {
         width: 80px;
         height: 80px;
-        margin-bottom: 0.5rem;
+        margin-bottom: 0.1rem;
         display: inline-block;
         vertical-align: middle;
       }
       .hero h1 {
-        font-size: 2.3rem;
+        font-size: 3rem;
         font-weight: 800;
         letter-spacing: -2px;
         color: var(--accent);
@@ -85,21 +91,17 @@
         font-size: 1.35rem;
         font-weight: 700;
         color: var(--accent);
-        margin-bottom: 1.1rem;
+        margin: 0;
         font-family: "Inter", "Segoe UI", Arial, sans-serif;
         letter-spacing: -1px;
         text-shadow: 0 0 8px #3bb0ff44;
         text-align: center;
         max-width: 700px;
-        margin-left: auto;
-        margin-right: auto;
-        margin-bottom: 0;
-        margin-top: 0.1rem;
         display: inline-block;
       }
       .hero-btn {
         display: inline-block;
-        padding: 0.7em 2.1em;
+        padding: 0.7em 1.2em;
         font-size: 1.13rem;
         font-weight: 700;
         color: #fff;
@@ -116,7 +118,9 @@
           transform 0.12s;
         display: inline-flex;
         align-items: center;
-        gap: 0.7em;
+        gap: 0.4em;
+        min-width: 160px;
+        justify-content: center;
       }
       .hero-btn:hover,
       .hero-btn:focus {
@@ -207,6 +211,7 @@
           box-shadow 0.2s,
           transform 0.2s;
         justify-content: flex-start;
+        min-height: 180px;
       }
       .feature-card:hover {
         box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.18);
@@ -261,12 +266,59 @@
           grid-template-columns: 1fr 1fr;
         }
       }
+      @media (max-width: 700px) {
+        .features {
+          grid-template-columns: 1fr;
+          gap: 1.2rem 0;
+        }
+        .feature-card {
+          width: 100%;
+          max-width: 100%;
+          min-height: 140px;
+          align-items: flex-start;
+        }
+        .sandbox.section {
+          display: none;
+        }
+      }
       @media (max-width: 600px) {
+        .logo {
+          width: 56px;
+          height: 56px;
+          margin-bottom: 0.3rem;
+        }
         .hero h1 {
-          font-size: 1.1rem;
+          font-size: 2.1rem;
+          margin-right: 0.5rem;
         }
         .feature-card {
           padding: 0.7rem 0.4rem;
+          min-height: 120px;
+        }
+        .feature-card-row {
+          gap: 0.4em;
+        }
+        .feature-card .icon {
+          font-size: 1.15rem;
+          height: 1.15em;
+        }
+        .feature-card h3 {
+          font-size: 1.05rem;
+        }
+        .feature-card p {
+          font-size: 0.97rem;
+        }
+      }
+      @media (min-width: 701px) {
+        .hero-row {
+          align-items: center;
+        }
+        .hero .subtitle {
+          margin: 0;
+          margin-left: 1.1rem;
+          text-align: left;
+          display: inline-block;
+          vertical-align: middle;
         }
       }
       /* Footer */
@@ -276,41 +328,6 @@
         text-align: center;
         color: var(--text-muted);
         font-size: 1rem;
-      }
-      /* Quickstart code panel */
-      .quickstart-panel {
-        width: 100%;
-        margin: 2.5rem 0 2.5rem 0;
-        font-family:
-          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
-        color: var(--code-green);
-        font-size: 1.08rem;
-        overflow-x: auto;
-        position: relative;
-      }
-      .quickstart-panel-title {
-        font-size: 1.35rem;
-        font-weight: 700;
-        color: var(--code-green);
-        font-family: "Inter", "Segoe UI", Arial, sans-serif;
-        letter-spacing: -1px;
-        text-shadow: 0 0 8px #3bff8392;
-      }
-      .quickstart-panel pre {
-        margin: 0;
-        background: none;
-        color: inherit;
-        font-family: inherit;
-        font-size: inherit;
-      }
-      .quickstart-panel code {
-        background: none;
-        color: inherit;
-        font-family: inherit;
-        font-size: inherit;
-        white-space: pre;
-        display: block;
-        font-size: smaller;
       }
     </style>
   </head>
@@ -399,32 +416,45 @@
         </div>
       </section>
 
-      <!-- QUICKSTART PANEL -->
-      <section class="quickstart-panel" aria-label="Quickstart">
-        <div class="quickstart-panel-title">StackBlitz Quickstart</div>
-        <pre><code>
-> pnpm dev:calculator
-</code></pre>
+      <!-- SHORT DESCRIPTION: Value Proposition -->
+      <section
+        class="short-desc section"
+        style="text-align: center; margin-bottom: 2.2rem"
+      >
+        <div
+          style="
+            max-width: 700px;
+            margin: 0 auto;
+            color: var(--text-muted);
+            font-size: 1.18rem;
+            font-weight: 500;
+          "
+        >
+          Act is a modern, type-safe event sourcing framework for TypeScript.
+          Build robust, auditable, and reactive systems with composable state
+          machines, pure functions, and zero runtime bloat—ready for production
+          or rapid prototyping.
+        </div>
       </section>
 
       <!-- SANDBOX SECTION: Calculator Example -->
       <section class="sandbox section">
         <iframe
           class="sandbox-iframe"
-          src="https://stackblitz.com/github/rotorsoft/act-root?embed=1&view=editor&file=libs/act-examples/src/calculator/main.ts&hideNavigation=1"
+          src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0"
           allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
           sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
         ></iframe>
         <div style="margin-top: 0.7rem">
           <a
-            href="https://stackblitz.com/github/rotorsoft/act-root?file=libs/act-examples/src/calculator/main.ts"
+            href="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0"
             target="_blank"
             class="btn btn-primary"
             style="margin-right: 0.7rem"
             >Open in StackBlitz</a
           >
           <a
-            href="https://github.com/rotorsoft/act-root/tree/master/libs/act-examples/src/calculator"
+            href="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
             target="_blank"
             class="btn btn-secondary"
             >Source on GitHub</a
