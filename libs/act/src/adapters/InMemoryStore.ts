@@ -1,4 +1,5 @@
 /**
+ * @module act/adapters
  * In-memory event store adapter for the Act Framework.
  *
  * This adapter implements the Store interface and is suitable for development, testing, and demonstration purposes.
@@ -57,6 +58,9 @@ class InMemoryStream {
 }
 
 /**
+ * @category Adapters
+ * @see Store
+ *
  * In-memory implementation of the Store interface.
  *
  * Suitable for development, testing, and demonstration. Not for production use.

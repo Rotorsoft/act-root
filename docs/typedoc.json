@@ -4,6 +4,7 @@
     "../libs/act-pg/src/index.ts"
   ],
   "out": "docs/api",
+  "name": "act",
   "exclude": [
     "../packages/**",
     "**/*.spec.ts",
@@ -16,7 +17,6 @@
   "categorizeByGroup": true,
   "defaultCategory": "Other",
   "theme": "default",
-  "name": "Act Framework Documentation",
   "readme": "none",
   "plugin": [
     "typedoc-plugin-markdown"

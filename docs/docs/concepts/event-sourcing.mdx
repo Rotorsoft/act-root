@@ -1,0 +1,156 @@
+# Event Sourcing
+
+---
+
+## Tips for Event Sourcing
+
+- Store all state changes as immutable events for full auditability.
+- Use clear, descriptive event names and payloads.
+- Leverage snapshots for performance in high-throughput domains.
+- Use event streams for analytics, debugging, and projections.
+- Visualize event flows and projections with diagrams.
+
+---
+
+## Example 1: Shopping Cart Event Stream
+
+**Scenario:**
+A user browses an e-commerce site, adds and removes items from their shopping cart, and eventually checks out. Every change to the cart is captured as an event, providing a complete audit trail of the user's actions. This enables features like undo, analytics, and debugging of user behavior.
+
+```typescript
+import { state, z } from "@rotorsoft/act";
+
+const Cart = state(
+  "Cart",
+  z.object({
+    items: z.array(z.object({ sku: z.string(), qty: z.number() })),
+    checkedOut: z.boolean(),
+  })
+)
+  .init(() => ({ items: [], checkedOut: false }))
+  .emits({
+    ItemAdded: z.object({ sku: z.string(), qty: z.number() }),
+    ItemRemoved: z.object({ sku: z.string() }),
+    CheckedOut: z.object({}),
+  })
+  .patch({
+    ItemAdded: (e, s) => ({
+      ...s,
+      items: [...s.items, { sku: e.sku, qty: e.qty }],
+    }),
+    ItemRemoved: (e, s) => ({
+      ...s,
+      items: s.items.filter((i) => i.sku !== e.sku),
+    }),
+    CheckedOut: (e, s) => ({ ...s, checkedOut: true }),
+  })
+  .on("addItem", z.object({ sku: z.string(), qty: z.number() }))
+  .emit((a) => ["ItemAdded", { sku: a.sku, qty: a.qty }])
+  .on("removeItem", z.object({ sku: z.string() }))
+  .emit((a) => ["ItemRemoved", { sku: a.sku }])
+  .on("checkout", z.object({}))
+  .emit(() => ["CheckedOut", {}])
+  .build();
+
+// Example committed event (matching framework type):
+// {
+//   name: "ItemAdded",
+//   data: { sku: "A123", qty: 2 },
+//   id: 1,
+//   stream: "Cart-123",
+//   version: 1,
+//   created: new Date(),
+//   meta: { correlation: "...", causation: "..." }
+// }
+```
+
+![Cart Event Stream](/img/cart-event-stream.svg)
+
+---
+
+## Example 2: Sales Projection for Analytics
+
+**Scenario:**
+The business wants to track daily sales and the number of checkouts for reporting and analytics. Each time a cart is checked out, a `CheckedOut` event is emitted. A projection processes the event stream to aggregate sales totals and counts per day, enabling dashboards and business insights.
+
+```typescript
+// Framework Committed type for events:
+// type Committed<E, K> = { name: K; data: E[K]; id: number; stream: string; version: number; created: Date; meta: ... }
+
+type CartEvents = {
+  CheckedOut: { total: number; timestamp: string };
+  // ... other events
+};
+
+type CommittedCartEvent = {
+  name: keyof CartEvents;
+  data: CartEvents[keyof CartEvents];
+  id: number;
+  stream: string;
+  version: number;
+  created: Date;
+  meta: any;
+};
+
+// Group checkouts by day and sum totals
+function salesByDay(events: CommittedCartEvent[]) {
+  return events
+    .filter(
+      (e) =>
+        e.name === "CheckedOut" &&
+        e.data &&
+        typeof (e.data as any).total === "number" &&
+        typeof (e.data as any).timestamp === "string"
+    )
+    .reduce(
+      (acc, e) => {
+        const day = (e.data as any).timestamp.slice(0, 10); // "YYYY-MM-DD"
+        if (!acc[day]) acc[day] = { total: 0, count: 0 };
+        acc[day].total += (e.data as any).total;
+        acc[day].count += 1;
+        return acc;
+      },
+      {} as Record<string, { total: number; count: number }>
+    );
+}
+
+// Example usage:
+const events: CommittedCartEvent[] = [
+  {
+    name: "CheckedOut",
+    data: { total: 120.5, timestamp: "2024-06-01T14:23:00Z" },
+    id: 1,
+    stream: "Cart-123",
+    version: 1,
+    created: new Date("2024-06-01T14:23:00Z"),
+    meta: {},
+  },
+  {
+    name: "CheckedOut",
+    data: { total: 80.0, timestamp: "2024-06-01T15:10:00Z" },
+    id: 2,
+    stream: "Cart-123",
+    version: 2,
+    created: new Date("2024-06-01T15:10:00Z"),
+    meta: {},
+  },
+  {
+    name: "CheckedOut",
+    data: { total: 200.0, timestamp: "2024-06-02T09:00:00Z" },
+    id: 3,
+    stream: "Cart-123",
+    version: 3,
+    created: new Date("2024-06-02T09:00:00Z"),
+    meta: {},
+  },
+];
+
+console.log(salesByDay(events));
+// Output:
+// {
+//   "2024-06-01": { total: 200.5, count: 2 },
+//   "2024-06-02": { total: 200.0, count: 1 }
+// }
+```
+
+![Sales Projection](/img/sales-projection.svg)

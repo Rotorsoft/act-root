@@ -1,6 +1,12 @@
 import { z, ZodObject, ZodRawShape } from "zod/v4";
 
 /**
+ * @module act/types
+ * @category Types
+ * Zod schemas and helpers for the Act Framework.
+ */
+
+/**
  * An empty Zod schema (no properties).
  */
 export const ZodEmpty = z.record(z.string(), z.never());

@@ -67,17 +67,16 @@ console.log(state.state); // { count: 5 }
 
 ## 📚 Documentation Map
 
-- [Core Concepts](concepts/core-framework): Framework architecture and philosophy
-- [State Management](concepts/state-management): Modeling state, actions, and events
-- [Event Sourcing](concepts/event-sourcing): Event storage, snapshots, and queries
-- [Builders](concepts/builders): Fluent APIs for composing applications
-- [Ports & Adapters](concepts/ports-adapters): Integrating with databases and external systems
-- [Configuration](concepts/configuration): Environment and logging
-- [Utilities](concepts/utilities): Helpers for patching, validation, and async
-- [Examples](examples/calculator): Calculator Example
-- [Examples](examples/wolfdesk): WolfDesk Example
-- [API Reference (act)](api/act.src.md)
-- [API Reference (act-pg)](api/act-pg.md)
+- Concepts: All main ideas and architecture
+  - [State Management](concepts/state-management)
+  - [Event Sourcing](concepts/event-sourcing)
+  - [Configuration, Builders, Adapters & Utilities](concepts/configuration)
+- Examples
+  - [Calculator](examples/calculator)
+  - [WolfDesk](examples/wolfdesk)
+- API Reference
+  - [act](api/act.src)
+  - [act-pg](api/act-pg.md)
 
 ## ❓ FAQ
 

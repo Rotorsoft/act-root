@@ -39,6 +39,9 @@ const DEFAULT_CONFIG: Config = {
 };
 
 /**
+ * @category Adapters
+ * @see Store
+ *
  * PostgresStore is a production-ready event store adapter for Act, using PostgreSQL as the backend.
  *
  * - Supports event sourcing, leasing, snapshots, and concurrency control.

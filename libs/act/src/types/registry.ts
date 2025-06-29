@@ -3,6 +3,12 @@ import type { CommittedMeta, Schema, Schemas, State } from "./action.js";
 import type { Reaction } from "./reaction.js";
 
 /**
+ * @module act/types
+ * @category Types
+ * Types for event and action registries in the Act Framework.
+ */
+
+/**
  * Maps event names to their schema and registered reactions.
  * @template E - Event schemas.
  */

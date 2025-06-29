@@ -9,6 +9,12 @@ import {
 } from "./schemas.js";
 
 /**
+ * @module act/types
+ * @category Types
+ * Types for actions, events, schemas, and state in the Act Framework.
+ */
+
+/**
  * Represents an actor (user, system, etc.) that initiates actions or events.
  */
 export type Actor = z.infer<typeof ActorSchema>;

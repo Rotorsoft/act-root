@@ -1,0 +1,54 @@
+<svg width="1100" height="400" viewBox="0 0 1100 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- States (staggered vertically) -->
+  <rect x="60" y="60" width="180" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="150" y="85" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">pending</text>
+  <text x="150" y="105" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "pending", items: [] }</text>
+
+  <rect x="320" y="180" width="180" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="410" y="205" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">confirmed</text>
+  <text x="410" y="225" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "confirmed" }</text>
+
+  <rect x="600" y="60" width="200" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="700" y="85" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">shipped</text>
+  <text x="700" y="105" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "shipped", trackingNumber: "TRK123" }</text>
+
+  <rect x="900" y="180" width="180" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="990" y="205" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">delivered</text>
+  <text x="990" y="225" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "delivered" }</text>
+
+  <ellipse cx="1050" cy="320" rx="30" ry="30" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="1050" y="325" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">End</text>
+
+  <rect x="600" y="320" width="200" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="700" y="345" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">cancelled</text>
+  <text x="700" y="365" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "cancelled" }</text>
+
+  <!-- Transitions (staggered, no overlap) -->
+  <!-- confirm -->
+  <path d="M240 90 Q320 90 320 180" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="280" y="110" font-size="14" font-family="monospace" fill="#1976d2">confirm</text>
+  <text x="280" y="130" font-size="12" font-family="monospace" fill="#f57c00">Confirmed</text>
+  <!-- ship -->
+  <path d="M500 210 Q600 210 600 90" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="550" y="180" font-size="14" font-family="monospace" fill="#1976d2">ship</text>
+  <text x="550" y="200" font-size="12" font-family="monospace" fill="#f57c00">Shipped</text>
+  <!-- deliver -->
+  <path d="M800 90 Q900 90 900 180" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="850" y="110" font-size="14" font-family="monospace" fill="#1976d2">deliver</text>
+  <text x="850" y="130" font-size="12" font-family="monospace" fill="#f57c00">Delivered</text>
+  <!-- delivered to end -->
+  <path d="M1080 210 Q1100 260 1050 320" stroke="#2e7d32" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <!-- cancel from confirmed -->
+  <path d="M410 240 Q410 320 700 320" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="500" y="300" font-size="14" font-family="monospace" fill="#1976d2">cancel</text>
+  <text x="500" y="320" font-size="12" font-family="monospace" fill="#f57c00">Cancelled</text>
+  <!-- cancel from shipped -->
+  <path d="M700 120 Q700 320 700 320" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="720" y="220" font-size="14" font-family="monospace" fill="#1976d2">cancel</text>
+  <text x="720" y="240" font-size="12" font-family="monospace" fill="#f57c00">Cancelled</text>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 L3,5 Z" fill="#1976d2"/>
+    </marker>
+  </defs>
+</svg> 

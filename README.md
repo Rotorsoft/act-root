@@ -1,5 +1,6 @@
 ![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
+![Repo Size](https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square)
 
 👉 **[View the Interactive Landing Page](https://rotorsoft.github.io/act-root/)** 👈
 
@@ -49,6 +50,96 @@ To tie everything together, this approach requires a robust integration layer to
 ## Complexity Emerging from Simplicity
 
 Living systems demonstrate that intricate behaviors and complex structures can emerge from simple, foundational building blocks. This natural principle suggests that advanced systems can be constructed from a few elemental components. The key question is whether focusing on the core concepts of state, actions, and reactions, while layering in reliability and scalability through event-driven design, provides all the essential ingredients needed to build the next generation of software agents.
+
+## Quickstart
+
+Install the framework:
+
+```sh
+npm install @rotorsoft/act
+# or
+pnpm add @rotorsoft/act
+# or
+yarn add @rotorsoft/act
+```
+
+Create a minimal app:
+
+```ts
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod/v4";
+
+const Counter = state("Counter", z.object({ count: z.number() }))
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .patch({
+    Incremented: (event, state) => ({ count: state.count + event.data.amount }),
+  })
+  .on("increment", z.object({ by: z.number() }))
+  .emit((action, state) => ["Incremented", { amount: action.by }])
+  .build();
+
+const app = act().with(Counter).build();
+
+await app.do(
+  "increment",
+  { stream: "counter1", actor: { id: "1", name: "User" } },
+  { by: 1 }
+);
+console.log(await app.load(Counter, "counter1"));
+```
+
+For more examples, see the [examples directory](./packages/calculator/src/) and [API docs](https://rotorsoft.github.io/act-root/api/).
+
+## Documentation
+
+- [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
+- [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro)
+- [Examples](./packages/calculator/src/)
+
+## How to Contribute
+
+We welcome contributions! To get started:
+
+1. **Fork** this repository and clone your fork.
+2. **Create a branch** for your feature or fix:
+
+   ```sh
+   git checkout -b my-feature
+   ```
+
+3. **Install dependencies**:
+
+   ```sh
+   pnpm install
+   ```
+
+4. **Run tests**:
+
+   ```sh
+   pnpm build
+   pnpm test
+   ```
+
+5. **Lint and format**:
+
+   ```sh
+   pnpm lint
+   ```
+
+6. **Commit and push** your changes.
+7. **Open a Pull Request** on GitHub.
+
+**Code style:**  
+We use [ESLint](https://eslint.org/) and [Prettier](https://prettier.io/).
+
+**Questions?**  
+Open an issue or join the discussion on [GitHub Discussions](https://github.com/rotorsoft/act-root/discussions).
+
+## Versioning
+
+This project follows [Semantic Versioning (SemVer)](https://semver.org/).  
+See [CHANGELOG.md](./CHANGELOG.md) for release notes and breaking changes.
 
 ## Examples
 

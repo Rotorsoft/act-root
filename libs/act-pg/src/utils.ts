@@ -1,4 +1,5 @@
 /**
+ * @module act-pg
  * Date reviver for JSON.parse to automatically convert ISO 8601 date strings to Date objects.
  *
  * Recognizes the following formats:

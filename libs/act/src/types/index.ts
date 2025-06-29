@@ -1,4 +1,5 @@
 /**
+ * @module act/types
  * Barrel file for Act Framework core types.
  *
  * Re-exports all major type definitions for actions, errors, ports, reactions, registries, and schemas.

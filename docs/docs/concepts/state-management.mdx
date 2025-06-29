@@ -1,0 +1,109 @@
+# State Management
+
+## Tips for Advanced State Modeling
+
+- Use advanced Zod schemas for complex state shapes.
+- Model aggregate roots and entity relationships as needed.
+- Use clear, explicit state transitions and event names.
+- Annotate your state machines with example state data for clarity.
+- Visualize your state machines with diagrams to communicate workflows.
+
+---
+
+## Example 1: Order State Machine
+
+Suppose you want to model an order with multiple states and transitions:
+
+```typescript
+import { state, z } from "@rotorsoft/act";
+
+const Order = state(
+  "Order",
+  z.object({
+    status: z.enum([
+      "pending",
+      "confirmed",
+      "shipped",
+      "delivered",
+      "cancelled",
+    ]),
+    items: z.array(z.object({ sku: z.string(), qty: z.number() })),
+    trackingNumber: z.string().optional(),
+  })
+)
+  .init(() => ({ status: "pending", items: [] }))
+  .emits({
+    Confirmed: z.object({}),
+    Shipped: z.object({ trackingNumber: z.string() }),
+    Delivered: z.object({}),
+    Cancelled: z.object({ reason: z.string() }),
+  })
+  .patch({
+    Confirmed: (e, s) => ({ ...s, status: "confirmed" }),
+    Shipped: (e, s) => ({
+      ...s,
+      status: "shipped",
+      trackingNumber: e.trackingNumber,
+    }),
+    Delivered: (e, s) => ({ ...s, status: "delivered" }),
+    Cancelled: (e, s) => ({ ...s, status: "cancelled" }),
+  })
+  .on("confirm", z.object({}))
+  .emit(() => ["Confirmed", {}])
+  .on("ship", z.object({ trackingNumber: z.string() }))
+  .emit((a) => ["Shipped", { trackingNumber: a.trackingNumber }])
+  .on("deliver", z.object({}))
+  .emit(() => ["Delivered", {}])
+  .on("cancel", z.object({ reason: z.string() }))
+  .emit((a) => ["Cancelled", { reason: a.reason }])
+  .build();
+```
+
+![Order State Machine](/img/order-state-machine.svg)
+
+---
+
+## Example 2: Ticket Workflow with Substates and Escalation
+
+A support ticket can be open, assigned, escalated, resolved, or closed, with substates for escalation:
+
+```typescript
+import { state, z } from "@rotorsoft/act";
+
+const Ticket = state(
+  "Ticket",
+  z.object({
+    status: z.enum(["open", "assigned", "escalated", "resolved", "closed"]),
+    assignedTo: z.string().optional(),
+    escalationLevel: z.number().optional(),
+  })
+)
+  .init(() => ({ status: "open" }))
+  .emits({
+    Assigned: z.object({ user: z.string() }),
+    Escalated: z.object({ level: z.number() }),
+    Resolved: z.object({}),
+    Closed: z.object({}),
+  })
+  .patch({
+    Assigned: (e, s) => ({ ...s, status: "assigned", assignedTo: e.user }),
+    Escalated: (e, s) => ({
+      ...s,
+      status: "escalated",
+      escalationLevel: e.level,
+    }),
+    Resolved: (e, s) => ({ ...s, status: "resolved" }),
+    Closed: (e, s) => ({ ...s, status: "closed" }),
+  })
+  .on("assign", z.object({ user: z.string() }))
+  .emit((a) => ["Assigned", { user: a.user }])
+  .on("escalate", z.object({ level: z.number() }))
+  .emit((a) => ["Escalated", { level: a.level }])
+  .on("resolve", z.object({}))
+  .emit(() => ["Resolved", {}])
+  .on("close", z.object({}))
+  .emit(() => ["Closed", {}])
+  .build();
+```
+
+![Ticket Workflow](/img/ticket-workflow.svg)

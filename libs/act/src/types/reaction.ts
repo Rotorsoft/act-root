@@ -1,3 +1,8 @@
+/**
+ * @module act/types
+ * @category Types
+ * Types for reactions, leases, and fetch results in the Act Framework.
+ */
 import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
 
 /**

@@ -19,13 +19,9 @@ const sidebars: SidebarsConfig = {
       type: "category",
       label: "Concepts",
       items: [
-        "concepts/core-framework",
-        "concepts/builders",
         "concepts/state-management",
         "concepts/event-sourcing",
-        "concepts/utilities",
         "concepts/configuration",
-        "concepts/ports-adapters",
       ],
     },
     {

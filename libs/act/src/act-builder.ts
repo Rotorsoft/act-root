@@ -1,3 +1,9 @@
+/**
+ * @module act-builder
+ * @category Builders
+ *
+ * Fluent builder for composing event-sourced applications.
+ */
 import { Act } from "./act.js";
 import type {
   EventRegister,

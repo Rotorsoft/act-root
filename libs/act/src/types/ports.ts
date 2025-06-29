@@ -1,3 +1,8 @@
+/**
+ * @module act/types
+ * @category Types
+ * Types and interfaces for event store ports and disposables in the Act Framework.
+ */
 import type {
   Committed,
   EventMeta,

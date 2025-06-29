@@ -1,3 +1,10 @@
+/**
+ * @module event-sourcing
+ * @category Event Sourcing
+ *
+ * Utilities for event sourcing, snapshotting, and event store interaction.
+ */
+
 import { randomUUID } from "crypto";
 import { logger, SNAP_EVENT, store } from "./ports.js";
 import { InvariantError } from "./types/errors.js";

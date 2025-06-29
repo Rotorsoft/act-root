@@ -1,7 +1,9 @@
 import type { Message, Schema, Schemas, Target } from "./action.js";
 
 /**
- * Application error type constants.
+ * @module act/types
+ * @category Types
+ * Application error type constants and error classes for the Act Framework.
  *
  * - `ERR_VALIDATION`: Schema validation error
  * - `ERR_INVARIANT`: Invariant validation error

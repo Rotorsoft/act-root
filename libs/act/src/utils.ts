@@ -32,14 +32,14 @@ const is_mergeable = (value: any): boolean =>
   !UNMERGEABLES.some((t) => value instanceof t);
 
 /**
+ * @module utils
+ * @category Utilities
  * Utility functions for patching state, validation, extending objects, and async helpers.
  *
  * - Use `patch()` to immutably update state with patches.
  * - Use `validate()` to validate payloads against Zod schemas.
  * - Use `extend()` to merge and validate configuration objects.
  * - Use `sleep()` for async delays.
- *
- * @module utils
  */
 
 /**

@@ -20,7 +20,10 @@ import type {
 type SnapshotArgs = Snapshot<Schemas, Schema>;
 
 /**
- * Act is the main orchestrator for event-sourced state machines and workflows.
+ * @category Orchestrator
+ * @see Store
+ *
+ * Main orchestrator for event-sourced state machines and workflows.
  *
  * It manages the lifecycle of actions, reactions, and event streams, providing APIs for loading state, executing actions, querying events, and draining reactions.
  *
@@ -185,6 +188,7 @@ export class Act<
   /**
    * Handles leased reactions.
    *
+   * @internal
    * @param lease The lease to handle
    * @param reactions The reactions to handle
    * @returns The lease
