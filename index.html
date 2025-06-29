@@ -8,6 +8,14 @@
       href="https://fonts.googleapis.com/css?family=Inter:400,700,900&display=swap"
       rel="stylesheet"
     />
+    <link
+      href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@700;900&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root {
         --bg-main: #181a20;
@@ -43,61 +51,99 @@
       /* HERO */
       .hero {
         text-align: center;
-        margin-bottom: 2.2rem;
+        margin-bottom: 1.1rem;
         padding-top: 1.2rem;
-        padding-bottom: 0.5rem;
+        padding-bottom: 0.2rem;
         display: flex;
         flex-direction: column;
         align-items: center;
-      }
-      .hero-row {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 0.2rem;
-        flex-wrap: wrap;
-        margin-top: 0.3rem;
-        margin-bottom: 0.6rem;
       }
       .hero-main {
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
+        width: 100%;
       }
-      .logo {
-        width: 80px;
-        height: 80px;
-        margin-bottom: 0.1rem;
-        display: inline-block;
-        vertical-align: middle;
+      .hero-logo-title {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.7em;
+        margin-bottom: 0.2em;
       }
-      .hero h1 {
-        font-size: 3rem;
-        font-weight: 800;
-        letter-spacing: -2px;
-        color: var(--accent);
-        display: inline-block;
-        text-shadow:
-          0 0 10px #3bb0ff66,
-          0 2px 8px #10111444;
-        filter: brightness(1.12) drop-shadow(0 0 4px #3bb0ff44);
-        margin-right: 0.7rem;
-        margin-top: 0.1em;
+      .logo-modern {
+        width: auto;
+        height: auto;
+        display: block;
         margin-bottom: 0.1em;
       }
-      .hero .subtitle {
-        font-size: 1.35rem;
-        font-weight: 700;
+      .logo-caption {
+        font-family: "JetBrains Mono", "Fira Mono", "IBM Plex Mono", monospace;
+        font-weight: 900;
+        font-size: 2.7rem;
+        letter-spacing: -5px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        margin-bottom: 0.05em;
+      }
+      .hero h1,
+      .logo-modern text {
+        font-family: "JetBrains Mono", "Fira Mono", "IBM Plex Mono", monospace;
+        font-weight: 900;
+        letter-spacing: -2px;
+      }
+      .subtitle,
+      .catch {
+        font-family: "JetBrains Mono", "Fira Mono", "IBM Plex Mono", monospace;
+        font-weight: 500;
         color: var(--accent);
-        margin: 0;
-        font-family: "Inter", "Segoe UI", Arial, sans-serif;
+      }
+      .catch {
+        color: var(--text-muted);
+        font-weight: 400;
+      }
+      .hero h1 {
+        font-size: 2.7rem;
+        letter-spacing: -2px;
+        color: var(--accent);
+        margin: 0 0 0.1em 0;
+        line-height: 1.1;
+        text-shadow:
+          0 0 10px #3bb0ff33,
+          0 2px 8px #10111422;
+      }
+      .subtitle {
+        font-size: 1.18rem;
+        font-weight: 500;
+        color: var(--accent);
+        font-family: "JetBrains Mono", "Fira Mono", "IBM Plex Mono", monospace;
+        margin-top: 0.05em;
+        margin-bottom: 1.1em;
         letter-spacing: -1px;
-        text-shadow: 0 0 8px #3bb0ff44;
-        text-align: center;
-        max-width: 700px;
-        display: inline-block;
+        text-shadow: 0 0 8px #3bb0ff22;
+      }
+      .catch {
+        font-size: 1.13rem;
+        margin: 1.1em 0 0.7em 0;
+        max-width: 600px;
+      }
+      .hero-divider {
+        height: 2px;
+        background: var(--accent-fade);
+        width: 100%;
+        margin: 1.5em 0 1.2em 0;
+        border-radius: 1px;
+      }
+      .hero-btn-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.7em;
+        margin-bottom: 1.2em;
+        margin-left: 0;
+        justify-content: center;
+        margin-top: 1.2em;
       }
       .hero-btn {
         display: inline-block;
@@ -128,14 +174,6 @@
         box-shadow: 0 4px 24px 0 #3bb0ff55;
         transform: translateY(-2px) scale(1.04);
         color: #fff;
-      }
-      .hero-btn-row {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        justify-content: center;
-        gap: 0.7em;
-        margin-bottom: 1.2em;
       }
       /* SANDBOX */
       .sandbox {
@@ -329,97 +367,217 @@
         color: var(--text-muted);
         font-size: 1rem;
       }
+      .quickstart-card {
+        background: var(--bg-panel);
+        border-radius: 18px;
+        box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.1);
+        border: 1px solid var(--accent-fade);
+        transition:
+          box-shadow 0.2s,
+          transform 0.2s;
+        padding: 2.1rem 2.2rem 1.7rem 2.2rem;
+        width: 100%;
+        max-width: none;
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      .quickstart-card:hover {
+        box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.18);
+        transform: translateY(-6px) scale(1.04);
+      }
+      .quickstart-card pre#quickstart-app {
+        font-size: 0.85rem !important;
+        background: #181a20;
+        color: #b5cdfa;
+        border-radius: 8px;
+        border: 1px solid var(--accent-fade);
+        padding: 0.7em 1.1em 0.7em 1.1em;
+        margin: 0;
+        font-family:
+          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .quickstart-card pre#quickstart-app code {
+        font-size: inherit;
+        background: none;
+        color: inherit;
+        padding: 0;
+        border-radius: 0;
+        font-family: inherit;
+      }
+      /* TypeScript syntax highlighting for demo */
+      .quickstart-card .token.keyword {
+        color: #ffb454;
+      }
+      .quickstart-card .token.string {
+        color: #b5e853;
+      }
+      .quickstart-card .token.number {
+        color: #d4bfff;
+      }
+      .quickstart-card .token.function {
+        color: #82aaff;
+      }
+      .quickstart-card .token.class-name {
+        color: #ffb454;
+      }
+      .quickstart-card .token.comment {
+        color: #6c7986;
+        font-style: italic;
+      }
+      .quickstart-card .token.punctuation {
+        color: #b5cdfa;
+      }
+      .quickstart-card .token.operator {
+        color: #f78c6c;
+      }
+      .quickstart-card .token.parameter {
+        color: #addb67;
+      }
+      .quickstart-card .token.type {
+        color: #c792ea;
+      }
+      .quickstart-card .token.property {
+        color: #ffcb8b;
+      }
+      .quickstart-card .token.constant {
+        color: #f78c6c;
+      }
+      .quickstart-card .token.boolean {
+        color: #ff6363;
+      }
+      .quickstart-card .token.brace {
+        color: #b5cdfa;
+      }
+      .quickstart-card .token.variable {
+        color: #addb67;
+      }
+      .quickstart-card .token.tag {
+        color: #ff6363;
+      }
+      .quickstart-card .token.attr-name {
+        color: #82aaff;
+      }
+      .quickstart-card .token.attr-value {
+        color: #b5e853;
+      }
+      .quickstart-card .token.selector {
+        color: #c792ea;
+      }
+      .quickstart-card .token.property-access {
+        color: #b5cdfa;
+      }
+      .quickstart-card .token.plain {
+        color: #b5cdfa;
+      }
+      .quickstart-card .token {
+        font-family: inherit;
+      }
+      .quickstart-card .hero-btn {
+        min-width: unset;
+        width: auto;
+        align-self: center;
+        background: #04508f;
+        box-shadow: none;
+      }
+      .quickstart-card .hero-btn:hover,
+      .quickstart-card .hero-btn:focus {
+        background: #033b6a;
+        color: #fff;
+        box-shadow: none;
+        transform: translateY(-2px) scale(1.04);
+      }
+      .fade-section {
+        opacity: 0;
+        transform: translateY(40px);
+        transition:
+          opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1),
+          transform 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: opacity, transform;
+      }
+      .fade-section.visible {
+        opacity: 1;
+        transform: none;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <!-- HERO -->
-      <section class="hero section">
-        <div class="hero-row">
-          <svg
-            class="logo"
-            viewBox="0 0 64 64"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-          >
-            <rect x="8" y="16" width="48" height="32" rx="8" fill="#23262f" />
-            <polygon
-              points="24,44 16,32 32,32"
-              fill="#2196f3"
-              fill-opacity="0.85"
-            />
-            <polygon
-              points="40,44 32,32 48,32"
-              fill="#ffb300"
-              fill-opacity="0.85"
-            />
-            <polygon
-              points="32,20 24,32 40,32"
-              fill="#43a047"
-              fill-opacity="0.85"
-            />
-          </svg>
-          <h1>Act</h1>
-          <div class="subtitle">Fluent Event Sourcing in TypeScript</div>
-        </div>
-        <div class="hero-btn-row">
-          <a
-            class="hero-btn"
-            href="https://github.com/rotorsoft/act-root"
-            target="_blank"
-            rel="noopener"
-          >
-            <svg
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
+      <section class="hero section fade-section">
+        <div class="hero-main">
+          <div class="hero-logo-title">
+            <div class="logo-caption">
+              <span style="color: #3bb0ff">A</span>
+              <span style="color: #ffb300">c</span>
+              <span style="color: #43a047">t</span>
+            </div>
+            <div class="subtitle">
+              TypeScript-first Event Sourcing Framework
+            </div>
+          </div>
+          <div class="hero-btn-row">
+            <a
+              class="hero-btn"
+              href="https://github.com/rotorsoft/act-root"
+              target="_blank"
+              rel="noopener"
             >
-              <path
-                d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.157-1.11-1.465-1.11-1.465-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.987 1.029-2.686-.103-.254-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.295 2.748-1.025 2.748-1.025.546 1.378.202 2.396.1 2.65.64.699 1.028 1.593 1.028 2.686 0 3.847-2.338 4.695-4.566 4.944.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.749 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2Z"
-                fill="currentColor"
-              />
-            </svg>
-            GitHub
-          </a>
-          <a
-            class="hero-btn"
-            href="docs/intro"
-            style="margin-left: 0.7em; background: #3bb0ff; color: #fff"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M12 2C6.477 2 2 6.484 2 12.021c0 4.428 2.865 8.184 6.839 9.504.5.092.682-.217.682-.483 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.342-3.369-1.342-.454-1.157-1.11-1.465-1.11-1.465-.908-.62.069-.608.069-.608 1.004.07 1.532 1.032 1.532 1.032.892 1.53 2.341 1.088 2.91.832.091-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.987 1.029-2.686-.103-.254-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.025A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.295 2.748-1.025 2.748-1.025.546 1.378.202 2.396.1 2.65.64.699 1.028 1.593 1.028 2.686 0 3.847-2.338 4.695-4.566 4.944.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.749 0 .268.18.579.688.481C19.138 20.2 22 16.447 22 12.021 22 6.484 17.523 2 12 2Z"
+                  fill="currentColor"
+                />
+              </svg>
+              GitHub
+            </a>
+            <a
+              class="hero-btn"
+              href="docs/intro"
+              style="background: #3bb0ff; color: #fff"
             >
-              <rect
-                x="4"
-                y="3"
-                width="16"
-                height="18"
-                rx="2"
-                stroke="currentColor"
-                stroke-width="2"
-              />
-              <path
-                d="M8 7h8M8 11h8M8 15h4"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-              />
-            </svg>
-            Docs
-          </a>
+              <svg
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <rect
+                  x="4"
+                  y="3"
+                  width="16"
+                  height="18"
+                  rx="2"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  d="M8 7h8M8 11h8M8 15h4"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+              Docs
+            </a>
+          </div>
+          <div class="hero-divider"></div>
         </div>
       </section>
 
       <!-- SHORT DESCRIPTION: Value Proposition -->
       <section
-        class="short-desc section"
-        style="text-align: center; margin-bottom: 2.2rem"
+        class="short-desc section fade-section"
+        style="text-align: center; margin-bottom: 2.2rem; margin-top: 0.3rem"
       >
         <div
           style="
@@ -428,43 +586,432 @@
             color: var(--text-muted);
             font-size: 1.18rem;
             font-weight: 500;
+            margin-top: 0;
           "
         >
-          Act is a modern, type-safe event sourcing framework for TypeScript.
           Build robust, auditable, and reactive systems with composable state
-          machines, pure functions, and zero runtime bloat—ready for production
-          or rapid prototyping.
+          machines, pure functions, and zero runtime bloat.
         </div>
       </section>
+
+      <!-- QUICKSTART SECTION -->
+      <section
+        class="quickstart section fade-section"
+        style="margin-bottom: 2.5rem; width: 100%; padding: 0"
+      >
+        <div
+          class="quickstart-card"
+          style="
+            box-shadow: 0 4px 24px 0 #3bb0ff22;
+            background: var(--bg-panel);
+            border-radius: 18px;
+            padding: 2.1rem 2.2rem 1.7rem 2.2rem;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+          "
+        >
+          <!-- Step 1: Install -->
+          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
+            <span
+              class="icon"
+              style="margin-right: 0.6em; display: flex; align-items: center"
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--code-green)"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M12 3v12m0 0l-4-4m4 4l4-4" />
+                <rect
+                  x="4"
+                  y="17"
+                  width="16"
+                  height="4"
+                  rx="2"
+                  fill="var(--code-green)"
+                  fill-opacity="0.15"
+                />
+              </svg>
+            </span>
+            <span
+              style="
+                font-size: 1.13rem;
+                font-weight: 800;
+                color: var(--code-green);
+              "
+              >Install</span
+            >
+          </div>
+          <div style="position: relative; width: 100%; margin-bottom: 1.2em">
+            <pre
+              id="quickstart-install"
+              style="
+                background: #181a20;
+                border-radius: 8px;
+                border: 1px solid var(--accent-fade);
+                padding: 0.7em 1.1em 0.7em 1.1em;
+                margin: 0;
+                font-family:
+                  &quot;JetBrains Mono&quot;, &quot;Fira Mono&quot;,
+                  &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;
+                color: var(--code-green);
+                font-size: 0.93rem;
+                overflow-x: auto;
+                white-space: pre;
+              "
+            ><code>npm install @rotorsoft/act</code></pre>
+            <button
+              class="copy-btn"
+              data-copy-target="quickstart-install"
+              title="Copy"
+              style="
+                position: absolute;
+                top: 0.5em;
+                right: 0.7em;
+                background: none;
+                border: none;
+                cursor: pointer;
+                color: var(--accent);
+                font-size: 1.13rem;
+                padding: 0;
+              "
+            >
+              <svg
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+              </svg>
+            </button>
+          </div>
+          <!-- Step 2: Minimal App -->
+          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
+            <span
+              class="icon"
+              style="margin-right: 0.6em; display: flex; align-items: center"
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="var(--code-green)"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M8 10h8M8 14h8" />
+              </svg>
+            </span>
+            <span
+              style="
+                font-size: 1.13rem;
+                font-weight: 800;
+                color: var(--code-green);
+              "
+              >Minimal App</span
+            >
+          </div>
+          <div style="position: relative; width: 100%; margin-bottom: 1.2em">
+            <pre
+              id="quickstart-app"
+              style="
+                background: #181a20;
+                border-radius: 8px;
+                border: 1px solid var(--accent-fade);
+                padding: 0.7em 1.1em 0.7em 1.1em;
+                margin: 0;
+                font-family:
+                  &quot;JetBrains Mono&quot;, &quot;Fira Mono&quot;,
+                  &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;
+                color: #b5cdfa;
+                font-size: 0.85rem;
+                overflow-x: auto;
+                white-space: pre;
+              "
+            ><code class="language-typescript">import { act, state } from "@rotorsoft/act";
+import { z } from "zod/v4";
+const Counter = state("Counter", z.object({ count: z.number() }))
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
+  .on("increment", z.object({ by: z.number() }))
+  .emit((action, state) => ["Incremented", { amount: action.by }])
+  .build();
+const app = act().with(Counter).build();
+await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
+console.log(await app.load(Counter, "counter1"));</code></pre>
+            <button
+              class="copy-btn"
+              data-copy-target="quickstart-app"
+              title="Copy"
+              style="
+                position: absolute;
+                top: 0.5em;
+                right: 0.7em;
+                background: none;
+                border: none;
+                cursor: pointer;
+                color: var(--accent);
+                font-size: 1.13rem;
+                padding: 0;
+              "
+            >
+              <svg
+                width="20"
+                height="20"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                viewBox="0 0 24 24"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+              </svg>
+            </button>
+          </div>
+          <!-- Step 3: Run & Explore -->
+          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
+            <span
+              class="icon"
+              style="margin-right: 0.6em; display: flex; align-items: center"
+            >
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="var(--code-green)"
+                stroke="var(--code-green)"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon
+                  points="5 3 19 12 5 21 5 3"
+                  fill="var(--code-green)"
+                  fill-opacity="0.85"
+                />
+              </svg>
+            </span>
+            <span
+              style="
+                font-size: 1.13rem;
+                font-weight: 800;
+                color: var(--code-green);
+              "
+              >Run &amp; Explore</span
+            >
+          </div>
+          <div
+            style="
+              color: var(--text-muted);
+              font-size: 1.01rem;
+              margin-bottom: 0.7em;
+              margin-left: 2.2em;
+            "
+          >
+            Run your app and see the output in your terminal or browser console.
+          </div>
+          <a class="hero-btn" href="docs/intro">Get Started</a>
+        </div>
+      </section>
+      <script>
+        // Copy-to-clipboard for quickstart code blocks
+        document.querySelectorAll(".copy-btn").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            var targetId = btn.getAttribute("data-copy-target");
+            var code = document.getElementById(targetId).innerText;
+            navigator.clipboard.writeText(code);
+            btn.innerHTML =
+              '<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/><polyline points="4 12 9 17 20 6"/></svg>';
+            setTimeout(function () {
+              btn.innerHTML =
+                '<svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+            }, 1200);
+          });
+        });
+        // Fade-in/out on scroll for sections
+        document.addEventListener("DOMContentLoaded", function () {
+          var observer = new window.IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (entry) {
+                if (entry.isIntersecting) {
+                  entry.target.classList.add("visible");
+                } else {
+                  entry.target.classList.remove("visible");
+                }
+              });
+            },
+            { threshold: 0.18 }
+          );
+          document
+            .querySelectorAll(".fade-section")
+            .forEach(function (section) {
+              observer.observe(section);
+            });
+        });
+      </script>
 
       <!-- SANDBOX SECTION: Calculator Example -->
-      <section class="sandbox section">
-        <iframe
-          class="sandbox-iframe"
-          src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
-          allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
-          sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
-        ></iframe>
-        <div style="margin-top: 0.7rem">
-          <a
-            href="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
-            target="_blank"
-            class="btn btn-primary"
-            style="margin-right: 0.7rem"
-            >Open in StackBlitz</a
+      <section class="sandbox section fade-section" style="width: 100%">
+        <div
+          id="sandbox-guard"
+          style="
+            display: none;
+            color: var(--text-muted);
+            font-size: 1.13rem;
+            margin-bottom: 1.2rem;
+            text-align: center;
+          "
+        >
+          The interactive sandbox is available only on desktop Chrome browsers.
+        </div>
+        <div id="sandbox-content">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              margin-bottom: 0.7em;
+              margin-top: 0.5em;
+            "
           >
-          <a
-            href="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
-            target="_blank"
-            class="btn btn-secondary"
-            >Source on GitHub</a
+            <span
+              class="icon"
+              style="margin-right: 0.5em; display: flex; align-items: center"
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="var(--code-green)"
+                stroke="var(--code-green)"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon
+                  points="5 3 19 12 5 21 5 3"
+                  fill="var(--code-green)"
+                  fill-opacity="0.85"
+                />
+              </svg>
+            </span>
+            <h2
+              style="
+                font-size: 1.08rem;
+                font-weight: 800;
+                color: var(--code-green);
+                margin: 0;
+              "
+            >
+              Try it in your browser
+            </h2>
+          </div>
+          <iframe
+            class="sandbox-iframe"
+            style="
+              box-shadow: 0 4px 24px 0 #3bb0ff22;
+              border-radius: 18px;
+              width: 100%;
+              max-width: 100%;
+              display: block;
+            "
+            src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
+            allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+            sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+          ></iframe>
+          <div
+            style="
+              margin-top: 0.7rem;
+              text-align: center;
+              width: 100%;
+              font-size: 0.85rem;
+              color: #8a8fa3;
+              display: flex;
+              justify-content: center;
+              gap: 1.2em;
+            "
           >
+            <a
+              href="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
+              target="_blank"
+              style="
+                color: #8a8fa3;
+                background: none;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                text-decoration: none;
+                font-size: 0.85rem;
+                transition: text-decoration 0.15s;
+              "
+              onmouseover="this.style.textDecoration='underline'"
+              onmouseout="this.style.textDecoration='none'"
+              >Open in StackBlitz</a
+            >
+            <a
+              href="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
+              target="_blank"
+              style="
+                color: #8a8fa3;
+                background: none;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                text-decoration: none;
+                font-size: 0.85rem;
+                transition: text-decoration 0.15s;
+              "
+              onmouseover="this.style.textDecoration='underline'"
+              onmouseout="this.style.textDecoration='none'"
+              >Source on GitHub</a
+            >
+          </div>
         </div>
       </section>
+      <script>
+        // Show sandbox only on desktop Chrome
+        (function () {
+          var isChrome =
+            /Chrome/.test(navigator.userAgent) &&
+            /Google Inc/.test(navigator.vendor);
+          var isDesktop =
+            window.innerWidth > 900 &&
+            !/Mobi|Android/i.test(navigator.userAgent);
+          var showSandbox = isChrome && isDesktop;
+          document.getElementById("sandbox-content").style.display = showSandbox
+            ? ""
+            : "none";
+          document.getElementById("sandbox-guard").style.display = showSandbox
+            ? "none"
+            : "";
+        })();
+      </script>
 
       <!-- FEATURES (trpc.io style, compact, modern) -->
-      <section class="features section">
-        <div class="feature-card">
+      <section class="features section fade-section">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -489,7 +1036,10 @@
             Immutability and replayability by design.
           </p>
         </div>
-        <div class="feature-card">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -514,7 +1064,10 @@
             classes, just functions and data.
           </p>
         </div>
-        <div class="feature-card">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -537,7 +1090,10 @@
             not at runtime.
           </p>
         </div>
-        <div class="feature-card">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -563,7 +1119,10 @@
             ease.
           </p>
         </div>
-        <div class="feature-card">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -589,7 +1148,10 @@
             code.
           </p>
         </div>
-        <div class="feature-card">
+        <div
+          class="feature-card"
+          style="box-shadow: 0 4px 24px 0 #3bb0ff22; border-radius: 18px"
+        >
           <div class="feature-card-row">
             <span class="icon">
               <svg
@@ -618,7 +1180,7 @@
         </div>
       </section>
       <!-- FOOTER -->
-      <footer class="footer">
+      <footer class="footer fade-section">
         <div>
           <a href="docs/intro">Docs</a>
           &bull;
@@ -632,5 +1194,7 @@
         </div>
       </footer>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
   </body>
 </html>

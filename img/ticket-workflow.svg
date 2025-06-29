@@ -1,0 +1,64 @@
+<svg width="1400" height="500" viewBox="0 0 1400 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- States (staggered vertically) -->
+  <rect x="60" y="60" width="180" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="150" y="85" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">open</text>
+  <text x="150" y="105" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "open" }</text>
+
+  <rect x="320" y="200" width="220" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="430" y="225" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">assigned</text>
+  <text x="430" y="245" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "assigned", assignedTo: "alice" }</text>
+
+  <rect x="600" y="60" width="260" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="730" y="85" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">escalated</text>
+  <text x="730" y="105" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "escalated", assignedTo: "alice", escalationLevel: 2 }</text>
+
+  <rect x="1000" y="200" width="220" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="1110" y="225" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">resolved</text>
+  <text x="1110" y="245" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "resolved", assignedTo: "alice" }</text>
+
+  <rect x="600" y="400" width="260" height="60" rx="16" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="730" y="425" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">closed</text>
+  <text x="730" y="445" text-anchor="middle" font-size="12" font-family="monospace" fill="#222">{ status: "closed" }</text>
+
+  <ellipse cx="1300" cy="400" rx="30" ry="30" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="1300" y="405" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">End</text>
+
+  <!-- Transitions (staggered, no overlap) -->
+  <!-- assign -->
+  <path d="M240 90 Q320 90 320 200" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="280" y="110" font-size="14" font-family="monospace" fill="#1976d2">assign</text>
+  <text x="280" y="130" font-size="12" font-family="monospace" fill="#f57c00">Assigned</text>
+  <!-- escalate -->
+  <path d="M540 230 Q600 230 600 90" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="570" y="200" font-size="14" font-family="monospace" fill="#1976d2">escalate</text>
+  <text x="570" y="220" font-size="12" font-family="monospace" fill="#f57c00">Escalated</text>
+  <!-- resolve from assigned -->
+  <path d="M540 230 Q1000 230 1000 230" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="800" y="250" font-size="14" font-family="monospace" fill="#1976d2">resolve</text>
+  <text x="800" y="270" font-size="12" font-family="monospace" fill="#f57c00">Resolved</text>
+  <!-- resolve from escalated -->
+  <path d="M860 90 Q1110 90 1110 200" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="1000" y="110" font-size="14" font-family="monospace" fill="#1976d2">resolve</text>
+  <text x="1000" y="130" font-size="12" font-family="monospace" fill="#f57c00">Resolved</text>
+  <!-- resolved to end -->
+  <path d="M1220 230 Q1300 230 1300 370" stroke="#2e7d32" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <!-- close from open -->
+  <path d="M150 120 Q150 400 730 400" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="200" y="350" font-size="14" font-family="monospace" fill="#1976d2">close</text>
+  <text x="200" y="370" font-size="12" font-family="monospace" fill="#f57c00">Closed</text>
+  <!-- close from assigned -->
+  <path d="M430 260 Q430 400 730 400" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="500" y="350" font-size="14" font-family="monospace" fill="#1976d2">close</text>
+  <text x="500" y="370" font-size="12" font-family="monospace" fill="#f57c00">Closed</text>
+  <!-- close from escalated -->
+  <path d="M730 120 Q730 400 730 400" stroke="#1976d2" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <text x="800" y="350" font-size="14" font-family="monospace" fill="#1976d2">close</text>
+  <text x="800" y="370" font-size="12" font-family="monospace" fill="#f57c00">Closed</text>
+  <!-- closed to end -->
+  <path d="M860 430 Q1300 430 1300 370" stroke="#2e7d32" stroke-width="3" fill="none" marker-end="url(#arrow)"/>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 L3,5 Z" fill="#1976d2"/>
+    </marker>
+  </defs>
+</svg> 

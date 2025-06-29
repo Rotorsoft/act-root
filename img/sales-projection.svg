@@ -1,0 +1,27 @@
+<svg width="1200" height="500" viewBox="0 0 1200 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Event bubbles (staggered vertically, extra margin) -->
+  <circle cx="170" cy="100" r="40" fill="#ffe0b2" stroke="#f57c00" stroke-width="3"/>
+  <text x="170" y="110" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">CheckedOut</text>
+
+  <circle cx="490" cy="260" r="40" fill="#ffe0b2" stroke="#f57c00" stroke-width="3"/>
+  <text x="490" y="270" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">CheckedOut</text>
+
+  <circle cx="830" cy="100" r="40" fill="#ffe0b2" stroke="#f57c00" stroke-width="3"/>
+  <text x="830" y="110" text-anchor="middle" font-size="18" font-family="monospace" fill="#222">CheckedOut</text>
+
+  <!-- Projection box below -->
+  <rect x="500" y="400" width="300" height="80" rx="20" fill="#b2f5b2" stroke="#2e7d32" stroke-width="3"/>
+  <text x="650" y="440" text-anchor="middle" font-size="20" font-family="monospace" fill="#222">Sales Projection</text>
+  <text x="650" y="460" text-anchor="middle" font-size="14" font-family="monospace" fill="#222">{ "2024-06-01": { total: 200.5, count: 2 }, ... }</text>
+
+  <!-- Arrows from each event to projection -->
+  <line x1="170" y1="140" x2="650" y2="400" stroke="#1976d2" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="490" y1="300" x2="650" y2="400" stroke="#1976d2" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="830" y1="140" x2="650" y2="400" stroke="#1976d2" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,5 L0,10 L3,5 Z" fill="#1976d2"/>
+    </marker>
+  </defs>
+</svg> 
