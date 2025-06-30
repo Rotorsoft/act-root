@@ -1,3 +1,5 @@
+#### 2025-06-30 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.1...@rotorsoft/act-v0.5.2) @rotorsoft/act-v0.5.2
+  - PATCH [3e32cf7a](https://github.com/Rotorsoft/act-root/commit/3e32cf7a17bc0592d09f6100fb0df192278cba37) fix: refactor signals
 #### 2025-06-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.4.0...@rotorsoft/act-pg-v0.4.1) @rotorsoft/act-pg-v0.4.1
   - PATCH [6e81c36c](https://github.com/Rotorsoft/act-root/commit/6e81c36ce7366d28631fea939536d1dbb725a073) fix: filter snapshot events when fetching
 #### 2025-06-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.0...@rotorsoft/act-v0.5.1) @rotorsoft/act-v0.5.1
