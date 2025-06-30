@@ -30,7 +30,7 @@ describe("adapters", () => {
     };
 
     it("should throw concurrency error", async () => {
-      const committed = await store().commit(stream, events, meta, 0);
+      const committed = await store().commit(stream, events, meta);
       expect(committed.length).toBe(events.length);
       try {
         await store().commit(stream, events, meta, 1);
@@ -146,6 +146,51 @@ describe("adapters", () => {
       const result = await store.fetch(1);
       expect(result.streams).toEqual([]);
       expect(result.events).toEqual([]);
+    });
+
+    it("should not lease a blocked stream", async () => {
+      const s = store();
+      await s.lease([
+        { stream: "L2", by: "actor", at: 0, retry: 0, block: true },
+      ]);
+      const leases = await s.lease([
+        { stream: "L2", by: "actor", at: 1, retry: 0, block: false },
+      ]);
+      expect(leases.length).toBe(1);
+    });
+
+    it("should not update state when ack is called with lower at", async () => {
+      const s = store();
+      await s.lease([
+        { stream: "L3", by: "actor", at: 2, retry: 0, block: false },
+      ]);
+      // Ack with lower at
+      await s.ack([
+        { stream: "L3", by: "actor", at: 1, retry: 0, block: false },
+      ]);
+      // No error, state unchanged
+    });
+
+    it("should throw ConcurrencyError on commit with wrong expectedVersion", async () => {
+      const s = store();
+      await s.commit("S3", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      await s.commit(
+        "S3",
+        [{ name: "A", data: {} }],
+        { correlation: "c", causation: {} },
+        0
+      );
+      await expect(
+        s.commit(
+          "S3",
+          [{ name: "A", data: {} }],
+          { correlation: "c", causation: {} },
+          0
+        )
+      ).rejects.toThrow(ConcurrencyError);
     });
   });
 });

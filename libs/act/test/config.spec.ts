@@ -87,4 +87,12 @@ describe("config", () => {
     const { config: config2 } = await import("../src/config.js");
     expect(config2().logLevel).toBe("info");
   });
+
+  it("should set logLevel to 'trace' if not test or production", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.LOG_LEVEL;
+    const { config: loadConfig } = await import("../src/config.js");
+    const config = loadConfig();
+    expect(config.logLevel).toBe("trace");
+  });
 });

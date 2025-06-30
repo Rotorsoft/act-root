@@ -73,6 +73,7 @@ describe("Act", () => {
   });
 
   it("should return 0 if drain is locked", async () => {
+    // Covers the drainLocked branch in Act.drain
     act.drainLocked = true;
     const result = await act.drain();
     expect(result).toBe(0);
@@ -319,5 +320,113 @@ describe("Act", () => {
       called = true;
     });
     expect(called).toBe(true);
+  });
+
+  it("should throw when calling do() with an invalid action", async () => {
+    await expect(
+      act.do("invalid", { stream: "s", actor: { id: "a", name: "a" } }, {})
+    ).rejects.toThrow();
+  });
+
+  it("should return 0 and undefined for query with no matching events", async () => {
+    const result = await act.query({ stream: "nonexistent" });
+    expect(result.count).toBe(0);
+    expect(result.first).toBeUndefined();
+    expect(result.last).toBeUndefined();
+  });
+
+  it("should not call removed event listener", async () => {
+    const listener = vi.fn();
+    act.on("committed", listener);
+    act.off("committed", listener);
+    await act.do("foo", { stream: "s", actor: { id: "a", name: "a" } }, {});
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("should handle unexpected error in reaction handler and continue", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn().mockImplementation(() => {
+            throw new Error("unexpected");
+          }),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await expect(act.drain()).resolves.toBeGreaterThanOrEqual(0);
+  });
+
+  it("should drain with no listeners and no events", async () => {
+    act = new (await import("../src/act.js")).Act(registry, 1);
+    await expect(act.drain()).resolves.toBe(0);
+  });
+
+  it("should emit event with no listeners and return false", () => {
+    const result = act.emit("nonexistent", {});
+    expect(result).toBe(false);
+  });
+
+  it("should log error for non-ValidationError in lease handler", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn().mockRejectedValue(new Error("not validation")),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    expect(fakeLogger.error).toHaveBeenCalledWith(new Error("not validation"));
+  });
+
+  it("should log error for non-ValidationError (plain object) in lease handler", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn().mockRejectedValue({ foo: "bar" }),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    expect(fakeLogger.error).toHaveBeenCalledWith({ foo: "bar" });
+  });
+
+  it("should log error for non-ValidationError (string) in lease handler", async () => {
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn().mockRejectedValue("plain string error"),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+    await act.drain();
+    expect(fakeLogger.error).toHaveBeenCalledWith("plain string error");
   });
 });

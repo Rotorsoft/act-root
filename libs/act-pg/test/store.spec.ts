@@ -99,7 +99,7 @@ describe("pg store", () => {
 
     const events2: Committed<Schemas, keyof Schemas>[] = [];
     await store().query((e) => events2.push(e), { after: first, limit: 2 });
-    expect(events2.at(0)?.id).toBe(first + 1);
+    expect(events2[0]?.id).toBe(first + 1);
     expect(events2.length).toBe(2);
 
     const events3: Committed<Schemas, keyof Schemas>[] = [];
@@ -183,5 +183,111 @@ describe("pg store", () => {
     expect(count).toBe(3);
     const count2 = await store().query(() => {}, { stream: a5 }, true);
     expect(count2).toBe(2);
+  });
+
+  it("should throw on connection error (simulate by using invalid config)", async () => {
+    const { PostgresStore } = await import("../src/PostgresStore.js");
+    await expect(
+      new PostgresStore({ password: "bad", port: 5431 }).seed()
+    ).rejects.toThrow();
+  });
+
+  it("should handle commit with empty events array", async () => {
+    const { PostgresStore } = await import("../src/PostgresStore.js");
+    const store = new PostgresStore({ port: 5431 });
+    await store.seed();
+    const result = await store.commit("stream", [], {
+      correlation: "c",
+      causation: {},
+    });
+    expect(result).toEqual([]);
+  });
+
+  it("should handle query with no results", async () => {
+    const { PostgresStore } = await import("../src/PostgresStore.js");
+    const store = new PostgresStore({ port: 5431 });
+    await store.seed();
+    const result: any[] = [];
+    await store.query((e) => result.push(e), { stream: "nonexistent" });
+    expect(result.length).toBe(0);
+  });
+});
+
+describe("PostgresStore config", () => {
+  it("should merge custom config with defaults", () => {
+    const custom = {
+      host: "custom",
+      port: 1234,
+      schema: "myschema",
+      table: "mytable",
+      leaseMillis: 5000,
+    };
+    const store = new PostgresStore(custom);
+    expect(store.config.host).toBe("custom");
+    expect(store.config.port).toBe(1234);
+    expect(store.config.schema).toBe("myschema");
+    expect(store.config.table).toBe("mytable");
+    expect(store.config.leaseMillis).toBe(5000);
+    // Defaults
+    expect(store.config.user).toBe("postgres");
+    expect(store.config.password).toBe("postgres");
+    expect(store.config.database).toBe("postgres");
+  });
+});
+
+describe("PostgresStore constructor", () => {
+  it("should use defaults when no config is provided", () => {
+    const store = new PostgresStore();
+    expect(store.config.host).toBe("localhost");
+    expect(store.config.port).toBe(5432);
+    expect(store.config.user).toBe("postgres");
+    expect(store.config.password).toBe("postgres");
+    expect(store.config.database).toBe("postgres");
+    expect(store.config.schema).toBe("public");
+    expect(store.config.table).toBe("events");
+    expect(store.config.leaseMillis).toBe(30000);
+  });
+  it("should merge partial config with defaults", () => {
+    const store = new PostgresStore({ host: "custom", port: 1234 });
+    expect(store.config.host).toBe("custom");
+    expect(store.config.port).toBe(1234);
+    expect(store.config.user).toBe("postgres");
+  });
+});
+
+describe("PostgresStore.query branches", () => {
+  const store = new PostgresStore({ port: 5431, table: "store_test" });
+  beforeAll(async () => {
+    await store.seed();
+  });
+  it("should handle withSnaps=true branch", async () => {
+    await expect(store.query(() => {}, { stream: "A" }, true)).resolves.toBe(0);
+  });
+  it("should handle no query argument branch", async () => {
+    await expect(store.query(() => {})).resolves.toBe(0);
+  });
+  it("should handle query.after defined branch", async () => {
+    await expect(store.query(() => {}, { after: 1 })).resolves.toBe(0);
+  });
+  it("should handle query.after undefined branch", async () => {
+    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
+  });
+  it("should handle query with no conditions (no WHERE clause)", async () => {
+    await expect(store.query(() => {})).resolves.toBe(0);
+  });
+  it("should handle query with conditions (adds WHERE clause)", async () => {
+    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
+  });
+  it("should handle query with limit (adds LIMIT clause)", async () => {
+    await expect(store.query(() => {}, { limit: 1 })).resolves.toBe(0);
+  });
+  it("should handle query without limit (no LIMIT clause)", async () => {
+    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
+  });
+  it("should handle query with no arguments (no conditions, no limit)", async () => {
+    await expect(store.query(() => {})).resolves.toBe(0);
+  });
+  it("should handle query with empty query object (no conditions, no limit)", async () => {
+    await expect(store.query(() => {}, {})).resolves.toBe(0);
   });
 });
