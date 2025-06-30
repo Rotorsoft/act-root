@@ -58,6 +58,8 @@ const DEFAULT_CONFIG: Config = {
 export class PostgresStore implements Store {
   private _pool;
   readonly config: Config;
+  private _fqt: string;
+  private _fqs: string;
 
   /**
    * Create a new PostgresStore instance.
@@ -66,6 +68,8 @@ export class PostgresStore implements Store {
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
     this._pool = new Pool(this.config);
+    this._fqt = `"${this.config.schema}"."${this.config.table}"`;
+    this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
   }
 
   /**
@@ -94,7 +98,7 @@ export class PostgresStore implements Store {
 
       // Events table
       await client.query(
-        `CREATE TABLE IF NOT EXISTS "${this.config.schema}"."${this.config.table}" (
+        `CREATE TABLE IF NOT EXISTS ${this._fqt} (
           id serial PRIMARY KEY,
           name varchar(100) COLLATE pg_catalog."default" NOT NULL,
           data jsonb,
@@ -108,24 +112,24 @@ export class PostgresStore implements Store {
       // Indexes on events
       await client.query(
         `CREATE UNIQUE INDEX IF NOT EXISTS "${this.config.table}_stream_ix" 
-        ON "${this.config.schema}"."${this.config.table}" (stream COLLATE pg_catalog."default", version);`
+        ON ${this._fqt} (stream COLLATE pg_catalog."default", version);`
       );
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_name_ix" 
-        ON "${this.config.schema}"."${this.config.table}" (name COLLATE pg_catalog."default");`
+        ON ${this._fqt} (name COLLATE pg_catalog."default");`
       );
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_created_id_ix" 
-        ON "${this.config.schema}"."${this.config.table}" (created, id);`
+        ON ${this._fqt} (created, id);`
       );
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_correlation_ix" 
-        ON "${this.config.schema}"."${this.config.table}" ((meta ->> 'correlation') COLLATE pg_catalog."default");`
+        ON ${this._fqt} ((meta ->> 'correlation') COLLATE pg_catalog."default");`
       );
 
       // Streams table
       await client.query(
-        `CREATE TABLE IF NOT EXISTS "${this.config.schema}"."${this.config.table}_streams" (
+        `CREATE TABLE IF NOT EXISTS ${this._fqs} (
           stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
           at int NOT NULL DEFAULT -1,
           retry smallint NOT NULL DEFAULT 0,
@@ -139,7 +143,7 @@ export class PostgresStore implements Store {
       // Index for fetching streams
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_fetch_ix" 
-        ON "${this.config.schema}"."${this.config.table}_streams" (blocked, at);`
+        ON ${this._fqs} (blocked, at);`
       );
 
       await client.query("COMMIT");
@@ -167,8 +171,8 @@ export class PostgresStore implements Store {
         IF EXISTS (SELECT 1 FROM information_schema.schemata
           WHERE schema_name = '${this.config.schema}'
         ) THEN
-          EXECUTE 'DROP TABLE IF EXISTS "${this.config.schema}"."${this.config.table}"';
-          EXECUTE 'DROP TABLE IF EXISTS "${this.config.schema}"."${this.config.table}_streams"';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fqt}';
+          EXECUTE 'DROP TABLE IF EXISTS ${this._fqs}';
           IF '${this.config.schema}' <> 'public' THEN
             EXECUTE 'DROP SCHEMA "${this.config.schema}" CASCADE';
           END IF;
@@ -207,51 +211,54 @@ export class PostgresStore implements Store {
       correlation,
     } = query || {};
 
-    let sql = `SELECT * FROM "${this.config.schema}"."${this.config.table}" WHERE`;
+    let sql = `SELECT * FROM ${this._fqt}`;
+    const conditions: string[] = [];
     const values: any[] = [];
 
-    if (withSnaps)
-      sql = sql.concat(
-        ` id>=COALESCE((SELECT id
-            FROM "${this.config.schema}"."${this.config.table}"
-            WHERE stream='${stream}' AND name='${SNAP_EVENT}'
-            ORDER BY id DESC LIMIT 1), 0)
-            AND stream='${stream}'`
+    if (withSnaps) {
+      conditions.push(
+        `id>=COALESCE((SELECT id FROM ${this._fqt} WHERE stream='${stream}' AND name='${SNAP_EVENT}' ORDER BY id DESC LIMIT 1), 0)`
       );
-    else if (query) {
+      conditions.push(`stream='${stream}'`);
+    } else if (query) {
       if (typeof after !== "undefined") {
         values.push(after);
-        sql = sql.concat(" id>$1");
-      } else sql = sql.concat(" id>-1");
+        conditions.push(`id>$${values.length}`);
+      } else {
+        conditions.push("id>-1");
+      }
       if (stream) {
         values.push(stream);
-        sql = sql.concat(` AND stream=$${values.length}`);
+        conditions.push(`stream=$${values.length}`);
       }
       if (names && names.length) {
         values.push(names);
-        sql = sql.concat(` AND name = ANY($${values.length})`);
+        conditions.push(`name = ANY($${values.length})`);
       }
       if (before) {
         values.push(before);
-        sql = sql.concat(` AND id<$${values.length}`);
+        conditions.push(`id<$${values.length}`);
       }
       if (created_after) {
         values.push(created_after.toISOString());
-        sql = sql.concat(` AND created>$${values.length}`);
+        conditions.push(`created>$${values.length}`);
       }
       if (created_before) {
         values.push(created_before.toISOString());
-        sql = sql.concat(` AND created<$${values.length}`);
+        conditions.push(`created<$${values.length}`);
       }
       if (correlation) {
         values.push(correlation);
-        sql = sql.concat(` AND meta->>'correlation'=$${values.length}`);
+        conditions.push(`meta->>'correlation'=$${values.length}`);
       }
     }
-    sql = sql.concat(` ORDER BY id ${backward ? "DESC" : "ASC"}`);
+    if (conditions.length) {
+      sql += " WHERE " + conditions.join(" AND ");
+    }
+    sql += ` ORDER BY id ${backward ? "DESC" : "ASC"}`;
     if (limit) {
       values.push(limit);
-      sql = sql.concat(` LIMIT $${values.length}`);
+      sql += ` LIMIT $${values.length}`;
     }
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
@@ -276,6 +283,7 @@ export class PostgresStore implements Store {
     meta: EventMeta,
     expectedVersion?: number
   ) {
+    if (msgs.length === 0) return [];
     const client = await this._pool.connect();
     let version = -1;
     try {
@@ -283,12 +291,12 @@ export class PostgresStore implements Store {
 
       const last = await client.query<Committed<E, keyof E>>(
         `SELECT version
-        FROM "${this.config.schema}"."${this.config.table}"
+        FROM ${this._fqt}
         WHERE stream=$1 ORDER BY version DESC LIMIT 1`,
         [stream]
       );
       version = last.rowCount ? last.rows[0].version : -1;
-      if (expectedVersion && version !== expectedVersion)
+      if (typeof expectedVersion === "number" && version !== expectedVersion)
         throw new ConcurrencyError(
           version,
           msgs as unknown as Message<Schemas, string>[],
@@ -299,7 +307,7 @@ export class PostgresStore implements Store {
         msgs.map(async ({ name, data }) => {
           version++;
           const sql = `
-          INSERT INTO "${this.config.schema}"."${this.config.table}"(name, data, stream, version, meta) 
+          INSERT INTO ${this._fqt}(name, data, stream, version, meta) 
           VALUES($1, $2, $3, $4, $5) RETURNING *`;
           const vals = [name, data, stream, version, meta];
           const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
@@ -345,7 +353,7 @@ export class PostgresStore implements Store {
     const { rows } = await this._pool.query<{ stream: string; at: number }>(
       `
       SELECT stream, at
-      FROM "${this.config.schema}"."${this.config.table}_streams"
+      FROM ${this._fqs}
       WHERE blocked=false
       ORDER BY at ASC
       LIMIT $1::integer
@@ -381,7 +389,7 @@ export class PostgresStore implements Store {
       // insert new streams
       await client.query(
         `
-        INSERT INTO "${this.config.schema}"."${this.config.table}_streams" (stream)
+        INSERT INTO ${this._fqs} (stream)
         SELECT UNNEST($1::text[])
         ON CONFLICT (stream) DO NOTHING
         `,
@@ -395,11 +403,11 @@ export class PostgresStore implements Store {
       }>(
         `
         WITH free AS (
-          SELECT * FROM "${this.config.schema}"."${this.config.table}_streams" 
+          SELECT * FROM ${this._fqs} 
           WHERE stream = ANY($1::text[]) AND (leased_by IS NULL OR leased_until <= NOW())
           FOR UPDATE
         )
-        UPDATE "${this.config.schema}"."${this.config.table}_streams" U
+        UPDATE ${this._fqs} U
         SET
           leased_by = $2::uuid,
           leased_at = $3::integer,
@@ -440,7 +448,7 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       for (const { stream, by, at, retry, block } of leases) {
         await client.query(
-          `UPDATE "${this.config.schema}"."${this.config.table}_streams"
+          `UPDATE ${this._fqs}
           SET
             at = $3::integer,
             retry = $4::integer,
