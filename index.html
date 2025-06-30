@@ -501,6 +501,55 @@
         opacity: 1;
         transform: none;
       }
+      /* Quickstart section utility classes */
+      .qs-flex-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 0.5em;
+      }
+      .qs-rel {
+        position: relative;
+        width: 100%;
+        margin-bottom: 1.2em;
+      }
+      .qs-icon {
+        margin-right: 0.6em;
+        display: flex;
+        align-items: center;
+      }
+      .qs-label {
+        font-size: 1.13rem;
+        font-weight: 800;
+        color: var(--code-green);
+      }
+      .qs-pre {
+        background: #181a20;
+        border-radius: 8px;
+        border: 1px solid var(--accent-fade);
+        padding: 0.7em 1.1em 0.7em 1.1em;
+        margin: 0;
+        font-family:
+          "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        color: var(--code-green);
+        font-size: 0.93rem;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .qs-pre-app {
+        color: #b5cdfa;
+        font-size: 0.85rem;
+      }
+      .qs-copy-btn {
+        position: absolute;
+        top: 0.5em;
+        right: 0.7em;
+        background: none;
+        border: none;
+        cursor: pointer;
+        color: var(--accent);
+        font-size: 1.13rem;
+        padding: 0;
+      }
     </style>
   </head>
   <body>
@@ -614,11 +663,8 @@
           "
         >
           <!-- Step 1: Install -->
-          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
-            <span
-              class="icon"
-              style="margin-right: 0.6em; display: flex; align-items: center"
-            >
+          <div class="qs-flex-row">
+            <span class="icon qs-icon">
               <svg
                 width="22"
                 height="22"
@@ -641,48 +687,17 @@
                 />
               </svg>
             </span>
-            <span
-              style="
-                font-size: 1.13rem;
-                font-weight: 800;
-                color: var(--code-green);
-              "
-              >Install</span
-            >
+            <span class="qs-label">Install</span>
           </div>
-          <div style="position: relative; width: 100%; margin-bottom: 1.2em">
+          <div class="qs-rel">
             <pre
               id="quickstart-install"
-              style="
-                background: #181a20;
-                border-radius: 8px;
-                border: 1px solid var(--accent-fade);
-                padding: 0.7em 1.1em 0.7em 1.1em;
-                margin: 0;
-                font-family:
-                  &quot;JetBrains Mono&quot;, &quot;Fira Mono&quot;,
-                  &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;
-                color: var(--code-green);
-                font-size: 0.93rem;
-                overflow-x: auto;
-                white-space: pre;
-              "
+              class="qs-pre"
             ><code>npm install @rotorsoft/act</code></pre>
             <button
-              class="copy-btn"
+              class="qs-copy-btn"
               data-copy-target="quickstart-install"
               title="Copy"
-              style="
-                position: absolute;
-                top: 0.5em;
-                right: 0.7em;
-                background: none;
-                border: none;
-                cursor: pointer;
-                color: var(--accent);
-                font-size: 1.13rem;
-                padding: 0;
-              "
             >
               <svg
                 width="20"
@@ -700,11 +715,8 @@
             </button>
           </div>
           <!-- Step 2: Minimal App -->
-          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
-            <span
-              class="icon"
-              style="margin-right: 0.6em; display: flex; align-items: center"
-            >
+          <div class="qs-flex-row">
+            <span class="icon qs-icon">
               <svg
                 width="22"
                 height="22"
@@ -719,32 +731,12 @@
                 <path d="M8 10h8M8 14h8" />
               </svg>
             </span>
-            <span
-              style="
-                font-size: 1.13rem;
-                font-weight: 800;
-                color: var(--code-green);
-              "
-              >Minimal App</span
-            >
+            <span class="qs-label">Minimal App</span>
           </div>
-          <div style="position: relative; width: 100%; margin-bottom: 1.2em">
+          <div class="qs-rel">
             <pre
               id="quickstart-app"
-              style="
-                background: #181a20;
-                border-radius: 8px;
-                border: 1px solid var(--accent-fade);
-                padding: 0.7em 1.1em 0.7em 1.1em;
-                margin: 0;
-                font-family:
-                  &quot;JetBrains Mono&quot;, &quot;Fira Mono&quot;,
-                  &quot;Menlo&quot;, &quot;Consolas&quot;, monospace;
-                color: #b5cdfa;
-                font-size: 0.85rem;
-                overflow-x: auto;
-                white-space: pre;
-              "
+              class="qs-pre-app"
             ><code class="language-typescript">import { act, state } from "@rotorsoft/act";
 import { z } from "zod/v4";
 const Counter = state("Counter", z.object({ count: z.number() }))
@@ -758,20 +750,9 @@ const app = act().with(Counter).build();
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
 console.log(await app.load(Counter, "counter1"));</code></pre>
             <button
-              class="copy-btn"
+              class="qs-copy-btn"
               data-copy-target="quickstart-app"
               title="Copy"
-              style="
-                position: absolute;
-                top: 0.5em;
-                right: 0.7em;
-                background: none;
-                border: none;
-                cursor: pointer;
-                color: var(--accent);
-                font-size: 1.13rem;
-                padding: 0;
-              "
             >
               <svg
                 width="20"
@@ -789,11 +770,8 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
             </button>
           </div>
           <!-- Step 3: Run & Explore -->
-          <div style="display: flex; align-items: center; margin-bottom: 0.5em">
-            <span
-              class="icon"
-              style="margin-right: 0.6em; display: flex; align-items: center"
-            >
+          <div class="qs-flex-row">
+            <span class="icon qs-icon">
               <svg
                 width="22"
                 height="22"
@@ -811,14 +789,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 />
               </svg>
             </span>
-            <span
-              style="
-                font-size: 1.13rem;
-                font-weight: 800;
-                color: var(--code-green);
-              "
-              >Run &amp; Explore</span
-            >
+            <span class="qs-label">Run &amp; Explore</span>
           </div>
           <div
             style="
