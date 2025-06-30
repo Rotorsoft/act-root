@@ -32,7 +32,19 @@ const sidebars: SidebarsConfig = {
     {
       type: "category",
       label: "API Reference",
-      items: ["api/act.src", "api/act-pg"],
+      collapsed: false,
+      items: [
+        {
+          type: "link",
+          label: "@rotorsoft/act",
+          href: "/docs/api/act/src",
+        },
+        {
+          type: "link",
+          label: "@rotorsoft/act-pg",
+          href: "/docs/api/act-pg/src",
+        },
+      ],
     },
   ],
 };

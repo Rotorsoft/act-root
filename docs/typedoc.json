@@ -4,31 +4,11 @@
     "../libs/act-pg/src/index.ts"
   ],
   "out": "docs/api",
-  "name": "act",
-  "exclude": [
-    "../packages/**",
-    "**/*.spec.ts",
-    "**/node_modules/**"
-  ],
   "excludePrivate": true,
-  "excludeProtected": true,
-  "excludeExternals": true,
-  "includeVersion": true,
-  "categorizeByGroup": true,
-  "defaultCategory": "Other",
-  "theme": "default",
+  "excludeInternal": true,
   "readme": "none",
+  "categorizeByGroup": true,
   "plugin": [
     "typedoc-plugin-markdown"
-  ],
-  "flattenOutputFiles": true,
-  "hideGenerator": true,
-  "sort": [
-    "source-order"
-  ],
-  "searchInComments": true,
-  "validation": {
-    "invalidLink": true,
-    "notExported": true
-  }
+  ]
 }

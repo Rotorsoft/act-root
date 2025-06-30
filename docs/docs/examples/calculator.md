@@ -25,5 +25,3 @@ This example demonstrates a simple calculator implemented using the Act Framewor
 ## Usage
 
 See the source files above for implementation details and usage examples.
-
-[API Reference (act)](../api/act.src)

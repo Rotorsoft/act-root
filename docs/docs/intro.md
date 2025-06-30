@@ -65,19 +65,6 @@ const state = await app.load(Counter, "counter1");
 console.log(state.state); // { count: 5 }
 ```
 
-## 📚 Documentation Map
-
-- Concepts: All main ideas and architecture
-  - [State Management](concepts/state-management)
-  - [Event Sourcing](concepts/event-sourcing)
-  - [Configuration, Builders, Adapters & Utilities](concepts/configuration)
-- Examples
-  - [Calculator](examples/calculator)
-  - [WolfDesk](examples/wolfdesk)
-- API Reference
-  - [act](api/act.src)
-  - [act-pg](api/act-pg.md)
-
 ## ❓ FAQ
 
 **Q: Do I need to use Postgres?**  
