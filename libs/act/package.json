@@ -23,7 +23,6 @@
       "require": "./dist/index.cjs"
     }
   },
-  "sideEffects": false,
   "engines": {
     "node": ">=18"
   },

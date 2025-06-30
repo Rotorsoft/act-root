@@ -1,9 +1,13 @@
 /**
+ * @packageDocumentation
  * @module act/types
  * Barrel file for Act Framework core types.
  *
  * Re-exports all major type definitions for actions, errors, ports, reactions, registries, and schemas.
  * Also defines common environment and log level types/constants for configuration and logging.
+ *
+ * @remarks
+ * Import from this module to access all core framework types in one place.
  */
 export type * from "./action.js";
 export * from "./errors.js";

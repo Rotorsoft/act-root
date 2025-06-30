@@ -9,6 +9,7 @@ import {
 } from "./schemas.js";
 
 /**
+ * @packageDocumentation
  * @module act/types
  * @category Types
  * Types for actions, events, schemas, and state in the Act Framework.

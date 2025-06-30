@@ -1,6 +1,7 @@
 import type { Message, Schema, Schemas, Target } from "./action.js";
 
 /**
+ * @packageDocumentation
  * @module act/types
  * @category Types
  * Application error type constants and error classes for the Act Framework.

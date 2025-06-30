@@ -1,6 +1,7 @@
 import { z, ZodObject, ZodRawShape } from "zod/v4";
 
 /**
+ * @packageDocumentation
  * @module act/types
  * @category Types
  * Zod schemas and helpers for the Act Framework.

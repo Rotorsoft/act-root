@@ -1,4 +1,5 @@
 /**
+ * @packageDocumentation
  * @module act/types
  * @category Types
  * Types for reactions, leases, and fetch results in the Act Framework.

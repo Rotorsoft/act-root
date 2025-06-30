@@ -1,4 +1,5 @@
 /**
+ * @packageDocumentation
  * @module act/adapters
  * In-memory event store adapter for the Act Framework.
  *
@@ -20,6 +21,10 @@ import type {
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
+/**
+ * @internal
+ * Represents an in-memory stream for event processing and leasing.
+ */
 class InMemoryStream {
   _at = -1;
   _retry = -1;
@@ -78,6 +83,7 @@ export class InMemoryStore implements Store {
 
   /**
    * Dispose of the store and clear all events.
+   * @returns Promise that resolves when disposal is complete.
    */
   async dispose() {
     await sleep();
@@ -86,6 +92,7 @@ export class InMemoryStore implements Store {
 
   /**
    * Seed the store with initial data (no-op for in-memory).
+   * @returns Promise that resolves when seeding is complete.
    */
   async seed() {
     await sleep();
@@ -93,6 +100,7 @@ export class InMemoryStore implements Store {
 
   /**
    * Drop all data from the store.
+   * @returns Promise that resolves when the store is cleared.
    */
   async drop() {
     await sleep();
@@ -154,7 +162,10 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     const instance = this._events.filter((e) => e.stream === stream); // ignore state events, this is a production optimization
-    if (expectedVersion && instance.length - 1 !== expectedVersion)
+    if (
+      typeof expectedVersion === "number" &&
+      instance.length - 1 !== expectedVersion
+    )
       throw new ConcurrencyError(
         instance.length - 1,
         msgs as Message<Schemas, keyof Schemas>[],

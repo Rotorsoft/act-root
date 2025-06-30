@@ -1,4 +1,5 @@
 /**
+ * @packageDocumentation
  * Configuration utilities for Act Framework environment, logging, and package metadata.
  *
  * Provides type-safe configuration loading and validation using Zod schemas.
@@ -17,6 +18,7 @@ import { extend } from "./utils.js";
 
 /**
  * Zod schema for validating package.json metadata.
+ * @internal
  */
 export const PackageSchema = z.object({
   name: z.string().min(1),
@@ -39,6 +41,7 @@ export type Package = z.infer<typeof PackageSchema>;
 /**
  * Loads and parses the local package.json file as a Package object.
  * @returns The parsed and validated package metadata.
+ * @internal
  */
 const getPackage = (): Package => {
   const pkg = fs.readFileSync("package.json");
@@ -48,6 +51,7 @@ const getPackage = (): Package => {
 /**
  * Zod schema for the full Act Framework configuration object.
  * Includes package metadata, environment, logging, and timing options.
+ * @internal
  */
 const BaseSchema = PackageSchema.extend({
   env: z.enum(Environments),
@@ -81,8 +85,10 @@ const pkg = getPackage();
  * Merges package.json metadata with environment, logging, and timing options.
  * @returns The validated configuration object.
  * @example
- *   const cfg = config();
- *   console.log(cfg.env, cfg.logLevel);
+ * ```ts
+ * const cfg = config();
+ * console.log(cfg.env, cfg.logLevel);
+ * ```
  */
 export const config = (): Config => {
   return extend({ ...pkg, env, logLevel, logSingleLine, sleepMs }, BaseSchema);
