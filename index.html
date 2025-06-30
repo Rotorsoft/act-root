@@ -87,6 +87,27 @@
         align-items: center;
         margin-bottom: 0.05em;
       }
+      @keyframes drop-t-right {
+        0% {
+          transform: rotate(-30deg);
+        }
+        60% {
+          transform: rotate(18deg);
+        }
+        80% {
+          transform: rotate(-8deg);
+        }
+        100% {
+          transform: rotate(0deg);
+        }
+      }
+      .logo-t {
+        display: inline-block;
+        will-change: transform, opacity;
+      }
+      .logo-t.animate {
+        animation: drop-t-right 1.1s cubic-bezier(0.4, 0, 0.2, 1);
+      }
       .hero h1,
       .logo-modern text {
         font-family: "JetBrains Mono", "Fira Mono", "IBM Plex Mono", monospace;
@@ -545,10 +566,18 @@
         right: 0.7em;
         background: none;
         border: none;
-        cursor: pointer;
         color: var(--accent);
         font-size: 1.13rem;
         padding: 0;
+      }
+      .qs-copy-btn:hover {
+        color: var(--code-green);
+        cursor: pointer !important;
+      }
+      .qs-copy-btn:focus {
+        background: var(--accent-fade);
+        border-radius: 4px;
+        outline: none;
       }
     </style>
   </head>
@@ -561,7 +590,7 @@
             <div class="logo-caption">
               <span style="color: #3bb0ff">A</span>
               <span style="color: #ffb300">c</span>
-              <span style="color: #43a047">t</span>
+              <span class="logo-t" style="color: #43a047">t</span>
             </div>
             <div class="subtitle">
               TypeScript-first Event Sourcing Framework
@@ -669,7 +698,7 @@
                 width="22"
                 height="22"
                 viewBox="0 0 24 24"
-                fill="none"
+                fill="var(--code-green)"
                 stroke="var(--code-green)"
                 stroke-width="2.2"
                 stroke-linecap="round"
@@ -721,7 +750,7 @@
                 width="22"
                 height="22"
                 viewBox="0 0 24 24"
-                fill="none"
+                fill="var(--code-green)"
                 stroke="var(--code-green)"
                 stroke-width="2.2"
                 stroke-linecap="round"
@@ -806,7 +835,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
       </section>
       <script>
         // Copy-to-clipboard for quickstart code blocks
-        document.querySelectorAll(".copy-btn").forEach(function (btn) {
+        document.querySelectorAll(".qs-copy-btn").forEach(function (btn) {
           btn.addEventListener("click", function () {
             var targetId = btn.getAttribute("data-copy-target");
             var code = document.getElementById(targetId).innerText;
@@ -1167,5 +1196,36 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
     </div>
     <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-typescript.min.js"></script>
+    <script>
+      // Animate the "t" every 12 seconds, but only if the title is visible
+      function animateLogoT() {
+        const t = document.querySelector(".logo-t");
+        if (!t) return;
+        t.classList.remove("animate");
+        // Force reflow to restart animation
+        void t.offsetWidth;
+        t.classList.add("animate");
+      }
+
+      // Only animate if the title is visible
+      let observer = new IntersectionObserver(
+        (entries) => {
+          if (entries[0].isIntersecting) {
+            animateLogoT();
+            // Animate every 12 seconds while visible
+            window.logoTInterval = setInterval(animateLogoT, 12000);
+          } else {
+            clearInterval(window.logoTInterval);
+          }
+        },
+        { threshold: 0.5 }
+      );
+      observer.observe(document.querySelector(".logo-caption"));
+
+      // Also animate on hover
+      document
+        .querySelector(".logo-caption")
+        .addEventListener("mouseenter", animateLogoT);
+    </script>
   </body>
 </html>
