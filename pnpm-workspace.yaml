@@ -3,7 +3,7 @@ packages:
   - packages/**
   - docs
 onlyBuiltDependencies:
-  - '@swc/core'
+  - "@swc/core"
   - core-js
   - core-js-pure
   - esbuild
