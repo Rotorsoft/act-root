@@ -13,7 +13,7 @@ importers:
         version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: workspace:*
-        version: link:libs/act-pg
+        version: 0.4.2
     devDependencies:
       '@eslint/eslintrc':
         specifier: ^3.3.1
@@ -191,7 +191,7 @@ importers:
         version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
-        version: 0.4.1
+        version: 0.4.2
       '@tanstack/react-query':
         specifier: ^5.80.10
         version: 5.81.5(react@19.1.0)
@@ -258,7 +258,7 @@ importers:
         version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
-        version: 0.4.1
+        version: 0.4.2
       '@trpc/server':
         specifier: 11.4.2
         version: 11.4.2(typescript@5.8.3)
@@ -283,7 +283,7 @@ importers:
         version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
-        version: 0.4.1
+        version: 0.4.2
       '@trpc/server':
         specifier: 11.4.2
         version: 11.4.2(typescript@5.8.3)
@@ -2229,8 +2229,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-pg@0.4.1':
-    resolution: {integrity: sha512-u4/n+sfoqprJ+cYoqwHnZdoZ1VyfLTyCI4VZwXg8JpH7uQX+eA99pkl9jVxfpoidsPFyjKhKFNHbHMroucFgMg==}
+  '@rotorsoft/act-pg@0.4.2':
+    resolution: {integrity: sha512-ULFvZOoLQYSvdikl799/sxBFm3FxUXTZ+iTY/0oBFQfSKLxRn927O29+xLmZCEpFf5OvzBPSd39el0HQrJpnYg==}
     engines: {node: '>=18'}
 
   '@rotorsoft/act@0.5.1':
@@ -9944,11 +9944,11 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.44.1':
     optional: true
 
-  '@rotorsoft/act-pg@0.4.1':
+  '@rotorsoft/act-pg@0.4.2':
     dependencies:
-      '@rotorsoft/act': 0.5.1
+      '@rotorsoft/act': 0.5.2
       pg: 8.16.3
-      zod: 3.25.67
+      zod: 3.25.71
     transitivePeerDependencies:
       - pg-native
 
