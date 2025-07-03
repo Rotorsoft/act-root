@@ -13,12 +13,12 @@
   "keywords": [],
   "license": "ISC",
   "dependencies": {
-    "@act/calculator": "workspace:../calculator",
-    "@rotorsoft/act": "^0.5.1",
-    "@rotorsoft/act-pg": "^0.4.1",
+    "@act/calculator": "link:../calculator",
+    "@rotorsoft/act": "^0.5.2",
+    "@rotorsoft/act-pg": "^0.4.2",
     "@trpc/server": "11.4.3",
     "cors": "^2.8.5",
-    "zod": "^3.25.67"
+    "zod": "^3.25.71"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19"
