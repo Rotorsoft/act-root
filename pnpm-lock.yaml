@@ -10,7 +10,7 @@ importers:
     dependencies:
       '@rotorsoft/act':
         specifier: workspace:*
-        version: link:libs/act
+        version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: workspace:*
         version: link:libs/act-pg
@@ -150,7 +150,7 @@ importers:
     dependencies:
       '@rotorsoft/act':
         specifier: workspace:*
-        version: link:../act
+        version: 0.5.2
       pg:
         specifier: ^8.16.2
         version: 8.16.3
@@ -166,7 +166,7 @@ importers:
     dependencies:
       '@rotorsoft/act':
         specifier: ^0.5.1
-        version: 0.5.1
+        version: 0.5.2
       '@trpc/server':
         specifier: 11.4.2
         version: 11.4.2(typescript@5.8.3)
@@ -188,7 +188,7 @@ importers:
         version: link:../calculator
       '@rotorsoft/act':
         specifier: ^0.5.1
-        version: 0.5.1
+        version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
         version: 0.4.1
@@ -255,7 +255,7 @@ importers:
         version: link:../calculator
       '@rotorsoft/act':
         specifier: ^0.5.1
-        version: 0.5.1
+        version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
         version: 0.4.1
@@ -280,7 +280,7 @@ importers:
         version: 0.15.9
       '@rotorsoft/act':
         specifier: ^0.5.1
-        version: 0.5.1
+        version: 0.5.2
       '@rotorsoft/act-pg':
         specifier: ^0.4.1
         version: 0.4.1
@@ -2235,6 +2235,10 @@ packages:
 
   '@rotorsoft/act@0.5.1':
     resolution: {integrity: sha512-uFYYwS7wbLFzwO1D2F6Ggi12itDthPxcblDcEDSgWJljoicGiRvxJyB6uS7Qr/6ODWP4ZDcbgJlhHVtE0x2mRQ==}
+    engines: {node: '>=18'}
+
+  '@rotorsoft/act@0.5.2':
+    resolution: {integrity: sha512-ZonGOi+CqIrkwh2Ttuc9VkbsJbGawcdxRDDKdAwwk5j4aCnOwlsNzy3rJ+SLf/66YlScXiCYeJqgwKLsFP/CmQ==}
     engines: {node: '>=18'}
 
   '@rspack/binding-darwin-arm64@1.4.1':
@@ -7367,6 +7371,9 @@ packages:
   zod@3.25.67:
     resolution: {integrity: sha512-idA2YXwpCdqUSKRCACDE6ItZD9TZzy3OZMtpfLoh6oPR47lipysRrJfjzMqFxQ3uJuUPyUeWe1r9vLH33xO/Qw==}
 
+  zod@3.25.71:
+    resolution: {integrity: sha512-BsBc/NPk7h8WsUWYWYL+BajcJPY8YhjelaWu2NMLuzgraKAz4Lb4/6K11g9jpuDetjMiqhZ6YaexFLOC0Ogi3Q==}
+
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
@@ -9950,6 +9957,12 @@ snapshots:
       pino: 9.7.0
       pino-pretty: 13.0.0
       zod: 3.25.67
+
+  '@rotorsoft/act@0.5.2':
+    dependencies:
+      pino: 9.7.0
+      pino-pretty: 13.0.0
+      zod: 3.25.71
 
   '@rspack/binding-darwin-arm64@1.4.1':
     optional: true
@@ -15751,5 +15764,7 @@ snapshots:
   yocto-queue@1.2.1: {}
 
   zod@3.25.67: {}
+
+  zod@3.25.71: {}
 
   zwitch@2.0.4: {}
