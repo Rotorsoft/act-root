@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.15.9",
-    "@trpc/server": "11.4.2",
+    "@trpc/server": "11.4.3",
     "@rotorsoft/act": "^0.5.1",
     "@rotorsoft/act-pg": "^0.4.1",
     "drizzle-orm": "^0.44.2",
