@@ -6,27 +6,18 @@
     ":maintainLockFilesWeekly",
     ":enableVulnerabilityAlerts"
   ],
+  "dependencyDashboard": true,
+  "enabledManagers": ["npm", "github-actions"],
   "packageRules": [
     {
-      "matchPackagePatterns": ["*"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "all non-major dependencies"
-    },
-    {
-      "matchDepTypes": ["dependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "dependencies (non-major)"
+      "matchPackagePatterns": ["^@types/"],
+      "groupName": "Types packages"
     },
     {
       "matchDepTypes": ["devDependencies"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "devDependencies (non-major)"
+      "groupName": "Dev dependencies"
     }
   ],
-  "pnpm": { "enabled": true },
-  "monorepo": { "enabled": true },
-  "dependencyDashboard": true,
-  "enabledManagers": ["pnpm"],
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["before 3am on monday"]
