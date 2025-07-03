@@ -1,5 +1,5 @@
 vi.mock("pg", () => {
-  const Pool = vi.fn().mockImplementation(function () {
+  const Pool = vi.fn().mockImplementation(function (this: any) {
     return this;
   });
   Pool.prototype.query = function () {};
@@ -17,7 +17,7 @@ vi.mock("pg", () => {
 
 import * as pg from "pg";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PostgresStore } from "../src/PostgresStore";
+import { PostgresStore } from "../src/PostgresStore.js";
 
 const makeClient = (queryMock: any) => ({
   query: queryMock,

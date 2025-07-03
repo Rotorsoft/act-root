@@ -1,9 +1,13 @@
 /// <reference types="vitest" />
+import * as path from "path";
 import { defineConfig } from "vite";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  plugins: [tsconfigPaths()],
+  resolve: {
+    alias: {
+      "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
+    },
+  },
   test: {
     globals: true,
     coverage: {
@@ -13,7 +17,7 @@ export default defineConfig({
       include: ["libs/**/src/**/*.ts"],
       exclude: ["**/node_modules/**", "packages/**"],
       thresholds: {
-        branches: 90,
+        branches: 95,
         functions: 95,
         lines: 95,
         statements: 95,

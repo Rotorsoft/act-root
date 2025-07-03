@@ -1,14 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "monorepo": true,
+  "pnpmWorkspaceDir": ".",
+  "enabledManagers": ["pnpm", "github-actions"],
+  "labels": ["dependencies"],
+  "dependencyDashboard": true,
   "packageRules": [
     {
-      "matchPackagePatterns": ["*"],
-      "groupName": "all dependencies"
+      "matchManagers": ["pnpm"],
+      "groupName": "pnpm workspace dependencies"
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
     }
-  ],
-  "enabledManagers": ["pnpm", "github-actions"],
-  "platform": "github",
-  "labels": ["dependencies"],
-  "dependencyDashboard": true
+  ]
 }
