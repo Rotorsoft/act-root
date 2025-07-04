@@ -1,4 +1,4 @@
-import { ZodError, type ZodType, prettifyError } from "zod/v4";
+import { type ZodError, type ZodType, prettifyError } from "zod/v4";
 import { config } from "./config.js";
 import type { Patch, Schema } from "./types/index.js";
 import { ValidationError } from "./types/index.js";
