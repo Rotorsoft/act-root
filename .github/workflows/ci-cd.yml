@@ -29,20 +29,19 @@ jobs:
         ports:
           - 5431:5432
     steps:
-      - uses: actions/checkout@v4.1.1
-      - uses: pnpm/action-setup@v4.0.0
+      - uses: actions/checkout@v4.2.2
+      - uses: pnpm/action-setup@v4.1.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4.0.2
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: 22
           cache: "pnpm"
 
-      - name: unit test
-        run: pnpm install && pnpm test
+      - run: pnpm install
+      - run: pnpm test
 
-      - name: upload coverage to coveralls
-        uses: coverallsapp/github-action@master
+      - uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -54,13 +53,13 @@ jobs:
         lib: [act, act-pg]
 
     steps:
-      - uses: actions/checkout@v4.1.1
+      - uses: actions/checkout@v4.2.2
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4.0.0
+      - uses: pnpm/action-setup@v4.1.0
         with:
           run_install: false
-      - uses: actions/setup-node@v4.0.2
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: 22
           cache: "pnpm"
