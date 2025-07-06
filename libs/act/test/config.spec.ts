@@ -47,7 +47,7 @@ describe("config", () => {
     expect(config.env).toBe("production");
     // This is based on the logic: LOG_LEVEL is not set, NODE_ENV is prod
     const expectedLogLevel =
-      process.env.LOG_LEVEL === "production" ? "info" : "trace";
+      process.env.NODE_ENV === "production" ? "info" : "trace";
     expect(config.logLevel).toBe(expectedLogLevel);
   });
 

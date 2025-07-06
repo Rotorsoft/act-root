@@ -71,7 +71,7 @@ const env = (NODE_ENV || "development") as Environment;
 const logLevel = (LOG_LEVEL ||
   (NODE_ENV === "test"
     ? "error"
-    : LOG_LEVEL === "production"
+    : NODE_ENV === "production"
       ? "info"
       : "trace")) as LogLevel;
 const logSingleLine = (LOG_SINGLE_LINE || "true") === "true";
