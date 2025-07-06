@@ -1,4 +1,5 @@
 name: CI-CD
+
 permissions:
   contents: write
   pull-requests: write
@@ -10,7 +11,6 @@ on:
   workflow_dispatch:
 
 env:
-  NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
   SKIP_SIMPLE_GIT_HOOKS: 1
 
 jobs:
@@ -29,21 +29,23 @@ jobs:
         ports:
           - 5431:5432
     steps:
-      - uses: actions/checkout@v4
-      - name: install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-      - name: install node
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4.1.1
+
+      - name: setup node
+        uses: actions/setup-node@v4.0.2
         with:
           node-version: 22
           cache: "pnpm"
-      - name: install
-        run: pnpm install 
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4.0.0
+        with:
+          run_install: true
+
       - name: unit test
         run: pnpm test
-      - name: coveralls
+
+      - name: upload coverage to coveralls
         uses: coverallsapp/github-action@master
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -54,57 +56,44 @@ jobs:
     strategy:
       matrix:
         lib: [act, act-pg]
+
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.1.1
         with:
           fetch-depth: 0
-      - name: install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          run_install: false
-      - name: install node
-        uses: actions/setup-node@v4
+
+      - name: setup node
+        uses: actions/setup-node@v4.0.2
         with:
           node-version: 22
           cache: "pnpm"
-      - name: install
-        run: pnpm install
+
+      - name: setup pnpm
+        uses: pnpm/action-setup@v4.0.0
+        with:
+          run_install: true
+
       - name: analyze ${{ matrix.lib }}
         id: analyze
         uses: rotorsoft/semrel-analyze@v3.0.0
         with:
           package: "@rotorsoft/${{ matrix.lib }}"
           directory: "libs/${{ matrix.lib }}"
-      - name: analysis
+
+      - name: print analysis
         run: |
           echo "last-tag: ${{ steps.analyze.outputs.last-tag }}"
           echo "next-tag: ${{ steps.analyze.outputs.next-tag }}"
           echo "next-version: ${{ steps.analyze.outputs.next-version }}"
           echo "${{ steps.analyze.outputs.change-log }}"
-      - name: check if release is needed
-        id: release
-        run: |
-          if [[ "${{ steps.analyze.outputs.next-tag }}" != "-" && "${{ steps.analyze.outputs.next-version }}" != "-" ]]; then
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
-      - name: check github token permissions
-        if: steps.release.outputs.found == 'true'
-        run: |
-          curl -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-           -H "Accept: application/vnd.github.v3+json" \
-           https://api.github.com/repos/${{ github.repository }}
-      - name: build before release
-        if: steps.release.outputs.found == 'true'
-        run: pnpm build
+
       - name: release ${{ matrix.lib }}
-        if: steps.release.outputs.found == 'true'
+        if: steps.analyze.outputs.next-tag != '-' && steps.analyze.outputs.next-version != '-'
         uses: rotorsoft/semrel-release@v3.0.1
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
-          npm-registry: "registry.npmjs.org"
           npm-token: "${{ secrets.NPM_TOKEN }}"
+          npm-registry: "registry.npmjs.org"
           npm-access: "public"
           user: "rotorsoft"
           email: "rotorsoft@outlook.com"

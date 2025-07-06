@@ -81,31 +81,6 @@ export type StateSchema = Readonly<{
 }>;
 
 /**
- * Builds a Zod schema for a snapshot of state and the most recent event.
- * @param s - The state schema definition.
- * @returns A Zod schema for the snapshot object.
- */
-export function buildSnapshotSchema<S extends StateSchema>(s: S) {
-  const events = Object.entries(s.events).map(([name, zod]) =>
-    z.object({
-      name: z.literal(name),
-      data: zod,
-      id: z.number(),
-      stream: z.string(),
-      version: z.number(),
-      created: z.date(),
-      meta: EventMetaSchema,
-    })
-  );
-  return z.object({
-    state: s.state.readonly(),
-    event: z.union([events[0], events[1], ...events.slice(2)]).optional(),
-    patches: z.number(),
-    snaps: z.number(),
-  });
-}
-
-/**
  * Query options for event store queries.
  *
  * - `stream?`: Filter by stream name
