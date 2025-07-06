@@ -37,14 +37,10 @@ jobs:
           node-version: 22
           cache: "pnpm"
 
-      - name: setup pnpm
-        uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 10.12.4
-          run_install: true
+      - uses: pnpm/action-setup@v4.0.0
 
       - name: unit test
-        run: pnpm test
+        run: pnpm install && pnpm test
 
       - name: upload coverage to coveralls
         uses: coverallsapp/github-action@master
@@ -69,11 +65,7 @@ jobs:
           node-version: 22
           cache: "pnpm"
 
-      - name: setup pnpm
-        uses: pnpm/action-setup@v4.0.0
-        with:
-          version: 10.12.4
-          run_install: true
+      - uses: pnpm/action-setup@v4.0.0
 
       - name: analyze ${{ matrix.lib }}
         id: analyze
