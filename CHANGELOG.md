@@ -1,3 +1,7 @@
+#### 2025-07-06 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.2...@rotorsoft/act-v0.5.3) @rotorsoft/act-v0.5.3
+  - PATCH [8f1060b1](https://github.com/Rotorsoft/act-root/commit/8f1060b150702991007b648417daeb72c94ce168) fix: remove snapshot schema
+  - PATCH [789e681c](https://github.com/Rotorsoft/act-root/commit/789e681c973fba34e4db566eb30a507e4d1d7d6e) fix(deps): update dependency zod to ^3.25.74
+  - PATCH [543dbf99](https://github.com/Rotorsoft/act-root/commit/543dbf99be08f39e39edf6417f145d1d60c9abd3) fix(deps): update dependency zod to ^3.25.73
 #### 2025-07-06 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.4.2...@rotorsoft/act-pg-v0.4.3) @rotorsoft/act-pg-v0.4.3
   - PATCH [789e681c](https://github.com/Rotorsoft/act-root/commit/789e681c973fba34e4db566eb30a507e4d1d7d6e) fix(deps): update dependency zod to ^3.25.74
   - PATCH [543dbf99](https://github.com/Rotorsoft/act-root/commit/543dbf99be08f39e39edf6417f145d1d60c9abd3) fix(deps): update dependency zod to ^3.25.73
