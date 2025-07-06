@@ -31,6 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4.1.1
       - uses: pnpm/action-setup@v4.0.0
+        with:
+          run_install: false
       - uses: actions/setup-node@v4.0.2
         with:
           node-version: 22
@@ -56,6 +58,8 @@ jobs:
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4.0.0
+        with:
+          run_install: false
       - uses: actions/setup-node@v4.0.2
         with:
           node-version: 22
