@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@act/calculator": "link:../calculator",
-    "@rotorsoft/act": "^0.5.2",
+    "@rotorsoft/act": "^0.5.3",
     "@rotorsoft/act-pg": "^0.4.2",
     "@tanstack/react-query": "^5.81.5",
     "@tanstack/react-query-devtools": "^5.81.5",
