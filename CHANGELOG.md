@@ -1,3 +1,5 @@
+#### 2025-07-06 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.3...@rotorsoft/act-v0.5.4) @rotorsoft/act-v0.5.4
+  - PATCH [7865ee52](https://github.com/Rotorsoft/act-root/commit/7865ee5204956e4d8f426b6145054ed503c7af83) fix: log default
 #### 2025-07-06 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.2...@rotorsoft/act-v0.5.3) @rotorsoft/act-v0.5.3
   - PATCH [8f1060b1](https://github.com/Rotorsoft/act-root/commit/8f1060b150702991007b648417daeb72c94ce168) fix: remove snapshot schema
   - PATCH [789e681c](https://github.com/Rotorsoft/act-root/commit/789e681c973fba34e4db566eb30a507e4d1d7d6e) fix(deps): update dependency zod to ^3.25.74
