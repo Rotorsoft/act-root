@@ -3,7 +3,11 @@ name: CI-CD
 permissions:
   contents: write
   pull-requests: write
+
 on:
+  pull_request:
+    paths:
+      - 'libs/**'
   push:
     branches: [master]
     paths:
@@ -18,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:15.1-alpine
+        image: postgres:17-alpine
         env:
           POSTGRES_PASSWORD: postgres
         options: >-
