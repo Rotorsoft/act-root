@@ -13,11 +13,8 @@ jobs:
   renovate:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Self-hosted Renovate
-        uses: renovatebot/github-action@v40.1.10
+      - uses: actions/checkout@v4.2.2
+      - uses: renovatebot/github-action@v43.0.2
         with:
           token: ${{ secrets.RENOVATE_TOKEN }}
         env:

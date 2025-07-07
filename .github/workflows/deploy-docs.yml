@@ -13,11 +13,9 @@ on:
 jobs:
   filter:
     runs-on: ubuntu-latest
-    outputs:
-      docs: ${{ steps.filter.outputs.docs }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
+      - uses: actions/checkout@v4.2.2
+      - uses: dorny/paths-filter@v3.0.2
         id: filter
         with:
           filters: |
@@ -25,33 +23,27 @@ jobs:
               - 'libs/act/src/**'
               - 'libs/act-pg/src/**'
               - 'docs/**'
-
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      
   deploy:
     needs: filter
     if: needs.filter.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: install pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v4.2.2
+      - uses: pnpm/action-setup@v4.1.0
         with:
           run_install: false
-
-      - name: install node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4.4.0
         with:
           node-version: 22
           cache: "pnpm"
 
-      - name: Install dependencies
-        run: pnpm install
+      - run: pnpm install
+      - run: pnpm -F docs build:all
 
-      - name: Build Docusaurus site
-        run: pnpm -F docs build:all
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
+      - uses: peaceiris/actions-gh-pages@v4.0.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: docs/build 
