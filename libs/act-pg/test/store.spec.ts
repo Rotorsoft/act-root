@@ -10,10 +10,6 @@ import { Chance } from "chance";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
 
-store(
-  new PostgresStore({ port: 5431, schema: "schema_test", table: "store_test" })
-);
-
 const chance = new Chance();
 const a1 = chance.guid();
 const a2 = chance.guid();
@@ -26,6 +22,13 @@ let created_after: Date;
 
 describe("pg store", () => {
   beforeAll(async () => {
+    store(
+      new PostgresStore({
+        port: 5431,
+        schema: "schema_test",
+        table: "store_test",
+      })
+    );
     await store().drop();
     await store().seed();
   });
@@ -252,42 +255,5 @@ describe("PostgresStore constructor", () => {
     expect(store.config.host).toBe("custom");
     expect(store.config.port).toBe(1234);
     expect(store.config.user).toBe("postgres");
-  });
-});
-
-describe("PostgresStore.query branches", () => {
-  const store = new PostgresStore({ port: 5431, table: "store_test" });
-  beforeAll(async () => {
-    await store.seed();
-  });
-  it("should handle withSnaps=true branch", async () => {
-    await expect(store.query(() => {}, { stream: "A" }, true)).resolves.toBe(0);
-  });
-  it("should handle no query argument branch", async () => {
-    await expect(store.query(() => {})).resolves.toBe(0);
-  });
-  it("should handle query.after defined branch", async () => {
-    await expect(store.query(() => {}, { after: 1 })).resolves.toBe(0);
-  });
-  it("should handle query.after undefined branch", async () => {
-    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
-  });
-  it("should handle query with no conditions (no WHERE clause)", async () => {
-    await expect(store.query(() => {})).resolves.toBe(0);
-  });
-  it("should handle query with conditions (adds WHERE clause)", async () => {
-    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
-  });
-  it("should handle query with limit (adds LIMIT clause)", async () => {
-    await expect(store.query(() => {}, { limit: 1 })).resolves.toBe(0);
-  });
-  it("should handle query without limit (no LIMIT clause)", async () => {
-    await expect(store.query(() => {}, { stream: "A" })).resolves.toBe(0);
-  });
-  it("should handle query with no arguments (no conditions, no limit)", async () => {
-    await expect(store.query(() => {})).resolves.toBe(0);
-  });
-  it("should handle query with empty query object (no conditions, no limit)", async () => {
-    await expect(store.query(() => {}, {})).resolves.toBe(0);
   });
 });

@@ -123,6 +123,12 @@ describe("utils", () => {
           ValidationError
         );
       });
+
+      it("should return payload when no schema is provided", () => {
+        const payload = { key: "value" };
+        const validated = validate("test", payload);
+        expect(validated).toEqual(payload);
+      });
     });
   });
 

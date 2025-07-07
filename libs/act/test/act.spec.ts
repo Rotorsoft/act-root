@@ -429,4 +429,39 @@ describe("Act", () => {
     await act.drain();
     expect(fakeLogger.error).toHaveBeenCalledWith("plain string error");
   });
+
+  it("should log error when Promise.allSettled is rejected", async () => {
+    vi.spyOn(Promise, "allSettled").mockRejectedValueOnce(
+      new Error("allSettled failed")
+    );
+    await store.commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    registry.events.E.reactions = new Map([
+      [
+        "handler",
+        {
+          handler: vi.fn(),
+          resolver: () => "s",
+          options: { maxRetries: 0, blockOnError: false, retryDelayMs: 0 },
+        },
+      ],
+    ]);
+
+    await act.drain();
+
+    expect(fakeLogger.error).toHaveBeenCalledWith(
+      new Error("allSettled failed")
+    );
+  });
+
+  it("should handle drain with event with no registered reactions", async () => {
+    await store.commit("s", [{ name: "UNREGISTERED_EVENT", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    await act.drain();
+    expect(fakeLogger.trace).toHaveBeenCalled();
+  });
 });

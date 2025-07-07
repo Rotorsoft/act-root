@@ -1,5 +1,4 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-
 const exitSpy = vi.spyOn(await import("../src/ports.js"), "disposeAndExit");
 const disposeSpy = vi.fn();
 
@@ -43,5 +42,27 @@ describe("exit signal handlers", () => {
     const { disposeAndExit } = await import("../src/ports.js");
     process.env.NODE_ENV = "production";
     await expect(disposeAndExit("ERROR")).resolves.toBeUndefined();
+  });
+
+  it("should exit with code 1 on error", async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = "development";
+    const { disposeAndExit } = await import("../src/ports.js");
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never);
+    await disposeAndExit("ERROR");
+    expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  it("should not exit in test environment", async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = "test";
+    const { disposeAndExit } = await import("../src/ports.js");
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation(() => undefined as never);
+    await disposeAndExit("EXIT");
+    expect(exit).not.toHaveBeenCalled();
   });
 });

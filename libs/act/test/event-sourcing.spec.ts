@@ -4,6 +4,7 @@ import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
 import { action, load, snap } from "../src/event-sourcing.js";
 import { dispose, logger, SNAP_EVENT, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
+import { Snapshot } from "../src/types/action.js";
 import { InvariantError } from "../src/types/errors.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
@@ -277,6 +278,21 @@ describe("event-sourcing", () => {
     expect(commitSpy).not.toHaveBeenCalled();
   });
 
+  it("should handle action handler returning an empty array of events", async () => {
+    const meWithEmptyArray = {
+      ...me,
+      on: { increment: () => [] },
+      given: undefined,
+    };
+    const snapshot = await action(
+      meWithEmptyArray,
+      "increment",
+      { stream: "s", actor: { id: "a", name: "a" } },
+      { count: 1 }
+    );
+    expect(snapshot.event).toBeUndefined();
+  });
+
   it("should use snapshot event version for commit", async () => {
     // Commit an event to establish a version number
     await store().commit("s", [{ name: "INCREMENT", data: { by: 1 } }], {
@@ -299,6 +315,71 @@ describe("event-sourcing", () => {
       expect.any(Array),
       expect.any(Object),
       0 // expectedVersion from snapshot.event.version
+    );
+  });
+
+  it("should handle action with empty invariants array", async () => {
+    const meWithEmptyInvariants = {
+      ...me,
+      given: { increment: [] },
+    };
+    const snapshot = await action(
+      meWithEmptyInvariants,
+      "increment",
+      { stream: "s", actor: { id: "a", name: "a" } },
+      { count: 1 }
+    );
+    expect(snapshot.event?.name).toBe("INCREMENT");
+  });
+
+  it("should log error when snap fails", async () => {
+    vi.spyOn(store(), "commit").mockRejectedValueOnce(
+      new Error("snap commit failed")
+    );
+    const snapshot: Snapshot<{ count: number }, { test: { n: number } }> = {
+      event: {
+        id: 1,
+        stream: "s",
+        name: "test",
+        data: { n: 1 },
+        meta: { correlation: "c", causation: {} },
+        version: 0,
+        created: new Date(),
+      },
+      state: { count: 1 },
+      patches: 1,
+      snaps: 0,
+    };
+    await snap(snapshot);
+    expect(logger.error).toHaveBeenCalledWith(new Error("snap commit failed"));
+  });
+
+  it("should use snapshot.event.version when reactingTo and expectedVersion are undefined", async () => {
+    // Commit an initial event to ensure a snapshot.event.version exists
+    await store().commit("s", [{ name: "INITIAL_EVENT", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+
+    const commitSpy = vi.spyOn(store(), "commit");
+
+    // Execute an action without reactingTo and without an explicit expectedVersion
+    await action(
+      { ...me, given: undefined },
+      "increment",
+      { stream: "s", actor: { id: "a", name: "a" } },
+      { count: 1 },
+      undefined, // reactingTo is undefined
+      false
+    );
+
+    // The expectedVersion passed to commit should be the version from the snapshot.event
+    // In this case, after the initial commit, the version would be 0.
+    expect(commitSpy).toHaveBeenCalledWith(
+      "s",
+      expect.any(Array),
+      expect.any(Object),
+      0 // This should be snapshot.event?.version
     );
   });
 
