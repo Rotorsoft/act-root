@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.5.4
-        version: 0.5.4
+        specifier: ^0.5.5
+        version: 0.5.5
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)
@@ -187,8 +187,8 @@ importers:
         specifier: link:../calculator
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: ^0.5.4
-        version: 0.5.4
+        specifier: ^0.5.5
+        version: 0.5.5
       '@rotorsoft/act-pg':
         specifier: ^0.4.3
         version: 0.4.3
@@ -254,8 +254,8 @@ importers:
         specifier: link:../calculator
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: ^0.5.4
-        version: 0.5.4
+        specifier: ^0.5.5
+        version: 0.5.5
       '@rotorsoft/act-pg':
         specifier: ^0.4.3
         version: 0.4.3
@@ -279,8 +279,8 @@ importers:
         specifier: ^0.15.9
         version: 0.15.9
       '@rotorsoft/act':
-        specifier: ^0.5.4
-        version: 0.5.4
+        specifier: ^0.5.5
+        version: 0.5.5
       '@rotorsoft/act-pg':
         specifier: ^0.4.3
         version: 0.4.3
@@ -2242,8 +2242,8 @@ packages:
     resolution: {integrity: sha512-ZonGOi+CqIrkwh2Ttuc9VkbsJbGawcdxRDDKdAwwk5j4aCnOwlsNzy3rJ+SLf/66YlScXiCYeJqgwKLsFP/CmQ==}
     engines: {node: '>=18'}
 
-  '@rotorsoft/act@0.5.4':
-    resolution: {integrity: sha512-H52fn8Lv9wvNLoHPUZrSgB+36vWfq7MPQU18Sbe40QrvprVokGSxwRdgfP+e2BkM1EV/pQG/Pghfx/5gf/wnyQ==}
+  '@rotorsoft/act@0.5.5':
+    resolution: {integrity: sha512-gXYChAN5yc5eVUEn7ulIB/RqeKdZ+VuRLnZW0t6c+kL/Psf3w4KRHx0KG7ycFgk0A3iaoqYOiYUwhCPpba4RIg==}
     engines: {node: '>=22.17.0'}
 
   '@rspack/binding-darwin-arm64@1.4.4':
@@ -9959,7 +9959,7 @@ snapshots:
       pino-pretty: 13.0.0
       zod: 3.25.75
 
-  '@rotorsoft/act@0.5.4':
+  '@rotorsoft/act@0.5.5':
     dependencies:
       pino: 9.7.0
       pino-pretty: 13.0.0
