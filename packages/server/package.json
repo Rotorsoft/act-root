@@ -18,7 +18,7 @@
     "@rotorsoft/act-pg": "^0.4.4",
     "@trpc/server": "11.4.3",
     "cors": "^2.8.5",
-    "zod": "^3.25.75"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19"

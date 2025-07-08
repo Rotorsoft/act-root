@@ -9,4 +9,5 @@ export default defineConfig({
   sourcemap: true,
   minify: false,
   target: "es2022",
+  tsconfig: "tsconfig.build.json",
 });

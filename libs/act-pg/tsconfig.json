@@ -4,10 +4,11 @@
     "rootDir": "src",
     "outDir": "dist",
     "declarationDir": "dist/@types",
-    "tsBuildInfoFile": "dist/.tsbuildinfo"
+    "tsBuildInfoFile": "dist/.tsbuildinfo",
   },
   "include": [
-    "src"
+    "src",
+    "test"
   ],
   "references": [
     {
