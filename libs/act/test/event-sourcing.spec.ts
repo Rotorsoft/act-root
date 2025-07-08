@@ -41,6 +41,18 @@ describe("event-sourcing", () => {
     vi.restoreAllMocks();
   });
 
+  it("should call logger.trace on action with expectedVersion", async () => {
+    await action(
+      { ...me, given: undefined },
+      "increment",
+      { stream: "s", actor: { id: "a", name: "a" }, expectedVersion: -1 },
+      { count: 1 },
+      undefined,
+      true
+    );
+    expect(logger.trace).toHaveBeenCalled();
+  });
+
   it("should call logger.error on snap error", async () => {
     vi.spyOn(store(), "commit").mockRejectedValueOnce(new Error("fail"));
     await snap({

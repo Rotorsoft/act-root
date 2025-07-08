@@ -188,6 +188,38 @@ describe("pg store", () => {
     expect(count2).toBe(2);
   });
 
+  it("should commit and query backwards", async () => {
+    await store().commit(
+      a1,
+      [
+        { name: "test3", data: { value: "1" } },
+        { name: "test3", data: { value: "2" } },
+        { name: "test3", data: { value: "3" } },
+      ],
+      { correlation: "", causation: {} }
+    );
+    await store().commit(
+      a1,
+      [
+        { name: "test3", data: { value: "4" } },
+        { name: "test3", data: { value: "5" } },
+        { name: "test3", data: { value: "6" } },
+      ],
+      { correlation: "", causation: {} }
+    );
+
+    const events: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query(
+      (e) => {
+        events.push(e);
+      },
+      { stream: a1, backward: true }
+    );
+    expect(events[0].data).toStrictEqual({ value: "6" });
+    expect(events[1].data).toStrictEqual({ value: "5" });
+    expect(events[2].data).toStrictEqual({ value: "4" });
+  });
+
   it("should throw on connection error (simulate by using invalid config)", async () => {
     const { PostgresStore } = await import("../src/PostgresStore.js");
     await expect(
