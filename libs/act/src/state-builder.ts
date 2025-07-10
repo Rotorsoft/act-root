@@ -4,7 +4,7 @@
  *
  * Fluent interface for defining a strongly-typed state machine using Zod schemas.
  */
-import { ZodType } from "zod/v4";
+import { ZodType } from "zod";
 import {
   ActionHandler,
   ActionHandlers,

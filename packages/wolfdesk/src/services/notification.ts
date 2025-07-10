@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { Message } from "../schemas/index.js";
 
 export const deliverMessage = (

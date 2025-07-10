@@ -1,6 +1,6 @@
 import { InvariantError, state, type Invariant } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod/v4";
+import { z } from "zod";
 import * as errors from "./errors.js";
 import * as schemas from "./schemas/index.js";
 

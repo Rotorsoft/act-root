@@ -1,4 +1,4 @@
-import { z } from "zod/v4";
+import { z } from "zod";
 import { actions } from "./ticket.action.schemas.js";
 
 export const events = {

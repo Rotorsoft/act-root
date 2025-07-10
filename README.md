@@ -67,7 +67,7 @@ Create a minimal app:
 
 ```ts
 import { act, state } from "@rotorsoft/act";
-import { z } from "zod/v4";
+import { z } from "zod";
 
 const Counter = state("Counter", z.object({ count: z.number() }))
   .init(() => ({ count: 0 }))
@@ -152,7 +152,7 @@ The first example is a simple [calculator](./packages/calculator/src/) where act
 ```ts
 import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { Calculator, KEYS } from ".";
 
 export const NineCounter = state(

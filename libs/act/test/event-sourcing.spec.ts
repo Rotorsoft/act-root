@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
 import { action, load, snap } from "../src/event-sourcing.js";
 import { dispose, logger, SNAP_EVENT, store } from "../src/ports.js";

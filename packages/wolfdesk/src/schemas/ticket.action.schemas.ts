@@ -1,5 +1,5 @@
 import { ZodEmpty } from "@rotorsoft/act";
-import { z } from "zod/v4";
+import { z } from "zod";
 import { Attachment, Priority } from "./ticket.state.schemas.js";
 
 export const actions = {
