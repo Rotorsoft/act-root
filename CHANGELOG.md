@@ -1,3 +1,5 @@
+#### 2025-07-10 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.4.4...@rotorsoft/act-pg-v0.4.5) @rotorsoft/act-pg-v0.4.5
+  - PATCH [2f6494d7](https://github.com/Rotorsoft/act-root/commit/2f6494d7ca33f99b0ae0f30017f1bda61d089853) fix: upgrade to zod 4
 #### 2025-07-07 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.4.3...@rotorsoft/act-pg-v0.4.4) @rotorsoft/act-pg-v0.4.4
   - PATCH [87d1e7a3](https://github.com/Rotorsoft/act-root/commit/87d1e7a31cfdaff7e443ea91d6c551d399aacc84) fix(deps): update dependency zod to ^3.25.75
 #### 2025-07-07 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.5.4...@rotorsoft/act-v0.5.5) @rotorsoft/act-v0.5.5
