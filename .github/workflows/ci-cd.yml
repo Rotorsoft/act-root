@@ -53,6 +53,7 @@ jobs:
     needs: ci
     runs-on: ubuntu-latest
     strategy:
+      max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
       matrix:
         lib: [act, act-pg]
 
