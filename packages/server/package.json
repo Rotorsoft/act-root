@@ -14,7 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "@act/calculator": "link:../calculator",
-    "@rotorsoft/act": "^0.5.6",
+    "@rotorsoft/act": "^0.5.7",
     "@rotorsoft/act-pg": "^0.4.6",
     "@trpc/server": "11.4.3",
     "cors": "^2.8.5",
