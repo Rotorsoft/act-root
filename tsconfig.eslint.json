@@ -20,6 +20,7 @@
     "libs/**/*.ts",
     "packages/**/*.ts",
     "docs/*.ts",
+    "performance/app/src/*.ts",
     "vite.config.ts",
   ],
   "exclude": [

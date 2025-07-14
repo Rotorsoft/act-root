@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5444:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: ./app
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+      PG_HOST: postgres
+      PG_PORT: 5432
+      LOG_LEVEL: trace
+    depends_on:
+      - postgres
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/metrics"]
+      interval: 5s
+      timeout: 2s
+      retries: 12
+
+  k6:
+    image: grafana/k6
+    volumes:
+      - ./k6:/scripts
+    command: ["run", "/scripts/actions.js"]
+    environment:
+      - VUS=100
+      - DURATION=30s
+    depends_on:
+      app:
+        condition: service_healthy
+
+volumes:
+  pgdata:

@@ -1,0 +1,75 @@
+/**
+ * Projection table for fast reads.
+ * Updated by event handlers.
+ */
+import { Committed } from "@rotorsoft/act";
+import { Pool } from "pg";
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+let reactionCount = 0;
+let lastReset = Date.now();
+let lastCount = 0;
+
+export async function projectTodoCreated(event: Committed<any, any>) {
+  reactionCount++;
+  await pool.query(
+    "INSERT INTO performance.todos_projection (id, text, created_at, deleted) VALUES ($1, $2, $3, FALSE) ON CONFLICT (id) DO NOTHING",
+    [event.stream, event.data.text, event.created.toISOString()]
+  );
+}
+
+export async function projectTodoUpdated(event: Committed<any, any>) {
+  reactionCount++;
+  await pool.query(
+    "UPDATE performance.todos_projection SET text=$2, updated_at=$3 WHERE id=$1",
+    [event.stream, event.data.text, event.created.toISOString()]
+  );
+}
+
+export async function projectTodoDeleted(event: Committed<any, any>) {
+  reactionCount++;
+  await pool.query(
+    "UPDATE performance.todos_projection SET deleted=TRUE, updated_at=$2 WHERE id=$1",
+    [event.stream, event.created.toISOString()]
+  );
+}
+
+export async function initProjection() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS performance.todos_projection (
+      id VARCHAR(50) PRIMARY KEY,
+      text TEXT NOT NULL,
+      created_at TIMESTAMP NOT NULL,
+      updated_at TIMESTAMP,
+      deleted BOOLEAN DEFAULT FALSE
+    );
+  `);
+}
+
+export async function getById(stream: string) {
+  const res = await pool.query(
+    "SELECT * FROM performance.todos_projection WHERE id=$1 AND deleted=FALSE",
+    [stream]
+  );
+  return res.rows[0] || null;
+}
+
+export async function getAll() {
+  const res = await pool.query(
+    "SELECT * FROM performance.todos_projection WHERE deleted=FALSE"
+  );
+  return res.rows;
+}
+
+export function metrics() {
+  const now = Date.now();
+  if (now - lastReset > 1000) {
+    lastCount = reactionCount;
+    reactionCount = 0;
+    lastReset = now;
+  }
+  return { reactionsPerSecond: lastCount };
+}
