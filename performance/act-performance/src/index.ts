@@ -50,7 +50,7 @@ async function main() {
     .on("TodoDeleted")
     .do(projectTodoDeleted)
     .to(projection_resolver)
-    .build();
+    .build(100);
 
   // Debounced drain on commits or scheduled interval
   let lastDrain = Date.now();
