@@ -13,42 +13,63 @@ This suite benchmarks the performance of the `@rotorsoft/act` framework using th
 ## How to Run Performance App in Dev mode
 
 - Start Postgres database (5431) using root docker compose
-- Start the sample app using pnpm -F perf dev
+- Start the sample app using pnpm -F act-performancedev
 
-## Test Scenarios
+## Throughput and Consistency Test
 
-- **Actions per Second**: How many events (actions) can be written per second?
-- **Reads per Second**: How many reads (from projection) can be served per second?
-- **Combined Actions & Reactions**: Run both actions and reads scripts in parallel to measure end-to-end throughput (event writes + projection reads).
-- **Concurrency Scaling**: How does the system behave as concurrent users increase?
-- **Resource Utilization**: CPU, memory, DB connections.
+The `throughput` scenario measures both endpoint throughput and projection consistency in two phases:
 
-## Quick Start from Monorepo Root
+### Phase 1: Load (Mutations + Reads)
 
-You can start the performance app directly from the root using pnpm scripts:
+- Concurrent writers mutate todos (create, update, delete) while readers poll the projected count.
+- Metrics collected:
+  - **Throughput**: Actions/sec and Reads/sec.
+  - **Projection Lag**: The absolute difference between the projected count and the in-memory count, recorded as a trend (distribution, p95, max, etc.).
+
+### Phase 2: Convergence (Consistency)
+
+- After mutations stop, only readers run.
+- Each read triggers a debounced drain via the `/drain` endpoint to help the projection settle.
+- The test measures how long it takes for the projected count to converge to the in-memory count and remain consistent for several consecutive reads.
+- **The convergence phase ends as soon as all VUs detect robust consistency: both the projected and in-memory counts match, and all events in the event store have been projected, for the required number of consecutive reads (checked via the `/stats` endpoint).**
+- Metrics collected:
+  - **Convergence Time**: Time from the end of mutations to when the projection and in-memory counts match and stay matched.
+  - **Final Projection Lag**: The lag (difference) between projection and in-memory count at the end of the convergence phase, even if full consistency was not achieved.
+  - **Event ID Lag**: The difference between the last event created and the last event projected, providing a precise view of how far the projection is behind the event store. This is available in the `/stats` endpoint and is recorded during the convergence phase.
+
+### How to Run
+
+#### Serial Projection Mode
 
 ```sh
-# Build the performance app docker image
-pnpm perf:build
+pnpm -F act-performance throughput:serial
 ```
 
-## Running k6 Performance Tests from the Root
+This sets `SERIAL_PROJECTION=true` so all projections are processed serially (single lease).
 
-You can run individual or combined k6 scenarios using root scripts:
+#### Parallel Projection Mode
 
 ```sh
-# Run actions (writes) scenario
-pnpm perf:k6:actions
-
-# Run reads scenario
-pnpm perf:k6:reads
-
-# Run scaling/concurrency scenario
-pnpm perf:k6:scaling
-
-# Run combined actions and reads (actions in background, reads in foreground)
-pnpm perf:k6:combined
+pnpm -F act-performance throughput:parallel
 ```
+
+This uses the default (parallel, one lease per stream) projection strategy.
+
+You can adjust VUs, duration, and write ratio as before:
+
+```sh
+docker compose run --rm -e VUS=200 -e DURATION=60s -e WRITE_RATIO=0.5 k6 run /scripts/throughput.js
+```
+
+### Metrics Explained
+
+- **Throughput**: Measures how many actions and reads the system can handle per second under load.
+- **Projection Lag**: Shows how far behind the projection is from the actual state during heavy mutations.
+- **Convergence Time**: Indicates how quickly the system becomes consistent after the write storm ends.
+- **Final Projection Lag**: Shows how close the system got to consistency at the end of the convergence phase, even if it did not fully converge.
+- **Event ID Lag**: The difference between the last event created and the last event projected, providing a precise view of how far the projection is behind the event store. This is available in the `/stats` endpoint and is recorded during the convergence phase.
+
+This methodology allows you to compare not just raw throughput, but also the real-world consistency behavior of the event-sourced system under different projection strategies.
 
 ### View Results
 
@@ -66,17 +87,6 @@ docker compose run --rm -e VUS=200 -e DURATION=60s k6 run /scripts/actions.js
 ### Machine Details
 
 Before running, record your machine specs (CPU, RAM, OS) for reproducibility.
-
----
-
-## Results Template
-
-| Scenario          | RPS | p50 Latency | p95 Latency | Error Rate | CPU (%) | RAM (MB) |
-| ----------------- | --- | ----------- | ----------- | ---------- | ------- | -------- |
-| Actions/sec       |     |             |             |            |         |          |
-| Reads/sec         |     |             |             |            |         |          |
-| Combined          |     |             |             |            |         |          |
-| Scaling (max VUs) |     |             |             |            |         |          |
 
 ---
 
@@ -107,3 +117,61 @@ Before running, record your machine specs (CPU, RAM, OS) for reproducibility.
 ## Questions?
 
 Open an issue or contact the maintainers.
+
+## Performance Stats Endpoint
+
+After running a test, you can query the `/stats` endpoint to get a summary of the run:
+
+- **totalEventsProjected**: Total number of events projected (all mutations processed by the projection).
+- **totalTodos**: Total number of todos ever created.
+- **activeTodos**: Number of active (not deleted) todos.
+- **lastEvents**: The last 10 projected events (with their details).
+
+Example:
+
+```sh
+curl http://localhost:3000/stats
+```
+
+Use this endpoint to analyze the volume of events, the current state of the system, and to debug or validate the results of your performance tests.
+
+## Visualizing k6 Metrics with InfluxDB and Grafana
+
+This project includes InfluxDB and Grafana services in `performance/act-performance/docker-compose.yml` for visualizing k6 performance test metrics.
+
+### 1. Start InfluxDB and Grafana
+
+```sh
+docker compose -f performance/act-performance/docker-compose.yml up -d influxdb grafana
+```
+
+### 2. Run k6 with InfluxDB Output
+
+Run your k6 test and output metrics to InfluxDB:
+
+```sh
+k6 run --out influxdb=http://localhost:8086/k6 performance/k6/throughput.js
+```
+
+### 3. Access Grafana
+
+- Open your browser and go to: [http://localhost:3000](http://localhost:3000)
+- Login (default user: `admin`, password: `admin`)
+
+### 4. Add InfluxDB as a Data Source
+
+- Go to **Configuration > Data Sources**
+- Add a new InfluxDB data source:
+  - URL: `http://influxdb:8086` (if using Docker Compose network) or `http://localhost:8086` (if running locally)
+  - Database: `k6`
+  - No authentication needed for default setup
+  - Click **Save & Test**
+
+### 5. Import a k6 Dashboard
+
+- Go to **Create > Import Dashboard**
+- Use dashboard ID: `2587` (official k6 load testing results dashboard)
+- Select your InfluxDB data source
+- Click **Import**
+
+You will now see real-time and historical k6 metrics, including your custom trends like `convergence_speed`.

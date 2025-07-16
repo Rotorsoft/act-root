@@ -1,12 +1,13 @@
-import { act, store } from "@rotorsoft/act";
+import { act, store, type Committed } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
 import {
   getAll,
   getById,
+  getEventsStats,
+  getTodosStats,
   initProjection,
-  metrics,
   projectTodoCreated,
   projectTodoDeleted,
   projectTodoUpdated,
@@ -14,6 +15,13 @@ import {
 import { Todo } from "./todo.model";
 
 const PORT = Number(process.env.PORT) || 3000;
+
+// serialize projection leases to one key or
+// one projection lease per stream?
+const projection_resolver =
+  process.env.SERIAL_PROJECTION === "true"
+    ? () => "serial_projection"
+    : (committed: Committed<any, any>) => committed.stream;
 
 async function main() {
   store(
@@ -26,6 +34,7 @@ async function main() {
       schema: "performance",
     })
   );
+  await store().drop();
   await store().seed();
   await initProjection();
 
@@ -34,11 +43,26 @@ async function main() {
     .with(Todo)
     .on("TodoCreated")
     .do(projectTodoCreated)
+    .to(projection_resolver)
     .on("TodoUpdated")
     .do(projectTodoUpdated)
+    .to(projection_resolver)
     .on("TodoDeleted")
     .do(projectTodoDeleted)
+    .to(projection_resolver)
     .build();
+
+  // Debounced drain on commits or scheduled interval
+  let lastDrain = Date.now();
+  async function debouncedDrain() {
+    const now = Date.now();
+    if (now - lastDrain > 100) {
+      lastDrain = now;
+      await actApp.drain();
+    }
+  }
+  setInterval(debouncedDrain, 3000);
+  actApp.on("committed", debouncedDrain);
 
   // Start Express API
   const app = express();
@@ -59,7 +83,6 @@ async function main() {
         },
         { text: req.body.text }
       );
-      await actApp.drain();
       res.status(201).json({ stream });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -77,7 +100,6 @@ async function main() {
         { stream: req.params.stream, actor: { id: actorId, name: actorId } },
         { text: req.body.text }
       );
-      await actApp.drain();
       res.status(200).json({ stream: req.params.stream });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -95,11 +117,16 @@ async function main() {
         { stream: req.params.stream, actor: { id: actorId, name: actorId } },
         {}
       );
-      await actApp.drain();
       res.status(204).send();
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
+  });
+
+  // GET /todos
+  app.get("/todos", async (_req, res) => {
+    const todos = await getAll();
+    res.json(todos);
   });
 
   // GET /todos/:stream
@@ -109,16 +136,25 @@ async function main() {
     res.json(todo);
   });
 
-  // GET /todos
-  app.get("/todos", async (_req, res) => {
-    const todos = await getAll();
-    res.json(todos);
+  // GET /stats (performance summary)
+  app.get("/stats", async (_req, res) => {
+    const [todosStats, eventsStats] = await Promise.all([
+      getTodosStats(),
+      getEventsStats(),
+    ]);
+    res.json({
+      lastEventInStore: eventsStats.lastEventInStore,
+      lastProjectedEvent: eventsStats.lastProjectedEvent,
+      totalTodos: todosStats.totalTodos,
+      activeTodos: todosStats.activeTodos,
+      serialProjection: process.env.SERIAL_PROJECTION === "true",
+    });
   });
 
-  // GET /metrics (for reaction throughput)
-  app.get("/metrics", (_req, res) => {
-    const m = metrics();
-    res.json(m);
+  // POST /drain (debounced drain for convergence testing)
+  app.post("/drain", async (_req, res) => {
+    await debouncedDrain();
+    res.status(200).send();
   });
 
   app.listen(PORT, "0.0.0.0", () => {

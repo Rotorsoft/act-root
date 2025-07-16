@@ -1,5 +1,5 @@
 FROM node:20-alpine
-WORKDIR /app
+WORKDIR /
 COPY package.json tsconfig.json ./
 RUN apk add --no-cache curl
 COPY src ./src

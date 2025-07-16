@@ -9,12 +9,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-let reactionCount = 0;
-let lastReset = Date.now();
-let lastCount = 0;
-
 export async function projectTodoCreated(event: Committed<any, any>) {
-  reactionCount++;
   await pool.query(
     "INSERT INTO performance.todos_projection (id, text, created_at, deleted) VALUES ($1, $2, $3, FALSE) ON CONFLICT (id) DO NOTHING",
     [event.stream, event.data.text, event.created.toISOString()]
@@ -22,7 +17,6 @@ export async function projectTodoCreated(event: Committed<any, any>) {
 }
 
 export async function projectTodoUpdated(event: Committed<any, any>) {
-  reactionCount++;
   await pool.query(
     "UPDATE performance.todos_projection SET text=$2, updated_at=$3 WHERE id=$1",
     [event.stream, event.data.text, event.created.toISOString()]
@@ -30,7 +24,6 @@ export async function projectTodoUpdated(event: Committed<any, any>) {
 }
 
 export async function projectTodoDeleted(event: Committed<any, any>) {
-  reactionCount++;
   await pool.query(
     "UPDATE performance.todos_projection SET deleted=TRUE, updated_at=$2 WHERE id=$1",
     [event.stream, event.created.toISOString()]
@@ -64,12 +57,24 @@ export async function getAll() {
   return res.rows;
 }
 
-export function metrics() {
-  const now = Date.now();
-  if (now - lastReset > 1000) {
-    lastCount = reactionCount;
-    reactionCount = 0;
-    lastReset = now;
-  }
-  return { reactionsPerSecond: lastCount };
+export async function getTodosStats() {
+  const res = await pool.query(
+    `SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE deleted=FALSE)::int AS active FROM performance.todos_projection`
+  );
+  return {
+    totalTodos: res.rows[0]?.total || 0,
+    activeTodos: res.rows[0]?.active || 0,
+  };
+}
+
+export async function getEventsStats() {
+  const res = await pool.query(`
+    SELECT
+      (SELECT MAX(id) FROM performance.events) AS last_event_id,
+      (SELECT MAX(at) FROM performance.events_streams) AS last_event_at
+  `);
+  return {
+    lastEventInStore: res.rows[0]?.last_event_id || 0,
+    lastProjectedEvent: res.rows[0]?.last_event_at || 0,
+  };
 }

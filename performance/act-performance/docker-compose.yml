@@ -16,18 +16,19 @@ services:
       retries: 30
 
   app:
-    build: ./app
+    build: .
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
       PG_HOST: postgres
       PG_PORT: 5432
-      LOG_LEVEL: trace
+      LOG_LEVEL: error
+      SERIAL_PROJECTION: ${SERIAL_PROJECTION}
     depends_on:
       - postgres
     ports:
-      - "3000:3000"
+      - "3100:3000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/metrics"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000/stats"]
       interval: 5s
       timeout: 2s
       retries: 12
@@ -35,14 +36,34 @@ services:
   k6:
     image: grafana/k6
     volumes:
-      - ./k6:/scripts
-    command: ["run", "/scripts/actions.js"]
-    environment:
-      - VUS=100
-      - DURATION=30s
+      - ../k6:/scripts
     depends_on:
       app:
         condition: service_healthy
 
+  influxdb:
+    image: influxdb:1.8
+    container_name: act-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=k6
+    volumes:
+      - influxdb-data:/var/lib/influxdb
+
+  grafana:
+    image: grafana/grafana
+    container_name: act-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - influxdb
+    volumes:
+      - grafana-data:/var/lib/grafana
+
 volumes:
   pgdata:
+  influxdb-data:
+  grafana-data:

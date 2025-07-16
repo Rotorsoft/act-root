@@ -42,12 +42,7 @@
     "dev:calculator": "pnpm -F calculator dev",
     "dev:wolfdesk": "pnpm -F wolfdesk dev",
     "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
-    "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh",
-    "perf:build": "docker compose -f ./performance/docker-compose.yml down && docker compose -f ./performance/docker-compose.yml build --no-cache",
-    "perf:k6:actions": "docker compose -f ./performance/docker-compose.yml run --rm k6 run /scripts/actions.js",
-    "perf:k6:reads": "docker compose -f ./performance/docker-compose.yml run --rm k6 run /scripts/reads.js",
-    "perf:k6:scaling": "docker compose -f ./performance/docker-compose.yml run --rm k6 run /scripts/scaling.js",
-    "perf:k6:combined": "docker compose -f ./performance/docker-compose.yml run --rm -d k6 run /scripts/actions.js && docker-compose -f ./performance/docker-compose.yml run --rm k6 run /scripts/reads.js"
+    "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
   "dependencies": {
     "@rotorsoft/act": "workspace:*",

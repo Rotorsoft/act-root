@@ -2,7 +2,7 @@ packages:
   - libs/**
   - packages/**
   - docs
-  - performance/app
+  - performance/act-performance
 onlyBuiltDependencies:
   - "@swc/core"
   - core-js
