@@ -298,6 +298,37 @@ importers:
         specifier: ^0.31.4
         version: 0.31.4
 
+  performance/act-performance:
+    dependencies:
+      '@rotorsoft/act':
+        specifier: ^0.5.7
+        version: 0.5.7
+      '@rotorsoft/act-pg':
+        specifier: ^0.4.7
+        version: 0.4.7
+      express:
+        specifier: ^4.18.2
+        version: 4.21.2
+      pg:
+        specifier: ^8.11.1
+        version: 8.16.3
+      zod:
+        specifier: ^4.0.0
+        version: 4.0.5
+    devDependencies:
+      '@types/express':
+        specifier: ^5.0.3
+        version: 5.0.3
+      '@types/pg':
+        specifier: ^8.15.4
+        version: 8.15.4
+      tsx:
+        specifier: ^4.20.3
+        version: 4.20.3
+      typescript:
+        specifier: ^5.2.2
+        version: 5.8.3
+
 packages:
 
   '@algolia/autocomplete-core@1.17.9':
@@ -2707,6 +2738,9 @@ packages:
 
   '@types/express@4.17.23':
     resolution: {integrity: sha512-Crp6WY9aTYP3qPi2wGDo9iUe/rceX01UMhnF1jmwDcKCFM6cx7YhGP/Mpr3y9AASpfHixIG0E6azCcL5OcDHsQ==}
+
+  '@types/express@5.0.3':
+    resolution: {integrity: sha512-wGA0NX93b19/dZC1J18tKWVIYWyyF2ZjT9vin/NRu0qzzvfVzWjs04iq2rQ3H65vCTQYlRqs3YHfY7zjdV+9Kw==}
 
   '@types/gtag.js@0.0.12':
     resolution: {integrity: sha512-YQV9bUsemkzG81Ea295/nF/5GijnD2Af7QhEofh7xu+kvCN6RdodgNwwGWXB5GMI3NoyvQo0odNctoH/qLMIpg==}
@@ -10423,6 +10457,12 @@ snapshots:
       '@types/qs': 6.14.0
       '@types/serve-static': 1.15.8
 
+  '@types/express@5.0.3':
+    dependencies:
+      '@types/body-parser': 1.19.6
+      '@types/express-serve-static-core': 5.0.7
+      '@types/serve-static': 1.15.8
+
   '@types/gtag.js@0.0.12': {}
 
   '@types/hast@3.0.4':
@@ -10525,7 +10565,7 @@ snapshots:
 
   '@types/serve-index@1.9.4':
     dependencies:
-      '@types/express': 4.17.23
+      '@types/express': 5.0.3
 
   '@types/serve-static@1.15.8':
     dependencies:
