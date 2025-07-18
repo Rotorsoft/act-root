@@ -19,7 +19,10 @@ import type {
 } from "./types/index.js";
 
 // resolves to the event stream (default)
-const _this_ = ({ stream }: { stream: string }) => stream;
+const _this_ = ({ stream }: { stream: string }) => ({
+  input: stream,
+  output: stream,
+});
 // resolves to nothing
 const _void_ = () => undefined;
 
@@ -214,7 +217,7 @@ export function act<
         };
       },
     }),
-    build: (drainLimit = 10) => new Act<S, E, A>(registry, drainLimit),
+    build: () => new Act<S, E, A>(registry),
     events: registry.events,
   };
   return builder;

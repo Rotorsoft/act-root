@@ -11,7 +11,7 @@ import type {
   Query,
   Schemas,
 } from "./action.js";
-import type { Fetch, Lease } from "./reaction.js";
+import type { Fetch, FetchOptions, Lease } from "./reaction.js";
 
 /**
  * A function that disposes of a resource asynchronously.
@@ -58,21 +58,24 @@ export interface Store extends Disposable {
    * Query events in the store, optionally filtered by query options.
    * @param callback - Function to call for each event.
    * @param query - Optional query options.
-   * @param withSnaps - Whether to include snapshot events.
    * @returns The number of events processed.
    */
   query: <E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
-    query?: Query,
-    withSnaps?: boolean
+    query?: Query
   ) => Promise<number>;
 
   /**
-   * Fetch new events from stream watermarks for processing.
-   * @param limit - Maximum number of streams to fetch.
-   * @returns Fetched streams and events.
+   * Fetch new events from unblocked streams for processing.
+   * - Uses `at` watermarks as a starting point.
+   * - Uses `filter` options established by first lease.
+   *
+   * When no streams are found, return an empty stream with events starting from the startAt option.
+   *
+   * @param options - Fetch options.
+   * @returns Fetched streams with next events to process.
    */
-  fetch: <E extends Schemas>(limit: number) => Promise<Fetch<E>>;
+  fetch: <E extends Schemas>(options: FetchOptions) => Promise<Fetch<E>>;
 
   /**
    * Lease streams for processing (e.g., for distributed consumers).

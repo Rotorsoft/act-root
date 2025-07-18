@@ -82,27 +82,18 @@ export type StateSchema = Readonly<{
 
 /**
  * Query options for event store queries.
- *
- * - `stream?`: Filter by stream name
- * - `names?`: Filter by event names
- * - `before?`: Filter events before this id
- * - `after?`: Filter events after this id
- * - `limit?`: Limit the number of events to return
- * - `created_before?`: Filter events created before this date/time
- * - `created_after?`: Filter events created after this date/time
- * - `backward?`: Order descending when true
- * - `correlation?`: Filter by correlation
- * - `actor?`: Filter by actor id (mainly used to reduce process managers)
- * - `loading?`: Flag when loading to optimize queries
  */
-export const QuerySchema = z.object({
-  stream: z.string().optional(),
-  names: z.string().array().optional(),
-  before: z.number().optional(),
-  after: z.number().optional(),
-  limit: z.number().optional(),
-  created_before: z.date().optional(),
-  created_after: z.date().optional(),
-  backward: z.boolean().optional(),
-  correlation: z.string().optional(),
-});
+export const QuerySchema = z
+  .object({
+    stream: z.string().optional(),
+    names: z.string().array().optional(),
+    before: z.number().optional(),
+    after: z.number().optional(),
+    limit: z.number().optional(),
+    created_before: z.date().optional(),
+    created_after: z.date().optional(),
+    backward: z.boolean().optional(),
+    correlation: z.string().optional(),
+    with_snaps: z.boolean().optional(),
+  })
+  .readonly();

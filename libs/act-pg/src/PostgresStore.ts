@@ -1,11 +1,13 @@
 import type {
   Committed,
   EventMeta,
+  FetchOptions,
   Lease,
   Message,
   Query,
   Schemas,
   Store,
+  StreamFilter,
 } from "@rotorsoft/act";
 import { ConcurrencyError, SNAP_EVENT, logger } from "@rotorsoft/act";
 import pg from "pg";
@@ -188,7 +190,6 @@ export class PostgresStore implements Store {
    *
    * @param callback Function called for each event found
    * @param query (Optional) Query filter (stream, names, before, after, etc.)
-   * @param withSnaps (Optional) If true, includes only events after the last snapshot
    * @returns The number of events found
    *
    * @example
@@ -196,8 +197,7 @@ export class PostgresStore implements Store {
    */
   async query<E extends Schemas>(
     callback: (event: Committed<E, keyof E>) => void,
-    query?: Query,
-    withSnaps = false
+    query?: Query
   ) {
     const {
       stream,
@@ -209,18 +209,14 @@ export class PostgresStore implements Store {
       created_after,
       backward,
       correlation,
+      with_snaps = false,
     } = query || {};
 
     let sql = `SELECT * FROM ${this._fqt}`;
     const conditions: string[] = [];
     const values: any[] = [];
 
-    if (withSnaps) {
-      conditions.push(
-        `id>=COALESCE((SELECT id FROM ${this._fqt} WHERE stream='${stream}' AND name='${SNAP_EVENT}' ORDER BY id DESC LIMIT 1), 0)`
-      );
-      conditions.push(`stream='${stream}'`);
-    } else if (query) {
+    if (query) {
       if (typeof after !== "undefined") {
         values.push(after);
         conditions.push(`id>$${values.length}`);
@@ -250,6 +246,9 @@ export class PostgresStore implements Store {
       if (correlation) {
         values.push(correlation);
         conditions.push(`meta->>'correlation'=$${values.length}`);
+      }
+      if (!with_snaps) {
+        conditions.push(`name <> '${SNAP_EVENT}'`);
       }
     }
     if (conditions.length) {
@@ -343,14 +342,27 @@ export class PostgresStore implements Store {
     }
   }
 
+  private async fetchAfter<E extends Schemas>(after: number, limit: number) {
+    const events: Committed<E, keyof E>[] = [];
+    await this.query<E>((e) => events.push(e), { after, limit });
+    return [{ stream: "", events }];
+  }
+
   /**
    * Fetch a batch of events and streams for processing (drain cycle).
    *
-   * @param limit The maximum number of events to fetch
+   * @param options The fetch options
    * @returns An object with arrays of streams and events
    */
-  async fetch<E extends Schemas>(limit: number) {
-    const { rows } = await this._pool.query<{ stream: string; at: number }>(
+  async fetch<E extends Schemas>(options: FetchOptions) {
+    if (typeof options.startAt === "number")
+      return this.fetchAfter<E>(options.startAt, options.eventLimit);
+
+    const { rows } = await this._pool.query<{
+      stream: string;
+      at: number;
+      filter: StreamFilter;
+    }>(
       `
       SELECT stream, at
       FROM ${this._fqs}
@@ -358,19 +370,33 @@ export class PostgresStore implements Store {
       ORDER BY at ASC
       LIMIT $1::integer
       `,
-      [limit]
+      [options.streamLimit]
     );
 
-    const after = rows.length
-      ? rows.reduce((min, r) => Math.min(min, r.at), Number.MAX_SAFE_INTEGER)
-      : -1;
+    if (rows.length) {
+      // query next events from all-stream in parallel using watermarks and filter options
+      return Promise.all(
+        rows.map(async (s) => {
+          const query: Query = s.filter
+            ? {
+                stream: s.filter.stream,
+                names: s.filter.names,
+                after: s.at,
+                limit: options.eventLimit,
+              }
+            : {
+                after: s.at,
+                limit: options.eventLimit,
+              };
+          const events: Committed<E, keyof E>[] = [];
+          await this.query<E>((e) => events.push(e), query);
+          return { stream: s.stream, events };
+        })
+      );
+    }
 
-    const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => e.name !== SNAP_EVENT && events.push(e), {
-      after,
-      limit,
-    });
-    return { streams: rows.map(({ stream }) => stream), events };
+    // no streams found, return events from the start to find new correlations
+    return this.fetchAfter<E>(0, options.eventLimit);
   }
 
   /**

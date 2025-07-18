@@ -17,7 +17,11 @@
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
+    "baseUrl": ".",
     "paths": {
+      "@rotorsoft/*": [
+        "libs/*/src"
+      ],
       "@act/calculator": [
         "./calculator/src/index.ts"
       ],

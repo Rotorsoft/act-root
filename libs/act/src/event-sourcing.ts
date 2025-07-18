@@ -98,8 +98,7 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream },
-    true
+    { stream, with_snaps: true }
   );
   logger.trace({ stream, patches, snaps, state }, "🟢 load");
   return { event, state, patches, snaps };

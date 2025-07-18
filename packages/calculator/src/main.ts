@@ -60,7 +60,7 @@ async function main() {
         event
       );
     })
-    .to(() => "Board")
+    .to(() => ({ output: "Board" }))
     .build();
 
   // On every drain, print the digit counts as a table
@@ -124,7 +124,7 @@ async function main() {
 
   // Print a table of all recorded events for all streams
   const allEvents: any[] = [];
-  await app.query({}, (event) => allEvents.push(event));
+  await app.query({ with_snaps: true }, (event) => allEvents.push(event));
   console.log("\nAll Recorded Events");
   console.table(
     allEvents.map((e) => ({

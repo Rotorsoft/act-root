@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)

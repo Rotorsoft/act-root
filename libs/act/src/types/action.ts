@@ -42,6 +42,17 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 
 /**
  * Query options for event store queries.
+ *
+ * @property `stream?` - Filter by stream name
+ * @property `names?` - Filter by event names
+ * @property `before?` - Filter events before this id
+ * @property `after?` - Filter events after this id
+ * @property `limit?` - Limit the number of events to return
+ * @property `created_before?` - Filter events created before this date/time
+ * @property `created_after?` - Filter events created after this date/time
+ * @property `backward?` - Order descending when true
+ * @property `correlation?` - Filter by correlation
+ * @property `with_snaps?` - Include snapshots in the results, defaults to false
  */
 export type Query = z.infer<typeof QuerySchema>;
 

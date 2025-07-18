@@ -13,11 +13,13 @@ import { ConcurrencyError } from "../types/errors.js";
 import type {
   Committed,
   EventMeta,
+  FetchOptions,
   Lease,
   Message,
   Query,
   Schemas,
   Store,
+  StreamFilter,
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
@@ -27,6 +29,7 @@ import { sleep } from "../utils.js";
  */
 class InMemoryStream {
   _at = -1;
+  _filter: StreamFilter | undefined;
   _retry = -1;
   _lease: Lease | undefined;
   _blocked = false;
@@ -41,6 +44,7 @@ class InMemoryStream {
   lease(lease: Lease): Lease | undefined {
     if (!this._blocked && lease.at > this._at) {
       this._lease = { ...lease, retry: this._retry + 1 };
+      this._filter = lease.filter;
       return this._lease;
     }
   }
@@ -127,6 +131,7 @@ export class InMemoryStore implements Store {
       created_before,
       created_after,
       correlation,
+      with_snaps = false,
     } = query || {};
     let i = after + 1,
       count = 0;
@@ -136,6 +141,7 @@ export class InMemoryStore implements Store {
       if (names && !names.includes(e.name)) continue;
       if (correlation && e.meta?.correlation !== correlation) continue;
       if (created_after && e.created <= created_after) continue;
+      if (e.name === SNAP_EVENT && !with_snaps) continue;
       if (before && e.id >= before) break;
       if (created_before && e.created >= created_before) break;
       callback(e as Committed<E, keyof E>);
@@ -189,30 +195,50 @@ export class InMemoryStore implements Store {
     });
   }
 
+  private async fetchAfter<E extends Schemas>(after: number, limit: number) {
+    const events: Committed<E, keyof E>[] = [];
+    await this.query<E>((e) => events.push(e), { after, limit });
+    return [{ stream: "", events }];
+  }
+
   /**
-   * Fetches new events from stream watermarks for processing.
-   * @param limit - Maximum number of streams to fetch.
-   * @returns Fetched streams and events.
+   * Fetches new events from stream watermarks for processing, applying filter options when available.
+   * @param options - Fetch options.
+   * @returns Fetched streams with next events to process.
    */
-  async fetch<E extends Schemas>(limit: number) {
+  async fetch<E extends Schemas>(options: FetchOptions) {
+    if (typeof options.startAt === "number")
+      return this.fetchAfter<E>(options.startAt, options.eventLimit);
+
     const streams = [...this._streams.values()]
       .filter((s) => !s._blocked)
       .sort((a, b) => a._at - b._at)
-      .slice(0, limit);
+      .slice(0, options.streamLimit);
 
-    const after = streams.length
-      ? streams.reduce(
-          (min, s) => Math.min(min, s._at),
-          Number.MAX_SAFE_INTEGER
-        )
-      : -1;
+    if (streams.length) {
+      // query next events from all-stream in parallel using watermarks and filter options
+      return Promise.all(
+        streams.map(async (s) => {
+          const query: Query = s._filter
+            ? {
+                stream: s._filter.stream,
+                names: s._filter.names,
+                after: s._at,
+                limit: options.eventLimit,
+              }
+            : {
+                after: s._at,
+                limit: options.eventLimit,
+              };
+          const events: Committed<E, keyof E>[] = [];
+          await this.query<E>((e) => events.push(e), query);
+          return { stream: s.stream, events };
+        })
+      );
+    }
 
-    const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => e.name !== SNAP_EVENT && events.push(e), {
-      after,
-      limit,
-    });
-    return { streams: streams.map(({ stream }) => stream), events };
+    // no streams found, return events from the start to find new correlations
+    return this.fetchAfter<E>(0, options.eventLimit);
   }
 
   /**
@@ -230,7 +256,7 @@ export class InMemoryStore implements Store {
           this._streams
             .set(lease.stream, new InMemoryStream(lease.stream))
             .get(lease.stream)!;
-        return stream.lease(lease);
+        return stream.lease(lease) as Lease;
       })
       .filter((l): l is Lease => !!l);
   }
