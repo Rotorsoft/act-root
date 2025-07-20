@@ -1,13 +1,11 @@
 import type {
   Committed,
   EventMeta,
-  FetchOptions,
   Lease,
   Message,
   Query,
   Schemas,
   Store,
-  StreamFilter,
 } from "@rotorsoft/act";
 import { ConcurrencyError, SNAP_EVENT, logger } from "@rotorsoft/act";
 import pg from "pg";
@@ -342,26 +340,16 @@ export class PostgresStore implements Store {
     }
   }
 
-  private async fetchAfter<E extends Schemas>(after: number, limit: number) {
-    const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => events.push(e), { after, limit });
-    return [{ stream: "", events }];
-  }
-
   /**
-   * Fetch a batch of events and streams for processing (drain cycle).
-   *
-   * @param options The fetch options
-   * @returns An object with arrays of streams and events
+   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
+   * @param limit - Maximum number of streams to poll.
+   * @returns The polled streams.
    */
-  async fetch<E extends Schemas>(options: FetchOptions) {
-    if (typeof options.startAt === "number")
-      return this.fetchAfter<E>(options.startAt, options.eventLimit);
-
+  async poll(limit: number) {
     const { rows } = await this._pool.query<{
       stream: string;
       at: number;
-      filter: StreamFilter;
+      source: string;
     }>(
       `
       SELECT stream, at
@@ -370,33 +358,9 @@ export class PostgresStore implements Store {
       ORDER BY at ASC
       LIMIT $1::integer
       `,
-      [options.streamLimit]
+      [limit]
     );
-
-    if (rows.length) {
-      // query next events from all-stream in parallel using watermarks and filter options
-      return Promise.all(
-        rows.map(async (s) => {
-          const query: Query = s.filter
-            ? {
-                stream: s.filter.stream,
-                names: s.filter.names,
-                after: s.at,
-                limit: options.eventLimit,
-              }
-            : {
-                after: s.at,
-                limit: options.eventLimit,
-              };
-          const events: Committed<E, keyof E>[] = [];
-          await this.query<E>((e) => events.push(e), query);
-          return { stream: s.stream, events };
-        })
-      );
-    }
-
-    // no streams found, return events from the start to find new correlations
-    return this.fetchAfter<E>(0, options.eventLimit);
+    return rows;
   }
 
   /**

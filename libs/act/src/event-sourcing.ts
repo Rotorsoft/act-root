@@ -136,7 +136,7 @@ export async function action<
   payload: Readonly<A[K]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false
-): Promise<Snapshot<S, E>> {
+): Promise<Snapshot<S, E>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
@@ -148,7 +148,7 @@ export async function action<
     `🔵 ${action as string} "${stream}${expectedVersion ? `@${expectedVersion}` : ""}"`
   );
 
-  let snapshot = await load(me, stream);
+  const snapshot = await load(me, stream);
   if (me.given) {
     const invariants = me.given[action] || [];
     invariants.forEach(({ valid, description }) => {
@@ -164,11 +164,11 @@ export async function action<
 
   let { state, patches } = snapshot;
   const result = me.on[action](payload, state, target);
-  if (!result) return snapshot;
+  if (!result) return [snapshot];
 
   // An empty array means no events were emitted
   if (Array.isArray(result) && result.length === 0) {
-    return snapshot;
+    return [snapshot];
   }
 
   const tuples = Array.isArray(result[0])
@@ -209,15 +209,16 @@ export async function action<
     reactingTo ? undefined : expectedVersion || snapshot.event?.version
   );
 
-  snapshot = committed
-    .map((event) => {
-      state = patch(state, me.patch[event.name](event, state));
-      patches++;
-      logger.trace({ event, state }, "🔴 commit");
-      return { event, state, patches, snaps: snapshot.snaps };
-    })
-    .at(-1)!;
+  const snapshots = committed.map((event) => {
+    state = patch(state, me.patch[event.name](event, state));
+    patches++;
+    return { event, state, patches, snaps: snapshot.snaps };
+  });
+  logger.trace(snapshots, "🔴 commit");
 
-  me.snap && me.snap(snapshot) && void snap(snapshot); // fire and forget snaps
-  return snapshot;
+  // fire and forget snaps
+  const last = snapshots.at(-1)!;
+  me.snap && me.snap(last) && void snap(last);
+
+  return snapshots;
 }

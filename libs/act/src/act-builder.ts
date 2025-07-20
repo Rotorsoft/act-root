@@ -18,10 +18,10 @@ import type {
   State,
 } from "./types/index.js";
 
-// resolves to the event stream (default)
+// resolves the event stream as source and target (default)
 const _this_ = ({ stream }: { stream: string }) => ({
-  input: stream,
-  output: stream,
+  source: stream,
+  target: stream,
 });
 // resolves to nothing
 const _void_ = () => undefined;

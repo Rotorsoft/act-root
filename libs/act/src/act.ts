@@ -10,6 +10,7 @@ import type {
   Lease,
   Query,
   ReactionPayload,
+  ReactionsRegister,
   Registry,
   Schema,
   SchemaRegister,
@@ -19,19 +20,26 @@ import type {
   Target,
 } from "./types/index.js";
 
-type SnapshotArgs = Snapshot<Schemas, Schema>;
-
 function traceFetch<E extends Schemas>(fetch: Fetch<E>) {
   logger.trace(
-    fetch.map(({ stream, events }) => ({
-      stream,
-      events: events
-        .map(({ id, stream, name }) => ({ id, stream, name }))
-        .reduce(
-          (a, { id, stream, name }) => ({ ...a, [id]: { [stream]: name } }),
-          {}
-        ),
-    })),
+    fetch
+      .map(({ stream, source, events }) => ({
+        stream,
+        source,
+        events: events
+          .map(({ id, stream, name }) => ({ id, stream, name }))
+          .reduce(
+            (a, { id, stream, name }) => ({ ...a, [id]: { [stream]: name } }),
+            {}
+          ),
+      }))
+      .reduce(
+        (a, { stream, source, events }) => ({
+          ...a,
+          [stream.concat(source ? `<-${source}` : "")]: events,
+        }),
+        {}
+      ),
     "⚡️ fetch"
   );
 }
@@ -107,7 +115,7 @@ export class Act<
    * @param args The event payload
    * @returns true if the event had listeners, false otherwise
    */
-  emit(event: "committed", args: SnapshotArgs): boolean;
+  emit(event: "committed", args: Snapshot<S, E>[]): boolean;
   emit(event: "drained", args: Lease[]): boolean;
   emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
@@ -120,7 +128,7 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  on(event: "committed", listener: (args: SnapshotArgs) => void): this;
+  on(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
   on(event: "drained", listener: (args: Lease[]) => void): this;
   on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
@@ -134,7 +142,7 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  off(event: "committed", listener: (args: SnapshotArgs) => void): this;
+  off(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
   off(event: "drained", listener: (args: Lease[]) => void): this;
   off(event: string, listener: (args: any) => void): this {
     this._emitter.off(event, listener);
@@ -169,7 +177,7 @@ export class Act<
     reactingTo?: Committed<E, keyof E>,
     skipValidation = false
   ) {
-    const snapshot = await es.action(
+    const snapshots = await es.action(
       this.registry.actions[action],
       action,
       target,
@@ -177,8 +185,10 @@ export class Act<
       reactingTo as Committed<Schemas, keyof Schemas>,
       skipValidation
     );
-    this.emit("committed", snapshot as SnapshotArgs);
-    return snapshot;
+    this.emit("committed", snapshots as Snapshot<S, E>[]);
+    // fire and forget correlations
+    void this.correlate(snapshots.filter((s) => s.event).map((s) => s.event!));
+    return snapshots;
   }
 
   /**
@@ -232,7 +242,56 @@ export class Act<
   }
 
   /**
+   * Identifies and registers new streams triggered by committed events using reaction resolvers.
+   *
+   * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
+   * Once registered, these streams will be picked up by the main `drain` loop.
+   */
+  async correlate<E extends Schemas>(events: Committed<E, keyof E>[]) {
+    if (!events.length) return;
+    const correlated = new Map<string, ReactionPayload<E>[]>();
+    for (const event of events) {
+      // @ts-expect-error indexed by key
+      const register = this.registry.events[event.name] as ReactionsRegister<
+        E,
+        keyof E
+      >;
+      if (!register) continue; // skip events with no registered reactions
+      for (const reaction of register.reactions.values()) {
+        const resolved =
+          typeof reaction.resolver === "function"
+            ? reaction.resolver(event)
+            : reaction.resolver;
+        resolved &&
+          (
+            correlated.get(resolved.target) ||
+            correlated.set(resolved.target, []).get(resolved.target)!
+          ).push({ ...reaction, source: resolved.source, event });
+      }
+    }
+    // found new correlations from fetched events!
+    // prepare leases - at the last fetched event
+    const leases = [...correlated.entries()].map(([stream, payloads]) => ({
+      stream,
+      // by convention, the first defined source wins (this can be tricky)
+      source: payloads.find((p) => p.source)?.source || undefined,
+      by: randomUUID(),
+      payloads,
+      at: 0,
+      retry: 0,
+      block: false,
+    }));
+    if (leases.length) {
+      const leased = await store().lease(leases);
+      traceLeased(leased);
+    }
+  }
+
+  /**
    * Handles leased reactions.
+   *
+   * This is called by the main `drain` loop after fetching new events.
+   * It handles reactions, supporting retries, blocking, and error handling.
    *
    * @internal
    * @param lease The lease to handle
@@ -270,6 +329,26 @@ export class Act<
     return lease;
   }
 
+  /**
+   * Fetches new events from store according to the fetch options.
+   * @param options - Fetch options.
+   * @returns Fetched streams with next events to process.
+   */
+  private async fetch<E extends Schemas>(options: FetchOptions) {
+    const polled = await store().poll(options.streamLimit);
+    return Promise.all(
+      polled.map(async ({ stream, source, at }) => {
+        const events: Committed<E, keyof E>[] = [];
+        await store().query<E>((e) => events.push(e), {
+          stream: source,
+          after: at,
+          limit: options.eventLimit,
+        });
+        return { stream, source, events };
+      })
+    );
+  }
+
   private drainLocked = false;
 
   /**
@@ -282,92 +361,44 @@ export class Act<
    * @example
    * await app.drain();
    */
-  async drain(options: FetchOptions = { streamLimit: 10, eventLimit: 10 }) {
+  async drain<E extends Schemas>(
+    options: FetchOptions = { streamLimit: 10, eventLimit: 10 }
+  ) {
     if (this.drainLocked) return 0;
     this.drainLocked = true;
 
-    // nothing to handle yet
-    const reactions = new Map<string, ReactionPayload<E>[]>();
-    const leases: Array<Lease & { payloads: ReactionPayload<E>[] }> = [];
-    // nothing drained yet
-    const drained: Lease[] = [];
-
-    // fetch unprocessed events
-    const fetch = await store().fetch<E>(options);
+    const fetch = await this.fetch<E>(options);
     traceFetch(fetch);
 
-    if (fetch.length === 1 && fetch[0].stream === "") {
-      const events = fetch[0].events;
-      // this is a forced fetch
-      // try to correlate the events to new streams by reaction resolvers (dynamic reactions)
-      for (const event of events) {
-        const register = this.registry.events[event.name];
-        if (!register) continue; // skip events with no registered reactions
-        for (const reaction of register.reactions.values()) {
-          const resolved =
-            typeof reaction.resolver === "function"
-              ? reaction.resolver(event)
-              : reaction.resolver;
-          resolved &&
-            (
-              reactions.get(resolved.output) ||
-              reactions.set(resolved.output, []).get(resolved.output)!
-            ).push({ ...reaction, input: resolved.input, event });
-        }
-      }
-      if (reactions.size) {
-        // found new correlations from fetched events!
-        // prepare leases - at the last fetched event
-        const last = events.at(-1)!.id;
-        reactions.forEach((payloads, stream) => {
-          // optimizate stream for future fetches when:
-          // - stream resolver defines an input stream -> stream will always be correlated to the same input stream
-          // - stream is always resolved statically -> no function resolver driven by event content, so we can map
-          //   all reactions (event names) to a target stream
-          const filter = { stream: undefined, names: undefined };
-          // // TODO: make sure all reactions mapping to this stream have the same input stream
-          // const input = inputs.size === 1 ? [...inputs.values()][0] : undefined;
-          // // TODO: find all event names with reactions mapping to this stream
-          // const names = undefined;
-          leases.push({
-            stream,
-            by: randomUUID(),
-            payloads,
-            at: last,
-            filter,
-            retry: 0,
-            block: false,
-          });
-        });
-      }
-    } else {
-      // map existing streams with reactions to the fetched events
-      // and prepare lease - at the last fetched event
-      fetch.forEach(({ stream, events }) => {
-        const payloads = events.flatMap((event) => {
-          const register = this.registry.events[event.name];
-          return [...register.reactions.values()]
-            .filter((reaction) => {
-              const resolved =
-                typeof reaction.resolver === "function"
-                  ? reaction.resolver(event)
-                  : reaction.resolver;
-              return resolved && resolved.output === stream;
-            })
-            .map((reaction) => ({ ...reaction, event }));
-        });
-        leases.push({
-          stream,
-          by: randomUUID(),
-          payloads,
-          at: events.at(-1)!.id,
-          retry: 0,
-          block: false,
-        });
+    const leases = fetch.map(({ stream, events }) => {
+      const payloads = events.flatMap((event) => {
+        // @ts-expect-error indexed by key
+        const register = this.registry.events[event.name] as ReactionsRegister<
+          E,
+          keyof E
+        >;
+        if (!register) return [];
+        return [...register.reactions.values()]
+          .filter((reaction) => {
+            const resolved =
+              typeof reaction.resolver === "function"
+                ? reaction.resolver(event)
+                : reaction.resolver;
+            return resolved && resolved.target === stream;
+          })
+          .map((reaction) => ({ ...reaction, event }));
       });
-    }
+      return {
+        stream,
+        by: randomUUID(),
+        payloads,
+        at: events.at(-1)!.id,
+        retry: 0,
+        block: false,
+      };
+    });
 
-    // lease streams and handle reactions
+    const drained: Lease[] = [];
     if (leases.length) {
       const leased = await store().lease(leases);
       traceLeased(leased);
@@ -385,7 +416,6 @@ export class Act<
       );
       drained.length && this.emit("drained", drained);
 
-      // acknowledge leases
       await store().ack(leased);
       traceAcked(leased);
     }

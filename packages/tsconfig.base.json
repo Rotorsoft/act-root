@@ -20,7 +20,7 @@
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
-        "libs/*/src"
+        "../libs/*/src/index.ts"
       ],
       "@act/calculator": [
         "./calculator/src/index.ts"

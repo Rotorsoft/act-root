@@ -36,6 +36,22 @@ export const DigitBoard = state(
   .emit(({ digit }) => ["DigitCounted", { digit }])
   .build();
 
+/**
+ * Calculator projection: tracks the result of each calculator
+ */
+const CalculatorResult = state(
+  "CalculatorResult",
+  z.object({
+    result: z.number(),
+  })
+)
+  .init(() => ({ result: 0 }))
+  .emits({ ResultProjected: z.object({ result: z.number() }) })
+  .patch({ ResultProjected: ({ data }) => data })
+  .on("ProjectResult", z.object({ result: z.number() }))
+  .emit(({ result }) => ["ResultProjected", { result }])
+  .build();
+
 async function main() {
   // to test with postgres
   // store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
@@ -45,11 +61,13 @@ async function main() {
   console.log(config());
 
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
+  const mainStream = "A";
 
   // Build the app with Calculator and DigitBoard
   const app = act()
     .with(Calculator)
     .with(DigitBoard)
+    .with(CalculatorResult)
     // React to every digit pressed and update the projection board
     .on("DigitPressed")
     .do(async function CountDigits(event) {
@@ -60,14 +78,29 @@ async function main() {
         event
       );
     })
-    .to(() => ({ output: "Board" }))
+    .to({ source: mainStream, target: "Board" })
+    .on("OperatorPressed")
+    .do(async function ProjectResult(event) {
+      // Load the current calculator state
+      const calc = await app.load(Calculator, event.stream);
+      // Project the result of the calculator
+      await app.do(
+        "ProjectResult",
+        { stream: "Calculator".concat(event.stream), actor },
+        { result: calc.state.result },
+        event
+      );
+    })
+    .to((e) => ({
+      source: e.stream,
+      target: "Calculator".concat(e.stream),
+    }))
     .build();
 
   // On every drain, print the digit counts as a table
   app.on("drained", async () => {
     const board = await app.load(DigitBoard, "Board");
     const state = board.state as BoardState;
-    console.clear();
     console.log("\n=== Digit Board ===");
     // Print as a 3x3 matrix (digits 1-9)
     let matrix = "";
@@ -81,9 +114,19 @@ async function main() {
     }
     console.log(matrix);
     // Print the calculator state after the digit board
-    const calc = await app.load(Calculator, "A");
+    const calc = await app.load(Calculator, mainStream);
     console.log("=== Calculator State ===");
     console.table(calc.state);
+  });
+
+  // On every commit of result projection, print the result
+  app.on("committed", async ([snapshot]) => {
+    const stream = snapshot.event?.stream || "";
+    if (stream.startsWith("Calculator")) {
+      const result = await app.load(CalculatorResult, stream as string);
+      console.log(`=== Result for ${stream} ===`);
+      console.log(result.state.result);
+    }
   });
 
   // Helper: pick a random key from KEYS
@@ -100,7 +143,7 @@ async function main() {
   while (true) {
     const key = randomKey();
     try {
-      await app.do("PressKey", { stream: "A", actor }, { key });
+      await app.do("PressKey", { stream: mainStream, actor }, { key });
     } catch (err) {
       if (err instanceof InvariantError) {
         console.log("[InvariantError]", err.message);
@@ -111,7 +154,10 @@ async function main() {
       }
     }
     await sleep(1000); // slow down for demo
-    await app.drain();
+    await app.drain({
+      streamLimit: 5,
+      eventLimit: 25,
+    });
     if (await shouldStop()) {
       console.log("Stopping demo.\n");
       break;
@@ -119,7 +165,7 @@ async function main() {
   }
 
   // Show final calculator state
-  const calc = await app.load(Calculator, "A");
+  const calc = await app.load(Calculator, mainStream);
   console.log("\nFinal Calculator State:", calc.state);
 
   // Print a table of all recorded events for all streams

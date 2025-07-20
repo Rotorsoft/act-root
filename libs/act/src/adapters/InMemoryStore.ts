@@ -13,13 +13,12 @@ import { ConcurrencyError } from "../types/errors.js";
 import type {
   Committed,
   EventMeta,
-  FetchOptions,
   Lease,
   Message,
   Query,
   Schemas,
+  SourceStream,
   Store,
-  StreamFilter,
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
@@ -28,13 +27,17 @@ import { sleep } from "../utils.js";
  * Represents an in-memory stream for event processing and leasing.
  */
 class InMemoryStream {
-  _at = -1;
-  _filter: StreamFilter | undefined;
-  _retry = -1;
-  _lease: Lease | undefined;
-  _blocked = false;
+  stream: string;
+  source: SourceStream | undefined;
+  at = -1;
+  retry = -1;
+  blocked = false;
+  _lease: Lease | undefined = undefined;
 
-  constructor(public readonly stream: string) {}
+  constructor(lease: Lease) {
+    this.stream = lease.stream;
+    this.source = lease.source;
+  }
 
   /**
    * Attempt to lease this stream for processing.
@@ -42,9 +45,8 @@ class InMemoryStream {
    * @returns The granted lease or undefined if blocked.
    */
   lease(lease: Lease): Lease | undefined {
-    if (!this._blocked && lease.at > this._at) {
-      this._lease = { ...lease, retry: this._retry + 1 };
-      this._filter = lease.filter;
+    if (!this.blocked && lease.at > this.at) {
+      this._lease = { ...lease, source: this.source, retry: this.retry + 1 };
       return this._lease;
     }
   }
@@ -54,12 +56,12 @@ class InMemoryStream {
    * @param lease - Lease to acknowledge.
    */
   ack(lease: Lease) {
-    if (this._lease && lease.at >= this._at) {
-      this._retry = lease.retry;
-      this._blocked = lease.block;
-      if (!this._blocked && !lease.error) {
-        this._at = lease.at;
-        this._retry = 0;
+    if (this._lease && lease.at >= this.at) {
+      this.retry = lease.retry;
+      this.blocked = lease.block;
+      if (!this.blocked && !lease.error) {
+        this.at = lease.at;
+        this.retry = 0;
       }
       this._lease = undefined;
     }
@@ -195,50 +197,18 @@ export class InMemoryStore implements Store {
     });
   }
 
-  private async fetchAfter<E extends Schemas>(after: number, limit: number) {
-    const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => events.push(e), { after, limit });
-    return [{ stream: "", events }];
-  }
-
   /**
-   * Fetches new events from stream watermarks for processing, applying filter options when available.
-   * @param options - Fetch options.
-   * @returns Fetched streams with next events to process.
+   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
+   * @param limit - Maximum number of streams to poll.
+   * @returns The polled streams.
    */
-  async fetch<E extends Schemas>(options: FetchOptions) {
-    if (typeof options.startAt === "number")
-      return this.fetchAfter<E>(options.startAt, options.eventLimit);
-
-    const streams = [...this._streams.values()]
-      .filter((s) => !s._blocked)
-      .sort((a, b) => a._at - b._at)
-      .slice(0, options.streamLimit);
-
-    if (streams.length) {
-      // query next events from all-stream in parallel using watermarks and filter options
-      return Promise.all(
-        streams.map(async (s) => {
-          const query: Query = s._filter
-            ? {
-                stream: s._filter.stream,
-                names: s._filter.names,
-                after: s._at,
-                limit: options.eventLimit,
-              }
-            : {
-                after: s._at,
-                limit: options.eventLimit,
-              };
-          const events: Committed<E, keyof E>[] = [];
-          await this.query<E>((e) => events.push(e), query);
-          return { stream: s.stream, events };
-        })
-      );
-    }
-
-    // no streams found, return events from the start to find new correlations
-    return this.fetchAfter<E>(0, options.eventLimit);
+  async poll(limit: number) {
+    await sleep();
+    return [...this._streams.values()]
+      .filter((s) => !s.blocked)
+      .sort((a, b) => a.at - b.at)
+      .slice(0, limit)
+      .map(({ stream, source, at }) => ({ stream, source, at }));
   }
 
   /**
@@ -254,7 +224,7 @@ export class InMemoryStore implements Store {
           this._streams.get(lease.stream) ||
           // store new correlations
           this._streams
-            .set(lease.stream, new InMemoryStream(lease.stream))
+            .set(lease.stream, new InMemoryStream(lease))
             .get(lease.stream)!;
         return stream.lease(lease) as Lease;
       })

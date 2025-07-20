@@ -10,14 +10,19 @@ import type { Reaction } from "./reaction.js";
  */
 
 /**
+ * Reactions register
+ */
+export type ReactionsRegister<E extends Schemas, K extends keyof E> = {
+  schema: ZodType<E[K]>;
+  reactions: Map<string, Reaction<E, K>>;
+};
+
+/**
  * Maps event names to their schema and registered reactions.
  * @template E - Event schemas.
  */
 export type EventRegister<E extends Schemas> = {
-  [K in keyof E]: {
-    schema: ZodType<E[K]>;
-    reactions: Map<string, Reaction<E, K>>;
-  };
+  [K in keyof E]: ReactionsRegister<E, K>;
 };
 
 /**
