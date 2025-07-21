@@ -114,7 +114,7 @@ describe("ticket projection", () => {
         Priority.High,
         now
       );
-      const snap = await markTicketResolved(t);
+      const [snap] = await markTicketResolved(t);
       expect(snap.state.resolvedById).toBeDefined();
 
       // project and verify

@@ -48,7 +48,7 @@ describe("calculator lifecycle", () => {
     await app.do("PressKey", { stream, actor: actor_a }, { key: "7" });
     await app.do("PressKey", { stream, actor: actor_a }, { key: "." });
     await app.do("PressKey", { stream, actor: actor_a }, { key: "9" });
-    const result = await app.do(
+    const [, result] = await app.do(
       "PressKey",
       { stream, actor: actor_x },
       { key: "=" }

@@ -279,11 +279,11 @@ importers:
         specifier: ^0.15.10
         version: 0.15.10
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^0.4.7
-        version: 0.4.7
+        specifier: workspace:*
+        version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)

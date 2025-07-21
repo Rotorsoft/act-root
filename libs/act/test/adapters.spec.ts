@@ -119,12 +119,11 @@ describe("adapters", () => {
       ]);
     });
 
-    it("should fetch events with and without streams", async () => {
+    it("should poll events with and without streams", async () => {
       const s = store();
       // No streams
-      let result = await s.fetch(1);
-      expect(result.streams.length).toBe(0);
-      expect(result.events.length).toBe(0);
+      let result = await s.poll(1);
+      expect(result.length).toBe(0);
       // Add a stream and commit events
       await s.lease([
         { stream: "F1", by: "actor", at: 0, retry: 0, block: false },
@@ -133,19 +132,17 @@ describe("adapters", () => {
         correlation: "f1",
         causation: {},
       });
-      result = await s.fetch(1);
-      expect(result.streams.length).toBe(1);
-      expect(result.events.length).toBeGreaterThan(0);
+      result = await s.poll(1);
+      expect(result.length).toBe(1);
     });
 
-    it("should fetch with no streams", async () => {
+    it("should poll with no streams", async () => {
       const { InMemoryStore } = await import(
         "../src/adapters/InMemoryStore.js"
       );
       const store = new InMemoryStore();
-      const result = await store.fetch(1);
-      expect(result.streams).toEqual([]);
-      expect(result.events).toEqual([]);
+      const result = await store.poll(1);
+      expect(result).toEqual([]);
     });
 
     it("should not lease a blocked stream", async () => {

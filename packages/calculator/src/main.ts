@@ -61,7 +61,7 @@ async function main() {
   console.log(config());
 
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
-  const mainStream = "A";
+  const streams = ["A", "B"];
 
   // Build the app with Calculator and DigitBoard
   const app = act()
@@ -78,7 +78,7 @@ async function main() {
         event
       );
     })
-    .to({ source: mainStream, target: "Board" })
+    .to({ source: new RegExp(`^(${streams.join("|")})$`), target: "Board" })
     .on("OperatorPressed")
     .do(async function ProjectResult(event) {
       // Load the current calculator state
@@ -97,6 +97,15 @@ async function main() {
     }))
     .build();
 
+  // Helper: print the calculator state after the digit board
+  const printStreamStates = async () => {
+    for (const stream of streams) {
+      const calc = await app.load(Calculator, stream);
+      console.log(`=== ${stream} State ===`);
+      console.table(calc.state);
+    }
+  };
+
   // On every drain, print the digit counts as a table
   app.on("drained", async () => {
     const board = await app.load(DigitBoard, "Board");
@@ -113,17 +122,15 @@ async function main() {
       matrix += line + "\n";
     }
     console.log(matrix);
-    // Print the calculator state after the digit board
-    const calc = await app.load(Calculator, mainStream);
-    console.log("=== Calculator State ===");
-    console.table(calc.state);
+
+    await printStreamStates();
   });
 
   // On every commit of result projection, print the result
   app.on("committed", async ([snapshot]) => {
     const stream = snapshot.event?.stream || "";
     if (stream.startsWith("Calculator")) {
-      const result = await app.load(CalculatorResult, stream as string);
+      const result = await app.load(CalculatorResult, stream);
       console.log(`=== Result for ${stream} ===`);
       console.log(result.state.result);
     }
@@ -131,6 +138,10 @@ async function main() {
 
   // Helper: pick a random key from KEYS
   const randomKey = () => KEYS[Math.floor(Math.random() * KEYS.length)];
+
+  // Helper: pick a random stream
+  const randomStream = () =>
+    streams[Math.floor(Math.random() * streams.length)];
 
   // Helper: when to stop the loop
   async function shouldStop() {
@@ -142,8 +153,9 @@ async function main() {
   // Main loop: press random keys until any digit reaches 10
   while (true) {
     const key = randomKey();
+    const stream = randomStream();
     try {
-      await app.do("PressKey", { stream: mainStream, actor }, { key });
+      await app.do("PressKey", { stream, actor }, { key });
     } catch (err) {
       if (err instanceof InvariantError) {
         console.log("[InvariantError]", err.message);
@@ -165,8 +177,7 @@ async function main() {
   }
 
   // Show final calculator state
-  const calc = await app.load(Calculator, mainStream);
-  console.log("\nFinal Calculator State:", calc.state);
+  await printStreamStates();
 
   // Print a table of all recorded events for all streams
   const allEvents: any[] = [];

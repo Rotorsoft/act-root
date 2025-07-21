@@ -32,7 +32,7 @@ class InMemoryStream {
   at = -1;
   retry = -1;
   blocked = false;
-  _lease: Lease | undefined = undefined;
+  _lease: (Lease & { until: Date }) | undefined = undefined;
 
   constructor(lease: Lease) {
     this.stream = lease.stream;
@@ -46,7 +46,12 @@ class InMemoryStream {
    */
   lease(lease: Lease): Lease | undefined {
     if (!this.blocked && lease.at > this.at) {
-      this._lease = { ...lease, source: this.source, retry: this.retry + 1 };
+      this._lease = {
+        ...lease,
+        source: this.source,
+        retry: this.retry + 1,
+        until: new Date(Date.now() + 5_000), // TODO: configurable
+      };
       return this._lease;
     }
   }
@@ -111,6 +116,7 @@ export class InMemoryStore implements Store {
   async drop() {
     await sleep();
     this._events.length = 0;
+    this._streams = new Map();
   }
 
   /**
@@ -139,7 +145,11 @@ export class InMemoryStore implements Store {
       count = 0;
     while (i < this._events.length) {
       const e = this._events[i++];
-      if (stream && e.stream !== stream) continue;
+      if (stream) {
+        if (typeof stream === "string") {
+          if (e.stream !== stream) continue;
+        } else if (!stream.test(e.stream)) continue;
+      }
       if (names && !names.includes(e.name)) continue;
       if (correlation && e.meta?.correlation !== correlation) continue;
       if (created_after && e.created <= created_after) continue;
@@ -205,7 +215,7 @@ export class InMemoryStore implements Store {
   async poll(limit: number) {
     await sleep();
     return [...this._streams.values()]
-      .filter((s) => !s.blocked)
+      .filter((s) => !s.blocked && (!s._lease || s._lease.until <= new Date()))
       .sort((a, b) => a.at - b.at)
       .slice(0, limit)
       .map(({ stream, source, at }) => ({ stream, source, at }));

@@ -88,7 +88,7 @@ describe("event-sourcing", () => {
     });
     expect(logger.trace).toHaveBeenCalled();
     const events: any[] = [];
-    await store().query((e) => events.push(e));
+    await store().query((e) => events.push(e), { with_snaps: true });
     // The original event is [0], the snap event is [1]
     expect(events[1].name).toBe(SNAP_EVENT);
     expect(events[1].data.count).toBe(1);
@@ -178,7 +178,10 @@ describe("event-sourcing", () => {
 
     expect(snapFn).toHaveBeenCalled();
     const events: any[] = [];
-    await store().query((e) => events.push(e), { stream: "s" });
+    await store().query((e) => events.push(e), {
+      stream: "s",
+      with_snaps: true,
+    });
     // first the action event, then the snap event
     expect(events.length).toBe(2);
     expect(events[1].name).toBe(SNAP_EVENT);
@@ -190,7 +193,7 @@ describe("event-sourcing", () => {
       on: { increment: () => undefined },
       given: undefined,
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithoutEmit,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -265,7 +268,7 @@ describe("event-sourcing", () => {
       given: { increment: [] },
     };
     // Should not throw InvariantError because 'increment' has no invariants
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithOtherInvariants,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -296,7 +299,7 @@ describe("event-sourcing", () => {
       on: { increment: () => [] },
       given: undefined,
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithEmptyArray,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -335,7 +338,7 @@ describe("event-sourcing", () => {
       ...me,
       given: { increment: [] },
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithEmptyInvariants,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },

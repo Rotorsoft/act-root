@@ -180,11 +180,13 @@ describe("pg store", () => {
       (e) => {
         if (e.name === "test3") expect(e.data.date).toBeInstanceOf(Date);
       },
-      { stream: a4 },
-      true
+      { stream: a4, with_snaps: true }
     );
-    expect(count).toBe(3);
-    const count2 = await store().query(() => {}, { stream: a5 }, true);
+    expect(count).toBe(6);
+    const count2 = await store().query(() => {}, {
+      stream: a5,
+      with_snaps: true,
+    });
     expect(count2).toBe(2);
   });
 

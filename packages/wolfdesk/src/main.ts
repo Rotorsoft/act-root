@@ -34,7 +34,7 @@ async function main() {
     void app.drain();
   });
 
-  const t1 = await app.do(
+  const [t1] = await app.do(
     "OpenTicket",
     { stream: randomUUID(), actor },
     {

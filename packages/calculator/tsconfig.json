@@ -3,6 +3,11 @@
   "compilerOptions": {
     "outDir": "dist"
   },
+  "references": [
+    {
+      "path": "../../libs/act"
+    }
+  ],
   "include": [
     "src/**/*"
   ]

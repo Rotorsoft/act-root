@@ -81,11 +81,11 @@ export type ActBuilder<
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A> & {
       /**
-       * Route the reaction to a specific stream (resolver function).
-       * @param resolver The resolver function
+       * Route the reaction to a specific target and optionally source streams (resolver function).
+       * @param resolver The resolver function or target stream name (all sources) as a shorthand
        * @returns The builder (for chaining)
        */
-      to: (resolver: ReactionResolver<E, K>) => ActBuilder<S, E, A>;
+      to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A>;
       /**
        * Mark the reaction as void (no routing).
        * @returns The builder (for chaining)
@@ -200,10 +200,11 @@ export function act<
         registry.events[event].reactions.set(handler.name, reaction);
         return {
           ...builder,
-          to(resolver: ReactionResolver<E, K>) {
+          to(resolver: ReactionResolver<E, K> | string) {
             registry.events[event].reactions.set(handler.name, {
               ...reaction,
-              resolver,
+              resolver:
+                typeof resolver === "string" ? { target: resolver } : resolver,
             });
             return builder;
           },

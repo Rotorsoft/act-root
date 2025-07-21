@@ -81,23 +81,20 @@ describe("PostgresStore", () => {
     });
   });
 
-  describe("fetch", () => {
+  describe("poll", () => {
     it("returns empty result on no rows", async () => {
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
         rows: [],
       } as any);
-      await expect(store.fetch(10)).resolves.toEqual({
-        streams: [],
-        events: [],
-      });
+      await expect(store.poll(10)).resolves.toEqual([]);
     });
 
     it("throws on DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "query").mockRejectedValue(
-        new Error("fetch error") as any
+        new Error("poll error") as any
       );
-      await expect(store.fetch(10)).rejects.toThrow("fetch error");
+      await expect(store.poll(10)).rejects.toThrow("poll error");
     });
   });
 
@@ -199,7 +196,7 @@ describe("PostgresStore", () => {
     });
   });
 
-  describe("fetch", () => {
+  describe("poll", () => {
     it("covers no rows branch", async () => {
       const store = new PostgresStore({
         port: 5431,
@@ -208,8 +205,8 @@ describe("PostgresStore", () => {
       vi.spyOn(pg.Pool.prototype, "query")
         .mockResolvedValueOnce({ rows: [] } as any) // eslint-disable-line @typescript-eslint/no-unsafe-argument
         .mockResolvedValueOnce({ rows: [], rowCount: 0 } as any); // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      const result = await store.fetch(10);
-      expect(result).toEqual({ streams: [], events: [] });
+      const result = await store.poll(10);
+      expect(result).toEqual([]);
     });
   });
 

@@ -223,7 +223,9 @@ export class PostgresStore implements Store {
       }
       if (stream) {
         values.push(stream);
-        conditions.push(`stream=$${values.length}`);
+        if (typeof stream === "string")
+          conditions.push(`stream=$${values.length}`);
+        else conditions.push(`stream ~ $${values.length}`);
       }
       if (names && names.length) {
         values.push(names);
@@ -354,7 +356,7 @@ export class PostgresStore implements Store {
       `
       SELECT stream, at
       FROM ${this._fqs}
-      WHERE blocked=false
+      WHERE blocked=false AND (leased_by IS NULL OR leased_until <= NOW())
       ORDER BY at ASC
       LIMIT $1::integer
       `,
@@ -369,7 +371,7 @@ export class PostgresStore implements Store {
    * @param leases Array of lease objects (stream, at, etc.)
    * @returns Array of leased objects with updated lease info
    */
-  async lease(leases: Lease[]) {
+  async lease(leases: Lease[]): Promise<Lease[]> {
     const { by, at } = leases.at(0)!;
     const streams = leases.map(({ stream }) => stream);
     const client = await this._pool.connect();
@@ -389,6 +391,7 @@ export class PostgresStore implements Store {
       const { rows } = await client.query<{
         stream: string;
         leased_at: number;
+        leased_until: number;
         retry: number;
       }>(
         `
@@ -410,9 +413,10 @@ export class PostgresStore implements Store {
       );
       await client.query("COMMIT");
 
-      return rows.map(({ stream, leased_at, retry }) => ({
+      return rows.map(({ stream, leased_at, leased_until, retry }) => ({
         stream,
         by,
+        until: new Date(leased_until),
         at: leased_at,
         retry,
         block: false,

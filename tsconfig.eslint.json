@@ -7,7 +7,11 @@
     "composite": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "baseUrl": ".",
     "paths": {
+      "@rotorsoft/*": [
+        "../libs/*/src/index.ts"
+      ],
       "@act/calculator": [
         "./packages/calculator/src/index.ts"
       ],

@@ -21,60 +21,33 @@ import type {
 } from "./types/index.js";
 
 function traceFetch<E extends Schemas>(fetch: Fetch<E>) {
-  logger.trace(
-    fetch
-      .map(({ stream, source, events }) => ({
-        stream,
-        source,
-        events: events
-          .map(({ id, stream, name }) => ({ id, stream, name }))
-          .reduce(
-            (a, { id, stream, name }) => ({ ...a, [id]: { [stream]: name } }),
-            {}
-          ),
-      }))
-      .reduce(
-        (a, { stream, source, events }) => ({
-          ...a,
-          [stream.concat(source ? `<-${source}` : "")]: events,
-        }),
-        {}
-      ),
-    "⚡️ fetch"
+  const data = Object.fromEntries(
+    fetch.map(({ stream, source, events }) => {
+      const key = source ? `${stream}<-${source}` : stream;
+      const value = Object.fromEntries(
+        events.map(({ id, stream, name }) => [id, { [stream]: name }])
+      );
+      return [key, value];
+    })
   );
+  logger.trace(data, "⚡️ fetch");
 }
 
 function traceLeased(leased: Lease[]) {
-  logger.trace(
-    leased
-      .map(({ stream, at, retry }) => ({ stream, at, retry }))
-      .reduce(
-        (a, { stream, at, retry }) => ({ ...a, [stream]: { at, retry } }),
-        {}
-      ),
-    "⚡️ lease"
+  const data = Object.fromEntries(
+    leased.map(({ stream, at, retry }) => [stream, { at, retry }])
   );
+  logger.trace(data, "⚡️ lease");
 }
 
 function traceAcked(leased: Lease[]) {
-  logger.trace(
-    leased
-      .map(({ stream, at, retry, block, error }) => ({
-        stream,
-        at,
-        retry,
-        block,
-        error,
-      }))
-      .reduce(
-        (a, { stream, at, retry, block, error }) => ({
-          ...a,
-          [stream]: { at, retry, block, error },
-        }),
-        {}
-      ),
-    "⚡️ ack"
+  const data = Object.fromEntries(
+    leased.map(({ stream, at, retry, block, error }) => [
+      stream,
+      { at, retry, block, error },
+    ])
   );
+  logger.trace(data, "⚡️ ack");
 }
 
 /**
@@ -270,17 +243,18 @@ export class Act<
       }
     }
     // found new correlations from fetched events!
-    // prepare leases - at the last fetched event
-    const leases = [...correlated.entries()].map(([stream, payloads]) => ({
-      stream,
-      // by convention, the first defined source wins (this can be tricky)
-      source: payloads.find((p) => p.source)?.source || undefined,
-      by: randomUUID(),
-      payloads,
-      at: 0,
-      retry: 0,
-      block: false,
-    }));
+    const leases: Lease[] = [...correlated.entries()].map(
+      ([stream, payloads]) => ({
+        stream,
+        // TODO: by convention, the first defined source wins (this can be tricky)
+        source: payloads.find((p) => p.source)?.source || undefined,
+        by: randomUUID(),
+        payloads,
+        at: 0,
+        retry: 0,
+        block: false,
+      })
+    );
     if (leases.length) {
       const leased = await store().lease(leases);
       traceLeased(leased);
@@ -370,33 +344,34 @@ export class Act<
     const fetch = await this.fetch<E>(options);
     traceFetch(fetch);
 
-    const leases = fetch.map(({ stream, events }) => {
-      const payloads = events.flatMap((event) => {
-        // @ts-expect-error indexed by key
-        const register = this.registry.events[event.name] as ReactionsRegister<
-          E,
-          keyof E
-        >;
-        if (!register) return [];
-        return [...register.reactions.values()]
-          .filter((reaction) => {
-            const resolved =
-              typeof reaction.resolver === "function"
-                ? reaction.resolver(event)
-                : reaction.resolver;
-            return resolved && resolved.target === stream;
-          })
-          .map((reaction) => ({ ...reaction, event }));
-      });
-      return {
-        stream,
-        by: randomUUID(),
-        payloads,
-        at: events.at(-1)!.id,
-        retry: 0,
-        block: false,
-      };
-    });
+    const leases: Array<Lease & { payloads: ReactionPayload<E>[] }> = fetch.map(
+      ({ stream, events }) => {
+        const payloads: ReactionPayload<E>[] = events.flatMap((event) => {
+          // @ts-expect-error indexed by key
+          const register = this.registry.events[
+            event.name
+          ] as ReactionsRegister<E, keyof E>;
+          if (!register) return [];
+          return [...register.reactions.values()]
+            .filter((reaction) => {
+              const resolved =
+                typeof reaction.resolver === "function"
+                  ? reaction.resolver(event)
+                  : reaction.resolver;
+              return resolved && resolved.target === stream;
+            })
+            .map((reaction) => ({ ...reaction, event }));
+        });
+        return {
+          stream,
+          by: randomUUID(),
+          payloads,
+          at: events.at(-1)?.id || -1,
+          retry: 0,
+          block: false,
+        };
+      }
+    );
 
     const drained: Lease[] = [];
     if (leases.length) {

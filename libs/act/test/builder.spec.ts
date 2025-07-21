@@ -90,7 +90,7 @@ describe("Builder", () => {
       .with(A1)
       .on("Event1")
       .do(() => Promise.resolve())
-      .to(() => "custom")
+      .to("custom")
       .on("Event2")
       .do(() => Promise.resolve())
       .void()
@@ -162,7 +162,7 @@ describe("Builder", () => {
       .emit(() => ["E", {}])
       .build();
 
-    const customResolver = vi.fn(() => "custom-stream");
+    const customResolver = vi.fn(() => ({ target: "custom-stream" }));
     function customHandler() {
       return Promise.resolve();
     }
@@ -187,9 +187,9 @@ describe("Builder", () => {
           created: new Date(),
           meta: { correlation: "c", causation: {} },
         })
-      ).toBe("custom-stream");
+      ).toStrictEqual({ target: "custom-stream" });
     } else {
-      expect(reaction?.resolver).toBe("custom-stream");
+      expect(reaction?.resolver).toStrictEqual({ target: "custom-stream" });
     }
   });
 
@@ -213,9 +213,12 @@ describe("Builder", () => {
           created: new Date(),
           meta: { correlation: "c", causation: {} },
         })
-      ).toBe("foo");
+      ).toStrictEqual({ source: "foo", target: "foo" });
     } else {
-      expect(reaction?.resolver).toBe("foo");
+      expect(reaction?.resolver).toStrictEqual({
+        source: "foo",
+        target: "foo",
+      });
     }
   });
 
@@ -247,10 +250,10 @@ describe("Builder", () => {
       .with(A1)
       .on("Event1")
       .do(handlerA)
-      .to(() => "streamA")
+      .to("streamA")
       .on("Event1")
       .do(handlerB)
-      .to(() => "streamB");
+      .to("streamB");
     const reactionA = builder.events.Event1.reactions.get("handlerA");
     const reactionB = builder.events.Event1.reactions.get("handlerB");
     if (typeof reactionA?.resolver === "function") {
@@ -264,9 +267,9 @@ describe("Builder", () => {
           created: new Date(),
           meta: { correlation: "c", causation: {} },
         })
-      ).toBe("streamA");
+      ).toStrictEqual({ target: "streamA" });
     } else {
-      expect(reactionA?.resolver).toBe("streamA");
+      expect(reactionA?.resolver).toStrictEqual({ target: "streamA" });
     }
     if (typeof reactionB?.resolver === "function") {
       expect(
@@ -279,9 +282,9 @@ describe("Builder", () => {
           created: new Date(),
           meta: { correlation: "c", causation: {} },
         })
-      ).toBe("streamB");
+      ).toStrictEqual({ target: "streamB" });
     } else {
-      expect(reactionB?.resolver).toBe("streamB");
+      expect(reactionB?.resolver).toStrictEqual({ target: "streamB" });
     }
   });
 });

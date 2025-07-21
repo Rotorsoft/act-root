@@ -32,10 +32,10 @@ export type SourceStream = string | RegExp;
  * @returns The target stream name and optionally the source stream (for fetch optimization).
  */
 export type ReactionResolver<E extends Schemas, K extends keyof E> =
+  | { target: string; source?: SourceStream } // static
   | ((
       event: Committed<E, K>
-    ) => { target: string; source?: SourceStream } | undefined)
-  | { target: string; source?: SourceStream };
+    ) => { target: string; source?: SourceStream } | undefined); // dynamic
 
 /**
  * Options for reaction processing.
