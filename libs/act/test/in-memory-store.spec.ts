@@ -1,10 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { ConcurrencyError, dispose, store } from "../src/index.js";
+import { ConcurrencyError, dispose, SNAP_EVENT, store } from "../src/index.js";
 
-describe("adapters", () => {
+describe("InMemoryStore", () => {
   beforeEach(async () => {
-    store(new InMemoryStore(0));
+    store(new InMemoryStore());
     await store().seed();
   });
 
@@ -58,6 +57,7 @@ describe("adapters", () => {
         [
           { name: "A", data: { a: 3 } },
           { name: "C", data: { c: 4 } },
+          { name: SNAP_EVENT, data: { value: "1" } },
         ],
         { correlation: "cor2", causation: {} }
       );
@@ -91,32 +91,31 @@ describe("adapters", () => {
       result = [];
       await s.query((e) => result.push(e), { limit: 1 });
       expect(result.length).toBe(1);
+      // By with_snaps
+      await s.query((e) => result.push(e), { with_snaps: true });
+      expect(result.length).toBe(6);
     });
 
     it("should not lease blocked or old streams and should ack only valid leases", async () => {
       const s = store();
       // Lease a new stream
-      const leases = await s.lease([
-        { stream: "L1", by: "actor", at: 0, retry: 0, block: false },
-      ]);
+      const leases = await s.lease(
+        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        0
+      );
       expect(leases.length).toBe(1);
       // Block the stream
-      await s.lease([
-        { stream: "L1", by: "actor", at: 1, retry: 0, block: true },
-      ]);
+      await s.lease([{ stream: "L1", by: "actor", at: 1, retry: 0 }], 0);
       // Try to lease again with old at (should not update)
-      const leases2 = await s.lease([
-        { stream: "L1", by: "actor", at: 0, retry: 0, block: false },
-      ]);
+      const leases2 = await s.lease(
+        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        0
+      );
       expect(leases2.length).toBe(1);
       // Ack with valid lease
-      await s.ack([
-        { stream: "L1", by: "actor", at: 1, retry: 0, block: true },
-      ]);
+      await s.ack([{ stream: "L1", by: "actor", at: 1, retry: 0 }]);
       // Ack with old lease (should not throw)
-      await s.ack([
-        { stream: "L1", by: "actor", at: 0, retry: 0, block: false },
-      ]);
+      await s.ack([{ stream: "L1", by: "actor", at: 0, retry: 0 }]);
     });
 
     it("should poll events with and without streams", async () => {
@@ -125,9 +124,7 @@ describe("adapters", () => {
       let result = await s.poll(1);
       expect(result.length).toBe(0);
       // Add a stream and commit events
-      await s.lease([
-        { stream: "F1", by: "actor", at: 0, retry: 0, block: false },
-      ]);
+      await s.lease([{ stream: "F1", by: "actor", at: 0, retry: 0 }], 0);
       await s.commit("F1", [{ name: "A", data: {} }], {
         correlation: "f1",
         causation: {},
@@ -147,24 +144,19 @@ describe("adapters", () => {
 
     it("should not lease a blocked stream", async () => {
       const s = store();
-      await s.lease([
-        { stream: "L2", by: "actor", at: 0, retry: 0, block: true },
-      ]);
-      const leases = await s.lease([
-        { stream: "L2", by: "actor", at: 1, retry: 0, block: false },
-      ]);
+      await s.lease([{ stream: "L2", by: "actor", at: 0, retry: 0 }], 0);
+      const leases = await s.lease(
+        [{ stream: "L2", by: "actor", at: 1, retry: 0 }],
+        0
+      );
       expect(leases.length).toBe(1);
     });
 
     it("should not update state when ack is called with lower at", async () => {
       const s = store();
-      await s.lease([
-        { stream: "L3", by: "actor", at: 2, retry: 0, block: false },
-      ]);
+      await s.lease([{ stream: "L3", by: "actor", at: 2, retry: 0 }], 0);
       // Ack with lower at
-      await s.ack([
-        { stream: "L3", by: "actor", at: 1, retry: 0, block: false },
-      ]);
+      await s.ack([{ stream: "L3", by: "actor", at: 1, retry: 0 }]);
       // No error, state unchanged
     });
 
@@ -188,6 +180,22 @@ describe("adapters", () => {
           0
         )
       ).rejects.toThrow(ConcurrencyError);
+    });
+
+    it("should not block a stream if not leased by same drainer", async () => {
+      const s = store();
+      await s.lease([{ stream: "L4", by: "actor", at: 0, retry: 0 }], 0);
+      const leases = await s.lease(
+        [{ stream: "L4", by: "actor", at: 1, retry: 0 }],
+        100000
+      );
+      expect(leases.length).toBe(1);
+
+      // Try to block the stream
+      const blocked = await s.block([
+        { stream: "L4", by: "actor2", at: 2, retry: 0, error: "error" },
+      ]);
+      expect(blocked.length).toBe(0);
     });
   });
 });

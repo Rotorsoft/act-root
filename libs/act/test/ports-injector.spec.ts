@@ -1,5 +1,3 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
 const pinoSpy = vi.fn(() => ({
   info: vi.fn(),
   error: vi.fn(),
@@ -60,6 +58,7 @@ describe("ports-injector", () => {
         .mockImplementation(() => undefined as never);
       const { dispose, store } = await import("../src/ports.js");
       const customDisposer = vi.fn();
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       const disposeAndExit = dispose(customDisposer);
       const adapter = store();
       const adapterDisposeSpy = vi.spyOn(adapter, "dispose");

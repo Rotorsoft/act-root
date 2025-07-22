@@ -226,8 +226,8 @@ async function main() {
   }, 1_000);
 
   // log drains
-  app.on("drained", (drained) => {
-    console.log("Drained:", drained);
+  app.on("acked", (acked) => {
+    console.log("Acked:", acked);
   });
 
   const calc1 = "A";

@@ -31,7 +31,7 @@ describe("ticket projection", () => {
   beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets).catch((e) => console.error(e));
-    // app.on("drained", (leases) => console.log("drained", leases));
+    // app.on("acked", (leases) => console.log("acked", leases));
   });
 
   afterAll(async () => {

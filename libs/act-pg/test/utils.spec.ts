@@ -1,4 +1,3 @@
-import { describe, expect, it } from "vitest";
 import { dateReviver } from "../src/utils.js";
 
 describe("act-pg utils", () => {

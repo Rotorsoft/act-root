@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { act, type Actor, dispose, state, ZodEmpty } from "../src/index.js";
 
@@ -171,6 +170,7 @@ describe("Builder", () => {
       .with(testState)
       .on("E")
       .do(customHandler)
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       .to(customResolver);
 
     // Access the reaction and call the resolver directly
@@ -229,13 +229,11 @@ describe("Builder", () => {
     const builder = act().with(A1).on("Event1").do(optHandler, {
       blockOnError: false,
       maxRetries: 1,
-      retryDelayMs: 123,
     });
     const reaction = builder.events.Event1.reactions.get("optHandler");
     expect(reaction?.options).toEqual({
       blockOnError: false,
       maxRetries: 1,
-      retryDelayMs: 123,
     });
   });
 

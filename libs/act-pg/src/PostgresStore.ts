@@ -24,7 +24,6 @@ type Config = Readonly<{
   password: string;
   schema: string;
   table: string;
-  leaseMillis: number;
 }>;
 
 const DEFAULT_CONFIG: Config = {
@@ -35,7 +34,6 @@ const DEFAULT_CONFIG: Config = {
   password: "postgres",
   schema: "public",
   table: "events",
-  leaseMillis: 30_000,
 };
 
 /**
@@ -131,9 +129,11 @@ export class PostgresStore implements Store {
       await client.query(
         `CREATE TABLE IF NOT EXISTS ${this._fqs} (
           stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
+          source varchar(100) COLLATE pg_catalog."default",
           at int NOT NULL DEFAULT -1,
           retry smallint NOT NULL DEFAULT 0,
           blocked boolean NOT NULL DEFAULT false,
+          error text,
           leased_at int,
           leased_by uuid,
           leased_until timestamptz
@@ -222,13 +222,8 @@ export class PostgresStore implements Store {
         conditions.push("id>-1");
       }
       if (stream) {
-        if (typeof stream === "string") {
-          values.push(stream);
-          conditions.push(`stream=$${values.length}`);
-        } else {
-          values.push(stream.source);
-          conditions.push(`stream ~ $${values.length}`);
-        }
+        values.push(stream);
+        conditions.push(`stream ~ $${values.length}`);
       }
       if (names && names.length) {
         values.push(names);
@@ -371,62 +366,71 @@ export class PostgresStore implements Store {
   /**
    * Lease streams for reaction processing, marking them as in-progress.
    *
-   * @param leases Array of lease objects (stream, at, etc.)
+   * @param leases - Lease requests for streams, including end-of-lease watermark, lease holder, and source stream.
+   * @param millis - Lease duration in milliseconds.
    * @returns Array of leased objects with updated lease info
    */
-  async lease(leases: Lease[]): Promise<Lease[]> {
-    const { by, at } = leases.at(0)!;
-    const streams = leases.map(({ stream }) => stream);
+  async lease(leases: Lease[], millis: number): Promise<Lease[]> {
     const client = await this._pool.connect();
-
     try {
       await client.query("BEGIN");
       // insert new streams
       await client.query(
         `
-        INSERT INTO ${this._fqs} (stream)
-        SELECT UNNEST($1::text[])
+        INSERT INTO ${this._fqs} (stream, source)
+        SELECT lease->>'stream', lease->>'source'
+        FROM jsonb_array_elements($1::jsonb) AS lease
         ON CONFLICT (stream) DO NOTHING
         `,
-        [streams]
+        [JSON.stringify(leases)]
       );
       // set leases
       const { rows } = await client.query<{
         stream: string;
+        source: string | null;
         leased_at: number;
+        leased_by: string;
         leased_until: number;
         retry: number;
       }>(
         `
-        WITH free AS (
-          SELECT * FROM ${this._fqs} 
-          WHERE stream = ANY($1::text[]) AND (leased_by IS NULL OR leased_until <= NOW())
-          FOR UPDATE
-        )
-        UPDATE ${this._fqs} U
-        SET
-          leased_by = $2::uuid,
-          leased_at = $3::integer,
-          leased_until = NOW() + ($4::integer || ' milliseconds')::interval
-        FROM free
-        WHERE U.stream = free.stream
-        RETURNING U.stream, U.leased_at, U.retry
-        `,
-        [streams, by, at, this.config.leaseMillis]
+      WITH input AS (
+        SELECT * FROM jsonb_to_recordset($1::jsonb)
+        AS x(stream text, at int, by uuid)
+      ), free AS (
+        SELECT s.stream FROM ${this._fqs} s
+        JOIN input i ON s.stream = i.stream
+        WHERE s.leased_by IS NULL OR s.leased_until <= NOW()
+        FOR UPDATE
+      )
+      UPDATE ${this._fqs} s
+      SET
+        leased_by = i.by,
+        leased_at = i.at,
+        leased_until = NOW() + ($2::integer || ' milliseconds')::interval,
+        retry = CASE WHEN $2::integer > 0 THEN s.retry + 1 ELSE s.retry END
+      FROM input i, free f
+      WHERE s.stream = f.stream AND s.stream = i.stream
+      RETURNING s.stream, s.source, s.leased_at, s.leased_until, s.retry
+      `,
+        [JSON.stringify(leases), millis]
       );
       await client.query("COMMIT");
 
-      return rows.map(({ stream, leased_at, leased_until, retry }) => ({
-        stream,
-        by,
-        until: new Date(leased_until),
-        at: leased_at,
-        retry,
-        block: false,
-      }));
+      return rows.map(
+        ({ stream, source, leased_at, leased_by, leased_until, retry }) => ({
+          stream,
+          source: source ?? undefined,
+          at: leased_at,
+          by: leased_by,
+          until: new Date(leased_until),
+          retry,
+        })
+      );
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      throw error;
+      logger.error(error);
+      return [];
     } finally {
       client.release();
     }
@@ -435,34 +439,101 @@ export class PostgresStore implements Store {
   /**
    * Acknowledge and release leases after processing, updating stream positions.
    *
-   * @param leases Array of lease objects to acknowledge
-   * @returns Promise that resolves when leases are acknowledged
+   * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
+   * @returns Acked leases.
    */
-  async ack(leases: Lease[]) {
+  async ack(leases: Lease[]): Promise<Lease[]> {
     const client = await this._pool.connect();
-
     try {
       await client.query("BEGIN");
-      for (const { stream, by, at, retry, block } of leases) {
-        await client.query(
-          `UPDATE ${this._fqs}
-          SET
-            at = $3::integer,
-            retry = $4::integer,
-            blocked = $5::boolean,
-            leased_by = NULL,
-            leased_at = NULL,
-            leased_until = NULL
-          WHERE
-            stream = $1::text
-            AND leased_by = $2::uuid`,
-          [stream, by, at, retry, block]
-        );
-      }
+      const { rows } = await client.query<{
+        stream: string;
+        source: string | null;
+        at: number;
+        retry: number;
+      }>(
+        `
+      WITH input AS (
+        SELECT * FROM jsonb_to_recordset($1::jsonb)
+        AS x(stream text, by uuid, at int)
+      )
+      UPDATE ${this._fqs} AS s
+      SET
+        at = i.at,
+        retry = -1,
+        leased_by = NULL,
+        leased_at = NULL,
+        leased_until = NULL
+      FROM input i
+      WHERE s.stream = i.stream AND s.leased_by = i.by
+      RETURNING s.stream, s.source, s.at, s.retry
+      `,
+        [JSON.stringify(leases)]
+      );
       await client.query("COMMIT");
-    } catch {
-      // leased_until fallback
+
+      return rows.map((row) => ({
+        stream: row.stream,
+        source: row.source ?? undefined,
+        at: row.at,
+        by: "",
+        retry: row.retry,
+      }));
+    } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
+      logger.error(error);
+      return [];
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
+   * @param leases - Leases to block, including lease holder and last error message.
+   * @returns Blocked leases.
+   */
+  async block(
+    leases: Array<Lease & { error: string }>
+  ): Promise<(Lease & { error: string })[]> {
+    const client = await this._pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query<{
+        stream: string;
+        source: string | null;
+        at: number;
+        by: string;
+        retry: number;
+        error: string;
+      }>(
+        `
+      WITH input AS (
+        SELECT * FROM jsonb_to_recordset($1::jsonb)
+        AS x(stream text, error text)
+      )
+      UPDATE ${this._fqs} AS s
+      SET blocked = true, error = i.error
+      FROM input i
+      WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
+      RETURNING s.stream, s.source, s.at, s.by, s.retry, s.error
+      `,
+        [JSON.stringify(leases)]
+      );
+      await client.query("COMMIT");
+
+      return rows.map((row) => ({
+        stream: row.stream,
+        source: row.source ?? undefined,
+        at: row.at,
+        by: row.by,
+        retry: row.retry,
+        error: row.error ?? "",
+      }));
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      logger.error(error);
+      return [];
     } finally {
       client.release();
     }

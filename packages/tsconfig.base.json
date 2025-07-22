@@ -17,6 +17,7 @@
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
+    "rootDir": ".",
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
@@ -30,9 +31,16 @@
       ]
     }
   },
+  "references": [
+    {
+      "path": "../libs/act/src/index.ts"
+    },
+    {
+      "path": "../libs/act-pg/src/index.ts"
+    },
+  ],
   "exclude": [
     "node_modules",
     "dist",
-    "**/*.spec.ts"
   ]
 }

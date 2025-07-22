@@ -194,7 +194,6 @@ export function act<
           options: {
             blockOnError: options?.blockOnError ?? true,
             maxRetries: options?.maxRetries ?? 3,
-            retryDelayMs: options?.retryDelayMs ?? 1000,
           },
         };
         registry.events[event].reactions.set(handler.name, reaction);

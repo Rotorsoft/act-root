@@ -1,14 +1,5 @@
 import { Committed, dispose, Schemas } from "@rotorsoft/act";
 import { Pool, QueryResult } from "pg";
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  describe,
-  expect,
-  it,
-  vi,
-} from "vitest";
 import { PostgresStore } from "../src/index.js";
 
 const query = (

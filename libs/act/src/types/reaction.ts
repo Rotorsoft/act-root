@@ -20,11 +20,6 @@ export type ReactionHandler<E extends Schemas, K extends keyof E> = (
 ) => Promise<Snapshot<E, Schema> | void>;
 
 /**
- * Source stream(s) for a reaction. Either a name, a RegExp, or all streams when undefined.
- */
-export type SourceStream = string | RegExp;
-
-/**
  * Resolves the stream for a reaction, either by mapping the event or statically.
  * @template E - Event schemas.
  * @template K - Event name.
@@ -32,21 +27,19 @@ export type SourceStream = string | RegExp;
  * @returns The target stream name and optionally the source stream (for fetch optimization).
  */
 export type ReactionResolver<E extends Schemas, K extends keyof E> =
-  | { target: string; source?: SourceStream } // static
+  | { target: string; source?: string } // static
   | ((
       event: Committed<E, K>
-    ) => { target: string; source?: SourceStream } | undefined); // dynamic
+    ) => { target: string; source?: string } | undefined); // dynamic
 
 /**
  * Options for reaction processing.
  * @property blockOnError - Whether to block on error.
  * @property maxRetries - Maximum number of retries.
- * @property retryDelayMs - Delay between retries in ms.
  */
 export type ReactionOptions = {
   readonly blockOnError: boolean;
   readonly maxRetries: number;
-  readonly retryDelayMs: number;
 };
 
 /**
@@ -74,7 +67,7 @@ export type Reaction<E extends Schemas, K extends keyof E = keyof E> = {
  */
 export type ReactionPayload<E extends Schemas> = Reaction<E> & {
   readonly event: Committed<E, keyof E>;
-  readonly source?: SourceStream;
+  readonly source?: string;
 };
 
 /**
@@ -85,7 +78,7 @@ export type ReactionPayload<E extends Schemas> = Reaction<E> & {
  */
 export type Poll = {
   readonly stream: string;
-  readonly source?: SourceStream;
+  readonly source?: string;
   readonly at: number;
 };
 
@@ -95,8 +88,9 @@ export type Poll = {
  * @property eventLimit - Maximum number of events to fetch per stream.
  */
 export type FetchOptions = {
-  readonly streamLimit: number;
-  readonly eventLimit: number;
+  readonly streamLimit?: number;
+  readonly eventLimit?: number;
+  readonly leaseMillis?: number;
 };
 
 /**
@@ -108,7 +102,7 @@ export type FetchOptions = {
  */
 export type Fetch<E extends Schemas> = Array<{
   readonly stream: string;
-  readonly source?: SourceStream;
+  readonly source?: string;
   readonly events: Committed<E, keyof E>[];
 }>;
 
@@ -119,15 +113,11 @@ export type Fetch<E extends Schemas> = Array<{
  * @property by - The lease holder.
  * @property at - The lease watermark.
  * @property retry - Retry count.
- * @property block - Whether the stream is blocked.
- * @property error - Optional error info.
  */
 export type Lease = {
   readonly stream: string;
-  readonly source?: SourceStream;
+  readonly source?: string;
+  readonly at: number;
   readonly by: string;
-  at: number;
-  retry: number;
-  block: boolean;
-  error?: unknown;
+  readonly retry: number;
 };

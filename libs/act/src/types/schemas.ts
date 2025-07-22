@@ -85,7 +85,7 @@ export type StateSchema = Readonly<{
  */
 export const QuerySchema = z
   .object({
-    stream: z.union([z.string(), z.instanceof(RegExp)]).optional(),
+    stream: z.string().optional(),
     names: z.string().array().optional(),
     before: z.number().optional(),
     after: z.number().optional(),

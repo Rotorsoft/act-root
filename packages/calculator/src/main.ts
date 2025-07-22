@@ -78,7 +78,7 @@ async function main() {
         event
       );
     })
-    .to({ source: new RegExp(`^(${streams.join("|")})$`), target: "Board" })
+    .to({ source: `^(${streams.join("|")})$`, target: "Board" })
     .on("OperatorPressed")
     .do(async function ProjectResult(event) {
       // Load the current calculator state
@@ -86,14 +86,14 @@ async function main() {
       // Project the result of the calculator
       await app.do(
         "ProjectResult",
-        { stream: "Calculator".concat(event.stream), actor },
+        { stream: "Calculator" + event.stream, actor },
         { result: calc.state.result },
         event
       );
     })
     .to((e) => ({
       source: e.stream,
-      target: "Calculator".concat(e.stream),
+      target: "Calculator" + e.stream,
     }))
     .build();
 
@@ -107,7 +107,7 @@ async function main() {
   };
 
   // On every drain, print the digit counts as a table
-  app.on("drained", async () => {
+  app.on("acked", async () => {
     const board = await app.load(DigitBoard, "Board");
     const state = board.state as BoardState;
     console.log("\n=== Digit Board ===");

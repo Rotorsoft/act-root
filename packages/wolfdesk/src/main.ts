@@ -26,7 +26,7 @@ async function main() {
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
   start_jobs();
-  app.on("drained", async () => {
+  app.on("acked", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });

@@ -74,14 +74,24 @@ export interface Store extends Disposable {
 
   /**
    * Lease streams for processing (e.g., for distributed consumers).
-   * @param leases - Lease requests.
+   * @param leases - Lease requests for streams, including end-of-lease watermark, lease holder, and source stream.
+   * @param millis - Lease duration in milliseconds.
    * @returns Granted leases.
    */
-  lease: (leases: Lease[]) => Promise<Lease[]>;
+  lease: (leases: Lease[], millis: number) => Promise<Lease[]>;
 
   /**
    * Acknowledge completion of processing for leased streams.
-   * @param leases - Leases to acknowledge.
+   * @param leases - Leases to acknowledge, including lease holder and last processed watermark.
    */
-  ack: (leases: Lease[]) => Promise<void>;
+  ack: (leases: Lease[]) => Promise<Lease[]>;
+
+  /**
+   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
+   * @param leases - Leases to block, including lease holder and last error message.
+   * @returns Blocked leases.
+   */
+  block: (
+    leases: Array<Lease & { error: string }>
+  ) => Promise<Array<Lease & { error: string }>>;
 }

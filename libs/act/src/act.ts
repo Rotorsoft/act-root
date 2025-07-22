@@ -33,21 +33,25 @@ function traceFetch<E extends Schemas>(fetch: Fetch<E>) {
   logger.trace(data, "⚡️ fetch");
 }
 
-function traceLeased(leased: Lease[]) {
+function traceLeased(leases: Lease[]) {
   const data = Object.fromEntries(
-    leased.map(({ stream, at, retry }) => [stream, { at, retry }])
+    leases.map(({ stream, at, retry }) => [stream, { at, retry }])
   );
   logger.trace(data, "⚡️ lease");
 }
 
-function traceAcked(leased: Lease[]) {
+function traceAcked(leases: Lease[]) {
   const data = Object.fromEntries(
-    leased.map(({ stream, at, retry, block, error }) => [
-      stream,
-      { at, retry, block, error },
-    ])
+    leases.map(({ stream, at, retry }) => [stream, { at, retry }])
   );
   logger.trace(data, "⚡️ ack");
+}
+
+function traceBlocked(leases: Array<Lease & { error: string }>) {
+  const data = Object.fromEntries(
+    leases.map(({ stream, at, retry, error }) => [stream, { at, retry, error }])
+  );
+  logger.trace(data, "⚡️ block");
 }
 
 /**
@@ -67,7 +71,7 @@ function traceAcked(leased: Lease[]) {
  * await app.drain();
  * ```
  *
- * - Register event listeners with `.on("committed", ...)` and `.on("drained", ...)` to react to lifecycle events.
+ * - Register event listeners with `.on("committed", ...)` and `.on("acked", ...)` to react to lifecycle events.
  * - Use `.query()` to analyze event streams for analytics or debugging.
  *
  * @template S SchemaRegister for state
@@ -84,25 +88,30 @@ export class Act<
   /**
    * Emit a lifecycle event (internal use, but can be used for custom listeners).
    *
-   * @param event The event name ("committed" or "drained")
+   * @param event The event name ("committed", "acked",  or "blocked")
    * @param args The event payload
    * @returns true if the event had listeners, false otherwise
    */
   emit(event: "committed", args: Snapshot<S, E>[]): boolean;
-  emit(event: "drained", args: Lease[]): boolean;
+  emit(event: "acked", args: Lease[]): boolean;
+  emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
   emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
   }
 
   /**
-   * Register a listener for a lifecycle event ("committed" or "drained").
+   * Register a listener for a lifecycle event ("committed", "acked", or "blocked").
    *
    * @param event The event name
    * @param listener The callback function
    * @returns this (for chaining)
    */
   on(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
-  on(event: "drained", listener: (args: Lease[]) => void): this;
+  on(event: "acked", listener: (args: Lease[]) => void): this;
+  on(
+    event: "blocked",
+    listener: (args: Array<Lease & { error: string }>) => void
+  ): this;
   on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
     return this;
@@ -116,7 +125,11 @@ export class Act<
    * @returns this (for chaining)
    */
   off(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
-  off(event: "drained", listener: (args: Lease[]) => void): this;
+  off(event: "acked", listener: (args: Lease[]) => void): this;
+  off(
+    event: "blocked",
+    listener: (args: Array<Lease & { error: string }>) => void
+  ): this;
   off(event: string, listener: (args: any) => void): this {
     this._emitter.off(event, listener);
     return this;
@@ -160,7 +173,7 @@ export class Act<
       skipValidation
     );
     this.emit("committed", snapshots as Snapshot<S, E>[]);
-    // fire and forget correlations
+    // fire and forget correlations - TODO: review this approach, maybe we can do this in the builder
     void this.correlate(snapshots.filter((s) => s.event).map((s) => s.event!));
     return snapshots;
   }
@@ -216,6 +229,22 @@ export class Act<
   }
 
   /**
+   * Query the event store for events matching a filter.
+   * Use this version with caution, as it return events in memory.
+   *
+   * @param query The query filter (e.g., by stream, event name, or time range)
+   * @returns The matching events
+   *
+   * @example
+   * const { count } = await app.query({ stream: "counter1" }, (event) => console.log(event));
+   */
+  async query_array(query: Query): Promise<Committed<E, keyof E>[]> {
+    const events: Committed<E, keyof E>[] = [];
+    await store().query<E>((e) => events.push(e), query);
+    return events;
+  }
+
+  /**
    * Identifies and registers new streams triggered by committed events using reaction resolvers.
    *
    * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
@@ -253,13 +282,12 @@ export class Act<
       // TODO: by convention, the first defined source wins (this can be tricky)
       source: payloads.find((p) => p.source)?.source || undefined,
       by: randomUUID(),
-      payloads,
       at: 0,
       retry: 0,
-      block: false,
+      payloads,
     }));
     if (leases.length) {
-      const leased = await store().lease(leases);
+      const leased = await store().lease(leases, 0);
       traceLeased(leased);
     }
     return leases;
@@ -279,32 +307,35 @@ export class Act<
   private async handle<E extends Schemas>(
     lease: Lease,
     payloads: ReactionPayload<E>[]
-  ): Promise<Lease> {
+  ): Promise<{ lease: Lease; at: number; error?: string; block?: boolean }> {
     const stream = lease.stream;
+    let at = lease.at;
 
     lease.retry > 0 &&
-      logger.warn(`Retrying ${stream}@${lease.at} (${lease.retry}).`);
+      logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     for (const payload of payloads) {
       const { event, handler, options } = payload;
       try {
         await handler(event, stream); // the actual reaction
-        lease.at = event.id;
+        at = event.id;
       } catch (error) {
-        lease.error = error;
         if (error instanceof ValidationError)
           logger.error({ stream, error }, error.message);
         else logger.error(error);
 
-        if (lease.retry < options.maxRetries) lease.retry++;
-        else if (options.blockOnError) {
-          lease.block = true;
-          logger.error(`Blocked ${stream} after ${lease.retry} retries.`);
-        }
-        break;
+        const block = lease.retry >= options.maxRetries && options.blockOnError;
+        block &&
+          logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
+        return {
+          lease,
+          at,
+          error: error instanceof Error ? error.message : "Unknown error",
+          block,
+        };
       }
     }
-    return lease;
+    return { lease, at };
   }
 
   /**
@@ -312,15 +343,14 @@ export class Act<
    * @param options - Fetch options.
    * @returns Fetched streams with next events to process.
    */
-  private async fetch<E extends Schemas>(options: FetchOptions) {
-    const polled = await store().poll(options.streamLimit);
+  async fetch({ streamLimit = 10, eventLimit = 10 }: FetchOptions) {
+    const polled = await store().poll(streamLimit);
     return Promise.all(
       polled.map(async ({ stream, source, at }) => {
-        const events: Committed<E, keyof E>[] = [];
-        await store().query<E>((e) => events.push(e), {
+        const events = await this.query_array({
           stream: source,
           after: at,
-          limit: options.eventLimit,
+          limit: eventLimit,
         });
         return { stream, source, events };
       })
@@ -339,66 +369,104 @@ export class Act<
    * @example
    * await app.drain();
    */
-  async drain<E extends Schemas>(
-    options: FetchOptions = { streamLimit: 10, eventLimit: 10 }
-  ) {
-    if (this.drainLocked) return 0;
-    this.drainLocked = true;
+  async drain<E extends Schemas>({
+    streamLimit = 10,
+    eventLimit = 10,
+    leaseMillis = 10_000,
+  }: FetchOptions = {}): Promise<{
+    leased: Lease[];
+    acked: Lease[];
+    blocked: Array<Lease & { error: string }>;
+  }> {
+    if (!this.drainLocked) {
+      try {
+        this.drainLocked = true;
 
-    const fetch = await this.fetch<E>(options);
-    traceFetch(fetch);
+        const fetch = await this.fetch({ streamLimit, eventLimit });
+        traceFetch(fetch);
 
-    const leases = fetch.map(({ stream, events }) => {
-      const payloads = events.flatMap((event) => {
-        // @ts-expect-error indexed by key
-        const register = this.registry.events[event.name] as ReactionsRegister<
-          E,
-          keyof E
-        >;
-        if (!register) return [];
-        return [...register.reactions.values()]
-          .filter((reaction) => {
-            const resolved =
-              typeof reaction.resolver === "function"
-                ? reaction.resolver(event)
-                : reaction.resolver;
-            return resolved && resolved.target === stream;
-          })
-          .map((reaction) => ({ ...reaction, event }));
-      });
-      return {
-        stream,
-        by: randomUUID(),
-        at: events.at(-1)?.id || -1,
-        retry: 0,
-        block: false,
-        payloads,
-      };
-    });
-
-    const drained: Lease[] = [];
-    if (leases.length) {
-      const leased = await store().lease(leases as Lease[]);
-      traceLeased(leased);
-
-      await Promise.allSettled(
-        leases.map((lease) => this.handle(lease, lease.payloads))
-      ).then(
-        (promise) => {
-          promise.forEach((result) => {
-            if (result.status === "rejected") logger.error(result.reason);
-            else if (!result.value.error) drained.push(result.value);
+        const last_at = fetch.reduce(
+          (last_at, { events }) => Math.max(last_at, events.at(-1)?.id || -1),
+          -1
+        );
+        if (last_at > -1) {
+          const leases = new Map<
+            string,
+            { lease: Lease; payloads: ReactionPayload<E>[] }
+          >();
+          fetch.forEach(({ stream, events }) => {
+            const payloads = events.flatMap((event) => {
+              // @ts-expect-error indexed by key
+              const register = this.registry.events[
+                event.name
+              ] as ReactionsRegister<E, keyof E>;
+              if (!register) return [];
+              return [...register.reactions.values()]
+                .filter((reaction) => {
+                  const resolved =
+                    typeof reaction.resolver === "function"
+                      ? // @ts-expect-error index by key
+                        reaction.resolver(event)
+                      : reaction.resolver;
+                  return resolved && resolved.target === stream;
+                })
+                .map((reaction) => ({ ...reaction, event }));
+            });
+            leases.set(stream, {
+              lease: {
+                stream,
+                by: randomUUID(),
+                at: events.at(-1)?.id || last_at, // move the lease watermark forward when no events found in window
+                retry: 0,
+              },
+              // @ts-expect-error indexed by key
+              payloads,
+            });
           });
-        },
-        (error) => logger.error(error)
-      );
-      drained.length && this.emit("drained", drained);
 
-      await store().ack(leased);
-      traceAcked(leased);
+          if (leases.size) {
+            const leased = await store().lease(
+              [...leases.values()].map((l) => l.lease),
+              leaseMillis
+            );
+            if (leased.length) {
+              traceLeased(leased);
+
+              const handled = await Promise.all(
+                leased.map((lease) =>
+                  this.handle(lease, leases.get(lease.stream)!.payloads)
+                )
+              );
+
+              const acked = await store().ack(
+                handled.filter(({ error }) => !error).map(({ lease }) => lease)
+              );
+              if (acked.length) {
+                traceAcked(acked);
+                this.emit("acked", acked);
+              }
+
+              const blocked = await store().block(
+                handled
+                  .filter(({ block }) => block)
+                  .map(({ lease, error }) => ({ ...lease, error: error! }))
+              );
+              if (blocked.length) {
+                traceBlocked(blocked);
+                this.emit("blocked", blocked);
+              }
+
+              return { leased, acked, blocked };
+            }
+          }
+        }
+      } catch (error) {
+        logger.error(error);
+      } finally {
+        this.drainLocked = false;
+      }
     }
 
-    this.drainLocked = false;
-    return drained.length;
+    return { leased: [], acked: [], blocked: [] };
   }
 }
