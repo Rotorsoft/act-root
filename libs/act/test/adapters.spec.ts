@@ -4,7 +4,7 @@ import { ConcurrencyError, dispose, store } from "../src/index.js";
 
 describe("adapters", () => {
   beforeEach(async () => {
-    store(new InMemoryStore());
+    store(new InMemoryStore(0));
     await store().seed();
   });
 

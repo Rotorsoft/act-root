@@ -222,10 +222,13 @@ export class PostgresStore implements Store {
         conditions.push("id>-1");
       }
       if (stream) {
-        values.push(stream);
-        if (typeof stream === "string")
+        if (typeof stream === "string") {
+          values.push(stream);
           conditions.push(`stream=$${values.length}`);
-        else conditions.push(`stream ~ $${values.length}`);
+        } else {
+          values.push(stream.source);
+          conditions.push(`stream ~ $${values.length}`);
+        }
       }
       if (names && names.length) {
         values.push(names);

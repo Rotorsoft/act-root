@@ -223,17 +223,13 @@ describe("pg store", () => {
   });
 
   it("should throw on connection error (simulate by using invalid config)", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
     await expect(
       new PostgresStore({ password: "bad", port: 5431 }).seed()
     ).rejects.toThrow();
   });
 
   it("should handle commit with empty events array", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
-    const store = new PostgresStore({ port: 5431 });
-    await store.seed();
-    const result = await store.commit("stream", [], {
+    const result = await store().commit("stream", [], {
       correlation: "c",
       causation: {},
     });
@@ -241,16 +237,55 @@ describe("pg store", () => {
   });
 
   it("should handle query with no results", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
-    const store = new PostgresStore({ port: 5431 });
-    await store.seed();
     const result: any[] = [];
-    await store.query((e) => result.push(e), { stream: "nonexistent" });
+    await store().query((e) => result.push(e), { stream: "nonexistent" });
     expect(result.length).toBe(0);
+  });
+
+  it("should cover query branch with no 'after' provided", async () => {
+    // Commit a couple of events
+    await store().commit(
+      "stream",
+      [
+        { name: "test", data: { value: 1 } },
+        { name: "test", data: { value: 2 } },
+      ],
+      { correlation: "c", causation: {} }
+    );
+    // Query without 'after' in the query object
+    const result: any[] = [];
+    await store().query((e) => result.push(e), { stream: "stream" });
+    expect(result.length).toBe(2);
+  });
+
+  it("should cover query branch with stream as RegExp", async () => {
+    // Commit events to multiple streams
+    await store().commit("regexA", [{ name: "test", data: { value: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().commit("regexB", [{ name: "test", data: { value: 2 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    // Query with stream as RegExp
+    const result: any[] = [];
+    await store().query((e) => result.push(e), { stream: /^regex/ });
+    expect(result.length).toBe(2);
+  });
+
+  it("should cover query branch where rowCount is undefined", async () => {
+    const origQuery = (store() as any)._pool.query;
+    (store() as any)._pool.query = function () {
+      return Promise.resolve({ rows: [], rowCount: undefined });
+    };
+    const count = await store().query(() => {});
+    expect(count).toBe(0);
+    (store() as any)._pool.query = origQuery;
   });
 });
 
-describe("PostgresStore config", () => {
+describe("PostgresStore constructor", () => {
   it("should merge custom config with defaults", () => {
     const custom = {
       host: "custom",
@@ -270,9 +305,7 @@ describe("PostgresStore config", () => {
     expect(store.config.password).toBe("postgres");
     expect(store.config.database).toBe("postgres");
   });
-});
 
-describe("PostgresStore constructor", () => {
   it("should use defaults when no config is provided", () => {
     const store = new PostgresStore();
     expect(store.config.host).toBe("localhost");
@@ -284,6 +317,7 @@ describe("PostgresStore constructor", () => {
     expect(store.config.table).toBe("events");
     expect(store.config.leaseMillis).toBe(30000);
   });
+
   it("should merge partial config with defaults", () => {
     const store = new PostgresStore({ host: "custom", port: 1234 });
     expect(store.config.host).toBe("custom");

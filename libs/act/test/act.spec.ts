@@ -1,4 +1,3 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Act } from "../src/act.js";
 import { store } from "../src/ports.js";
 import { Schema, Schemas } from "../src/types/action.js";
@@ -47,17 +46,47 @@ const makeHandler = (
 };
 
 const makeReactionsMap = (
-  handlers: Record<string, ReturnType<typeof makeHandler>>
+  handlers: Record<
+    string,
+    | ReturnType<typeof makeHandler>
+    | [
+        ReturnType<typeof makeHandler>,
+        Partial<{
+          maxRetries: number;
+          blockOnError: boolean;
+          retryDelayMs: number;
+        }>,
+      ]
+  >
 ) =>
   new Map(
-    Object.entries(handlers).map(([name, handler]) => [
-      name,
-      {
-        handler,
-        resolver: { target: "s" },
-        options: { maxRetries: 1, blockOnError: false, retryDelayMs: 0 },
-      },
-    ])
+    Object.entries(handlers).map(([name, handlerOrTuple]) => {
+      if (Array.isArray(handlerOrTuple)) {
+        const [handler, options] = handlerOrTuple;
+        return [
+          name,
+          {
+            handler,
+            resolver: { target: "s" },
+            options: {
+              maxRetries: 1,
+              blockOnError: false,
+              retryDelayMs: 0,
+              ...options,
+            },
+          },
+        ];
+      } else {
+        return [
+          name,
+          {
+            handler: handlerOrTuple,
+            resolver: { target: "s" },
+            options: { maxRetries: 1, blockOnError: false, retryDelayMs: 0 },
+          },
+        ];
+      }
+    })
   );
 
 const commitEvent = async (name = "E", data = {}) => {
@@ -69,7 +98,7 @@ const commitEvent = async (name = "E", data = {}) => {
 
 describe("Act", () => {
   let act: Act<Schema, Schemas, Schemas>;
-  let registry: Registry<Schema, Schemas, Schemas>; // explicitly typed as any for test flexibility
+  let registry: Registry<Schema, Schemas, Schemas>;
   const setupAct = async () => {
     await store().drop();
     registry = {
@@ -169,6 +198,7 @@ describe("Act", () => {
     ({ label, handlers }) => {
       it(label, async () => {
         await commitEvent("E", {});
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         registry.events.E.reactions = makeReactionsMap(handlers);
         if (label === "success") {
           await store().lease([
@@ -304,7 +334,9 @@ describe("Act", () => {
 
   it("should not call removed event listener", async () => {
     const listener = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     act.on("committed", listener);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     act.off("committed", listener);
     await act.do("foo", { stream: "s", actor: { id: "a", name: "a" } }, {});
     expect(listener).not.toHaveBeenCalled();
@@ -381,5 +413,77 @@ describe("Act", () => {
     });
     await act.drain();
     expect(traceSpy).toHaveBeenCalled();
+  });
+
+  it("should handle ValidationError and block lease", async () => {
+    await commitEvent();
+    registry.events.E.reactions = makeReactionsMap({
+      failHandler: [
+        makeHandler("validation", "validation error"),
+        { maxRetries: 1, blockOnError: true, retryDelayMs: 0 },
+      ],
+    });
+    await act.drain();
+  });
+
+  it("should handle generic error and block lease", async () => {
+    await commitEvent();
+    registry.events.E.reactions = makeReactionsMap({
+      failHandler: [
+        makeHandler("fail", "generic error"),
+        { maxRetries: 1, blockOnError: true, retryDelayMs: 0 },
+      ],
+    });
+    await act.drain();
+  });
+
+  it("should retry on error and not block if blockOnError is false", async () => {
+    await commitEvent();
+    registry.events.E.reactions = makeReactionsMap({
+      failHandler: [
+        makeHandler("fail", "retry error"),
+        { maxRetries: 2, blockOnError: false, retryDelayMs: 0 },
+      ],
+    });
+    await act.drain();
+  });
+
+  it("should log a warning and retry on reaction failure", async () => {
+    let callCount = 0;
+    const handler = vi.fn().mockImplementation(() => {
+      if (callCount++ === 0) throw new Error("fail once");
+      // succeed on second call
+    });
+    registry.events.E.reactions = makeReactionsMap({
+      E: [handler, { maxRetries: 2, blockOnError: false, retryDelayMs: 0 }],
+    });
+    await store().commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().lease([
+      { stream: "s", at: -1, retry: 0, block: false, by: "test" },
+    ]);
+    await act.drain(); // first attempt, handler throws, lease.retry++
+    await store().lease([
+      { stream: "s", at: -1, retry: 1, block: false, by: "test" },
+    ]);
+    await act.drain(); // second attempt, handler succeeds
+    expect(handler).toHaveBeenCalledTimes(2); // ensure retry happened
+  });
+
+  it("should return the number of drained leases", async () => {
+    registry.events.E.reactions = makeReactionsMap({
+      E: makeHandler("success"),
+    });
+    await store().commit("s", [{ name: "E", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().lease([
+      { stream: "s", at: -1, retry: 0, block: false, by: "test" },
+    ]);
+    const result = await act.drain();
+    expect(result).toBeGreaterThan(0);
   });
 });

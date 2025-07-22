@@ -11,6 +11,10 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
@@ -18,9 +22,4 @@
       ]
     }
   },
-  "exclude": [
-    "**/node_modules",
-    "**/dist",
-    "**/*.spec.ts"
-  ]
 }

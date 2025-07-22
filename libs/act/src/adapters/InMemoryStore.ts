@@ -32,11 +32,18 @@ class InMemoryStream {
   at = -1;
   retry = -1;
   blocked = false;
-  _lease: (Lease & { until: Date }) | undefined = undefined;
+  leased_by: string | undefined = undefined;
+  leased_until: Date | undefined = undefined;
 
   constructor(lease: Lease) {
     this.stream = lease.stream;
     this.source = lease.source;
+  }
+
+  get is_avaliable() {
+    return (
+      !this.blocked && (!this.leased_until || this.leased_until <= new Date())
+    );
   }
 
   /**
@@ -44,15 +51,18 @@ class InMemoryStream {
    * @param lease - Lease request.
    * @returns The granted lease or undefined if blocked.
    */
-  lease(lease: Lease): Lease | undefined {
-    if (!this.blocked && lease.at > this.at) {
-      this._lease = {
-        ...lease,
+  lease(lease: Lease, leaseMillis: number): Lease | undefined {
+    if (this.is_avaliable && lease.at > this.at) {
+      this.leased_by = lease.by;
+      this.leased_until = new Date(Date.now() + leaseMillis);
+      return {
+        stream: this.stream,
         source: this.source,
+        by: lease.by,
+        at: lease.at,
         retry: this.retry + 1,
-        until: new Date(Date.now() + 5_000), // TODO: configurable
+        block: false,
       };
-      return this._lease;
     }
   }
 
@@ -61,14 +71,15 @@ class InMemoryStream {
    * @param lease - Lease to acknowledge.
    */
   ack(lease: Lease) {
-    if (this._lease && lease.at >= this.at) {
+    if (this.leased_by === lease.by && lease.at >= this.at) {
+      this.leased_by = undefined;
+      this.leased_until = undefined;
       this.retry = lease.retry;
       this.blocked = lease.block;
       if (!this.blocked && !lease.error) {
         this.at = lease.at;
         this.retry = 0;
       }
-      this._lease = undefined;
     }
   }
 }
@@ -91,6 +102,8 @@ export class InMemoryStore implements Store {
   private _events: Committed<Schemas, keyof Schemas>[] = [];
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
+
+  constructor(private _leaseMillis: number = 5_000) {}
 
   /**
    * Dispose of the store and clear all events.
@@ -215,7 +228,7 @@ export class InMemoryStore implements Store {
   async poll(limit: number) {
     await sleep();
     return [...this._streams.values()]
-      .filter((s) => !s.blocked && (!s._lease || s._lease.until <= new Date()))
+      .filter((s) => s.is_avaliable)
       .sort((a, b) => a.at - b.at)
       .slice(0, limit)
       .map(({ stream, source, at }) => ({ stream, source, at }));
@@ -236,7 +249,7 @@ export class InMemoryStore implements Store {
           this._streams
             .set(lease.stream, new InMemoryStream(lease))
             .get(lease.stream)!;
-        return stream.lease(lease) as Lease;
+        return stream.lease(lease, this._leaseMillis);
       })
       .filter((l): l is Lease => !!l);
   }

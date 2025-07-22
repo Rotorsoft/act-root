@@ -155,7 +155,8 @@ export class Act<
       action,
       target,
       payload,
-      reactingTo as Committed<Schemas, keyof Schemas>,
+      // @ts-expect-error type lost
+      reactingTo,
       skipValidation
     );
     this.emit("committed", snapshots as Snapshot<S, E>[]);
@@ -219,9 +220,13 @@ export class Act<
    *
    * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
    * Once registered, these streams will be picked up by the main `drain` loop.
+   * @param events - Committed events to correlate
+   * @returns - A list of leases for each stream
    */
-  async correlate<E extends Schemas>(events: Committed<E, keyof E>[]) {
-    if (!events.length) return;
+  async correlate<E extends Schemas>(
+    events: Committed<E, keyof E>[]
+  ): Promise<Array<Lease & { payloads: ReactionPayload<E>[] }>> {
+    if (!events.length) return [];
     const correlated = new Map<string, ReactionPayload<E>[]>();
     for (const event of events) {
       // @ts-expect-error indexed by key
@@ -243,22 +248,21 @@ export class Act<
       }
     }
     // found new correlations from fetched events!
-    const leases: Lease[] = [...correlated.entries()].map(
-      ([stream, payloads]) => ({
-        stream,
-        // TODO: by convention, the first defined source wins (this can be tricky)
-        source: payloads.find((p) => p.source)?.source || undefined,
-        by: randomUUID(),
-        payloads,
-        at: 0,
-        retry: 0,
-        block: false,
-      })
-    );
+    const leases = [...correlated.entries()].map(([stream, payloads]) => ({
+      stream,
+      // TODO: by convention, the first defined source wins (this can be tricky)
+      source: payloads.find((p) => p.source)?.source || undefined,
+      by: randomUUID(),
+      payloads,
+      at: 0,
+      retry: 0,
+      block: false,
+    }));
     if (leases.length) {
       const leased = await store().lease(leases);
       traceLeased(leased);
     }
+    return leases;
   }
 
   /**
@@ -344,38 +348,37 @@ export class Act<
     const fetch = await this.fetch<E>(options);
     traceFetch(fetch);
 
-    const leases: Array<Lease & { payloads: ReactionPayload<E>[] }> = fetch.map(
-      ({ stream, events }) => {
-        const payloads: ReactionPayload<E>[] = events.flatMap((event) => {
-          // @ts-expect-error indexed by key
-          const register = this.registry.events[
-            event.name
-          ] as ReactionsRegister<E, keyof E>;
-          if (!register) return [];
-          return [...register.reactions.values()]
-            .filter((reaction) => {
-              const resolved =
-                typeof reaction.resolver === "function"
-                  ? reaction.resolver(event)
-                  : reaction.resolver;
-              return resolved && resolved.target === stream;
-            })
-            .map((reaction) => ({ ...reaction, event }));
-        });
-        return {
-          stream,
-          by: randomUUID(),
-          payloads,
-          at: events.at(-1)?.id || -1,
-          retry: 0,
-          block: false,
-        };
-      }
-    );
+    const leases = fetch.map(({ stream, events }) => {
+      const payloads = events.flatMap((event) => {
+        // @ts-expect-error indexed by key
+        const register = this.registry.events[event.name] as ReactionsRegister<
+          E,
+          keyof E
+        >;
+        if (!register) return [];
+        return [...register.reactions.values()]
+          .filter((reaction) => {
+            const resolved =
+              typeof reaction.resolver === "function"
+                ? reaction.resolver(event)
+                : reaction.resolver;
+            return resolved && resolved.target === stream;
+          })
+          .map((reaction) => ({ ...reaction, event }));
+      });
+      return {
+        stream,
+        by: randomUUID(),
+        at: events.at(-1)?.id || -1,
+        retry: 0,
+        block: false,
+        payloads,
+      };
+    });
 
     const drained: Lease[] = [];
     if (leases.length) {
-      const leased = await store().lease(leases);
+      const leased = await store().lease(leases as Lease[]);
       traceLeased(leased);
 
       await Promise.allSettled(

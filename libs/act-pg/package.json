@@ -32,7 +32,7 @@
   },
   "scripts": {
     "clean": "rm -rf dist",
-    "types": "tsc --build --emitDeclarationOnly",
+    "types": "tsc --project tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {

@@ -1,6 +1,5 @@
 import { act, Actor, Committed, dispose, sleep, store } from "@rotorsoft/act";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { Calculator } from "../src/index.js";
+import { Calculator } from "./calculator.js";
 
 describe("calculator lifecycle", () => {
   const actor_a: Actor = { id: "A", name: "A" };
@@ -48,7 +47,7 @@ describe("calculator lifecycle", () => {
     await app.do("PressKey", { stream, actor: actor_a }, { key: "7" });
     await app.do("PressKey", { stream, actor: actor_a }, { key: "." });
     await app.do("PressKey", { stream, actor: actor_a }, { key: "9" });
-    const [, result] = await app.do(
+    const [result] = await app.do(
       "PressKey",
       { stream, actor: actor_x },
       { key: "=" }
@@ -72,8 +71,9 @@ describe("calculator lifecycle", () => {
 
   it("should query by stream", async () => {
     const events: Committed<any, any>[] = [];
-    const { first, last, count } = await app.query({ stream }, (e) =>
-      events.push(e)
+    const { first, last, count } = await app.query(
+      { stream, with_snaps: true },
+      (e) => events.push(e)
     );
     // console.table(events);
     expect(events.length).toBe(19);
@@ -135,6 +135,7 @@ describe("calculator lifecycle", () => {
   it("should query by created after", async () => {
     const { first, count } = await app.query({
       created_after: midpoint,
+      with_snaps: true,
     });
     expect(count).toBe(10);
     expect(first).toMatchObject({
