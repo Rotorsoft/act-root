@@ -9,7 +9,9 @@ export default function Calculator() {
     onSuccess: ([snap]) => {
       console.log(snap.state);
       setDisplay(
-        `${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${snap.state.right ?? ""}`
+        `${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${
+          snap.state.right ?? ""
+        }`
       );
     },
     onError: console.error,

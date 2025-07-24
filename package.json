@@ -34,7 +34,7 @@
   "scripts": {
     "clean": "pnpm -r clean",
     "build": "pnpm -r build",
-    "typecheck": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json",
+    "typecheck": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json --jsx react-jsx",
     "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
     "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
     "lint:fix": "pnpm lint --fix",
