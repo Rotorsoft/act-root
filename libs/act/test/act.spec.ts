@@ -26,10 +26,10 @@ describe("act", () => {
   const app = act()
     .with(counter)
     .on("incremented")
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
     .do(onIncremented)
     .on("decremented")
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
     .build();
 
@@ -37,7 +37,7 @@ describe("act", () => {
 
   it("should register and call an event listener", async () => {
     const listener = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
     app.on("committed", listener);
     await app.do("increment", { stream: "s", actor }, {});
     expect(listener).toHaveBeenCalled();
@@ -45,9 +45,7 @@ describe("act", () => {
 
   it("should not call removed event listener", async () => {
     const listener = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     app.on("committed", listener);
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     app.off("committed", listener);
     await app.do("increment", { stream: "s", actor }, {});
     expect(listener).not.toHaveBeenCalled();

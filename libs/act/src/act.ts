@@ -174,7 +174,7 @@ export class Act<
     );
     this.emit("committed", snapshots as Snapshot<S, E>[]);
     // fire and forget correlations - TODO: review this approach, maybe we can do this in the builder
-    void this.correlate(snapshots.filter((s) => s.event).map((s) => s.event!));
+    await this.correlate(snapshots.filter((s) => s.event).map((s) => s.event!));
     return snapshots;
   }
 

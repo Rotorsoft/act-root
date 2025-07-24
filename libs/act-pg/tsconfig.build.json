@@ -2,12 +2,13 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
+    "outDir": "dist",
     "declarationDir": "dist/@types",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
   },
   "references": [
     {
-      "path": "../act"
+      "path": "../act/tsconfig.build.json"
     }
   ],
   "include": [

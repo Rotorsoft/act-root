@@ -18,7 +18,7 @@
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
-        "./*/src/index.ts"
+        "*/src/index.ts"
       ]
     }
   },

@@ -170,7 +170,6 @@ describe("Builder", () => {
       .with(testState)
       .on("E")
       .do(customHandler)
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
       .to(customResolver);
 
     // Access the reaction and call the resolver directly

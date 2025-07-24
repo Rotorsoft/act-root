@@ -9,7 +9,6 @@ import { dispose } from "../src/index.js";
 
 describe("exit signal handlers", () => {
   beforeAll(() => {
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     dispose(disposeSpy);
   });
 

@@ -17,30 +17,18 @@
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "rootDir": ".",
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
         "../libs/*/src/index.ts"
       ],
-      "@act/calculator": [
-        "./calculator/src/index.ts"
+      "@act/*": [
+        "*/src/index.ts"
       ],
-      "@act/wolfdesk": [
-        "./wolfdesk/src/index.ts"
-      ]
     }
   },
-  "references": [
-    {
-      "path": "../libs/act/src/index.ts"
-    },
-    {
-      "path": "../libs/act-pg/src/index.ts"
-    },
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-  ]
 }

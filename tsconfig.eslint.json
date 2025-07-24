@@ -7,21 +7,23 @@
     "composite": false,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
     "baseUrl": ".",
     "paths": {
       "@rotorsoft/*": [
-        "../libs/*/src/index.ts"
+        "libs/*/src/index.ts"
       ],
-      "@act/calculator": [
-        "./packages/calculator/src/index.ts"
+      "@act/*": [
+        "packages/*/src/index.ts"
       ],
-      "@act/wolfdesk": [
-        "./packages/wolfdesk/src/index.ts"
-      ]
     }
   },
   "include": [
     "**/*.ts",
+    "**/*.tsx",
   ],
   "exclude": [
     "**/node_modules",

@@ -45,10 +45,11 @@ describe("PostgresStore", () => {
         .mockResolvedValueOnce(undefined) // BEGIN
         .mockRejectedValueOnce(new Error("seed fail")); // CREATE SCHEMA fails
 
+      // @ts-expect-error mock
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
         query,
         release: vi.fn(),
-      } as any);
+      });
       await expect(store.seed()).rejects.toThrow("seed fail");
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("Failed to seed store:"),
@@ -59,9 +60,8 @@ describe("PostgresStore", () => {
 
   describe("commit", () => {
     it("returns [] for empty events", async () => {
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
-        rows: [],
-      } as any);
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
       await expect(
         store.commit("stream", [], { correlation: "c", causation: {} })
       ).resolves.toEqual([]);
@@ -69,7 +69,8 @@ describe("PostgresStore", () => {
 
     it("throws on DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        makeClient(vi.fn().mockRejectedValue(new Error("db error"))) as any
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("db error")))
       );
       await expect(
         store.commit("stream", [{ name: "E", data: {} }], {
@@ -88,7 +89,8 @@ describe("PostgresStore", () => {
         .mockResolvedValue(Promise.resolve());
 
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        makeClient(queryMock) as any
+        // @ts-expect-error mock
+        makeClient(queryMock)
       );
       await expect(
         store.commit("stream", [{ name: "E", data: {} }], {
@@ -107,9 +109,10 @@ describe("PostgresStore", () => {
       });
       const querySpy = vi
         .spyOn(pg.Pool.prototype, "query")
-        .mockResolvedValue({ rows: [], rowCount: 0 } as any);
+        // @ts-expect-error mock
+        .mockResolvedValue({ rows: [], rowCount: 0 });
       const cb = vi.fn();
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
       await store.query(cb);
       expect(querySpy).toHaveBeenCalledWith(
         expect.stringContaining("SELECT *"),
@@ -121,9 +124,8 @@ describe("PostgresStore", () => {
 
   describe("poll", () => {
     it("returns empty result on no rows", async () => {
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
-        rows: [],
-      } as any);
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
       await expect(store.poll(10)).resolves.toEqual([]);
     });
 
@@ -140,8 +142,10 @@ describe("PostgresStore", () => {
         table: "store_error_test",
       });
       vi.spyOn(pg.Pool.prototype, "query")
-        .mockResolvedValueOnce({ rows: [] } as any)
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 } as any);
+        // @ts-expect-error mock
+        .mockResolvedValueOnce({ rows: [] })
+        // @ts-expect-error mock
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
       const result = await store.poll(10);
       expect(result).toEqual([]);
     });
@@ -150,7 +154,8 @@ describe("PostgresStore", () => {
   describe("lease", () => {
     it("swallows DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        makeClient(vi.fn().mockRejectedValue(new Error("lease error"))) as any
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("lease error")))
       );
       await expect(
         store.lease([{ stream: "s", by: "a", at: 1, retry: 0 }], 0)
@@ -161,7 +166,8 @@ describe("PostgresStore", () => {
   describe("ack", () => {
     it("swallows DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        makeClient(vi.fn().mockRejectedValue(new Error("ack error"))) as any
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("ack error")))
       );
       await expect(
         store.ack([{ stream: "s", by: "a", at: 1, retry: 0 }])
@@ -172,7 +178,8 @@ describe("PostgresStore", () => {
   describe("block", () => {
     it("swallows DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        makeClient(vi.fn().mockRejectedValue(new Error("block error"))) as any
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("block error")))
       );
       await expect(
         store.block([{ stream: "s", by: "a", at: 1, retry: 0, error: "" }])

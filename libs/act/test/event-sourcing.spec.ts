@@ -254,7 +254,6 @@ describe("event-sourcing", () => {
     });
 
     const callback = vi.fn();
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     await load(me, "s", callback);
 
     expect(callback).toHaveBeenCalledTimes(2);
@@ -415,7 +414,7 @@ describe("event-sourcing", () => {
       correlation: "c",
       causation: {},
     });
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+
     await load(state, "stream", vi.fn());
   });
 

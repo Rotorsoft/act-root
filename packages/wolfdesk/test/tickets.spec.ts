@@ -1,7 +1,6 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
@@ -119,7 +118,7 @@ describe("ticket projection", () => {
 
       // project and verify
       const drained = await app.drain();
-      expect(drained).toBeGreaterThan(0);
+      expect(drained.acked.length).toBeGreaterThan(0);
 
       let ticket = await findTicket(t.stream);
       console.table(ticket);

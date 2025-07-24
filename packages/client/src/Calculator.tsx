@@ -1,12 +1,12 @@
+import type { Digits, Operators } from "@act/calculator";
 import { useState } from "react";
-import type { Digits, Operators } from "../../server/src/router";
-import { trpc } from "./trpc";
+import { trpc } from "./trpc.js";
 
 export default function Calculator() {
   const [display, setDisplay] = useState("");
 
   const pressKey = trpc.PressKey.useMutation({
-    onSuccess: (snap) => {
+    onSuccess: ([snap]) => {
       console.log(snap.state);
       setDisplay(
         `${snap.state.left ?? "0"} ${snap.state.operator ?? ""} ${snap.state.right ?? ""}`
@@ -16,7 +16,7 @@ export default function Calculator() {
   });
 
   const clear = trpc.Clear.useMutation({
-    onSuccess: (snap) => {
+    onSuccess: ([snap]) => {
       console.log(snap.state);
       setDisplay("0");
     },

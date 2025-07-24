@@ -295,6 +295,7 @@ export class PostgresStore implements Store {
       version = last.rowCount ? last.rows[0].version : -1;
       if (typeof expectedVersion === "number" && version !== expectedVersion)
         throw new ConcurrencyError(
+          stream,
           version,
           msgs as unknown as Message<Schemas, string>[],
           expectedVersion
@@ -326,6 +327,7 @@ export class PostgresStore implements Store {
         .catch((error) => {
           logger.error(error);
           throw new ConcurrencyError(
+            stream,
             version,
             msgs as unknown as Message<Schemas, string>[],
             expectedVersion || -1
@@ -510,13 +512,13 @@ export class PostgresStore implements Store {
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, error text)
+        AS x(stream text, by uuid, error text)
       )
       UPDATE ${this._fqs} AS s
       SET blocked = true, error = i.error
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
-      RETURNING s.stream, s.source, s.at, s.by, s.retry, s.error
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error
       `,
         [JSON.stringify(leases)]
       );

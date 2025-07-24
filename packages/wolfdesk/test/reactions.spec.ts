@@ -1,5 +1,4 @@
 import { dispose } from "@rotorsoft/act";
-import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../src/bootstrap.js";
 import { Ticket } from "../src/ticket.js";
 import {

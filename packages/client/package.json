@@ -7,9 +7,9 @@
     "lint": "eslint ."
   },
   "dependencies": {
-    "@act/calculator": "link:../calculator",
-    "@rotorsoft/act": "^0.5.7",
-    "@rotorsoft/act-pg": "^0.4.7",
+    "@act/calculator": "workspace:*",
+    "@rotorsoft/act": "workspace:*",
+    "@rotorsoft/act-pg": "workspace:*",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-query-devtools": "^5.83.0",
     "@trpc/client": "11.4.3",
