@@ -185,7 +185,7 @@ export type ActionHandler<
   K extends keyof A,
 > = (
   action: Readonly<A[K]>,
-  state: Readonly<S>,
+  snapshot: Readonly<Snapshot<S, E>>,
   target: Target
 ) => Emitted<E> | Emitted<E>[] | undefined;
 

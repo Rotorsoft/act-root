@@ -80,7 +80,11 @@ describe("ticket projection", () => {
       await assignTicket(t, chance.guid(), now, now);
 
       // project and verify agent and escalate after
-      await app.drain();
+      await app.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+        leaseMillis: 10_000,
+      });
       let ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
       expect(ticket?.escalateAfter).toBe(now.getTime());
@@ -90,7 +94,11 @@ describe("ticket projection", () => {
       await AutoEscalate(1).catch(console.error);
 
       // project and verify escalation id
-      await app.drain();
+      await app.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+        leaseMillis: 10_000,
+      });
       ticket = await findTicket(t.stream);
       expect(ticket?.escalationId).toBeDefined();
 

@@ -14,7 +14,7 @@ describe("reactions", () => {
   });
 
   it("should assign agent to new ticket", async () => {
-    const t = target();
+    const t = target(undefined, "should assign agent");
     await openTicket(t, "assign agent", "Hello");
     await app.drain();
 
@@ -23,7 +23,7 @@ describe("reactions", () => {
   });
 
   it("should deliver new ticket", async () => {
-    const t = target();
+    const t = target(undefined, "should deliver new ticket");
     await openTicket(t, "deliver", "Hello");
     await addMessage(t, "the body");
     await app.drain();
@@ -35,7 +35,7 @@ describe("reactions", () => {
   });
 
   it("should request escalation", async () => {
-    const t = target();
+    const t = target(undefined, "should request escalation");
     await openTicket(t, "request escalation", "Hello");
     await requestTicketEscalation(t);
     await app.drain();

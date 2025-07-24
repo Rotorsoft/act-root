@@ -104,7 +104,7 @@ const Calculator = state("Calculator", State)
     }),
   })
   .on("PressKey", Actions.PressKey)
-  .emit(({ key }, state) => {
+  .emit(({ key }, { state }) => {
     if (key === ".") return ["DotPressed", {}];
     if (key === "=") {
       if (!state.operator) throw Error("no operator");

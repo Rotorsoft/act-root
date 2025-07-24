@@ -157,16 +157,16 @@ export async function action<
     invariants.forEach(({ valid, description }) => {
       if (!valid(snapshot.state, actor))
         throw new InvariantError(
-          action as string,
+          action,
           payload,
           target,
+          snapshot,
           description
         );
     });
   }
 
-  let { state, patches } = snapshot;
-  const result = me.on[action](payload, state, target);
+  const result = me.on[action](payload, snapshot, target);
   if (!result) return [snapshot];
 
   // An empty array means no events were emitted
@@ -217,6 +217,7 @@ export async function action<
     reactingTo ? undefined : expected
   );
 
+  let { state, patches } = snapshot;
   const snapshots = committed.map((event) => {
     state = patch(state, me.patch[event.name](event, state));
     patches++;

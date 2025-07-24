@@ -385,11 +385,15 @@ export class Act<
         const fetch = await this.fetch({ streamLimit, eventLimit });
         fetch.length && traceFetch(fetch);
 
-        const last_at = fetch.reduce(
-          (last_at, { events }) => Math.max(last_at, events.at(-1)?.id || -1),
-          -1
+        // set drain bounds
+        const [last_at, count] = fetch.reduce(
+          ([last_at, count], { events }) => [
+            Math.max(last_at, events.at(-1)?.id || 0),
+            count + events.length,
+          ],
+          [0, 0]
         );
-        if (last_at > -1) {
+        if (count > 0) {
           const leases = new Map<
             string,
             { lease: Lease; payloads: ReactionPayload<E>[] }

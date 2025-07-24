@@ -68,7 +68,7 @@ export function AutoReassign(batchSize: number) {
   };
   return new Promise((resolve, reject) =>
     db
-      .select({ id: tickets.id })
+      .select()
       .from(tickets)
       .where(
         and(isNull(tickets.closedById), lt(tickets.reassignAfter, Date.now()))
@@ -76,6 +76,7 @@ export function AutoReassign(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
+          console.log("Reassigning", ticket);
           const agent = reassignAgent(ticket.id);
           await app
             .do("ReassignTicket", { stream: ticket.id, actor }, agent)
