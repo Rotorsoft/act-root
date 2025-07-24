@@ -288,7 +288,7 @@ export class Act<
     }));
     if (leases.length) {
       const leased = await store().lease(leases, 0);
-      traceLeased(leased);
+      leased.length && traceLeased(leased);
     }
     return leases;
   }
@@ -383,7 +383,7 @@ export class Act<
         this.drainLocked = true;
 
         const fetch = await this.fetch({ streamLimit, eventLimit });
-        traceFetch(fetch);
+        fetch.length && traceFetch(fetch);
 
         const last_at = fetch.reduce(
           (last_at, { events }) => Math.max(last_at, events.at(-1)?.id || -1),

@@ -68,14 +68,17 @@ export class InvariantError extends Error {
  */
 export class ConcurrencyError extends Error {
   constructor(
+    public readonly stream: string,
     public readonly lastVersion: number,
     public readonly events: Message<Schemas, keyof Schemas>[],
     public readonly expectedVersion: number
   ) {
     super(
-      `Concurrency error committing event "${
-        events.at(0)?.name
-      }". Expected version ${expectedVersion} but found version ${lastVersion}.`
+      `Concurrency error committing "${events
+        .map((e) => `${stream}.${e.name}.${JSON.stringify(e.data)}`)
+        .join(
+          ", "
+        )}". Expected version ${expectedVersion} but found version ${lastVersion}.`
     );
     this.name = Errors.ConcurrencyError;
   }

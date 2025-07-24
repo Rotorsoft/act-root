@@ -100,7 +100,7 @@ export async function load<
     },
     { stream, with_snaps: true }
   );
-  logger.trace({ stream, patches, snaps, state }, "🟢 load");
+  logger.trace(state, `🟢 load ${stream}`);
   return { event, state, patches, snaps };
 }
 
@@ -143,12 +143,15 @@ export async function action<
   payload = skipValidation
     ? payload
     : validate(action as string, payload, me.actions[action]);
-  logger.trace(
-    payload,
-    `🔵 ${action as string} "${stream}${expectedVersion ? `@${expectedVersion}` : ""}"`
-  );
 
   const snapshot = await load(me, stream);
+  const expected = expectedVersion || snapshot.event?.version;
+
+  logger.trace(
+    payload,
+    `🔵 ${stream}.${action as string}${typeof expected === "number" ? `.${expected}` : ""}`
+  );
+
   if (me.given) {
     const invariants = me.given[action] || [];
     invariants.forEach(({ valid, description }) => {
@@ -201,12 +204,17 @@ export async function action<
     },
   };
 
+  logger.trace(
+    emitted.map((e) => e.data),
+    `🔴 commit ${stream}.${emitted.map((e) => e.name).join(", ")}`
+  );
+
   const committed = await store().commit(
     stream,
     emitted,
     meta,
     // TODO: review reactions not enforcing expected version
-    reactingTo ? undefined : expectedVersion || snapshot.event?.version
+    reactingTo ? undefined : expected
   );
 
   const snapshots = committed.map((event) => {
@@ -214,7 +222,6 @@ export async function action<
     patches++;
     return { event, state, patches, snaps: snapshot.snaps };
   });
-  logger.trace(snapshots, "🔴 commit");
 
   // fire and forget snaps
   const last = snapshots.at(-1)!;

@@ -173,7 +173,7 @@ export class InMemoryStore implements Store {
       count = 0;
     while (i < this._events.length) {
       const e = this._events[i++];
-      if (stream && !RegExp(stream).test(e.stream)) continue;
+      if (stream && !RegExp(`^${stream}$`).test(e.stream)) continue;
       if (names && !names.includes(e.name)) continue;
       if (correlation && e.meta?.correlation !== correlation) continue;
       if (created_after && e.created <= created_after) continue;
@@ -207,12 +207,14 @@ export class InMemoryStore implements Store {
     if (
       typeof expectedVersion === "number" &&
       instance.length - 1 !== expectedVersion
-    )
+    ) {
       throw new ConcurrencyError(
+        stream,
         instance.length - 1,
         msgs as Message<Schemas, keyof Schemas>[],
         expectedVersion
       );
+    }
 
     let version = instance.length;
     return msgs.map(({ name, data }) => {
