@@ -1,5 +1,6 @@
 import { dispose } from "@rotorsoft/act";
 import { app } from "../src/bootstrap.js";
+import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { Ticket } from "../src/ticket.js";
 import {
   addMessage,
@@ -10,6 +11,8 @@ import {
 
 describe("reactions", () => {
   afterAll(async () => {
+    await init_tickets_db();
+    await db.delete(tickets).catch((e) => console.error(e));
     await dispose()();
   });
 
