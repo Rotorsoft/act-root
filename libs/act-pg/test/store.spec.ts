@@ -343,26 +343,29 @@ describe("pg store", () => {
 
 describe("blocking", () => {
   it("should handle increment and decrement should block", async () => {
-    await app.do("increment", { stream: "s", actor }, {});
-    await app.do("increment", { stream: "s", actor }, {});
+    await app.do("increment", { stream: "blocking", actor }, {});
+    await app.do("increment", { stream: "blocking", actor }, {});
 
-    const drained = await app.drain();
+    const { leased } = await app.correlate();
+    expect(leased.length).toBe(1);
+
+    let drained = await app.drain();
     expect(drained.acked.length).toBe(1);
     expect(onIncremented).toHaveBeenCalled();
     expect(onDecremented).not.toHaveBeenCalled();
 
-    await app.do("decrement", { stream: "s", actor }, {});
-    const drained2 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    expect(drained2.acked.length).toBe(0);
+    await app.do("decrement", { stream: "blocking", actor }, {});
+
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
     expect(onDecremented).toHaveBeenCalledTimes(1);
 
-    const drained3 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    expect(drained3.acked.length).toBe(0);
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
-    const drained4 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    expect(drained4.acked.length).toBe(0);
-    expect(drained4.blocked.length).toBe(1);
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    expect(drained.acked.length).toBe(0);
+    expect(drained.blocked.length).toBe(1);
     expect(onDecremented).toHaveBeenCalledTimes(3);
   });
 });

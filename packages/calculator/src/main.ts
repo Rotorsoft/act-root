@@ -97,6 +97,9 @@ async function main() {
     }))
     .build();
 
+  // start the correlation pump
+  app.start_correlations();
+
   // Helper: print the calculator state after the digit board
   const printStreamStates = async () => {
     for (const stream of streams) {

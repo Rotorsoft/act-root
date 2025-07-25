@@ -76,7 +76,6 @@ export function AutoReassign(batchSize: number) {
       .limit(batchSize)
       .then(async (tickets) => {
         for (const ticket of tickets) {
-          console.log("Reassigning", ticket);
           const agent = reassignAgent(ticket.id);
           await app
             .do("ReassignTicket", { stream: ticket.id, actor }, agent)

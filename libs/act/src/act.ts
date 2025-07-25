@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import * as es from "./event-sourcing.js";
-import { logger, store } from "./ports.js";
+import { dispose, logger, store } from "./ports.js";
 import { ValidationError } from "./types/errors.js";
 import type {
   Committed,
@@ -31,6 +31,11 @@ function traceFetch<E extends Schemas>(fetch: Fetch<E>) {
     })
   );
   logger.trace(data, "⚡️ fetch");
+}
+
+function traceCorrelated(leases: Lease[]) {
+  const data = leases.map(({ stream }) => stream).join(" ");
+  logger.trace(`⚡️ correlate ${data}`);
 }
 
 function traceLeased(leases: Lease[]) {
@@ -84,6 +89,8 @@ export class Act<
   A extends Schemas,
 > {
   private _emitter = new EventEmitter();
+  private _drain_locked = false;
+  private _correlation_interval: NodeJS.Timeout | undefined = undefined;
 
   /**
    * Emit a lifecycle event (internal use, but can be used for custom listeners).
@@ -140,7 +147,13 @@ export class Act<
    *
    * @param registry The registry of state, event, and action schemas
    */
-  constructor(public readonly registry: Registry<S, E, A>) {}
+  constructor(public readonly registry: Registry<S, E, A>) {
+    dispose(() => {
+      this._emitter.removeAllListeners();
+      this.stop_correlations();
+      return Promise.resolve();
+    });
+  }
 
   /**
    * Executes an action (command) against a state machine, emitting and committing the resulting event(s).
@@ -173,8 +186,6 @@ export class Act<
       skipValidation
     );
     this.emit("committed", snapshots as Snapshot<S, E>[]);
-    // fire and forget correlations - TODO: review this approach, maybe we can do this in the builder
-    await this.correlate(snapshots.filter((s) => s.event).map((s) => s.event!));
     return snapshots;
   }
 
@@ -245,55 +256,6 @@ export class Act<
   }
 
   /**
-   * Identifies and registers new streams triggered by committed events using reaction resolvers.
-   *
-   * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
-   * Once registered, these streams will be picked up by the main `drain` loop.
-   * @param events - Committed events to correlate
-   * @returns - A list of leases for each stream
-   */
-  async correlate<E extends Schemas>(
-    events: Committed<E, keyof E>[]
-  ): Promise<Array<Lease & { payloads: ReactionPayload<E>[] }>> {
-    if (!events.length) return [];
-    const correlated = new Map<string, ReactionPayload<E>[]>();
-    for (const event of events) {
-      // @ts-expect-error indexed by key
-      const register = this.registry.events[event.name] as ReactionsRegister<
-        E,
-        keyof E
-      >;
-      if (!register) continue; // skip events with no registered reactions
-      for (const reaction of register.reactions.values()) {
-        const resolved =
-          typeof reaction.resolver === "function"
-            ? reaction.resolver(event)
-            : reaction.resolver;
-        resolved &&
-          (
-            correlated.get(resolved.target) ||
-            correlated.set(resolved.target, []).get(resolved.target)!
-          ).push({ ...reaction, source: resolved.source, event });
-      }
-    }
-    // found new correlations from fetched events!
-    const leases = [...correlated.entries()].map(([stream, payloads]) => ({
-      stream,
-      // TODO: by convention, the first defined source wins (this can be tricky)
-      source: payloads.find((p) => p.source)?.source || undefined,
-      by: randomUUID(),
-      at: 0,
-      retry: 0,
-      payloads,
-    }));
-    if (leases.length) {
-      const leased = await store().lease(leases, 0);
-      leased.length && traceLeased(leased);
-    }
-    return leases;
-  }
-
-  /**
    * Handles leased reactions.
    *
    * This is called by the main `drain` loop after fetching new events.
@@ -308,8 +270,12 @@ export class Act<
     lease: Lease,
     payloads: ReactionPayload<E>[]
   ): Promise<{ lease: Lease; at: number; error?: string; block?: boolean }> {
+    // no payloads, just advance the lease
+    if (payloads.length === 0) return { lease, at: lease.at };
+
     const stream = lease.stream;
-    let at = lease.at;
+    let at = payloads.at(0)!.event.id,
+      handled = 0;
 
     lease.retry > 0 &&
       logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
@@ -319,6 +285,7 @@ export class Act<
       try {
         await handler(event, stream); // the actual reaction
         at = event.id;
+        handled++;
       } catch (error) {
         if (error instanceof ValidationError)
           logger.error({ stream, error }, error.message);
@@ -330,7 +297,13 @@ export class Act<
         return {
           lease,
           at,
-          error: error instanceof Error ? error.message : "Unknown error",
+          // only report error when nothing was handled
+          error:
+            handled === 0
+              ? error instanceof Error
+                ? error.message
+                : "Unknown Error"
+              : undefined,
           block,
         };
       }
@@ -357,8 +330,6 @@ export class Act<
     );
   }
 
-  private drainLocked = false;
-
   /**
    * Drains and processes events from the store, triggering reactions and updating state.
    *
@@ -378,9 +349,9 @@ export class Act<
     acked: Lease[];
     blocked: Array<Lease & { error: string }>;
   }> {
-    if (!this.drainLocked) {
+    if (!this._drain_locked) {
       try {
-        this.drainLocked = true;
+        this._drain_locked = true;
 
         const fetch = await this.fetch({ streamLimit, eventLimit });
         fetch.length && traceFetch(fetch);
@@ -443,7 +414,9 @@ export class Act<
               );
 
               const acked = await store().ack(
-                handled.filter(({ error }) => !error).map(({ lease }) => lease)
+                handled
+                  .filter(({ error }) => !error)
+                  .map(({ at, lease }) => ({ ...lease, at }))
               );
               if (acked.length) {
                 traceAcked(acked);
@@ -467,10 +440,100 @@ export class Act<
       } catch (error) {
         logger.error(error);
       } finally {
-        this.drainLocked = false;
+        this._drain_locked = false;
       }
     }
 
     return { leased: [], acked: [], blocked: [] };
+  }
+
+  /**
+   * Correlates streams using reaction resolvers.
+   * @param query - The query filter (e.g., by stream, event name, or starting point).
+   * @returns The leases of newly correlated streams, and the last seen event ID.
+   */
+  async correlate(
+    query: Query = { after: -1, limit: 10 }
+  ): Promise<{ leased: Lease[]; last_id: number }> {
+    const correlated = new Map<string, ReactionPayload<E>[]>();
+    let last_id = query.after || -1;
+    await store().query<E>((event) => {
+      last_id = event.id;
+      const register = this.registry.events[event.name];
+      // skip events with no registered reactions
+      if (register) {
+        for (const reaction of register.reactions.values()) {
+          const resolved =
+            typeof reaction.resolver === "function"
+              ? reaction.resolver(event)
+              : reaction.resolver;
+          resolved &&
+            (
+              correlated.get(resolved.target) ||
+              correlated.set(resolved.target, []).get(resolved.target)!
+            ).push({ ...reaction, source: resolved.source, event });
+        }
+      }
+    }, query);
+    if (correlated.size) {
+      const leases = [...correlated.entries()].map(([stream, payloads]) => ({
+        stream,
+        // TODO: by convention, the first defined source wins (this can be tricky)
+        source: payloads.find((p) => p.source)?.source || undefined,
+        by: randomUUID(),
+        at: 0,
+        retry: 0,
+        payloads,
+      }));
+      // register leases with 0ms lease timeout (just to tag the new streams)
+      const leased = await store().lease(leases, 0);
+      leased.length && traceCorrelated(leased);
+      return { leased, last_id };
+    }
+    return { leased: [], last_id };
+  }
+
+  /**
+   * Starts correlation worker that identifies and registers new streams using reaction resolvers.
+   *
+   * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
+   * - Uses a correlation sliding window over the event stream to identify new streams.
+   * - Once registered, these streams are picked up by the main `drain` loop.
+   * - Users should have full control over their correlation strategy.
+   * - The starting point keeps increasing with each new batch of events.
+   * - Users are responsible for storing the last seen event ID.
+   *
+   * @param query - The query filter (e.g., by stream, event name, or starting point).
+   * @param frequency - The frequency of correlation checks (in milliseconds).
+   * @param callback - Callback to report stats (new strems, last seen event ID, etc.).
+   * @returns true if the correlation worker started, false otherwise (already started).
+   */
+  start_correlations(
+    query: Query = {},
+    frequency = 10_000,
+    callback?: (leased: Lease[]) => void
+  ): boolean {
+    if (this._correlation_interval) return false;
+
+    const limit = query.limit || 100;
+    let after = query.after || -1;
+    this._correlation_interval = setInterval(
+      () =>
+        this.correlate({ ...query, after, limit })
+          .then((result) => {
+            after = result.last_id;
+            if (callback && result.leased.length) callback(result.leased);
+          })
+          .catch(console.error),
+      frequency
+    );
+    return true;
+  }
+
+  stop_correlations() {
+    if (this._correlation_interval) {
+      clearInterval(this._correlation_interval);
+      this._correlation_interval = undefined;
+    }
   }
 }

@@ -52,28 +52,34 @@ describe("act", () => {
   });
 
   it("should handle increment and decrement should block", async () => {
-    const drained = await app.drain();
-    console.log(drained);
-    expect(drained.acked.length).toBe(1);
-    expect(onIncremented).toHaveBeenCalled();
-    expect(onDecremented).not.toHaveBeenCalled();
-
     await app.do("decrement", { stream: "s", actor }, {});
-    const drained2 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    console.log(drained2);
-    expect(drained2.acked.length).toBe(0);
+
+    const { leased } = await app.correlate();
+    expect(leased.length).toBe(1);
+
+    // should drain the first two events...  third event should throw and stop drain
+    let drained = await app.drain();
+    expect(drained.acked.length).toBe(1);
+    expect(drained.acked[0].at).toBe(1);
+    expect(onIncremented).toHaveBeenCalledTimes(2);
     expect(onDecremented).toHaveBeenCalledTimes(1);
 
-    const drained3 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    console.log(drained3);
-    expect(drained3.acked.length).toBe(0);
+    // first fully failed
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
-    const drained4 = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    console.log(drained4);
-    expect(drained4.acked.length).toBe(0);
-    expect(drained4.blocked.length).toBe(1);
+    // second fully failed (first retry)
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    expect(drained.acked.length).toBe(0);
+    expect(drained.blocked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(3);
+
+    // third fully failed (second retry) - should block
+    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    expect(drained.acked.length).toBe(0);
+    expect(drained.blocked.length).toBe(1);
+    expect(onDecremented).toHaveBeenCalledTimes(4);
   });
 
   it("should exit drain loop on error", async () => {

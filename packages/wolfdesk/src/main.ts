@@ -33,6 +33,7 @@ async function main() {
   app.on("committed", () => {
     void app.drain();
   });
+  app.start_correlations({ after: 0, limit: 10 }, 3000);
 
   const [t1] = await app.do(
     "OpenTicket",
