@@ -2,7 +2,6 @@ import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import * as es from "./event-sourcing.js";
 import { dispose, logger, store } from "./ports.js";
-import { ValidationError } from "./types/errors.js";
 import type {
   Committed,
   Fetch,
@@ -287,9 +286,7 @@ export class Act<
         at = event.id;
         handled++;
       } catch (error) {
-        if (error instanceof ValidationError)
-          logger.error({ stream, error }, error.message);
-        else logger.error(error);
+        logger.error(error);
 
         const block = lease.retry >= options.maxRetries && options.blockOnError;
         block &&
@@ -298,12 +295,7 @@ export class Act<
           lease,
           at,
           // only report error when nothing was handled
-          error:
-            handled === 0
-              ? error instanceof Error
-                ? error.message
-                : "Unknown Error"
-              : undefined,
+          error: handled === 0 ? (error as Error).message : undefined,
           block,
         };
       }
