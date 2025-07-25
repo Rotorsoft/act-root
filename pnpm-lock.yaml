@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)
@@ -184,14 +184,14 @@ importers:
   packages/client:
     dependencies:
       '@act/calculator':
-        specifier: link:../calculator
+        specifier: workspace:*
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^0.4.7
-        version: 0.4.7
+        specifier: workspace:*
+        version: link:../../libs/act-pg
       '@tanstack/react-query':
         specifier: ^5.83.0
         version: 5.83.0(react@19.1.0)
@@ -251,14 +251,14 @@ importers:
   packages/server:
     dependencies:
       '@act/calculator':
-        specifier: link:../calculator
+        specifier: workspace:*
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^0.4.7
-        version: 0.4.7
+        specifier: workspace:*
+        version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)
@@ -279,11 +279,11 @@ importers:
         specifier: ^0.15.10
         version: 0.15.10
       '@rotorsoft/act':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: workspace:*
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^0.4.7
-        version: 0.4.7
+        specifier: workspace:*
+        version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)
@@ -2241,14 +2241,6 @@ packages:
     resolution: {integrity: sha512-M/fKi4sasCdM8i0aWJjCSFm2qEnYRR8AMLG2kxp6wD13+tMGA4Z1tVAuHkNRjud5SW2EM3naLuK35w9twvf6aA==}
     cpu: [x64]
     os: [win32]
-
-  '@rotorsoft/act-pg@0.4.7':
-    resolution: {integrity: sha512-LWL/sQIEAi+FNwa25aitz3kIHD0N632s29OpukIabpkIaAS6U1IpnXTj+8V0/VoeKsW1bsSCjGKclBTvg3iLbg==}
-    engines: {node: '>=22.17.0'}
-
-  '@rotorsoft/act@0.5.7':
-    resolution: {integrity: sha512-WnTec40uL5fjgidfw2xmKxAyqLrlJYPb7AttbLhmfUHGcRYlkXMW7jlEkkW/LWFb5sr4JHJ3NLKm8RZsSCLV4g==}
-    engines: {node: '>=22.17.0'}
 
   '@rspack/binding-darwin-arm64@1.4.10':
     resolution: {integrity: sha512-PraYGuVSzvEwdoYC8T70qI/8j1QeUe2sysiWmjSdxUpxJsDfw35hK9TfxULeAJULlAUAiiXs03hdZk29DBc3ow==}
@@ -9958,20 +9950,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.45.1':
     optional: true
-
-  '@rotorsoft/act-pg@0.4.7':
-    dependencies:
-      '@rotorsoft/act': 0.5.7
-      pg: 8.16.3
-      zod: 4.0.10
-    transitivePeerDependencies:
-      - pg-native
-
-  '@rotorsoft/act@0.5.7':
-    dependencies:
-      pino: 9.7.0
-      pino-pretty: 13.0.0
-      zod: 4.0.10
 
   '@rspack/binding-darwin-arm64@1.4.10':
     optional: true

@@ -26,15 +26,16 @@ async function main() {
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
   start_jobs();
-  app.on("drained", async () => {
+  app.on("acked", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);
   });
   app.on("committed", () => {
     void app.drain();
   });
+  app.start_correlations({ after: 0, limit: 10 }, 3000);
 
-  const t1 = await app.do(
+  const [t1] = await app.do(
     "OpenTicket",
     { stream: randomUUID(), actor },
     {

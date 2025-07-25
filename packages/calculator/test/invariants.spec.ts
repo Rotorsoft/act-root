@@ -5,7 +5,6 @@ import {
   InvariantError,
   ValidationError,
 } from "@rotorsoft/act";
-import { afterAll, describe, expect, it } from "vitest";
 import { Calculator } from "../src/index.js";
 
 describe("calculator invariants", () => {

@@ -66,7 +66,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
   })
 
   .on("OpenTicket", schemas.actions.OpenTicket)
-  .emit((data, state, { stream, actor }) => {
+  .emit((data, { state }, { stream, actor }) => {
     if (state.productId) throw new errors.TicketCannotOpenTwiceError(stream);
     return [
       "TicketOpened",
@@ -95,7 +95,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
 
   .on("RequestTicketEscalation", schemas.actions.RequestTicketEscalation)
   .given([mustBeOpen, mustBeUser])
-  .emit((_, state, { stream, actor }) => {
+  .emit((_, { state }, { stream, actor }) => {
     // escalation can only be requested after window expired
     if (state.escalateAfter && state.escalateAfter > new Date())
       throw new errors.TicketEscalationError(
@@ -114,7 +114,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
 
   .on("EscalateTicket", schemas.actions.EscalateTicket)
   .given([mustBeOpen])
-  .emit((data, state, { stream, actor }) => {
+  .emit((data, { state }, { stream, actor }) => {
     // only if ticket has not been escalated before?
     if (state.escalationId)
       throw new errors.TicketEscalationError(
@@ -127,7 +127,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
 
   .on("ReassignTicket", schemas.actions.ReassignTicket)
   .given([mustBeOpen])
-  .emit((data, state, { stream, actor }) => {
+  .emit((data, { state }, { stream, actor }) => {
     // is escalated
     if (!state.escalationId)
       throw new errors.TicketEscalationError(
@@ -157,7 +157,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
 
   .on("MarkMessageDelivered", schemas.actions.MarkMessageDelivered)
   .given([mustBeOpen])
-  .emit((data, state) => {
+  .emit((data, { state }) => {
     if (!state.messages[data.messageId])
       throw new errors.MessageNotFoundError(data.messageId);
     return ["MessageDelivered", data];
@@ -165,8 +165,8 @@ export const Ticket = state("Ticket", schemas.Ticket)
 
   .on("AcknowledgeMessage", schemas.actions.AcknowledgeMessage)
   .given([mustBeOpen])
-  .emit((data, state, { stream, actor }) => {
-    const msg = state.messages[data.messageId];
+  .emit((data, snapshot, { stream, actor }) => {
+    const msg = snapshot.state.messages[data.messageId];
     if (!msg) throw new errors.MessageNotFoundError(data.messageId);
 
     // message can only be acknowledged by receiver
@@ -175,6 +175,7 @@ export const Ticket = state("Ticket", schemas.Ticket)
         "AcknowledgeMessage",
         data,
         { stream, actor },
+        snapshot,
         "Must be receiver to ack"
       );
     return ["MessageRead", data];

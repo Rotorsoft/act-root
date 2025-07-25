@@ -48,12 +48,12 @@ export const assignTicket = (
 export const closeTicket = (target: Target) =>
   app.do("CloseTicket", target, {});
 
-export const addMessage = (
+export const addMessage = async (
   target: Target,
   body: string,
   to = chance.guid()
 ) => {
-  const snap = app.do("AddMessage", target, {
+  const snap = await app.do("AddMessage", target, {
     body,
     to,
     attachments: {},

@@ -20,32 +20,35 @@ export type ReactionHandler<E extends Schemas, K extends keyof E> = (
 ) => Promise<Snapshot<E, Schema> | void>;
 
 /**
- * Resolves the stream for a reaction, either by function or static string.
+ * Resolves the stream for a reaction, either by mapping the event or statically.
  * @template E - Event schemas.
  * @template K - Event name.
  * @param event - The committed event.
- * @returns The stream name or undefined.
+ * @returns The target stream name and optionally the source stream (for fetch optimization).
  */
 export type ReactionResolver<E extends Schemas, K extends keyof E> =
-  | ((event: Committed<E, K>) => string | undefined)
-  | string;
+  | { target: string; source?: string } // static
+  | ((
+      event: Committed<E, K>
+    ) => { target: string; source?: string } | undefined); // dynamic
 
 /**
  * Options for reaction processing.
  * @property blockOnError - Whether to block on error.
  * @property maxRetries - Maximum number of retries.
- * @property retryDelayMs - Delay between retries in ms.
  */
 export type ReactionOptions = {
   readonly blockOnError: boolean;
   readonly maxRetries: number;
-  readonly retryDelayMs: number;
 };
 
 /**
- * Defines a reaction to an event, including handler, resolver, and options.
+ * Defines a reaction to an event.
  * @template E - Event schemas.
  * @template K - Event name.
+ * @property handler - The reaction handler.
+ * @property resolver - The reaction resolver.
+ * @property options - The reaction options.
  */
 export type Reaction<E extends Schemas, K extends keyof E = keyof E> = {
   readonly handler: ReactionHandler<E, K>;
@@ -54,38 +57,67 @@ export type Reaction<E extends Schemas, K extends keyof E = keyof E> = {
 };
 
 /**
- * Payload for a reaction, including the event and reaction definition.
+ * Payload for a reaction.
  * @template E - Event schemas.
+ * @property handler - The reaction handler.
+ * @property resolver - The reaction resolver.
+ * @property options - The reaction options.
+ * @property event - The committed event triggering the reaction.
+ * @property source - The source stream.
  */
 export type ReactionPayload<E extends Schemas> = Reaction<E> & {
   readonly event: Committed<E, keyof E>;
+  readonly source?: string;
+};
+
+/**
+ * Poll details for stream processing.
+ * @property stream - The target stream name.
+ * @property source - The source stream.
+ * @property at - The lease watermark.
+ */
+export type Poll = {
+  readonly stream: string;
+  readonly source?: string;
+  readonly at: number;
+};
+
+/**
+ * Options for fetching events from the store.
+ * @property streamLimit - Maximum number of streams to fetch.
+ * @property eventLimit - Maximum number of events to fetch per stream.
+ */
+export type FetchOptions = {
+  readonly streamLimit?: number;
+  readonly eventLimit?: number;
+  readonly leaseMillis?: number;
 };
 
 /**
  * Result of fetching events from the store for processing.
  * @template E - Event schemas.
- * @property streams - The list of stream names.
- * @property events - The list of committed events.
+ * @property stream - The stream name
+ * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property events - The list of next committed events to be processed by the stream.
  */
-export type Fetch<E extends Schemas> = {
-  streams: string[];
-  events: Committed<E, keyof E>[];
-};
+export type Fetch<E extends Schemas> = Array<{
+  readonly stream: string;
+  readonly source?: string;
+  readonly events: Committed<E, keyof E>[];
+}>;
 
 /**
  * Lease information for stream processing.
- * @property stream - The stream name.
+ * @property stream - The target stream name.
+ * @property source - The source stream.
  * @property by - The lease holder.
- * @property at - The lease timestamp.
+ * @property at - The lease watermark.
  * @property retry - Retry count.
- * @property block - Whether the stream is blocked.
- * @property error - Optional error info.
  */
 export type Lease = {
-  stream: string;
-  by: string;
-  at: number;
-  retry: number;
-  block: boolean;
-  error?: unknown;
+  readonly stream: string;
+  readonly source?: string;
+  readonly at: number;
+  readonly by: string;
+  readonly retry: number;
 };

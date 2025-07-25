@@ -17,18 +17,18 @@
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
+    "types": [
+      "node",
+      "vitest/globals"
+    ],
+    "baseUrl": ".",
     "paths": {
-      "@act/calculator": [
-        "./calculator/src/index.ts"
+      "@rotorsoft/*": [
+        "../libs/*/src/index.ts"
       ],
-      "@act/wolfdesk": [
-        "./wolfdesk/src/index.ts"
-      ]
+      "@act/*": [
+        "*/src/index.ts"
+      ],
     }
   },
-  "exclude": [
-    "node_modules",
-    "dist",
-    "**/*.spec.ts"
-  ]
 }

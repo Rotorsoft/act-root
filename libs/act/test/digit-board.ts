@@ -39,7 +39,7 @@ export const DigitBoard = state(
 /**
  * Calculator projection: tracks the result of each calculator
  */
-const CalculatorResult = state(
+export const CalculatorResult = state(
   "CalculatorResult",
   z.object({
     result: z.number(),
@@ -52,53 +52,51 @@ const CalculatorResult = state(
   .emit(({ result }) => ["ResultProjected", { result }])
   .build();
 
-async function main() {
+export const actor: Actor = { id: randomUUID(), name: "Calculator" };
+export const streams = ["A", "B"];
+
+// Build the app with Calculator and DigitBoard
+export const app = act()
+  .with(Calculator)
+  .with(DigitBoard)
+  .with(CalculatorResult)
+  // React to every digit pressed and update the projection board
+  .on("DigitPressed")
+  .do(async function CountDigits(event) {
+    await app.do(
+      "CountDigit",
+      { stream: "Board", actor },
+      { digit: event.data.digit },
+      event
+    );
+  })
+  .to({ source: `^(${streams.join("|")})$`, target: "Board" })
+  .on("OperatorPressed")
+  .do(async function ProjectResult(event) {
+    // Load the current calculator state
+    const stream = event.stream;
+    const calc = await app.load(Calculator, stream);
+    // Project the result of the calculator
+    await app.do(
+      "ProjectResult",
+      { stream: "Calculator" + stream, actor },
+      { result: calc.state.result },
+      event
+    );
+  })
+  .to((e) => ({
+    source: e.stream,
+    target: "Calculator" + e.stream,
+  }))
+  .build();
+
+export async function main() {
   // to test with postgres
   // store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
   // await store().drop();
   // await store().seed();
 
   console.log(config());
-
-  const actor: Actor = { id: randomUUID(), name: "Calculator" };
-  const streams = ["A", "B"];
-
-  // Build the app with Calculator and DigitBoard
-  const app = act()
-    .with(Calculator)
-    .with(DigitBoard)
-    .with(CalculatorResult)
-    // React to every digit pressed and update the projection board
-    .on("DigitPressed")
-    .do(async function CountDigits(event) {
-      await app.do(
-        "CountDigit",
-        { stream: "Board", actor },
-        { digit: event.data.digit },
-        event
-      );
-    })
-    .to({ source: `^(${streams.join("|")})$`, target: "Board" })
-    .on("OperatorPressed")
-    .do(async function ProjectResult(event) {
-      // Load the current calculator state
-      const calc = await app.load(Calculator, event.stream);
-      // Project the result of the calculator
-      await app.do(
-        "ProjectResult",
-        { stream: "Calculator" + event.stream, actor },
-        { result: calc.state.result },
-        event
-      );
-    })
-    .to((e) => ({
-      source: e.stream,
-      target: "Calculator" + e.stream,
-    }))
-    .build();
-
-  // start the correlation pump
-  app.start_correlations();
 
   // Helper: print the calculator state after the digit board
   const printStreamStates = async () => {
@@ -196,5 +194,3 @@ async function main() {
     }))
   );
 }
-
-void main();

@@ -26,39 +26,78 @@ import { sleep } from "../utils.js";
  * Represents an in-memory stream for event processing and leasing.
  */
 class InMemoryStream {
-  _at = -1;
-  _retry = -1;
-  _lease: Lease | undefined;
-  _blocked = false;
+  stream: string;
+  source: string | undefined;
+  at = -1;
+  retry = -1;
+  blocked = false;
+  error = "";
+  leased_at: number | undefined = undefined;
+  leased_by: string | undefined = undefined;
+  leased_until: Date | undefined = undefined;
 
-  constructor(public readonly stream: string) {}
+  constructor(stream: string, source: string | undefined) {
+    this.stream = stream;
+    this.source = source;
+  }
+
+  get is_avaliable() {
+    return (
+      !this.blocked && (!this.leased_until || this.leased_until <= new Date())
+    );
+  }
 
   /**
    * Attempt to lease this stream for processing.
-   * @param lease - Lease request.
+   * @param at - The end-of-lease watermark.
+   * @param by - The lease holder.
+   * @param millis - Lease duration in milliseconds.
    * @returns The granted lease or undefined if blocked.
    */
-  lease(lease: Lease): Lease | undefined {
-    if (!this._blocked && lease.at > this._at) {
-      this._lease = { ...lease, retry: this._retry + 1 };
-      return this._lease;
+  lease(at: number, by: string, millis: number): Lease | undefined {
+    if (this.is_avaliable && at > this.at) {
+      this.leased_at = at;
+      this.leased_by = by;
+      this.leased_until = new Date(Date.now() + millis);
+      millis > 0 && (this.retry = this.retry + 1);
+      return {
+        stream: this.stream,
+        source: this.source,
+        at,
+        by,
+        retry: this.retry,
+      };
     }
   }
 
   /**
    * Acknowledge completion of processing for this stream.
-   * @param lease - Lease to acknowledge.
+   * @param at - Last processed watermark.
+   * @param by - Lease holder that processed the watermark.
    */
-  ack(lease: Lease) {
-    if (this._lease && lease.at >= this._at) {
-      this._retry = lease.retry;
-      this._blocked = lease.block;
-      if (!this._blocked && !lease.error) {
-        this._at = lease.at;
-        this._retry = 0;
-      }
-      this._lease = undefined;
+  ack(at: number, by: string) {
+    if (this.leased_by === by && at >= this.at) {
+      this.leased_at = undefined;
+      this.leased_by = undefined;
+      this.leased_until = undefined;
+      this.at = at;
+      this.retry = -1;
+      return true;
     }
+    return false;
+  }
+
+  /**
+   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
+   * @param error Blocked error message.
+   */
+  block(by: string, error: string) {
+    if (this.leased_by === by) {
+      this.blocked = true;
+      this.error = error;
+      return true;
+    }
+    return false;
   }
 }
 
@@ -105,6 +144,7 @@ export class InMemoryStore implements Store {
   async drop() {
     await sleep();
     this._events.length = 0;
+    this._streams = new Map();
   }
 
   /**
@@ -127,15 +167,17 @@ export class InMemoryStore implements Store {
       created_before,
       created_after,
       correlation,
+      with_snaps = false,
     } = query || {};
     let i = after + 1,
       count = 0;
     while (i < this._events.length) {
       const e = this._events[i++];
-      if (stream && e.stream !== stream) continue;
+      if (stream && !RegExp(`^${stream}$`).test(e.stream)) continue;
       if (names && !names.includes(e.name)) continue;
       if (correlation && e.meta?.correlation !== correlation) continue;
       if (created_after && e.created <= created_after) continue;
+      if (e.name === SNAP_EVENT && !with_snaps) continue;
       if (before && e.id >= before) break;
       if (created_before && e.created >= created_before) break;
       callback(e as Committed<E, keyof E>);
@@ -165,12 +207,14 @@ export class InMemoryStore implements Store {
     if (
       typeof expectedVersion === "number" &&
       instance.length - 1 !== expectedVersion
-    )
+    ) {
       throw new ConcurrencyError(
+        stream,
         instance.length - 1,
         msgs as Message<Schemas, keyof Schemas>[],
         expectedVersion
       );
+    }
 
     let version = instance.length;
     return msgs.map(({ name, data }) => {
@@ -190,57 +234,60 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Fetches new events from stream watermarks for processing.
-   * @param limit - Maximum number of streams to fetch.
-   * @returns Fetched streams and events.
+   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
+   * @param limit - Maximum number of streams to poll.
+   * @returns The polled streams.
    */
-  async fetch<E extends Schemas>(limit: number) {
-    const streams = [...this._streams.values()]
-      .filter((s) => !s._blocked)
-      .sort((a, b) => a._at - b._at)
-      .slice(0, limit);
-
-    const after = streams.length
-      ? streams.reduce(
-          (min, s) => Math.min(min, s._at),
-          Number.MAX_SAFE_INTEGER
-        )
-      : -1;
-
-    const events: Committed<E, keyof E>[] = [];
-    await this.query<E>((e) => e.name !== SNAP_EVENT && events.push(e), {
-      after,
-      limit,
-    });
-    return { streams: streams.map(({ stream }) => stream), events };
+  async poll(limit: number) {
+    await sleep();
+    return [...this._streams.values()]
+      .filter((s) => s.is_avaliable)
+      .sort((a, b) => a.at - b.at)
+      .slice(0, limit)
+      .map(({ stream, source, at }) => ({ stream, source, at }));
   }
 
   /**
    * Lease streams for processing (e.g., for distributed consumers).
-   * @param leases - Lease requests.
+   * @param leases - Lease requests for streams, including end-of-lease watermark, lease holder, and source stream.
+   * @param leaseMilis - Lease duration in milliseconds.
    * @returns Granted leases.
    */
-  async lease(leases: Lease[]) {
+  async lease(leases: Lease[], millis: number) {
     await sleep();
     return leases
-      .map((lease) => {
-        const stream =
-          this._streams.get(lease.stream) ||
+      .map(({ stream, at, by, source }) => {
+        const found =
+          this._streams.get(stream) ||
           // store new correlations
           this._streams
-            .set(lease.stream, new InMemoryStream(lease.stream))
-            .get(lease.stream)!;
-        return stream.lease(lease);
+            .set(stream, new InMemoryStream(stream, source))
+            .get(stream)!;
+        return found.lease(at, by, millis);
       })
-      .filter((l): l is Lease => !!l);
+      .filter((l) => !!l);
   }
 
   /**
    * Acknowledge completion of processing for leased streams.
-   * @param leases - Leases to acknowledge.
+   * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */
   async ack(leases: Lease[]) {
     await sleep();
-    leases.forEach((lease) => this._streams.get(lease.stream)?.ack(lease));
+    return leases.filter((lease) =>
+      this._streams.get(lease.stream)?.ack(lease.at, lease.by)
+    );
+  }
+
+  /**
+   * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
+   * @param leases - Leases to block, including lease holder and last error message.
+   * @returns Blocked leases.
+   */
+  async block(leases: Array<Lease & { error: string }>) {
+    await sleep();
+    return leases.filter((lease) =>
+      this._streams.get(lease.stream)?.block(lease.by, lease.error)
+    );
   }
 }

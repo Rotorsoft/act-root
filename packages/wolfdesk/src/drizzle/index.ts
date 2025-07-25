@@ -30,6 +30,7 @@ export async function init_tickets_db() {
       escalate_after INTEGER,
       close_after INTEGER
     );
+    TRUNCATE tickets;
   `);
 }
 

@@ -1,4 +1,4 @@
-import type { Message, Schema, Schemas, Target } from "./action.js";
+import type { Message, Schema, Schemas, Snapshot, Target } from "./action.js";
 
 /**
  * @packageDocumentation
@@ -44,17 +44,21 @@ export class ValidationError extends Error {
  * @example
  *   throw new InvariantError('balanceNonNegative', state, target, 'Balance must be >= 0');
  */
-export class InvariantError extends Error {
-  public readonly details;
+export class InvariantError<
+  S extends Schema,
+  E extends Schemas,
+  A extends Schemas,
+  K extends keyof A,
+> extends Error {
   constructor(
-    name: string,
-    payload: Schema,
-    target: Target,
-    description: string
+    readonly action: K,
+    readonly payload: Readonly<A[K]>,
+    readonly target: Target,
+    readonly snapshot: Snapshot<S, E>,
+    readonly description: string
   ) {
-    super(`${name} failed invariant: ${description}`);
+    super(`${action as string} failed invariant: ${description}`);
     this.name = Errors.InvariantError;
-    this.details = { name, payload, target, description };
   }
 }
 
@@ -68,14 +72,17 @@ export class InvariantError extends Error {
  */
 export class ConcurrencyError extends Error {
   constructor(
+    public readonly stream: string,
     public readonly lastVersion: number,
     public readonly events: Message<Schemas, keyof Schemas>[],
     public readonly expectedVersion: number
   ) {
     super(
-      `Concurrency error committing event "${
-        events.at(0)?.name
-      }". Expected version ${expectedVersion} but found version ${lastVersion}.`
+      `Concurrency error committing "${events
+        .map((e) => `${stream}.${e.name}.${JSON.stringify(e.data)}`)
+        .join(
+          ", "
+        )}". Expected version ${expectedVersion} but found version ${lastVersion}.`
     );
     this.name = Errors.ConcurrencyError;
   }
