@@ -18,8 +18,8 @@
     "library"
   ],
   "engines": {
-    "node": ">=22.17.1",
-    "pnpm": ">=10.13.1"
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
   },
   "packageManager": "pnpm@10.13.1",
   "type": "module",
