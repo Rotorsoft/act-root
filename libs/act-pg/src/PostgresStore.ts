@@ -135,7 +135,7 @@ export class PostgresStore implements Store {
           blocked boolean NOT NULL DEFAULT false,
           error text,
           leased_at int,
-          leased_by uuid,
+          leased_by text,
           leased_until timestamptz
         ) TABLESPACE pg_default;`
       );
@@ -398,7 +398,7 @@ export class PostgresStore implements Store {
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, at int, by uuid)
+        AS x(stream text, at int, by text)
       ), free AS (
         SELECT s.stream FROM ${this._fqs} s
         JOIN input i ON s.stream = i.stream
@@ -413,7 +413,7 @@ export class PostgresStore implements Store {
         retry = CASE WHEN $2::integer > 0 THEN s.retry + 1 ELSE s.retry END
       FROM input i, free f
       WHERE s.stream = f.stream AND s.stream = i.stream
-      RETURNING s.stream, s.source, s.leased_at, s.leased_until, s.retry
+      RETURNING s.stream, s.source, s.leased_at, s.leased_by, s.leased_until, s.retry
       `,
         [JSON.stringify(leases), millis]
       );
@@ -457,7 +457,7 @@ export class PostgresStore implements Store {
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by uuid, at int)
+        AS x(stream text, by text, at int)
       )
       UPDATE ${this._fqs} AS s
       SET
@@ -512,7 +512,7 @@ export class PostgresStore implements Store {
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by uuid, error text)
+        AS x(stream text, by text, error text)
       )
       UPDATE ${this._fqs} AS s
       SET blocked = true, error = i.error
