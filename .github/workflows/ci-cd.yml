@@ -50,6 +50,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
   cd:
+    if: github.ref == 'refs/heads/master'
     needs: ci
     runs-on: ubuntu-latest
     strategy:
