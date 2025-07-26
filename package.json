@@ -79,7 +79,7 @@
     "pre-push": "pnpm test"
   },
   "lint-staged": {
-    "*.{ts,tsx,js,jsx}": [
+    "*.{ts,tsx}": [
       "eslint --fix"
     ]
   }
