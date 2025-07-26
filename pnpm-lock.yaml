@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: workspace:*
-        version: link:../../libs/act
+        specifier: '*'
+        version: 0.6.0
       '@trpc/server':
         specifier: 11.4.3
         version: 11.4.3(typescript@5.8.3)
@@ -2241,6 +2241,10 @@ packages:
     resolution: {integrity: sha512-M/fKi4sasCdM8i0aWJjCSFm2qEnYRR8AMLG2kxp6wD13+tMGA4Z1tVAuHkNRjud5SW2EM3naLuK35w9twvf6aA==}
     cpu: [x64]
     os: [win32]
+
+  '@rotorsoft/act@0.6.0':
+    resolution: {integrity: sha512-kD7oWGjdIA8zrvbPsQLEU+QUayUQFTXTcx0byFIdHaTb0UhAhuSjFQqRYAszhayvFXuIIrc9GEL7qVOsaAfqvQ==}
+    engines: {node: '>=22.17.1'}
 
   '@rspack/binding-darwin-arm64@1.4.10':
     resolution: {integrity: sha512-PraYGuVSzvEwdoYC8T70qI/8j1QeUe2sysiWmjSdxUpxJsDfw35hK9TfxULeAJULlAUAiiXs03hdZk29DBc3ow==}
@@ -9950,6 +9954,12 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.45.1':
     optional: true
+
+  '@rotorsoft/act@0.6.0':
+    dependencies:
+      pino: 9.7.0
+      pino-pretty: 13.0.0
+      zod: 4.0.10
 
   '@rspack/binding-darwin-arm64@1.4.10':
     optional: true
