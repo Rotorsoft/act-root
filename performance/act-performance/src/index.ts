@@ -1,4 +1,4 @@
-import { act, store, type Committed } from "@rotorsoft/act";
+import { act, store, type Committed, type Schemas } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
@@ -11,8 +11,8 @@ import {
   projectTodoCreated,
   projectTodoDeleted,
   projectTodoUpdated,
-} from "./projection";
-import { Todo } from "./todo.model";
+} from "./projection.js";
+import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
@@ -20,8 +20,11 @@ const PORT = Number(process.env.PORT) || 3000;
 // one projection lease per stream?
 const projection_resolver =
   process.env.SERIAL_PROJECTION === "true"
-    ? () => "serial_projection"
-    : (committed: Committed<any, any>) => committed.stream;
+    ? () => ({ target: "serial_projection" })
+    : (committed: Committed<Schemas, keyof Schemas>) => ({
+        target: committed.stream,
+        source: committed.stream,
+      });
 
 async function main() {
   store(
@@ -56,9 +59,13 @@ async function main() {
   let lastDrain = Date.now();
   async function debouncedDrain() {
     const now = Date.now();
-    if (now - lastDrain > 100) {
+    if (now - lastDrain > 1000) {
       lastDrain = now;
-      await actApp.drain();
+      const drained = await actApp.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+      });
+      console.log(drained);
     }
   }
   setInterval(debouncedDrain, 3000);
@@ -75,7 +82,7 @@ async function main() {
         ? req.headers["authorization"].replace("Bearer ", "")
         : "system";
       const stream = randomUUID();
-      await actApp.do(
+      const [snap] = await actApp.do(
         "create",
         {
           stream,
@@ -83,6 +90,8 @@ async function main() {
         },
         { text: req.body.text }
       );
+      // correlate right after creation
+      await actApp.correlate({ stream, after: snap.event!.id - 1 });
       res.status(201).json({ stream });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -160,9 +169,38 @@ async function main() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Sample app listening on port ${PORT}`);
   });
+
+  return actApp;
 }
 
-main().catch((err) => {
-  console.error("Failed to start app:", err);
-  process.exit(1);
-});
+main()
+  .then((actApp) => {
+    console.log("App started");
+
+    // simulate load when in local dev mode
+    if (process.env.SIMULATE_LOAD)
+      setInterval(async () => {
+        const actorId = randomUUID();
+        const stream = randomUUID();
+        const [snap] = await actApp.do(
+          "create",
+          { stream, actor: { id: actorId, name: actorId } },
+          {
+            text: randomUUID(),
+          }
+        );
+        // correlate right after creation
+        await actApp.correlate({ stream, after: snap.event!.id - 1 });
+        await actApp.do(
+          "update",
+          { stream, actor: { id: actorId, name: actorId } },
+          {
+            text: randomUUID(),
+          }
+        );
+      }, 1000);
+  })
+  .catch((err) => {
+    console.error("Failed to start app:", err);
+    process.exit(1);
+  });

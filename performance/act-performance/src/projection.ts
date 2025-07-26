@@ -2,28 +2,34 @@
  * Projection table for fast reads.
  * Updated by event handlers.
  */
-import { Committed } from "@rotorsoft/act";
+import type { Committed, Schemas } from "@rotorsoft/act";
 import { Pool } from "pg";
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
 
-export async function projectTodoCreated(event: Committed<any, any>) {
+export async function projectTodoCreated(
+  event: Committed<Schemas, keyof Schemas>
+) {
   await pool.query(
     "INSERT INTO performance.todos_projection (id, text, created_at, deleted) VALUES ($1, $2, $3, FALSE) ON CONFLICT (id) DO NOTHING",
     [event.stream, event.data.text, event.created.toISOString()]
   );
 }
 
-export async function projectTodoUpdated(event: Committed<any, any>) {
+export async function projectTodoUpdated(
+  event: Committed<Schemas, keyof Schemas>
+) {
   await pool.query(
     "UPDATE performance.todos_projection SET text=$2, updated_at=$3 WHERE id=$1",
     [event.stream, event.data.text, event.created.toISOString()]
   );
 }
 
-export async function projectTodoDeleted(event: Committed<any, any>) {
+export async function projectTodoDeleted(
+  event: Committed<Schemas, keyof Schemas>
+) {
   await pool.query(
     "UPDATE performance.todos_projection SET deleted=TRUE, updated_at=$2 WHERE id=$1",
     [event.stream, event.created.toISOString()]

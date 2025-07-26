@@ -53,12 +53,14 @@ export const Todo = state("Todo", TodoState)
   .emit((action) => ["TodoCreated", { text: action.text }])
   .on("update", UpdateTodo)
   .emit((action, state) => {
-    if (!state || state.deleted) throw new Error("Todo not found");
+    if (!state || ("deleted" in state && state.deleted))
+      throw new Error("Todo not found");
     return ["TodoUpdated", { text: action.text }];
   })
   .on("delete", DeleteTodo)
   .emit((_action, state) => {
-    if (!state || state.deleted) throw new Error("Todo not found");
+    if (!state || ("deleted" in state && state.deleted))
+      throw new Error("Todo not found");
     return ["TodoDeleted", {}];
   })
   .build();

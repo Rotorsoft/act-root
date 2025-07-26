@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /
 COPY package.json tsconfig.json ./
 RUN apk add --no-cache curl
