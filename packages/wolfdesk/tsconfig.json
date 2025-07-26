@@ -1,9 +1,23 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "outDir": "dist"
+    "outDir": "dist",
+    "rootDir": "."
   },
+  "references": [
+    {
+      "path": "../../libs/act"
+    },
+    {
+      "path": "../../libs/act-pg"
+    }
+  ],
   "include": [
-    "src/**/*"
+    "src",
+    "test"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules"
   ]
 }

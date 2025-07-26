@@ -16,7 +16,6 @@ vi.mock("pg", () => {
 });
 
 import * as pg from "pg";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PostgresStore } from "../src/PostgresStore.js";
 
 const makeClient = (queryMock: any) => ({
@@ -36,12 +35,33 @@ describe("PostgresStore", () => {
     vi.restoreAllMocks();
   });
 
+  describe("seed", () => {
+    it("logs and throws on error", async () => {
+      const { logger } = await import("@rotorsoft/act");
+      const errorSpy = vi.spyOn(logger, "error");
+      // Simulate a client whose query throws after BEGIN
+      const query = vi
+        .fn()
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockRejectedValueOnce(new Error("seed fail")); // CREATE SCHEMA fails
+
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
+        query,
+        release: vi.fn(),
+      });
+      await expect(store.seed()).rejects.toThrow("seed fail");
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Failed to seed store:"),
+        expect.any(Error)
+      );
+    });
+  });
+
   describe("commit", () => {
     it("returns [] for empty events", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
-        rows: [],
-      } as any);
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
       await expect(
         store.commit("stream", [], { correlation: "c", causation: {} })
       ).resolves.toEqual([]);
@@ -49,8 +69,8 @@ describe("PostgresStore", () => {
 
     it("throws on DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(vi.fn().mockRejectedValue(new Error("db error"))) as any
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("db error")))
       );
       await expect(
         store.commit("stream", [{ name: "E", data: {} }], {
@@ -69,8 +89,8 @@ describe("PostgresStore", () => {
         .mockResolvedValue(Promise.resolve());
 
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(queryMock) as any
+        // @ts-expect-error mock
+        makeClient(queryMock)
       );
       await expect(
         store.commit("stream", [{ name: "E", data: {} }], {
@@ -78,105 +98,6 @@ describe("PostgresStore", () => {
           causation: {},
         })
       ).rejects.toThrow("notify fail");
-    });
-  });
-
-  describe("fetch", () => {
-    it("returns empty result on no rows", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
-        rows: [],
-      } as any);
-      await expect(store.fetch(10)).resolves.toEqual({
-        streams: [],
-        events: [],
-      });
-    });
-
-    it("throws on DB error", async () => {
-      vi.spyOn(pg.Pool.prototype, "query").mockRejectedValue(
-        new Error("fetch error") as any
-      );
-      await expect(store.fetch(10)).rejects.toThrow("fetch error");
-    });
-  });
-
-  describe("lease", () => {
-    it("throws on DB error", async () => {
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(vi.fn().mockRejectedValue(new Error("lease error"))) as any
-      );
-      await expect(
-        store.lease([{ stream: "s", by: "a", at: 1, retry: 0, block: false }])
-      ).rejects.toThrow("lease error");
-    });
-
-    it("throws on transaction error", async () => {
-      const queryMock = vi
-        .fn()
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error("lease update fail"))
-        .mockResolvedValue(Promise.resolve());
-
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(queryMock) as any
-      );
-      await expect(
-        store.lease([{ stream: "s", by: "a", at: 1, retry: 0, block: false }])
-      ).rejects.toThrow("lease update fail");
-    });
-  });
-
-  describe("ack", () => {
-    it("swallows DB error", async () => {
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(vi.fn().mockRejectedValue(new Error("ack error"))) as any
-      );
-      await expect(
-        store.ack([{ stream: "s", by: "a", at: 1, retry: 0, block: false }])
-      ).resolves.toBeUndefined();
-    });
-
-    it("swallows transaction error", async () => {
-      const queryMock = vi
-        .fn()
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new Error("ack update fail"))
-        .mockResolvedValue(Promise.resolve());
-
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-        makeClient(queryMock) as any
-      );
-      await expect(
-        store.ack([{ stream: "s", by: "a", at: 1, retry: 0, block: false }])
-      ).resolves.toBeUndefined();
-    });
-  });
-
-  describe("seed", () => {
-    it("logs and throws on error", async () => {
-      const { logger } = await import("@rotorsoft/act");
-      const errorSpy = vi.spyOn(logger, "error");
-      // Simulate a client whose query throws after BEGIN
-      const query = vi
-        .fn()
-        .mockResolvedValueOnce(undefined) // BEGIN
-        .mockRejectedValueOnce(new Error("seed fail")); // CREATE SCHEMA fails
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue({
-        query,
-        release: vi.fn(),
-      } as any);
-      await expect(store.seed()).rejects.toThrow("seed fail");
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to seed store:"),
-        expect.any(Error)
-      );
     });
   });
 
@@ -188,8 +109,10 @@ describe("PostgresStore", () => {
       });
       const querySpy = vi
         .spyOn(pg.Pool.prototype, "query")
-        .mockResolvedValue({ rows: [], rowCount: 0 } as any); // eslint-disable-line @typescript-eslint/no-unsafe-argument
+        // @ts-expect-error mock
+        .mockResolvedValue({ rows: [], rowCount: 0 });
       const cb = vi.fn();
+
       await store.query(cb);
       expect(querySpy).toHaveBeenCalledWith(
         expect.stringContaining("SELECT *"),
@@ -199,38 +122,68 @@ describe("PostgresStore", () => {
     });
   });
 
-  describe("fetch", () => {
+  describe("poll", () => {
+    it("returns empty result on no rows", async () => {
+      // @ts-expect-error mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
+      await expect(store.poll(10)).resolves.toEqual([]);
+    });
+
+    it("throws on DB error", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockRejectedValue(
+        new Error("poll error") as any
+      );
+      await expect(store.poll(10)).rejects.toThrow("poll error");
+    });
+
     it("covers no rows branch", async () => {
       const store = new PostgresStore({
         port: 5431,
         table: "store_error_test",
       });
       vi.spyOn(pg.Pool.prototype, "query")
-        .mockResolvedValueOnce({ rows: [] } as any) // eslint-disable-line @typescript-eslint/no-unsafe-argument
-        .mockResolvedValueOnce({ rows: [], rowCount: 0 } as any); // eslint-disable-line @typescript-eslint/no-unsafe-argument
-      const result = await store.fetch(10);
-      expect(result).toEqual({ streams: [], events: [] });
+        // @ts-expect-error mock
+        .mockResolvedValueOnce({ rows: [] })
+        // @ts-expect-error mock
+        .mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      const result = await store.poll(10);
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe("lease", () => {
+    it("swallows DB error", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("lease error")))
+      );
+      await expect(
+        store.lease([{ stream: "s", by: "a", at: 1, retry: 0 }], 0)
+      ).resolves.toEqual([]);
     });
   });
 
   describe("ack", () => {
-    it("covers catch branch", async () => {
-      const store = new PostgresStore({
-        port: 5431,
-        table: "store_error_test",
-      });
-      const client = {
-        query: vi
-          .fn()
-          .mockRejectedValueOnce(new Error("ack fail"))
-          .mockResolvedValue(undefined),
-        release: vi.fn(),
-      };
-      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(client as any); // eslint-disable-line @typescript-eslint/no-unsafe-argument
+    it("swallows DB error", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("ack error")))
+      );
       await expect(
-        store.ack([{ stream: "s", by: "a", at: 1, retry: 0, block: false }])
-      ).resolves.toBeUndefined();
-      expect(client.query).toHaveBeenCalled();
+        store.ack([{ stream: "s", by: "a", at: 1, retry: 0 }])
+      ).resolves.toEqual([]);
+    });
+  });
+
+  describe("block", () => {
+    it("swallows DB error", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("block error")))
+      );
+      await expect(
+        store.block([{ stream: "s", by: "a", at: 1, retry: 0, error: "" }])
+      ).resolves.toEqual([]);
     });
   });
 });

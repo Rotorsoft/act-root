@@ -11,6 +11,12 @@
   ],
   "references": [
     {
+      "path": "../../libs/act"
+    },
+    {
+      "path": "../../libs/act-pg"
+    },
+    {
       "path": "../calculator"
     }
   ]

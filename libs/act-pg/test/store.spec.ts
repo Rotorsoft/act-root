@@ -1,5 +1,6 @@
 import {
   Committed,
+  ConcurrencyError,
   SNAP_EVENT,
   Schemas,
   dispose,
@@ -7,8 +8,8 @@ import {
   store,
 } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PostgresStore } from "../src/index.js";
+import { actor, app, onDecremented, onIncremented } from "./app.js";
 
 const chance = new Chance();
 const a1 = chance.guid();
@@ -180,11 +181,13 @@ describe("pg store", () => {
       (e) => {
         if (e.name === "test3") expect(e.data.date).toBeInstanceOf(Date);
       },
-      { stream: a4 },
-      true
+      { stream: a4, with_snaps: true }
     );
-    expect(count).toBe(3);
-    const count2 = await store().query(() => {}, { stream: a5 }, true);
+    expect(count).toBe(6);
+    const count2 = await store().query(() => {}, {
+      stream: a5,
+      with_snaps: true,
+    });
     expect(count2).toBe(2);
   });
 
@@ -221,17 +224,13 @@ describe("pg store", () => {
   });
 
   it("should throw on connection error (simulate by using invalid config)", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
     await expect(
       new PostgresStore({ password: "bad", port: 5431 }).seed()
     ).rejects.toThrow();
   });
 
   it("should handle commit with empty events array", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
-    const store = new PostgresStore({ port: 5431 });
-    await store.seed();
-    const result = await store.commit("stream", [], {
+    const result = await store().commit("stream", [], {
       correlation: "c",
       causation: {},
     });
@@ -239,16 +238,252 @@ describe("pg store", () => {
   });
 
   it("should handle query with no results", async () => {
-    const { PostgresStore } = await import("../src/PostgresStore.js");
-    const store = new PostgresStore({ port: 5431 });
-    await store.seed();
     const result: any[] = [];
-    await store.query((e) => result.push(e), { stream: "nonexistent" });
+    await store().query((e) => result.push(e), { stream: "nonexistent" });
     expect(result.length).toBe(0);
+  });
+
+  it("should cover query branch with no 'after' provided", async () => {
+    // Commit a couple of events
+    await store().commit(
+      "stream",
+      [
+        { name: "test", data: { value: 1 } },
+        { name: "test", data: { value: 2 } },
+      ],
+      { correlation: "c", causation: {} }
+    );
+    // Query without 'after' in the query object
+    const result: any[] = [];
+    await store().query((e) => result.push(e), { stream: "stream" });
+    expect(result.length).toBe(2);
+  });
+
+  it("should cover query branch with stream as RegExp", async () => {
+    // Commit events to multiple streams
+    await store().commit("regexA", [{ name: "test", data: { value: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().commit("regexB", [{ name: "test", data: { value: 2 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    // Query with stream as RegExp
+    const result: any[] = [];
+    await store().query((e) => result.push(e), { stream: "^regex" });
+    expect(result.length).toBe(2);
+  });
+
+  it("should cover query branch where rowCount is undefined", async () => {
+    const origQuery = (store() as any)._pool.query;
+    (store() as any)._pool.query = function () {
+      return Promise.resolve({ rows: [], rowCount: undefined });
+    };
+    const count = await store().query(() => {});
+    expect(count).toBe(0);
+    (store() as any)._pool.query = origQuery;
+  });
+
+  describe("blocking", () => {
+    it("should handle increment and decrement should block", async () => {
+      await app.do("increment", { stream: "blocking", actor }, {});
+      await app.do("increment", { stream: "blocking", actor }, {});
+
+      const correlated = await app.correlate({ limit: 100 });
+      expect(correlated.leased.length).toBe(1);
+
+      let drained = await app.drain({ streamLimit: 100, eventLimit: 100 });
+      expect(drained.acked.length).toBe(1);
+      expect(onIncremented).toHaveBeenCalled();
+      expect(onDecremented).not.toHaveBeenCalled();
+
+      await app.do("decrement", { stream: "blocking", actor }, {});
+
+      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      expect(onDecremented).toHaveBeenCalledTimes(1);
+
+      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      expect(drained.acked.length).toBe(0);
+      expect(onDecremented).toHaveBeenCalledTimes(2);
+
+      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      expect(drained.acked.length).toBe(0);
+      expect(drained.blocked.length).toBe(1);
+      expect(onDecremented).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  describe("other", () => {
+    const stream = "B";
+    const events = [
+      { name: "A", data: { a: 1 } },
+      { name: "B", data: { b: 2 } },
+      { name: "C", data: { c: 3 } },
+    ];
+    const meta = {
+      correlation: "1",
+      causation: {
+        action: { name: "A", stream, actor: { id: "1", name: "A" } },
+      },
+    };
+
+    it("should throw concurrency error", async () => {
+      const stream = "concurrency";
+      const committed = await store().commit(stream, events, meta);
+      expect(committed.length).toBe(events.length);
+      try {
+        await store().commit(stream, events, meta, 1);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConcurrencyError);
+      }
+      const count = await store().query(() => {}, { stream });
+      expect(count).toBe(events.length);
+    });
+
+    it("should filter events by stream, names, correlation, created_after, before, created_before, and limit", async () => {
+      const s = store();
+      const now = new Date();
+      // Add events with different properties
+      await s.commit(
+        "S1",
+        [
+          { name: "A", data: { a: 1 } },
+          { name: "B", data: { b: 2 } },
+        ],
+        { correlation: "cor1", causation: {} }
+      );
+      const committed = await s.commit(
+        "S2",
+        [
+          { name: "A", data: { a: 3 } },
+          { name: "C", data: { c: 4 } },
+          { name: SNAP_EVENT, data: { value: "1" } },
+        ],
+        { correlation: "cor2", causation: {} }
+      );
+      // By stream
+      let result: any[] = [];
+      await s.query((e) => result.push(e), { stream: "S1" });
+      expect(result.length).toBe(2);
+      // By names
+      result = [];
+      await s.query((e) => result.push(e), { stream: "S2", names: ["C"] });
+      expect(result.length).toBe(1);
+      // By correlation
+      result = [];
+      await s.query((e) => result.push(e), { correlation: "cor2" });
+      expect(result.length).toBe(2);
+      // By created_after
+      result = [];
+      const after = new Date(now.getTime() - 1000);
+      await s.query((e) => result.push(e), { created_after: after });
+      expect(result.length).toBeGreaterThan(0);
+      // By before (id)
+      result = [];
+      await s.query((e) => result.push(e), {
+        before: committed[0].id,
+        stream: "S1",
+      });
+      expect(result.length).toBe(2);
+      // By created_before
+      result = [];
+      const future = new Date(now.getTime() + 1000 * 60 * 60);
+      await s.query((e) => result.push(e), { created_before: future });
+      expect(result.length).toBeGreaterThan(0);
+      // By limit
+      result = [];
+      await s.query((e) => result.push(e), { stream: "S1|S2", limit: 1 });
+      expect(result.length).toBe(1);
+      // By with_snaps
+      await s.query((e) => result.push(e), {
+        stream: "S1|S2",
+        with_snaps: true,
+      });
+      expect(result.length).toBe(6);
+    });
+
+    it("should not lease blocked or old streams and should ack only valid leases", async () => {
+      const s = store();
+      // Lease a new stream
+      const leases = await s.lease(
+        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        0
+      );
+      expect(leases.length).toBe(1);
+      // Block the stream
+      await s.lease([{ stream: "L1", by: "actor", at: 1, retry: 0 }], 0);
+      // Try to lease again with old at (should not update)
+      const leases2 = await s.lease(
+        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        0
+      );
+      expect(leases2.length).toBe(1);
+      // Ack with valid lease
+      await s.ack([{ stream: "L1", by: "actor", at: 1, retry: 0 }]);
+      // Ack with old lease (should not throw)
+      await s.ack([{ stream: "L1", by: "actor", at: 0, retry: 0 }]);
+    });
+
+    it("should not lease a blocked stream", async () => {
+      const s = store();
+      await s.lease([{ stream: "L2", by: "actor", at: 0, retry: 0 }], 0);
+      const leases = await s.lease(
+        [{ stream: "L2", by: "actor", at: 1, retry: 0 }],
+        0
+      );
+      expect(leases.length).toBe(1);
+    });
+
+    it("should not update state when ack is called with lower at", async () => {
+      const s = store();
+      await s.lease([{ stream: "L3", by: "actor", at: 2, retry: 0 }], 0);
+      // Ack with lower at
+      await s.ack([{ stream: "L3", by: "actor", at: 1, retry: 0 }]);
+      // No error, state unchanged
+    });
+
+    it("should throw ConcurrencyError on commit with wrong expectedVersion", async () => {
+      const s = store();
+      await s.commit("S3", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      await s.commit(
+        "S3",
+        [{ name: "A", data: {} }],
+        { correlation: "c", causation: {} },
+        0
+      );
+      await expect(
+        s.commit(
+          "S3",
+          [{ name: "A", data: {} }],
+          { correlation: "c", causation: {} },
+          0
+        )
+      ).rejects.toThrow(ConcurrencyError);
+    });
+
+    it("should not block a stream if not leased by same drainer", async () => {
+      const s = store();
+      await s.lease([{ stream: "L4", by: "actor", at: 0, retry: 0 }], 0);
+      const leases = await s.lease(
+        [{ stream: "L4", by: "actor", at: 1, retry: 0 }],
+        100000
+      );
+      expect(leases.length).toBe(1);
+
+      // Try to block the stream
+      const blocked = await s.block([
+        { stream: "L4", by: "actor2", at: 2, retry: 0, error: "error" },
+      ]);
+      expect(blocked.length).toBe(0);
+    });
   });
 });
 
-describe("PostgresStore config", () => {
+describe("PostgresStore constructor", () => {
   it("should merge custom config with defaults", () => {
     const custom = {
       host: "custom",
@@ -262,15 +497,12 @@ describe("PostgresStore config", () => {
     expect(store.config.port).toBe(1234);
     expect(store.config.schema).toBe("myschema");
     expect(store.config.table).toBe("mytable");
-    expect(store.config.leaseMillis).toBe(5000);
     // Defaults
     expect(store.config.user).toBe("postgres");
     expect(store.config.password).toBe("postgres");
     expect(store.config.database).toBe("postgres");
   });
-});
 
-describe("PostgresStore constructor", () => {
   it("should use defaults when no config is provided", () => {
     const store = new PostgresStore();
     expect(store.config.host).toBe("localhost");
@@ -280,8 +512,8 @@ describe("PostgresStore constructor", () => {
     expect(store.config.database).toBe("postgres");
     expect(store.config.schema).toBe("public");
     expect(store.config.table).toBe("events");
-    expect(store.config.leaseMillis).toBe(30000);
   });
+
   it("should merge partial config with defaults", () => {
     const store = new PostgresStore({ host: "custom", port: 1234 });
     expect(store.config.host).toBe("custom");

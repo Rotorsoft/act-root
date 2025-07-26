@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
 import { action, load, snap } from "../src/event-sourcing.js";
@@ -88,7 +87,7 @@ describe("event-sourcing", () => {
     });
     expect(logger.trace).toHaveBeenCalled();
     const events: any[] = [];
-    await store().query((e) => events.push(e));
+    await store().query((e) => events.push(e), { with_snaps: true });
     // The original event is [0], the snap event is [1]
     expect(events[1].name).toBe(SNAP_EVENT);
     expect(events[1].data.count).toBe(1);
@@ -178,7 +177,10 @@ describe("event-sourcing", () => {
 
     expect(snapFn).toHaveBeenCalled();
     const events: any[] = [];
-    await store().query((e) => events.push(e), { stream: "s" });
+    await store().query((e) => events.push(e), {
+      stream: "s",
+      with_snaps: true,
+    });
     // first the action event, then the snap event
     expect(events.length).toBe(2);
     expect(events[1].name).toBe(SNAP_EVENT);
@@ -190,7 +192,7 @@ describe("event-sourcing", () => {
       on: { increment: () => undefined },
       given: undefined,
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithoutEmit,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -265,7 +267,7 @@ describe("event-sourcing", () => {
       given: { increment: [] },
     };
     // Should not throw InvariantError because 'increment' has no invariants
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithOtherInvariants,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -296,7 +298,7 @@ describe("event-sourcing", () => {
       on: { increment: () => [] },
       given: undefined,
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithEmptyArray,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -335,7 +337,7 @@ describe("event-sourcing", () => {
       ...me,
       given: { increment: [] },
     };
-    const snapshot = await action(
+    const [snapshot] = await action(
       meWithEmptyInvariants,
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
@@ -412,6 +414,7 @@ describe("event-sourcing", () => {
       correlation: "c",
       causation: {},
     });
+
     await load(state, "stream", vi.fn());
   });
 
@@ -430,5 +433,33 @@ describe("event-sourcing", () => {
     await expect(
       action(state, "foo", { stream: "", actor: { id: "a", name: "a" } }, {})
     ).rejects.toThrow("Missing target stream");
+  });
+
+  it("should handle error in snap", async () => {
+    vi.resetModules();
+    const fakeLogger = { error: vi.fn(), trace: vi.fn() };
+    vi.doMock("../src/ports.js", async (importOriginal) => {
+      const actual = await importOriginal();
+      return Object.assign({}, actual, {
+        store: () => ({ commit: vi.fn().mockRejectedValue(new Error("fail")) }),
+        logger: fakeLogger,
+      });
+    });
+    const { snap } = await import("../src/event-sourcing.js");
+    await snap({
+      event: {
+        id: 1,
+        stream: "s",
+        name: "E",
+        meta: { correlation: "c", causation: {} },
+        version: 1,
+        data: {},
+        created: new Date(),
+      },
+      state: {},
+      patches: 0,
+      snaps: 0,
+    });
+    expect(fakeLogger.error).toHaveBeenCalled();
   });
 });

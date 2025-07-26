@@ -1,5 +1,3 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
 const pinoSpy = vi.fn(() => ({
   info: vi.fn(),
   error: vi.fn(),

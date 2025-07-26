@@ -68,7 +68,7 @@ export function AutoReassign(batchSize: number) {
   };
   return new Promise((resolve, reject) =>
     db
-      .select({ id: tickets.id })
+      .select()
       .from(tickets)
       .where(
         and(isNull(tickets.closedById), lt(tickets.reassignAfter, Date.now()))

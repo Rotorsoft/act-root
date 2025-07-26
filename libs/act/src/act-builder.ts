@@ -18,8 +18,11 @@ import type {
   State,
 } from "./types/index.js";
 
-// resolves to the event stream (default)
-const _this_ = ({ stream }: { stream: string }) => stream;
+// resolves the event stream as source and target (default)
+const _this_ = ({ stream }: { stream: string }) => ({
+  source: stream,
+  target: stream,
+});
 // resolves to nothing
 const _void_ = () => undefined;
 
@@ -78,11 +81,11 @@ export type ActBuilder<
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A> & {
       /**
-       * Route the reaction to a specific stream (resolver function).
-       * @param resolver The resolver function
+       * Route the reaction to a specific target and optionally source streams (resolver function).
+       * @param resolver The resolver function or target stream name (all sources) as a shorthand
        * @returns The builder (for chaining)
        */
-      to: (resolver: ReactionResolver<E, K>) => ActBuilder<S, E, A>;
+      to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A>;
       /**
        * Mark the reaction as void (no routing).
        * @returns The builder (for chaining)
@@ -191,16 +194,16 @@ export function act<
           options: {
             blockOnError: options?.blockOnError ?? true,
             maxRetries: options?.maxRetries ?? 3,
-            retryDelayMs: options?.retryDelayMs ?? 1000,
           },
         };
         registry.events[event].reactions.set(handler.name, reaction);
         return {
           ...builder,
-          to(resolver: ReactionResolver<E, K>) {
+          to(resolver: ReactionResolver<E, K> | string) {
             registry.events[event].reactions.set(handler.name, {
               ...reaction,
-              resolver,
+              resolver:
+                typeof resolver === "string" ? { target: resolver } : resolver,
             });
             return builder;
           },
@@ -214,7 +217,7 @@ export function act<
         };
       },
     }),
-    build: (drainLimit = 10) => new Act<S, E, A>(registry, drainLimit),
+    build: () => new Act<S, E, A>(registry),
     events: registry.events,
   };
   return builder;

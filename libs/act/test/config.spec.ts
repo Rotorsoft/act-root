@@ -1,5 +1,3 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-
 // Mock fs to control package.json content
 vi.mock("node:fs", () => ({
   readFileSync: vi.fn().mockReturnValue(

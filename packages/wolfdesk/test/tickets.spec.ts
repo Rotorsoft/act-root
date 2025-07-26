@@ -1,7 +1,6 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
@@ -15,6 +14,7 @@ import {
   markTicketResolved,
   openTicket,
   reassignTicket,
+  requestTicketEscalation,
   target,
 } from "./actions.js";
 
@@ -27,32 +27,35 @@ async function findTicket(stream: string) {
   ).at(0);
 }
 
-describe("ticket projection", () => {
+describe("tickets", () => {
   beforeAll(async () => {
     await init_tickets_db();
     await db.delete(tickets).catch((e) => console.error(e));
-    // app.on("drained", (leases) => console.log("drained", leases));
+    // app.on("acked", (leases) => console.log("acked", leases));
   });
 
   afterAll(async () => {
     await dispose()();
   });
 
-  it("should project tickets", async () => {
+  it("projection", async () => {
     const t = target(chance.guid(), "projecting");
     const title = "projecting";
     const message = "opening a new ticket for projection";
 
     await openTicket(t, title, message);
     await addMessage(t, "first message");
+    await app.correlate();
     await app.drain();
 
     await escalateTicket(t);
+    await app.correlate();
     await app.drain();
 
     await reassignTicket(t);
     await markTicketResolved(t);
     await closeTicket(t);
+    await app.correlate();
     await app.drain();
 
     const ticket = await findTicket(t.stream);
@@ -81,7 +84,12 @@ describe("ticket projection", () => {
       await assignTicket(t, chance.guid(), now, now);
 
       // project and verify agent and escalate after
-      await app.drain();
+      await app.correlate();
+      await app.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+        leaseMillis: 10_000,
+      });
       let ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
       expect(ticket?.escalateAfter).toBe(now.getTime());
@@ -91,7 +99,12 @@ describe("ticket projection", () => {
       await AutoEscalate(1).catch(console.error);
 
       // project and verify escalation id
-      await app.drain();
+      await app.correlate();
+      await app.drain({
+        streamLimit: 100,
+        eventLimit: 100,
+        leaseMillis: 10_000,
+      });
       ticket = await findTicket(t.stream);
       expect(ticket?.escalationId).toBeDefined();
 
@@ -114,12 +127,13 @@ describe("ticket projection", () => {
         Priority.High,
         now
       );
-      const snap = await markTicketResolved(t);
+      const [snap] = await markTicketResolved(t);
       expect(snap.state.resolvedById).toBeDefined();
 
       // project and verify
+      await app.correlate();
       const drained = await app.drain();
-      expect(drained).toBeGreaterThan(0);
+      expect(drained.acked.length).toBeGreaterThan(0);
 
       let ticket = await findTicket(t.stream);
       console.table(ticket);
@@ -130,6 +144,7 @@ describe("ticket projection", () => {
       await AutoClose(1);
 
       // project and verify closed by
+      await app.correlate();
       await app.drain();
       ticket = await findTicket(t.stream);
       expect(ticket?.closedById).toBeDefined();
@@ -149,6 +164,7 @@ describe("ticket projection", () => {
       await assignTicket(t, agentId, now, now);
 
       // project and verify agent and escalate after
+      await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
       let ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
@@ -184,6 +200,42 @@ describe("ticket projection", () => {
       expect(snapshot.state.escalateAfter?.getTime()).toBeGreaterThan(
         now.getTime()
       );
+    });
+  });
+
+  describe("reactions", () => {
+    it("should assign agent to new ticket", async () => {
+      const t = target(undefined, "should assign agent");
+      await openTicket(t, "assign agent", "Hello");
+      await app.correlate({ limit: 120 }); // 120 to reach the previous event
+      await app.drain();
+
+      const snapshot = await app.load(Ticket, t.stream);
+      expect(snapshot.state.agentId).toBeDefined();
+    });
+
+    it("should deliver new ticket", async () => {
+      const t = target(undefined, "should deliver new ticket");
+      await openTicket(t, "deliver", "Hello");
+      await addMessage(t, "the body");
+      await app.correlate({ limit: 120 }); // 120 to reach the previous event
+      await app.drain();
+
+      const snapshot = await app.load(Ticket, t.stream);
+      expect(
+        Object.values(snapshot.state.messages).at(-1)?.wasDelivered
+      ).toBeDefined();
+    });
+
+    it("should request escalation", async () => {
+      const t = target(undefined, "should request escalation");
+      await openTicket(t, "request escalation", "Hello");
+      await requestTicketEscalation(t);
+      await app.correlate({ limit: 120 }); // 120 to reach the previous event
+      await app.drain();
+
+      const snapshot = await app.load(Ticket, t.stream);
+      expect(snapshot.state.escalationId).toBeDefined();
     });
   });
 });

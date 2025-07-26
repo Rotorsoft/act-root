@@ -98,10 +98,9 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream },
-    true
+    { stream, with_snaps: true }
   );
-  logger.trace({ stream, patches, snaps, state }, "🟢 load");
+  logger.trace(state, `🟢 load ${stream}`);
   return { event, state, patches, snaps };
 }
 
@@ -137,39 +136,42 @@ export async function action<
   payload: Readonly<A[K]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false
-): Promise<Snapshot<S, E>> {
+): Promise<Snapshot<S, E>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
   payload = skipValidation
     ? payload
     : validate(action as string, payload, me.actions[action]);
+
+  const snapshot = await load(me, stream);
+  const expected = expectedVersion || snapshot.event?.version;
+
   logger.trace(
     payload,
-    `🔵 ${action as string} "${stream}${expectedVersion ? `@${expectedVersion}` : ""}"`
+    `🔵 ${stream}.${action as string}${typeof expected === "number" ? `.${expected}` : ""}`
   );
 
-  let snapshot = await load(me, stream);
   if (me.given) {
     const invariants = me.given[action] || [];
     invariants.forEach(({ valid, description }) => {
       if (!valid(snapshot.state, actor))
         throw new InvariantError(
-          action as string,
+          action,
           payload,
           target,
+          snapshot,
           description
         );
     });
   }
 
-  let { state, patches } = snapshot;
-  const result = me.on[action](payload, state, target);
-  if (!result) return snapshot;
+  const result = me.on[action](payload, snapshot, target);
+  if (!result) return [snapshot];
 
   // An empty array means no events were emitted
   if (Array.isArray(result) && result.length === 0) {
-    return snapshot;
+    return [snapshot];
   }
 
   const tuples = Array.isArray(result[0])
@@ -202,23 +204,29 @@ export async function action<
     },
   };
 
+  logger.trace(
+    emitted.map((e) => e.data),
+    `🔴 commit ${stream}.${emitted.map((e) => e.name).join(", ")}`
+  );
+
   const committed = await store().commit(
     stream,
     emitted,
     meta,
     // TODO: review reactions not enforcing expected version
-    reactingTo ? undefined : expectedVersion || snapshot.event?.version
+    reactingTo ? undefined : expected
   );
 
-  snapshot = committed
-    .map((event) => {
-      state = patch(state, me.patch[event.name](event, state));
-      patches++;
-      logger.trace({ event, state }, "🔴 commit");
-      return { event, state, patches, snaps: snapshot.snaps };
-    })
-    .at(-1)!;
+  let { state, patches } = snapshot;
+  const snapshots = committed.map((event) => {
+    state = patch(state, me.patch[event.name](event, state));
+    patches++;
+    return { event, state, patches, snaps: snapshot.snaps };
+  });
 
-  me.snap && me.snap(snapshot) && void snap(snapshot); // fire and forget snaps
-  return snapshot;
+  // fire and forget snaps
+  const last = snapshots.at(-1)!;
+  me.snap && me.snap(last) && void snap(last);
+
+  return snapshots;
 }

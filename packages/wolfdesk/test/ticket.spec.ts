@@ -1,6 +1,5 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
-import { afterAll, describe, expect, it } from "vitest";
 import { app } from "../src/bootstrap.js";
 import { Ticket } from "../src/ticket.js";
 import {
@@ -34,7 +33,7 @@ describe("ticket without reactions", () => {
     await openTicket(t, title, "Opening a new ticket");
     await assignTicket(t, agentId, new Date(), new Date());
 
-    const s = await addMessage(t, "first message", to);
+    const [s] = await addMessage(t, "first message", to);
     const message = Object.values(s.state.messages).at(-1);
     expect(message?.from).toEqual(t.actor?.id);
     messageId = message!.messageId!;
