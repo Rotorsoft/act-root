@@ -1,3 +1,5 @@
+#### 2025-07-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.0...@rotorsoft/act-pg-v0.5.1) @rotorsoft/act-pg-v0.5.1
+  - PATCH [ce5f7d68](https://github.com/Rotorsoft/act-root/commit/ce5f7d68d72cb34e7d0fbefb96e81c7124c9efb5) fix: add descending option to poll, to allow draining from the tail
 #### 2025-07-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.0...@rotorsoft/act-v0.6.1) @rotorsoft/act-v0.6.1
   - PATCH [ce5f7d68](https://github.com/Rotorsoft/act-root/commit/ce5f7d68d72cb34e7d0fbefb96e81c7124c9efb5) fix: add descending option to poll, to allow draining from the tail
 #### 2025-07-25 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.4.7...@rotorsoft/act-pg-v0.5.0) @rotorsoft/act-pg-v0.5.0
