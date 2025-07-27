@@ -118,6 +118,17 @@ describe("InMemoryStore", () => {
       await s.ack([{ stream: "L1", by: "actor", at: 0, retry: 0 }]);
     });
 
+    it("should poll events in descending order", async () => {
+      const s = store();
+      await s.lease([{ stream: "F1", by: "actor", at: 0, retry: 0 }], 0);
+      await s.lease([{ stream: "F2", by: "actor", at: 0, retry: 0 }], 0);
+      await s.ack([{ stream: "F1", by: "actor", at: 1, retry: 0 }]);
+      await s.ack([{ stream: "F2", by: "actor", at: 2, retry: 0 }]);
+      const result = await s.poll(2, true);
+      expect(result.length).toBe(2);
+      expect(result[0].stream).toBe("F2");
+    });
+
     it("should poll events with and without streams", async () => {
       const s = store();
       // No streams

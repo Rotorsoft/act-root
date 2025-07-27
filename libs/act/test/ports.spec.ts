@@ -5,7 +5,7 @@ const disposeAndExitSpy = vi.spyOn(
 const disposeSpy = vi.fn();
 
 // to register signal handlers
-import { dispose } from "../src/index.js";
+import { build_tracer, dispose } from "../src/index.js";
 
 describe("exit signal handlers", () => {
   beforeAll(() => {
@@ -67,5 +67,39 @@ describe("exit signal handlers", () => {
       .mockImplementation(() => undefined as never);
     await disposeAndExit("EXIT");
     expect(exit).not.toHaveBeenCalled();
+  });
+});
+
+describe("tracer", () => {
+  it("should trace stuff", () => {
+    const tracer = build_tracer("trace");
+    tracer.fetched([
+      {
+        stream: "A",
+        source: "B",
+        events: [
+          {
+            id: 1,
+            stream: "A",
+            name: "B",
+            data: { a: 1 },
+            created: new Date(),
+            meta: { correlation: "1", causation: {} },
+            version: 1,
+          },
+        ],
+      },
+      {
+        stream: "A",
+        events: [],
+      },
+    ]);
+    tracer.correlated([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
+    tracer.leased([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
+    tracer.acked([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
+    tracer.blocked([
+      { stream: "A", source: "B", at: 1, by: "x", retry: 0, error: "error" },
+    ]);
+    expect(tracer).toBeDefined();
   });
 });

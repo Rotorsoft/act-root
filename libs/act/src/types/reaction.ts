@@ -83,14 +83,17 @@ export type Poll = {
 };
 
 /**
- * Options for fetching events from the store.
+ * Options for draining events from the store.
  * @property streamLimit - Maximum number of streams to fetch.
  * @property eventLimit - Maximum number of events to fetch per stream.
+ * @property leaseMillis - Maximum lease duration (in milliseconds).
+ * @property descending - Whether to fetch streams in descending order (aka fetch the most advanced first).
  */
-export type FetchOptions = {
+export type DrainOptions = {
   readonly streamLimit?: number;
   readonly eventLimit?: number;
   readonly leaseMillis?: number;
+  readonly descending?: boolean;
 };
 
 /**

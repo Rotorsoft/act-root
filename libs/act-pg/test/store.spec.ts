@@ -480,6 +480,18 @@ describe("pg store", () => {
       ]);
       expect(blocked.length).toBe(0);
     });
+
+    it("should poll descending", async () => {
+      await store().lease(
+        [{ stream: "makeitlast", by: "x", at: 0, retry: 0 }],
+        0
+      );
+      await store().ack([
+        { stream: "makeitlast", by: "x", at: 1000, retry: 0 },
+      ]);
+      const result = await store().poll(2, true);
+      expect(result[0].stream).toEqual("makeitlast");
+    });
   });
 });
 

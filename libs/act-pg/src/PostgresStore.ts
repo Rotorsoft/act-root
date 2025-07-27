@@ -345,9 +345,10 @@ export class PostgresStore implements Store {
   /**
    * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
    * @param limit - Maximum number of streams to poll.
+   * @param descending - Whether to poll streams in descending order (aka poll the most advanced first).
    * @returns The polled streams.
    */
-  async poll(limit: number) {
+  async poll(limit: number, descending = false) {
     const { rows } = await this._pool.query<{
       stream: string;
       at: number;
@@ -357,7 +358,7 @@ export class PostgresStore implements Store {
       SELECT stream, at
       FROM ${this._fqs}
       WHERE blocked=false AND (leased_by IS NULL OR leased_until <= NOW())
-      ORDER BY at ASC
+      ORDER BY at ${descending ? "DESC" : "ASC"}
       LIMIT $1::integer
       `,
       [limit]
@@ -530,7 +531,7 @@ export class PostgresStore implements Store {
         at: row.at,
         by: row.by,
         retry: row.retry,
-        error: row.error ?? "",
+        error: row.error,
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});

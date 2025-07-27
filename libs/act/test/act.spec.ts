@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, sleep, state, ZodEmpty } from "../src/index.js";
+import { act, sleep, state, store, ZodEmpty } from "../src/index.js";
 
 describe("act", () => {
   const counter = state("Counter", z.object({ count: z.number() }))
@@ -99,14 +99,13 @@ describe("act", () => {
   });
 
   it("should exit drain loop on error", async () => {
-    // eslint-disable-next-line @typescript-eslint/unbound-method
-    const fetch = app.fetch;
-    app.fetch = () => {
-      throw new Error("fetch error");
-    };
+    // mock store poll to throw
+    const mockedPoll = vi.spyOn(store(), "poll").mockImplementation(() => {
+      throw new Error("test");
+    });
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
-    app.fetch = fetch;
+    mockedPoll.mockClear();
   });
 
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {

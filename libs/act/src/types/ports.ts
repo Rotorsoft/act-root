@@ -66,11 +66,12 @@ export interface Store extends Disposable {
   ) => Promise<number>;
 
   /**
-   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
+   * Polls the store for unblocked streams needing processing, ordered by lease watermark.
    * @param limit - Maximum number of streams to poll.
+   * @param descending - Whether to poll streams in descending order (aka poll the most advanced first).
    * @returns The polled streams.
    */
-  poll: (limit: number) => Promise<Poll[]>;
+  poll: (limit: number, descending?: boolean) => Promise<Poll[]>;
 
   /**
    * Lease streams for processing (e.g., for distributed consumers).
