@@ -236,13 +236,14 @@ export class InMemoryStore implements Store {
   /**
    * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
    * @param limit - Maximum number of streams to poll.
+   * @param descending - Whether to poll streams in descending order (aka poll the most advanced first).
    * @returns The polled streams.
    */
-  async poll(limit: number) {
+  async poll(limit: number, descending = false) {
     await sleep();
     return [...this._streams.values()]
       .filter((s) => s.is_avaliable)
-      .sort((a, b) => a.at - b.at)
+      .sort((a, b) => (descending ? b.at - a.at : a.at - b.at))
       .slice(0, limit)
       .map(({ stream, source, at }) => ({ stream, source, at }));
   }

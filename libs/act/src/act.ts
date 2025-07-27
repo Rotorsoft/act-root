@@ -1,11 +1,11 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
+import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
-import { dispose, logger, store } from "./ports.js";
+import { build_tracer, dispose, logger, store } from "./ports.js";
 import type {
   Committed,
-  Fetch,
-  FetchOptions,
+  DrainOptions,
   Lease,
   Query,
   ReactionPayload,
@@ -19,44 +19,7 @@ import type {
   Target,
 } from "./types/index.js";
 
-function traceFetch<E extends Schemas>(fetch: Fetch<E>) {
-  const data = Object.fromEntries(
-    fetch.map(({ stream, source, events }) => {
-      const key = source ? `${stream}<-${source}` : stream;
-      const value = Object.fromEntries(
-        events.map(({ id, stream, name }) => [id, { [stream]: name }])
-      );
-      return [key, value];
-    })
-  );
-  logger.trace(data, "⚡️ fetch");
-}
-
-function traceCorrelated(leases: Lease[]) {
-  const data = leases.map(({ stream }) => stream).join(" ");
-  logger.trace(`⚡️ correlate ${data}`);
-}
-
-function traceLeased(leases: Lease[]) {
-  const data = Object.fromEntries(
-    leases.map(({ stream, at, retry }) => [stream, { at, retry }])
-  );
-  logger.trace(data, "⚡️ lease");
-}
-
-function traceAcked(leases: Lease[]) {
-  const data = Object.fromEntries(
-    leases.map(({ stream, at, retry }) => [stream, { at, retry }])
-  );
-  logger.trace(data, "⚡️ ack");
-}
-
-function traceBlocked(leases: Array<Lease & { error: string }>) {
-  const data = Object.fromEntries(
-    leases.map(({ stream, at, retry, error }) => [stream, { at, retry, error }])
-  );
-  logger.trace(data, "⚡️ block");
-}
+const tracer = build_tracer(config().logLevel);
 
 /**
  * @category Orchestrator
@@ -304,25 +267,6 @@ export class Act<
   }
 
   /**
-   * Fetches new events from store according to the fetch options.
-   * @param options - Fetch options.
-   * @returns Fetched streams with next events to process.
-   */
-  async fetch({ streamLimit = 10, eventLimit = 10 }: FetchOptions) {
-    const polled = await store().poll(streamLimit);
-    return Promise.all(
-      polled.map(async ({ stream, source, at }) => {
-        const events = await this.query_array({
-          stream: source,
-          after: at,
-          limit: eventLimit,
-        });
-        return { stream, source, events };
-      })
-    );
-  }
-
-  /**
    * Drains and processes events from the store, triggering reactions and updating state.
    *
    * This is typically called in a background loop or after committing new events.
@@ -336,7 +280,8 @@ export class Act<
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
-  }: FetchOptions = {}): Promise<{
+    descending = false,
+  }: DrainOptions = {}): Promise<{
     leased: Lease[];
     acked: Lease[];
     blocked: Array<Lease & { error: string }>;
@@ -345,11 +290,21 @@ export class Act<
       try {
         this._drain_locked = true;
 
-        const fetch = await this.fetch({ streamLimit, eventLimit });
-        fetch.length && traceFetch(fetch);
+        const polled = await store().poll(streamLimit, descending);
+        const fetched = await Promise.all(
+          polled.map(async ({ stream, source, at }) => {
+            const events = await this.query_array({
+              stream: source,
+              after: at,
+              limit: eventLimit,
+            });
+            return { stream, source, events };
+          })
+        );
+        fetched.length && tracer.fetched(fetched);
 
         // set drain bounds
-        const [last_at, count] = fetch.reduce(
+        const [last_at, count] = fetched.reduce(
           ([last_at, count], { events }) => [
             Math.max(last_at, events.at(-1)?.id || 0),
             count + events.length,
@@ -361,7 +316,7 @@ export class Act<
             string,
             { lease: Lease; payloads: ReactionPayload<E>[] }
           >();
-          fetch.forEach(({ stream, events }) => {
+          fetched.forEach(({ stream, events }) => {
             const payloads = events.flatMap((event) => {
               // @ts-expect-error indexed by key
               const register = this.registry.events[
@@ -397,7 +352,7 @@ export class Act<
               leaseMillis
             );
             if (leased.length) {
-              traceLeased(leased);
+              tracer.leased(leased);
 
               const handled = await Promise.all(
                 leased.map((lease) =>
@@ -411,7 +366,7 @@ export class Act<
                   .map(({ at, lease }) => ({ ...lease, at }))
               );
               if (acked.length) {
-                traceAcked(acked);
+                tracer.acked(acked);
                 this.emit("acked", acked);
               }
 
@@ -421,7 +376,7 @@ export class Act<
                   .map(({ lease, error }) => ({ ...lease, error: error! }))
               );
               if (blocked.length) {
-                traceBlocked(blocked);
+                tracer.blocked(blocked);
                 this.emit("blocked", blocked);
               }
 
@@ -479,7 +434,7 @@ export class Act<
       }));
       // register leases with 0ms lease timeout (just to tag the new streams)
       const leased = await store().lease(leases, 0);
-      leased.length && traceCorrelated(leased);
+      leased.length && tracer.correlated(leased);
       return { leased, last_id };
     }
     return { leased: [], last_id };
