@@ -1,30 +1,17 @@
-import { act, store, type Committed, type Schemas } from "@rotorsoft/act";
+import { store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
+import { app as actApp, drain, loadTest } from "./load-test.js";
 import {
   getAll,
   getById,
   getEventsStats,
   getTodosStats,
   initProjection,
-  projectTodoCreated,
-  projectTodoDeleted,
-  projectTodoUpdated,
 } from "./projection.js";
-import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
-
-// serialize projection leases to one key or
-// one projection lease per stream?
-const projection_resolver =
-  process.env.SERIAL_PROJECTION === "true"
-    ? () => ({ target: "serial_projection" })
-    : (committed: Committed<Schemas, keyof Schemas>) => ({
-        target: committed.stream,
-        source: committed.stream,
-      });
 
 async function main() {
   store(
@@ -40,36 +27,6 @@ async function main() {
   await store().drop();
   await store().seed();
   await initProjection();
-
-  // Compose the app with state and reactions
-  const actApp = act()
-    .with(Todo)
-    .on("TodoCreated")
-    .do(projectTodoCreated)
-    .to(projection_resolver)
-    .on("TodoUpdated")
-    .do(projectTodoUpdated)
-    .to(projection_resolver)
-    .on("TodoDeleted")
-    .do(projectTodoDeleted)
-    .to(projection_resolver)
-    .build(100);
-
-  // Debounced drain on commits or scheduled interval
-  let lastDrain = Date.now();
-  async function debouncedDrain() {
-    const now = Date.now();
-    if (now - lastDrain > 1000) {
-      lastDrain = now;
-      const drained = await actApp.drain({
-        streamLimit: 100,
-        eventLimit: 100,
-      });
-      console.log(drained);
-    }
-  }
-  setInterval(debouncedDrain, 3000);
-  actApp.on("committed", debouncedDrain);
 
   // Start Express API
   const app = express();
@@ -162,43 +119,24 @@ async function main() {
 
   // POST /drain (debounced drain for convergence testing)
   app.post("/drain", async (_req, res) => {
-    await debouncedDrain();
+    await drain();
     res.status(200).send();
   });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Sample app listening on port ${PORT}`);
   });
-
-  return actApp;
 }
 
 main()
-  .then((actApp) => {
-    console.log("App started");
-
-    // simulate load when in local dev mode
+  .then(() => {
     if (process.env.SIMULATE_LOAD)
-      setInterval(async () => {
-        const actorId = randomUUID();
-        const stream = randomUUID();
-        const [snap] = await actApp.do(
-          "create",
-          { stream, actor: { id: actorId, name: actorId } },
-          {
-            text: randomUUID(),
-          }
-        );
-        // correlate right after creation
-        await actApp.correlate({ stream, after: snap.event!.id - 1 });
-        await actApp.do(
-          "update",
-          { stream, actor: { id: actorId, name: actorId } },
-          {
-            text: randomUUID(),
-          }
-        );
-      }, 1000);
+      void loadTest({
+        maxEvents: 300,
+        createMax: 200,
+        eventFrequency: 100,
+        drainFrequency: 500,
+      });
   })
   .catch((err) => {
     console.error("Failed to start app:", err);
