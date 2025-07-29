@@ -132,9 +132,9 @@ main()
   .then(() => {
     if (process.env.SIMULATE_LOAD)
       void loadTest({
-        maxEvents: 300,
+        maxEvents: 350,
         createMax: 200,
-        eventFrequency: 100,
+        eventFrequency: 10,
         drainFrequency: 500,
       });
   })

@@ -24,6 +24,8 @@ let lagConvergedTime: number | undefined;
 let leadConvergedTime: number | undefined;
 
 const createTableHeaders = (
+  totalLag = 0,
+  totalLead = 0,
   lagConverged = 0,
   leadConverged = 0,
   lagProgress = 0,
@@ -32,14 +34,14 @@ const createTableHeaders = (
   "drains",
   "events",
   "streams",
-  `lag ${lagConverged ? `(converged @${lagConverged})` : lagProgress ? `(${lagProgress}/${CONVERGENCE_THRESHOLD})` : ""}`,
-  `lead ${leadConverged ? `(converged @${leadConverged})` : leadProgress ? `(${leadProgress}/${CONVERGENCE_THRESHOLD})` : ""}`,
+  `${totalLag} lag streams ${lagConverged ? `(converged @${lagConverged})` : lagProgress ? `(${lagProgress}/${CONVERGENCE_THRESHOLD})` : ""}`,
+  `${totalLead} lead streams ${leadConverged ? `(converged @${leadConverged})` : leadProgress ? `(${leadProgress}/${CONVERGENCE_THRESHOLD})` : ""}`,
 ];
 
 const table = new Table({
   head: createTableHeaders(),
   colAligns: ["center", "center", "center", "center", "center"],
-  colWidths: [10, 10, 10, 30, 50],
+  colWidths: [10, 10, 10, 60, 60],
   wordWrap: false,
   style: { compact: true, head: ["green"] },
 });
@@ -50,16 +52,21 @@ export interface ConvergenceStatus {
   bothConverged: boolean;
 }
 
+interface Watermark {
+  at: number;
+  incomplete: boolean;
+}
+
 export function updateStats(
   drainCount: number,
   eventCount: number,
   streams: Set<string>,
-  lag: number[],
-  lead: number[]
+  lag: Watermark[],
+  lead: Watermark[]
 ): ConvergenceStatus {
   // Check lag convergence
   if (!lagConvergedAt) {
-    const allLagMatch = lag.every((at) => at === eventCount);
+    const allLagMatch = lag.every((watermark) => watermark.at === eventCount);
     if (allLagMatch) {
       if (lastLagMatch === eventCount) {
         consecutiveLagMatches++;
@@ -79,7 +86,7 @@ export function updateStats(
 
   // Check lead convergence
   if (!leadConvergedAt) {
-    const allLeadMatch = lead.every((at) => at === eventCount);
+    const allLeadMatch = lead.every((watermark) => watermark.at === eventCount);
     if (allLeadMatch) {
       if (lastLeadMatch === eventCount) {
         consecutiveLeadMatches++;
@@ -99,6 +106,8 @@ export function updateStats(
 
   // Update table headers if convergence status changed
   table.options.head = createTableHeaders(
+    lag.length,
+    lead.length,
     lagConvergedAt,
     leadConvergedAt,
     consecutiveLagMatches,
@@ -110,8 +119,12 @@ export function updateStats(
     drainCount,
     eventCount,
     streams.size,
-    lag.toString(),
-    lead.toString(),
+    lag
+      .map((watermark) => `${watermark.at}${watermark.incomplete ? "." : ""}`)
+      .join(", "),
+    lead
+      .map((watermark) => `${watermark.at}${watermark.incomplete ? "." : ""}`)
+      .join(", "),
   ]);
 
   console.clear();

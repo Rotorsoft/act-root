@@ -49,13 +49,21 @@ let drainCount = 0;
 const streams = new Set<string>();
 
 const lagOptions: DrainOptions = {
-  streamLimit: 5,
-  eventLimit: 100,
-};
-const leadOptions: DrainOptions = {
   streamLimit: 10,
-  eventLimit: 10,
+  eventLimit: 200,
+};
+
+const leadOptions: DrainOptions = {
+  streamLimit: 5,
+  eventLimit: 5,
   descending: true,
+};
+
+type LoadTestOptions = {
+  maxEvents: number;
+  createMax: number;
+  eventFrequency: number;
+  drainFrequency: number;
 };
 
 /**
@@ -69,11 +77,24 @@ export async function drain() {
   const now = Date.now();
   if (now - lastDrain > debounceFrequency) {
     lastDrain = now;
+
     const lag_drained = await app.drain(lagOptions);
     const lead_drained = await app.drain(leadOptions);
 
-    const lag = lag_drained.acked.map((l) => l.at).sort((a, b) => a - b);
-    const lead = lead_drained.acked.map((l) => l.at).sort((a, b) => a - b);
+    const lag = lag_drained.acked
+      .map((acked, index) => ({
+        at: acked.at,
+        incomplete: lag_drained.leased[index]?.at > acked.at,
+      }))
+      .sort((a, b) => a.at - b.at);
+
+    const lead = lead_drained.acked
+      .map((acked, index) => ({
+        at: acked.at,
+        incomplete: lead_drained.leased[index]?.at > acked.at,
+      }))
+      .sort((a, b) => a.at - b.at);
+
     drainCount++;
     const convergence = updateStats(drainCount, eventCount, streams, lag, lead);
 
@@ -100,17 +121,7 @@ export async function drain() {
 }
 
 export async function loadTest(
-  {
-    maxEvents,
-    createMax,
-    eventFrequency,
-    drainFrequency,
-  }: {
-    maxEvents: number;
-    createMax: number;
-    eventFrequency: number;
-    drainFrequency: number;
-  } = {
+  { maxEvents, createMax, eventFrequency, drainFrequency }: LoadTestOptions = {
     maxEvents: 300,
     createMax: 200,
     eventFrequency: 100,
