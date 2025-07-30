@@ -126,14 +126,14 @@ describe("PostgresStore", () => {
     it("returns empty result on no rows", async () => {
       // @ts-expect-error mock
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({ rows: [] });
-      await expect(store.poll(10)).resolves.toEqual([]);
+      await expect(store.poll(10, 1)).resolves.toEqual([]);
     });
 
     it("throws on DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "query").mockRejectedValue(
         new Error("poll error") as any
       );
-      await expect(store.poll(10)).rejects.toThrow("poll error");
+      await expect(store.poll(10, 1)).rejects.toThrow("poll error");
     });
 
     it("covers no rows branch", async () => {
@@ -146,7 +146,7 @@ describe("PostgresStore", () => {
         .mockResolvedValueOnce({ rows: [] })
         // @ts-expect-error mock
         .mockResolvedValueOnce({ rows: [], rowCount: 0 });
-      const result = await store.poll(10);
+      const result = await store.poll(10, 1);
       expect(result).toEqual([]);
     });
   });
