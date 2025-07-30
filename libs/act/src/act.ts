@@ -5,6 +5,7 @@ import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, logger, store } from "./ports.js";
 import type {
   Committed,
+  Drain,
   DrainOptions,
   Lease,
   Query,
@@ -249,7 +250,6 @@ export class Act<
         handled++;
       } catch (error) {
         logger.error(error);
-
         const block = lease.retry >= options.maxRetries && options.blockOnError;
         block &&
           logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
@@ -280,11 +280,7 @@ export class Act<
     eventLimit = 10,
     leaseMillis = 10_000,
     descending = false,
-  }: DrainOptions = {}): Promise<{
-    leased: Lease[];
-    acked: Lease[];
-    blocked: Array<Lease & { error: string }>;
-  }> {
+  }: DrainOptions = {}): Promise<Drain<E>> {
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
@@ -297,7 +293,7 @@ export class Act<
               after: at,
               limit: eventLimit,
             });
-            return { stream, source, at, events };
+            return { stream, source, at, events } as const;
           })
         );
         if (fetched.length) {
@@ -339,43 +335,40 @@ export class Act<
             });
           });
 
-          if (leases.size) {
-            const leased = await store().lease(
-              [...leases.values()].map((l) => l.lease),
-              leaseMillis
-            );
-            if (leased.length) {
-              tracer.leased(leased);
+          const leased = await store().lease(
+            [...leases.values()].map((l) => l.lease),
+            leaseMillis
+          );
+          tracer.leased(leased);
 
-              const handled = await Promise.all(
-                leased.map((lease) =>
-                  this.handle(lease, leases.get(lease.stream)!.payloads)
-                )
-              );
+          const handled = await Promise.all(
+            leased.map((lease) =>
+              this.handle(lease, leases.get(lease.stream)!.payloads)
+            )
+          );
 
-              const acked = await store().ack(
-                handled
-                  .filter(({ error }) => !error)
-                  .map(({ at, lease }) => ({ ...lease, at }))
-              );
-              if (acked.length) {
-                tracer.acked(acked);
-                this.emit("acked", acked);
-              }
-
-              const blocked = await store().block(
-                handled
-                  .filter(({ block }) => block)
-                  .map(({ lease, error }) => ({ ...lease, error: error! }))
-              );
-              if (blocked.length) {
-                tracer.blocked(blocked);
-                this.emit("blocked", blocked);
-              }
-
-              return { leased, acked, blocked };
-            }
+          const acked = await store().ack(
+            handled
+              .filter(({ error }) => !error)
+              .map(({ at, lease }) => ({ ...lease, at }))
+          );
+          if (acked.length) {
+            tracer.acked(acked);
+            this.emit("acked", acked);
           }
+
+          const blocked = await store().block(
+            handled
+              .filter(({ block }) => block)
+              .map(({ lease, error }) => ({ ...lease, error: error! }))
+          );
+          if (blocked.length) {
+            tracer.blocked(blocked);
+            this.emit("blocked", blocked);
+          }
+
+          // @ts-expect-error key
+          return { fetched, leased, acked, blocked };
         }
       } catch (error) {
         logger.error(error);
@@ -384,7 +377,7 @@ export class Act<
       }
     }
 
-    return { leased: [], acked: [], blocked: [] };
+    return { fetched: [], leased: [], acked: [], blocked: [] };
   }
 
   /**

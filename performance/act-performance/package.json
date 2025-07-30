@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "SIMULATE_LOAD=true tsx --env-file .env.local src/index.ts",
-    "start": "tsx src/index.ts",
+    "start": "tsx --watch --env-file .env.local src/index.ts",
+    "serve": "tsx src/server.ts",
     "compose": "docker compose down && docker compose build --no-cache && docker compose up -d",
     "throughput:serial": "SERIAL_PROJECTION=true docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js",
     "throughput:parallel": "docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js"

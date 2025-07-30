@@ -26,25 +26,27 @@ import { sleep } from "../utils.js";
  * Represents an in-memory stream for event processing and leasing.
  */
 class InMemoryStream {
-  stream: string;
-  source: string | undefined;
-  at = -1;
-  retry = -1;
-  blocked = false;
-  error = "";
-  leased_at: number | undefined = undefined;
-  leased_by: string | undefined = undefined;
-  leased_until: Date | undefined = undefined;
+  private _at = -1;
+  private _retry = -1;
+  private _blocked = false;
+  private _error = "";
+  private _leased_by: string | undefined = undefined;
+  private _leased_until: Date | undefined = undefined;
 
-  constructor(stream: string, source: string | undefined) {
-    this.stream = stream;
-    this.source = source;
-  }
+  constructor(
+    readonly stream: string,
+    readonly source: string | undefined
+  ) {}
 
   get is_avaliable() {
     return (
-      !this.blocked && (!this.leased_until || this.leased_until <= new Date())
+      !this._blocked &&
+      (!this._leased_until || this._leased_until <= new Date())
     );
+  }
+
+  get at() {
+    return this._at;
   }
 
   /**
@@ -55,17 +57,18 @@ class InMemoryStream {
    * @returns The granted lease or undefined if blocked.
    */
   lease(at: number, by: string, millis: number): Lease | undefined {
-    if (this.is_avaliable && at > this.at) {
-      this.leased_at = at;
-      this.leased_by = by;
-      this.leased_until = new Date(Date.now() + millis);
-      millis > 0 && (this.retry = this.retry + 1);
+    if (this.is_avaliable) {
+      if (millis > 0) {
+        this._leased_by = by;
+        this._leased_until = new Date(Date.now() + millis);
+        this._retry = this._retry + 1;
+      }
       return {
         stream: this.stream,
         source: this.source,
         at,
         by,
-        retry: this.retry,
+        retry: this._retry,
       };
     }
   }
@@ -76,15 +79,19 @@ class InMemoryStream {
    * @param by - Lease holder that processed the watermark.
    */
   ack(at: number, by: string) {
-    if (this.leased_by === by && at >= this.at) {
-      this.leased_at = undefined;
-      this.leased_by = undefined;
-      this.leased_until = undefined;
-      this.at = at;
-      this.retry = -1;
-      return true;
+    if (this._leased_by === by) {
+      this._leased_by = undefined;
+      this._leased_until = undefined;
+      this._at = at;
+      this._retry = -1;
+      return {
+        stream: this.stream,
+        source: this.source,
+        at: this._at,
+        by,
+        retry: this._retry,
+      };
     }
-    return false;
   }
 
   /**
@@ -92,12 +99,18 @@ class InMemoryStream {
    * @param error Blocked error message.
    */
   block(by: string, error: string) {
-    if (this.leased_by === by) {
-      this.blocked = true;
-      this.error = error;
-      return true;
+    if (this._leased_by === by) {
+      this._blocked = true;
+      this._error = error;
+      return {
+        stream: this.stream,
+        source: this.source,
+        at: this._at,
+        by: this._leased_by,
+        retry: this._retry,
+        error: this._error,
+      };
     }
-    return false;
   }
 }
 
@@ -147,6 +160,16 @@ export class InMemoryStore implements Store {
     this._streams = new Map();
   }
 
+  private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
+    if (query.stream && !RegExp(`^${query.stream}$`).test(e.stream))
+      return false;
+    if (query.names && !query.names.includes(e.name as string)) return false;
+    if (query.correlation && e.meta?.correlation !== query.correlation)
+      return false;
+    if (e.name === SNAP_EVENT && !query.with_snaps) return false;
+    return true;
+  }
+
   /**
    * Query events in the store, optionally filtered by query options.
    * @param callback - Function to call for each event.
@@ -158,31 +181,32 @@ export class InMemoryStore implements Store {
     query?: Query
   ) {
     await sleep();
-    const {
-      stream,
-      names,
-      before,
-      after = -1,
-      limit,
-      created_before,
-      created_after,
-      correlation,
-      with_snaps = false,
-    } = query || {};
-    let i = after + 1,
-      count = 0;
-    while (i < this._events.length) {
-      const e = this._events[i++];
-      if (stream && !RegExp(`^${stream}$`).test(e.stream)) continue;
-      if (names && !names.includes(e.name)) continue;
-      if (correlation && e.meta?.correlation !== correlation) continue;
-      if (created_after && e.created <= created_after) continue;
-      if (e.name === SNAP_EVENT && !with_snaps) continue;
-      if (before && e.id >= before) break;
-      if (created_before && e.created >= created_before) break;
-      callback(e as Committed<E, keyof E>);
-      count++;
-      if (limit && count >= limit) break;
+    let count = 0;
+    if (query?.backward) {
+      let i = (query?.before || this._events.length) - 1;
+      while (i >= 0) {
+        const e = this._events[i--];
+        if (query && !this.in_query(query, e)) continue;
+        if (query?.created_before && e.created >= query.created_before)
+          continue;
+        if (query.after && e.id <= query.after) break;
+        if (query.created_after && e.created <= query.created_after) break;
+        callback(e as Committed<E, keyof E>);
+        count++;
+        if (query?.limit && count >= query.limit) break;
+      }
+    } else {
+      let i = (query?.after ?? -1) + 1;
+      while (i < this._events.length) {
+        const e = this._events[i++];
+        if (query && !this.in_query(query, e)) continue;
+        if (query?.created_after && e.created <= query.created_after) continue;
+        if (query?.before && e.id >= query.before) break;
+        if (query?.created_before && e.created >= query.created_before) break;
+        callback(e as Committed<E, keyof E>);
+        count++;
+        if (query?.limit && count >= query.limit) break;
+      }
     }
     return count;
   }
@@ -257,14 +281,12 @@ export class InMemoryStore implements Store {
   async lease(leases: Lease[], millis: number) {
     await sleep();
     return leases
-      .map(({ stream, at, by, source }) => {
-        const found =
-          this._streams.get(stream) ||
+      .map((l) => {
+        if (!this._streams.has(l.stream)) {
           // store new correlations
-          this._streams
-            .set(stream, new InMemoryStream(stream, source))
-            .get(stream)!;
-        return found.lease(at, by, millis);
+          this._streams.set(l.stream, new InMemoryStream(l.stream, l.source));
+        }
+        return this._streams.get(l.stream)?.lease(l.at, l.by, millis);
       })
       .filter((l) => !!l);
   }
@@ -275,9 +297,9 @@ export class InMemoryStore implements Store {
    */
   async ack(leases: Lease[]) {
     await sleep();
-    return leases.filter((lease) =>
-      this._streams.get(lease.stream)?.ack(lease.at, lease.by)
-    );
+    return leases
+      .map((l) => this._streams.get(l.stream)?.ack(l.at, l.by))
+      .filter((l) => !!l);
   }
 
   /**
@@ -287,8 +309,8 @@ export class InMemoryStore implements Store {
    */
   async block(leases: Array<Lease & { error: string }>) {
     await sleep();
-    return leases.filter((lease) =>
-      this._streams.get(lease.stream)?.block(lease.by, lease.error)
-    );
+    return leases
+      .map((l) => this._streams.get(l.stream)?.block(l.by, l.error))
+      .filter((l) => !!l);
   }
 }

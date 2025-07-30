@@ -59,3 +59,15 @@ export type AsCommitted<R, K extends keyof R> = R[K] extends { schema: infer S }
       readonly data: z.infer<S>;
     } & CommittedMeta
   : never;
+
+/**
+ * Utility type to map commited events from zod schema maps.
+ * @template E - Event map.
+ * @template K - Event name.
+ */
+export type CommittedOf<E, K extends keyof E> = E[K] extends z.ZodType
+  ? {
+      readonly name: K;
+      readonly data: z.infer<E[K]>;
+    } & CommittedMeta
+  : never;

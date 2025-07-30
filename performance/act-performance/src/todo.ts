@@ -17,7 +17,7 @@ const TodoCreated = z.object({ text: z.string() });
 const TodoUpdated = z.object({ text: z.string() });
 const TodoDeleted = z.object({});
 
-const Events = {
+export const Events = {
   TodoCreated,
   TodoUpdated,
   TodoDeleted,

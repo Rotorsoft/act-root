@@ -83,29 +83,17 @@ export type Poll = {
 };
 
 /**
- * Options for draining events from the store.
- * @property streamLimit - Maximum number of streams to fetch.
- * @property eventLimit - Maximum number of events to fetch per stream.
- * @property leaseMillis - Maximum lease duration (in milliseconds).
- * @property descending - Whether to fetch streams in descending order (aka fetch the most advanced first).
- */
-export type DrainOptions = {
-  readonly streamLimit?: number;
-  readonly eventLimit?: number;
-  readonly leaseMillis?: number;
-  readonly descending?: boolean;
-};
-
-/**
  * Result of fetching events from the store for processing.
  * @template E - Event schemas.
  * @property stream - The stream name
  * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
+ * @property at - The last event sequence number processed by the stream.
  * @property events - The list of next committed events to be processed by the stream.
  */
 export type Fetch<E extends Schemas> = Array<{
   readonly stream: string;
   readonly source?: string;
+  readonly at: number;
   readonly events: Committed<E, keyof E>[];
 }>;
 
@@ -123,4 +111,32 @@ export type Lease = {
   readonly at: number;
   readonly by: string;
   readonly retry: number;
+};
+
+/**
+ * Options for draining events from the store.
+ * @property streamLimit - Maximum number of streams to fetch.
+ * @property eventLimit - Maximum number of events to fetch per stream.
+ * @property leaseMillis - Maximum lease duration (in milliseconds).
+ * @property descending - Whether to fetch streams in descending order (aka fetch the most advanced first).
+ */
+export type DrainOptions = {
+  readonly streamLimit?: number;
+  readonly eventLimit?: number;
+  readonly leaseMillis?: number;
+  readonly descending?: boolean;
+};
+
+/**
+ * Drain results
+ * @property fetched - The fetched events.
+ * @property leased - The leased events.
+ * @property acked - The acked events.
+ * @property blocked - The blocked events.
+ */
+export type Drain<E extends Schemas> = {
+  readonly fetched: Fetch<E>;
+  readonly leased: Lease[];
+  readonly acked: Lease[];
+  readonly blocked: Array<Lease & { error: string }>;
 };
