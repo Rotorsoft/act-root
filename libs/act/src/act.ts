@@ -5,11 +5,11 @@ import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, logger, store } from "./ports.js";
 import type {
   Committed,
+  Drain,
   DrainOptions,
   Lease,
   Query,
   ReactionPayload,
-  ReactionsRegister,
   Registry,
   Schema,
   SchemaRegister,
@@ -250,7 +250,6 @@ export class Act<
         handled++;
       } catch (error) {
         logger.error(error);
-
         const block = lease.retry >= options.maxRetries && options.blockOnError;
         block &&
           logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
@@ -280,17 +279,17 @@ export class Act<
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
-    descending = false,
-  }: DrainOptions = {}): Promise<{
-    leased: Lease[];
-    acked: Lease[];
-    blocked: Array<Lease & { error: string }>;
-  }> {
+  }: DrainOptions = {}): Promise<Drain<E>> {
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
 
-        const polled = await store().poll(streamLimit, descending);
+        // TODO: use configurable options
+        // for now, but default use 2/3 of streamLimit for lagging, and 1/3 for leading
+        // round up to nearest integer
+        const lagging = Math.ceil((streamLimit * 2) / 3);
+        const leading = streamLimit - lagging;
+        const polled = await store().poll(lagging, leading);
         const fetched = await Promise.all(
           polled.map(async ({ stream, source, at }) => {
             const events = await this.query_array({
@@ -298,37 +297,30 @@ export class Act<
               after: at,
               limit: eventLimit,
             });
-            return { stream, source, events };
+            return { stream, source, at, events } as const;
           })
         );
-        fetched.length && tracer.fetched(fetched);
+        if (fetched.length) {
+          tracer.fetched(fetched);
 
-        // set drain bounds
-        const [last_at, count] = fetched.reduce(
-          ([last_at, count], { events }) => [
-            Math.max(last_at, events.at(-1)?.id || 0),
-            count + events.length,
-          ],
-          [0, 0]
-        );
-        if (count > 0) {
           const leases = new Map<
             string,
             { lease: Lease; payloads: ReactionPayload<E>[] }
           >();
+
+          // last event id found in fetch window
+          const last_window_at = fetched.reduce(
+            (max, { at, events }) => Math.max(max, events.at(-1)?.id || at),
+            0
+          );
           fetched.forEach(({ stream, events }) => {
             const payloads = events.flatMap((event) => {
-              // @ts-expect-error indexed by key
-              const register = this.registry.events[
-                event.name
-              ] as ReactionsRegister<E, keyof E>;
-              if (!register) return [];
+              const register = this.registry.events[event.name] || [];
               return [...register.reactions.values()]
                 .filter((reaction) => {
                   const resolved =
                     typeof reaction.resolver === "function"
-                      ? // @ts-expect-error index by key
-                        reaction.resolver(event)
+                      ? reaction.resolver(event)
                       : reaction.resolver;
                   return resolved && resolved.target === stream;
                 })
@@ -338,7 +330,7 @@ export class Act<
               lease: {
                 stream,
                 by: randomUUID(),
-                at: events.at(-1)?.id || last_at, // move the lease watermark forward when no events found in window
+                at: events.at(-1)?.id || last_window_at, // ff when no matching events
                 retry: 0,
               },
               // @ts-expect-error indexed by key
@@ -346,43 +338,40 @@ export class Act<
             });
           });
 
-          if (leases.size) {
-            const leased = await store().lease(
-              [...leases.values()].map((l) => l.lease),
-              leaseMillis
-            );
-            if (leased.length) {
-              tracer.leased(leased);
+          const leased = await store().lease(
+            [...leases.values()].map((l) => l.lease),
+            leaseMillis
+          );
+          tracer.leased(leased);
 
-              const handled = await Promise.all(
-                leased.map((lease) =>
-                  this.handle(lease, leases.get(lease.stream)!.payloads)
-                )
-              );
+          const handled = await Promise.all(
+            leased.map((lease) =>
+              this.handle(lease, leases.get(lease.stream)!.payloads)
+            )
+          );
 
-              const acked = await store().ack(
-                handled
-                  .filter(({ error }) => !error)
-                  .map(({ at, lease }) => ({ ...lease, at }))
-              );
-              if (acked.length) {
-                tracer.acked(acked);
-                this.emit("acked", acked);
-              }
-
-              const blocked = await store().block(
-                handled
-                  .filter(({ block }) => block)
-                  .map(({ lease, error }) => ({ ...lease, error: error! }))
-              );
-              if (blocked.length) {
-                tracer.blocked(blocked);
-                this.emit("blocked", blocked);
-              }
-
-              return { leased, acked, blocked };
-            }
+          const acked = await store().ack(
+            handled
+              .filter(({ error }) => !error)
+              .map(({ at, lease }) => ({ ...lease, at }))
+          );
+          if (acked.length) {
+            tracer.acked(acked);
+            this.emit("acked", acked);
           }
+
+          const blocked = await store().block(
+            handled
+              .filter(({ block }) => block)
+              .map(({ lease, error }) => ({ ...lease, error: error! }))
+          );
+          if (blocked.length) {
+            tracer.blocked(blocked);
+            this.emit("blocked", blocked);
+          }
+
+          // @ts-expect-error key
+          return { fetched, leased, acked, blocked };
         }
       } catch (error) {
         logger.error(error);
@@ -391,7 +380,7 @@ export class Act<
       }
     }
 
-    return { leased: [], acked: [], blocked: [] };
+    return { fetched: [], leased: [], acked: [], blocked: [] };
   }
 
   /**

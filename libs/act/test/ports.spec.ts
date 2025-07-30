@@ -77,6 +77,7 @@ describe("tracer", () => {
       {
         stream: "A",
         source: "B",
+        at: 0,
         events: [
           {
             id: 1,
@@ -91,6 +92,7 @@ describe("tracer", () => {
       },
       {
         stream: "A",
+        at: 0,
         events: [],
       },
     ]);

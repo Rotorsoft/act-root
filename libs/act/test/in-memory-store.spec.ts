@@ -65,31 +65,93 @@ describe("InMemoryStore", () => {
       let result: any[] = [];
       await s.query((e) => result.push(e), { stream: "S1" });
       expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), { stream: "S1", backward: true });
+      expect(result.length).toBe(2);
       // By names
       result = [];
       await s.query((e) => result.push(e), { names: ["C"] });
+      expect(result.length).toBe(1);
+      result = [];
+      await s.query((e) => result.push(e), { names: ["C"], backward: true });
       expect(result.length).toBe(1);
       // By correlation
       result = [];
       await s.query((e) => result.push(e), { correlation: "cor2" });
       expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), {
+        correlation: "cor2",
+        backward: true,
+      });
+      expect(result.length).toBe(2);
       // By created_after
       result = [];
       const after = new Date(now.getTime() - 1000);
-      await s.query((e) => result.push(e), { created_after: after });
-      expect(result.length).toBeGreaterThan(0);
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_after: after,
+      });
+      expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_after: after,
+        backward: true,
+      });
+      expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_after: new Date(),
+        backward: true,
+      });
+      expect(result.length).toBe(0);
       // By before (id)
       result = [];
       await s.query((e) => result.push(e), { before: 2 });
       expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), { before: 2, backward: true });
+      expect(result.length).toBe(2);
+      // By after (id)
+      result = [];
+      await s.query((e) => result.push(e), { stream: "S2", after: 2 });
+      expect(result.length).toBe(1);
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        after: 2,
+        backward: true,
+      });
+      expect(result.length).toBe(1);
       // By created_before
       result = [];
       const future = new Date(now.getTime() + 1000 * 60 * 60);
-      await s.query((e) => result.push(e), { created_before: future });
-      expect(result.length).toBeGreaterThan(0);
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_before: future,
+      });
+      expect(result.length).toBe(2);
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_before: future,
+        backward: true,
+      });
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "S2",
+        created_before: after,
+        backward: true,
+      });
+      expect(result.length).toBe(0);
       // By limit
       result = [];
       await s.query((e) => result.push(e), { limit: 1 });
+      expect(result.length).toBe(1);
+      result = [];
+      await s.query((e) => result.push(e), { limit: 1, backward: true });
       expect(result.length).toBe(1);
       // By with_snaps
       await s.query((e) => result.push(e), { with_snaps: true });
@@ -118,21 +180,20 @@ describe("InMemoryStore", () => {
       await s.ack([{ stream: "L1", by: "actor", at: 0, retry: 0 }]);
     });
 
-    it("should poll events in descending order", async () => {
+    it("should poll", async () => {
       const s = store();
-      await s.lease([{ stream: "F1", by: "actor", at: 0, retry: 0 }], 0);
-      await s.lease([{ stream: "F2", by: "actor", at: 0, retry: 0 }], 0);
+      await s.lease([{ stream: "F1", by: "actor", at: 0, retry: 0 }], 1);
+      await s.lease([{ stream: "F2", by: "actor", at: 0, retry: 0 }], 1);
       await s.ack([{ stream: "F1", by: "actor", at: 1, retry: 0 }]);
       await s.ack([{ stream: "F2", by: "actor", at: 2, retry: 0 }]);
-      const result = await s.poll(2, true);
-      expect(result.length).toBe(2);
-      expect(result[0].stream).toBe("F2");
+      const result = await s.poll(2, 2);
+      expect(result.length).toBe(4);
     });
 
     it("should poll events with and without streams", async () => {
       const s = store();
       // No streams
-      let result = await s.poll(1);
+      let result = await s.poll(1, 1);
       expect(result.length).toBe(0);
       // Add a stream and commit events
       await s.lease([{ stream: "F1", by: "actor", at: 0, retry: 0 }], 0);
@@ -140,8 +201,8 @@ describe("InMemoryStore", () => {
         correlation: "f1",
         causation: {},
       });
-      result = await s.poll(1);
-      expect(result.length).toBe(1);
+      result = await s.poll(1, 1);
+      expect(result.length).toBe(2);
     });
 
     it("should poll with no streams", async () => {
@@ -149,7 +210,7 @@ describe("InMemoryStore", () => {
         "../src/adapters/InMemoryStore.js"
       );
       const store = new InMemoryStore();
-      const result = await store.poll(1);
+      const result = await store.poll(1, 1);
       expect(result).toEqual([]);
     });
 

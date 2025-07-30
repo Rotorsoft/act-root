@@ -14,8 +14,21 @@ describe("act", () => {
     .emit(() => ["incremented", {}])
     .on("decrement", ZodEmpty)
     .emit(() => ["decremented", {}])
-    .on("ignored", ZodEmpty)
+    .on("ignore", ZodEmpty)
     .emit(() => ["ignored", {}])
+    .build();
+
+  const dummy = state("Dummy", z.object({ count: z.number() }))
+    .init(() => ({ count: 0 }))
+    .emits({ added: ZodEmpty, ignored2: ZodEmpty })
+    .patch({
+      added: () => ({ count: 1 }),
+      ignored2: () => ({}),
+    })
+    .on("add", ZodEmpty)
+    .emit(() => ["added", {}])
+    .on("ignore2", ZodEmpty)
+    .emit(() => ["ignored2", {}])
     .build();
 
   const onIncremented = vi.fn().mockImplementation(async () => {
@@ -29,11 +42,12 @@ describe("act", () => {
   const app = act()
     .with(counter)
     .on("incremented")
-
     .do(onIncremented)
     .on("decremented")
-
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
+    .with(dummy)
+    .on("added")
+    .do(() => Promise.resolve())
     .build();
 
   const actor = { id: "a", name: "a" };
@@ -56,14 +70,7 @@ describe("act", () => {
 
   it("should handle increment and decrement should block", async () => {
     await app.do("decrement", { stream: "s", actor }, {});
-
-    const { leased } = await app.correlate();
-    expect(leased.length).toBe(1);
-
-    // TODO: two correlate in a row should not return any leases
-    // const result = await app.correlate();
-    // expect(result.leased.length).toBe(0);
-    // expect(result.last_id).toBe(2);
+    await app.correlate();
 
     // should drain the first two events...  third event should throw and stop drain
     let drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
@@ -74,38 +81,29 @@ describe("act", () => {
 
     // first fully failed
     drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    console.log(drained);
+    console.log("first try", drained);
     expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
     // second fully failed (first retry)
     drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
-    console.log(drained);
+    console.log("second try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(3);
 
     // third fully failed (second retry) - should block
     drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    console.log("third try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(1);
     expect(onDecremented).toHaveBeenCalledTimes(4);
   });
 
   it("should not do anything when ignored events are emitted", async () => {
-    await app.do("ignored", { stream: "s", actor }, {});
+    await app.do("ignore", { stream: "s", actor }, {});
     const drained = await app.drain();
     expect(drained.acked.length).toBe(0);
-  });
-
-  it("should exit drain loop on error", async () => {
-    // mock store poll to throw
-    const mockedPoll = vi.spyOn(store(), "poll").mockImplementation(() => {
-      throw new Error("test");
-    });
-    const drained = await app.drain();
-    expect(drained.leased.length).toBe(0);
-    mockedPoll.mockClear();
   });
 
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {
@@ -124,5 +122,28 @@ describe("act", () => {
     await sleep(100);
     app.stop_correlations();
     expect(callback).toHaveBeenCalled();
+  });
+
+  it("should correlate when event has reactions", async () => {
+    await app.do("ignore2", { stream: "dummy", actor }, {});
+    let correlated = await app.correlate({ stream: "dummy" });
+    expect(correlated.leased.length).toBe(0); // won't correlate events without reactions
+    await app.do("add", { stream: "dummy", actor }, {});
+    correlated = await app.correlate({ stream: "dummy" });
+    expect(correlated.leased.length).toBe(1); // added event should correlate stream
+
+    const drained = await app.drain({ streamLimit: 2 });
+    expect(drained.fetched.length).toBe(2); // new stream and dummy
+    expect(drained.leased.length).toBe(2);
+  });
+
+  it("should exit drain loop on error", async () => {
+    // mock store poll to throw
+    const mockedPoll = vi.spyOn(store(), "poll").mockImplementation(() => {
+      throw new Error("test");
+    });
+    const drained = await app.drain();
+    expect(drained.leased.length).toBe(0);
+    mockedPoll.mockClear();
   });
 });

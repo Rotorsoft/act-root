@@ -344,24 +344,42 @@ export class PostgresStore implements Store {
 
   /**
    * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
-   * @param limit - Maximum number of streams to poll.
-   * @param descending - Whether to poll streams in descending order (aka poll the most advanced first).
+   * @param lagging - Max number of streams to poll in ascending order.
+   * @param leading - Max number of streams to poll in descending order.
    * @returns The polled streams.
    */
-  async poll(limit: number, descending = false) {
+  async poll(lagging: number, leading: number) {
     const { rows } = await this._pool.query<{
       stream: string;
       at: number;
       source: string;
     }>(
       `
-      SELECT stream, at
-      FROM ${this._fqs}
-      WHERE blocked=false AND (leased_by IS NULL OR leased_until <= NOW())
-      ORDER BY at ${descending ? "DESC" : "ASC"}
-      LIMIT $1::integer
+      WITH
+      lag AS (
+        SELECT stream, at, source
+        FROM ${this._fqs}
+        WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
+        ORDER BY at ASC
+        LIMIT $1
+      ),
+      lead AS (
+        SELECT stream, at, source
+        FROM ${this._fqs}
+        WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
+        ORDER BY at DESC
+        LIMIT $2
+      ),
+      combined AS (
+        SELECT * FROM lag
+        UNION ALL
+        SELECT * FROM lead
+      )
+      SELECT DISTINCT ON (stream) stream, at, source
+      FROM combined
+      ORDER BY stream, at;
       `,
-      [limit]
+      [lagging, leading]
     );
     return rows;
   }

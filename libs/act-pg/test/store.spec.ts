@@ -481,7 +481,7 @@ describe("pg store", () => {
       expect(blocked.length).toBe(0);
     });
 
-    it("should poll descending", async () => {
+    it("should poll", async () => {
       await store().lease(
         [{ stream: "makeitlast", by: "x", at: 0, retry: 0 }],
         0
@@ -489,8 +489,8 @@ describe("pg store", () => {
       await store().ack([
         { stream: "makeitlast", by: "x", at: 1000, retry: 0 },
       ]);
-      const result = await store().poll(2, true);
-      expect(result[0].stream).toEqual("makeitlast");
+      const result = await store().poll(1, 1);
+      expect(result.at(-1)?.stream).toEqual("makeitlast");
     });
   });
 });

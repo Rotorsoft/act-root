@@ -1,0 +1,63 @@
+/**
+ * Projection table for fast reads.
+ * Updated by event handlers.
+ */
+import { sleep, store, type CommittedOf } from "@rotorsoft/act";
+import { Events, TodoState } from "./todo";
+
+export function create() {
+  const todos = new Map<string, TodoState>();
+  return {
+    init: async () => {
+      await sleep();
+      todos.clear();
+    },
+    projectTodoCreated: async (
+      event: CommittedOf<typeof Events, "TodoCreated">
+    ) => {
+      await sleep();
+      todos.set(event.stream, {
+        id: event.stream,
+        text: event.data.text,
+        createdAt: event.created.toISOString(),
+        deleted: false,
+      });
+    },
+    projectTodoUpdated: async (
+      event: CommittedOf<typeof Events, "TodoUpdated">
+    ) => {
+      await sleep();
+      todos.set(event.stream, {
+        ...todos.get(event.stream)!,
+        text: event.data.text,
+        updatedAt: event.created.toISOString(),
+      });
+    },
+    projectTodoDeleted: async (
+      event: CommittedOf<typeof Events, "TodoDeleted">
+    ) => {
+      await sleep();
+      todos.set(event.stream, {
+        ...todos.get(event.stream)!,
+        deleted: true,
+        updatedAt: event.created.toISOString(),
+      });
+    },
+    getById: async (stream: string) => {
+      await sleep();
+      return todos.get(stream) || null;
+    },
+    getStats: async () => {
+      let lastEventInStore = -1;
+      await store().query((e) => (lastEventInStore = e.id), {
+        limit: 1,
+        backward: true,
+      });
+      return {
+        totalTodos: todos.size,
+        activeTodos: [...todos.values()].filter((t) => !t.deleted).length,
+        lastEventInStore,
+      };
+    },
+  };
+}
