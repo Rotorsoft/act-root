@@ -41,6 +41,6 @@
     "zod": "^4.0.10"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.4"
+    "@types/pg": "^8.15.5"
   }
 }
