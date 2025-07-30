@@ -1,3 +1,8 @@
+#### 2025-07-30 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.1...@rotorsoft/act-v0.6.2) @rotorsoft/act-v0.6.2
+  - PATCH [0e489403](https://github.com/Rotorsoft/act-root/commit/0e4894033d0545fc0806e146a717060cee3d03e0) fix: combine lead/lag strategies in poll/drain
+  - PATCH [9527cc3e](https://github.com/Rotorsoft/act-root/commit/9527cc3e261364237e39919977ede5e73b34b579) fix: small fixes in memory store, types, and drains
+  - PATCH [25ad49f8](https://github.com/Rotorsoft/act-root/commit/25ad49f8170428e4196232170247557ea32eab48) fix(deps): update dependency zod to ^4.0.13
+  - PATCH [a6c6dfff](https://github.com/Rotorsoft/act-root/commit/a6c6dfff38f6dd788d82e11e4badc0f96a6953e2) fix: refining load test and fixing drain
 #### 2025-07-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.0...@rotorsoft/act-pg-v0.5.1) @rotorsoft/act-pg-v0.5.1
   - PATCH [ce5f7d68](https://github.com/Rotorsoft/act-root/commit/ce5f7d68d72cb34e7d0fbefb96e81c7124c9efb5) fix: add descending option to poll, to allow draining from the tail
 #### 2025-07-27 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.0...@rotorsoft/act-v0.6.1) @rotorsoft/act-v0.6.1
