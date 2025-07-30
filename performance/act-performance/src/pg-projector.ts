@@ -6,9 +6,9 @@ import type { CommittedOf } from "@rotorsoft/act";
 import { Pool } from "pg";
 import { Events } from "./todo";
 
-export function create() {
+export function create(connectionString?: string) {
   const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: connectionString || process.env.DATABASE_URL,
   });
   return {
     init: async () => {
@@ -20,6 +20,7 @@ export function create() {
           updated_at TIMESTAMP,
           deleted BOOLEAN DEFAULT FALSE
         );
+        TRUNCATE TABLE performance.todos_projection;
       `);
     },
     projectTodoCreated: async (

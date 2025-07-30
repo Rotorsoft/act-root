@@ -132,7 +132,7 @@ describe("act", () => {
     correlated = await app.correlate({ stream: "dummy" });
     expect(correlated.leased.length).toBe(1); // added event should correlate stream
 
-    const drained = await app.drain();
+    const drained = await app.drain({ streamLimit: 2 });
     expect(drained.fetched.length).toBe(2); // new stream and dummy
     expect(drained.leased.length).toBe(2);
   });

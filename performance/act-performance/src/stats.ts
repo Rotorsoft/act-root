@@ -3,11 +3,8 @@ import Table from "cli-table3";
 
 // Types
 export interface ConvergenceStatus {
-  lagConverged: boolean;
-  leadConverged: boolean;
-  bothConverged: boolean;
-  lagConvergedTime?: number;
-  leadConvergedTime?: number;
+  converged: boolean;
+  convergenceTime?: number;
 }
 
 interface ConvergenceState {
@@ -57,105 +54,65 @@ function checkConvergence(
 }
 
 // Convergence tracking
-const lagState: ConvergenceState = {
-  convergedAt: 0,
-  lastMatch: 0,
-  consecutiveMatches: 0,
-};
-const leadState: ConvergenceState = {
+const state: ConvergenceState = {
   convergedAt: 0,
   lastMatch: 0,
   consecutiveMatches: 0,
 };
 const startTime = Date.now();
-let lagConvergedTime: number | undefined;
-let leadConvergedTime: number | undefined;
+let convergenceTime: number | undefined;
 
 const createTableHeaders = (
-  totalLag = 0,
-  totalLead = 0,
-  lagConverged = 0,
-  leadConverged = 0,
-  lagProgress = 0,
-  leadProgress = 0,
+  total = 0,
+  converged = 0,
+  progress = 0,
   convergenceThreshold = 5
 ) => [
   "drains",
   "events",
   "streams",
-  `${totalLag} lag streams ${lagConverged ? `(converged @${lagConverged})` : lagProgress ? `(${lagProgress}/${convergenceThreshold})` : ""}`,
-  `${totalLead} lead streams ${leadConverged ? `(converged @${leadConverged})` : leadProgress ? `(${leadProgress}/${convergenceThreshold})` : ""}`,
+  `${total} streams ${converged ? `(converged @${converged})` : progress ? `(${progress}/${convergenceThreshold})` : ""}`,
 ];
 
 const table = new Table({
   head: createTableHeaders(),
-  colAligns: ["center", "center", "center", "center", "center"],
-  colWidths: [10, 10, 10, 60, 60],
+  colAligns: ["center", "center", "center", "center"],
+  colWidths: [10, 10, 10, 100],
   wordWrap: false,
   style: { compact: true, head: ["green"] },
 });
-
-export interface ConvergenceStatus {
-  lagConverged: boolean;
-  leadConverged: boolean;
-  bothConverged: boolean;
-}
 
 export function updateStats<E extends Schemas>(
   drainCount: number,
   eventCount: number,
   streams: Set<string>,
-  lag_drained: Drain<E>,
-  lead_drained: Drain<E>
+  drain: Drain<E>
 ): ConvergenceStatus {
-  const convergenceThreshold = Math.max(
-    lag_drained.leased.length,
-    lead_drained.leased.length
-  );
+  const convergenceThreshold = Math.ceil(drain.leased.length / 2);
 
-  const lag = lag_drained.acked
+  const watermarks = drain.acked
     .map((acked, index) => ({
       at: acked.at,
-      incomplete: lag_drained.leased[index]?.at > acked.at,
+      incomplete: drain.leased[index]?.at > acked.at,
     }))
     .sort((a, b) => a.at - b.at);
 
-  const lead = lead_drained.acked
-    .map((acked, index) => ({
-      at: acked.at,
-      incomplete: lead_drained.leased[index]?.at > acked.at,
-    }))
-    .sort((a, b) => a.at - b.at);
-
-  const lagResult = checkConvergence(
-    lag,
-    lagState,
+  const convergence = checkConvergence(
+    watermarks,
+    state,
     drainCount,
     eventCount,
     convergenceThreshold
   );
-  if (lagResult.convergedAt && !lagConvergedTime) {
-    lagConvergedTime = Date.now() - startTime;
-  }
-  const leadResult = checkConvergence(
-    lead,
-    leadState,
-    drainCount,
-    eventCount,
-    convergenceThreshold
-  );
-  if (leadResult.convergedAt && !leadConvergedTime) {
-    leadConvergedTime = Date.now() - startTime;
+  if (convergence.convergedAt && !convergenceTime) {
+    convergenceTime = Date.now() - startTime;
   }
 
   // Update table headers if convergence status changed
   table.options.head = createTableHeaders(
-    lag.length,
-    lead.length,
-    lagState.convergedAt,
-    leadState.convergedAt,
-    lagState.consecutiveMatches,
-    leadState.consecutiveMatches,
+    watermarks.length,
+    state.convergedAt,
+    state.consecutiveMatches,
     convergenceThreshold
   );
 
@@ -164,10 +121,7 @@ export function updateStats<E extends Schemas>(
     drainCount,
     eventCount,
     streams.size,
-    lag
-      .map((watermark) => `${watermark.at}${watermark.incomplete ? "." : ""}`)
-      .join(", "),
-    lead
+    watermarks
       .map((watermark) => `${watermark.at}${watermark.incomplete ? "." : ""}`)
       .join(", "),
   ]);
@@ -176,10 +130,7 @@ export function updateStats<E extends Schemas>(
   console.log(table.toString());
 
   return {
-    lagConverged: lagState.convergedAt > 0,
-    leadConverged: leadState.convergedAt > 0,
-    bothConverged: lagState.convergedAt > 0 && leadState.convergedAt > 0,
-    lagConvergedTime,
-    leadConvergedTime,
+    converged: state.convergedAt > 0,
+    convergenceTime: convergenceTime,
   };
 }

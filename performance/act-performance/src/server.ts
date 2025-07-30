@@ -131,11 +131,6 @@ async function main() {
       streamLimit: 10,
       eventLimit: 200,
     });
-    await actApp.drain({
-      streamLimit: 5,
-      eventLimit: 5,
-      descending: true,
-    });
     res.status(200).send();
   });
 

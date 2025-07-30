@@ -279,13 +279,17 @@ export class Act<
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
-    descending = false,
   }: DrainOptions = {}): Promise<Drain<E>> {
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
 
-        const polled = await store().poll(streamLimit, descending);
+        // TODO: use configurable options
+        // for now, but default use 2/3 of streamLimit for lagging, and 1/3 for leading
+        // round up to nearest integer
+        const lagging = Math.ceil((streamLimit * 2) / 3);
+        const leading = streamLimit - lagging;
+        const polled = await store().poll(lagging, leading);
         const fetched = await Promise.all(
           polled.map(async ({ stream, source, at }) => {
             const events = await this.query_array({
@@ -311,8 +315,7 @@ export class Act<
           );
           fetched.forEach(({ stream, events }) => {
             const payloads = events.flatMap((event) => {
-              const register = this.registry.events[event.name];
-              if (!register) return [];
+              const register = this.registry.events[event.name] || [];
               return [...register.reactions.values()]
                 .filter((reaction) => {
                   const resolved =

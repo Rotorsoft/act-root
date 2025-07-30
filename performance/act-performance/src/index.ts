@@ -4,9 +4,12 @@ import {
   type DrainOptions,
   type Schemas,
   sleep,
+  store,
 } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import { create as memProjector } from "./mem-projector";
+import { create as pgProjector } from "./pg-projector";
 import { updateStats } from "./stats";
 import { Todo } from "./todo";
 import { LoadTestOptions } from "./types";
@@ -21,7 +24,22 @@ const projection_resolver =
         source: committed.stream,
       });
 
-const projector = memProjector();
+const usePg = process.env.USE_PG === "true";
+if (usePg) {
+  store(
+    new PostgresStore({
+      host: "localhost",
+      port: 5431,
+      user: "postgres",
+      password: "postgres",
+      database: "postgres",
+      schema: "performance",
+    })
+  );
+}
+const projector = usePg
+  ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
+  : memProjector();
 
 // Compose the app with state and reactions
 export const app = act()
@@ -38,22 +56,16 @@ export const app = act()
   .build(100);
 
 // load test variables
-let debounceFrequency = 1000;
+let debounceFrequency = 500;
 let drainInterval: ReturnType<typeof setInterval> | undefined = undefined;
 let lastDrain = Date.now();
 let eventCount = 0;
 let drainCount = 0;
 const streams = new Set<string>();
 
-const lagOptions: DrainOptions = {
-  streamLimit: 10,
-  eventLimit: 200,
-};
-
-const leadOptions: DrainOptions = {
-  streamLimit: 5,
-  eventLimit: 5,
-  descending: true,
+const drainOptions: DrainOptions = {
+  streamLimit: 15,
+  eventLimit: 50,
 };
 
 /**
@@ -68,19 +80,12 @@ export async function drain() {
   if (now - lastDrain > debounceFrequency) {
     lastDrain = now;
 
-    const lag_drain = await app.drain(lagOptions);
-    const lead_drain = await app.drain(leadOptions);
+    const drain = await app.drain(drainOptions);
     drainCount++;
 
-    const convergence = updateStats(
-      drainCount,
-      eventCount,
-      streams,
-      lag_drain,
-      lead_drain
-    );
+    const convergence = updateStats(drainCount, eventCount, streams, drain);
 
-    if (convergence.bothConverged && drainInterval) {
+    if (convergence.converged && drainInterval) {
       clearInterval(drainInterval);
       drainInterval = undefined;
 
@@ -88,8 +93,7 @@ export async function drain() {
       const stats = await projector.getStats();
       console.table({
         ...stats,
-        lagConvergenceTime: `${convergence.lagConvergedTime! / 1000} seconds`,
-        leadConvergenceTime: `${convergence.leadConvergedTime! / 1000} seconds`,
+        convergenceTime: `${convergence.convergenceTime! / 1000} seconds`,
       });
     }
   }
@@ -103,6 +107,10 @@ async function main(
     drainFrequency: 1000,
   }
 ) {
+  await store().drop();
+  await store().seed();
+  await projector.init();
+
   debounceFrequency = drainFrequency;
   drainInterval = setInterval(drain, drainFrequency);
   // app.on("committed", debouncedDrain);
@@ -150,7 +158,7 @@ void main({
   maxEvents: 350,
   createMax: 200,
   eventFrequency: 10,
-  drainFrequency: 500,
+  drainFrequency: 100,
 }).catch((err) => {
   console.error(err);
   process.exit(1);
