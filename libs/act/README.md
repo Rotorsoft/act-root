@@ -161,6 +161,39 @@ As the system scales, multiple consumer instances may need to process events in 
 - Leases distribute events evenly across consumers, preventing hotspots.
 - Idle consumers are dynamically assigned new workloads, ensuring efficient resource utilization.
 
-## Summary
+## Dual-Frontier Drain
 
-This architecture balances event-driven flexibility, strong ordering guarantees, and dynamic stream resolution while minimizing processing overhead. By using event leasing, correlation-based processing, parallel execution, and retry mechanisms, it provides a robust and scalable foundation for handling real-time data flows in distributed systems.
+In event-sourced systems, consumers often subscribe to multiple event streams.
+These streams advance at different rates: some produce bursts of events, while others may stay idle for long periods.
+New streams can also be discovered while proccesing events from existing streams.
+
+The following issues arise:
+
+- Strictly serial processing across all streams would block fast streams.
+- Fully independent processing risks inconsistent states.
+- Prioritizing new streams over existing ones risks missing important events.
+
+Act addresses this with the Dual-Frontier Drain strategy.
+
+### Key features
+
+- Dynamic correlation
+  - Event resolvers dynamically correlate streams as new events arrive.
+  - Resolvers can include a source regex to limit matched streams by name.
+  - When a new stream matching the resolver is discovered, it is added immediately to the drain process.
+- Dual frontiers
+  - Each drain cycle calculates two sets of streams:
+    - Leading frontier – streams already near the latest known event (the global frontier).
+    - Lagging frontier – streams behind or newly discovered.
+- Fast-forwarding lagging streams
+  - Lagging streams are advanced quickly. If they have no matching events in the current window, their watermarks are advanced using the leading watermarks.
+  - This prevents stale streams from blocking global convergence.
+- Parallel processing
+  - While lagging streams catch up, leading streams continue processing without waiting.
+  - All reactions eventually converge on the global frontier.
+
+### Why it matters
+
+- Fast recovery: Newly discovered or previously idle streams catch up quickly.
+- No global blocking: Fast streams are never paused to wait for slower ones.
+- Consistent state: All reactions end up aligned on the same event position.
