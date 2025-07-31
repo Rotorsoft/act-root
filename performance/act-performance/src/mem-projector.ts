@@ -15,7 +15,7 @@ export function create() {
     projectTodoCreated: async (
       event: CommittedOf<typeof Events, "TodoCreated">
     ) => {
-      await sleep();
+      await sleep(150);
       todos.set(event.stream, {
         id: event.stream,
         text: event.data.text,
@@ -26,7 +26,7 @@ export function create() {
     projectTodoUpdated: async (
       event: CommittedOf<typeof Events, "TodoUpdated">
     ) => {
-      await sleep();
+      await sleep(50);
       todos.set(event.stream, {
         ...todos.get(event.stream)!,
         text: event.data.text,
@@ -36,7 +36,7 @@ export function create() {
     projectTodoDeleted: async (
       event: CommittedOf<typeof Events, "TodoDeleted">
     ) => {
-      await sleep();
+      await sleep(100);
       todos.set(event.stream, {
         ...todos.get(event.stream)!,
         deleted: true,

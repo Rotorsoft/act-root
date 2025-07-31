@@ -166,7 +166,7 @@ void main({
   maxEvents: 350,
   createMax: 200,
   eventFrequency: 10,
-  drainFrequency: 100,
+  drainFrequency: 500,
 }).catch((err) => {
   console.error(err);
   process.exit(1);
