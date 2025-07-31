@@ -71,13 +71,13 @@ const createTableHeaders = (
   "drains",
   "events",
   "streams",
-  `${total} streams ${converged ? `(converged @${converged})` : progress ? `(${progress}/${convergenceThreshold})` : ""}`,
+  `draining ${total} streams ${converged ? `(converged @${converged})` : progress ? `(${progress}/${convergenceThreshold})` : ""}`,
 ];
 
 const table = new Table({
   head: createTableHeaders(),
   colAligns: ["center", "center", "center", "center"],
-  colWidths: [10, 10, 10, 100],
+  colWidths: [8, 8, 10, 80],
   wordWrap: false,
   style: { compact: true, head: ["green"] },
 });

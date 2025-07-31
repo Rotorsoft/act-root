@@ -24,6 +24,7 @@ const projection_resolver =
         source: committed.stream,
       });
 
+// Don't use PG option in browser
 const usePg = process.env.USE_PG === "true";
 if (usePg) {
   store(
@@ -41,7 +42,7 @@ const projector = usePg
   ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
   : memProjector();
 
-// Compose the app with state and reactions
+// Composed TODO app with state and reactions
 export const app = act()
   .with(Todo)
   .on("TodoCreated")
@@ -99,6 +100,7 @@ export async function drain() {
   }
 }
 
+// Main event generation loop
 async function main(
   { maxEvents, createMax, eventFrequency, drainFrequency }: LoadTestOptions = {
     maxEvents: 300,
@@ -154,6 +156,7 @@ async function main(
   }
 }
 
+// Change options to evaluate performance at different load levels
 void main({
   maxEvents: 350,
   createMax: 200,
