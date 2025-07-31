@@ -922,7 +922,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 margin: 0;
               "
             >
-              Try it in your browser
+              Event Sourcing: Projecting Calculator Events
             </h2>
           </div>
           <iframe
@@ -1006,7 +1006,143 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
         })();
       </script>
 
-      <!-- FEATURES (trpc.io style, compact, modern) -->
+      <!-- SANDBOX SECTION: Drain Example -->
+      <section class="sandbox section fade-section" style="width: 100%">
+        <div
+          id="sandbox-guard"
+          style="
+            display: none;
+            color: var(--text-muted);
+            font-size: 1.13rem;
+            margin-bottom: 1.2rem;
+            text-align: center;
+          "
+        >
+          The interactive sandbox is available only on desktop Chrome browsers.
+        </div>
+        <div id="sandbox-content">
+          <div
+            style="
+              display: flex;
+              align-items: center;
+              margin-bottom: 0.7em;
+              margin-top: 0.5em;
+            "
+          >
+            <span
+              class="icon"
+              style="margin-right: 0.5em; display: flex; align-items: center"
+            >
+              <svg
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="var(--code-green)"
+                stroke="var(--code-green)"
+                stroke-width="2.2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon
+                  points="5 3 19 12 5 21 5 3"
+                  fill="var(--code-green)"
+                  fill-opacity="0.85"
+                />
+              </svg>
+            </span>
+            <h2
+              style="
+                font-size: 1.08rem;
+                font-weight: 800;
+                color: var(--code-green);
+                margin: 0;
+              "
+            >
+              Dual-Frontier Drain: Projecting Todo-List Events
+            </h2>
+          </div>
+          <iframe
+            class="sandbox-iframe"
+            style="
+              box-shadow: 0 4px 24px 0 #3bb0ff22;
+              border-radius: 18px;
+              width: 100%;
+              max-width: 100%;
+              display: block;
+            "
+            src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&view=editor&terminal=1&file=src/index.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start"
+            allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
+            sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
+          ></iframe>
+          <div
+            style="
+              margin-top: 0.7rem;
+              text-align: center;
+              width: 100%;
+              font-size: 0.85rem;
+              color: #8a8fa3;
+              display: flex;
+              justify-content: center;
+              gap: 1.2em;
+            "
+          >
+            <a
+              href="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start"
+              target="_blank"
+              style="
+                color: #8a8fa3;
+                background: none;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                text-decoration: none;
+                font-size: 0.85rem;
+                transition: text-decoration 0.15s;
+              "
+              onmouseover="this.style.textDecoration='underline'"
+              onmouseout="this.style.textDecoration='none'"
+              >Open in StackBlitz</a
+            >
+            <a
+              href="https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src"
+              target="_blank"
+              style="
+                color: #8a8fa3;
+                background: none;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                text-decoration: none;
+                font-size: 0.85rem;
+                transition: text-decoration 0.15s;
+              "
+              onmouseover="this.style.textDecoration='underline'"
+              onmouseout="this.style.textDecoration='none'"
+              >Source on GitHub</a
+            >
+          </div>
+        </div>
+      </section>
+      <script>
+        // Show sandbox only on desktop Chrome
+        (function () {
+          var isChrome =
+            /Chrome/.test(navigator.userAgent) &&
+            /Google Inc/.test(navigator.vendor);
+          var isDesktop =
+            window.innerWidth > 900 &&
+            !/Mobi|Android/i.test(navigator.userAgent);
+          var showSandbox = isChrome && isDesktop;
+          document.getElementById("sandbox-content").style.display = showSandbox
+            ? ""
+            : "none";
+          document.getElementById("sandbox-guard").style.display = showSandbox
+            ? "none"
+            : "";
+        })();
+      </script>
+
+      <!-- FEATURES -->
       <section class="features section fade-section">
         <div
           class="feature-card"
