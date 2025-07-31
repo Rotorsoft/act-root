@@ -84,13 +84,18 @@ export async function drain() {
     const drain = await app.drain(drainOptions);
     drainCount++;
 
-    const convergence = updateStats(drainCount, eventCount, streams, drain);
+    const convergence = updateStats(
+      drainCount,
+      eventCount,
+      streams.size,
+      drain
+    );
 
     if (convergence.converged && drainInterval) {
       clearInterval(drainInterval);
       drainInterval = undefined;
 
-      console.log("\nBoth strategies have converged! Load test complete.");
+      console.log("\nConverged! Load test complete.");
       const stats = await projector.getStats();
       console.table({
         ...stats,

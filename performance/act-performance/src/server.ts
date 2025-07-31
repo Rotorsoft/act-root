@@ -3,6 +3,7 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
 import { create as pgProjector } from "./pg-projector.js";
+import { ConvergenceStatus, updateStats } from "./stats.js";
 import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -48,6 +49,23 @@ async function main() {
     .to(projection_resolver)
     .build(100);
 
+  let drainCount = 0;
+  let eventCount = 0;
+  let streamCount = 0;
+  let convergence: ConvergenceStatus;
+  const drainInterval = setInterval(async () => {
+    const drain = await actApp.drain({
+      streamLimit: 20,
+      eventLimit: 200,
+    });
+    drainCount++;
+    convergence = updateStats(drainCount, eventCount, streamCount, drain);
+    if (convergence.converged) {
+      console.log("\nConverged! Load test complete.");
+      drainInterval && clearInterval(drainInterval);
+    }
+  }, 1000);
+
   // Start Express API
   const app = express();
   app.use(express.json());
@@ -67,6 +85,8 @@ async function main() {
         },
         { text: req.body.text }
       );
+      streamCount++;
+      eventCount++;
       // correlate right after creation
       await actApp.correlate({ stream, after: snap.event!.id - 1 });
       res.status(201).json({ stream });
@@ -86,6 +106,7 @@ async function main() {
         { stream: req.params.stream, actor: { id: actorId, name: actorId } },
         { text: req.body.text }
       );
+      eventCount++;
       res.status(200).json({ stream: req.params.stream });
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -103,6 +124,7 @@ async function main() {
         { stream: req.params.stream, actor: { id: actorId, name: actorId } },
         {}
       );
+      eventCount++;
       res.status(204).send();
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -121,17 +143,12 @@ async function main() {
     const stats = await projector.getStats();
     res.json({
       ...stats,
+      ...convergence,
+      drainCount,
+      eventCount,
+      streamCount,
       serialProjection: process.env.SERIAL_PROJECTION === "true",
     });
-  });
-
-  // POST /drain (debounced drain for convergence testing)
-  app.post("/drain", async (_req, res) => {
-    await actApp.drain({
-      streamLimit: 10,
-      eventLimit: 200,
-    });
-    res.status(200).send();
   });
 
   app.listen(PORT, "0.0.0.0", () => {

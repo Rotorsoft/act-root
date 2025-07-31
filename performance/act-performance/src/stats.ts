@@ -85,7 +85,7 @@ const table = new Table({
 export function updateStats<E extends Schemas>(
   drainCount: number,
   eventCount: number,
-  streams: Set<string>,
+  streamCount: number,
   drain: Drain<E>
 ): ConvergenceStatus {
   const convergenceThreshold = Math.ceil(drain.leased.length / 2);
@@ -120,7 +120,7 @@ export function updateStats<E extends Schemas>(
   table.push([
     drainCount,
     eventCount,
-    streams.size,
+    streamCount,
     watermarks
       .map((watermark) => `${watermark.at}${watermark.incomplete ? "." : ""}`)
       .join(", "),
