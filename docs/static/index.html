@@ -873,7 +873,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
       <!-- SANDBOX SECTION: Calculator Example -->
       <section class="sandbox section fade-section" style="width: 100%">
         <div
-          id="sandbox-guard"
+          id="sandbox-guard-1"
           style="
             display: none;
             color: var(--text-muted);
@@ -884,7 +884,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
         >
           The interactive sandbox is available only on desktop Chrome browsers.
         </div>
-        <div id="sandbox-content">
+        <div id="sandbox-content-1">
           <div
             style="
               display: flex;
@@ -987,29 +987,11 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
           </div>
         </div>
       </section>
-      <script>
-        // Show sandbox only on desktop Chrome
-        (function () {
-          var isChrome =
-            /Chrome/.test(navigator.userAgent) &&
-            /Google Inc/.test(navigator.vendor);
-          var isDesktop =
-            window.innerWidth > 900 &&
-            !/Mobi|Android/i.test(navigator.userAgent);
-          var showSandbox = isChrome && isDesktop;
-          document.getElementById("sandbox-content").style.display = showSandbox
-            ? ""
-            : "none";
-          document.getElementById("sandbox-guard").style.display = showSandbox
-            ? "none"
-            : "";
-        })();
-      </script>
 
       <!-- SANDBOX SECTION: Drain Example -->
       <section class="sandbox section fade-section" style="width: 100%">
         <div
-          id="sandbox-guard"
+          id="sandbox-guard-2"
           style="
             display: none;
             color: var(--text-muted);
@@ -1020,7 +1002,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
         >
           The interactive sandbox is available only on desktop Chrome browsers.
         </div>
-        <div id="sandbox-content">
+        <div id="sandbox-content-2">
           <div
             style="
               display: flex;
@@ -1123,8 +1105,9 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
           </div>
         </div>
       </section>
+
+      <!-- show sandbox only on desktop Chrome -->
       <script>
-        // Show sandbox only on desktop Chrome
         (function () {
           var isChrome =
             /Chrome/.test(navigator.userAgent) &&
@@ -1133,12 +1116,12 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
             window.innerWidth > 900 &&
             !/Mobi|Android/i.test(navigator.userAgent);
           var showSandbox = isChrome && isDesktop;
-          document.getElementById("sandbox-content").style.display = showSandbox
-            ? ""
-            : "none";
-          document.getElementById("sandbox-guard").style.display = showSandbox
-            ? "none"
-            : "";
+          document.querySelectorAll('[id^="sandbox-content"]').forEach((el) => {
+            el.style.display = showSandbox ? "" : "none";
+          });
+          document.querySelectorAll('[id^="sandbox-guard"]').forEach((el) => {
+            el.style.display = showSandbox ? "none" : "";
+          });
         })();
       </script>
 
