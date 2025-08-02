@@ -123,13 +123,13 @@ importers:
         version: 3.8.1(@swc/core@1.13.3(@swc/helpers@0.5.15))(acorn@8.15.0)(esbuild@0.25.8)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       docusaurus-plugin-typedoc:
         specifier: ^1.4.1
-        version: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.8(typescript@5.9.2)))
+        version: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)))
       typedoc:
-        specifier: ^0.28.8
-        version: 0.28.8(typescript@5.9.2)
+        specifier: ^0.28.9
+        version: 0.28.9(typescript@5.9.2)
       typedoc-plugin-markdown:
         specifier: ^4.8.0
-        version: 4.8.0(typedoc@0.28.8(typescript@5.9.2))
+        version: 4.8.0(typedoc@0.28.9(typescript@5.9.2))
       typescript:
         specifier: ~5.9.2
         version: 5.9.2
@@ -7127,12 +7127,12 @@ packages:
     peerDependencies:
       typedoc: 0.28.x
 
-  typedoc@0.28.8:
-    resolution: {integrity: sha512-16GfLopc8icHfdvqZDqdGBoS2AieIRP2rpf9mU+MgN+gGLyEQvAO0QgOa6NJ5QNmQi0LFrDY9in4F2fUNKgJKA==}
+  typedoc@0.28.9:
+    resolution: {integrity: sha512-aw45vwtwOl3QkUAmWCnLV9QW1xY+FSX2zzlit4MAfE99wX+Jij4ycnpbAWgBXsRrxmfs9LaYktg/eX5Bpthd3g==}
     engines: {node: '>= 18', pnpm: '>= 10'}
     hasBin: true
     peerDependencies:
-      typescript: 5.0.x || 5.1.x || 5.2.x || 5.3.x || 5.4.x || 5.5.x || 5.6.x || 5.7.x || 5.8.x
+      typescript: 5.0.x || 5.1.x || 5.2.x || 5.3.x || 5.4.x || 5.5.x || 5.6.x || 5.7.x || 5.8.x || 5.9.x
 
   typescript-eslint@8.38.0:
     resolution: {integrity: sha512-FsZlrYK6bPDGoLeZRuvx2v6qrM03I0U0SnfCLPs/XCCPCFD80xU9Pg09H/K+XFa68uJuZo7l/Xhs+eDRg2l3hg==}
@@ -11759,10 +11759,10 @@ snapshots:
     dependencies:
       '@leichtgewicht/ip-codec': 2.0.5
 
-  docusaurus-plugin-typedoc@1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.8(typescript@5.9.2))):
+  docusaurus-plugin-typedoc@1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2))):
     dependencies:
-      typedoc-docusaurus-theme: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.8(typescript@5.9.2)))
-      typedoc-plugin-markdown: 4.8.0(typedoc@0.28.8(typescript@5.9.2))
+      typedoc-docusaurus-theme: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)))
+      typedoc-plugin-markdown: 4.8.0(typedoc@0.28.9(typescript@5.9.2))
 
   dom-converter@0.2.0:
     dependencies:
@@ -15614,15 +15614,15 @@ snapshots:
     dependencies:
       is-typedarray: 1.0.0
 
-  typedoc-docusaurus-theme@1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.8(typescript@5.9.2))):
+  typedoc-docusaurus-theme@1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2))):
     dependencies:
-      typedoc-plugin-markdown: 4.8.0(typedoc@0.28.8(typescript@5.9.2))
+      typedoc-plugin-markdown: 4.8.0(typedoc@0.28.9(typescript@5.9.2))
 
-  typedoc-plugin-markdown@4.8.0(typedoc@0.28.8(typescript@5.9.2)):
+  typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)):
     dependencies:
-      typedoc: 0.28.8(typescript@5.9.2)
+      typedoc: 0.28.9(typescript@5.9.2)
 
-  typedoc@0.28.8(typescript@5.9.2):
+  typedoc@0.28.9(typescript@5.9.2):
     dependencies:
       '@gerrit0/mini-shiki': 3.9.0
       lunr: 2.3.9
