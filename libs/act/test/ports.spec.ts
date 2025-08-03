@@ -78,6 +78,7 @@ describe("tracer", () => {
         stream: "A",
         source: "B",
         at: 0,
+        lagging: true,
         events: [
           {
             id: 1,
@@ -93,14 +94,29 @@ describe("tracer", () => {
       {
         stream: "A",
         at: 0,
+        lagging: false,
         events: [],
       },
     ]);
-    tracer.correlated([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
-    tracer.leased([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
-    tracer.acked([{ stream: "A", source: "B", at: 1, by: "x", retry: 0 }]);
+    tracer.correlated([
+      { stream: "A", source: "B", lagging: false, at: 1, by: "x", retry: 0 },
+    ]);
+    tracer.leased([
+      { stream: "A", source: "B", lagging: false, at: 1, by: "x", retry: 0 },
+    ]);
+    tracer.acked([
+      { stream: "A", source: "B", lagging: false, at: 1, by: "x", retry: 0 },
+    ]);
     tracer.blocked([
-      { stream: "A", source: "B", at: 1, by: "x", retry: 0, error: "error" },
+      {
+        stream: "A",
+        source: "B",
+        lagging: false,
+        at: 1,
+        by: "x",
+        retry: 0,
+        error: "error",
+      },
     ]);
     expect(tracer).toBeDefined();
   });

@@ -52,6 +52,7 @@ export class Act<
 > {
   private _emitter = new EventEmitter();
   private _drain_locked = false;
+  private _drain_lag2lead_ratio = 0.5;
   private _correlation_interval: NodeJS.Timeout | undefined = undefined;
 
   /**
@@ -231,9 +232,15 @@ export class Act<
   private async handle<E extends Schemas>(
     lease: Lease,
     payloads: ReactionPayload<E>[]
-  ): Promise<{ lease: Lease; at: number; error?: string; block?: boolean }> {
+  ): Promise<{
+    readonly lease: Lease;
+    readonly handled: number;
+    readonly at: number;
+    readonly error?: string;
+    readonly block?: boolean;
+  }> {
     // no payloads, just advance the lease
-    if (payloads.length === 0) return { lease, at: lease.at };
+    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
 
     const stream = lease.stream;
     let at = payloads.at(0)!.event.id,
@@ -255,6 +262,7 @@ export class Act<
           logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
         return {
           lease,
+          handled,
           at,
           // only report error when nothing was handled
           error: handled === 0 ? (error as Error).message : undefined,
@@ -262,7 +270,7 @@ export class Act<
         };
       }
     }
-    return { lease, at };
+    return { lease, handled, at };
   }
 
   /**
@@ -283,21 +291,17 @@ export class Act<
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
-
-        // TODO: use configurable options
-        // for now, but default use 2/3 of streamLimit for lagging, and 1/3 for leading
-        // round up to nearest integer
-        const lagging = Math.ceil((streamLimit * 2) / 3);
+        const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
         const leading = streamLimit - lagging;
         const polled = await store().poll(lagging, leading);
         const fetched = await Promise.all(
-          polled.map(async ({ stream, source, at }) => {
+          polled.map(async ({ stream, source, at, lagging }) => {
             const events = await this.query_array({
               stream: source,
               after: at,
               limit: eventLimit,
             });
-            return { stream, source, at, events } as const;
+            return { stream, source, at, lagging, events } as const;
           })
         );
         if (fetched.length) {
@@ -305,15 +309,16 @@ export class Act<
 
           const leases = new Map<
             string,
-            { lease: Lease; payloads: ReactionPayload<E>[] }
+            { lease: Lease; lagging: boolean; payloads: ReactionPayload<E>[] }
           >();
 
-          // last event id found in fetch window
-          const last_window_at = fetched.reduce(
+          // compute fetch window max event id
+          const fetch_window_at = fetched.reduce(
             (max, { at, events }) => Math.max(max, events.at(-1)?.id || at),
             0
           );
-          fetched.forEach(({ stream, events }) => {
+
+          fetched.forEach(({ stream, lagging, events }) => {
             const payloads = events.flatMap((event) => {
               const register = this.registry.events[event.name] || [];
               return [...register.reactions.values()]
@@ -330,8 +335,9 @@ export class Act<
               lease: {
                 stream,
                 by: randomUUID(),
-                at: events.at(-1)?.id || last_window_at, // ff when no matching events
+                at: events.at(-1)?.id || fetch_window_at, // ff when no matching events
                 retry: 0,
+                lagging,
               },
               // @ts-expect-error indexed by key
               payloads,
@@ -339,7 +345,7 @@ export class Act<
           });
 
           const leased = await store().lease(
-            [...leases.values()].map((l) => l.lease),
+            [...leases.values()].map(({ lease }) => lease),
             leaseMillis
           );
           tracer.leased(leased);
@@ -349,6 +355,20 @@ export class Act<
               this.handle(lease, leases.get(lease.stream)!.payloads)
             )
           );
+
+          // adaptive drain ratio based on handled events, favors frontier with highest pressure (clamped between 20% and 80%)
+          const [lagging_handled, leading_handled] = handled.reduce(
+            ([lagging_handled, leading_handled], { lease, handled }) => [
+              lagging_handled + (lease.lagging ? handled : 0),
+              leading_handled + (lease.lagging ? 0 : handled),
+            ],
+            [0, 0]
+          );
+          const lagging_avg = lagging > 0 ? lagging_handled / lagging : 0;
+          const leading_avg = leading > 0 ? leading_handled / leading : 0;
+          const total = lagging_avg + leading_avg;
+          this._drain_lag2lead_ratio =
+            total > 0 ? Math.max(0.2, Math.min(0.8, lagging_avg / total)) : 0.5;
 
           const acked = await store().ack(
             handled
@@ -419,6 +439,7 @@ export class Act<
         by: randomUUID(),
         at: 0,
         retry: 0,
+        lagging: true,
         payloads,
       }));
       // register leases with 0ms lease timeout (just to tag the new streams)

@@ -14,15 +14,28 @@ import { updateStats } from "./stats";
 import { Todo } from "./todo";
 import { LoadTestOptions } from "./types";
 
+// maps a todo-UUID stream to a bucket of N+1 streams
+function target(stream: string, N: number) {
+  const first = parseInt(stream[5], 16); // first uuid character
+  return first % N;
+}
+
 // serialize projection leases to one key or
 // one projection lease per stream?
 const projection_resolver =
   process.env.SERIAL_PROJECTION === "true"
-    ? () => ({ target: "serial_projection" })
-    : (committed: Committed<Schemas, keyof Schemas>) => ({
-        target: committed.stream,
-        source: committed.stream,
+    ? // serial projection (only one projection stream)
+      () => ({ target: "serial_projection" })
+    : // parallel projection (custom resolver to N projection streams)
+      (committed: Committed<Schemas, keyof Schemas>) => ({
+        target: `stream-${target(committed.stream, 25)}`, // use N > streamLimit to avoid conflicts
+        source: "todo.*", // incluce all todos
       });
+// // parallel projection (default resolver is one-stream-to-one-projection)
+// : (committed: Committed<Schemas, keyof Schemas>) => ({
+//   target: committed.stream,
+//   source: committed.stream,
+// });
 
 // Don't use PG option in browser
 const usePg = process.env.USE_PG === "true";
@@ -42,7 +55,7 @@ const projector = usePg
   ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
   : memProjector();
 
-// Composed TODO app with state and reactions
+// Composed "Todo" app with state and reactions
 export const app = act()
   .with(Todo)
   .on("TodoCreated")
@@ -57,17 +70,11 @@ export const app = act()
   .build(100);
 
 // load test variables
-let debounceFrequency = 500;
 let drainInterval: ReturnType<typeof setInterval> | undefined = undefined;
 let lastDrain = Date.now();
 let eventCount = 0;
 let drainCount = 0;
 const streams = new Set<string>();
-
-const drainOptions: DrainOptions = {
-  streamLimit: 15,
-  eventLimit: 50,
-};
 
 /**
  * Debounced drain for convergence testing.
@@ -78,20 +85,15 @@ const drainOptions: DrainOptions = {
  */
 export async function drain() {
   const now = Date.now();
-  if (now - lastDrain > debounceFrequency) {
+  if (now - lastDrain > drainFrequency) {
     lastDrain = now;
 
     const drain = await app.drain(drainOptions);
     drainCount++;
 
-    const convergence = updateStats(
-      drainCount,
-      eventCount,
-      streams.size,
-      drain
-    );
+    const [lagging, leading] = updateStats(drainCount, eventCount, drain);
 
-    if (convergence.converged && drainInterval) {
+    if (lagging.convergedAt && leading.convergedAt) {
       clearInterval(drainInterval);
       drainInterval = undefined;
 
@@ -99,7 +101,8 @@ export async function drain() {
       const stats = await projector.getStats();
       console.table({
         ...stats,
-        convergenceTime: `${convergence.convergenceTime! / 1000} seconds`,
+        lagging: `Converged @${lagging.convergedAt} in ${lagging.convergedTime! / 1000} seconds`,
+        leading: `Converged @${leading.convergedAt} in ${leading.convergedTime! / 1000} seconds`,
       });
     }
   }
@@ -107,18 +110,16 @@ export async function drain() {
 
 // Main event generation loop
 async function main(
-  { maxEvents, createMax, eventFrequency, drainFrequency }: LoadTestOptions = {
+  { maxEvents, createMax, eventFrequency }: LoadTestOptions = {
     maxEvents: 300,
     createMax: 200,
     eventFrequency: 100,
-    drainFrequency: 1000,
   }
 ) {
   await store().drop();
   await store().seed();
   await projector.init();
 
-  debounceFrequency = drainFrequency;
   drainInterval = setInterval(drain, drainFrequency);
   // app.on("committed", debouncedDrain);
 
@@ -128,7 +129,7 @@ async function main(
     await sleep(eventFrequency);
     const op = Math.random();
     if (eventCount < createMax && (op < 0.5 || streams.size === 0)) {
-      const stream = randomUUID();
+      const stream = "todo-" + randomUUID();
       const [snap] = await app.do(
         "create",
         { stream, actor: { id: actorId, name: actorId } },
@@ -161,12 +162,17 @@ async function main(
   }
 }
 
-// Change options to evaluate performance at different load levels
+// 👉 Change drain options to evaluate performance at different load levels
+const drainFrequency = 500;
+const drainOptions: DrainOptions = {
+  streamLimit: 15,
+  eventLimit: 20,
+};
+// 👉 Change app options to evaluate performance at different load levels
 void main({
   maxEvents: 350,
   createMax: 200,
   eventFrequency: 10,
-  drainFrequency: 500,
 }).catch((err) => {
   console.error(err);
   process.exit(1);

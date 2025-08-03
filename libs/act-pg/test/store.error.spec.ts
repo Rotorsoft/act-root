@@ -158,7 +158,10 @@ describe("PostgresStore", () => {
         makeClient(vi.fn().mockRejectedValue(new Error("lease error")))
       );
       await expect(
-        store.lease([{ stream: "s", by: "a", at: 1, retry: 0 }], 0)
+        store.lease(
+          [{ stream: "s", lagging: false, by: "a", at: 1, retry: 0 }],
+          0
+        )
       ).resolves.toEqual([]);
     });
   });
@@ -170,7 +173,7 @@ describe("PostgresStore", () => {
         makeClient(vi.fn().mockRejectedValue(new Error("ack error")))
       );
       await expect(
-        store.ack([{ stream: "s", by: "a", at: 1, retry: 0 }])
+        store.ack([{ stream: "s", lagging: false, by: "a", at: 1, retry: 0 }])
       ).resolves.toEqual([]);
     });
   });
@@ -182,7 +185,9 @@ describe("PostgresStore", () => {
         makeClient(vi.fn().mockRejectedValue(new Error("block error")))
       );
       await expect(
-        store.block([{ stream: "s", by: "a", at: 1, retry: 0, error: "" }])
+        store.block([
+          { stream: "s", lagging: false, by: "a", at: 1, retry: 0, error: "" },
+        ])
       ).resolves.toEqual([]);
     });
   });

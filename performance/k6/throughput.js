@@ -15,7 +15,8 @@ const _lastEventInStore = new Gauge("last_event_in_store");
 const _drainCount = new Gauge("drain_count");
 const _eventCount = new Gauge("event_count");
 const _streamCount = new Gauge("stream_count");
-const _covergenceTime = new Gauge("convergence_time", true);
+const _laggingCovergenceTime = new Gauge("lagging_convergence_time", true);
+const _leadingCovergenceTime = new Gauge("leading_convergence_time", true);
 const _scenarioType = new Gauge("scenario_type");
 
 let streams = [];
@@ -74,8 +75,8 @@ export function convergence() {
       totalTodos,
       activeTodos,
       lastEventInStore,
-      converged,
-      convergenceTime,
+      lagging,
+      leading,
       drainCount,
       eventCount,
       streamCount,
@@ -91,11 +92,10 @@ export function convergence() {
     _scenarioType.add(serialProjection ? 1 : 0);
 
     // --- abort test when convergence is reached ---
-    if (converged) {
-      _covergenceTime.add(convergenceTime);
-      console.log(
-        `Convergence reached in ${convergenceTime}s, stopping test...`
-      );
+    if (lagging.convergedAt && leading.convergedAt) {
+      _laggingCovergenceTime.add(lagging.convergedTime);
+      _leadingCovergenceTime.add(leading.convergedTime);
+      console.log(`Convergence reached, stopping test...`);
       exec.test.abort();
     }
   }

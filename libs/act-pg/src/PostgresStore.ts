@@ -3,6 +3,7 @@ import type {
   EventMeta,
   Lease,
   Message,
+  Poll,
   Query,
   Schemas,
   Store,
@@ -349,22 +350,18 @@ export class PostgresStore implements Store {
    * @returns The polled streams.
    */
   async poll(lagging: number, leading: number) {
-    const { rows } = await this._pool.query<{
-      stream: string;
-      at: number;
-      source: string;
-    }>(
+    const { rows } = await this._pool.query<Poll>(
       `
       WITH
       lag AS (
-        SELECT stream, at, source
+        SELECT stream, source, at, TRUE AS lagging
         FROM ${this._fqs}
         WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
         ORDER BY at ASC
         LIMIT $1
       ),
       lead AS (
-        SELECT stream, at, source
+        SELECT stream, source, at, FALSE AS lagging
         FROM ${this._fqs}
         WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
         ORDER BY at DESC
@@ -375,7 +372,7 @@ export class PostgresStore implements Store {
         UNION ALL
         SELECT * FROM lead
       )
-      SELECT DISTINCT ON (stream) stream, at, source
+      SELECT DISTINCT ON (stream) stream, source, at, lagging
       FROM combined
       ORDER BY stream, at;
       `,
@@ -413,11 +410,12 @@ export class PostgresStore implements Store {
         leased_by: string;
         leased_until: number;
         retry: number;
+        lagging: boolean;
       }>(
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, at int, by text)
+        AS x(stream text, at int, by text, lagging boolean)
       ), free AS (
         SELECT s.stream FROM ${this._fqs} s
         JOIN input i ON s.stream = i.stream
@@ -432,20 +430,29 @@ export class PostgresStore implements Store {
         retry = CASE WHEN $2::integer > 0 THEN s.retry + 1 ELSE s.retry END
       FROM input i, free f
       WHERE s.stream = f.stream AND s.stream = i.stream
-      RETURNING s.stream, s.source, s.leased_at, s.leased_by, s.leased_until, s.retry
+      RETURNING s.stream, s.source, s.leased_at, s.leased_by, s.leased_until, s.retry, i.lagging
       `,
         [JSON.stringify(leases), millis]
       );
       await client.query("COMMIT");
 
       return rows.map(
-        ({ stream, source, leased_at, leased_by, leased_until, retry }) => ({
+        ({
+          stream,
+          source,
+          leased_at,
+          leased_by,
+          leased_until,
+          retry,
+          lagging,
+        }) => ({
           stream,
           source: source ?? undefined,
           at: leased_at,
           by: leased_by,
           until: new Date(leased_until),
           retry,
+          lagging,
         })
       );
     } catch (error) {
@@ -472,11 +479,12 @@ export class PostgresStore implements Store {
         source: string | null;
         at: number;
         retry: number;
+        lagging: boolean;
       }>(
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by text, at int)
+        AS x(stream text, by text, at int, lagging boolean)
       )
       UPDATE ${this._fqs} AS s
       SET
@@ -487,7 +495,7 @@ export class PostgresStore implements Store {
         leased_until = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
-      RETURNING s.stream, s.source, s.at, s.retry
+      RETURNING s.stream, s.source, s.at, s.retry, i.lagging
       `,
         [JSON.stringify(leases)]
       );
@@ -499,6 +507,7 @@ export class PostgresStore implements Store {
         at: row.at,
         by: "",
         retry: row.retry,
+        lagging: row.lagging,
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -526,18 +535,19 @@ export class PostgresStore implements Store {
         at: number;
         by: string;
         retry: number;
+        lagging: boolean;
         error: string;
       }>(
         `
       WITH input AS (
         SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, by text, error text)
+        AS x(stream text, by text, error text, lagging boolean)
       )
       UPDATE ${this._fqs} AS s
       SET blocked = true, error = i.error
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
-      RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error, i.lagging
       `,
         [JSON.stringify(leases)]
       );
@@ -549,6 +559,7 @@ export class PostgresStore implements Store {
         at: row.at,
         by: row.by,
         retry: row.retry,
+        lagging: row.lagging,
         error: row.error,
       }));
     } catch (error) {

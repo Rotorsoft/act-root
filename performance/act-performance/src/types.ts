@@ -5,7 +5,6 @@ export type LoadTestOptions = {
   maxEvents: number;
   createMax: number;
   eventFrequency: number;
-  drainFrequency: number;
 };
 
 export type Projector = {

@@ -3,7 +3,7 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
 import { create as pgProjector } from "./pg-projector.js";
-import { ConvergenceStatus, updateStats } from "./stats.js";
+import { ConvergenceState, updateStats } from "./stats.js";
 import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
@@ -52,15 +52,21 @@ async function main() {
   let drainCount = 0;
   let eventCount = 0;
   let streamCount = 0;
-  let convergence: ConvergenceStatus;
+  let lagging: ConvergenceState;
+  let leading: ConvergenceState;
   const drainInterval = setInterval(async () => {
     const drain = await actApp.drain({
       streamLimit: 20,
       eventLimit: 200,
     });
     drainCount++;
-    convergence = updateStats(drainCount, eventCount, streamCount, drain);
-    if (convergence.converged) {
+    [lagging, leading] = updateStats(
+      drainCount,
+      eventCount,
+      streamCount,
+      drain
+    );
+    if (lagging.convergedAt && leading.convergedAt) {
       console.log("\nConverged! Load test complete.");
       drainInterval && clearInterval(drainInterval);
     }
@@ -143,7 +149,8 @@ async function main() {
     const stats = await projector.getStats();
     res.json({
       ...stats,
-      ...convergence,
+      lagging,
+      leading,
       drainCount,
       eventCount,
       streamCount,
