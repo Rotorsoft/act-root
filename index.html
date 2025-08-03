@@ -872,18 +872,6 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
 
       <!-- SANDBOX SECTION: Calculator Example -->
       <section class="sandbox section fade-section" style="width: 100%">
-        <div
-          id="sandbox-guard-1"
-          style="
-            display: none;
-            color: var(--text-muted);
-            font-size: 1.13rem;
-            margin-bottom: 1.2rem;
-            text-align: center;
-          "
-        >
-          The interactive sandbox is available only on desktop Chrome browsers.
-        </div>
         <div id="sandbox-content-1">
           <div
             style="
@@ -922,7 +910,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 margin: 0;
               "
             >
-              Event Sourcing: Projecting Calculator Events
+              Event Sourcing
             </h2>
           </div>
           <iframe
@@ -990,18 +978,6 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
 
       <!-- SANDBOX SECTION: Drain Example -->
       <section class="sandbox section fade-section" style="width: 100%">
-        <div
-          id="sandbox-guard-2"
-          style="
-            display: none;
-            color: var(--text-muted);
-            font-size: 1.13rem;
-            margin-bottom: 1.2rem;
-            text-align: center;
-          "
-        >
-          The interactive sandbox is available only on desktop Chrome browsers.
-        </div>
         <div id="sandbox-content-2">
           <div
             style="
@@ -1040,7 +1016,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 margin: 0;
               "
             >
-              Dual-Frontier Drain: Projecting Todo-List Events
+              Adaptive Dual-Frontier Drain
             </h2>
           </div>
           <iframe
@@ -1118,9 +1094,6 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
           var showSandbox = isChrome && isDesktop;
           document.querySelectorAll('[id^="sandbox-content"]').forEach((el) => {
             el.style.display = showSandbox ? "" : "none";
-          });
-          document.querySelectorAll('[id^="sandbox-guard"]').forEach((el) => {
-            el.style.display = showSandbox ? "none" : "";
           });
         })();
       </script>
