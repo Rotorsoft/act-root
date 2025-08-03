@@ -1,3 +1,5 @@
+#### 2025-08-03 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.2...@rotorsoft/act-v0.6.3) @rotorsoft/act-v0.6.3
+  - PATCH [4b1a16e9](https://github.com/Rotorsoft/act-root/commit/4b1a16e9cdff6b2fa63ad5b8c0e9ccb8b16b9d5e) fix: adaptive drain based on number of handled events
 #### 2025-07-30 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.1...@rotorsoft/act-pg-v0.5.2) @rotorsoft/act-pg-v0.5.2
   - PATCH [0e489403](https://github.com/Rotorsoft/act-root/commit/0e4894033d0545fc0806e146a717060cee3d03e0) fix: combine lead/lag strategies in poll/drain
   - PATCH [25ad49f8](https://github.com/Rotorsoft/act-root/commit/25ad49f8170428e4196232170247557ea32eab48) fix(deps): update dependency zod to ^4.0.13
