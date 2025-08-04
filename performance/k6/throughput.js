@@ -65,7 +65,7 @@ export function writer() {
     check(res, { deleted: (r) => r.status === 204 });
     streams.splice(idx, 1);
   }
-  sleep(0.1);
+  sleep(0.001);
 }
 
 export function convergence() {

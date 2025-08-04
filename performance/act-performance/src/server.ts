@@ -8,6 +8,29 @@ import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
 
+// maps a todo-UUID stream to a bucket of N+1 streams
+function target(stream: string, N: number) {
+  const first = parseInt(stream[5], 16); // first uuid character
+  return first % N;
+}
+
+// serialize projection leases to one key or
+// one projection lease per stream?
+const projection_resolver =
+  process.env.SERIAL_PROJECTION === "true"
+    ? // serial projection (only one projection stream)
+      () => ({ target: "serial_projection" })
+    : // parallel projection (custom resolver to N projection streams)
+      (committed: Committed<Schemas, keyof Schemas>) => ({
+        target: `stream-${target(committed.stream, 25)}`, // use N > streamLimit to avoid conflicts
+        source: "todo.*", // incluce all todos
+      });
+// // parallel projection (default resolver is one-stream-to-one-projection)
+// : (committed: Committed<Schemas, keyof Schemas>) => ({
+//   target: committed.stream,
+//   source: committed.stream,
+// });
+
 async function main() {
   store(
     new PostgresStore({
@@ -24,16 +47,6 @@ async function main() {
 
   const projector = pgProjector();
   await projector.init();
-
-  // serialize projection leases to one key or
-  // one projection lease per stream?
-  const projection_resolver =
-    process.env.SERIAL_PROJECTION === "true"
-      ? () => ({ target: "serial_projection" })
-      : (committed: Committed<Schemas, keyof Schemas>) => ({
-          target: committed.stream,
-          source: committed.stream,
-        });
 
   // Compose the app with state and reactions
   const actApp = act()
@@ -60,12 +73,7 @@ async function main() {
       eventLimit: 200,
     });
     drainCount++;
-    [lagging, leading] = updateStats(
-      drainCount,
-      eventCount,
-      streamCount,
-      drain
-    );
+    [lagging, leading] = updateStats(drainCount, eventCount, drain);
     if (lagging.convergedAt && leading.convergedAt) {
       console.log("\nConverged! Load test complete.");
       drainInterval && clearInterval(drainInterval);
@@ -82,7 +90,7 @@ async function main() {
       const actorId = req.headers["authorization"]
         ? req.headers["authorization"].replace("Bearer ", "")
         : "system";
-      const stream = randomUUID();
+      const stream = "todo-" + randomUUID();
       const [snap] = await actApp.do(
         "create",
         {
