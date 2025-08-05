@@ -122,8 +122,8 @@ importers:
         specifier: 3.8.1
         version: 3.8.1(@swc/core@1.13.3(@swc/helpers@0.5.15))(acorn@8.15.0)(esbuild@0.25.8)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)
       docusaurus-plugin-typedoc:
-        specifier: ^1.4.1
-        version: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)))
+        specifier: ^1.4.2
+        version: 1.4.2(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)))
       typedoc:
         specifier: ^0.28.9
         version: 0.28.9(typescript@5.9.2)
@@ -3811,8 +3811,8 @@ packages:
     resolution: {integrity: sha512-l4gcSouhcgIKRvyy99RNVOgxXiicE+2jZoNmaNmZ6JXiGajBOJAesk1OBlJuM5k2c+eudGdLxDqXuPCKIj6kpw==}
     engines: {node: '>=6'}
 
-  docusaurus-plugin-typedoc@1.4.1:
-    resolution: {integrity: sha512-qWGx1acadt0yMkF4FpUpBvky3d1/5W2gB01iNV+00uO/BN+dvksHDZQHrX1JqbTwP3jmZDjZyRQ+rJtZQVBmow==}
+  docusaurus-plugin-typedoc@1.4.2:
+    resolution: {integrity: sha512-1qerRejLSYxEWdyVPLDMMeKFPLA/37yZAsdwJy9ThHFQR78+v3b5spSbk67VHGLr2mAn4FVHu0aGJ6p7iWotSg==}
     peerDependencies:
       typedoc-plugin-markdown: '>=4.8.0'
 
@@ -11769,7 +11769,7 @@ snapshots:
     dependencies:
       '@leichtgewicht/ip-codec': 2.0.5
 
-  docusaurus-plugin-typedoc@1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2))):
+  docusaurus-plugin-typedoc@1.4.2(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2))):
     dependencies:
       typedoc-docusaurus-theme: 1.4.1(typedoc-plugin-markdown@4.8.0(typedoc@0.28.9(typescript@5.9.2)))
       typedoc-plugin-markdown: 4.8.0(typedoc@0.28.9(typescript@5.9.2))
