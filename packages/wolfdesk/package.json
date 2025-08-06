@@ -15,7 +15,7 @@
     "@libsql/client": "^0.15.10",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
-    "@trpc/server": "11.4.3",
+    "@trpc/server": "11.4.4",
     "drizzle-orm": "^0.44.4",
     "zod": "^4.0.14"
   },
