@@ -61,7 +61,7 @@
     "chance": "^1.1.13",
     "eslint": "^9.32.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.3",
+    "eslint-plugin-prettier": "^5.5.4",
     "lint-staged": "^16.1.4",
     "prettier": "^3.6.2",
     "prettier-plugin-organize-imports": "^4.2.0",
