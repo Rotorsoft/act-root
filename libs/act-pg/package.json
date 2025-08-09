@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-pg",
   "type": "module",
-  "version": "0.5.2",
+  "version": "0.5.5",
   "description": "act pg adapters",
   "author": "rotorsoft",
   "license": "MIT",
@@ -25,7 +25,7 @@
   },
   "sideEffects": false,
   "engines": {
-    "node": ">=22.17.1"
+    "node": ">=22.18.0"
   },
   "publishConfig": {
     "access": "public"
@@ -38,7 +38,7 @@
   "dependencies": {
     "@rotorsoft/act": "workspace:*",
     "pg": "^8.16.3",
-    "zod": "^4.0.14"
+    "zod": "^4.0.16"
   },
   "devDependencies": {
     "@types/pg": "^8.15.5"

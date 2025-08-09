@@ -580,6 +580,12 @@
         outline: none;
       }
     </style>
+    <script
+      defer
+      src="https://unpkg.com/@tinybirdco/flock.js"
+      data-host="https://api.us-east.tinybird.co"
+      data-token="p.eyJ1IjogIjU4MDAxMmY5LTMyOGItNGRhZS1hNmUxLWVlMzkyYzc5MDVkZCIsICJpZCI6ICJhYmI4ODRlMC01NzQxLTQ0NTAtYWM5Mi0wMTU5ZTBmZDViMWEiLCAiaG9zdCI6ICJ1c19lYXN0In0.YHha7mn6nkX4N0G-ljwRSI8gS3Uh3LhhHuw-AGGx8Gc"
+    ></script>
   </head>
   <body>
     <div class="container">
@@ -872,19 +878,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
 
       <!-- SANDBOX SECTION: Calculator Example -->
       <section class="sandbox section fade-section" style="width: 100%">
-        <div
-          id="sandbox-guard"
-          style="
-            display: none;
-            color: var(--text-muted);
-            font-size: 1.13rem;
-            margin-bottom: 1.2rem;
-            text-align: center;
-          "
-        >
-          The interactive sandbox is available only on desktop Chrome browsers.
-        </div>
-        <div id="sandbox-content">
+        <div id="sandbox-content-1">
           <div
             style="
               display: flex;
@@ -922,7 +916,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 margin: 0;
               "
             >
-              Event Sourcing: Projecting Calculator Events
+              Event Sourcing
             </h2>
           </div>
           <iframe
@@ -987,40 +981,10 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
           </div>
         </div>
       </section>
-      <script>
-        // Show sandbox only on desktop Chrome
-        (function () {
-          var isChrome =
-            /Chrome/.test(navigator.userAgent) &&
-            /Google Inc/.test(navigator.vendor);
-          var isDesktop =
-            window.innerWidth > 900 &&
-            !/Mobi|Android/i.test(navigator.userAgent);
-          var showSandbox = isChrome && isDesktop;
-          document.getElementById("sandbox-content").style.display = showSandbox
-            ? ""
-            : "none";
-          document.getElementById("sandbox-guard").style.display = showSandbox
-            ? "none"
-            : "";
-        })();
-      </script>
 
       <!-- SANDBOX SECTION: Drain Example -->
       <section class="sandbox section fade-section" style="width: 100%">
-        <div
-          id="sandbox-guard"
-          style="
-            display: none;
-            color: var(--text-muted);
-            font-size: 1.13rem;
-            margin-bottom: 1.2rem;
-            text-align: center;
-          "
-        >
-          The interactive sandbox is available only on desktop Chrome browsers.
-        </div>
-        <div id="sandbox-content">
+        <div id="sandbox-content-2">
           <div
             style="
               display: flex;
@@ -1058,7 +1022,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
                 margin: 0;
               "
             >
-              Dual-Frontier Drain: Projecting Todo-List Events
+              Adaptive Dual-Frontier Drain
             </h2>
           </div>
           <iframe
@@ -1123,8 +1087,9 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
           </div>
         </div>
       </section>
+
+      <!-- show sandbox only on desktop Chrome -->
       <script>
-        // Show sandbox only on desktop Chrome
         (function () {
           var isChrome =
             /Chrome/.test(navigator.userAgent) &&
@@ -1133,12 +1098,9 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
             window.innerWidth > 900 &&
             !/Mobi|Android/i.test(navigator.userAgent);
           var showSandbox = isChrome && isDesktop;
-          document.getElementById("sandbox-content").style.display = showSandbox
-            ? ""
-            : "none";
-          document.getElementById("sandbox-guard").style.display = showSandbox
-            ? "none"
-            : "";
+          document.querySelectorAll('[id^="sandbox-content"]').forEach((el) => {
+            el.style.display = showSandbox ? "" : "none";
+          });
         })();
       </script>
 

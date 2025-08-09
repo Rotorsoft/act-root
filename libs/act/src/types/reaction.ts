@@ -75,11 +75,13 @@ export type ReactionPayload<E extends Schemas> = Reaction<E> & {
  * @property stream - The target stream name.
  * @property source - The source stream.
  * @property at - The lease watermark.
+ * @property lagging - Whether the stream is lagging behind.
  */
 export type Poll = {
   readonly stream: string;
   readonly source?: string;
   readonly at: number;
+  readonly lagging: boolean;
 };
 
 /**
@@ -88,12 +90,14 @@ export type Poll = {
  * @property stream - The stream name
  * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
+ * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
  */
 export type Fetch<E extends Schemas> = Array<{
   readonly stream: string;
   readonly source?: string;
   readonly at: number;
+  readonly lagging: boolean;
   readonly events: Committed<E, keyof E>[];
 }>;
 
@@ -102,8 +106,9 @@ export type Fetch<E extends Schemas> = Array<{
  * @property stream - The target stream name.
  * @property source - The source stream.
  * @property by - The lease holder.
- * @property at - The lease watermark.
+ * @property at - The lease watermark (last event in the lease window or acked).
  * @property retry - Retry count.
+ * @property lagging - Whether the stream is lagging behind.
  */
 export type Lease = {
   readonly stream: string;
@@ -111,6 +116,7 @@ export type Lease = {
   readonly at: number;
   readonly by: string;
   readonly retry: number;
+  readonly lagging: boolean;
 };
 
 /**
@@ -130,11 +136,11 @@ export type DrainOptions = {
  * @property fetched - The fetched events.
  * @property leased - The leased events.
  * @property acked - The acked events.
- * @property blocked - The blocked events.
+ * @property blocked - The blocked events (with error).
  */
 export type Drain<E extends Schemas> = {
   readonly fetched: Fetch<E>;
   readonly leased: Lease[];
   readonly acked: Lease[];
-  readonly blocked: Array<Lease & { error: string }>;
+  readonly blocked: Array<Lease & { readonly error: string }>;
 };

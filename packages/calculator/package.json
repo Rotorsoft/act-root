@@ -9,12 +9,12 @@
     "dev": "LOG_LEVEL=trace tsx watch src/main.ts"
   },
   "dependencies": {
-    "@rotorsoft/act": "^0.6.2",
-    "@trpc/server": "11.4.3",
-    "zod": "^4.0.14"
+    "@rotorsoft/act": "^0.6.4",
+    "@trpc/server": "11.4.4",
+    "zod": "^4.0.16"
   },
   "devDependencies": {
-    "@types/node": "^24.1.0",
+    "@types/node": "^24.2.1",
     "tsx": "^4.20.3"
   }
 }

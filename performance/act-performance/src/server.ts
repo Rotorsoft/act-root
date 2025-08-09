@@ -3,10 +3,33 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { randomUUID } from "crypto";
 import express from "express";
 import { create as pgProjector } from "./pg-projector.js";
-import { ConvergenceStatus, updateStats } from "./stats.js";
+import { ConvergenceState, updateStats } from "./stats.js";
 import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;
+
+// maps a todo-UUID stream to a bucket of N+1 streams
+function target(stream: string, N: number) {
+  const first = parseInt(stream[5], 16); // first uuid character
+  return first % N;
+}
+
+// serialize projection leases to one key or
+// one projection lease per stream?
+const projection_resolver =
+  process.env.SERIAL_PROJECTION === "true"
+    ? // serial projection (only one projection stream)
+      () => ({ target: "serial_projection" })
+    : // parallel projection (custom resolver to N projection streams)
+      (committed: Committed<Schemas, keyof Schemas>) => ({
+        target: `stream-${target(committed.stream, 25)}`, // use N > streamLimit to avoid conflicts
+        source: "todo.*", // incluce all todos
+      });
+// // parallel projection (default resolver is one-stream-to-one-projection)
+// : (committed: Committed<Schemas, keyof Schemas>) => ({
+//   target: committed.stream,
+//   source: committed.stream,
+// });
 
 async function main() {
   store(
@@ -25,16 +48,6 @@ async function main() {
   const projector = pgProjector();
   await projector.init();
 
-  // serialize projection leases to one key or
-  // one projection lease per stream?
-  const projection_resolver =
-    process.env.SERIAL_PROJECTION === "true"
-      ? () => ({ target: "serial_projection" })
-      : (committed: Committed<Schemas, keyof Schemas>) => ({
-          target: committed.stream,
-          source: committed.stream,
-        });
-
   // Compose the app with state and reactions
   const actApp = act()
     .with(Todo)
@@ -52,15 +65,16 @@ async function main() {
   let drainCount = 0;
   let eventCount = 0;
   let streamCount = 0;
-  let convergence: ConvergenceStatus;
+  let lagging: ConvergenceState;
+  let leading: ConvergenceState;
   const drainInterval = setInterval(async () => {
     const drain = await actApp.drain({
       streamLimit: 20,
       eventLimit: 200,
     });
     drainCount++;
-    convergence = updateStats(drainCount, eventCount, streamCount, drain);
-    if (convergence.converged) {
+    [lagging, leading] = updateStats(drainCount, eventCount, drain);
+    if (lagging.convergedAt && leading.convergedAt) {
       console.log("\nConverged! Load test complete.");
       drainInterval && clearInterval(drainInterval);
     }
@@ -76,7 +90,7 @@ async function main() {
       const actorId = req.headers["authorization"]
         ? req.headers["authorization"].replace("Bearer ", "")
         : "system";
-      const stream = randomUUID();
+      const stream = "todo-" + randomUUID();
       const [snap] = await actApp.do(
         "create",
         {
@@ -143,7 +157,8 @@ async function main() {
     const stats = await projector.getStats();
     res.json({
       ...stats,
-      ...convergence,
+      lagging,
+      leading,
       drainCount,
       eventCount,
       streamCount,

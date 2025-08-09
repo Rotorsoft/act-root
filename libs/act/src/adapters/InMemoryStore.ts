@@ -51,55 +51,56 @@ class InMemoryStream {
 
   /**
    * Attempt to lease this stream for processing.
-   * @param at - The end-of-lease watermark.
-   * @param by - The lease holder.
+   * @param lease - The lease request.
    * @param millis - Lease duration in milliseconds.
    * @returns The granted lease or undefined if blocked.
    */
-  lease(at: number, by: string, millis: number): Lease | undefined {
+  lease(lease: Lease, millis: number): Lease | undefined {
     if (this.is_avaliable) {
       if (millis > 0) {
-        this._leased_by = by;
+        this._leased_by = lease.by;
         this._leased_until = new Date(Date.now() + millis);
         this._retry = this._retry + 1;
       }
       return {
         stream: this.stream,
         source: this.source,
-        at,
-        by,
+        at: lease.at,
+        by: lease.by,
         retry: this._retry,
+        lagging: lease.lagging,
       };
     }
   }
 
   /**
    * Acknowledge completion of processing for this stream.
-   * @param at - Last processed watermark.
-   * @param by - Lease holder that processed the watermark.
+   * @param lease - The lease request.
    */
-  ack(at: number, by: string) {
-    if (this._leased_by === by) {
+  ack(lease: Lease) {
+    if (this._leased_by === lease.by) {
       this._leased_by = undefined;
       this._leased_until = undefined;
-      this._at = at;
+      this._at = lease.at;
       this._retry = -1;
       return {
         stream: this.stream,
         source: this.source,
         at: this._at,
-        by,
+        by: lease.by,
         retry: this._retry,
+        lagging: lease.lagging,
       };
     }
   }
 
   /**
    * Block a stream for processing after failing to process and reaching max retries with blocking enabled.
+   * @param lease - The lease request.
    * @param error Blocked error message.
    */
-  block(by: string, error: string) {
-    if (this._leased_by === by) {
+  block(lease: Lease, error: string) {
+    if (this._leased_by === lease.by) {
       this._blocked = true;
       this._error = error;
       return {
@@ -109,6 +110,7 @@ class InMemoryStream {
         by: this._leased_by,
         retry: this._retry,
         error: this._error,
+        lagging: lease.lagging,
       };
     }
   }
@@ -269,12 +271,22 @@ export class InMemoryStore implements Store {
       .filter((s) => s.is_avaliable)
       .sort((a, b) => a.at - b.at)
       .slice(0, lagging)
-      .map(({ stream, source, at }) => ({ stream, source, at }));
+      .map(({ stream, source, at }) => ({
+        stream,
+        source,
+        at,
+        lagging: true,
+      }));
     const b = [...this._streams.values()]
       .filter((s) => s.is_avaliable)
       .sort((a, b) => b.at - a.at)
       .slice(0, leading)
-      .map(({ stream, source, at }) => ({ stream, source, at }));
+      .map(({ stream, source, at }) => ({
+        stream,
+        source,
+        at,
+        lagging: false,
+      }));
     return [...a, ...b];
   }
 
@@ -292,7 +304,7 @@ export class InMemoryStore implements Store {
           // store new correlations
           this._streams.set(l.stream, new InMemoryStream(l.stream, l.source));
         }
-        return this._streams.get(l.stream)?.lease(l.at, l.by, millis);
+        return this._streams.get(l.stream)?.lease(l, millis);
       })
       .filter((l) => !!l);
   }
@@ -304,7 +316,7 @@ export class InMemoryStore implements Store {
   async ack(leases: Lease[]) {
     await sleep();
     return leases
-      .map((l) => this._streams.get(l.stream)?.ack(l.at, l.by))
+      .map((l) => this._streams.get(l.stream)?.ack(l))
       .filter((l) => !!l);
   }
 
@@ -316,7 +328,7 @@ export class InMemoryStore implements Store {
   async block(leases: Array<Lease & { error: string }>) {
     await sleep();
     return leases
-      .map((l) => this._streams.get(l.stream)?.block(l.by, l.error))
+      .map((l) => this._streams.get(l.stream)?.block(l, l.error))
       .filter((l) => !!l);
   }
 }

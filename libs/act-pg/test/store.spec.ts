@@ -407,29 +407,39 @@ describe("pg store", () => {
       const s = store();
       // Lease a new stream
       const leases = await s.lease(
-        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
         0
       );
       expect(leases.length).toBe(1);
       // Block the stream
-      await s.lease([{ stream: "L1", by: "actor", at: 1, retry: 0 }], 0);
+      await s.lease(
+        [{ stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 }],
+        0
+      );
       // Try to lease again with old at (should not update)
       const leases2 = await s.lease(
-        [{ stream: "L1", by: "actor", at: 0, retry: 0 }],
+        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
         0
       );
       expect(leases2.length).toBe(1);
       // Ack with valid lease
-      await s.ack([{ stream: "L1", by: "actor", at: 1, retry: 0 }]);
+      await s.ack([
+        { stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 },
+      ]);
       // Ack with old lease (should not throw)
-      await s.ack([{ stream: "L1", by: "actor", at: 0, retry: 0 }]);
+      await s.ack([
+        { stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 },
+      ]);
     });
 
     it("should not lease a blocked stream", async () => {
       const s = store();
-      await s.lease([{ stream: "L2", by: "actor", at: 0, retry: 0 }], 0);
+      await s.lease(
+        [{ stream: "L2", lagging: false, by: "actor", at: 0, retry: 0 }],
+        0
+      );
       const leases = await s.lease(
-        [{ stream: "L2", by: "actor", at: 1, retry: 0 }],
+        [{ stream: "L2", lagging: false, by: "actor", at: 1, retry: 0 }],
         0
       );
       expect(leases.length).toBe(1);
@@ -437,9 +447,14 @@ describe("pg store", () => {
 
     it("should not update state when ack is called with lower at", async () => {
       const s = store();
-      await s.lease([{ stream: "L3", by: "actor", at: 2, retry: 0 }], 0);
+      await s.lease(
+        [{ stream: "L3", lagging: false, by: "actor", at: 2, retry: 0 }],
+        0
+      );
       // Ack with lower at
-      await s.ack([{ stream: "L3", by: "actor", at: 1, retry: 0 }]);
+      await s.ack([
+        { stream: "L3", lagging: false, by: "actor", at: 1, retry: 0 },
+      ]);
       // No error, state unchanged
     });
 
@@ -467,27 +482,37 @@ describe("pg store", () => {
 
     it("should not block a stream if not leased by same drainer", async () => {
       const s = store();
-      await s.lease([{ stream: "L4", by: "actor", at: 0, retry: 0 }], 0);
+      await s.lease(
+        [{ stream: "L4", lagging: false, by: "actor", at: 0, retry: 0 }],
+        0
+      );
       const leases = await s.lease(
-        [{ stream: "L4", by: "actor", at: 1, retry: 0 }],
+        [{ stream: "L4", lagging: false, by: "actor", at: 1, retry: 0 }],
         100000
       );
       expect(leases.length).toBe(1);
 
       // Try to block the stream
       const blocked = await s.block([
-        { stream: "L4", by: "actor2", at: 2, retry: 0, error: "error" },
+        {
+          stream: "L4",
+          lagging: false,
+          by: "actor2",
+          at: 2,
+          retry: 0,
+          error: "error",
+        },
       ]);
       expect(blocked.length).toBe(0);
     });
 
     it("should poll", async () => {
       await store().lease(
-        [{ stream: "makeitlast", by: "x", at: 0, retry: 0 }],
+        [{ stream: "makeitlast", lagging: false, by: "x", at: 0, retry: 0 }],
         0
       );
       await store().ack([
-        { stream: "makeitlast", by: "x", at: 1000, retry: 0 },
+        { stream: "makeitlast", lagging: false, by: "x", at: 1000, retry: 0 },
       ]);
       const result = await store().poll(1, 1);
       expect(result.at(-1)?.stream).toEqual("makeitlast");

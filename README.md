@@ -2,7 +2,7 @@
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 ![Repo Size](https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square)
 
-👉 **[View the Interactive Landing Page](https://rotorsoft.github.io/act-root/)** 👈
+[![Landing Page](./assets/landing.png)](https://rotorsoft.github.io/act-root/)
 
 The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. This project is an attempt to distill the basic building blocks of modern software design into a small, simple, and composable library.
 
@@ -89,13 +89,11 @@ await app.do(
 console.log(await app.load(Counter, "counter1"));
 ```
 
-For more examples, see the [examples directory](./packages/calculator/src/) and [API docs](https://rotorsoft.github.io/act-root/api/).
-
 ## Documentation
 
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
 - [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro)
-- [Examples](./packages/calculator/src/)
+- [Examples](#examples)
 
 ## How to Contribute
 
@@ -147,225 +145,14 @@ To demonstrate the capabilities of this framework, we provide a library of examp
 
 ### Calculator
 
-The first example is a simple [calculator](./packages/calculator/src/) where actions represent key presses, and a counter tracks how many times the "9" and "=" keys have been pressed in response to events.
-
-```ts
-import { act, Actor, sleep, state, ZodEmpty } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
-import { z } from "zod";
-import { Calculator, KEYS } from ".";
-
-export const NineCounter = state(
-  "NineCounter",
-  z.object({
-    nines: z.number().int(),
-    equals: z.number().int(),
-  })
-)
-  .init(() => ({ nines: 0, equals: 0 }))
-  .emits({
-    NineCounted: ZodEmpty,
-    EqualCounted: ZodEmpty,
-  })
-  .patch({
-    NineCounted: (_, state) => ({ nines: (state.nines || 0) + 1 }),
-    EqualCounted: (_, state) => ({ equals: (state.equals || 0) + 1 }),
-  })
-  .on("Count", z.object({ key: z.enum(KEYS) }))
-  .emit(({ key }) => {
-    if (key === "9") return ["NineCounted", {}];
-    if (key === "=") return ["EqualCounted", {}];
-  })
-  .build();
-
-async function main() {
-  // to test with postgres
-  // store(new PostgresStore({ schema: "act", table: "calculator", leaseMillis: 30_000 }));
-  // await store().drop();
-  // await store().seed();
-
-  const actor: Actor = { id: randomUUID(), name: "Calculator" };
-
-  const app = act()
-    .with(Calculator)
-    .with(NineCounter)
-
-    .on("DigitPressed")
-    .do(async function CountNines(event, stream) {
-      await app.do(
-        "Count",
-        { stream, actor },
-        { key: event.data.digit },
-        event
-      );
-    })
-    .to(() => "Counter")
-    .on("EqualsPressed")
-    .do(async function CountEquals(event, stream) {
-      await app.do("Count", { stream, actor }, { key: "=" }, event);
-    })
-    .to(() => "Counter")
-
-    .on("EqualCounted")
-    .do(async function ShowMessage({ stream }) {
-      await sleep();
-      console.log(`Equals counted on ${stream}`);
-    })
-    .void()
-
-    .build();
-
-  // drain on commit
-  app.on("committed", () => {
-    void app.drain();
-  });
-
-  // drain on a schedule
-  setInterval(() => {
-    void app.drain();
-  }, 1_000);
-
-  // log drains
-  app.on("acked", (acked) => {
-    console.log("Acked:", acked);
-  });
-
-  const calc1 = "A";
-  const calc2 = "B";
-
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "+" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "*" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "+" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "9" });
-  await app.do("PressKey", { stream: calc1, actor }, { key: "=" });
-  await app.do("PressKey", { stream: calc2, actor }, { key: "=" });
-
-  console.log(calc1, await app.load(Calculator, calc1));
-  console.log(calc2, await app.load(Calculator, calc2));
-
-  setInterval(async () => {
-    const counter = await app.load(NineCounter, "Counter");
-    console.log("Counter", counter.state);
-  }, 1_000);
-}
-
-void main();
-```
+The first example is a simple [calculator](./packages/calculator/src/) where actions represent key presses, and a digit board tracks how many times the digits have been pressed in response to events.
 
 ### WolfDesk
 
 The second example is a reference implementation of the [WolfDesk](./packages/wolfdesk/src/) ticketing system, as proposed by Vlad Khononov in his book [Learning Domain-Driven Design](https://a.co/d/1udDtcE).
 
-```ts
-import { act, Actor } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
-import { Ticket } from "./ticket";
+### tRPC Integration
 
-export const builder = act().with(Ticket);
-
-export const app = builder
-  // reactions
-  .on("TicketOpened")
-  .do(assign)
-  .on("MessageAdded")
-  .do(deliver)
-  .on("TicketEscalationRequested")
-  .do(escalate)
-
-  // tickets projection
-  .on("TicketOpened")
-  .do(p.opened)
-  .to("tickets")
-  .on("TicketClosed")
-  .do(p.closed)
-  .to("tickets")
-  .on("TicketAssigned")
-  .do(p.assigned)
-  .to("tickets")
-  .on("MessageAdded")
-  .do(p.messageAdded)
-  .to("tickets")
-  .on("TicketEscalated")
-  .do(p.escalated)
-  .to("tickets")
-  .on("TicketReassigned")
-  .do(p.reassigned)
-  .to("tickets")
-  .on("TicketResolved")
-  .do(p.resolved)
-  .to("tickets")
-  .build();
-
-const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
-
-export async function assign(
-  event: AsCommitted<typeof builder.events, "TicketOpened">
-) {
-  const agent = assignAgent(
-    event.stream,
-    event.data.supportCategoryId,
-    event.data.priority
-  );
-  await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
-}
-
-export async function deliver(
-  event: AsCommitted<typeof builder.events, "MessageAdded">
-) {
-  await deliverMessage(event.data);
-  await app.do(
-    "MarkMessageDelivered",
-    { stream: event.stream, actor },
-    { messageId: event.data.messageId },
-    event
-  );
-}
-
-export async function escalate(
-  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
-) {
-  await app.do(
-    "EscalateTicket",
-    { stream: event.stream, actor },
-    event.data,
-    event
-  );
-}
-```
-
-## tRPC Integration
-
-Additionally, we include tRPC-based client and server packages that outline the basic steps for exposing the calculator as a web application.
-
-```ts
-import { act, Target } from "@rotorsoft/act";
-import { Calculator, Digits, Operators } from "@act/calculator";
-import { initTRPC } from "@trpc/server";
-
-const app = act().with(Calculator).build();
-const t = initTRPC.create();
-const target: Target = {
-  stream: "calculator",
-  actor: { id: "1", name: "Calculator" },
-};
-
-export const router = t.router({
-  PressKey: t.procedure
-    .input(Calculator.actions.PressKey)
-    .mutation(({ input }) => app.do("PressKey", target, input)),
-  Clear: t.procedure.mutation(() => app.do("Clear", target, {})),
-});
-
-export type Router = typeof router;
-export type { Digits, Operators };
-```
+Additionally, we include tRPC-based [client](./packages/client/src/) and [server](/packages/server/src/) packages that outline the basic steps for exposing the calculator as a web application.
 
 Enjoy!

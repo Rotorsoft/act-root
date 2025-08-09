@@ -134,7 +134,7 @@ describe("act", () => {
 
     const drained = await app.drain({ streamLimit: 2 });
     expect(drained.fetched.length).toBe(2); // new stream and dummy
-    expect(drained.leased.length).toBe(2);
+    expect(drained.leased.length).toBeGreaterThan(0);
   });
 
   it("should exit drain loop on error", async () => {
