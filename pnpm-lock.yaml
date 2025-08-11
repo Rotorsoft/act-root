@@ -143,8 +143,8 @@ importers:
         specifier: ^13.1.1
         version: 13.1.1
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
 
   libs/act-pg:
     dependencies:
@@ -155,8 +155,8 @@ importers:
         specifier: ^8.16.3
         version: 8.16.3
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       '@types/pg':
         specifier: ^8.15.5
@@ -171,8 +171,8 @@ importers:
         specifier: 11.4.4
         version: 11.4.4(typescript@5.9.2)
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       '@types/node':
         specifier: ^24.2.1
@@ -266,8 +266,8 @@ importers:
         specifier: ^2.8.5
         version: 2.8.5
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       '@types/cors':
         specifier: ^2.8.19
@@ -291,8 +291,8 @@ importers:
         specifier: ^0.44.4
         version: 0.44.4(@libsql/client@0.15.10)(@types/pg@8.15.5)(pg@8.16.3)
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       drizzle-kit:
         specifier: ^0.31.4
@@ -316,8 +316,8 @@ importers:
         specifier: ^8.16.3
         version: 8.16.3
       zod:
-        specifier: ^4.0.16
-        version: 4.0.16
+        specifier: ^4.0.17
+        version: 4.0.17
     devDependencies:
       '@types/express':
         specifier: ^5.0.3
@@ -7513,8 +7513,8 @@ packages:
     resolution: {integrity: sha512-AyeEbWOu/TAXdxlV9wmGcR0+yh2j3vYPGOECcIj2S7MkrLyC7ne+oye2BKTItt0ii2PHk4cDy+95+LshzbXnGg==}
     engines: {node: '>=12.20'}
 
-  zod@4.0.16:
-    resolution: {integrity: sha512-Djo/cM339grjI7/HmN+ixYO2FzEMcWr/On50UlQ/RjrWK1I/hPpWhpC76heCptnRFpH0LMwrEbUY50HDc0V8wg==}
+  zod@4.0.17:
+    resolution: {integrity: sha512-1PHjlYRevNxxdy2JZ8JcNAw7rX8V9P1AKkP+x/xZfxB0K5FYfuV+Ug6P/6NVSR2jHQ+FzDDoDHS04nYUsOIyLQ==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -10109,7 +10109,7 @@ snapshots:
     dependencies:
       '@rotorsoft/act': 0.6.5
       pg: 8.16.3
-      zod: 4.0.16
+      zod: 4.0.17
     transitivePeerDependencies:
       - pg-native
 
@@ -10117,7 +10117,7 @@ snapshots:
     dependencies:
       pino: 9.7.0
       pino-pretty: 13.1.1
-      zod: 4.0.16
+      zod: 4.0.17
 
   '@rspack/binding-darwin-arm64@1.4.11':
     optional: true
@@ -16077,6 +16077,6 @@ snapshots:
 
   yocto-queue@1.2.1: {}
 
-  zod@4.0.16: {}
+  zod@4.0.17: {}
 
   zwitch@2.0.4: {}
