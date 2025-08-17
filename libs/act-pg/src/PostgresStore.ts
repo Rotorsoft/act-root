@@ -153,7 +153,7 @@ export class PostgresStore implements Store {
       );
     } catch (error) {
       await client.query("ROLLBACK");
-      logger.error("Failed to seed store:", error);
+      logger.error(error);
       throw error;
     } finally {
       client.release();

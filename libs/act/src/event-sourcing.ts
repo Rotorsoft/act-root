@@ -100,7 +100,7 @@ export async function load<
     },
     { stream, with_snaps: true }
   );
-  logger.trace(state, `🟢 load ${stream}`);
+  logger.trace({ ...state, msg: `🟢 load ${stream}` });
   return { event, state, patches, snaps };
 }
 
@@ -147,10 +147,10 @@ export async function action<
   const snapshot = await load(me, stream);
   const expected = expectedVersion || snapshot.event?.version;
 
-  logger.trace(
-    payload,
-    `🔵 ${stream}.${action as string}${typeof expected === "number" ? `.${expected}` : ""}`
-  );
+  logger.trace({
+    ...payload,
+    msg: `🔵 ${stream}.${action as string}${typeof expected === "number" ? `.${expected}` : ""}`,
+  });
 
   if (me.given) {
     const invariants = me.given[action] || [];

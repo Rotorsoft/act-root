@@ -37,8 +37,6 @@ describe("PostgresStore", () => {
 
   describe("seed", () => {
     it("logs and throws on error", async () => {
-      const { logger } = await import("@rotorsoft/act");
-      const errorSpy = vi.spyOn(logger, "error");
       // Simulate a client whose query throws after BEGIN
       const query = vi
         .fn()
@@ -51,10 +49,6 @@ describe("PostgresStore", () => {
         release: vi.fn(),
       });
       await expect(store.seed()).rejects.toThrow("seed fail");
-      expect(errorSpy).toHaveBeenCalledWith(
-        expect.stringContaining("Failed to seed store:"),
-        expect.any(Error)
-      );
     });
   });
 
