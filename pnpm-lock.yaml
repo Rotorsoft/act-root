@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.6.6
-        version: 0.6.6
+        specifier: ^0.6.7
+        version: 0.6.7
       '@trpc/server':
         specifier: 11.4.4
         version: 11.4.4(typescript@5.9.2)
@@ -301,8 +301,8 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.6.6
-        version: 0.6.6
+        specifier: ^0.6.7
+        version: 0.6.7
       '@rotorsoft/act-pg':
         specifier: ^0.5.6
         version: 0.5.6
@@ -2286,6 +2286,10 @@ packages:
 
   '@rotorsoft/act@0.6.6':
     resolution: {integrity: sha512-ohSTXS1nR9SmFL/zzDPaTwiycvjQrq6kyRwgl4l6udFT+M2u+eFTsg/6dxX3pLbAIZlTH3RYpMxek5BICqFj3g==}
+    engines: {node: '>=22.18.0'}
+
+  '@rotorsoft/act@0.6.7':
+    resolution: {integrity: sha512-IgZ2YWdgvJR7vR1k0Ghy41IQZy3SI9SxVBwMDXsOeftdqj0CmycbWhbfsz12adDyXio7aX6+0EcaGF9sIqHRag==}
     engines: {node: '>=22.18.0'}
 
   '@rspack/binding-darwin-arm64@1.4.11':
@@ -10113,6 +10117,12 @@ snapshots:
       - pg-native
 
   '@rotorsoft/act@0.6.6':
+    dependencies:
+      pino: 9.9.0
+      pino-pretty: 13.1.1
+      zod: 4.0.17
+
+  '@rotorsoft/act@0.6.7':
     dependencies:
       pino: 9.9.0
       pino-pretty: 13.1.1
