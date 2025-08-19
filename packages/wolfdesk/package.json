@@ -12,7 +12,7 @@
     "drizzle:studio": "npx drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.15.11",
+    "@libsql/client": "^0.15.12",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
     "@trpc/server": "11.4.4",

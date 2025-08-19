@@ -276,8 +276,8 @@ importers:
   packages/wolfdesk:
     dependencies:
       '@libsql/client':
-        specifier: ^0.15.11
-        version: 0.15.11
+        specifier: ^0.15.12
+        version: 0.15.12
       '@rotorsoft/act':
         specifier: workspace:*
         version: link:../../libs/act
@@ -289,7 +289,7 @@ importers:
         version: 11.4.4(typescript@5.9.2)
       drizzle-orm:
         specifier: ^0.44.4
-        version: 0.44.4(@libsql/client@0.15.11)(@types/pg@8.15.5)(pg@8.16.3)
+        version: 0.44.4(@libsql/client@0.15.12)(@types/pg@8.15.5)(pg@8.16.3)
       zod:
         specifier: ^4.0.17
         version: 4.0.17
@@ -1997,11 +1997,11 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@libsql/client@0.15.11':
-    resolution: {integrity: sha512-JB8RWRs+cAbHX35/dQ9wD3m4W5EVGevq1fFqiHKTT4Pa5HR7WrcGRVT+8NL2M7gtTlOvyPh9zzms2DPLBCswig==}
+  '@libsql/client@0.15.12':
+    resolution: {integrity: sha512-JIqB0XsNrqYqBQZuhcgZdTcQoNOoQ5AMF+1yxc7vcZrLtm42QJwRazmTuBfyDwtWASEmVgjxeaLF4NT1iyVX8g==}
 
-  '@libsql/core@0.15.11':
-    resolution: {integrity: sha512-DQDYnEhCSYOsx30ASlOGuOqcQhvwELhOS2qM4dnIP+ZhKki2epZU1j5VZSNeQlrQXHkByMcWBy+wt7tBNx/9uA==}
+  '@libsql/core@0.15.12':
+    resolution: {integrity: sha512-S3tF6885ZizVjfym7f8SevL2VId/+DzxiKmP5zFbrhA8oMLh2XH8bYXChmhab7o9qUSHx+XjK4jCFpUwR5g+Ig==}
 
   '@libsql/darwin-arm64@0.5.17':
     resolution: {integrity: sha512-WTYG2skZsUnZmfZ2v7WFj7s3/5s2PfrYBZOWBKOnxHA8g4XCDc/4bFDaqob9Q2e88+GC7cWeJ8VNkVBFpD2Xxg==}
@@ -9857,9 +9857,9 @@ snapshots:
 
   '@leichtgewicht/ip-codec@2.0.5': {}
 
-  '@libsql/client@0.15.11':
+  '@libsql/client@0.15.12':
     dependencies:
-      '@libsql/core': 0.15.11
+      '@libsql/core': 0.15.12
       '@libsql/hrana-client': 0.7.0
       js-base64: 3.7.7
       libsql: 0.5.17
@@ -9868,7 +9868,7 @@ snapshots:
       - bufferutil
       - utf-8-validate
 
-  '@libsql/core@0.15.11':
+  '@libsql/core@0.15.12':
     dependencies:
       js-base64: 3.7.7
 
@@ -11837,9 +11837,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.44.4(@libsql/client@0.15.11)(@types/pg@8.15.5)(pg@8.16.3):
+  drizzle-orm@0.44.4(@libsql/client@0.15.12)(@types/pg@8.15.5)(pg@8.16.3):
     optionalDependencies:
-      '@libsql/client': 0.15.11
+      '@libsql/client': 0.15.12
       '@types/pg': 8.15.5
       pg: 8.16.3
 
