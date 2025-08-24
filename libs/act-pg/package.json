@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-pg",
   "type": "module",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "act pg adapters",
   "author": "rotorsoft",
   "license": "MIT",
