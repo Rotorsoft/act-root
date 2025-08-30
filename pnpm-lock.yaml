@@ -304,8 +304,8 @@ importers:
         specifier: ^0.6.9
         version: 0.6.9
       '@rotorsoft/act-pg':
-        specifier: ^0.5.7
-        version: 0.5.7
+        specifier: ^0.5.8
+        version: 0.5.8
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -2307,12 +2307,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-pg@0.5.7':
-    resolution: {integrity: sha512-B8TohfxoOmrFftyHJ6XkKuFtiljLlgt57R5SeMOHYd6Gn1heGvLRmIEAjDVLBbG2ID4BmYKq8pgsNELbXJ39Kg==}
-    engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act@0.6.8':
-    resolution: {integrity: sha512-Vgfkh917dc+5uuPT2IXRRy6tYSpT6mmbVmqV6brVQXNiwpFSQXdPNMhQNd4Z0JLbw8FRqE876JXxlajy48NVJg==}
+  '@rotorsoft/act-pg@0.5.8':
+    resolution: {integrity: sha512-oLcGldD7v0zuuM0opliYZl0oD5rJfIYC1uNHF+XSCgU4gsYGa0Olx7MO1TM/KdtU6+PLQXVu5FsXjx73C1+zeA==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.6.9':
@@ -10804,19 +10800,13 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.46.2':
     optional: true
 
-  '@rotorsoft/act-pg@0.5.7':
+  '@rotorsoft/act-pg@0.5.8':
     dependencies:
-      '@rotorsoft/act': 0.6.8
+      '@rotorsoft/act': 0.6.9
       pg: 8.16.3
       zod: 4.1.4
     transitivePeerDependencies:
       - pg-native
-
-  '@rotorsoft/act@0.6.8':
-    dependencies:
-      pino: 9.9.0
-      pino-pretty: 13.1.1
-      zod: 4.1.4
 
   '@rotorsoft/act@0.6.9':
     dependencies:
