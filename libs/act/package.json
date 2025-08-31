@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act",
   "type": "module",
-  "version": "0.6.9",
+  "version": "0.6.10",
   "description": "act core library",
   "author": "rotorsoft",
   "license": "MIT",
