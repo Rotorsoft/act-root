@@ -165,8 +165,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.6.15
-        version: 0.6.15
+        specifier: ^0.6.16
+        version: 0.6.16
       '@trpc/server':
         specifier: 11.5.1
         version: 11.5.1(typescript@5.9.2)
@@ -301,8 +301,8 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.6.15
-        version: 0.6.15
+        specifier: ^0.6.16
+        version: 0.6.16
       '@rotorsoft/act-pg':
         specifier: ^0.5.12
         version: 0.5.12
