@@ -12,9 +12,9 @@
     "@rotorsoft/act-pg": "workspace:*",
     "@tanstack/react-query": "^5.90.2",
     "@tanstack/react-query-devtools": "^5.90.2",
-    "@trpc/client": "11.5.1",
-    "@trpc/next": "11.5.1",
-    "@trpc/react-query": "11.5.1",
+    "@trpc/client": "11.6.0",
+    "@trpc/next": "11.6.0",
+    "@trpc/react-query": "11.6.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
