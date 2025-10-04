@@ -1,3 +1,5 @@
+#### 2025-10-04 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.17...@rotorsoft/act-v0.6.18) @rotorsoft/act-v0.6.18
+  - PATCH [96e49686](https://github.com/Rotorsoft/act-root/commit/96e496867372ca5fbe33c5d5a52d7fb930c41aff) fix(deps): update dependency pino to ^9.13.1
 #### 2025-09-29 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.16...@rotorsoft/act-v0.6.17) @rotorsoft/act-v0.6.17
   - PATCH [4d3baf48](https://github.com/Rotorsoft/act-root/commit/4d3baf481ab21543adb520cba58b5d4ac5806e15) fix(deps): update dependency pino to ^9.12.0
 #### 2025-09-21 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.11...@rotorsoft/act-pg-v0.5.12) @rotorsoft/act-pg-v0.5.12
