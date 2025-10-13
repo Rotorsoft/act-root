@@ -1,3 +1,6 @@
+#### 2025-10-13 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.20...@rotorsoft/act-v0.6.21) @rotorsoft/act-v0.6.21
+  - PATCH [9d38a44d](https://github.com/Rotorsoft/act-root/commit/9d38a44df3f6db859683694abc39091ce88c526e) fix: pino logs
+  - PATCH [e6795bcf](https://github.com/Rotorsoft/act-root/commit/e6795bcf248497dc4dea0012070822541e25aee3) fix(deps): update dependency pino to v10
 #### 2025-10-12 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.19...@rotorsoft/act-v0.6.20) @rotorsoft/act-v0.6.20
   - PATCH [d2423f84](https://github.com/Rotorsoft/act-root/commit/d2423f84025b1ca10e85d18bee22755a15a6d125) fix(deps): update dependency pino-pretty to ^13.1.2 (#200)
 #### 2025-10-08 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.12...@rotorsoft/act-pg-v0.5.13) @rotorsoft/act-pg-v0.5.13
