@@ -57,7 +57,7 @@
     "@types/node": "^24.9.1",
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
-    "@vitest/coverage-v8": "^4.0.3",
+    "@vitest/coverage-v8": "^4.0.4",
     "chance": "^1.1.13",
     "eslint": "^9.38.0",
     "eslint-config-prettier": "^10.1.8",
@@ -71,7 +71,7 @@
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
-    "vitest": "^4.0.3"
+    "vitest": "^4.0.4"
   },
   "simple-git-hooks": {
     "commit-msg": "bash scripts/commit-msg.sh $1",
