@@ -19,9 +19,9 @@
   ],
   "engines": {
     "node": ">=22.18.0",
-    "pnpm": ">=10.19.0"
+    "pnpm": ">=10.20.0"
   },
-  "packageManager": "pnpm@10.19.0",
+  "packageManager": "pnpm@10.20.0",
   "type": "module",
   "repository": {
     "type": "git",
