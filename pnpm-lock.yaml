@@ -304,8 +304,8 @@ importers:
         specifier: ^0.6.23
         version: 0.6.23
       '@rotorsoft/act-pg':
-        specifier: ^0.5.13
-        version: 0.5.13
+        specifier: ^0.5.14
+        version: 0.5.14
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -2669,12 +2669,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-pg@0.5.13':
-    resolution: {integrity: sha512-O/1v7ZhdUAuEBrFx/lKmPHz+HclDLfHztv+8t9YCg9i5+7POzH0ql6U2CjaI3uy+CiabE4c+6ydLI3cA18FVSw==}
-    engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act@0.6.19':
-    resolution: {integrity: sha512-Q4w1dvAF4VFx51P1eZFkUQPy/NAg69jq4l3w/xyogcUAFjoQhWse4+iVEPcSd37vxmxiuVTJweQ3o4vjub53WA==}
+  '@rotorsoft/act-pg@0.5.14':
+    resolution: {integrity: sha512-RXLCjnqOZiI/ePKodbmCoiZwrhp5k1jE6KfBlIICOVjc5RWDLSqB0QCPvZdIpdXe7LVd6o/8+fua8/4icV67bA==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.6.23':
@@ -6200,10 +6196,6 @@ packages:
     resolution: {integrity: sha512-0zZC2ygfdqvqK8zJIr1e+wT1T/L+LF6qvqvbzEQ6tiMAoTqEVK9a1K3YRu8HEUvGEvNqZyPJTtb2sNIoTkB83w==}
     hasBin: true
 
-  pino@9.13.1:
-    resolution: {integrity: sha512-Szuj+ViDTjKPQYiKumGmEn3frdl+ZPSdosHyt9SnUevFosOkMY2b7ipxlEctNKPmMD/VibeBI+ZcZCJK+4DPuw==}
-    hasBin: true
-
   pirates@4.0.7:
     resolution: {integrity: sha512-TfySrs/5nm8fQJDcBDuUng3VOUKsd7S+zqvbOTiGXHfxX4wK31ard+hoNuvkicM/2YFzlpDgABOevKSsB4G/FA==}
     engines: {node: '>= 6'}
@@ -7170,9 +7162,6 @@ packages:
   slice-ansi@7.1.0:
     resolution: {integrity: sha512-bSiSngZ/jWeX93BqeIAbImyTbEihizcwNjFoRUIY/T1wWQsfsm2Vw1agPKylXvQTU7iASGdHhyqRlqQzfz+Htg==}
     engines: {node: '>=18'}
-
-  slow-redact@0.3.0:
-    resolution: {integrity: sha512-cf723wn9JeRIYP9tdtd86GuqoR5937u64Io+CYjlm2i7jvu7g0H+Cp0l0ShAf/4ZL+ISUTVT+8Qzz7RZmp9FjA==}
 
   snake-case@3.0.4:
     resolution: {integrity: sha512-LAOh4z89bGQvl9pFfNF8V146i7o7/CqFPbqzYgP+yYzDIDeS9HaNFtXABamRW+AQzEVODcvE79ljJ+8a9YSdMg==}
@@ -10790,19 +10779,13 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.52.5':
     optional: true
 
-  '@rotorsoft/act-pg@0.5.13':
+  '@rotorsoft/act-pg@0.5.14':
     dependencies:
-      '@rotorsoft/act': 0.6.19
+      '@rotorsoft/act': 0.6.23
       pg: 8.16.3
       zod: 4.1.13
     transitivePeerDependencies:
       - pg-native
-
-  '@rotorsoft/act@0.6.19':
-    dependencies:
-      pino: 9.13.1
-      pino-pretty: 13.1.2
-      zod: 4.1.13
 
   '@rotorsoft/act@0.6.23':
     dependencies:
@@ -14856,20 +14839,6 @@ snapshots:
       sonic-boom: 4.2.0
       thread-stream: 3.1.0
 
-  pino@9.13.1:
-    dependencies:
-      atomic-sleep: 1.0.0
-      on-exit-leak-free: 2.1.2
-      pino-abstract-transport: 2.0.0
-      pino-std-serializers: 7.0.0
-      process-warning: 5.0.0
-      quick-format-unescaped: 4.0.4
-      real-require: 0.2.0
-      safe-stable-stringify: 2.5.0
-      slow-redact: 0.3.0
-      sonic-boom: 4.2.0
-      thread-stream: 3.1.0
-
   pirates@4.0.7: {}
 
   pkg-dir@7.0.0:
@@ -16020,8 +15989,6 @@ snapshots:
     dependencies:
       ansi-styles: 6.2.1
       is-fullwidth-code-point: 5.0.0
-
-  slow-redact@0.3.0: {}
 
   snake-case@3.0.4:
     dependencies:
