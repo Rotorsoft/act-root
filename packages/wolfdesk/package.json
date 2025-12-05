@@ -20,6 +20,6 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "drizzle-kit": "^0.31.7"
+    "drizzle-kit": "^0.31.8"
   }
 }
