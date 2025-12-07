@@ -16,7 +16,7 @@
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
     "@trpc/server": "11.7.2",
-    "drizzle-orm": "^0.44.7",
+    "drizzle-orm": "^0.45.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {
