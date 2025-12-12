@@ -159,8 +159,8 @@ importers:
         version: 4.1.13
     devDependencies:
       '@types/pg':
-        specifier: ^8.15.6
-        version: 8.15.6
+        specifier: ^8.16.0
+        version: 8.16.0
 
   packages/calculator:
     dependencies:
@@ -289,7 +289,7 @@ importers:
         version: 11.7.2(typescript@5.9.3)
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@libsql/client@0.15.15)(@types/pg@8.15.6)(pg@8.16.3)
+        version: 0.45.1(@libsql/client@0.15.15)(@types/pg@8.16.0)(pg@8.16.3)
       zod:
         specifier: ^4.1.13
         version: 4.1.13
@@ -323,8 +323,8 @@ importers:
         specifier: ^5.0.6
         version: 5.0.6
       '@types/pg':
-        specifier: ^8.15.6
-        version: 8.15.6
+        specifier: ^8.16.0
+        version: 8.16.0
       tsx:
         specifier: ^4.21.0
         version: 4.21.0
@@ -3060,8 +3060,8 @@ packages:
   '@types/node@24.10.3':
     resolution: {integrity: sha512-gqkrWUsS8hcm0r44yn7/xZeV1ERva/nLgrLxFRUGb7aoNMIJfZJ3AC261zDQuOAKC7MiXai1WCpYc48jAHoShQ==}
 
-  '@types/pg@8.15.6':
-    resolution: {integrity: sha512-NoaMtzhxOrubeL/7UZuNTrejB4MPAJ0RpxZqXQf2qXuVlTPuG6Y8p4u9dKRaue4yjmC7ZhzVO2/Yyyn25znrPQ==}
+  '@types/pg@8.16.0':
+    resolution: {integrity: sha512-RmhMd/wD+CF8Dfo+cVIy3RR5cl8CyfXQ0tGgW6XBL8L4LM/UTEbNXYRbLwU6w+CgrKBNbrQWt4FUtTfaU5jSYQ==}
 
   '@types/prismjs@1.26.5':
     resolution: {integrity: sha512-AUZTa7hQ2KY5L7AmtSiqxlhWxb4ina0yd8hNbl4TWuqnv/pFP0nDMb3YrfSBf4hJVGLh2YEIBfKaBW/9UEl6IQ==}
@@ -11696,7 +11696,7 @@ snapshots:
     dependencies:
       undici-types: 7.16.0
 
-  '@types/pg@8.15.6':
+  '@types/pg@8.16.0':
     dependencies:
       '@types/node': 24.10.3
       pg-protocol: 1.10.3
@@ -12905,10 +12905,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.45.1(@libsql/client@0.15.15)(@types/pg@8.15.6)(pg@8.16.3):
+  drizzle-orm@0.45.1(@libsql/client@0.15.15)(@types/pg@8.16.0)(pg@8.16.3):
     optionalDependencies:
       '@libsql/client': 0.15.15
-      '@types/pg': 8.15.6
+      '@types/pg': 8.16.0
       pg: 8.16.3
 
   dunder-proto@1.0.1:
