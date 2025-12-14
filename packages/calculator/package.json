@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@rotorsoft/act": "^0.6.24",
-    "@trpc/server": "11.7.2",
+    "@trpc/server": "11.8.0",
     "zod": "^4.1.13"
   },
   "devDependencies": {
