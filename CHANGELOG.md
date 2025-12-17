@@ -1,3 +1,5 @@
+#### 2025-12-17 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.24...@rotorsoft/act-v0.6.25) @rotorsoft/act-v0.6.25
+  - PATCH [edf067c1](https://github.com/Rotorsoft/act-root/commit/edf067c17428fdaa82ddf0222027587fedc5e84c) fix(deps): update dependency zod to ^4.2.1
 #### 2025-12-04 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-v0.6.23...@rotorsoft/act-v0.6.24) @rotorsoft/act-v0.6.24
   - PATCH [014e3252](https://github.com/Rotorsoft/act-root/commit/014e32521ff6b08a7e6b3a06568cdfe9f687e043) fix(deps): update dependency pino-pretty to ^13.1.3
 #### 2025-11-24 [+/-](https://github.com/Rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.5.13...@rotorsoft/act-pg-v0.5.14) @rotorsoft/act-pg-v0.5.14
