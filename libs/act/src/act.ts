@@ -119,18 +119,87 @@ export class Act<
   }
 
   /**
-   * Executes an action (command) against a state machine, emitting and committing the resulting event(s).
+   * Executes an action on a state instance, committing resulting events.
    *
-   * @template K The type of action to execute
-   * @param action The action name (key of the action schema)
-   * @param target The target (stream and actor) for the action
-   * @param payload The action payload (validated against the schema)
-   * @param reactingTo (Optional) The event this action is reacting to
-   * @param skipValidation (Optional) If true, skips schema validation (not recommended)
-   * @returns The snapshot of the committed event
+   * This is the primary method for modifying state. It:
+   * 1. Validates the action payload against the schema
+   * 2. Loads the current state snapshot
+   * 3. Checks invariants (business rules)
+   * 4. Executes the action handler to generate events
+   * 5. Applies events to create new state
+   * 6. Commits events to the store with optimistic concurrency control
    *
-   * @example
-   * await app.do("increment", { stream: "counter1", actor }, { by: 1 });
+   * @template K - Action name from registered actions
+   * @param action - The name of the action to execute
+   * @param target - Target specification with stream ID and actor context
+   * @param payload - Action payload matching the action's schema
+   * @param reactingTo - Optional event that triggered this action (for correlation)
+   * @param skipValidation - Skip schema validation (use carefully, for performance)
+   * @returns Array of snapshots for all affected states (usually one)
+   *
+   * @throws {ValidationError} If payload doesn't match action schema
+   * @throws {InvariantError} If business rules are violated
+   * @throws {ConcurrencyError} If another process modified the stream
+   *
+   * @example Basic action execution
+   * ```typescript
+   * const snapshots = await app.do(
+   *   "increment",
+   *   {
+   *     stream: "counter-1",
+   *     actor: { id: "user1", name: "Alice" }
+   *   },
+   *   { by: 5 }
+   * );
+   *
+   * console.log(snapshots[0].state.count); // Current count after increment
+   * ```
+   *
+   * @example With error handling
+   * ```typescript
+   * try {
+   *   await app.do(
+   *     "withdraw",
+   *     { stream: "account-123", actor: { id: "user1", name: "Alice" } },
+   *     { amount: 1000 }
+   *   );
+   * } catch (error) {
+   *   if (error instanceof InvariantError) {
+   *     console.error("Business rule violated:", error.description);
+   *   } else if (error instanceof ConcurrencyError) {
+   *     console.error("Concurrent modification detected, retry...");
+   *   } else if (error instanceof ValidationError) {
+   *     console.error("Invalid payload:", error.details);
+   *   }
+   * }
+   * ```
+   *
+   * @example Reaction triggering another action
+   * ```typescript
+   * const app = act()
+   *   .with(Order)
+   *   .with(Inventory)
+   *   .on("OrderPlaced")
+   *     .do(async (event, context) => {
+   *       // This action is triggered by an event
+   *       const result = await context.app.do(
+   *         "reduceStock",
+   *         {
+   *           stream: "inventory-1",
+   *           actor: event.meta.causation.action.actor
+   *         },
+   *         { amount: event.data.items.length },
+   *         event // Pass event for correlation tracking
+   *       );
+   *       return result;
+   *     })
+   *     .to("inventory-1")
+   *   .build();
+   * ```
+   *
+   * @see {@link Target} for target structure
+   * @see {@link Snapshot} for return value structure
+   * @see {@link ValidationError}, {@link InvariantError}, {@link ConcurrencyError}
    */
   async do<K extends keyof A>(
     action: K,
@@ -153,18 +222,43 @@ export class Act<
   }
 
   /**
-   * Loads the current state snapshot for a given state machine and stream.
+   * Loads the current state snapshot for a specific stream.
    *
-   * @template SX The type of state
-   * @template EX The type of events
-   * @template AX The type of actions
-   * @param state The state machine definition
-   * @param stream The stream (instance) to load
-   * @param callback (Optional) Callback to receive the loaded snapshot
-   * @returns The snapshot of the loaded state
+   * Reconstructs the current state by replaying events from the event store.
+   * Uses snapshots when available to optimize loading performance.
    *
-   * @example
-   * const snapshot = await app.load(Counter, "counter1");
+   * @template SX - State schema type
+   * @template EX - Event schemas type
+   * @template AX - Action schemas type
+   * @param state - The state definition to load
+   * @param stream - The stream ID (state instance identifier)
+   * @param callback - Optional callback invoked with the loaded snapshot
+   * @returns The current state snapshot for the stream
+   *
+   * @example Load current state
+   * ```typescript
+   * const snapshot = await app.load(Counter, "counter-1");
+   * console.log(snapshot.state.count);    // Current count
+   * console.log(snapshot.version);        // Number of events applied
+   * console.log(snapshot.patches);        // Events since last snapshot
+   * ```
+   *
+   * @example With callback
+   * ```typescript
+   * const snapshot = await app.load(User, "user-123", (snap) => {
+   *   console.log("Loaded user:", snap.state.name);
+   * });
+   * ```
+   *
+   * @example Load multiple states
+   * ```typescript
+   * const [user, account] = await Promise.all([
+   *   app.load(User, "user-123"),
+   *   app.load(BankAccount, "account-456")
+   * ]);
+   * ```
+   *
+   * @see {@link Snapshot} for snapshot structure
    */
   async load<SX extends Schema, EX extends Schemas, AX extends Schemas>(
     state: State<SX, EX, AX>,
@@ -175,14 +269,55 @@ export class Act<
   }
 
   /**
-   * Query the event store for events matching a filter.
+   * Queries the event store for events matching a filter.
    *
-   * @param query The query filter (e.g., by stream, event name, or time range)
-   * @param callback (Optional) Callback for each event found
-   * @returns An object with the first and last event found, and the total count
+   * Use this for analyzing event streams, generating reports, or debugging.
+   * The callback is invoked for each matching event, and the method returns
+   * summary information (first event, last event, total count).
    *
-   * @example
-   * const { count } = await app.query({ stream: "counter1" }, (event) => console.log(event));
+   * For small result sets, consider using {@link query_array} instead.
+   *
+   * @param query - The query filter
+   * @param query.stream - Filter by stream ID
+   * @param query.name - Filter by event name
+   * @param query.after - Filter events after this event ID
+   * @param query.before - Filter events before this event ID
+   * @param query.created_after - Filter events after this timestamp
+   * @param query.created_before - Filter events before this timestamp
+   * @param query.limit - Maximum number of events to return
+   * @param callback - Optional callback invoked for each matching event
+   * @returns Object with first event, last event, and total count
+   *
+   * @example Query all events for a stream
+   * ```typescript
+   * const { first, last, count } = await app.query(
+   *   { stream: "counter-1" },
+   *   (event) => console.log(event.name, event.data)
+   * );
+   * console.log(`Found ${count} events from ${first?.id} to ${last?.id}`);
+   * ```
+   *
+   * @example Query specific event types
+   * ```typescript
+   * const { count } = await app.query(
+   *   { name: "UserCreated", limit: 100 },
+   *   (event) => {
+   *     console.log("User created:", event.data.email);
+   *   }
+   * );
+   * ```
+   *
+   * @example Query events in time range
+   * ```typescript
+   * const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+   * const { count } = await app.query({
+   *   created_after: yesterday,
+   *   stream: "user-123"
+   * });
+   * console.log(`User had ${count} events in last 24 hours`);
+   * ```
+   *
+   * @see {@link query_array} for loading events into memory
    */
   async query(
     query: Query,
@@ -203,14 +338,30 @@ export class Act<
   }
 
   /**
-   * Query the event store for events matching a filter.
-   * Use this version with caution, as it return events in memory.
+   * Queries the event store and returns all matching events in memory.
    *
-   * @param query The query filter (e.g., by stream, event name, or time range)
-   * @returns The matching events
+   * **Use with caution** - this loads all results into memory. For large result sets,
+   * use {@link query} with a callback instead to process events incrementally.
    *
-   * @example
-   * const { count } = await app.query({ stream: "counter1" }, (event) => console.log(event));
+   * @param query - The query filter (same as {@link query})
+   * @returns Array of all matching events
+   *
+   * @example Load all events for a stream
+   * ```typescript
+   * const events = await app.query_array({ stream: "counter-1" });
+   * console.log(`Loaded ${events.length} events`);
+   * events.forEach(event => console.log(event.name, event.data));
+   * ```
+   *
+   * @example Get recent events
+   * ```typescript
+   * const recent = await app.query_array({
+   *   stream: "user-123",
+   *   limit: 10
+   * });
+   * ```
+   *
+   * @see {@link query} for large result sets
    */
   async query_array(query: Query): Promise<Committed<E, keyof E>[]> {
     const events: Committed<E, keyof E>[] = [];
@@ -274,14 +425,68 @@ export class Act<
   }
 
   /**
-   * Drains and processes events from the store, triggering reactions and updating state.
+   * Processes pending reactions by draining uncommitted events from the event store.
    *
-   * This is typically called in a background loop or after committing new events.
+   * The drain process:
+   * 1. Polls the store for streams with uncommitted events
+   * 2. Leases streams to prevent concurrent processing
+   * 3. Fetches events for each leased stream
+   * 4. Executes matching reaction handlers
+   * 5. Acknowledges successful reactions or blocks failing ones
    *
-   * @returns The number of events drained and processed
+   * Drain uses a dual-frontier strategy to balance processing of new streams (lagging)
+   * vs active streams (leading). The ratio adapts based on event pressure.
    *
-   * @example
+   * Call this method periodically in a background loop, or after committing events.
+   *
+   * @param options - Drain configuration options
+   * @param options.streamLimit - Maximum number of streams to process per cycle (default: 10)
+   * @param options.eventLimit - Maximum events to fetch per stream (default: 10)
+   * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
+   * @returns Drain statistics with fetched, leased, acked, and blocked counts
+   *
+   * @example Basic drain loop
+   * ```typescript
+   * // Process reactions after each action
+   * await app.do("createUser", target, payload);
    * await app.drain();
+   * ```
+   *
+   * @example Background drain worker
+   * ```typescript
+   * setInterval(async () => {
+   *   try {
+   *     const result = await app.drain({
+   *       streamLimit: 20,
+   *       eventLimit: 50
+   *     });
+   *     if (result.acked.length) {
+   *       console.log(`Processed ${result.acked.length} streams`);
+   *     }
+   *   } catch (error) {
+   *     console.error("Drain error:", error);
+   *   }
+   * }, 5000); // Every 5 seconds
+   * ```
+   *
+   * @example With lifecycle listeners
+   * ```typescript
+   * app.on("acked", (leases) => {
+   *   console.log(`Acknowledged ${leases.length} streams`);
+   * });
+   *
+   * app.on("blocked", (blocked) => {
+   *   console.error(`Blocked ${blocked.length} streams due to errors`);
+   *   blocked.forEach(({ stream, error }) => {
+   *     console.error(`Stream ${stream}: ${error}`);
+   *   });
+   * });
+   *
+   * await app.drain();
+   * ```
+   *
+   * @see {@link correlate} for dynamic stream discovery
+   * @see {@link start_correlations} for automatic correlation
    */
   async drain<E extends Schemas>({
     streamLimit = 10,
@@ -404,9 +609,49 @@ export class Act<
   }
 
   /**
-   * Correlates streams using reaction resolvers.
-   * @param query - The query filter (e.g., by stream, event name, or starting point).
-   * @returns The leases of newly correlated streams, and the last seen event ID.
+   * Discovers and registers new streams dynamically based on reaction resolvers.
+   *
+   * Correlation enables "dynamic reactions" where target streams are determined at runtime
+   * based on event content. For example, you might create a stats stream for each user
+   * when they perform certain actions.
+   *
+   * This method scans events matching the query and identifies new target streams based
+   * on reaction resolvers. It then registers these streams so they'll be picked up by
+   * the next drain cycle.
+   *
+   * @param query - Query filter to scan for new correlations
+   * @param query.after - Start scanning after this event ID (default: -1)
+   * @param query.limit - Maximum events to scan (default: 10)
+   * @returns Object with newly leased streams and last scanned event ID
+   *
+   * @example Manual correlation
+   * ```typescript
+   * // Scan for new streams
+   * const { leased, last_id } = await app.correlate({ after: 0, limit: 100 });
+   * console.log(`Found ${leased.length} new streams`);
+   *
+   * // Save last_id for next scan
+   * await saveCheckpoint(last_id);
+   * ```
+   *
+   * @example Dynamic stream creation
+   * ```typescript
+   * const app = act()
+   *   .with(User)
+   *   .with(UserStats)
+   *   .on("UserLoggedIn")
+   *     .do(async (event) => ["incrementLoginCount", {}])
+   *     .to((event) => ({
+   *       target: `stats-${event.stream}` // Dynamic target per user
+   *     }))
+   *   .build();
+   *
+   * // Discover stats streams as users log in
+   * await app.correlate();
+   * ```
+   *
+   * @see {@link start_correlations} for automatic periodic correlation
+   * @see {@link stop_correlations} to stop automatic correlation
    */
   async correlate(
     query: Query = { after: -1, limit: 10 }
@@ -451,19 +696,59 @@ export class Act<
   }
 
   /**
-   * Starts correlation worker that identifies and registers new streams using reaction resolvers.
+   * Starts automatic periodic correlation worker for discovering new streams.
    *
-   * Enables "dynamic reactions", allowing streams to be auto-discovered based on event content.
-   * - Uses a correlation sliding window over the event stream to identify new streams.
-   * - Once registered, these streams are picked up by the main `drain` loop.
-   * - Users should have full control over their correlation strategy.
-   * - The starting point keeps increasing with each new batch of events.
-   * - Users are responsible for storing the last seen event ID.
+   * The correlation worker runs in the background, scanning for new events and identifying
+   * new target streams based on reaction resolvers. It maintains a sliding window that
+   * advances with each scan, ensuring all events are eventually correlated.
    *
-   * @param query - The query filter (e.g., by stream, event name, or starting point).
-   * @param frequency - The frequency of correlation checks (in milliseconds).
-   * @param callback - Callback to report stats (new strems, last seen event ID, etc.).
-   * @returns true if the correlation worker started, false otherwise (already started).
+   * This is useful for dynamic stream creation patterns where you don't know all streams
+   * upfront - they're discovered as events arrive.
+   *
+   * **Note:** Only one correlation worker can run at a time per Act instance.
+   *
+   * @param query - Query filter for correlation scans
+   * @param query.after - Initial starting point (default: -1, start from beginning)
+   * @param query.limit - Events to scan per cycle (default: 100)
+   * @param frequency - Correlation frequency in milliseconds (default: 10000)
+   * @param callback - Optional callback invoked with newly discovered streams
+   * @returns `true` if worker started, `false` if already running
+   *
+   * @example Start automatic correlation
+   * ```typescript
+   * // Start correlation worker scanning every 5 seconds
+   * app.start_correlations(
+   *   { after: 0, limit: 100 },
+   *   5000,
+   *   (leased) => {
+   *     console.log(`Discovered ${leased.length} new streams`);
+   *   }
+   * );
+   *
+   * // Later, stop it
+   * app.stop_correlations();
+   * ```
+   *
+   * @example With checkpoint persistence
+   * ```typescript
+   * // Load last checkpoint
+   * const lastId = await loadCheckpoint();
+   *
+   * app.start_correlations(
+   *   { after: lastId, limit: 100 },
+   *   10000,
+   *   async (leased) => {
+   *     // Save checkpoint for next restart
+   *     if (leased.length) {
+   *       const maxId = Math.max(...leased.map(l => l.at));
+   *       await saveCheckpoint(maxId);
+   *     }
+   *   }
+   * );
+   * ```
+   *
+   * @see {@link correlate} for manual one-time correlation
+   * @see {@link stop_correlations} to stop the worker
    */
   start_correlations(
     query: Query = {},
@@ -487,6 +772,23 @@ export class Act<
     return true;
   }
 
+  /**
+   * Stops the automatic correlation worker.
+   *
+   * Call this to stop the background correlation worker started by {@link start_correlations}.
+   * This is automatically called when the Act instance is disposed.
+   *
+   * @example
+   * ```typescript
+   * // Start correlation
+   * app.start_correlations();
+   *
+   * // Later, stop it
+   * app.stop_correlations();
+   * ```
+   *
+   * @see {@link start_correlations}
+   */
   stop_correlations() {
     if (this._correlation_interval) {
       clearInterval(this._correlation_interval);

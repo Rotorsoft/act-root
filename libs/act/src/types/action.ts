@@ -16,12 +16,54 @@ import {
  */
 
 /**
- * Represents an actor (user, system, etc.) that initiates actions or events.
+ * Represents an actor (user or system) performing an action.
+ *
+ * Actors provide audit trail and authorization context. Every action
+ * must specify who is performing it for accountability and access control.
+ *
+ * @example User actor
+ * ```typescript
+ * const actor: Actor = {
+ *   id: "user-123",
+ *   name: "Alice Smith"
+ * };
+ * ```
+ *
+ * @example System actor
+ * ```typescript
+ * const systemActor: Actor = {
+ *   id: "system",
+ *   name: "Background Job"
+ * };
+ * ```
  */
 export type Actor = z.infer<typeof ActorSchema>;
 
 /**
- * Represents the target of an action or event, including stream and actor info.
+ * Target specification for action execution.
+ *
+ * Identifies which state instance (stream) should process the action
+ * and who is performing it. The target combines the stream identifier
+ * with actor context for complete audit trail.
+ *
+ * @example Basic target
+ * ```typescript
+ * const target: Target = {
+ *   stream: "user-123",
+ *   actor: { id: "admin", name: "Admin User" }
+ * };
+ *
+ * await app.do("updateProfile", target, { email: "new@example.com" });
+ * ```
+ *
+ * @example Dynamic stream ID
+ * ```typescript
+ * const userId = "user-" + Date.now();
+ * await app.do("createUser", {
+ *   stream: userId,
+ *   actor: currentUser
+ * }, userData);
+ * ```
  */
 export type Target = z.infer<typeof TargetSchema>;
 
@@ -89,31 +131,101 @@ export type ZodTypes<T extends Schemas> = {
 
 /**
  * Represents a message (event or action) with a name and data payload.
- * @template E - Schemas map.
- * @template K - Event/action name.
+ *
+ * Messages are the basic building blocks of the event log. Each message
+ * has a name (event type) and data (event payload).
+ *
+ * @template E - Schemas map
+ * @template K - Event/action name
+ *
+ * @example
+ * ```typescript
+ * const message: Message<{ Incremented: { amount: number } }, "Incremented"> = {
+ *   name: "Incremented",
+ *   data: { amount: 5 }
+ * };
+ * ```
  */
 export type Message<E extends Schemas, K extends keyof E> = {
+  /** The event or action name */
   readonly name: K;
+  /** The event or action payload */
   readonly data: Readonly<E[K]>;
 };
 
 /**
- * A committed event, including metadata.
- * @template E - Schemas map.
- * @template K - Event name.
+ * A committed event with complete metadata.
+ *
+ * Committed events include the message data plus metadata about when and how
+ * the event was created, including correlation and causation information for
+ * tracing event-driven workflows.
+ *
+ * @template E - Schemas map
+ * @template K - Event name
+ *
+ * @example
+ * ```typescript
+ * // Committed events include:
+ * // - id: global sequence number
+ * // - stream: which state instance
+ * // - version: event number within stream
+ * // - created: timestamp
+ * // - meta: correlation and causation
+ *
+ * app.on("committed", (snapshots) => {
+ *   snapshots.forEach(snap => {
+ *     if (snap.event) {
+ *       console.log(`Event ${snap.event.name} #${snap.event.id}`);
+ *       console.log(`Stream: ${snap.event.stream} v${snap.event.version}`);
+ *       console.log(`Data:`, snap.event.data);
+ *     }
+ *   });
+ * });
+ * ```
+ *
+ * @see {@link CommittedMeta} for metadata structure
  */
 export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
   CommittedMeta;
 
 /**
- * Represents a snapshot of state at a point in the event stream.
- * @template S - State schema.
- * @template E - Event schemas.
+ * Snapshot of state at a specific point in time.
+ *
+ * Snapshots represent the current state after applying events. They include
+ * metadata about how many events have been applied (patches) and how many
+ * snapshots have been taken for optimization.
+ *
+ * @template S - State schema
+ * @template E - Event schemas
+ *
+ * @example
+ * ```typescript
+ * const snapshot = await app.load(Counter, "counter-1");
+ *
+ * console.log(snapshot.state);     // { count: 42 }
+ * console.log(snapshot.patches);   // 8 (events since last snapshot)
+ * console.log(snapshot.snaps);     // 1 (1 snapshot taken)
+ * console.log(snapshot.event);     // Last event that created this snapshot
+ * ```
+ *
+ * @example Using snapshot in action handler
+ * ```typescript
+ * .on("increment", z.object({ by: z.number() }))
+ *   .emit((action, snapshot) => {
+ *     console.log("Current count:", snapshot.state.count);
+ *     console.log("Events applied:", snapshot.patches);
+ *     return ["Incremented", { amount: action.by }];
+ *   })
+ * ```
  */
 export type Snapshot<S extends Schema, E extends Schemas> = {
+  /** Current state data */
   readonly state: S;
-  readonly event?: Committed<E, keyof E>; // undefined when initialized
+  /** Event that created this snapshot (undefined for initial state) */
+  readonly event?: Committed<E, keyof E>;
+  /** Number of patches applied since last snapshot */
   readonly patches: number;
+  /** Number of snapshots taken for this stream */
   readonly snaps: number;
 };
 

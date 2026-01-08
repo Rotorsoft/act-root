@@ -117,17 +117,68 @@ class InMemoryStream {
 }
 
 /**
+ * In-memory event store implementation.
+ *
+ * This is the default store used by Act when no other store is injected.
+ * It stores all events in memory and is suitable for:
+ * - Development and prototyping
+ * - Unit and integration testing
+ * - Demonstrations and examples
+ *
+ * **Not suitable for production** - all data is lost when the process exits.
+ * Use {@link PostgresStore} for production deployments.
+ *
+ * The in-memory store provides:
+ * - Full {@link Store} interface implementation
+ * - Optimistic concurrency control
+ * - Stream leasing for distributed processing simulation
+ * - Snapshot support
+ * - Fast performance (no I/O overhead)
+ *
+ * @example Using in tests
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ *
+ * describe("Counter", () => {
+ *   beforeEach(async () => {
+ *     // Reset store between tests
+ *     await store().seed();
+ *   });
+ *
+ *   it("increments", async () => {
+ *     await app.do("increment", target, { by: 5 });
+ *     const snapshot = await app.load(Counter, "counter-1");
+ *     expect(snapshot.state.count).toBe(5);
+ *   });
+ * });
+ * ```
+ *
+ * @example Explicit instantiation
+ * ```typescript
+ * import { InMemoryStore } from "@rotorsoft/act";
+ *
+ * const testStore = new InMemoryStore();
+ * await testStore.seed();
+ *
+ * // Use for specific test scenarios
+ * await testStore.commit("test-stream", events, meta);
+ * ```
+ *
+ * @example Querying events
+ * ```typescript
+ * const events: any[] = [];
+ * await store().query(
+ *   (event) => events.push(event),
+ *   { stream: "test-stream" }
+ * );
+ * console.log(`Found ${events.length} events`);
+ * ```
+ *
+ * @see {@link Store} for the interface definition
+ * @see {@link PostgresStore} for production use
+ * @see {@link store} for injecting stores
+ *
  * @category Adapters
- * @see Store
- *
- * In-memory implementation of the Store interface.
- *
- * Suitable for development, testing, and demonstration. Not for production use.
- * All events and streams are stored in memory and lost on process exit.
- *
- * @example
- *   const store = new InMemoryStore();
- *   await store.commit('streamA', [{ name: 'event', data: {} }], meta);
  */
 export class InMemoryStore implements Store {
   // stored events

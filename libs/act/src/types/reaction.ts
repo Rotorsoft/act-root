@@ -7,12 +7,37 @@
 import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
 
 /**
- * Handles a committed event and optionally returns a new snapshot of state.
- * @template E - Event schemas.
- * @template K - Event name.
- * @param event - The committed event.
- * @param stream - The stream name.
- * @returns A promise resolving to a snapshot or void.
+ * Reaction handler function that processes committed events.
+ *
+ * Reaction handlers respond to events asynchronously. They can:
+ * - Perform side effects (send emails, call APIs, log, etc.)
+ * - Return an action tuple to trigger another action
+ * - Return `void` or `undefined` for side-effect-only reactions
+ *
+ * Handlers are called during drain cycles and support automatic retries
+ * with configurable error handling.
+ *
+ * @template E - Event schemas
+ * @template K - Event name
+ * @param event - The committed event that triggered this reaction
+ * @param stream - The target stream name for this reaction
+ * @returns Promise resolving to an action tuple or void
+ *
+ * @example Side effect only
+ * ```typescript
+ * const sendEmail: ReactionHandler<Events, "UserCreated"> = async (event) => {
+ *   await emailService.send(event.data.email, "Welcome!");
+ * };
+ * ```
+ *
+ * @example Triggering another action
+ * ```typescript
+ * const reduceInventory: ReactionHandler<Events, "OrderPlaced"> = async (event) => {
+ *   return ["reduceStock", { amount: event.data.items.length }];
+ * };
+ * ```
+ *
+ * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionHandler<E extends Schemas, K extends keyof E> = (
   event: Committed<E, K>,
@@ -20,11 +45,47 @@ export type ReactionHandler<E extends Schemas, K extends keyof E> = (
 ) => Promise<Snapshot<E, Schema> | void>;
 
 /**
- * Resolves the stream for a reaction, either by mapping the event or statically.
- * @template E - Event schemas.
- * @template K - Event name.
- * @param event - The committed event.
- * @returns The target stream name and optionally the source stream (for fetch optimization).
+ * Resolver for determining which stream a reaction should target.
+ *
+ * Resolvers enable dynamic reaction routing based on event content. They can be:
+ * - **Static**: Always route to the same target stream
+ * - **Dynamic**: Determine target based on event data at runtime
+ *
+ * Resolvers can also specify source streams for optimization, allowing the drain
+ * process to efficiently fetch only relevant events.
+ *
+ * @template E - Event schemas
+ * @template K - Event name
+ * @param event - The committed event (for dynamic resolvers)
+ * @returns Target stream configuration or undefined to skip
+ *
+ * @example Static target
+ * ```typescript
+ * .on("UserCreated")
+ *   .do(sendWelcomeEmail)
+ *   .to("email-queue") // Static target
+ * ```
+ *
+ * @example Dynamic target per user
+ * ```typescript
+ * .on("UserLoggedIn")
+ *   .do(incrementLoginCount)
+ *   .to((event) => ({
+ *     target: `stats-${event.stream}` // Dynamic per user
+ *   }))
+ * ```
+ *
+ * @example With source optimization
+ * ```typescript
+ * .on("UserUpdated")
+ *   .do(updateReadModel)
+ *   .to(({ stream }) => ({
+ *     source: stream,           // Only fetch from this user's stream
+ *     target: `cache-${stream}` // Update corresponding cache
+ *   }))
+ * ```
+ *
+ * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionResolver<E extends Schemas, K extends keyof E> =
   | { target: string; source?: string } // static
@@ -102,13 +163,41 @@ export type Fetch<E extends Schemas> = Array<{
 }>;
 
 /**
- * Lease information for stream processing.
- * @property stream - The target stream name.
- * @property source - The source stream.
- * @property by - The lease holder.
- * @property at - The lease watermark (last event in the lease window or acked).
- * @property retry - Retry count.
- * @property lagging - Whether the stream is lagging behind.
+ * Lease information for distributed stream processing.
+ *
+ * Leases prevent concurrent processing of the same stream by multiple workers.
+ * When a worker acquires a lease, it has exclusive rights to process events
+ * for that stream until the lease expires or is acknowledged.
+ *
+ * The drain process uses leases to:
+ * - Prevent race conditions in distributed setups
+ * - Track processing progress (watermark)
+ * - Manage retries on failures
+ * - Balance load between lagging and leading streams
+ *
+ * @property stream - The target stream name being processed
+ * @property source - Optional source stream for filtering
+ * @property at - Watermark: last successfully processed event ID
+ * @property by - Unique identifier of the lease holder (UUID)
+ * @property retry - Number of retry attempts (0 = first attempt)
+ * @property lagging - Whether this stream is behind (lagging frontier)
+ *
+ * @example
+ * ```typescript
+ * app.on("acked", (leases) => {
+ *   leases.forEach(lease => {
+ *     console.log(`Processed ${lease.stream} up to event ${lease.at}`);
+ *   });
+ * });
+ *
+ * app.on("blocked", (blocked) => {
+ *   blocked.forEach(({ stream, retry, error }) => {
+ *     console.error(`Stream ${stream} blocked after ${retry} retries: ${error}`);
+ *   });
+ * });
+ * ```
+ *
+ * @see {@link Drain} for drain cycle results
  */
 export type Lease = {
   readonly stream: string;

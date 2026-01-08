@@ -96,13 +96,83 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
 }
 
 /**
- * Registers resource disposers that are triggered on process exit.
+ * Registers resource cleanup functions for graceful shutdown.
  *
- * @param disposer The disposer function to register
- * @returns A function that triggers all registered disposers and terminates the process
+ * Disposers are called automatically when the process exits (SIGINT, SIGTERM)
+ * or when manually triggered. They execute in reverse registration order,
+ * allowing proper cleanup of dependent resources.
  *
- * @example
- * dispose(async () => { await myResource.close(); });
+ * Act automatically disposes registered stores and adapters. Use this function
+ * to register additional cleanup for your own resources (database connections,
+ * file handles, timers, etc.).
+ *
+ * @param disposer - Async function to call during cleanup
+ * @returns Function to manually trigger disposal and exit
+ *
+ * @example Register custom resource cleanup
+ * ```typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const redis = createRedisClient();
+ *
+ * dispose(async () => {
+ *   console.log("Closing Redis connection...");
+ *   await redis.quit();
+ * });
+ *
+ * // On SIGINT/SIGTERM, Redis will be cleaned up automatically
+ * ```
+ *
+ * @example Multiple disposers in order
+ * ```typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const db = connectDatabase();
+ * dispose(async () => {
+ *   console.log("Closing database...");
+ *   await db.close();
+ * });
+ *
+ * const cache = connectCache();
+ * dispose(async () => {
+ *   console.log("Closing cache...");
+ *   await cache.disconnect();
+ * });
+ *
+ * // On exit: cache closes first, then database
+ * ```
+ *
+ * @example Manual cleanup trigger
+ * ```typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * const shutdown = dispose(async () => {
+ *   await cleanup();
+ * });
+ *
+ * // Manually trigger cleanup and exit
+ * process.on("SIGUSR2", async () => {
+ *   console.log("Manual shutdown requested");
+ *   await shutdown("EXIT");
+ * });
+ * ```
+ *
+ * @example With error handling
+ * ```typescript
+ * import { dispose } from "@rotorsoft/act";
+ *
+ * dispose(async () => {
+ *   try {
+ *     await expensiveCleanup();
+ *   } catch (error) {
+ *     console.error("Cleanup failed:", error);
+ *     // Error doesn't prevent other disposers from running
+ *   }
+ * });
+ * ```
+ *
+ * @see {@link Disposer} for disposer function type
+ * @see {@link Disposable} for disposable interface
  */
 export function dispose(
   disposer?: Disposer
@@ -117,13 +187,82 @@ export function dispose(
 export const SNAP_EVENT = "__snapshot__";
 
 /**
- * Singleton event store port. By default, uses the in-memory store.
+ * Gets or injects the singleton event store.
  *
- * You can inject a persistent store (e.g., Postgres) by calling `store(myAdapter)`.
+ * By default, Act uses an in-memory store suitable for development and testing.
+ * For production, inject a persistent store like PostgresStore before building
+ * your application.
  *
- * @example
- * const myStore = store();
- * const customStore = store(new MyCustomStore());
+ * **Important:** Store injection must happen before creating any Act instances.
+ * Once set, the store cannot be changed without restarting the application.
+ *
+ * @param adapter - Optional store implementation to inject
+ * @returns The singleton store instance
+ *
+ * @example Using default in-memory store
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ *
+ * const currentStore = store(); // Returns InMemoryStore
+ * ```
+ *
+ * @example Injecting PostgreSQL store
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * // Inject before building your app
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret",
+ *   schema: "public",
+ *   table: "events"
+ * }));
+ *
+ * // Now build your app - it will use PostgreSQL
+ * const app = act()
+ *   .with(Counter)
+ *   .build();
+ * ```
+ *
+ * @example With environment-based configuration
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * if (process.env.NODE_ENV === "production") {
+ *   store(new PostgresStore({
+ *     host: process.env.DB_HOST,
+ *     port: parseInt(process.env.DB_PORT || "5432"),
+ *     database: process.env.DB_NAME,
+ *     user: process.env.DB_USER,
+ *     password: process.env.DB_PASSWORD
+ *   }));
+ * }
+ * // Development uses default in-memory store
+ * ```
+ *
+ * @example Testing with fresh store
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ *
+ * beforeEach(async () => {
+ *   // Reset store between tests
+ *   await store().seed();
+ * });
+ *
+ * afterAll(async () => {
+ *   // Cleanup
+ *   await store().drop();
+ * });
+ * ```
+ *
+ * @see {@link Store} for the store interface
+ * @see {@link InMemoryStore} for the default implementation
+ * @see {@link PostgresStore} for production use
  */
 export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();

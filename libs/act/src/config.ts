@@ -80,15 +80,63 @@ const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"));
 const pkg = getPackage();
 
 /**
- * Returns the current Act Framework configuration, validated and type-safe.
+ * Gets the current Act Framework configuration.
  *
- * Merges package.json metadata with environment, logging, and timing options.
- * @returns The validated configuration object.
- * @example
- * ```ts
+ * Configuration is loaded from package.json and environment variables, providing
+ * type-safe access to application metadata and runtime settings.
+ *
+ * **Environment Variables:**
+ * - `NODE_ENV`: "development" | "test" | "staging" | "production" (default: "development")
+ * - `LOG_LEVEL`: "fatal" | "error" | "warn" | "info" | "debug" | "trace"
+ * - `LOG_SINGLE_LINE`: "true" | "false" (default: "true")
+ * - `SLEEP_MS`: Milliseconds for sleep utility (default: 100, 0 for tests)
+ *
+ * **Defaults by environment:**
+ * - test: logLevel="error", sleepMs=0
+ * - production: logLevel="info"
+ * - development: logLevel="trace"
+ *
+ * @returns The validated configuration object
+ *
+ * @example Basic usage
+ * ```typescript
+ * import { config } from "@rotorsoft/act";
+ *
  * const cfg = config();
- * console.log(cfg.env, cfg.logLevel);
+ * console.log(`App: ${cfg.name} v${cfg.version}`);
+ * console.log(`Environment: ${cfg.env}`);
+ * console.log(`Log level: ${cfg.logLevel}`);
  * ```
+ *
+ * @example Environment-specific behavior
+ * ```typescript
+ * import { config } from "@rotorsoft/act";
+ *
+ * const cfg = config();
+ *
+ * if (cfg.env === "production") {
+ *   // Use PostgreSQL in production
+ *   store(new PostgresStore(prodConfig));
+ * } else {
+ *   // Use in-memory store for dev/test
+ *   store(new InMemoryStore());
+ * }
+ * ```
+ *
+ * @example Adjusting log levels
+ * ```typescript
+ * // Set via environment variable:
+ * // LOG_LEVEL=debug npm start
+ *
+ * // Or check in code:
+ * const cfg = config();
+ * if (cfg.logLevel === "trace") {
+ *   logger.trace("Detailed debugging enabled");
+ * }
+ * ```
+ *
+ * @see {@link Config} for configuration type
+ * @see {@link Package} for package.json metadata
  */
 export const config = (): Config => {
   return extend({ ...pkg, env, logLevel, logSingleLine, sleepMs }, BaseSchema);

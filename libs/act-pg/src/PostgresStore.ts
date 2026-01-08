@@ -38,21 +38,112 @@ const DEFAULT_CONFIG: Config = {
 };
 
 /**
+ * Production-ready PostgreSQL event store implementation.
+ *
+ * PostgresStore provides persistent, scalable event storage using PostgreSQL.
+ * It implements the full {@link Store} interface with production-grade features:
+ *
+ * **Features:**
+ * - Persistent event storage with ACID guarantees
+ * - Optimistic concurrency control via version numbers
+ * - Distributed stream processing with leasing
+ * - Snapshot support for performance optimization
+ * - Connection pooling for scalability
+ * - Automatic table and index creation
+ *
+ * **Database Schema:**
+ * - Events table: Stores all committed events
+ * - Streams table: Tracks stream metadata and leases
+ * - Indexes on stream, version, and timestamps for fast queries
+ *
+ * @example Basic setup
+ * ```typescript
+ * import { store } from "@rotorsoft/act";
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * store(new PostgresStore({
+ *   host: "localhost",
+ *   port: 5432,
+ *   database: "myapp",
+ *   user: "postgres",
+ *   password: "secret"
+ * }));
+ *
+ * const app = act()
+ *   .with(Counter)
+ *   .build();
+ * ```
+ *
+ * @example With custom schema and table
+ * ```typescript
+ * import { PostgresStore } from "@rotorsoft/act-pg";
+ *
+ * const pgStore = new PostgresStore({
+ *   host: process.env.DB_HOST || "localhost",
+ *   port: parseInt(process.env.DB_PORT || "5432"),
+ *   database: process.env.DB_NAME || "myapp",
+ *   user: process.env.DB_USER || "postgres",
+ *   password: process.env.DB_PASSWORD,
+ *   schema: "events",      // Custom schema
+ *   table: "act_events"    // Custom table name
+ * });
+ *
+ * // Initialize tables
+ * await pgStore.seed();
+ * ```
+ *
+ * @example Connection pooling configuration
+ * ```typescript
+ * // PostgresStore uses node-postgres (pg) connection pooling
+ * // Pool is created automatically with default settings
+ * // For custom pool config, use environment variables:
+ * //   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+ * //   PGMAXCONNECTIONS, PGIDLETIMEOUT, etc.
+ *
+ * const pgStore = new PostgresStore({
+ *   host: "db.example.com",
+ *   port: 5432,
+ *   database: "production",
+ *   user: "app_user",
+ *   password: process.env.DB_PASSWORD
+ * });
+ * ```
+ *
+ * @example Multi-tenant setup
+ * ```typescript
+ * // Use separate schemas per tenant
+ * const tenants = ["tenant1", "tenant2", "tenant3"];
+ *
+ * for (const tenant of tenants) {
+ *   const tenantStore = new PostgresStore({
+ *     host: "localhost",
+ *     database: "multitenant",
+ *     schema: tenant,        // Each tenant gets own schema
+ *     table: "events"
+ *   });
+ *   await tenantStore.seed();
+ * }
+ * ```
+ *
+ * @example Querying PostgreSQL directly
+ * ```typescript
+ * // For advanced queries, you can access pg client
+ * const pgStore = new PostgresStore(config);
+ * await pgStore.seed();
+ *
+ * // Use the store's query method for standard queries
+ * await pgStore.query(
+ *   (event) => console.log(event),
+ *   { stream: "user-123", limit: 100 }
+ * );
+ * ```
+ *
+ * @see {@link Store} for the interface definition
+ * @see {@link InMemoryStore} for development/testing
+ * @see {@link store} for injecting stores
+ * @see {@link https://node-postgres.com/ | node-postgres documentation}
+ *
  * @category Adapters
- * @see Store
- *
- * PostgresStore is a production-ready event store adapter for Act, using PostgreSQL as the backend.
- *
- * - Supports event sourcing, leasing, snapshots, and concurrency control.
- * - Designed for high-throughput, scalable, and reliable event storage.
- * - Implements the Act Store interface.
- *
- * @example
- * import { PostgresStore } from "@act/pg";
- * const store = new PostgresStore({ schema: "my_schema", table: "events" });
- * await store.seed();
- *
- * @see https://github.com/rotorsoft/act-root
  */
 export class PostgresStore implements Store {
   private _pool;
