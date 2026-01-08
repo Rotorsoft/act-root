@@ -273,8 +273,8 @@ importers:
   packages/wolfdesk:
     dependencies:
       '@libsql/client':
-        specifier: ^0.15.15
-        version: 0.15.15
+        specifier: ^0.17.0
+        version: 0.17.0
       '@rotorsoft/act':
         specifier: workspace:*
         version: link:../../libs/act
@@ -286,7 +286,7 @@ importers:
         version: 11.8.1(typescript@5.9.3)
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@libsql/client@0.15.15)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(pg@8.16.3)
+        version: 0.45.1(@libsql/client@0.17.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(pg@8.16.3)
       zod:
         specifier: ^4.3.5
         version: 4.3.5
@@ -2133,11 +2133,11 @@ packages:
   '@leichtgewicht/ip-codec@2.0.5':
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
 
-  '@libsql/client@0.15.15':
-    resolution: {integrity: sha512-twC0hQxPNHPKfeOv3sNT6u2pturQjLcI+CnpTM0SjRpocEGgfiZ7DWKXLNnsothjyJmDqEsBQJ5ztq9Wlu470w==}
+  '@libsql/client@0.17.0':
+    resolution: {integrity: sha512-TLjSU9Otdpq0SpKHl1tD1Nc9MKhrsZbCFGot3EbCxRa8m1E5R1mMwoOjKMMM31IyF7fr+hPNHLpYfwbMKNusmg==}
 
-  '@libsql/core@0.15.15':
-    resolution: {integrity: sha512-C88Z6UKl+OyuKKPwz224riz02ih/zHYI3Ho/LAcVOgjsunIRZoBw7fjRfaH9oPMmSNeQfhGklSG2il1URoOIsA==}
+  '@libsql/core@0.17.0':
+    resolution: {integrity: sha512-hnZRnJHiS+nrhHKLGYPoJbc78FE903MSDrFJTbftxo+e52X+E0Y0fHOCVYsKWcg6XgB7BbJYUrz/xEkVTSaipw==}
 
   '@libsql/darwin-arm64@0.5.22':
     resolution: {integrity: sha512-4B8ZlX3nIDPndfct7GNe0nI3Yw6ibocEicWdC4fvQbSs/jdq/RC2oCsoJxJ4NzXkvktX70C1J4FcmmoBy069UA==}
@@ -2149,12 +2149,8 @@ packages:
     cpu: [x64]
     os: [darwin]
 
-  '@libsql/hrana-client@0.7.0':
-    resolution: {integrity: sha512-OF8fFQSkbL7vJY9rfuegK1R7sPgQ6kFMkDamiEccNUvieQ+3urzfDFI616oPl8V7T9zRmnTkSjMOImYCAVRVuw==}
-
-  '@libsql/isomorphic-fetch@0.3.1':
-    resolution: {integrity: sha512-6kK3SUK5Uu56zPq/Las620n5aS9xJq+jMBcNSOmjhNf/MUvdyji4vrMTqD7ptY7/4/CAVEAYDeotUz60LNQHtw==}
-    engines: {node: '>=18.0.0'}
+  '@libsql/hrana-client@0.9.0':
+    resolution: {integrity: sha512-pxQ1986AuWfPX4oXzBvLwBnfgKDE5OMhAdR/5cZmRaB4Ygz5MecQybvwZupnRz341r2CtFmbk/BhSu7k2Lm+Jw==}
 
   '@libsql/isomorphic-ws@0.1.5':
     resolution: {integrity: sha512-DtLWIH29onUYR00i0GlQ3UdcTRC6EP4u9w/h9LxpUZJWRMARk6dQwZ6Jkd+QdwVpuAOrdxt18v0K2uIYR3fwFg==}
@@ -3649,6 +3645,9 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  cross-fetch@4.1.0:
+    resolution: {integrity: sha512-uKm5PU+MHTootlWEY+mZ4vvXoCn4fLQxT9dSc1sXVMSFkINTJVN8cAQROpwcKm8bJ/c7rgZVIBWzH5T78sNZZw==}
 
   cross-spawn@7.0.6:
     resolution: {integrity: sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA==}
@@ -5560,6 +5559,15 @@ packages:
     resolution: {integrity: sha512-Z3lTE9pLaJF47NyMhd4ww1yFTAP8YhYI8SleJiHzM46Fgpm5cnNzSl9XfzFNqbaz+VlJrIj3fXQ4DeN1Rjm6cw==}
     engines: {node: '>=18'}
 
+  node-fetch@2.7.0:
+    resolution: {integrity: sha512-c4FRfUm/dbcWZ7U+1Wq0AwCyFL+3nt2bEw05wfxSz+DWpWsitgmSgYmy2dQdWyKC1694ELPqMs/YzUSNozLt8A==}
+    engines: {node: 4.x || >=6.0.0}
+    peerDependencies:
+      encoding: ^0.1.0
+    peerDependenciesMeta:
+      encoding:
+        optional: true
+
   node-fetch@3.3.2:
     resolution: {integrity: sha512-dRB78srN/l6gqWulah9SrxeYnxeddIG30+GOqK/9OlLVyLg3HPnr6SqOWTWOXKRwC2eGYCkZ59NNuSgvSrpgOA==}
     engines: {node: ^12.20.0 || ^14.13.1 || >=16.0.0}
@@ -7049,6 +7057,9 @@ packages:
     resolution: {integrity: sha512-sf4i37nQ2LBx4m3wB74y+ubopq6W/dIzXg0FDGjsYnZHVa1Da8FH853wlL2gtUhg+xJXjfk3kUZS3BRoQeoQBQ==}
     engines: {node: '>=6'}
 
+  tr46@0.0.3:
+    resolution: {integrity: sha512-N3WMsuqV66lT30CrXNbEjx4GEwlow3v6rr4mCcv6prnfwhS01rkgyFdjPNBYd9br7LpXV1+Emh01fHnq2Gdgrw==}
+
   tree-dump@1.1.0:
     resolution: {integrity: sha512-rMuvhU4MCDbcbnleZTFezWsaZXRFemSqAM+7jPnzUl1fo9w3YEKOxAeui0fz3OI4EU4hf23iyA7uQRVko+UaBA==}
     engines: {node: '>=10.0'}
@@ -7374,6 +7385,9 @@ packages:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
 
+  webidl-conversions@3.0.1:
+    resolution: {integrity: sha512-2JAn3z8AR6rjK8Sm8orRC0h/bcl/DqL7tRPdGZ4I1CjdF+EaMLmYxBHyXuKL849eucPFhvBoxMsflfOb8kxaeQ==}
+
   webpack-bundle-analyzer@4.10.2:
     resolution: {integrity: sha512-vJptkMm9pk5si4Bv922ZbKLV8UTT4zib4FPgXMhgzUny0bfDDkLXAVQs3ly3fS4/TN9ROFtb0NFrm04UXFE/Vw==}
     engines: {node: '>= 10.13.0'}
@@ -7436,6 +7450,9 @@ packages:
   websocket-extensions@0.1.4:
     resolution: {integrity: sha512-OqedPIGOfsDlo31UNwYbCFMSaO9m9G/0faIHj5/dZFDMFqPTcx6UwqyOy3COEaEOg/9VsGIpdqn62W5KhoKSpg==}
     engines: {node: '>=0.8.0'}
+
+  whatwg-url@5.0.0:
+    resolution: {integrity: sha512-saE57nupxk6v3HY35+jzBwYa0rKSy0XR8JSxZPwgLr7ys0IBzhGviA1/TUGJLmSVqs8pb9AnvICXEuOHLprYTw==}
 
   which@2.0.2:
     resolution: {integrity: sha512-BLI3Tl1TW3Pvl70l3yq3Y64i+awpwXqsGBYWkkqMtnbXgrMD+yj7rhW0kuEDxzJaYXGjEW5ogapKNMEKNMjibA==}
@@ -9958,18 +9975,19 @@ snapshots:
 
   '@leichtgewicht/ip-codec@2.0.5': {}
 
-  '@libsql/client@0.15.15':
+  '@libsql/client@0.17.0':
     dependencies:
-      '@libsql/core': 0.15.15
-      '@libsql/hrana-client': 0.7.0
+      '@libsql/core': 0.17.0
+      '@libsql/hrana-client': 0.9.0
       js-base64: 3.7.8
       libsql: 0.5.22
       promise-limit: 2.7.0
     transitivePeerDependencies:
       - bufferutil
+      - encoding
       - utf-8-validate
 
-  '@libsql/core@0.15.15':
+  '@libsql/core@0.17.0':
     dependencies:
       js-base64: 3.7.8
 
@@ -9979,17 +9997,16 @@ snapshots:
   '@libsql/darwin-x64@0.5.22':
     optional: true
 
-  '@libsql/hrana-client@0.7.0':
+  '@libsql/hrana-client@0.9.0':
     dependencies:
-      '@libsql/isomorphic-fetch': 0.3.1
       '@libsql/isomorphic-ws': 0.1.5
+      cross-fetch: 4.1.0
       js-base64: 3.7.8
       node-fetch: 3.3.2
     transitivePeerDependencies:
       - bufferutil
+      - encoding
       - utf-8-validate
-
-  '@libsql/isomorphic-fetch@0.3.1': {}
 
   '@libsql/isomorphic-ws@0.1.5':
     dependencies:
@@ -11592,6 +11609,12 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
+  cross-fetch@4.1.0:
+    dependencies:
+      node-fetch: 2.7.0
+    transitivePeerDependencies:
+      - encoding
+
   cross-spawn@7.0.6:
     dependencies:
       path-key: 3.1.1
@@ -11890,9 +11913,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.45.1(@libsql/client@0.15.15)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(pg@8.16.3):
+  drizzle-orm@0.45.1(@libsql/client@0.17.0)(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(pg@8.16.3):
     optionalDependencies:
-      '@libsql/client': 0.15.15
+      '@libsql/client': 0.17.0
       '@opentelemetry/api': 1.9.0
       '@types/pg': 8.16.0
       pg: 8.16.3
@@ -13871,6 +13894,10 @@ snapshots:
       emojilib: 2.4.0
       skin-tone: 2.0.0
 
+  node-fetch@2.7.0:
+    dependencies:
+      whatwg-url: 5.0.0
+
   node-fetch@3.3.2:
     dependencies:
       data-uri-to-buffer: 4.0.1
@@ -15534,6 +15561,8 @@ snapshots:
 
   totalist@3.0.1: {}
 
+  tr46@0.0.3: {}
+
   tree-dump@1.1.0(tslib@2.8.1):
     dependencies:
       tslib: 2.8.1
@@ -15850,6 +15879,8 @@ snapshots:
 
   web-streams-polyfill@3.3.3: {}
 
+  webidl-conversions@3.0.1: {}
+
   webpack-bundle-analyzer@4.10.2:
     dependencies:
       '@discoveryjs/json-ext': 0.5.7
@@ -15982,6 +16013,11 @@ snapshots:
       websocket-extensions: 0.1.4
 
   websocket-extensions@0.1.4: {}
+
+  whatwg-url@5.0.0:
+    dependencies:
+      tr46: 0.0.3
+      webidl-conversions: 3.0.1
 
   which@2.0.2:
     dependencies:
