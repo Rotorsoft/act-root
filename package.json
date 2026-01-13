@@ -54,10 +54,10 @@
     "@total-typescript/ts-reset": "^0.6.1",
     "@types/chance": "^1.1.7",
     "@types/minimist": "^1.2.5",
-    "@types/node": "^25.0.6",
+    "@types/node": "^25.0.7",
     "@typescript-eslint/eslint-plugin": "^8.52.0",
     "@typescript-eslint/parser": "^8.52.0",
-    "@vitest/coverage-v8": "^4.0.16",
+    "@vitest/coverage-v8": "^4.0.17",
     "chance": "^1.1.13",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
@@ -71,7 +71,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.0.16"
+    "vitest": "^4.0.17"
   },
   "simple-git-hooks": {
     "commit-msg": "bash scripts/commit-msg.sh $1",
