@@ -10,7 +10,7 @@
     "@act/calculator": "workspace:*",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
-    "@tanstack/react-query": "^5.90.17",
+    "@tanstack/react-query": "^5.90.18",
     "@tanstack/react-query-devtools": "^5.91.2",
     "@trpc/client": "11.8.1",
     "@trpc/react-query": "11.8.1",
