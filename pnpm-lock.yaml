@@ -137,7 +137,7 @@ importers:
   libs/act:
     dependencies:
       pino:
-        specifier: ^10.2.1
+        specifier: ^10.3.0
         version: 10.3.0
       pino-pretty:
         specifier: ^13.1.3
