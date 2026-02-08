@@ -49,6 +49,8 @@
     "@rotorsoft/act-pg": "workspace:*"
   },
   "devDependencies": {
+    "@commitlint/cli": "^20.4.1",
+    "@commitlint/config-conventional": "^20.4.1",
     "@eslint/eslintrc": "^3.3.3",
     "@eslint/js": "^10.0.1",
     "@semantic-release/changelog": "^6.0.3",
@@ -83,9 +85,9 @@
     "vitest": "^4.0.18"
   },
   "simple-git-hooks": {
-    "commit-msg": "bash scripts/commit-msg.sh $1",
+    "commit-msg": "npx --no -- commitlint --edit $1",
     "pre-commit": "npx lint-staged",
-    "pre-push": "pnpm test"
+    "pre-push": "branch=$(git rev-parse --abbrev-ref HEAD); if [ \"$branch\" = \"master\" ]; then pnpm test; fi"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
