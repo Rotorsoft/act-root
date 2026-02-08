@@ -14,8 +14,8 @@ jobs:
   filter:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: dorny/paths-filter@v3.0.2
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
         id: filter
         with:
           filters: |
@@ -25,17 +25,17 @@ jobs:
               - 'docs/**'
     outputs:
       docs: ${{ steps.filter.outputs.docs }}
-      
+
   deploy:
     needs: filter
     if: needs.filter.outputs.docs == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: pnpm/action-setup@v4.1.0
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         with:
           run_install: false
-      - uses: actions/setup-node@v4.4.0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
@@ -43,7 +43,7 @@ jobs:
       - run: pnpm install
       - run: pnpm -F docs build:all
 
-      - uses: peaceiris/actions-gh-pages@v4.0.0
+      - uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/build 
+          publish_dir: docs/build

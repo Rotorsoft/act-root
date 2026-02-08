@@ -3,6 +3,7 @@ name: CI-CD
 permissions:
   contents: write
   pull-requests: write
+  issues: write
 
 on:
   pull_request:
@@ -33,11 +34,11 @@ jobs:
         ports:
           - 5431:5432
     steps:
-      - uses: actions/checkout@v4.2.2
-      - uses: pnpm/action-setup@v4.1.0
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
         with:
           run_install: false
-      - uses: actions/setup-node@v4.4.0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
@@ -45,7 +46,7 @@ jobs:
       - run: pnpm install
       - run: pnpm test
 
-      - uses: coverallsapp/github-action@master
+      - uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -59,43 +60,33 @@ jobs:
         lib: [act, act-pg]
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: pnpm/action-setup@v4.1.0
+      - uses: pnpm/action-setup@v4
         with:
           run_install: false
-      - uses: actions/setup-node@v4.4.0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
+          registry-url: "https://registry.npmjs.org"
 
-      - name: analyze ${{ matrix.lib }}
-        id: analyze
-        uses: rotorsoft/semrel-analyze@v3.0.0
-        with:
-          package: "@rotorsoft/${{ matrix.lib }}"
-          directory: "libs/${{ matrix.lib }}"
+      - run: pnpm install
+      - run: pnpm build
 
-      - name: print analysis
+      - name: configure git
         run: |
-          echo "last-tag: ${{ steps.analyze.outputs.last-tag }}"
-          echo "next-tag: ${{ steps.analyze.outputs.next-tag }}"
-          echo "next-version: ${{ steps.analyze.outputs.next-version }}"
-          echo "${{ steps.analyze.outputs.change-log }}"
+          git config user.name "rotorsoft"
+          git config user.email "rotorsoft@outlook.com"
+
+      - name: pull latest master
+        run: git pull origin master --rebase
 
       - name: release ${{ matrix.lib }}
-        if: steps.analyze.outputs.next-tag != '-' && steps.analyze.outputs.next-version != '-'
-        uses: rotorsoft/semrel-release@v3.0.1
-        with:
-          github-token: "${{ secrets.GITHUB_TOKEN }}"
-          npm-token: "${{ secrets.NPM_TOKEN }}"
-          npm-registry: "registry.npmjs.org"
-          npm-access: "public"
-          user: "rotorsoft"
-          email: "rotorsoft@outlook.com"
-          package: "@rotorsoft/${{ matrix.lib }}"
-          directory: "libs/${{ matrix.lib }}"
-          tag: "${{ steps.analyze.outputs.next-tag }}"
-          version: "${{ steps.analyze.outputs.next-version }}"
-          change-log: "${{ steps.analyze.outputs.change-log }}"
+        working-directory: libs/${{ matrix.lib }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npx semantic-release

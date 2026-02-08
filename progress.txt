@@ -4,3 +4,9 @@ This file tracks AI-assisted development progress.
 Each entry documents: date, feature, decisions, files changed, tests, and concerns.
 
 ---
+
+[2026-02-08] #371 chore: replace custom semrel actions with standard semantic-release
+- Files: .github/workflows/ci-cd.yml, .github/workflows/deploy-docs.yml, .github/workflows/renovate.yml, libs/act/.releaserc.json, libs/act-pg/.releaserc.json, package.json, pnpm-lock.yaml
+- Changes: Replaced rotorsoft/semrel-analyze and rotorsoft/semrel-release with semantic-release + official plugins. Updated all GitHub Actions to latest major versions. Added per-library .releaserc.json configs with semantic-release-monorepo for commit filtering.
+- Decisions: Used @semantic-release/exec with pnpm publish (instead of @semantic-release/npm publish) to resolve workspace:* protocol in act-pg dependencies. Preserved existing tag format (@rotorsoft/<lib>-v${version}) via explicit tagFormat. Added git pull --rebase step in CD job so second matrix lib picks up commits from first.
+- Issues: Dry-run on feature branch recommended before merging to master. Verify NPM_TOKEN and GITHUB_TOKEN secrets are configured.
