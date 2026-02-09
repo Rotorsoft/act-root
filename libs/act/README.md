@@ -1,199 +1,252 @@
-# @rotorsoft/act [![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
+# @rotorsoft/act
 
-[Act](../../README.md) core library
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
+[![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
+[![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[Act](../../README.md) core library - Event Sourcing + CQRS + Actor Model framework for TypeScript.
+
+## Installation
+
+```sh
+npm install @rotorsoft/act
+# or
+pnpm add @rotorsoft/act
+```
+
+**Requirements:** Node.js >= 22.18.0
+
+## Quick Start
+
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state("Counter", z.object({ count: z.number() }))
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .patch({
+    Incremented: (event, state) => ({ count: state.count + event.data.amount }),
+  })
+  .on("increment", z.object({ by: z.number() }))
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+
+const app = act().with(Counter).build();
+
+await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 5 });
+const snapshot = await app.load(Counter, "counter1");
+console.log(snapshot.state.count); // 5
+```
+
+## Related
+
+- [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) - PostgreSQL adapter for production deployments
+- [Full Documentation](https://rotorsoft.github.io/act-root/)
+- [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
+- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
+
+---
 
 ## Event Store
 
-The event store in this architecture serves as the single source of truth for system state, persisting all changes as immutable events. It acts as both a storage mechanism and a queryable event history, enabling efficient replayability, debugging, and distributed event-driven processing.
+The event store serves as the single source of truth for system state, persisting all changes as immutable events. It provides both durable storage and a queryable event history, enabling replayability, debugging, and distributed event-driven processing.
 
 ### Append-Only, Immutable Event Log
 
-Unlike traditional databases that update records in place, the event store follows an append-only model, meaning:
+Unlike traditional databases that update records in place, the event store follows an append-only model:
 
-- All state changes are recorded as new events, never modifying past data.
-- Events are immutable, ensuring a complete historical record of all changes.
-- Each event is time-stamped and versioned, allowing precise state reconstruction at any point in time.
+- All state changes are recorded as new events — past data is never modified.
+- Events are immutable, providing a complete historical record.
+- Each event is time-stamped and versioned, allowing state reconstruction at any point in time.
 
-This immutability is critical for auditability, debugging, and ensuring consistent state reconstruction across distributed systems.
+This immutability is critical for auditability, debugging, and consistent state reconstruction across distributed systems.
 
-### Event Streams for State Aggregation
+### Event Streams
 
-Events are not stored in a single, monolithic table but are instead grouped into event streams, each representing a unique entity or domain process.
+Events are grouped into streams, each representing a unique entity or domain process:
 
 - Each entity instance (e.g., a user, order, or transaction) has its own stream.
-- Events within a stream maintain a strict order, ensuring that state is replayed correctly.
-- Streams can be dynamically created and partitioned, allowing for horizontal scalability.
+- Events within a stream maintain strict ordering for correct state replay.
+- Streams are created dynamically as new entities appear.
 
 For example, an Order aggregate might have a stream containing:
 
-1. OrderCreated
-2. OrderItemAdded
-3. OrderItemRemoved
-4. OrderShipped
+1. `OrderCreated`
+2. `OrderItemAdded`
+3. `OrderItemRemoved`
+4. `OrderShipped`
 
-A consumer reconstructing the order’s state would replay these events in order, rather than relying on a snapshot-based approach.
+Reconstructing the order's state means replaying these events in sequence, producing a deterministic result.
 
-### Optimistic Concurrency and Versioning
+### Optimistic Concurrency
 
-Each event stream supports optimistic concurrency control by maintaining a version number per stream.
+Each event stream maintains a version number for conflict detection:
 
-- When appending an event, the system verifies that the stream’s version matches the expected version.
-- If another process has written an event in the meantime, the append operation is rejected to prevent race conditions.
-- Consumers can retry with the latest stream state, preventing lost updates.
+- When committing events, the system verifies the stream's version matches the expected version.
+- If another process has written events in the meantime, a `ConcurrencyError` is thrown.
+- The caller can retry with the latest stream state, preventing lost updates.
 
-This ensures strong consistency in distributed systems without requiring heavyweight locks.
+This ensures strong consistency without heavyweight locks.
+
+```typescript
+// Version is tracked automatically — concurrent writes to the same stream are detected
+await app.do("increment", { stream: "counter1", actor }, { by: 1 });
+```
 
 ### Querying
 
-Events in the store can be retrieved via two primary methods:
+Events can be retrieved in two ways:
 
-- Stream-based retrieval (load): Fetching all events for a given stream in order.
-- Query: Provides multiple ways to filter and sort events, enabling efficient state reconstruction.
+- **Load** — Fetch and replay all events for a given stream, reconstructing its current state:
+  ```typescript
+  const snapshot = await app.load(Counter, "counter1");
+  ```
+- **Query** — Filter events by stream, name, time range, correlation ID, or position, with support for forward and backward traversal:
+  ```typescript
+  const events = await app.query_array({ stream: "counter1", names: ["Incremented"], limit: 10 });
+  ```
 
-This enables both on-demand querying for state reconstruction and real-time processing for event-driven architectures.
+### Snapshots
 
-### Snapshots for Efficient State Reconstruction
+Replaying all events from the beginning for every request can be expensive for long-lived streams. Act supports configurable snapshotting:
 
-Replaying all events from the beginning for every request can be inefficient. To optimize state reconstruction:
+```typescript
+const Account = state("Account", schema)
+  // ...
+  .snap((snap) => snap.patchCount >= 10) // snapshot every 10 events
+  .build();
+```
 
-- Snapshots are periodically stored, capturing the computed state of an entity.
-- When retrieving an entity’s state, the system first loads the latest snapshot and replays only newer events.
-- This reduces query time while maintaining full event traceability.
+When loading state, the system first loads the latest snapshot and replays only the events that came after it. For example, instead of replaying 1,000 events for an account balance, the system loads a snapshot and applies only the last few transactions.
 
-For example, instead of replaying 1,000 events for an account balance, the system might load a snapshot with the latest balance and only apply the last few transactions.
+### Storage Backends
 
-### Event Storage Backend
+The event store uses a port/adapter pattern, making it easy to swap implementations:
 
-The event store can be implemented using different storage solutions, depending on system requirements:
+- **InMemoryStore** (included) — Fast, ephemeral storage for development and testing.
+- **[PostgresStore](https://www.npmjs.com/package/@rotorsoft/act-pg)** — Production-ready with ACID guarantees, connection pooling, and distributed processing.
 
-- Relational Databases (PostgreSQL, MySQL): Storing events in an append-only table with indexing for fast retrieval.
-- NoSQL Databases (Cassandra, DynamoDB, MongoDB): Using key-value or document stores to manage streams efficiently.
-- Event-Specific Databases (EventStoreDB, Kafka, Pulsar): Purpose-built for high-performance event sourcing with built-in subscriptions and replication.
+```typescript
+import { store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
 
-### Indexing and Retrieval Optimization
+// Development: in-memory (default)
+const s = store();
 
-To ensure high performance when querying events:
+// Production: inject PostgreSQL
+store(new PostgresStore({ host: "localhost", database: "myapp", user: "postgres", password: "secret" }));
+```
 
-- Events are indexed by stream ID and timestamp for fast lookups.
-- Materialized views can be used for common queries (e.g., the latest event per stream).
-- Partitioning strategies help distribute event streams across multiple nodes, improving scalability.
+Custom store implementations must fulfill the `Store` interface contract (see [CLAUDE.md](../../CLAUDE.md) or the source for details).
 
-### Retention and Archival
+### Performance Considerations
 
-Since event data grows indefinitely, a retention policy is needed:
+- Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
+- Use snapshots for states with long event histories to avoid full replay on every load.
+- The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
+- Active event streams remain in fast storage; consider archival strategies for very large datasets.
 
-- Active event streams remain in fast storage for quick access.
-- Older events are archived in cold storage while keeping snapshots for quick recovery.
-- Event compression techniques can be used to reduce storage overhead without losing historical data.
+## Event-Driven Processing
 
-## Event-Driven Processing with Stream Leasing and Correlation
+Act handles event-driven workflows through stream leasing and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
 
-This architecture is designed to handle event-driven workflows efficiently while ensuring ordered and non-duplicated event processing. Instead of a queueing system, it dynamically processes events from an event store and correlates them with specific event streams. The approach improves scalability, fault tolerance, and event visibility while maintaining strong guarantees for event processing.
+### Reactions
 
-### Event-Centric Processing Instead of Queues
+Reactions are asynchronous handlers triggered by events. They can update other state streams, trigger external integrations, or drive cross-aggregate workflows:
 
-Rather than storing messages in a queue and tracking explicit positions, this architecture treats the event store as the single source of truth. Events are written once and can be consumed by multiple independent consumers. This decoupling allows:
+```typescript
+const app = act()
+  .with(Account)
+  .with(AuditLog)
+  .on("Deposited")
+    .do((event) => [{ name: "LogEntry", data: { message: `Deposit: ${event.data.amount}` } }])
+    .to((event) => `audit-${event.stream}`)  // resolver determines target stream
+  .build();
+```
 
-- Independent consumers that can process the same event stream in different ways.
-- Efficient event querying without maintaining redundant queue states.
-- Flexible event correlation, where consumers can derive dependencies dynamically rather than following a strict order.
+Resolvers dynamically determine which stream a reaction targets, enabling flexible event routing without hardcoded dependencies. They can include source regex patterns to limit which streams trigger the reaction.
 
-### Stream Leasing for Ordered Event Processing
+### Stream Leasing
 
-Each consumer does not simply fetch and process events immediately; instead, events are fetched by the application and pushed to consumers by leasing the events of each correlated stream. Leasing prevents multiple consumers from processing the same event concurrently, ensuring:
+Rather than processing events immediately, Act uses a leasing mechanism to coordinate distributed consumers. The application fetches events and pushes them to reaction handlers by leasing correlated streams:
 
-- Per-stream ordering, where events related to a specific stream are processed sequentially.
-- Temporary ownership of events, allowing retries if a lease expires before acknowledgment.
-- Backpressure control, as only a limited number of leases can be active at a time, preventing overwhelming consumers.
+- **Per-stream ordering** — Events within a stream are processed sequentially.
+- **Temporary ownership** — Leases expire after a configurable duration, allowing re-processing if a consumer fails.
+- **Backpressure** — Only a limited number of leases can be active at a time, preventing consumer overload.
 
-If a lease expires due to failure or unresponsiveness, the event can be re-leased to another consumer, ensuring no event is permanently lost.
+If a lease expires due to failure, the stream is automatically re-leased to another consumer, ensuring no event is permanently lost.
 
-### Event Correlation and Dynamic Stream Resolution
+### Event Correlation
 
-A key challenge in event-driven systems is understanding which stream an event belongs to and how it should be processed. Instead of hardcoding event routing logic, this system enables:
+Act tracks causation chains across actions and reactions using correlation metadata:
 
-- Dynamic correlation, where events are linked to streams based on resolver functions.
-- Multi-stream dependency tracking, allowing one event to trigger multiple related processes.
-- Implicit event grouping, ensuring that related events are processed in the correct sequence.
+- Each action/event carries a `correlation` ID (request trace) and `causation` ID (what triggered it).
+- Reactions can discover new streams to process by querying uncommitted events with matching correlation IDs.
+- This enables full workflow tracing — from the initial user action through every downstream reaction.
 
-For example, if an event pertains to a transaction across multiple users, the system can determine which user streams should handle it dynamically.
+```typescript
+// Correlate events to discover new streams for processing
+await app.correlate();
 
-### Parallel Execution with Retry and Blocking Strategies
+// Or run periodic background correlation
+app.start_correlations();
+```
 
-While events are processed in an ordered fashion within a stream, multiple streams can be processed concurrently. The architecture includes:
+### Parallel Execution with Retry and Blocking
 
-- Parallel event handling, improving throughput by distributing processing load.
-- Retry mechanisms with exponential backoff, ensuring transient failures do not cause data loss.
-- Blocking strategies, where streams with consistent failures can be temporarily halted to prevent cascading errors.
+While events within a stream are processed in order, multiple streams can be processed concurrently:
 
-A stream is only blocked after exhausting a configurable number of retries, reducing the risk of infinite failure loops.
+- **Parallel handling** — Multiple streams are drained simultaneously for throughput.
+- **Retry with backoff** — Transient failures trigger retries before escalation.
+- **Stream blocking** — After exhausting retries, a stream is blocked to prevent cascading errors. Blocked streams can be inspected and unblocked manually.
 
-### Draining and Acknowledgment for Fault Tolerance
+### Draining
 
-Once an event has been successfully processed, it is acknowledged to release its lease.
-This design ensures:
+The `drain` method processes pending reactions across all subscribed streams:
 
-- Consumers only process new work, reducing idle resource usage.
-- Failure recovery without manual intervention, as failed events can be re-leased automatically.
-- Clear event lifecycle management, with visibility into pending, processing, and completed events.
+```typescript
+// Process pending reactions
+await app.drain({ streamLimit: 100, eventLimit: 1000 });
+```
 
-### Persistent Event Store with Optimized Querying
+Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed events are re-leased automatically.
 
-Since events are stored persistently rather than transiently queued, the system must efficiently query and retrieve relevant events. The event store supports:
+### Real-Time Notifications
 
-- Efficient filtering, allowing consumers to retrieve only the events relevant to them.
-- Indexing strategies for fast lookups, optimizing performance for high-volume event processing.
-- Retention policies, ensuring historical event data is accessible for audits without overloading the system.
-
-### Real-Time Notifications and Asynchronous Processing
-
-To reduce polling overhead, the system can utilize real-time event notifications via database triggers or a pub-sub mechanism. This allows consumers to:
-
-- React to new events immediately, improving responsiveness.
-- Reduce unnecessary database queries, optimizing system performance.
-- Enable distributed event processing, where multiple instances can coordinate workload distribution.
-
-### Scalable Consumer Management
-
-As the system scales, multiple consumer instances may need to process events in parallel. The architecture ensures that:
-
-- Each consumer instance handles an exclusive subset of events, avoiding conflicts.
-- Leases distribute events evenly across consumers, preventing hotspots.
-- Idle consumers are dynamically assigned new workloads, ensuring efficient resource utilization.
+When using the PostgreSQL backend, the store emits `NOTIFY` events on each commit, enabling consumers to react immediately via `LISTEN` rather than polling. This reduces latency and unnecessary database queries in production deployments.
 
 ## Dual-Frontier Drain
 
-In event-sourced systems, consumers often subscribe to multiple event streams.
-These streams advance at different rates: some produce bursts of events, while others may stay idle for long periods.
-New streams can also be discovered while proccesing events from existing streams.
+In event-sourced systems, consumers often subscribe to multiple event streams that advance at different rates: some produce bursts of events, while others stay idle for long periods. New streams can also be discovered while processing events from existing streams.
 
-The following issues arise:
+Naive approaches have fundamental trade-offs:
 
-- Strictly serial processing across all streams would block fast streams.
-- Fully independent processing risks inconsistent states.
+- Strictly serial processing across all streams blocks fast streams behind slow ones.
+- Fully independent processing risks inconsistent cross-stream states.
 - Prioritizing new streams over existing ones risks missing important events.
 
-Act addresses this with the Dual-Frontier Drain strategy.
+Act addresses this with the **Dual-Frontier Drain** strategy.
 
-### Key features
+### How It Works
 
-- Dynamic correlation
-  - Event resolvers dynamically correlate streams as new events arrive.
-  - Resolvers can include a source regex to limit matched streams by name.
-  - When a new stream matching the resolver is discovered, it is added immediately to the drain process.
-- Dual frontiers
-  - Each drain cycle calculates two sets of streams:
-    - Leading frontier – streams already near the latest known event (the global frontier).
-    - Lagging frontier – streams behind or newly discovered.
-- Fast-forwarding lagging streams
-  - Lagging streams are advanced quickly. If they have no matching events in the current window, their watermarks are advanced using the leading watermarks.
-  - This prevents stale streams from blocking global convergence.
-- Parallel processing
-  - While lagging streams catch up, leading streams continue processing without waiting.
-  - All reactions eventually converge on the global frontier.
+Each drain cycle divides streams into two sets:
 
-### Why it matters
+- **Leading frontier** — Streams already near the latest known event (the global frontier). These continue processing without waiting.
+- **Lagging frontier** — Streams that are behind or newly discovered. These are advanced quickly to catch up.
 
-- Fast recovery: Newly discovered or previously idle streams catch up quickly.
-- No global blocking: Fast streams are never paused to wait for slower ones.
-- Consistent state: All reactions end up aligned on the same event position.
+**Fast-forwarding:** If a lagging stream has no matching events in the current window, its watermark is advanced using the leading frontier's position. This prevents stale streams from blocking global convergence.
+
+**Dynamic correlation:** Event resolvers dynamically discover and add new streams as events arrive. Resolvers can include source regex patterns to limit which streams are matched. When a new matching stream is discovered, it joins the drain immediately.
+
+### Why It Matters
+
+- **Fast recovery** — Newly discovered or previously idle streams catch up quickly.
+- **No global blocking** — Fast streams are never paused to wait for slower ones.
+- **Eventual convergence** — All reactions end up aligned on the same global event position.
+
+## License
+
+[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)

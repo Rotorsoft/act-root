@@ -10,3 +10,7 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Changes: Replaced rotorsoft/semrel-analyze and rotorsoft/semrel-release with semantic-release + official plugins. Updated all GitHub Actions to latest major versions. Added per-library .releaserc.json configs with semantic-release-monorepo for commit filtering.
 - Decisions: Used @semantic-release/exec with pnpm publish (instead of @semantic-release/npm publish) to resolve workspace:* protocol in act-pg dependencies. Preserved existing tag format (@rotorsoft/<lib>-v${version}) via explicit tagFormat. Added git pull --rebase step in CD job so second matrix lib picks up commits from first.
 - Issues: Dry-run on feature branch recommended before merging to master. Verify NPM_TOKEN and GITHUB_TOKEN secrets are configured.
+
+[2026-02-08] #371 docs: improve published library README files
+- Files: libs/act/README.md, libs/act-pg/README.md
+- Changes: Added npm downloads, build status, coverage, and license badges to both library READMEs. Added installation, quick start, and related links sections to act README while preserving all existing documentation. Rewrote act-pg README with full usage docs, configuration table, feature list, and database schema reference.
