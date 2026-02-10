@@ -26,15 +26,21 @@ export const app = builder
   .on("TicketResolved").do(p.resolved).to("tickets")
   .build();
 
-export async function assign(
-  event: AsCommitted<typeof builder.events, "TicketOpened">
-) {
+export async function assign({
+  event,
+  app: a,
+}: {
+  event: AsCommitted<typeof builder.events, "TicketOpened">;
+  app: import("@rotorsoft/act").App;
+}) {
+  /* eslint-disable @typescript-eslint/no-unsafe-argument */
   const agent = assignAgent(
     event.stream,
     event.data.supportCategoryId,
     event.data.priority
   );
-  await app.do(
+  /* eslint-enable @typescript-eslint/no-unsafe-argument */
+  await a.do(
     "AssignTicket",
     {
       stream: event.stream,
@@ -45,9 +51,11 @@ export async function assign(
   );
 }
 
-export async function deliver(
-  event: AsCommitted<typeof builder.events, "MessageAdded">
-) {
+export async function deliver({
+  event,
+}: {
+  event: AsCommitted<typeof builder.events, "MessageAdded">;
+}) {
   await deliverMessage(event.data);
   await app.do(
     "MarkMessageDelivered",
@@ -60,10 +68,14 @@ export async function deliver(
   );
 }
 
-export async function escalate(
-  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">
-) {
-  await app.do(
+export async function escalate({
+  event,
+  app: a,
+}: {
+  event: AsCommitted<typeof builder.events, "TicketEscalationRequested">;
+  app: import("@rotorsoft/act").App;
+}) {
+  await a.do(
     "EscalateTicket",
     {
       stream: event.stream,

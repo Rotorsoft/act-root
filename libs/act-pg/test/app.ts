@@ -1,4 +1,10 @@
-import { act, ReactionHandler, sleep, state, ZodEmpty } from "@rotorsoft/act";
+import {
+  act,
+  type ReactionHandler,
+  sleep,
+  state,
+  ZodEmpty,
+} from "@rotorsoft/act";
 import z from "zod";
 
 const counter = state("Counter", z.object({ count: z.number() }))

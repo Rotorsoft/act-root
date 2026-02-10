@@ -4,9 +4,12 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
+import type { ZodType } from "zod";
 import { Act } from "./act.js";
+import { isSlice, type Slice } from "./slice-builder.js";
 import type {
   EventRegister,
+  Invariant,
   Reaction,
   ReactionHandler,
   ReactionOptions,
@@ -77,9 +80,12 @@ export type ActBuilder<
    *   .build();
    * ```
    */
-  with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
-    state: State<SX, EX, AX>
-  ) => ActBuilder<S & { [K in keyof AX]: SX }, E & EX, A & AX>;
+  with: {
+    <SX extends Schema, EX extends Schemas, AX extends Schemas>(
+      state: State<SX, EX, AX>
+    ): ActBuilder<S & { [K in keyof AX]: SX }, E & EX, A & AX>;
+    (slice: Slice): ActBuilder<S, E, A>;
+  };
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -375,52 +381,142 @@ export function act<
   E extends Schemas = {},
   A extends Schemas = {},
 >(
-  states: Set<string> = new Set(),
+  states: Map<string, State<Schema, Schemas, Schemas>> = new Map(),
   registry: Registry<S, E, A> = {
     actions: {} as any,
     events: {} as any,
   }
 ): ActBuilder<S, E, A> {
-  const builder: ActBuilder<S, E, A> = {
-    /**
-     * Adds a state to the builder.
-     *
-     * @template SX The type of state
-     * @template EX The type of events
-     * @template AX The type of actions
-     * @param state The state to add
-     * @returns The builder
-     */
-    with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
-      state: State<SX, EX, AX>
-    ) => {
-      if (!states.has(state.name)) {
-        states.add(state.name);
-        for (const name of Object.keys(state.actions)) {
-          if (registry.actions[name])
-            throw new Error(`Duplicate action "${name}"`);
-          // @ts-expect-error indexed access
-          registry.actions[name] = state;
+  /**
+   * Registers a State (creates a mutable copy in the states map).
+   */
+  function registerState(state: State<Schema, Schemas, Schemas>) {
+    if (!states.has(state.name)) {
+      // Store a shallow mutable copy so slices can extend it
+      const mutable = {
+        name: state.name,
+        state: state.state,
+        init: state.init,
+        events: { ...state.events },
+        patch: { ...state.patch },
+        actions: { ...state.actions },
+        on: { ...state.on },
+        given: state.given ? { ...state.given } : undefined,
+        snap: state.snap,
+      } as State<Schema, Schemas, Schemas>;
+      states.set(state.name, mutable);
+      for (const name of Object.keys(state.actions)) {
+        if (registry.actions[name])
+          throw new Error(`Duplicate action "${name}"`);
+        // @ts-expect-error indexed access
+        registry.actions[name] = mutable;
+      }
+      for (const name of Object.keys(state.events)) {
+        if (registry.events[name]) throw new Error(`Duplicate event "${name}"`);
+        // @ts-expect-error indexed access
+        registry.events[name] = {
+          schema: state.events[name],
+          reactions: new Map(),
+        };
+      }
+    }
+  }
+
+  /**
+   * Merges a slice into the builder with conflict detection.
+   */
+  function mergeSlice(sl: Slice) {
+    // Merge state contributions
+    for (const [stateName, contrib] of sl.states) {
+      // Auto-register base state if not yet registered
+      registerState(contrib.base);
+
+      const existing = states.get(stateName)!;
+
+      // Check and merge new events
+      for (const eventName of Object.keys(contrib.events)) {
+        if (registry.events[eventName]) {
+          throw new Error(
+            `Duplicate event "${eventName}" in slice "${sl.name}" (already registered)`
+          );
         }
-        for (const name of Object.keys(state.events)) {
-          if (registry.events[name])
-            throw new Error(`Duplicate event "${name}"`);
-          // @ts-expect-error indexed access
-          registry.events[name] = {
-            schema: state.events[name],
-            reactions: new Map(),
-          };
+        (existing.events as Record<string, ZodType>)[eventName] =
+          contrib.events[eventName];
+        // @ts-expect-error indexed access
+        registry.events[eventName] = {
+          schema: contrib.events[eventName],
+          reactions: new Map(),
+        };
+      }
+
+      // Check and merge new patches
+      for (const patchKey of Object.keys(contrib.patch)) {
+        if (existing.patch[patchKey]) {
+          throw new Error(
+            `Conflicting patch for "${patchKey}" in slice "${sl.name}" (already registered)`
+          );
+        }
+        existing.patch[patchKey] = contrib.patch[patchKey];
+      }
+
+      // Check and merge new actions
+      for (const actionName of Object.keys(contrib.actions)) {
+        if (registry.actions[actionName]) {
+          throw new Error(
+            `Duplicate action "${actionName}" in slice "${sl.name}" (already registered)`
+          );
+        }
+        (existing.actions as Record<string, ZodType>)[actionName] =
+          contrib.actions[actionName];
+        existing.on[actionName] = contrib.on[actionName];
+        // @ts-expect-error indexed access
+        registry.actions[actionName] = existing;
+      }
+
+      // Merge invariants (accumulate, don't conflict)
+      if (Object.keys(contrib.given).length) {
+        if (!existing.given) existing.given = {};
+        for (const [actionName, rules] of Object.entries(contrib.given)) {
+          const existingRules =
+            (existing.given as Record<string, Invariant<Schema>[]>)[
+              actionName
+            ] || [];
+          (existing.given as Record<string, Invariant<Schema>[]>)[actionName] =
+            [...existingRules, ...rules];
         }
       }
-      return act<S & { [K in keyof AX]: SX }, E & EX, A & AX>(
+    }
+
+    // Register slice reactions
+    for (const { event, reaction } of sl.reactions) {
+      if (!registry.events[event]) {
+        throw new Error(
+          `Unknown event "${event}" in slice "${sl.name}" reaction`
+        );
+      }
+      registry.events[event].reactions.set(
+        reaction.handler.name || `${sl.name}_${event}`,
+        reaction as Reaction<E, keyof E>
+      );
+    }
+  }
+
+  const builder: ActBuilder<S, E, A> = {
+    with: ((arg: State<Schema, Schemas, Schemas> | Slice) => {
+      if (isSlice(arg)) {
+        mergeSlice(arg);
+        return act<S, E, A>(states, registry);
+      }
+      registerState(arg);
+      return act<S & Record<string, Schema>, E & Schemas, A & Schemas>(
         states,
         registry as unknown as Registry<
-          S & { [K in keyof AX]: SX },
-          E & EX,
-          A & AX
+          S & Record<string, Schema>,
+          E & Schemas,
+          A & Schemas
         >
       );
-    },
+    }) as ActBuilder<S, E, A>["with"],
     /**
      * Adds a reaction to an event.
      *
@@ -462,7 +558,7 @@ export function act<
         };
       },
     }),
-    build: () => new Act<S, E, A>(registry),
+    build: () => new Act<S, E, A>(states, registry),
     events: registry.events,
   };
   return builder;

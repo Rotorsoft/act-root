@@ -4,14 +4,30 @@
  * @category Types
  * Types for reactions, leases, and fetch results in the Act Framework.
  */
-import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
+import type { App, Committed, Schema, Schemas, Snapshot } from "./action.js";
+
+/**
+ * Context object passed to reaction handlers.
+ *
+ * @template E - Event schemas
+ * @template K - Event name
+ * @property event - The committed event that triggered this reaction
+ * @property stream - The target stream name for this reaction
+ * @property app - The App instance for executing actions and loading state
+ */
+export type ReactionContext<E extends Schemas, K extends keyof E> = {
+  readonly event: Committed<E, K>;
+  readonly stream: string;
+  readonly app: App;
+};
 
 /**
  * Reaction handler function that processes committed events.
  *
- * Reaction handlers respond to events asynchronously. They can:
+ * Reaction handlers respond to events asynchronously via a context object.
+ * They can:
  * - Perform side effects (send emails, call APIs, log, etc.)
- * - Return an action tuple to trigger another action
+ * - Use `context.app` to trigger further actions (no circular imports)
  * - Return `void` or `undefined` for side-effect-only reactions
  *
  * Handlers are called during drain cycles and support automatic retries
@@ -19,29 +35,28 @@ import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
  *
  * @template E - Event schemas
  * @template K - Event name
- * @param event - The committed event that triggered this reaction
- * @param stream - The target stream name for this reaction
- * @returns Promise resolving to an action tuple or void
+ * @param context - The reaction context with event, stream, and app
+ * @returns Promise resolving to a snapshot or void
  *
  * @example Side effect only
  * ```typescript
- * const sendEmail: ReactionHandler<Events, "UserCreated"> = async (event) => {
+ * const sendEmail: ReactionHandler<Events, "UserCreated"> = async ({ event }) => {
  *   await emailService.send(event.data.email, "Welcome!");
  * };
  * ```
  *
- * @example Triggering another action
+ * @example Triggering another action via context
  * ```typescript
- * const reduceInventory: ReactionHandler<Events, "OrderPlaced"> = async (event) => {
- *   return ["reduceStock", { amount: event.data.items.length }];
+ * const assign: ReactionHandler<Events, "TicketOpened"> = async ({ event, app }) => {
+ *   await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
  * };
  * ```
  *
  * @see {@link Reaction} for complete reaction configuration
+ * @see {@link ReactionContext} for context structure
  */
 export type ReactionHandler<E extends Schemas, K extends keyof E> = (
-  event: Committed<E, K>,
-  stream: string
+  context: ReactionContext<E, K>
 ) => Promise<Snapshot<E, Schema> | void>;
 
 /**

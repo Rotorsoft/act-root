@@ -18,6 +18,7 @@ export type BoardState = Record<(typeof DIGITS)[number], number>;
 /**
  * DigitBoard state: tracks the count of each digit key pressed (0-9)
  */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 export const DigitBoard = state(
   "DigitBoard",
   z.object(
@@ -35,10 +36,12 @@ export const DigitBoard = state(
   .on("CountDigit", z.object({ digit: z.enum(DIGITS) }))
   .emit(({ digit }) => ["DigitCounted", { digit }])
   .build();
+/* eslint-enable @typescript-eslint/no-unsafe-argument */
 
 /**
  * Calculator projection: tracks the result of each calculator
  */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 const CalculatorResult = state(
   "CalculatorResult",
   z.object({
@@ -51,6 +54,7 @@ const CalculatorResult = state(
   .on("ProjectResult", z.object({ result: z.number() }))
   .emit(({ result }) => ["ResultProjected", { result }])
   .build();
+/* eslint-enable @typescript-eslint/no-unsafe-argument */
 
 async function main() {
   // to test with postgres
@@ -70,8 +74,8 @@ async function main() {
     .with(CalculatorResult)
     // React to every digit pressed and update the projection board
     .on("DigitPressed")
-    .do(async function CountDigits(event) {
-      await app.do(
+    .do(async function CountDigits({ event, app: a }) {
+      await a.do(
         "CountDigit",
         { stream: "Board", actor },
         { digit: event.data.digit },
@@ -80,11 +84,11 @@ async function main() {
     })
     .to({ source: `^(${streams.join("|")})$`, target: "Board" })
     .on("OperatorPressed")
-    .do(async function ProjectResult(event) {
+    .do(async function ProjectResult({ event, app: a }) {
       // Load the current calculator state
-      const calc = await app.load(Calculator, event.stream);
+      const calc = await a.load(Calculator, event.stream);
       // Project the result of the calculator
-      await app.do(
+      await a.do(
         "ProjectResult",
         { stream: "Calculator" + event.stream, actor },
         { result: calc.state.result },

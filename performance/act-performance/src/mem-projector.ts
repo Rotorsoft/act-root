@@ -12,9 +12,12 @@ export function create() {
       await sleep();
       todos.clear();
     },
-    projectTodoCreated: async (
-      event: CommittedOf<typeof Events, "TodoCreated">
-    ) => {
+    /* eslint-disable @typescript-eslint/no-unsafe-argument */
+    projectTodoCreated: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoCreated">;
+    }) => {
       await sleep(150);
       todos.set(event.stream, {
         id: event.stream,
@@ -23,9 +26,11 @@ export function create() {
         deleted: false,
       });
     },
-    projectTodoUpdated: async (
-      event: CommittedOf<typeof Events, "TodoUpdated">
-    ) => {
+    projectTodoUpdated: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoUpdated">;
+    }) => {
       await sleep(50);
       todos.set(event.stream, {
         ...todos.get(event.stream)!,
@@ -33,9 +38,11 @@ export function create() {
         updatedAt: event.created.toISOString(),
       });
     },
-    projectTodoDeleted: async (
-      event: CommittedOf<typeof Events, "TodoDeleted">
-    ) => {
+    projectTodoDeleted: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoDeleted">;
+    }) => {
       await sleep(100);
       todos.set(event.stream, {
         ...todos.get(event.stream)!,
@@ -43,6 +50,7 @@ export function create() {
         updatedAt: event.created.toISOString(),
       });
     },
+    /* eslint-enable @typescript-eslint/no-unsafe-argument */
     getById: async (stream: string) => {
       await sleep();
       return todos.get(stream) || null;

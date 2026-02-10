@@ -23,27 +23,33 @@ export function create(connectionString?: string) {
         TRUNCATE TABLE performance.todos_projection;
       `);
     },
-    projectTodoCreated: async (
-      event: CommittedOf<typeof Events, "TodoCreated">
-    ) => {
+    projectTodoCreated: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoCreated">;
+    }) => {
       await sleep(150);
       await pool.query(
         "INSERT INTO performance.todos_projection (id, text, created_at, deleted) VALUES ($1, $2, $3, FALSE) ON CONFLICT (id) DO NOTHING",
         [event.stream, event.data.text, event.created.toISOString()]
       );
     },
-    projectTodoUpdated: async (
-      event: CommittedOf<typeof Events, "TodoUpdated">
-    ) => {
+    projectTodoUpdated: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoUpdated">;
+    }) => {
       await sleep(50);
       await pool.query(
         "UPDATE performance.todos_projection SET text=$2, updated_at=$3 WHERE id=$1",
         [event.stream, event.data.text, event.created.toISOString()]
       );
     },
-    projectTodoDeleted: async (
-      event: CommittedOf<typeof Events, "TodoDeleted">
-    ) => {
+    projectTodoDeleted: async ({
+      event,
+    }: {
+      event: CommittedOf<typeof Events, "TodoDeleted">;
+    }) => {
       await sleep(100);
       await pool.query(
         "UPDATE performance.todos_projection SET deleted=TRUE, updated_at=$2 WHERE id=$1",

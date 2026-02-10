@@ -4,9 +4,10 @@ import { builder } from "./bootstrap.js";
 import { db, tickets } from "./drizzle/index.js";
 
 export async function opened({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketOpened">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketOpened">;
+}) {
   const { closeAfter, ...other } = data;
   await db
     .insert(tickets)
@@ -21,9 +22,10 @@ export async function opened({
 }
 
 export async function closed({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketClosed">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketClosed">;
+}) {
   await db
     .update(tickets)
     .set(data)
@@ -32,9 +34,10 @@ export async function closed({
 }
 
 export async function assigned({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketAssigned">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketAssigned">;
+}) {
   const { reassignAfter, escalateAfter, ...other } = data;
   await db
     .update(tickets)
@@ -48,8 +51,10 @@ export async function assigned({
 }
 
 export async function messageAdded({
-  stream,
-}: AsCommitted<typeof builder.events, "MessageAdded">) {
+  event: { stream },
+}: {
+  event: AsCommitted<typeof builder.events, "MessageAdded">;
+}) {
   await db
     .update(tickets)
     .set({ messages: sql`${tickets.messages} + 1` })
@@ -58,9 +63,10 @@ export async function messageAdded({
 }
 
 export async function escalated({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketEscalated">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketEscalated">;
+}) {
   await db
     .update(tickets)
     .set({ escalationId: data.requestId })
@@ -69,9 +75,10 @@ export async function escalated({
 }
 
 export async function reassigned({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketReassigned">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketReassigned">;
+}) {
   const { reassignAfter, escalateAfter, ...other } = data;
   await db
     .update(tickets)
@@ -85,9 +92,10 @@ export async function reassigned({
 }
 
 export async function resolved({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketResolved">) {
+  event: { stream, data },
+}: {
+  event: AsCommitted<typeof builder.events, "TicketResolved">;
+}) {
   await db
     .update(tickets)
     .set(data)

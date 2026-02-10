@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, logger, store } from "./ports.js";
 import type {
+  App,
   Committed,
   Drain,
   DrainOptions,
@@ -108,9 +109,13 @@ export class Act<
   /**
    * Create a new Act orchestrator.
    *
+   * @param states The map of state names to merged state definitions
    * @param registry The registry of state, event, and action schemas
    */
-  constructor(public readonly registry: Registry<S, E, A>) {
+  constructor(
+    public readonly states: Map<string, State<Schema, Schemas, Schemas>>,
+    public readonly registry: Registry<S, E, A>
+  ) {
     dispose(() => {
       this._emitter.removeAllListeners();
       this.stop_correlations();
@@ -208,13 +213,19 @@ export class Act<
     reactingTo?: Committed<E, keyof E>,
     skipValidation = false
   ) {
+    // Use merged state (with slice extensions) if available
+    const baseState = this.registry.actions[action] as unknown as State<
+      Schema,
+      Schemas,
+      Schemas
+    >;
+    const merged = this.states.get(baseState.name) || baseState;
     const snapshots = await es.action(
-      this.registry.actions[action],
-      action,
+      merged,
+      action as string,
       target,
       payload,
-      // @ts-expect-error type lost
-      reactingTo,
+      reactingTo as Committed<Schemas, keyof Schemas>,
       skipValidation
     );
     this.emit("committed", snapshots as Snapshot<S, E>[]);
@@ -265,7 +276,9 @@ export class Act<
     stream: string,
     callback?: (snapshot: Snapshot<SX, EX>) => void
   ): Promise<Snapshot<SX, EX>> {
-    return await es.load(state, stream, callback);
+    // Use merged state (with slice extensions) if available
+    const merged = (this.states.get(state.name) || state) as State<SX, EX, AX>;
+    return await es.load(merged, stream, callback);
   }
 
   /**
@@ -403,7 +416,7 @@ export class Act<
     for (const payload of payloads) {
       const { event, handler, options } = payload;
       try {
-        await handler(event, stream); // the actual reaction
+        await handler({ event, stream, app: this as unknown as App }); // the actual reaction
         at = event.id;
         handled++;
       } catch (error) {

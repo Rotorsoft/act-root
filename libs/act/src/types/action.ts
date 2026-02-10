@@ -325,6 +325,45 @@ export type GivenHandlers<S extends Schema, A extends Schemas> = {
 };
 
 /**
+ * Public contract for the Act orchestrator, used to type `app` in reaction contexts
+ * without circular imports.
+ *
+ * @see {@link Act} for the full implementation
+ */
+export interface App {
+  do(
+    action: string,
+    target: Target,
+    payload: Readonly<Schema>,
+    reactingTo?: Committed<Schemas, keyof Schemas>,
+    skipValidation?: boolean
+  ): Promise<Snapshot<Schema, Schemas>[]>;
+
+  load(
+    state: State<any, any, any>,
+    stream: string,
+    callback?: (snapshot: Snapshot<any, any>) => void
+  ): Promise<Snapshot<any, any>>;
+
+  query(
+    query: Query,
+    callback?: (event: Committed<Schemas, keyof Schemas>) => void
+  ): Promise<{
+    first?: Committed<Schemas, keyof Schemas>;
+    last?: Committed<Schemas, keyof Schemas>;
+    count: number;
+  }>;
+
+  query_array(query: Query): Promise<Committed<Schemas, keyof Schemas>[]>;
+
+  drain(options?: {
+    readonly streamLimit?: number;
+    readonly eventLimit?: number;
+    readonly leaseMillis?: number;
+  }): Promise<unknown>;
+}
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template S - State schema.
  * @template E - Event schemas.

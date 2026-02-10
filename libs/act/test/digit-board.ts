@@ -62,8 +62,8 @@ export const app = act()
   .with(CalculatorResult)
   // React to every digit pressed and update the projection board
   .on("DigitPressed")
-  .do(async function CountDigits(event) {
-    await app.do(
+  .do(async function CountDigits({ event, app: a }) {
+    await a.do(
       "CountDigit",
       { stream: "Board", actor },
       { digit: event.data.digit },
@@ -72,12 +72,12 @@ export const app = act()
   })
   .to({ source: `^(${streams.join("|")})$`, target: "Board" })
   .on("OperatorPressed")
-  .do(async function ProjectResult(event) {
+  .do(async function ProjectResult({ event, app: a }) {
     // Load the current calculator state
     const stream = event.stream;
-    const calc = await app.load(Calculator, stream);
+    const calc = await a.load(Calculator, stream);
     // Project the result of the calculator
-    await app.do(
+    await a.do(
       "ProjectResult",
       { stream: "Calculator" + stream, actor },
       { result: calc.state.result },
