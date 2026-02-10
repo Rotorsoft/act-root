@@ -339,11 +339,17 @@ export interface App {
     skipValidation?: boolean
   ): Promise<Snapshot<Schema, Schemas>[]>;
 
-  load(
-    state: State<any, any, any>,
+  load<S extends Schema, E extends Schemas, A extends Schemas>(
+    state: State<S, E, A>,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void
-  ): Promise<Snapshot<any, any>>;
+    callback?: (snapshot: Snapshot<S, E>) => void
+  ): Promise<Snapshot<S, E>>;
+
+  load(
+    state: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+  ): Promise<Snapshot<Schema, Schemas>>;
 
   query(
     query: Query,

@@ -28,11 +28,15 @@ const _this_ = ({ stream }: { stream: string }) => ({
 const _void_ = () => undefined;
 
 /**
- * A state contribution from a slice: the base state reference plus only the NEW
- * events, patches, actions, handlers, and invariants added by the slice.
+ * A state contribution from a slice: either a base state reference (extending
+ * an existing state) or a partial state schema/init (declaring a new partial),
+ * plus only the NEW events, patches, actions, handlers, and invariants added
+ * by the slice.
  */
 export type StateContribution = {
-  readonly base: State<Schema, Schemas, Schemas>;
+  readonly base?: State<Schema, Schemas, Schemas>;
+  readonly stateSchema?: ZodType;
+  readonly stateInit?: () => Readonly<Schema>;
   readonly events: Record<string, ZodType>;
   readonly patch: Record<string, PatchHandler<Schema, Schemas, string>>;
   readonly actions: Record<string, ZodType>;
@@ -86,12 +90,25 @@ export function isSlice(value: unknown): value is Slice {
 }
 
 /**
+ * Empty schemas type for generic accumulation (lint-safe replacement for `{}`).
+ */
+type NoSchemas = Record<never, never>;
+
+/**
  * Builder for composing a vertical feature slice.
  */
 export type SliceBuilder = {
   with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
     state: State<SX, EX, AX>
-  ) => SliceStateBuilder<SX, EX, AX>;
+  ) => SliceStateBuilder<SX, NoSchemas, NoSchemas>;
+  state: <SX extends Schema>(
+    name: string,
+    schema: ZodType<SX>
+  ) => {
+    init: (
+      init: () => Readonly<SX>
+    ) => SliceStateBuilder<SX, NoSchemas, NoSchemas>;
+  };
   on: (event: string) => {
     do: (
       handler: ReactionHandler<Schemas, string>,
@@ -127,12 +144,12 @@ export type SliceStateBuilder<
   ) => {
     given: (rules: Invariant<S>[]) => {
       emit: (
-        handler: ActionHandler<S, E, { [P in K]: AX }, K>
-      ) => SliceStateBuilder<S, E, A & { [P in K]: AX }>;
+        handler: ActionHandler<S, E, Record<K, AX>, K>
+      ) => SliceStateBuilder<S, E, A & Record<K, AX>>;
     };
     emit: (
-      handler: ActionHandler<S, E, { [P in K]: AX }, K>
-    ) => SliceStateBuilder<S, E, A & { [P in K]: AX }>;
+      handler: ActionHandler<S, E, Record<K, AX>, K>
+    ) => SliceStateBuilder<S, E, A & Record<K, AX>>;
   };
 };
 
@@ -187,7 +204,35 @@ export function slice(name: string): SliceBuilder {
       with<SX extends Schema, EX extends Schemas, AX extends Schemas>(
         state: State<SX, EX, AX>
       ) {
-        return makeSliceStateBuilder<SX, EX, AX>(state);
+        // Get or create contribution for this state
+        if (!contributions.has(state.name)) {
+          contributions.set(state.name, {
+            base: state as unknown as State<Schema, Schemas, Schemas>,
+            events: {},
+            patch: {},
+            actions: {},
+            on: {},
+            given: {},
+          });
+        }
+        return makeSliceStateBuilder<SX, NoSchemas, NoSchemas>(state.name);
+      },
+
+      state<SX extends Schema>(stateName: string, schema: ZodType<SX>) {
+        return {
+          init(init: () => Readonly<SX>) {
+            contributions.set(stateName, {
+              stateSchema: schema,
+              stateInit: init as () => Readonly<Schema>,
+              events: {},
+              patch: {},
+              actions: {},
+              on: {},
+              given: {},
+            });
+            return makeSliceStateBuilder<SX, NoSchemas, NoSchemas>(stateName);
+          },
+        };
       },
 
       on(event: string) {
@@ -258,25 +303,15 @@ export function slice(name: string): SliceBuilder {
     S extends Schema,
     E extends Schemas,
     A extends Schemas,
-  >(baseState: State<S, E, A>): SliceStateBuilder<S, E, A> {
-    // Get or create contribution for this state
-    if (!contributions.has(baseState.name)) {
-      contributions.set(baseState.name, {
-        base: baseState as unknown as State<Schema, Schemas, Schemas>,
-        events: {},
-        patch: {},
-        actions: {},
-        on: {},
-        given: {},
-      });
-    }
-    const contrib = contributions.get(baseState.name)!;
+  >(stateName: string): SliceStateBuilder<S, E, A> {
+    const contrib = contributions.get(stateName)!;
 
     const parent = makeSliceBuilder();
 
     const stateBuilder: SliceStateBuilder<S, E, A> = {
       // Forward slice-level methods
       with: parent.with,
+      state: parent.state,
       on: parent.on,
       build: parent.build,
 
@@ -287,9 +322,7 @@ export function slice(name: string): SliceBuilder {
             [K in keyof EX]: PatchHandler<S, EX, K & string>;
           }) {
             Object.assign(contrib.patch, patches);
-            return makeSliceStateBuilder<S, E & EX, A>(
-              baseState as unknown as State<S, E & EX, A>
-            );
+            return makeSliceStateBuilder<S, E & EX, A>(stateName);
           },
         };
       },
@@ -305,16 +338,14 @@ export function slice(name: string): SliceBuilder {
           return { emit };
         }
 
-        function emit(handler: ActionHandler<S, E, { [P in K]: AX }, K>) {
-          contrib.on[actionName] = handler as unknown as ActionHandler<
+        function emit(handler: ActionHandler<S, E, Record<K, AX>, K>) {
+          contrib.on[actionName] = handler as ActionHandler<
             Schema,
             Schemas,
             Schemas,
             string
           >;
-          return makeSliceStateBuilder<S, E, A & { [P in K]: AX }>(
-            baseState as unknown as State<S, E, A & { [P in K]: AX }>
-          );
+          return makeSliceStateBuilder<S, E, A & Record<K, AX>>(stateName);
         }
 
         return { given, emit };

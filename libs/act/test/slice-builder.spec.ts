@@ -272,6 +272,240 @@ describe("slice-builder", () => {
     });
   });
 
+  describe("partial state declaration", () => {
+    it("should merge two slices contributing different fields to same state", async () => {
+      const counting = slice("counting")
+        .state("Counter", z.object({ count: z.number() }))
+        .init(() => ({ count: 0 }))
+        .events({ Incremented: z.object({ amount: z.number() }) })
+        .patches({
+          Incremented: (e, s) => ({ count: s.count + e.data.amount }),
+        })
+        .action("increment", z.object({ by: z.number() }))
+        .emit(({ by }) => ["Incremented", { amount: by }])
+        .build();
+
+      const naming = slice("naming")
+        .state("Counter", z.object({ name: z.string() }))
+        .init(() => ({ name: "" }))
+        .events({ Named: z.object({ name: z.string() }) })
+        .patches({ Named: (e) => ({ name: e.data.name }) })
+        .action("setName", z.object({ name: z.string() }))
+        .emit(({ name }) => ["Named", { name }])
+        .build();
+
+      const app = act().with(counting).with(naming).build();
+
+      await app.do("increment", { stream: "s1", actor }, { by: 5 });
+      await app.do("setName", { stream: "s1", actor }, { name: "hello" });
+
+      const snap = await app.load("Counter", "s1");
+      expect(snap.state.count).toBe(5);
+      expect(snap.state.name).toBe("hello");
+    });
+
+    it("should load by state name for partially-declared states", async () => {
+      const counting = slice("counting")
+        .state("MyState", z.object({ value: z.number() }))
+        .init(() => ({ value: 0 }))
+        .events({ ValueSet: z.object({ value: z.number() }) })
+        .patches({ ValueSet: (e) => ({ value: e.data.value }) })
+        .action("setValue", z.object({ value: z.number() }))
+        .emit(({ value }) => ["ValueSet", { value }])
+        .build();
+
+      const app = act().with(counting).build();
+
+      await app.do("setValue", { stream: "s1", actor }, { value: 42 });
+
+      const snap = await app.load("MyState", "s1");
+      expect(snap.state.value).toBe(42);
+    });
+
+    it("should throw on unknown state name in load", async () => {
+      const counting = slice("counting")
+        .state("MyState", z.object({ value: z.number() }))
+        .init(() => ({ value: 0 }))
+        .events({ ValueSet: z.object({ value: z.number() }) })
+        .patches({ ValueSet: (e) => ({ value: e.data.value }) })
+        .action("setValue", z.object({ value: z.number() }))
+        .emit(({ value }) => ["ValueSet", { value }])
+        .build();
+
+      const app = act().with(counting).build();
+
+      await expect(app.load("NonExistent", "s1")).rejects.toThrow(
+        /Unknown state "NonExistent"/
+      );
+    });
+
+    it("should compose three partial slices into one state", async () => {
+      const sliceA = slice("a")
+        .state("Thing", z.object({ x: z.number() }))
+        .init(() => ({ x: 0 }))
+        .events({ XSet: z.object({ x: z.number() }) })
+        .patches({ XSet: (e) => ({ x: e.data.x }) })
+        .action("setX", z.object({ x: z.number() }))
+        .emit(({ x }) => ["XSet", { x }])
+        .build();
+
+      const sliceB = slice("b")
+        .state("Thing", z.object({ y: z.number() }))
+        .init(() => ({ y: 0 }))
+        .events({ YSet: z.object({ y: z.number() }) })
+        .patches({ YSet: (e) => ({ y: e.data.y }) })
+        .action("setY", z.object({ y: z.number() }))
+        .emit(({ y }) => ["YSet", { y }])
+        .build();
+
+      const sliceC = slice("c")
+        .state("Thing", z.object({ z: z.number() }))
+        .init(() => ({ z: 0 }))
+        .events({ ZSet: z.object({ z: z.number() }) })
+        .patches({ ZSet: (e) => ({ z: e.data.z }) })
+        .action("setZ", z.object({ z: z.number() }))
+        .emit(({ z }) => ["ZSet", { z }])
+        .build();
+
+      const app = act().with(sliceA).with(sliceB).with(sliceC).build();
+
+      await app.do("setX", { stream: "t1", actor }, { x: 1 });
+      await app.do("setY", { stream: "t1", actor }, { y: 2 });
+      await app.do("setZ", { stream: "t1", actor }, { z: 3 });
+
+      const snap = await app.load("Thing", "t1");
+      expect(snap.state.x).toBe(1);
+      expect(snap.state.y).toBe(2);
+      expect(snap.state.z).toBe(3);
+    });
+
+    it("should support reactions with partial states", async () => {
+      const reacted = vi.fn().mockResolvedValue(undefined);
+
+      const counting = slice("counting")
+        .state("Counter", z.object({ count: z.number() }))
+        .init(() => ({ count: 0 }))
+        .events({ CountChanged: z.object({ amount: z.number() }) })
+        .patches({
+          CountChanged: (e, s) => ({ count: s.count + e.data.amount }),
+        })
+        .action("addCount", z.object({ amount: z.number() }))
+        .emit(({ amount }) => ["CountChanged", { amount }])
+        .build();
+
+      const monitoring = slice("monitoring")
+        .on("CountChanged")
+        .do(reacted)
+        .build();
+
+      const app = act().with(counting).with(monitoring).build();
+
+      await app.do("addCount", { stream: "s1", actor }, { amount: 10 });
+      await app.correlate();
+      await app.drain({ leaseMillis: 1 });
+
+      expect(reacted).toHaveBeenCalledTimes(1);
+      expect(reacted).toHaveBeenCalledWith(
+        expect.objectContaining({
+          event: expect.objectContaining({
+            name: "CountChanged",
+            data: { amount: 10 },
+          }),
+        })
+      );
+    });
+
+    it("should throw on duplicate events across partial slices", () => {
+      const sliceA = slice("a")
+        .state("Thing", z.object({ x: z.number() }))
+        .init(() => ({ x: 0 }))
+        .events({ SameEvent: z.object({ v: z.number() }) })
+        .patches({ SameEvent: (e) => ({ x: e.data.v }) })
+        .action("doA", z.object({ v: z.number() }))
+        .emit(({ v }) => ["SameEvent", { v }])
+        .build();
+
+      const sliceB = slice("b")
+        .state("Thing", z.object({ y: z.number() }))
+        .init(() => ({ y: 0 }))
+        .events({ SameEvent: z.object({ v: z.number() }) })
+        .patches({ SameEvent: (e) => ({ y: e.data.v }) })
+        .action("doB", z.object({ v: z.number() }))
+        .emit(({ v }) => ["SameEvent", { v }])
+        .build();
+
+      expect(() => act().with(sliceA).with(sliceB)).toThrow(
+        /Duplicate event "SameEvent"/
+      );
+    });
+
+    it("should throw on duplicate actions across partial slices", () => {
+      const sliceA = slice("a")
+        .state("Thing", z.object({ x: z.number() }))
+        .init(() => ({ x: 0 }))
+        .events({ EventA: z.object({ v: z.number() }) })
+        .patches({ EventA: (e) => ({ x: e.data.v }) })
+        .action("doSame", z.object({ v: z.number() }))
+        .emit(({ v }) => ["EventA", { v }])
+        .build();
+
+      const sliceB = slice("b")
+        .state("Thing", z.object({ y: z.number() }))
+        .init(() => ({ y: 0 }))
+        .events({ EventB: z.object({ v: z.number() }) })
+        .patches({ EventB: (e) => ({ y: e.data.v }) })
+        .action("doSame", z.object({ v: z.number() }))
+        .emit(({ v }) => ["EventB", { v }])
+        .build();
+
+      expect(() => act().with(sliceA).with(sliceB)).toThrow(
+        /Duplicate action "doSame"/
+      );
+    });
+
+    it("should throw when mixing base-state and partial-state patterns", () => {
+      const partial = slice("partial")
+        .state("Counter", z.object({ extra: z.string() }))
+        .init(() => ({ extra: "" }))
+        .events({ ExtraSet: z.object({ extra: z.string() }) })
+        .patches({ ExtraSet: (e) => ({ extra: e.data.extra }) })
+        .action("setExtra", z.object({ extra: z.string() }))
+        .emit(({ extra }) => ["ExtraSet", { extra }])
+        .build();
+
+      expect(() => act().with(Counter).with(partial)).toThrow(
+        /Cannot declare partial state "Counter".*already registered via state\(\) builder/
+      );
+    });
+
+    it("should produce correct merged init from multiple partial slices", async () => {
+      const sliceA = slice("a")
+        .state("Merged", z.object({ x: z.number() }))
+        .init(() => ({ x: 10 }))
+        .events({ Noop1: ZodEmpty })
+        .patches({ Noop1: () => ({}) })
+        .action("noop1", ZodEmpty)
+        .emit(() => ["Noop1", {}])
+        .build();
+
+      const sliceB = slice("b")
+        .state("Merged", z.object({ y: z.string() }))
+        .init(() => ({ y: "hello" }))
+        .events({ Noop2: ZodEmpty })
+        .patches({ Noop2: () => ({}) })
+        .action("noop2", ZodEmpty)
+        .emit(() => ["Noop2", {}])
+        .build();
+
+      const app = act().with(sliceA).with(sliceB).build();
+
+      // Load without any actions — should get merged init
+      const snap = await app.load("Merged", "fresh-stream");
+      expect(snap.state.x).toBe(10);
+      expect(snap.state.y).toBe("hello");
+    });
+  });
+
   describe("diagram", () => {
     it("should generate a mermaid diagram", () => {
       const doubling = slice("doubling")

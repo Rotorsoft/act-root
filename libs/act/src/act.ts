@@ -56,17 +56,24 @@ export class Act<
   private _drain_lag2lead_ratio = 0.5;
   private _correlation_interval: NodeJS.Timeout | undefined = undefined;
 
+  /** Lifecycle event map: event name → payload type */
+  private _events!: {
+    committed: Snapshot<S, E>[];
+    acked: Lease[];
+    blocked: Array<Lease & { error: string }>;
+  };
+
   /**
    * Emit a lifecycle event (internal use, but can be used for custom listeners).
    *
-   * @param event The event name ("committed", "acked",  or "blocked")
+   * @param event The event name ("committed", "acked", or "blocked")
    * @param args The event payload
    * @returns true if the event had listeners, false otherwise
    */
-  emit(event: "committed", args: Snapshot<S, E>[]): boolean;
-  emit(event: "acked", args: Lease[]): boolean;
-  emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
-  emit(event: string, args: any): boolean {
+  emit<K extends keyof typeof this._events>(
+    event: K,
+    args: (typeof this._events)[K]
+  ): boolean {
     return this._emitter.emit(event, args);
   }
 
@@ -77,13 +84,10 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  on(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
-  on(event: "acked", listener: (args: Lease[]) => void): this;
-  on(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
-  on(event: string, listener: (args: any) => void): this {
+  on<K extends keyof typeof this._events>(
+    event: K,
+    listener: (args: (typeof this._events)[K]) => void
+  ): this {
     this._emitter.on(event, listener);
     return this;
   }
@@ -95,13 +99,10 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  off(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
-  off(event: "acked", listener: (args: Lease[]) => void): this;
-  off(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
-  off(event: string, listener: (args: any) => void): this {
+  off<K extends keyof typeof this._events>(
+    event: K,
+    listener: (args: (typeof this._events)[K]) => void
+  ): this {
     this._emitter.off(event, listener);
     return this;
   }
@@ -275,9 +276,24 @@ export class Act<
     state: State<SX, EX, AX>,
     stream: string,
     callback?: (snapshot: Snapshot<SX, EX>) => void
-  ): Promise<Snapshot<SX, EX>> {
+  ): Promise<Snapshot<SX, EX>>;
+  async load(
+    state: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+  ): Promise<Snapshot<Schema, Schemas>>;
+  async load(
+    stateOrName: State<Schema, Schemas, Schemas> | string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+  ): Promise<Snapshot<Schema, Schemas>> {
+    if (typeof stateOrName === "string") {
+      const merged = this.states.get(stateOrName);
+      if (!merged) throw new Error(`Unknown state "${stateOrName}"`);
+      return await es.load(merged, stream, callback);
+    }
     // Use merged state (with slice extensions) if available
-    const merged = (this.states.get(state.name) || state) as State<SX, EX, AX>;
+    const merged = this.states.get(stateOrName.name) || stateOrName;
     return await es.load(merged, stream, callback);
   }
 
@@ -393,7 +409,7 @@ export class Act<
    * @param payloads The reactions to handle
    * @returns The lease with results
    */
-  private async handle<E extends Schemas>(
+  private async handle(
     lease: Lease,
     payloads: ReactionPayload<E>[]
   ): Promise<{
@@ -416,7 +432,7 @@ export class Act<
     for (const payload of payloads) {
       const { event, handler, options } = payload;
       try {
-        await handler({ event, stream, app: this as unknown as App }); // the actual reaction
+        await handler({ event, stream, app: this as App }); // the actual reaction
         at = event.id;
         handled++;
       } catch (error) {
@@ -501,7 +517,7 @@ export class Act<
    * @see {@link correlate} for dynamic stream discovery
    * @see {@link start_correlations} for automatic correlation
    */
-  async drain<E extends Schemas>({
+  async drain({
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
@@ -557,7 +573,7 @@ export class Act<
                 retry: 0,
                 lagging,
               },
-              // @ts-expect-error indexed by key
+              lagging,
               payloads,
             });
           });
@@ -608,7 +624,6 @@ export class Act<
             this.emit("blocked", blocked);
           }
 
-          // @ts-expect-error key
           return { fetched, leased, acked, blocked };
         }
       } catch (error) {

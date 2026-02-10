@@ -254,8 +254,6 @@ export type ActBuilder<
   readonly events: EventRegister<E>;
 };
 
-/* eslint-disable @typescript-eslint/no-empty-object-type */
-
 /**
  * Creates a new Act orchestrator builder for composing event-sourced applications.
  *
@@ -376,16 +374,18 @@ export type ActBuilder<
  * @see {@link https://rotorsoft.github.io/act-root/docs/intro | Documentation}
  */
 export function act<
-  // @ts-expect-error empty schema
-  S extends SchemaRegister<A> = {},
-  E extends Schemas = {},
-  A extends Schemas = {},
+  E extends Schemas = Record<never, never>,
+  A extends Schemas = Record<never, never>,
+  S extends SchemaRegister<A> = SchemaRegister<A>,
 >(
   states: Map<string, State<Schema, Schemas, Schemas>> = new Map(),
   registry: Registry<S, E, A> = {
-    actions: {} as any,
-    events: {} as any,
-  }
+    actions: {} as Registry<S, E, A>["actions"],
+    events: {} as Registry<S, E, A>["events"],
+  },
+  // Tracks state names registered via state() builder (base states)
+  // to guard against mixing base-state and partial-state patterns.
+  baseOriginStates: Set<string> = new Set<string>()
 ): ActBuilder<S, E, A> {
   /**
    * Registers a State (creates a mutable copy in the states map).
@@ -405,19 +405,55 @@ export function act<
         snap: state.snap,
       } as State<Schema, Schemas, Schemas>;
       states.set(state.name, mutable);
+      baseOriginStates.add(state.name);
       for (const name of Object.keys(state.actions)) {
         if (registry.actions[name])
           throw new Error(`Duplicate action "${name}"`);
-        // @ts-expect-error indexed access
-        registry.actions[name] = mutable;
+        Object.assign(registry.actions, { [name]: mutable });
       }
       for (const name of Object.keys(state.events)) {
         if (registry.events[name]) throw new Error(`Duplicate event "${name}"`);
-        // @ts-expect-error indexed access
-        registry.events[name] = {
-          schema: state.events[name],
-          reactions: new Map(),
-        };
+        Object.assign(registry.events, {
+          [name]: { schema: state.events[name], reactions: new Map() },
+        });
+      }
+    }
+  }
+
+  /**
+   * Ensures a partial state entry exists in the states map, creating or
+   * merging schema and init from a slice contribution.
+   */
+  function ensurePartialState(
+    stateName: string,
+    contrib: { stateSchema: ZodType; stateInit?: () => Readonly<Schema> }
+  ) {
+    const existing = states.get(stateName);
+    if (!existing) {
+      // Create a new bare state entry from this partial contribution
+      const mutable = {
+        name: stateName,
+        state: contrib.stateSchema,
+        init: contrib.stateInit || (() => ({}) as Readonly<Schema>),
+        events: {},
+        patch: {},
+        actions: {},
+        on: {},
+        given: undefined,
+        snap: undefined,
+      } as State<Schema, Schemas, Schemas>;
+      states.set(stateName, mutable);
+    } else {
+      // Merge schema via .and() and init via spread
+      Object.assign(existing, {
+        state: (existing.state as ZodType).and(contrib.stateSchema),
+      });
+      const prevInit = existing.init;
+      const sliceInit = contrib.stateInit;
+      if (sliceInit) {
+        Object.assign(existing, {
+          init: () => ({ ...prevInit(), ...sliceInit() }),
+        });
       }
     }
   }
@@ -428,8 +464,30 @@ export function act<
   function mergeSlice(sl: Slice) {
     // Merge state contributions
     for (const [stateName, contrib] of sl.states) {
-      // Auto-register base state if not yet registered
-      registerState(contrib.base);
+      if (contrib.base) {
+        // Guard: cannot mix base-state and partial-state patterns
+        const prev = states.get(stateName);
+        if (prev && !baseOriginStates.has(stateName)) {
+          throw new Error(
+            `Cannot extend state "${stateName}" with base reference in slice "${sl.name}" — it was declared as a partial state by another slice`
+          );
+        }
+        // Existing path: auto-register base state
+        registerState(contrib.base);
+      } else if (contrib.stateSchema) {
+        // Guard: cannot mix base-state and partial-state patterns
+        const prev = states.get(stateName);
+        if (prev && baseOriginStates.has(stateName)) {
+          throw new Error(
+            `Cannot declare partial state "${stateName}" in slice "${sl.name}" — it was already registered via state() builder`
+          );
+        }
+        // New path: partial state declaration
+        ensurePartialState(stateName, {
+          stateSchema: contrib.stateSchema,
+          stateInit: contrib.stateInit,
+        });
+      }
 
       const existing = states.get(stateName)!;
 
@@ -442,11 +500,12 @@ export function act<
         }
         (existing.events as Record<string, ZodType>)[eventName] =
           contrib.events[eventName];
-        // @ts-expect-error indexed access
-        registry.events[eventName] = {
-          schema: contrib.events[eventName],
-          reactions: new Map(),
-        };
+        Object.assign(registry.events, {
+          [eventName]: {
+            schema: contrib.events[eventName],
+            reactions: new Map(),
+          },
+        });
       }
 
       // Check and merge new patches
@@ -469,8 +528,7 @@ export function act<
         (existing.actions as Record<string, ZodType>)[actionName] =
           contrib.actions[actionName];
         existing.on[actionName] = contrib.on[actionName];
-        // @ts-expect-error indexed access
-        registry.actions[actionName] = existing;
+        Object.assign(registry.actions, { [actionName]: existing });
       }
 
       // Merge invariants (accumulate, don't conflict)
@@ -505,16 +563,17 @@ export function act<
     with: ((arg: State<Schema, Schemas, Schemas> | Slice) => {
       if (isSlice(arg)) {
         mergeSlice(arg);
-        return act<S, E, A>(states, registry);
+        return act<E, A, S>(states, registry, baseOriginStates);
       }
       registerState(arg);
-      return act<S & Record<string, Schema>, E & Schemas, A & Schemas>(
+      return act<E & Schemas, A & Schemas, S & Record<string, Schema>>(
         states,
-        registry as unknown as Registry<
+        registry as Registry<
           S & Record<string, Schema>,
           E & Schemas,
           A & Schemas
-        >
+        >,
+        baseOriginStates
       );
     }) as ActBuilder<S, E, A>["with"],
     /**
