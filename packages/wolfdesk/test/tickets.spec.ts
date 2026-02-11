@@ -5,7 +5,6 @@ import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
 import { Priority } from "../src/schemas/index.js";
-import { Ticket, type TicketState } from "../src/ticket.js";
 import {
   addMessage,
   assignTicket,
@@ -109,8 +108,8 @@ describe("tickets", () => {
       expect(ticket?.escalationId).toBeDefined();
 
       // load state and verify escalation id
-      const snapshot = await app.load(Ticket, t.stream);
-      expect((snapshot.state as TicketState).escalationId).toBeDefined();
+      const snapshot = await app.load("Ticket", t.stream);
+      expect(snapshot.state.escalationId).toBeDefined();
     });
 
     it("should close ticket", async () => {
@@ -150,7 +149,7 @@ describe("tickets", () => {
       expect(ticket?.closedById).toBeDefined();
 
       // load state and verify closed by
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.closedById).toBeDefined();
     });
 
@@ -191,12 +190,15 @@ describe("tickets", () => {
       expect(ticket?.escalateAfter).toBeGreaterThan(now.getTime());
 
       // load state and verify new agent and reassign after date
-      const snapshot = await app.load(Ticket, t.stream);
-      const st = snapshot.state as TicketState;
-      expect(st.agentId).toBeDefined();
-      expect(st.agentId).not.toEqual(agentId);
-      expect(st.reassignAfter?.getTime()).toBeGreaterThan(now.getTime());
-      expect(st.escalateAfter?.getTime()).toBeGreaterThan(now.getTime());
+      const snapshot = await app.load("Ticket", t.stream);
+      expect(snapshot.state.agentId).toBeDefined();
+      expect(snapshot.state.agentId).not.toEqual(agentId);
+      expect(snapshot.state.reassignAfter?.getTime()).toBeGreaterThan(
+        now.getTime()
+      );
+      expect(snapshot.state.escalateAfter?.getTime()).toBeGreaterThan(
+        now.getTime()
+      );
     });
   });
 
@@ -207,8 +209,8 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
-      expect((snapshot.state as TicketState).agentId).toBeDefined();
+      const snapshot = await app.load("Ticket", t.stream);
+      expect(snapshot.state.agentId).toBeDefined();
     });
 
     it("should deliver new ticket", async () => {
@@ -218,10 +220,11 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
-      expect(
-        Object.values(snapshot.state.messages).at(-1)?.wasDelivered
-      ).toBeDefined();
+      const snapshot = await app.load("Ticket", t.stream);
+      const lastMsg: any = Object.values(
+        snapshot.state.messages as Record<string, unknown>
+      ).at(-1);
+      expect(lastMsg?.wasDelivered).toBeDefined();
     });
 
     it("should request escalation", async () => {
@@ -231,8 +234,8 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
-      expect((snapshot.state as TicketState).escalationId).toBeDefined();
+      const snapshot = await app.load("Ticket", t.stream);
+      expect(snapshot.state.escalationId).toBeDefined();
     });
   });
 });

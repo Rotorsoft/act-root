@@ -231,27 +231,29 @@ export class Act<
    * Reconstructs the current state by replaying events from the event store.
    * Uses snapshots when available to optimize loading performance.
    *
+   * Accepts either a State definition object or a state name string. When
+   * using a string, the merged state (from partial states registered via
+   * `.with()`) is resolved by name.
+   *
    * @template SX - State schema type
    * @template EX - Event schemas type
    * @template AX - Action schemas type
-   * @param state - The state definition to load
+   * @param state - The state definition or state name to load
    * @param stream - The stream ID (state instance identifier)
    * @param callback - Optional callback invoked with the loaded snapshot
    * @returns The current state snapshot for the stream
    *
-   * @example Load current state
+   * @example Load by state definition
    * ```typescript
    * const snapshot = await app.load(Counter, "counter-1");
    * console.log(snapshot.state.count);    // Current count
-   * console.log(snapshot.version);        // Number of events applied
    * console.log(snapshot.patches);        // Events since last snapshot
    * ```
    *
-   * @example With callback
+   * @example Load by state name (useful with partial states)
    * ```typescript
-   * const snapshot = await app.load(User, "user-123", (snap) => {
-   *   console.log("Loaded user:", snap.state.name);
-   * });
+   * const snapshot = await app.load("Ticket", "ticket-123");
+   * console.log(snapshot.state.title);    // Merged state from all partials
    * ```
    *
    * @example Load multiple states
@@ -268,9 +270,25 @@ export class Act<
     state: State<SX, EX, AX>,
     stream: string,
     callback?: (snapshot: Snapshot<SX, EX>) => void
-  ): Promise<Snapshot<SX, EX>> {
-    // Use the merged state (with all partial patches) when available
-    const merged = this._states.get(state.name) || state;
+  ): Promise<Snapshot<SX, EX>>;
+  async load(
+    name: string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+  ): Promise<Snapshot<Schema, Schemas>>;
+  async load(
+    stateOrName: State<any, any, any> | string,
+    stream: string,
+    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+  ): Promise<Snapshot<any, any>> {
+    let merged: State<any, any, any>;
+    if (typeof stateOrName === "string") {
+      const found = this._states.get(stateOrName);
+      if (!found) throw new Error(`State "${stateOrName}" not found`);
+      merged = found;
+    } else {
+      merged = this._states.get(stateOrName.name) || stateOrName;
+    }
     return await es.load(merged, stream, callback);
   }
 

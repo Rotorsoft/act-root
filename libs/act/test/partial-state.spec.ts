@@ -146,6 +146,24 @@ describe("partial-state", () => {
     expect(snap.state.count).toBe(1);
   });
 
+  it("should load merged state by name", async () => {
+    const app = act().with(PartA).with(PartB).build();
+
+    await app.do("increment", { stream: "n1", actor }, { by: 7 });
+    await app.do("setLabel", { stream: "n1", actor }, { label: "byname" });
+
+    const snap = await app.load("Thing", "n1");
+    expect(snap.state.count).toBe(7);
+    expect(snap.state.label).toBe("byname");
+  });
+
+  it("should throw when loading unknown state by name", async () => {
+    const app = act().with(PartA).build();
+    await expect(app.load("Unknown", "s1")).rejects.toThrow(
+      'State "Unknown" not found'
+    );
+  });
+
   it("should merge partial schemas with non-overlapping fields", async () => {
     const SliceA = state("Merged", z.object({ count: z.number() }))
       .init(() => ({ count: 0 }))
