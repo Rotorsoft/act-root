@@ -109,8 +109,12 @@ export class Act<
    * Create a new Act orchestrator.
    *
    * @param registry The registry of state, event, and action schemas
+   * @param states Map of state names to their (potentially merged) state definitions
    */
-  constructor(public readonly registry: Registry<S, E, A>) {
+  constructor(
+    public readonly registry: Registry<S, E, A>,
+    private readonly _states: Map<string, State<any, any, any>> = new Map()
+  ) {
     dispose(() => {
       this._emitter.removeAllListeners();
       this.stop_correlations();
@@ -265,7 +269,9 @@ export class Act<
     stream: string,
     callback?: (snapshot: Snapshot<SX, EX>) => void
   ): Promise<Snapshot<SX, EX>> {
-    return await es.load(state, stream, callback);
+    // Use the merged state (with all partial patches) when available
+    const merged = this._states.get(state.name) || state;
+    return await es.load(merged, stream, callback);
   }
 
   /**
