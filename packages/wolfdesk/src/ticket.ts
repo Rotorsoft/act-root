@@ -1,10 +1,18 @@
-// Shared invariants and types
+import type { z } from "zod";
+import type { TicketCreation } from "./ticket-creation.js";
+import type { TicketMessaging } from "./ticket-messaging.js";
+import type { TicketOperations } from "./ticket-operations.js";
+
+/** Full merged ticket state type derived from the three slice schemas */
+export type TicketState = z.infer<typeof TicketCreation.state> &
+  z.infer<typeof TicketMessaging.state> &
+  z.infer<typeof TicketOperations.state>;
+
+// Shared invariants
 export {
   mustBeOpen,
   mustBeUser,
   mustBeUserOrAgent,
-  ticketInit,
-  type TicketState,
 } from "./ticket-invariants.js";
 
 // Partial state definitions

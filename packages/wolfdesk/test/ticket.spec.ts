@@ -1,7 +1,7 @@
 import { dispose } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { app } from "../src/bootstrap.js";
-import { Ticket } from "../src/ticket.js";
+import { Ticket, type TicketState } from "../src/ticket.js";
 import {
   acknowledgeMessage,
   addMessage,
@@ -42,9 +42,10 @@ describe("ticket without reactions", () => {
     await escalateTicket(t);
 
     const snapshot = await app.load(Ticket, t.stream);
-    expect(snapshot.state.title).toEqual(title);
-    expect(snapshot.state.agentId).toBeDefined();
-    expect(Object.keys(snapshot.state.messages).length).toBe(2);
+    const s1 = snapshot.state as TicketState;
+    expect(s1.title).toEqual(title);
+    expect(s1.agentId).toBeDefined();
+    expect(Object.keys(s1.messages).length).toBe(2);
     expect(snapshot.patches).toBeGreaterThanOrEqual(5);
   });
 
@@ -56,14 +57,15 @@ describe("ticket without reactions", () => {
     await closeTicket(t);
 
     const snapshot2 = await app.load(Ticket, t.stream);
-    const message2 = Object.values(snapshot2.state.messages).at(-1);
+    const s2 = snapshot2.state as TicketState;
+    const message2 = Object.values(s2.messages).at(-1);
 
-    expect(snapshot2.state.agentId).not.toEqual(agentId);
-    expect(snapshot2.state.resolvedById).toBeDefined();
-    expect(snapshot2.state.closedById).toBeDefined();
-    expect(snapshot2.state.closeAfter).toBeDefined();
-    expect(snapshot2.state.escalateAfter).toBeDefined();
-    expect(snapshot2.state.reassignAfter).toBeDefined();
+    expect(s2.agentId).not.toEqual(agentId);
+    expect(s2.resolvedById).toBeDefined();
+    expect(s2.closedById).toBeDefined();
+    expect(s2.closeAfter).toBeDefined();
+    expect(s2.escalateAfter).toBeDefined();
+    expect(s2.reassignAfter).toBeDefined();
     expect(message2?.wasDelivered).toBe(true);
     expect(message2?.wasRead).toBe(true);
 

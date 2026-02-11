@@ -5,7 +5,7 @@ import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
 import { Priority } from "../src/schemas/index.js";
-import { Ticket } from "../src/ticket.js";
+import { Ticket, type TicketState } from "../src/ticket.js";
 import {
   addMessage,
   assignTicket,
@@ -110,7 +110,7 @@ describe("tickets", () => {
 
       // load state and verify escalation id
       const snapshot = await app.load(Ticket, t.stream);
-      expect(snapshot.state.escalationId).toBeDefined();
+      expect((snapshot.state as TicketState).escalationId).toBeDefined();
     });
 
     it("should close ticket", async () => {
@@ -192,14 +192,11 @@ describe("tickets", () => {
 
       // load state and verify new agent and reassign after date
       const snapshot = await app.load(Ticket, t.stream);
-      expect(snapshot.state.agentId).toBeDefined();
-      expect(snapshot.state.agentId).not.toEqual(agentId);
-      expect(snapshot.state.reassignAfter?.getTime()).toBeGreaterThan(
-        now.getTime()
-      );
-      expect(snapshot.state.escalateAfter?.getTime()).toBeGreaterThan(
-        now.getTime()
-      );
+      const st = snapshot.state as TicketState;
+      expect(st.agentId).toBeDefined();
+      expect(st.agentId).not.toEqual(agentId);
+      expect(st.reassignAfter?.getTime()).toBeGreaterThan(now.getTime());
+      expect(st.escalateAfter?.getTime()).toBeGreaterThan(now.getTime());
     });
   });
 
@@ -211,7 +208,7 @@ describe("tickets", () => {
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
-      expect(snapshot.state.agentId).toBeDefined();
+      expect((snapshot.state as TicketState).agentId).toBeDefined();
     });
 
     it("should deliver new ticket", async () => {
@@ -235,7 +232,7 @@ describe("tickets", () => {
       await app.drain();
 
       const snapshot = await app.load(Ticket, t.stream);
-      expect(snapshot.state.escalationId).toBeDefined();
+      expect((snapshot.state as TicketState).escalationId).toBeDefined();
     });
   });
 });

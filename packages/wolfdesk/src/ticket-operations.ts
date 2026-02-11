@@ -1,8 +1,9 @@
 import { state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import * as errors from "./errors.js";
 import * as schemas from "./schemas/index.js";
-import { mustBeOpen, mustBeUser, ticketInit } from "./ticket-invariants.js";
+import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
 
 const operationsEvents = {
   TicketAssigned: schemas.events.TicketAssigned,
@@ -11,8 +12,26 @@ const operationsEvents = {
   TicketReassigned: schemas.events.TicketReassigned,
 };
 
-export const TicketOperations = state("Ticket", schemas.Ticket)
-  .init(ticketInit)
+export const TicketOperations = state(
+  "Ticket",
+  z.object({
+    productId: z.uuid(),
+    userId: z.uuid(),
+    messages: z.record(z.uuid(), schemas.Message),
+    closedById: z.uuid().optional(),
+    agentId: z.uuid().optional(),
+    requestId: z.uuid().optional(),
+    requestedById: z.uuid().optional(),
+    escalationId: z.uuid().optional(),
+    reassignAfter: z.date().optional(),
+    escalateAfter: z.date().optional(),
+  })
+)
+  .init(() => ({
+    productId: "",
+    userId: "",
+    messages: {},
+  }))
   .emits(operationsEvents)
   .patch({
     TicketAssigned: ({ data }) => data,

@@ -146,6 +146,146 @@ describe("partial-state", () => {
     expect(snap.state.count).toBe(1);
   });
 
+  it("should merge partial schemas with non-overlapping fields", async () => {
+    const SliceA = state("Merged", z.object({ count: z.number() }))
+      .init(() => ({ count: 0 }))
+      .emits({ Counted: z.object({ n: z.number() }) })
+      .patch({ Counted: (e) => ({ count: e.data.n }) })
+      .on("setCount", z.object({ n: z.number() }))
+      .emit((a) => ["Counted", { n: a.n }])
+      .build();
+
+    const SliceB = state("Merged", z.object({ label: z.string() }))
+      .init(() => ({ label: "" }))
+      .emits({ Named: z.object({ label: z.string() }) })
+      .patch({ Named: (e) => ({ label: e.data.label }) })
+      .on("setName", z.object({ label: z.string() }))
+      .emit((a) => ["Named", { label: a.label }])
+      .build();
+
+    const app = act().with(SliceA).with(SliceB).build();
+
+    await app.do("setCount", { stream: "m1", actor }, { n: 42 });
+    await app.do("setName", { stream: "m1", actor }, { label: "hello" });
+
+    const snap = await app.load(SliceA, "m1");
+    expect(snap.state.count).toBe(42);
+    expect((snap.state as any).label).toBe("hello");
+  });
+
+  it("should merge init functions from partials", async () => {
+    const SliceA = state("InitMerge", z.object({ x: z.number() }))
+      .init(() => ({ x: 10 }))
+      .emits({ A: ZodEmpty })
+      .patch({ A: () => ({}) })
+      .on("doA", ZodEmpty)
+      .emit(() => ["A", {}])
+      .build();
+
+    const SliceB = state("InitMerge", z.object({ y: z.string() }))
+      .init(() => ({ y: "default" }))
+      .emits({ B: ZodEmpty })
+      .patch({ B: () => ({}) })
+      .on("doB", ZodEmpty)
+      .emit(() => ["B", {}])
+      .build();
+
+    const app = act().with(SliceA).with(SliceB).build();
+    await app.do("doA", { stream: "i1", actor }, {});
+    const snap = await app.load(SliceA, "i1");
+    expect(snap.state.x).toBe(10);
+    expect((snap.state as any).y).toBe("default");
+  });
+
+  it("should allow overlapping keys with same base type", () => {
+    const SliceA = state("Overlap", z.object({ shared: z.string() }))
+      .init(() => ({ shared: "" }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on("doX", ZodEmpty)
+      .emit(() => ["X", {}])
+      .build();
+
+    const SliceB = state("Overlap", z.object({ shared: z.string().optional() }))
+      .init(() => ({ shared: undefined }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on("doY", ZodEmpty)
+      .emit(() => ["Y", {}])
+      .build();
+
+    // Same base type (ZodString) - should not throw
+    expect(() => act().with(SliceA).with(SliceB)).not.toThrow();
+  });
+
+  it("should throw on overlapping keys with different base types", () => {
+    const SliceA = state("Conflict", z.object({ field: z.string() }))
+      .init(() => ({ field: "" }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on("doX", ZodEmpty)
+      .emit(() => ["X", {}])
+      .build();
+
+    const SliceB = state("Conflict", z.object({ field: z.number() }))
+      .init(() => ({ field: 0 }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on("doY", ZodEmpty)
+      .emit(() => ["Y", {}])
+      .build();
+
+    expect(() => act().with(SliceA).with(SliceB)).toThrow("Schema conflict");
+  });
+
+  it("should reconstruct state from cross-partial events", async () => {
+    const SliceA = state("Cross", z.object({ total: z.number() }))
+      .init(() => ({ total: 0 }))
+      .emits({ Added: z.object({ n: z.number() }) })
+      .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
+      .on("add", z.object({ n: z.number() }))
+      .emit((a) => ["Added", { n: a.n }])
+      .build();
+
+    const SliceB = state("Cross", z.object({ tag: z.string() }))
+      .init(() => ({ tag: "" }))
+      .emits({ Tagged: z.object({ tag: z.string() }) })
+      .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
+      .on("tag", z.object({ tag: z.string() }))
+      .emit((a) => ["Tagged", { tag: a.tag }])
+      .build();
+
+    const app = act().with(SliceA).with(SliceB).build();
+    await app.do("add", { stream: "c1", actor }, { n: 1 });
+    await app.do("tag", { stream: "c1", actor }, { tag: "a" });
+    await app.do("add", { stream: "c1", actor }, { n: 2 });
+    await app.do("tag", { stream: "c1", actor }, { tag: "b" });
+
+    const snap = await app.load(SliceA, "c1");
+    expect(snap.state.total).toBe(3);
+    expect((snap.state as any).tag).toBe("b");
+  });
+
+  it("should not conflict on optional wrapping of same base type", () => {
+    const SliceA = state("OptWrap", z.object({ val: z.string() }))
+      .init(() => ({ val: "" }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on("doX", ZodEmpty)
+      .emit(() => ["X", {}])
+      .build();
+
+    const SliceB = state("OptWrap", z.object({ val: z.string().optional() }))
+      .init(() => ({ val: undefined }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on("doY", ZodEmpty)
+      .emit(() => ["Y", {}])
+      .build();
+
+    expect(() => act().with(SliceA).with(SliceB)).not.toThrow();
+  });
+
   it("should merge given (invariants) from partials", async () => {
     const PartWithInvariant = state(
       "Guarded",

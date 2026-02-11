@@ -4,6 +4,7 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
+import { ZodObject, type ZodType } from "zod";
 import { Act } from "./act.js";
 import type {
   EventRegister,
@@ -17,6 +18,59 @@ import type {
   Schemas,
   State,
 } from "./types/index.js";
+
+/**
+ * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
+ * to find the base type name, e.g. `z.string().optional()` → `"ZodString"`.
+ */
+function baseTypeName(zodType: ZodType): string {
+  let t: any = zodType;
+  while (typeof t.unwrap === "function" || t._def?.innerType) {
+    t = typeof t.unwrap === "function" ? t.unwrap() : t._def.innerType;
+  }
+  return t.constructor.name;
+}
+
+/**
+ * Merges two Zod schemas. If both are ZodObject instances, checks for
+ * overlapping shape keys with incompatible base types (throws descriptive
+ * error), then merges via `.extend()`. Falls back to keeping existing
+ * schema if either is not a ZodObject.
+ */
+function mergeSchemas(
+  existing: ZodType,
+  incoming: ZodType,
+  stateName: string
+): ZodType {
+  if (existing instanceof ZodObject && incoming instanceof ZodObject) {
+    const existingShape = existing.shape as Record<string, ZodType>;
+    const incomingShape = incoming.shape as Record<string, ZodType>;
+    for (const key of Object.keys(incomingShape)) {
+      if (key in existingShape) {
+        const existingBase = baseTypeName(existingShape[key]);
+        const incomingBase = baseTypeName(incomingShape[key]);
+        if (existingBase !== incomingBase) {
+          throw new Error(
+            `Schema conflict in "${stateName}": key "${key}" has type "${existingBase}" but incoming partial declares "${incomingBase}"`
+          );
+        }
+      }
+    }
+    return existing.extend(incomingShape);
+  }
+  return existing;
+}
+
+/**
+ * Merges two init functions by spreading both results together.
+ * Each partial only provides its own defaults.
+ */
+function mergeInits<S extends Schema>(
+  existing: () => Readonly<S>,
+  incoming: () => Readonly<S>
+): () => Readonly<S> {
+  return () => ({ ...existing(), ...incoming() });
+}
 
 // resolves the event stream as source and target (default)
 const _this_ = ({ stream }: { stream: string }) => ({
@@ -433,6 +487,8 @@ export function act<
         }
         const merged = {
           ...existing,
+          state: mergeSchemas(existing.state, state.state, state.name),
+          init: mergeInits(existing.init, state.init),
           events: { ...existing.events, ...state.events },
           actions: { ...existing.actions, ...state.actions },
           patch: { ...existing.patch, ...state.patch },
