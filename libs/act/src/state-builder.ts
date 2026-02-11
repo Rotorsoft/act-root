@@ -29,7 +29,7 @@ import {
  * @see {@link state} for usage examples
  * @see {@link ActionBuilder} for action configuration
  */
-export type StateBuilder<S extends Schema> = {
+export type StateBuilder<S extends Schema, N extends string = string> = {
   /**
    * Defines the initial state for new state instances.
    *
@@ -93,7 +93,7 @@ export type StateBuilder<S extends Schema> = {
        */
       patch: (
         patch: PatchHandlers<S, E>
-      ) => ActionBuilder<S, E, Record<string, never>>;
+      ) => ActionBuilder<S, E, Record<string, never>, N>;
     };
   };
 };
@@ -114,6 +114,7 @@ export type ActionBuilder<
   S extends Schema,
   E extends Schemas,
   A extends Schemas,
+  N extends string = string,
 > = {
   /**
    * Defines an action (command) that can be executed on this state.
@@ -197,7 +198,7 @@ export type ActionBuilder<
        */
       emit: (
         handler: ActionHandler<S, E, { [P in K]: AX }, K>
-      ) => ActionBuilder<S, E, A & { [P in K]: AX }>;
+      ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
     };
     /**
      * Defines the action handler that emits events.
@@ -237,7 +238,7 @@ export type ActionBuilder<
      */
     emit: (
       handler: ActionHandler<S, E, { [P in K]: AX }, K>
-    ) => ActionBuilder<S, E, A & { [P in K]: AX }>;
+    ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
   };
   /**
    * Defines a snapshotting strategy to optimize state reconstruction.
@@ -270,7 +271,9 @@ export type ActionBuilder<
    * })
    * ```
    */
-  snap: (snap: (snapshot: Snapshot<S, E>) => boolean) => ActionBuilder<S, E, A>;
+  snap: (
+    snap: (snapshot: Snapshot<S, E>) => boolean
+  ) => ActionBuilder<S, E, A, N>;
   /**
    * Finalizes and builds the state definition.
    *
@@ -287,10 +290,10 @@ export type ActionBuilder<
    *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
    *   .on("increment", z.object({ by: z.number() }))
    *     .emit((action) => ["Incremented", { amount: action.by }])
-   *   .build(); // Returns State<S, E, A>
+   *   .build(); // Returns State<S, E, A, N>
    * ```
    */
-  build: () => State<S, E, A>;
+  build: () => State<S, E, A, N>;
 };
 
 /**
@@ -400,17 +403,17 @@ export type ActionBuilder<
  * @see {@link https://rotorsoft.github.io/act-root/docs/intro | Getting Started Guide}
  * @see {@link https://rotorsoft.github.io/act-root/docs/examples/calculator | Calculator Example}
  */
-export function state<S extends Schema>(
-  name: string,
+export function state<N extends string, S extends Schema>(
+  name: N,
   state: ZodType<S>
-): StateBuilder<S> {
+): StateBuilder<S, N> {
   return {
     init(init: () => Readonly<S>) {
       return {
         emits<E extends Schema>(events: ZodTypes<E>) {
           return {
             patch(patch: PatchHandlers<S, E>) {
-              return action_builder<S, E, Record<string, never>>({
+              return action_builder<S, E, Record<string, never>, N>({
                 events,
                 actions: {},
                 state,
@@ -427,9 +430,12 @@ export function state<S extends Schema>(
   };
 }
 
-function action_builder<S extends Schema, E extends Schemas, A extends Schemas>(
-  state: State<S, E, A>
-): ActionBuilder<S, E, A> {
+function action_builder<
+  S extends Schema,
+  E extends Schemas,
+  A extends Schemas,
+  N extends string = string,
+>(state: State<S, E, A, N>): ActionBuilder<S, E, A, N> {
   return {
     on<K extends string, AX extends Schema>(action: K, schema: ZodType<AX>) {
       if (action in state.actions)
@@ -447,7 +453,7 @@ function action_builder<S extends Schema, E extends Schemas, A extends Schemas>(
 
       function emit(handler: ActionHandler<S, E, NewA, K>) {
         on[action] = handler;
-        return action_builder<S, E, NewA>({
+        return action_builder<S, E, NewA, N>({
           ...state,
           actions,
           on,
@@ -459,10 +465,10 @@ function action_builder<S extends Schema, E extends Schemas, A extends Schemas>(
     },
 
     snap(snap: (snapshot: Snapshot<S, E>) => boolean) {
-      return action_builder<S, E, A>({ ...state, snap });
+      return action_builder<S, E, A, N>({ ...state, snap });
     },
 
-    build(): State<S, E, A> {
+    build(): State<S, E, A, N> {
       return state;
     },
   };

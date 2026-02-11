@@ -137,6 +137,73 @@ describe("act", () => {
     expect(drained.leased.length).toBeGreaterThan(0);
   });
 
+  it("should return empty when drain is already locked", async () => {
+    // slow down poll so two concurrent drains overlap
+    const originalPoll = store().poll.bind(store());
+    const pollSpy = vi
+      .spyOn(store(), "poll")
+      .mockImplementation(async (lagging, leading) => {
+        await sleep(50);
+        return originalPoll(lagging, leading);
+      });
+    const [r1, r2] = await Promise.all([app.drain(), app.drain()]);
+    // one of them should have been locked out
+    const locked = r1.fetched.length === 0 ? r1 : r2;
+    expect(locked.fetched.length).toBe(0);
+    expect(locked.leased.length).toBe(0);
+    pollSpy.mockRestore();
+  });
+
+  it("should cover leading=0 branch when streamLimit=1", async () => {
+    // emit an event with a reaction so drain has work
+    await app.do("increment", { stream: "ratio-test", actor }, {});
+    await app.correlate();
+    // streamLimit=1 → lagging=1, leading=0 → covers the leading===0 branch
+    const drained = await app.drain({ streamLimit: 1, leaseMillis: 1 });
+    expect(drained.fetched.length).toBeLessThanOrEqual(1);
+  });
+
+  it("should cover lagging=0 branch in adaptive drain ratio", async () => {
+    // Force ratio to 0 so lagging=Math.ceil(0)=0
+    (app as any)._drain_lag2lead_ratio = 0;
+    await app.do("increment", { stream: "lag0-test", actor }, {});
+    await app.correlate();
+    const drained = await app.drain({ streamLimit: 1, leaseMillis: 1 });
+    expect(drained).toBeDefined();
+    // Restore to default
+    (app as any)._drain_lag2lead_ratio = 0.5;
+  });
+
+  it("should load unregistered state by object (fallback to stateOrName)", async () => {
+    // Create a state not registered via .with()
+    const unregistered = state("Unregistered", z.object({ val: z.number() }))
+      .init(() => ({ val: 0 }))
+      .emits({ Evt: ZodEmpty })
+      .patch({ Evt: () => ({}) })
+      .on("doEvt", ZodEmpty)
+      .emit(() => ["Evt", {}])
+      .build();
+
+    // Load it directly — should use the state object itself since name isn't in _states
+    const snap = await app.load(unregistered, "nonexistent-stream");
+    expect(snap.state.val).toBe(0);
+    expect(snap.patches).toBe(0);
+  });
+
+  it("should handle unregistered events in drain", async () => {
+    // Emit a registered event so this stream gets polled
+    await app.do("increment", { stream: "mixed-evt", actor }, {});
+    // Also commit an unregistered event to the same stream
+    await store().commit("mixed-evt", [{ name: "UnknownEvent", data: {} }], {
+      correlation: "c",
+      causation: {},
+    });
+    await app.correlate({ limit: 200 });
+    // drain encounters both "incremented" (registered) and "UnknownEvent" (not registered)
+    const drained = await app.drain();
+    expect(drained).toBeDefined();
+  });
+
   it("should exit drain loop on error", async () => {
     // mock store poll to throw
     const mockedPoll = vi.spyOn(store(), "poll").mockImplementation(() => {

@@ -5,7 +5,6 @@ import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
 import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
 import { Priority } from "../src/schemas/index.js";
-import { Ticket } from "../src/ticket.js";
 import {
   addMessage,
   assignTicket,
@@ -109,7 +108,7 @@ describe("tickets", () => {
       expect(ticket?.escalationId).toBeDefined();
 
       // load state and verify escalation id
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
@@ -150,7 +149,7 @@ describe("tickets", () => {
       expect(ticket?.closedById).toBeDefined();
 
       // load state and verify closed by
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.closedById).toBeDefined();
     });
 
@@ -191,7 +190,7 @@ describe("tickets", () => {
       expect(ticket?.escalateAfter).toBeGreaterThan(now.getTime());
 
       // load state and verify new agent and reassign after date
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.agentId).toBeDefined();
       expect(snapshot.state.agentId).not.toEqual(agentId);
       expect(snapshot.state.reassignAfter?.getTime()).toBeGreaterThan(
@@ -210,7 +209,7 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.agentId).toBeDefined();
     });
 
@@ -221,10 +220,9 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
-      expect(
-        Object.values(snapshot.state.messages).at(-1)?.wasDelivered
-      ).toBeDefined();
+      const snapshot = await app.load("Ticket", t.stream);
+      const lastMsg = Object.values(snapshot.state.messages).at(-1);
+      expect(lastMsg?.wasDelivered).toBeDefined();
     });
 
     it("should request escalation", async () => {
@@ -234,7 +232,7 @@ describe("tickets", () => {
       await app.correlate({ limit: 120 }); // 120 to reach the previous event
       await app.drain();
 
-      const snapshot = await app.load(Ticket, t.stream);
+      const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
     });
   });

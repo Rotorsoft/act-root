@@ -334,8 +334,9 @@ export type State<
   S extends Schema,
   E extends Schemas,
   A extends Schemas,
+  N extends string = string,
 > = StateSchemas<S, E, A> & {
-  name: string;
+  name: N;
   init: () => Readonly<S>;
   patch: PatchHandlers<S, E>;
   on: ActionHandlers<S, E, A>;

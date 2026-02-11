@@ -1,12 +1,9 @@
 import { state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import * as errors from "./errors.js";
 import * as schemas from "./schemas/index.js";
-import {
-  mustBeOpen,
-  mustBeUserOrAgent,
-  ticketInit,
-} from "./ticket-invariants.js";
+import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 
 const creationEvents = {
   TicketOpened: schemas.events.TicketOpened,
@@ -14,8 +11,28 @@ const creationEvents = {
   TicketResolved: schemas.events.TicketResolved,
 };
 
-export const TicketCreation = state("Ticket", schemas.Ticket)
-  .init(ticketInit)
+export const TicketCreation = state(
+  "Ticket",
+  z.object({
+    productId: z.uuid(),
+    supportCategoryId: z.uuid(),
+    priority: z.enum(schemas.Priority),
+    title: z.string().min(1),
+    userId: z.uuid(),
+    messages: z.record(z.uuid(), schemas.Message),
+    closedById: z.uuid().optional(),
+    resolvedById: z.uuid().optional(),
+    closeAfter: z.date().optional(),
+  })
+)
+  .init(() => ({
+    title: "",
+    productId: "",
+    supportCategoryId: "",
+    userId: "",
+    priority: schemas.Priority.Low,
+    messages: {},
+  }))
   .emits(creationEvents)
   .patch({
     TicketOpened: ({ data }) => {

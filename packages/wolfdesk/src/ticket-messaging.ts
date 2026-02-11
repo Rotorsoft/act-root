@@ -1,12 +1,9 @@
 import { InvariantError, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
+import { z } from "zod";
 import * as errors from "./errors.js";
 import * as schemas from "./schemas/index.js";
-import {
-  mustBeOpen,
-  mustBeUserOrAgent,
-  ticketInit,
-} from "./ticket-invariants.js";
+import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 
 const messagingEvents = {
   MessageAdded: schemas.events.MessageAdded,
@@ -14,8 +11,21 @@ const messagingEvents = {
   MessageRead: schemas.events.MessageRead,
 };
 
-export const TicketMessaging = state("Ticket", schemas.Ticket)
-  .init(ticketInit)
+export const TicketMessaging = state(
+  "Ticket",
+  z.object({
+    productId: z.uuid(),
+    userId: z.uuid(),
+    agentId: z.uuid().optional(),
+    messages: z.record(z.uuid(), schemas.Message),
+    closedById: z.uuid().optional(),
+  })
+)
+  .init(() => ({
+    productId: "",
+    userId: "",
+    messages: {},
+  }))
   .emits(messagingEvents)
   .patch({
     MessageAdded: ({ data }) => ({

@@ -236,6 +236,31 @@ describe("Builder", () => {
     });
   });
 
+  it("should merge states with non-ZodObject schemas (fallback path)", () => {
+    // z.any() is not a ZodObject, so mergeSchemas should return existing unchanged
+    const s1 = {
+      name: "NonObj",
+      state: z.any(),
+      init: () => ({}),
+      actions: { nonA: ZodEmpty },
+      events: { nonE1: ZodEmpty },
+      patch: { nonE1: () => ({}) },
+      on: { nonA: () => ["nonE1", {}] as [string, object] },
+    };
+    const s2 = {
+      name: "NonObj",
+      state: z.any(),
+      init: () => ({}),
+      actions: { nonB: ZodEmpty },
+      events: { nonE2: ZodEmpty },
+      patch: { nonE2: () => ({}) },
+      on: { nonB: () => ["nonE2", {}] as [string, object] },
+    };
+    const builder = act();
+    builder.with(s1);
+    expect(() => builder.with(s2)).not.toThrow();
+  });
+
   it("should allow multiple reactions for the same event with different handlers", () => {
     function handlerA() {
       return Promise.resolve();
