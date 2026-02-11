@@ -221,9 +221,7 @@ describe("tickets", () => {
       await app.drain();
 
       const snapshot = await app.load("Ticket", t.stream);
-      const lastMsg: any = Object.values(
-        snapshot.state.messages as Record<string, unknown>
-      ).at(-1);
+      const lastMsg = Object.values(snapshot.state.messages).at(-1);
       expect(lastMsg?.wasDelivered).toBeDefined();
     });
 

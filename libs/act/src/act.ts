@@ -49,6 +49,7 @@ export class Act<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
+  M extends Record<string, Schema> = Record<string, never>,
 > {
   private _emitter = new EventEmitter();
   private _drain_locked = false;
@@ -271,15 +272,15 @@ export class Act<
     stream: string,
     callback?: (snapshot: Snapshot<SX, EX>) => void
   ): Promise<Snapshot<SX, EX>>;
-  async load(
-    name: string,
+  async load<K extends keyof M & string>(
+    name: K,
     stream: string,
-    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
-  ): Promise<Snapshot<Schema, Schemas>>;
-  async load(
-    stateOrName: State<any, any, any> | string,
+    callback?: (snapshot: Snapshot<M[K], E>) => void
+  ): Promise<Snapshot<M[K], E>>;
+  async load<SX extends Schema>(
+    stateOrName: State<SX, any, any> | string,
     stream: string,
-    callback?: (snapshot: Snapshot<Schema, Schemas>) => void
+    callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>> {
     let merged: State<any, any, any>;
     if (typeof stateOrName === "string") {
@@ -549,7 +550,8 @@ export class Act<
 
           fetched.forEach(({ stream, lagging, events }) => {
             const payloads = events.flatMap((event) => {
-              const register = this.registry.events[event.name] || [];
+              const register = this.registry.events[event.name];
+              if (!register) return [];
               return [...register.reactions.values()]
                 .filter((reaction) => {
                   const resolved =

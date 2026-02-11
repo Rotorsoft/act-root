@@ -159,6 +159,7 @@ describe("partial-state", () => {
 
   it("should throw when loading unknown state by name", async () => {
     const app = act().with(PartA).build();
+    // @ts-expect-error "Unknown" is not a registered state name
     await expect(app.load("Unknown", "s1")).rejects.toThrow(
       'State "Unknown" not found'
     );
@@ -186,9 +187,9 @@ describe("partial-state", () => {
     await app.do("setCount", { stream: "m1", actor }, { n: 42 });
     await app.do("setName", { stream: "m1", actor }, { label: "hello" });
 
-    const snap = await app.load(SliceA, "m1");
+    const snap = await app.load("Merged", "m1");
     expect(snap.state.count).toBe(42);
-    expect((snap.state as any).label).toBe("hello");
+    expect(snap.state.label).toBe("hello");
   });
 
   it("should merge init functions from partials", async () => {
@@ -210,9 +211,9 @@ describe("partial-state", () => {
 
     const app = act().with(SliceA).with(SliceB).build();
     await app.do("doA", { stream: "i1", actor }, {});
-    const snap = await app.load(SliceA, "i1");
+    const snap = await app.load("InitMerge", "i1");
     expect(snap.state.x).toBe(10);
-    expect((snap.state as any).y).toBe("default");
+    expect(snap.state.y).toBe("default");
   });
 
   it("should allow overlapping keys with same base type", () => {
@@ -279,9 +280,9 @@ describe("partial-state", () => {
     await app.do("add", { stream: "c1", actor }, { n: 2 });
     await app.do("tag", { stream: "c1", actor }, { tag: "b" });
 
-    const snap = await app.load(SliceA, "c1");
+    const snap = await app.load("Cross", "c1");
     expect(snap.state.total).toBe(3);
-    expect((snap.state as any).tag).toBe("b");
+    expect(snap.state.tag).toBe("b");
   });
 
   it("should not conflict on optional wrapping of same base type", () => {

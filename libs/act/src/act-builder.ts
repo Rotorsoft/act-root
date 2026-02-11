@@ -25,8 +25,8 @@ import type {
  */
 function baseTypeName(zodType: ZodType): string {
   let t: any = zodType;
-  while (typeof t.unwrap === "function" || t._def?.innerType) {
-    t = typeof t.unwrap === "function" ? t.unwrap() : t._def.innerType;
+  while (typeof t.unwrap === "function") {
+    t = t.unwrap();
   }
   return t.constructor.name;
 }
@@ -99,6 +99,7 @@ export type ActBuilder<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
+  M extends Record<string, Schema> = Record<string, never>,
 > = {
   /**
    * Registers a state definition with the builder.
@@ -131,9 +132,19 @@ export type ActBuilder<
    *   .build();
    * ```
    */
-  with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
-    state: State<SX, EX, AX>
-  ) => ActBuilder<S & { [K in keyof AX]: SX }, E & EX, A & AX>;
+  with: <
+    SX extends Schema,
+    EX extends Schemas,
+    AX extends Schemas,
+    NX extends string = string,
+  >(
+    state: State<SX, EX, AX, NX>
+  ) => ActBuilder<
+    S & { [K in keyof AX]: SX },
+    E & EX,
+    A & AX,
+    M & { [K in NX]: SX }
+  >;
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -207,7 +218,7 @@ export type ActBuilder<
     do: (
       handler: ReactionHandler<E, K>,
       options?: Partial<ReactionOptions>
-    ) => ActBuilder<S, E, A> & {
+    ) => ActBuilder<S, E, A, M> & {
       /**
        * Routes the reaction to a specific target stream.
        *
@@ -244,7 +255,7 @@ export type ActBuilder<
        *   }))
        * ```
        */
-      to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A>;
+      to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A, M>;
       /**
        * Marks the reaction as void (side-effect only, no target stream).
        *
@@ -263,7 +274,7 @@ export type ActBuilder<
        *   .void()  // No target stream
        * ```
        */
-      void: () => ActBuilder<S, E, A>;
+      void: () => ActBuilder<S, E, A, M>;
     };
   };
   /**
@@ -292,7 +303,7 @@ export type ActBuilder<
    *
    * @see {@link Act} for available orchestrator methods
    */
-  build: (drainLimit?: number) => Act<S, E, A>;
+  build: (drainLimit?: number) => Act<S, E, A, M>;
   /**
    * The registered event schemas and their reaction maps.
    *
@@ -452,14 +463,15 @@ export function act<
   S extends SchemaRegister<A> = {},
   E extends Schemas = {},
   A extends Schemas = {},
+  M extends Record<string, Schema> = {},
 >(
   states: Map<string, State<any, any, any>> = new Map(),
   registry: Registry<S, E, A> = {
     actions: {} as any,
     events: {} as any,
   }
-): ActBuilder<S, E, A> {
-  const builder: ActBuilder<S, E, A> = {
+): ActBuilder<S, E, A, M> {
+  const builder: ActBuilder<S, E, A, M> = {
     /**
      * Adds a state to the builder. When a state with the same name is already
      * registered, merges the new partial's actions, events, patches, and handlers
@@ -471,8 +483,13 @@ export function act<
      * @param state The state to add
      * @returns The builder
      */
-    with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
-      state: State<SX, EX, AX>
+    with: <
+      SX extends Schema,
+      EX extends Schemas,
+      AX extends Schemas,
+      NX extends string = string,
+    >(
+      state: State<SX, EX, AX, NX>
     ) => {
       if (states.has(state.name)) {
         // MERGE: same state name - combine events, actions, patches, handlers
@@ -528,7 +545,12 @@ export function act<
           };
         }
       }
-      return act<S & { [K in keyof AX]: SX }, E & EX, A & AX>(
+      return act<
+        S & { [K in keyof AX]: SX },
+        E & EX,
+        A & AX,
+        M & { [K in NX]: SX }
+      >(
         states,
         registry as unknown as Registry<
           S & { [K in keyof AX]: SX },
@@ -578,7 +600,7 @@ export function act<
         };
       },
     }),
-    build: () => new Act<S, E, A>(registry, states),
+    build: () => new Act<S, E, A, M>(registry, states),
     events: registry.events,
   };
   return builder;

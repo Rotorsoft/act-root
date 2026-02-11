@@ -43,9 +43,7 @@ describe("ticket without reactions", () => {
     const snapshot = await app.load("Ticket", t.stream);
     expect(snapshot.state.title).toEqual(title);
     expect(snapshot.state.agentId).toBeDefined();
-    expect(
-      Object.keys(snapshot.state.messages as Record<string, unknown>).length
-    ).toBe(2);
+    expect(Object.keys(snapshot.state.messages).length).toBe(2);
     expect(snapshot.patches).toBeGreaterThanOrEqual(5);
   });
 
@@ -58,9 +56,7 @@ describe("ticket without reactions", () => {
 
     const snapshot2 = await app.load("Ticket", t.stream);
     const s2 = snapshot2.state;
-    const message2: any = Object.values(
-      s2.messages as Record<string, unknown>
-    ).at(-1);
+    const message2 = Object.values(s2.messages).at(-1);
 
     expect(s2.agentId).not.toEqual(agentId);
     expect(s2.resolvedById).toBeDefined();
