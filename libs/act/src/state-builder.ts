@@ -18,7 +18,6 @@ import {
   ZodTypes,
 } from "./types/index.js";
 
-/* eslint-disable @typescript-eslint/no-empty-object-type */
 /**
  * Builder interface for defining a state with event sourcing.
  *
@@ -92,7 +91,9 @@ export type StateBuilder<S extends Schema> = {
        * })
        * ```
        */
-      patch: (patch: PatchHandlers<S, E>) => ActionBuilder<S, E, {}>;
+      patch: (
+        patch: PatchHandlers<S, E>
+      ) => ActionBuilder<S, E, Record<string, never>>;
     };
   };
 };
@@ -409,7 +410,7 @@ export function state<S extends Schema>(
         emits<E extends Schema>(events: ZodTypes<E>) {
           return {
             patch(patch: PatchHandlers<S, E>) {
-              return action_builder<S, E, {}>({
+              return action_builder<S, E, Record<string, never>>({
                 events,
                 actions: {},
                 state,

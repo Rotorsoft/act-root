@@ -248,7 +248,7 @@ export type ActBuilder<
   readonly events: EventRegister<E>;
 };
 
-/* eslint-disable @typescript-eslint/no-empty-object-type */
+/* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
 
 /**
  * Creates a new Act orchestrator builder for composing event-sourced applications.
@@ -364,6 +364,30 @@ export type ActBuilder<
  * await app.drain();
  * ```
  *
+ * @example Partial state definitions (same name, merged via .with())
+ * ```typescript
+ * const TicketCreation = state("Ticket", TicketSchema)
+ *   .init(() => initialTicket)
+ *   .emits({ TicketOpened: ..., TicketClosed: ... })
+ *   .patch({ TicketOpened: ..., TicketClosed: ... })
+ *   .on("OpenTicket", ...).emit(...)
+ *   .on("CloseTicket", ...).emit(...)
+ *   .build();
+ *
+ * const TicketMessaging = state("Ticket", TicketSchema)
+ *   .init(() => initialTicket)
+ *   .emits({ MessageAdded: ... })
+ *   .patch({ MessageAdded: ... })
+ *   .on("AddMessage", ...).emit(...)
+ *   .build();
+ *
+ * // Partials with same name are merged automatically
+ * const app = act()
+ *   .with(TicketCreation)
+ *   .with(TicketMessaging)
+ *   .build();
+ * ```
+ *
  * @see {@link ActBuilder} for available builder methods
  * @see {@link Act} for orchestrator API methods
  * @see {@link state} for defining states
@@ -375,7 +399,7 @@ export function act<
   E extends Schemas = {},
   A extends Schemas = {},
 >(
-  states: Set<string> = new Set(),
+  states: Map<string, State<any, any, any>> = new Map(),
   registry: Registry<S, E, A> = {
     actions: {} as any,
     events: {} as any,
@@ -383,7 +407,9 @@ export function act<
 ): ActBuilder<S, E, A> {
   const builder: ActBuilder<S, E, A> = {
     /**
-     * Adds a state to the builder.
+     * Adds a state to the builder. When a state with the same name is already
+     * registered, merges the new partial's actions, events, patches, and handlers
+     * into the existing state (errors on duplicate action/event names).
      *
      * @template SX The type of state
      * @template EX The type of events
@@ -394,8 +420,42 @@ export function act<
     with: <SX extends Schema, EX extends Schemas, AX extends Schemas>(
       state: State<SX, EX, AX>
     ) => {
-      if (!states.has(state.name)) {
-        states.add(state.name);
+      if (states.has(state.name)) {
+        // MERGE: same state name - combine events, actions, patches, handlers
+        const existing = states.get(state.name)!;
+        for (const name of Object.keys(state.actions)) {
+          if (registry.actions[name])
+            throw new Error(`Duplicate action "${name}"`);
+        }
+        for (const name of Object.keys(state.events)) {
+          if (registry.events[name])
+            throw new Error(`Duplicate event "${name}"`);
+        }
+        const merged = {
+          ...existing,
+          events: { ...existing.events, ...state.events },
+          actions: { ...existing.actions, ...state.actions },
+          patch: { ...existing.patch, ...state.patch },
+          on: { ...existing.on, ...state.on },
+          given: { ...existing.given, ...state.given },
+          snap: state.snap || existing.snap,
+        };
+        states.set(state.name, merged);
+        // Update ALL action→state pointers to the merged object
+        for (const name of Object.keys(merged.actions)) {
+          // @ts-expect-error indexed access
+          registry.actions[name] = merged;
+        }
+        for (const name of Object.keys(state.events)) {
+          // @ts-expect-error indexed access
+          registry.events[name] = {
+            schema: state.events[name],
+            reactions: new Map(),
+          };
+        }
+      } else {
+        // NEW: register state for the first time
+        states.set(state.name, state as State<any, any, any>);
         for (const name of Object.keys(state.actions)) {
           if (registry.actions[name])
             throw new Error(`Duplicate action "${name}"`);
@@ -462,7 +522,7 @@ export function act<
         };
       },
     }),
-    build: () => new Act<S, E, A>(registry),
+    build: () => new Act<S, E, A>(registry, states),
     events: registry.events,
   };
   return builder;

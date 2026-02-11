@@ -2,13 +2,16 @@ import { act, type AsCommitted } from "@rotorsoft/act";
 import { randomUUID } from "node:crypto";
 import { assignAgent } from "./services/agent.js";
 import { deliverMessage } from "./services/notification.js";
-import { Ticket } from "./ticket.js";
+import { TicketCreation, TicketMessaging, TicketOperations } from "./ticket.js";
 import * as p from "./tickets.js";
 
 export * from "./errors.js";
 export * from "./ticket.js";
 
-export const builder = act().with(Ticket);
+export const builder = act()
+  .with(TicketCreation)
+  .with(TicketMessaging)
+  .with(TicketOperations);
 
 // prettier-ignore
 export const app = builder
