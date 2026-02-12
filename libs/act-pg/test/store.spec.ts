@@ -300,7 +300,7 @@ describe("pg store", () => {
 
       await app.do("decrement", { stream: "blocking", actor }, {});
 
-      drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+      await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
       expect(onDecremented).toHaveBeenCalledTimes(1);
 
       drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
@@ -504,6 +504,30 @@ describe("pg store", () => {
         },
       ]);
       expect(blocked.length).toBe(0);
+    });
+
+    it("should block a stream when leased by same drainer", async () => {
+      const s = store();
+      const leases = await s.lease(
+        [{ stream: "L5", lagging: false, by: "blocker", at: 0, retry: 0 }],
+        100000
+      );
+      expect(leases.length).toBe(1);
+
+      const blocked = await s.block([
+        {
+          stream: "L5",
+          lagging: false,
+          by: "blocker",
+          at: 1,
+          retry: 0,
+          error: "test error",
+        },
+      ]);
+      expect(blocked.length).toBe(1);
+      expect(blocked[0].stream).toBe("L5");
+      expect(blocked[0].source).toBeUndefined();
+      expect(blocked[0].error).toBe("test error");
     });
 
     it("should poll", async () => {
