@@ -224,8 +224,8 @@ export function act<
 >(
   states: Map<string, State<any, any, any>> = new Map(),
   registry: Registry<S, E, A> = {
-    actions: {} as any,
-    events: {} as any,
+    actions: {} as Registry<S, E, A>["actions"],
+    events: {} as Registry<S, E, A>["events"],
   }
 ): ActBuilder<S, E, A, M> {
   const builder: ActBuilder<S, E, A, M> = {
@@ -239,7 +239,12 @@ export function act<
         for (const eventName of Object.keys(input.events)) {
           const sliceRegister = input.events[eventName];
           for (const [name, reaction] of sliceRegister.reactions) {
-            (registry.events as any)[eventName].reactions.set(name, reaction);
+            (
+              registry.events as Record<
+                string,
+                { reactions: Map<string, unknown> }
+              >
+            )[eventName].reactions.set(name, reaction);
           }
         }
         return act(states, registry as Registry<any, any, any>);
@@ -247,7 +252,7 @@ export function act<
       // STATE: register directly
       registerState(input, states, registry.actions, registry.events);
       return act(states, registry as Registry<any, any, any>);
-    }) as any,
+    }) as ActBuilder<S, E, A, M>["with"],
     /**
      * Adds a reaction to an event.
      *

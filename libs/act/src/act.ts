@@ -210,7 +210,7 @@ export class Act<
     action: K,
     target: Target,
     payload: Readonly<A[K]>,
-    reactingTo?: Committed<E, keyof E>,
+    reactingTo?: Committed<E, string & keyof E>,
     skipValidation = false
   ) {
     const snapshots = await es.action(
@@ -218,7 +218,6 @@ export class Act<
       action,
       target,
       payload,
-      // @ts-expect-error type lost
       reactingTo,
       skipValidation
     );
@@ -405,7 +404,7 @@ export class Act<
    * @param payloads The reactions to handle
    * @returns The lease with results
    */
-  private async handle<E extends Schemas>(
+  private async handle(
     lease: Lease,
     payloads: ReactionPayload<E>[]
   ): Promise<{
@@ -513,7 +512,7 @@ export class Act<
    * @see {@link correlate} for dynamic stream discovery
    * @see {@link start_correlations} for automatic correlation
    */
-  async drain<E extends Schemas>({
+  async drain({
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
@@ -539,7 +538,7 @@ export class Act<
 
           const leases = new Map<
             string,
-            { lease: Lease; lagging: boolean; payloads: ReactionPayload<E>[] }
+            { lease: Lease; payloads: ReactionPayload<E>[] }
           >();
 
           // compute fetch window max event id
@@ -570,8 +569,7 @@ export class Act<
                 retry: 0,
                 lagging,
               },
-              // @ts-expect-error indexed by key
-              payloads,
+              payloads: payloads as ReactionPayload<E>[],
             });
           });
 
@@ -621,7 +619,6 @@ export class Act<
             this.emit("blocked", blocked);
           }
 
-          // @ts-expect-error key
           return { fetched, leased, acked, blocked };
         }
       } catch (error) {

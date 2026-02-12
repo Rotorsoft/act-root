@@ -162,7 +162,7 @@ export function slice<
 >(
   states: Map<string, State<any, any, any>> = new Map(),
   actions: Record<string, any> = {},
-  events: EventRegister<E> = {} as any
+  events: EventRegister<E> = {} as EventRegister<E>
 ): SliceBuilder<S, E, A, M> {
   const builder: SliceBuilder<S, E, A, M> = {
     with: <
@@ -173,7 +173,7 @@ export function slice<
     >(
       state: State<SX, EX, AX, NX>
     ) => {
-      registerState(state, states, actions, events as Record<string, any>);
+      registerState(state, states, actions, events as Record<string, unknown>);
       return slice<
         S & { [K in keyof AX]: SX },
         E & EX,
