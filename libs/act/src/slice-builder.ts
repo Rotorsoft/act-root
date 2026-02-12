@@ -7,6 +7,8 @@
  */
 import { _this_, _void_, registerState } from "./merge.js";
 import type {
+  Committed,
+  Dispatcher,
   EventRegister,
   Reaction,
   ReactionHandler,
@@ -15,6 +17,7 @@ import type {
   Schema,
   SchemaRegister,
   Schemas,
+  Snapshot,
   State,
 } from "./types/index.js";
 
@@ -32,7 +35,8 @@ export type Slice<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  M extends Record<string, Schema> = Record<string, never>,
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  M extends Record<string, Schema> = {},
 > = {
   readonly _tag: "Slice";
   readonly states: Map<string, State<any, any, any>>;
@@ -53,8 +57,10 @@ export function isSlice(x: any): x is Slice<any, any, any, any> {
 /**
  * Fluent builder interface for composing functional slices.
  *
- * Provides the same chainable API as ActBuilder for registering states
- * and defining reactions, but scoped to the slice's own events.
+ * Provides a chainable API for registering states and defining reactions,
+ * scoped to the slice's own events. Include all states whose actions your
+ * handlers need via `.with()` — the `app` parameter in `.do()` handlers
+ * is typed with every action registered in the slice.
  *
  * @template S - Schema register for states
  * @template E - Event schemas
@@ -65,10 +71,15 @@ export type SliceBuilder<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  M extends Record<string, Schema> = Record<string, never>,
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  M extends Record<string, Schema> = {},
 > = {
   /**
    * Registers a partial state definition with the slice.
+   *
+   * Include every state whose actions your reaction handlers need to
+   * dispatch. Duplicate registrations (same state in multiple slices)
+   * are handled automatically at composition time.
    */
   with: <
     SX extends Schema,
@@ -90,7 +101,11 @@ export type SliceBuilder<
     event: K
   ) => {
     do: (
-      handler: ReactionHandler<E, K>,
+      handler: (
+        event: Committed<E, K>,
+        stream: string,
+        app: Dispatcher<A>
+      ) => Promise<Snapshot<E, Schema> | void>,
       options?: Partial<ReactionOptions>
     ) => SliceBuilder<S, E, A, M> & {
       to: (
@@ -118,35 +133,30 @@ export type SliceBuilder<
  * reactions into self-contained feature modules. Reactions defined in a slice
  * are type-scoped to events from that slice's states only.
  *
- * @example Single-state slice
+ * Include all states whose actions your handlers dispatch via `.with()`.
+ * When multiple slices share the same state, duplicates are merged
+ * automatically at `act().with(slice)` composition time.
+ *
+ * @example Single-state slice with typed dispatch
  * ```typescript
  * const CounterSlice = slice()
  *   .with(Counter)
  *   .on("Incremented")
- *     .do(async (event) => { console.log("incremented!", event.data); })
+ *     .do(async (event, _stream, app) => {
+ *       await app.do("reset", target, {});
+ *     })
  *     .void()
- *   .build();
- *
- * const app = act()
- *   .with(CounterSlice)
  *   .build();
  * ```
  *
- * @example Multi-slice composition
+ * @example Cross-state dispatch (include both states)
  * ```typescript
  * const CreationSlice = slice()
  *   .with(TicketCreation)
- *   .on("TicketOpened").do(assign)
- *   .build();
- *
- * const MessagingSlice = slice()
- *   .with(TicketMessaging)
- *   .on("MessageAdded").do(deliver)
- *   .build();
- *
- * const app = act()
- *   .with(CreationSlice)
- *   .with(MessagingSlice)
+ *   .with(TicketOperations) // handler can dispatch AssignTicket
+ *   .on("TicketOpened").do(async (event, _stream, app) => {
+ *     await app.do("AssignTicket", target, payload, event);
+ *   })
  *   .build();
  * ```
  *
@@ -183,22 +193,28 @@ export function slice<
     },
     on: <K extends keyof E>(event: K) => ({
       do: (
-        handler: ReactionHandler<E, K>,
+        handler: (
+          event: Committed<E, K>,
+          stream: string,
+          app: Dispatcher<A>
+        ) => Promise<Snapshot<E, Schema> | void>,
         options?: Partial<ReactionOptions>
       ) => {
         const reaction: Reaction<E, K> = {
-          handler,
+          handler: handler as ReactionHandler<E, K>,
           resolver: _this_,
           options: {
             blockOnError: options?.blockOnError ?? true,
             maxRetries: options?.maxRetries ?? 3,
           },
         };
-        events[event].reactions.set(handler.name, reaction);
+        const name =
+          handler.name || `${String(event)}_${events[event].reactions.size}`;
+        events[event].reactions.set(name, reaction);
         return {
           ...builder,
           to(resolver: ReactionResolver<E, K> | string) {
-            events[event].reactions.set(handler.name, {
+            events[event].reactions.set(name, {
               ...reaction,
               resolver:
                 typeof resolver === "string" ? { target: resolver } : resolver,
@@ -206,7 +222,7 @@ export function slice<
             return builder;
           },
           void() {
-            events[event].reactions.set(handler.name, {
+            events[event].reactions.set(name, {
               ...reaction,
               resolver: _void_,
             });

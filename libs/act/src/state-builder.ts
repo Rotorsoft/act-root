@@ -93,7 +93,8 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
        */
       patch: (
         patch: PatchHandlers<S, E>
-      ) => ActionBuilder<S, E, Record<string, never>, N>;
+        // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
+      ) => ActionBuilder<S, E, {}, N>;
     };
   };
 };
@@ -413,7 +414,8 @@ export function state<N extends string, S extends Schema>(
         emits<E extends Schema>(events: ZodTypes<E>) {
           return {
             patch(patch: PatchHandlers<S, E>) {
-              return action_builder<S, E, Record<string, never>, N>({
+              // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
+              return action_builder<S, E, {}, N>({
                 events,
                 actions: {},
                 state,

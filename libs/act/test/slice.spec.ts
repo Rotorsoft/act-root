@@ -1,7 +1,10 @@
 import { z } from "zod";
-import { act, slice, state, ZodEmpty } from "../src/index.js";
+import { act, slice, state, store, ZodEmpty } from "../src/index.js";
 
 describe("slice", () => {
+  beforeEach(async () => {
+    await store().drop();
+  });
   const schema = z.object({
     count: z.number(),
     label: z.string(),
@@ -47,6 +50,18 @@ describe("slice", () => {
     const s = slice().with(PartA).on("Incremented").do(handler).void().build();
 
     expect(s.events["Incremented"].reactions.size).toBe(1);
+  });
+
+  it("should generate a reaction name for anonymous handlers", () => {
+    const s = slice()
+      .with(PartA)
+      .on("Incremented")
+      .do(async () => {})
+      .void()
+      .build();
+
+    const [name] = [...s.events["Incremented"].reactions.keys()];
+    expect(name).toBe("Incremented_0");
   });
 
   it("should register scoped reactions via .on().do().to() with string", () => {
@@ -302,6 +317,37 @@ describe("slice", () => {
     expect(b.events).toBeDefined();
     expect(b.events["Incremented"]).toBeDefined();
     expect(b.events["Incremented"].schema).toBeDefined();
+  });
+
+  it("should compose slices that share the same state", async () => {
+    const stream = nextStream();
+    const onIncremented = vi.fn().mockResolvedValue(undefined);
+    const onLabeled = vi.fn().mockResolvedValue(undefined);
+
+    // SliceA includes both PartA and PartB so its handler can dispatch setLabel
+    const SliceA = slice()
+      .with(PartA)
+      .with(PartB)
+      .on("Incremented")
+      .do(onIncremented)
+      .build();
+
+    // SliceB also includes PartB (shared state) — no conflict at composition
+    const SliceB = slice().with(PartB).on("Labeled").do(onLabeled).build();
+
+    const app = act().with(SliceA).with(SliceB).build();
+
+    await app.do("increment", { stream, actor }, { by: 7 });
+    await app.do("setLabel", { stream, actor }, { label: "shared" });
+    await app.correlate();
+    await app.drain();
+
+    expect(onIncremented).toHaveBeenCalled();
+    expect(onLabeled).toHaveBeenCalled();
+
+    const snap = await app.load("Thing", stream);
+    expect(snap.state.count).toBe(7);
+    expect(snap.state.label).toBe("shared");
   });
 
   it("should merge multiple partials within a single slice", async () => {

@@ -1,24 +1,51 @@
-import { state } from "@rotorsoft/act";
+import { slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import * as errors from "./errors.js";
-import * as schemas from "./schemas/index.js";
+import { Message } from "./schemas/ticket.state.schemas.js";
 import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
 
-const operationsEvents = {
-  TicketAssigned: schemas.events.TicketAssigned,
-  TicketEscalationRequested: schemas.events.TicketEscalationRequested,
-  TicketEscalated: schemas.events.TicketEscalated,
-  TicketReassigned: schemas.events.TicketReassigned,
-};
+// --- Action schemas ---
+const AssignTicket = z
+  .object({
+    agentId: z.uuid(),
+    reassignAfter: z.date(),
+    escalateAfter: z.date(),
+  })
+  .describe("Assigns the ticket to an agent");
+const RequestTicketEscalation = z
+  .object({})
+  .describe("Requests a ticket escalation");
+const EscalateTicket = z
+  .object({ requestId: z.uuid(), requestedById: z.uuid() })
+  .describe("Escalates the ticket");
+const ReassignTicket = z
+  .object({
+    agentId: z.uuid(),
+    reassignAfter: z.date(),
+    escalateAfter: z.date(),
+  })
+  .describe("Reassigns the ticket");
 
+// --- Event schemas ---
+const TicketAssigned = AssignTicket.describe(
+  "An agent was assigned to the ticket"
+);
+const TicketEscalationRequested = z
+  .object({ requestedById: z.uuid(), requestId: z.uuid() })
+  .describe("A ticket escalation was requested");
+const TicketEscalated = EscalateTicket.and(
+  z.object({ escalationId: z.uuid() })
+).describe("The ticket was escalated");
+const TicketReassigned = ReassignTicket.describe("The ticket was reassigned");
+
+// --- State ---
 export const TicketOperations = state(
   "Ticket",
   z.object({
     productId: z.uuid(),
     userId: z.uuid(),
-    messages: z.record(z.uuid(), schemas.Message),
-    closedById: z.uuid().optional(),
+    messages: z.record(z.uuid(), Message),
     agentId: z.uuid().optional(),
     requestId: z.uuid().optional(),
     requestedById: z.uuid().optional(),
@@ -32,7 +59,12 @@ export const TicketOperations = state(
     userId: "",
     messages: {},
   }))
-  .emits(operationsEvents)
+  .emits({
+    TicketAssigned,
+    TicketEscalationRequested,
+    TicketEscalated,
+    TicketReassigned,
+  })
   .patch({
     TicketAssigned: ({ data }) => data,
     TicketEscalationRequested: ({ data }) => data,
@@ -40,11 +72,11 @@ export const TicketOperations = state(
     TicketReassigned: ({ data }) => data,
   })
 
-  .on("AssignTicket", schemas.actions.AssignTicket)
+  .on("AssignTicket", AssignTicket)
   .given([mustBeOpen])
   .emit((data) => ["TicketAssigned", data])
 
-  .on("RequestTicketEscalation", schemas.actions.RequestTicketEscalation)
+  .on("RequestTicketEscalation", RequestTicketEscalation)
   .given([mustBeOpen, mustBeUser])
   .emit((_, { state }, { stream, actor }) => {
     if (state.escalateAfter && state.escalateAfter > new Date())
@@ -62,7 +94,7 @@ export const TicketOperations = state(
     ];
   })
 
-  .on("EscalateTicket", schemas.actions.EscalateTicket)
+  .on("EscalateTicket", EscalateTicket)
   .given([mustBeOpen])
   .emit((data, { state }, { stream, actor }) => {
     if (state.escalationId)
@@ -74,7 +106,7 @@ export const TicketOperations = state(
     return ["TicketEscalated", { ...data, escalationId: randomUUID() }];
   })
 
-  .on("ReassignTicket", schemas.actions.ReassignTicket)
+  .on("ReassignTicket", ReassignTicket)
   .given([mustBeOpen])
   .emit((data, { state }, { stream, actor }) => {
     if (!state.escalationId)
@@ -101,4 +133,21 @@ export const TicketOperations = state(
     return ["TicketReassigned", data];
   })
 
+  .build();
+
+// --- Slice ---
+// prettier-ignore
+export const TicketOpsSlice = slice()
+  .with(TicketOperations)
+  .on("TicketEscalationRequested").do(async function escalate(event, _stream, app) {
+    await app.do(
+      "EscalateTicket",
+      {
+        stream: event.stream,
+        actor: { id: randomUUID(), name: "escalate reaction" },
+      },
+      event.data,
+      event
+    );
+  })
   .build();

@@ -74,9 +74,13 @@ export function registerState(
     // MERGE: same state name - combine events, actions, patches, handlers
     const existing = states.get(state.name)!;
     for (const name of Object.keys(state.actions)) {
+      // Same schema reference means the same partial re-registered via another slice
+      if (existing.actions[name] === state.actions[name]) continue;
       if (actions[name]) throw new Error(`Duplicate action "${name}"`);
     }
     for (const name of Object.keys(state.events)) {
+      // Same schema reference means the same partial re-registered via another slice
+      if (existing.events[name] === state.events[name]) continue;
       if (events[name]) throw new Error(`Duplicate event "${name}"`);
     }
     const merged = {
@@ -96,6 +100,7 @@ export function registerState(
       actions[name] = merged;
     }
     for (const name of Object.keys(state.events)) {
+      if (events[name]) continue; // already registered, preserve reactions
       events[name] = {
         schema: state.events[name],
         reactions: new Map(),

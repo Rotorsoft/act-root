@@ -343,3 +343,58 @@ export type State<
   given?: GivenHandlers<S, A>;
   snap?: (snapshot: Snapshot<S, E>) => boolean;
 };
+
+/**
+ * Extracts the raw action schemas from a State definition.
+ *
+ * Use this to recover the `A` type parameter from a built State object,
+ * enabling construction of typed dispatchers without circular imports.
+ *
+ * @template T - A State object (or any object with `readonly actions: ZodTypes<A>`)
+ *
+ * @example
+ * ```typescript
+ * type Actions = InferActions<typeof Counter>;
+ * // => { increment: { by: number } }
+ * ```
+ */
+export type InferActions<
+  T extends { readonly actions: Record<string, ZodType> },
+> = {
+  [K in keyof T["actions"]]: T["actions"][K] extends ZodType<infer V>
+    ? V
+    : never;
+};
+
+/**
+ * Typed interface for the `app.do()` method, enabling reaction handlers
+ * to dispatch actions with full autocomplete.
+ *
+ * Construct with {@link InferActions} to avoid circular imports between
+ * slice files and the bootstrap module.
+ *
+ * @template A - Action schemas (maps action names to payload types)
+ *
+ * @example
+ * ```typescript
+ * import type { Dispatcher, InferActions } from "@rotorsoft/act";
+ *
+ * type App = Dispatcher<
+ *   InferActions<typeof StateA> &
+ *   InferActions<typeof StateB>
+ * >;
+ *
+ * async function myReaction(event: ..., stream: string, app: App) {
+ *   await app.do("someAction", target, payload, event);
+ * }
+ * ```
+ */
+export interface Dispatcher<A extends Schemas> {
+  do<K extends keyof A & string>(
+    action: K,
+    target: Target,
+    payload: Readonly<A[K]>,
+    reactingTo?: Committed<Schemas, string>,
+    skipValidation?: boolean
+  ): Promise<any>;
+}

@@ -1,7 +1,9 @@
 import { type CommittedOf } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
 import { db, tickets } from "./drizzle/index.js";
-import { TicketCreation, TicketMessaging, TicketOperations } from "./ticket.js";
+import { TicketCreation } from "./ticket-creation.js";
+import { TicketMessaging } from "./ticket-messaging.js";
+import { TicketOperations } from "./ticket-operations.js";
 
 export async function opened({
   stream,
@@ -31,6 +33,27 @@ export async function closed({
     .then(() => console.log(`${stream} => closed`));
 }
 
+export async function resolved({
+  stream,
+  data,
+}: CommittedOf<typeof TicketCreation.events, "TicketResolved">) {
+  await db
+    .update(tickets)
+    .set(data)
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => resolved`));
+}
+
+export async function messageAdded({
+  stream,
+}: CommittedOf<typeof TicketMessaging.events, "MessageAdded">) {
+  await db
+    .update(tickets)
+    .set({ messages: sql`${tickets.messages} + 1` })
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => messageAdded`));
+}
+
 export async function assigned({
   stream,
   data,
@@ -45,16 +68,6 @@ export async function assigned({
     })
     .where(eq(tickets.id, stream))
     .then(() => console.log(`${stream} => assigned`));
-}
-
-export async function messageAdded({
-  stream,
-}: CommittedOf<typeof TicketMessaging.events, "MessageAdded">) {
-  await db
-    .update(tickets)
-    .set({ messages: sql`${tickets.messages} + 1` })
-    .where(eq(tickets.id, stream))
-    .then(() => console.log(`${stream} => messageAdded`));
 }
 
 export async function escalated({
@@ -82,15 +95,4 @@ export async function reassigned({
     })
     .where(eq(tickets.id, stream))
     .then(() => console.log(`${stream} => reassigned`));
-}
-
-export async function resolved({
-  stream,
-  data,
-}: CommittedOf<typeof TicketCreation.events, "TicketResolved">) {
-  await db
-    .update(tickets)
-    .set(data)
-    .where(eq(tickets.id, stream))
-    .then(() => console.log(`${stream} => resolved`));
 }

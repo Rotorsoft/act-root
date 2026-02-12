@@ -8,6 +8,8 @@ import { Act } from "./act.js";
 import { _this_, _void_, registerState } from "./merge.js";
 import { isSlice, type Slice } from "./slice-builder.js";
 import type {
+  Committed,
+  Dispatcher,
   EventRegister,
   Reaction,
   ReactionHandler,
@@ -17,6 +19,7 @@ import type {
   Schema,
   SchemaRegister,
   Schemas,
+  Snapshot,
   State,
 } from "./types/index.js";
 
@@ -39,7 +42,8 @@ export type ActBuilder<
   S extends SchemaRegister<A>,
   E extends Schemas,
   A extends Schemas,
-  M extends Record<string, Schema> = Record<string, never>,
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  M extends Record<string, Schema> = {},
 > = {
   /**
    * Registers a state definition or a slice with the builder.
@@ -124,7 +128,11 @@ export type ActBuilder<
      * @returns The builder with `.to()` and `.void()` methods for routing configuration
      */
     do: (
-      handler: ReactionHandler<E, K>,
+      handler: (
+        event: Committed<E, K>,
+        stream: string,
+        app: Dispatcher<A>
+      ) => Promise<Snapshot<E, Schema> | void>,
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A, M> & {
       /**
@@ -262,22 +270,29 @@ export function act<
      */
     on: <K extends keyof E>(event: K) => ({
       do: (
-        handler: ReactionHandler<E, K>,
+        handler: (
+          event: Committed<E, K>,
+          stream: string,
+          app: Dispatcher<A>
+        ) => Promise<Snapshot<E, Schema> | void>,
         options?: Partial<ReactionOptions>
       ) => {
         const reaction: Reaction<E, K> = {
-          handler,
+          handler: handler as ReactionHandler<E, K>,
           resolver: _this_,
           options: {
             blockOnError: options?.blockOnError ?? true,
             maxRetries: options?.maxRetries ?? 3,
           },
         };
-        registry.events[event].reactions.set(handler.name, reaction);
+        const name =
+          handler.name ||
+          `${String(event)}_${registry.events[event].reactions.size}`;
+        registry.events[event].reactions.set(name, reaction);
         return {
           ...builder,
           to(resolver: ReactionResolver<E, K> | string) {
-            registry.events[event].reactions.set(handler.name, {
+            registry.events[event].reactions.set(name, {
               ...reaction,
               resolver:
                 typeof resolver === "string" ? { target: resolver } : resolver,
@@ -285,7 +300,7 @@ export function act<
             return builder;
           },
           void() {
-            registry.events[event].reactions.set(handler.name, {
+            registry.events[event].reactions.set(name, {
               ...reaction,
               resolver: _void_,
             });

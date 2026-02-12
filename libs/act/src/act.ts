@@ -427,7 +427,7 @@ export class Act<
     for (const payload of payloads) {
       const { event, handler, options } = payload;
       try {
-        await handler(event, stream); // the actual reaction
+        await handler(event, stream, this); // the actual reaction
         at = event.id;
         handled++;
       } catch (error) {
