@@ -4,8 +4,9 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import { ZodObject, type ZodType } from "zod";
 import { Act } from "./act.js";
+import { _this_, _void_, registerState } from "./merge.js";
+import { isSlice, type Slice } from "./slice-builder.js";
 import type {
   EventRegister,
   Reaction,
@@ -20,71 +21,10 @@ import type {
 } from "./types/index.js";
 
 /**
- * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
- * to find the base type name, e.g. `z.string().optional()` → `"ZodString"`.
- */
-function baseTypeName(zodType: ZodType): string {
-  let t: any = zodType;
-  while (typeof t.unwrap === "function") {
-    t = t.unwrap();
-  }
-  return t.constructor.name;
-}
-
-/**
- * Merges two Zod schemas. If both are ZodObject instances, checks for
- * overlapping shape keys with incompatible base types (throws descriptive
- * error), then merges via `.extend()`. Falls back to keeping existing
- * schema if either is not a ZodObject.
- */
-function mergeSchemas(
-  existing: ZodType,
-  incoming: ZodType,
-  stateName: string
-): ZodType {
-  if (existing instanceof ZodObject && incoming instanceof ZodObject) {
-    const existingShape = existing.shape as Record<string, ZodType>;
-    const incomingShape = incoming.shape as Record<string, ZodType>;
-    for (const key of Object.keys(incomingShape)) {
-      if (key in existingShape) {
-        const existingBase = baseTypeName(existingShape[key]);
-        const incomingBase = baseTypeName(incomingShape[key]);
-        if (existingBase !== incomingBase) {
-          throw new Error(
-            `Schema conflict in "${stateName}": key "${key}" has type "${existingBase}" but incoming partial declares "${incomingBase}"`
-          );
-        }
-      }
-    }
-    return existing.extend(incomingShape);
-  }
-  return existing;
-}
-
-/**
- * Merges two init functions by spreading both results together.
- * Each partial only provides its own defaults.
- */
-function mergeInits<S extends Schema>(
-  existing: () => Readonly<S>,
-  incoming: () => Readonly<S>
-): () => Readonly<S> {
-  return () => ({ ...existing(), ...incoming() });
-}
-
-// resolves the event stream as source and target (default)
-const _this_ = ({ stream }: { stream: string }) => ({
-  source: stream,
-  target: stream,
-});
-// resolves to nothing
-const _void_ = () => undefined;
-
-/**
  * Fluent builder interface for composing event-sourced applications.
  *
  * Provides a chainable API for:
- * - Registering states via `.with()`
+ * - Registering states or slices via `.with()`
  * - Defining event reactions via `.on()` → `.do()` → `.to()` or `.void()`
  * - Building the orchestrator via `.build()`
  *
@@ -102,37 +42,27 @@ export type ActBuilder<
   M extends Record<string, Schema> = Record<string, never>,
 > = {
   /**
-   * Registers a state definition with the builder.
+   * Registers a state definition or a slice with the builder.
    *
-   * States define aggregates that process actions and emit events. Each state
-   * registration adds its actions and events to the orchestrator's registry.
-   * State names, action names, and event names must be unique across the application.
+   * When receiving a State, it registers the state's actions and events.
+   * When receiving a Slice, it merges all the slice's states and reactions.
+   * State names, action names, and event names must be unique across the application
+   * (partial states with the same name are merged automatically).
    *
-   * @template SX - State schema type
-   * @template EX - Event schemas type for this state
-   * @template AX - Action schemas type for this state
-   * @param state - The state definition to register
-   * @returns The builder with updated type information for chaining
+   * @throws {Error} If duplicate action or event names are detected
    *
-   * @throws {Error} If a state with duplicate action or event names is registered
-   *
-   * @example Register single state
+   * @example Register a state
    * ```typescript
-   * const app = act()
-   *   .with(Counter)
-   *   .build();
+   * const app = act().with(Counter).build();
    * ```
    *
-   * @example Register multiple states
+   * @example Register a slice
    * ```typescript
-   * const app = act()
-   *   .with(User)
-   *   .with(Order)
-   *   .with(Inventory)
-   *   .build();
+   * const CounterSlice = slice().with(Counter).on("Incremented").do(log).void().build();
+   * const app = act().with(CounterSlice).build();
    * ```
    */
-  with: <
+  with: (<
     SX extends Schema,
     EX extends Schemas,
     AX extends Schemas,
@@ -144,7 +74,15 @@ export type ActBuilder<
     E & EX,
     A & AX,
     M & { [K in NX]: SX }
-  >;
+  >) &
+    (<
+      SX extends SchemaRegister<AX>,
+      EX extends Schemas,
+      AX extends Schemas,
+      MX extends Record<string, Schema>,
+    >(
+      slice: Slice<SX, EX, AX, MX>
+    ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>);
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -184,36 +122,6 @@ export type ActBuilder<
      * @param options.blockOnError - Block this stream if handler fails (default: true)
      * @param options.maxRetries - Maximum retry attempts on failure (default: 3)
      * @returns The builder with `.to()` and `.void()` methods for routing configuration
-     *
-     * @example Side effect only (void)
-     * ```typescript
-     * .on("UserCreated")
-     *   .do(async (event) => {
-     *     await analytics.track("user_created", event.data);
-     *   })
-     *   .void()
-     * ```
-     *
-     * @example Trigger another action
-     * ```typescript
-     * .on("OrderPlaced")
-     *   .do(async (event) => {
-     *     return ["reduceStock", { amount: event.data.items.length }];
-     *   })
-     *   .to("inventory-1")
-     * ```
-     *
-     * @example With retry configuration
-     * ```typescript
-     * .on("PaymentProcessed")
-     *   .do(async (event) => {
-     *     await externalAPI.notify(event.data);
-     *   }, {
-     *     blockOnError: false,  // Don't block on failure
-     *     maxRetries: 5         // Retry up to 5 times
-     *   })
-     *   .void()
-     * ```
      */
     do: (
       handler: ReactionHandler<E, K>,
@@ -222,57 +130,14 @@ export type ActBuilder<
       /**
        * Routes the reaction to a specific target stream.
        *
-       * Use this when the reaction triggers an action on a specific state instance.
-       * You can provide either a static stream name (string) or a resolver function
-       * that dynamically determines the target based on the event.
-       *
        * @param resolver - Target stream name (string) or resolver function
        * @returns The builder for chaining
-       *
-       * @example Static target stream
-       * ```typescript
-       * .on("OrderPlaced")
-       *   .do(async (event) => ["reduceStock", { amount: 10 }])
-       *   .to("inventory-main")
-       * ```
-       *
-       * @example Dynamic target based on event data
-       * ```typescript
-       * .on("OrderPlaced")
-       *   .do(async (event) => ["reduceStock", { amount: 10 }])
-       *   .to((event) => ({
-       *     target: `inventory-${event.data.warehouseId}`
-       *   }))
-       * ```
-       *
-       * @example Source and target routing
-       * ```typescript
-       * .on("UserLoggedIn")
-       *   .do(async (event) => ["incrementCount", {}])
-       *   .to(({ stream }) => ({
-       *     source: stream,           // React to events from this user stream
-       *     target: `stats-${stream}` // Update corresponding stats stream
-       *   }))
-       * ```
        */
       to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A, M>;
       /**
        * Marks the reaction as void (side-effect only, no target stream).
        *
-       * Use this when the reaction doesn't trigger any actions - it only performs
-       * side effects like logging, sending notifications, or updating external systems.
-       *
        * @returns The builder for chaining
-       *
-       * @example
-       * ```typescript
-       * .on("UserCreated")
-       *   .do(async (event) => {
-       *     await sendEmail(event.data.email, "Welcome!");
-       *     await logger.info("User created", event.data);
-       *   })
-       *   .void()  // No target stream
-       * ```
        */
       void: () => ActBuilder<S, E, A, M>;
     };
@@ -280,35 +145,14 @@ export type ActBuilder<
   /**
    * Builds and returns the Act orchestrator instance.
    *
-   * This finalizes the builder configuration and creates the orchestrator that
-   * can execute actions, load state, and process reactions.
-   *
    * @param drainLimit - Deprecated parameter, no longer used
    * @returns The Act orchestrator instance
-   *
-   * @example
-   * ```typescript
-   * const app = act()
-   *   .with(Counter)
-   *   .with(User)
-   *   .on("UserCreated")
-   *     .do(sendWelcomeEmail)
-   *     .void()
-   *   .build();
-   *
-   * // Now use the app
-   * await app.do("createUser", target, payload);
-   * await app.drain();
-   * ```
    *
    * @see {@link Act} for available orchestrator methods
    */
   build: (drainLimit?: number) => Act<S, E, A, M>;
   /**
    * The registered event schemas and their reaction maps.
-   *
-   * This is an internal registry maintained by the builder. Generally, you don't
-   * need to access this directly.
    */
   readonly events: EventRegister<E>;
 };
@@ -324,8 +168,8 @@ export type ActBuilder<
  * - Processing reactions (event handlers)
  * - Coordinating event-driven workflows
  *
- * Use the fluent API to register states with `.with()`, define event reactions with `.on()`,
- * and build the orchestrator with `.build()`.
+ * Use the fluent API to register states or slices with `.with()`, define event
+ * reactions with `.on()`, and build the orchestrator with `.build()`.
  *
  * @template S - State schema register type
  * @template E - Event schemas type
@@ -348,115 +192,28 @@ export type ActBuilder<
  * const app = act()
  *   .with(Counter)
  *   .build();
- *
- * // Execute action
- * await app.do("increment",
- *   { stream: "counter1", actor: { id: "user1", name: "Alice" } },
- *   { by: 5 }
- * );
- *
- * // Load current state
- * const snapshot = await app.load(Counter, "counter1");
- * console.log(snapshot.state.count); // 5
  * ```
  *
- * @example Application with reactions
+ * @example Application with slices (vertical slice architecture)
  * ```typescript
- * const User = state("User", z.object({ name: z.string(), email: z.string() }))
- *   .init((data) => data)
- *   .emits({ UserCreated: z.object({ name: z.string(), email: z.string() }) })
- *   .patch({ UserCreated: (event) => event.data })
- *   .on("createUser", z.object({ name: z.string(), email: z.string() }))
- *     .emit((action) => ["UserCreated", action])
+ * import { act, slice, state } from "@rotorsoft/act";
+ *
+ * const CounterSlice = slice()
+ *   .with(Counter)
+ *   .on("Incremented")
+ *     .do(async (event) => { console.log("incremented!"); })
+ *     .void()
  *   .build();
  *
  * const app = act()
- *   .with(User)
- *   .on("UserCreated")
- *     .do(async (event) => {
- *       // Send welcome email
- *       await sendEmail(event.data.email, "Welcome!");
- *       logger.info(`Sent welcome email to ${event.data.email}`);
- *     })
- *     .void() // No target stream, just side effects
- *   .build();
- *
- * // Create user (triggers email sending via reaction)
- * await app.do("createUser",
- *   { stream: "user-123", actor: { id: "admin", name: "Admin" } },
- *   { name: "Alice", email: "alice@example.com" }
- * );
- *
- * // Process reactions
- * await app.drain();
- * ```
- *
- * @example Multi-state application with event correlation
- * ```typescript
- * const Order = state("Order", z.object({ items: z.array(z.string()), total: z.number() }))
- *   .init((data) => data)
- *   .emits({ OrderPlaced: z.object({ items: z.array(z.string()), total: z.number() }) })
- *   .patch({ OrderPlaced: (event) => event.data })
- *   .on("placeOrder", z.object({ items: z.array(z.string()), total: z.number() }))
- *     .emit((action) => ["OrderPlaced", action])
- *   .build();
- *
- * const Inventory = state("Inventory", z.object({ stock: z.number() }))
- *   .init(() => ({ stock: 100 }))
- *   .emits({ StockReduced: z.object({ amount: z.number() }) })
- *   .patch({ StockReduced: (event, state) => ({ stock: state.stock - event.data.amount }) })
- *   .on("reduceStock", z.object({ amount: z.number() }))
- *     .emit((action) => ["StockReduced", { amount: action.amount }])
- *   .build();
- *
- * const app = act()
- *   .with(Order)
- *   .with(Inventory)
- *   .on("OrderPlaced")
- *     .do(async (event) => {
- *       // Reduce inventory for each item
- *       return ["reduceStock", { amount: event.data.items.length }];
- *     })
- *     .to("inventory-1") // Target specific inventory stream
- *   .build();
- *
- * await app.do("placeOrder",
- *   { stream: "order-1", actor: { id: "user1", name: "Alice" } },
- *   { items: ["item1", "item2"], total: 100 }
- * );
- *
- * // Process reaction (reduces inventory)
- * await app.drain();
- * ```
- *
- * @example Partial state definitions (same name, merged via .with())
- * ```typescript
- * const TicketCreation = state("Ticket", TicketSchema)
- *   .init(() => initialTicket)
- *   .emits({ TicketOpened: ..., TicketClosed: ... })
- *   .patch({ TicketOpened: ..., TicketClosed: ... })
- *   .on("OpenTicket", ...).emit(...)
- *   .on("CloseTicket", ...).emit(...)
- *   .build();
- *
- * const TicketMessaging = state("Ticket", TicketSchema)
- *   .init(() => initialTicket)
- *   .emits({ MessageAdded: ... })
- *   .patch({ MessageAdded: ... })
- *   .on("AddMessage", ...).emit(...)
- *   .build();
- *
- * // Partials with same name are merged automatically
- * const app = act()
- *   .with(TicketCreation)
- *   .with(TicketMessaging)
+ *   .with(CounterSlice)
  *   .build();
  * ```
  *
  * @see {@link ActBuilder} for available builder methods
  * @see {@link Act} for orchestrator API methods
  * @see {@link state} for defining states
- * @see {@link https://rotorsoft.github.io/act-root/docs/intro | Documentation}
+ * @see {@link slice} for defining slices
  */
 export function act<
   // @ts-expect-error empty schema
@@ -472,93 +229,27 @@ export function act<
   }
 ): ActBuilder<S, E, A, M> {
   const builder: ActBuilder<S, E, A, M> = {
-    /**
-     * Adds a state to the builder. When a state with the same name is already
-     * registered, merges the new partial's actions, events, patches, and handlers
-     * into the existing state (errors on duplicate action/event names).
-     *
-     * @template SX The type of state
-     * @template EX The type of events
-     * @template AX The type of actions
-     * @param state The state to add
-     * @returns The builder
-     */
-    with: <
-      SX extends Schema,
-      EX extends Schemas,
-      AX extends Schemas,
-      NX extends string = string,
-    >(
-      state: State<SX, EX, AX, NX>
-    ) => {
-      if (states.has(state.name)) {
-        // MERGE: same state name - combine events, actions, patches, handlers
-        const existing = states.get(state.name)!;
-        for (const name of Object.keys(state.actions)) {
-          if (registry.actions[name])
-            throw new Error(`Duplicate action "${name}"`);
+    with: ((input: State<any, any, any> | Slice<any, any, any, any>) => {
+      if (isSlice(input)) {
+        // SLICE: merge all states and copy reactions
+        for (const s of input.states.values()) {
+          registerState(s, states, registry.actions, registry.events);
         }
-        for (const name of Object.keys(state.events)) {
-          if (registry.events[name])
-            throw new Error(`Duplicate event "${name}"`);
+        // Copy reactions from slice's event register
+        for (const eventName of Object.keys(input.events)) {
+          const sliceRegister = input.events[eventName];
+          if ((registry.events as any)[eventName]) {
+            for (const [name, reaction] of sliceRegister.reactions) {
+              (registry.events as any)[eventName].reactions.set(name, reaction);
+            }
+          }
         }
-        const merged = {
-          ...existing,
-          state: mergeSchemas(existing.state, state.state, state.name),
-          init: mergeInits(existing.init, state.init),
-          events: { ...existing.events, ...state.events },
-          actions: { ...existing.actions, ...state.actions },
-          patch: { ...existing.patch, ...state.patch },
-          on: { ...existing.on, ...state.on },
-          given: { ...existing.given, ...state.given },
-          snap: state.snap || existing.snap,
-        };
-        states.set(state.name, merged);
-        // Update ALL action→state pointers to the merged object
-        for (const name of Object.keys(merged.actions)) {
-          // @ts-expect-error indexed access
-          registry.actions[name] = merged;
-        }
-        for (const name of Object.keys(state.events)) {
-          // @ts-expect-error indexed access
-          registry.events[name] = {
-            schema: state.events[name],
-            reactions: new Map(),
-          };
-        }
-      } else {
-        // NEW: register state for the first time
-        states.set(state.name, state as State<any, any, any>);
-        for (const name of Object.keys(state.actions)) {
-          if (registry.actions[name])
-            throw new Error(`Duplicate action "${name}"`);
-          // @ts-expect-error indexed access
-          registry.actions[name] = state;
-        }
-        for (const name of Object.keys(state.events)) {
-          if (registry.events[name])
-            throw new Error(`Duplicate event "${name}"`);
-          // @ts-expect-error indexed access
-          registry.events[name] = {
-            schema: state.events[name],
-            reactions: new Map(),
-          };
-        }
+        return act(states, registry as Registry<any, any, any>);
       }
-      return act<
-        S & { [K in keyof AX]: SX },
-        E & EX,
-        A & AX,
-        M & { [K in NX]: SX }
-      >(
-        states,
-        registry as unknown as Registry<
-          S & { [K in keyof AX]: SX },
-          E & EX,
-          A & AX
-        >
-      );
-    },
+      // STATE: register directly
+      registerState(input, states, registry.actions, registry.events);
+      return act(states, registry as Registry<any, any, any>);
+    }) as any,
     /**
      * Adds a reaction to an event.
      *
