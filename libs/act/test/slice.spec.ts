@@ -49,13 +49,26 @@ describe("slice", () => {
     expect(s.events["Incremented"].reactions.size).toBe(1);
   });
 
-  it("should register scoped reactions via .on().do().to()", () => {
+  it("should register scoped reactions via .on().do().to() with string", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const s = slice()
       .with(PartA)
       .on("Incremented")
       .do(handler)
       .to("target-stream")
+      .build();
+
+    expect(s.events["Incremented"].reactions.size).toBe(1);
+  });
+
+  it("should register scoped reactions via .on().do().to() with function resolver", () => {
+    const handler = vi.fn().mockResolvedValue(undefined);
+    const resolver = (event: any) => ({ target: event.stream });
+    const s = slice()
+      .with(PartA)
+      .on("Incremented")
+      .do(handler)
+      .to(resolver)
       .build();
 
     expect(s.events["Incremented"].reactions.size).toBe(1);

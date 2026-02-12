@@ -238,10 +238,8 @@ export function act<
         // Copy reactions from slice's event register
         for (const eventName of Object.keys(input.events)) {
           const sliceRegister = input.events[eventName];
-          if ((registry.events as any)[eventName]) {
-            for (const [name, reaction] of sliceRegister.reactions) {
-              (registry.events as any)[eventName].reactions.set(name, reaction);
-            }
+          for (const [name, reaction] of sliceRegister.reactions) {
+            (registry.events as any)[eventName].reactions.set(name, reaction);
           }
         }
         return act(states, registry as Registry<any, any, any>);
