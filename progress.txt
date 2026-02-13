@@ -55,3 +55,9 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Changes: Replaced state() two-argument signature with single-argument record shorthand state({ Name: schema }), matching .on() pattern. Updated all call sites across tests, examples (calculator, wolfdesk, performance), and documentation. Fixed outdated .on() syntax in landing page. Bumped performance @rotorsoft/act dep to ^0.10.0.
 - Decisions: Breaking change — no backward compat for old two-arg form. Same StateEntry pattern as ActionEntry. Runtime throws on non-single-key records.
 - Tests: 5 new tests for record shorthand. All 235 tests pass, 100% coverage.
+
+[2026-02-13] #392 fix(calculator): fix calculator main.ts and add advanced composition patterns panel
+- Files: packages/calculator/src/main.ts, packages/calculator/package.json, docs/static/index.html, pnpm-lock.yaml
+- Changes: Fixed calculator dependency from ^0.6.33 (stale npm) to workspace:* so it uses the local framework with record shorthand API. Added stop_correlations() cleanup so process exits. Added advanced composition patterns panel to landing page with 5 tabbed sections (Vertical Slices, Projections, Partial States, Invariants, Orchestrator) using real WolfDesk code examples.
+- Decisions: Used workspace:* to match other example packages. Tabs use Prism.js for syntax highlighting (already loaded by landing page). Kept panel static per issue requirements.
+- Issues: Pre-existing lint/typecheck errors unrelated to this change (missing client/tsconfig.eslint.json, unused @ts-expect-error directives).
