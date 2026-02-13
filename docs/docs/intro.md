@@ -45,7 +45,7 @@ Here's a simple example to get you started:
 import { act, state, z } from "@rotorsoft/act";
 
 // Define a counter state machine
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({

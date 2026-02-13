@@ -84,7 +84,7 @@ const compute = (
   return new_op === "-" && !left ? { left: "-" } : { operator: new_op };
 };
 
-const Calculator = state("Calculator", State)
+const Calculator = state({ Calculator: State })
   .init(() => ({ result: 0 }))
   .emits(Events)
   .patch({

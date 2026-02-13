@@ -20,7 +20,7 @@ describe("projection", () => {
   const Incremented = z.object({ by: z.number() });
   const Labeled = z.object({ label: z.string() });
 
-  const Counter = state("Counter", z.object({ count: z.number() }))
+  const Counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ Incremented })
     .patch({

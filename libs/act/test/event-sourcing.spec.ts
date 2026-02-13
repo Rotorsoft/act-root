@@ -8,7 +8,7 @@ import { InvariantError } from "../src/types/errors.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
 // Minimal state machine mock
-const me = state("me", z.object({ count: z.number() }))
+const me = state({ me: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({
     INCREMENT: z.object({ by: z.number() }),

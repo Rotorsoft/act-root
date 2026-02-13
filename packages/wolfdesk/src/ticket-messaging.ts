@@ -1,30 +1,20 @@
 import { InvariantError, slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod";
 import * as errors from "./errors.js";
 import {
   AcknowledgeMessage,
   AddMessage,
   MarkMessageDelivered,
-} from "./schemas/ticket.action.schemas.js";
-import {
   MessageAdded,
   MessageDelivered,
   MessageRead,
-} from "./schemas/ticket.event.schemas.js";
-import { Message } from "./schemas/ticket.state.schemas.js";
+  TicketMessagingState,
+} from "./schemas/ticket.schemas.js";
 import { deliverMessage } from "./services/notification.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 
 // --- State ---
-export const TicketMessaging = state(
-  "Ticket",
-  z.object({
-    productId: z.uuid(),
-    userId: z.uuid(),
-    messages: z.record(z.uuid(), Message),
-  })
-)
+export const TicketMessaging = state({ Ticket: TicketMessagingState })
   .init(() => ({
     productId: "",
     userId: "",
@@ -85,6 +75,7 @@ export const TicketMessaging = state(
 // prettier-ignore
 export const TicketMessagingSlice = slice()
   .with(TicketMessaging)
+
   .on("MessageAdded").do(async function deliver(event, _stream, app) {
     await deliverMessage(event.data);
     await app.do(

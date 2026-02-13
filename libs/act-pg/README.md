@@ -37,7 +37,7 @@ store(new PostgresStore({
 await store().seed();
 
 // Build and use your app as normal
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({ Incremented: (e, s) => ({ count: s.count + e.data.amount }) })

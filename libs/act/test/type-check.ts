@@ -9,7 +9,7 @@ import { z } from "zod";
 import { act, slice, state } from "../src/index.js";
 
 // ── Define test states ──────────────────────────────────────────────
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({
@@ -19,7 +19,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
-const Logger = state("Logger", z.object({ entries: z.number() }))
+const Logger = state({ Logger: z.object({ entries: z.number() }) })
   .init(() => ({ entries: 0 }))
   .emits({ Logged: z.object({ message: z.string() }) })
   .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })

@@ -9,7 +9,7 @@ import {
   TicketOpened,
   TicketReassigned,
   TicketResolved,
-} from "./schemas/ticket.event.schemas.js";
+} from "./schemas/ticket.schemas.js";
 
 // prettier-ignore
 export const TicketProjection = projection("tickets")

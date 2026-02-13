@@ -7,7 +7,7 @@ describe("partial-state", () => {
     label: z.string(),
   });
 
-  const PartA = state("Thing", schema)
+  const PartA = state({ Thing: schema })
     .init(() => ({ count: 0, label: "" }))
     .emits({ Incremented: z.object({ by: z.number() }) })
     .patch({
@@ -17,7 +17,7 @@ describe("partial-state", () => {
     .emit((action) => ["Incremented", { by: action.by }])
     .build();
 
-  const PartB = state("Thing", schema)
+  const PartB = state({ Thing: schema })
     .init(() => ({ count: 0, label: "" }))
     .emits({ Labeled: z.object({ label: z.string() }) })
     .patch({
@@ -59,7 +59,7 @@ describe("partial-state", () => {
   });
 
   it("should throw on duplicate action across partials", () => {
-    const DupAction = state("Thing", schema)
+    const DupAction = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ Other: ZodEmpty })
       .patch({ Other: () => ({}) })
@@ -73,7 +73,7 @@ describe("partial-state", () => {
   });
 
   it("should throw on duplicate event across partials", () => {
-    const DupEvent = state("Thing", schema)
+    const DupEvent = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ Incremented: z.object({ by: z.number() }) })
       .patch({ Incremented: () => ({}) })
@@ -109,7 +109,7 @@ describe("partial-state", () => {
   });
 
   it("should preserve snap from partial that defines it", () => {
-    const WithSnap = state("Snapped", schema)
+    const WithSnap = state({ Snapped: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -118,7 +118,7 @@ describe("partial-state", () => {
       .snap(() => true)
       .build();
 
-    const WithoutSnap = state("Snapped", schema)
+    const WithoutSnap = state({ Snapped: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -132,7 +132,7 @@ describe("partial-state", () => {
   });
 
   it("should work with single-chain states (backward compat)", async () => {
-    const counter = state("Counter", z.object({ count: z.number() }))
+    const counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ incremented: ZodEmpty })
       .patch({ incremented: (_, state) => ({ count: state.count + 1 }) })
@@ -166,7 +166,7 @@ describe("partial-state", () => {
   });
 
   it("should merge partial schemas with non-overlapping fields", async () => {
-    const SliceA = state("Merged", z.object({ count: z.number() }))
+    const SliceA = state({ Merged: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e) => ({ count: e.data.n }) })
@@ -174,7 +174,7 @@ describe("partial-state", () => {
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
-    const SliceB = state("Merged", z.object({ label: z.string() }))
+    const SliceB = state({ Merged: z.object({ label: z.string() }) })
       .init(() => ({ label: "" }))
       .emits({ Named: z.object({ label: z.string() }) })
       .patch({ Named: (e) => ({ label: e.data.label }) })
@@ -193,7 +193,7 @@ describe("partial-state", () => {
   });
 
   it("should merge init functions from partials", async () => {
-    const SliceA = state("InitMerge", z.object({ x: z.number() }))
+    const SliceA = state({ InitMerge: z.object({ x: z.number() }) })
       .init(() => ({ x: 10 }))
       .emits({ A: ZodEmpty })
       .patch({ A: () => ({}) })
@@ -201,7 +201,7 @@ describe("partial-state", () => {
       .emit(() => ["A", {}])
       .build();
 
-    const SliceB = state("InitMerge", z.object({ y: z.string() }))
+    const SliceB = state({ InitMerge: z.object({ y: z.string() }) })
       .init(() => ({ y: "default" }))
       .emits({ B: ZodEmpty })
       .patch({ B: () => ({}) })
@@ -217,7 +217,7 @@ describe("partial-state", () => {
   });
 
   it("should allow overlapping keys with same base type", () => {
-    const SliceA = state("Overlap", z.object({ shared: z.string() }))
+    const SliceA = state({ Overlap: z.object({ shared: z.string() }) })
       .init(() => ({ shared: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -225,7 +225,9 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state("Overlap", z.object({ shared: z.string().optional() }))
+    const SliceB = state({
+      Overlap: z.object({ shared: z.string().optional() }),
+    })
       .init(() => ({ shared: undefined }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -238,7 +240,7 @@ describe("partial-state", () => {
   });
 
   it("should throw on overlapping keys with different base types", () => {
-    const SliceA = state("Conflict", z.object({ field: z.string() }))
+    const SliceA = state({ Conflict: z.object({ field: z.string() }) })
       .init(() => ({ field: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -246,7 +248,7 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state("Conflict", z.object({ field: z.number() }))
+    const SliceB = state({ Conflict: z.object({ field: z.number() }) })
       .init(() => ({ field: 0 }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -258,7 +260,7 @@ describe("partial-state", () => {
   });
 
   it("should reconstruct state from cross-partial events", async () => {
-    const SliceA = state("Cross", z.object({ total: z.number() }))
+    const SliceA = state({ Cross: z.object({ total: z.number() }) })
       .init(() => ({ total: 0 }))
       .emits({ Added: z.object({ n: z.number() }) })
       .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
@@ -266,7 +268,7 @@ describe("partial-state", () => {
       .emit((a) => ["Added", { n: a.n }])
       .build();
 
-    const SliceB = state("Cross", z.object({ tag: z.string() }))
+    const SliceB = state({ Cross: z.object({ tag: z.string() }) })
       .init(() => ({ tag: "" }))
       .emits({ Tagged: z.object({ tag: z.string() }) })
       .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
@@ -286,7 +288,7 @@ describe("partial-state", () => {
   });
 
   it("should not conflict on optional wrapping of same base type", () => {
-    const SliceA = state("OptWrap", z.object({ val: z.string() }))
+    const SliceA = state({ OptWrap: z.object({ val: z.string() }) })
       .init(() => ({ val: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -294,7 +296,7 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state("OptWrap", z.object({ val: z.string().optional() }))
+    const SliceB = state({ OptWrap: z.object({ val: z.string().optional() }) })
       .init(() => ({ val: undefined }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -306,10 +308,9 @@ describe("partial-state", () => {
   });
 
   it("should merge given (invariants) from partials", async () => {
-    const PartWithInvariant = state(
-      "Guarded",
-      z.object({ locked: z.boolean() })
-    )
+    const PartWithInvariant = state({
+      Guarded: z.object({ locked: z.boolean() }),
+    })
       .init(() => ({ locked: false }))
       .emits({ Locked: ZodEmpty })
       .patch({ Locked: () => ({ locked: true }) })
@@ -317,10 +318,9 @@ describe("partial-state", () => {
       .emit(() => ["Locked", {}])
       .build();
 
-    const PartWithGuardedAction = state(
-      "Guarded",
-      z.object({ locked: z.boolean() })
-    )
+    const PartWithGuardedAction = state({
+      Guarded: z.object({ locked: z.boolean() }),
+    })
       .init(() => ({ locked: false }))
       .emits({ Attempted: ZodEmpty })
       .patch({ Attempted: () => ({}) })

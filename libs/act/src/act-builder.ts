@@ -193,7 +193,7 @@ export type ActBuilder<
  * import { act, state } from "@rotorsoft/act";
  * import { z } from "zod";
  *
- * const Counter = state("Counter", z.object({ count: z.number() }))
+ * const Counter = state({ Counter: z.object({ count: z.number() }) })
  *   .init(() => ({ count: 0 }))
  *   .emits({ Incremented: z.object({ amount: z.number() }) })
  *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })

@@ -102,7 +102,7 @@ pnpm -F shared drizzle:migrate
 States are built using a fluent API:
 
 ```typescript
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({
     Incremented: z.object({ amount: z.number() })

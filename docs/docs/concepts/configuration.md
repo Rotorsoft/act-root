@@ -18,7 +18,7 @@ You want to define two state machines (e.g., a Counter and a TodoList) and compo
 ```typescript
 import { act, state, z } from "@rotorsoft/act";
 
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({
@@ -28,7 +28,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
-const TodoList = state("TodoList", z.object({ todos: z.array(z.string()) }))
+const TodoList = state({ TodoList: z.object({ todos: z.array(z.string()) }) })
   .init(() => ({ todos: [] }))
   .emits({ Added: z.object({ todo: z.string() }) })
   .patch({

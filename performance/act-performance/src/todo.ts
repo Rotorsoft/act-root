@@ -28,7 +28,7 @@ const CreateTodo = z.object({ text: z.string() });
 const UpdateTodo = z.object({ text: z.string() });
 const DeleteTodo = z.object({});
 
-export const Todo = state("Todo", TodoState)
+export const Todo = state({ Todo: TodoState })
   .init(() => ({ id: "", text: "", createdAt: "", deleted: false }))
   .emits(Events)
   .patch({

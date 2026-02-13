@@ -87,7 +87,7 @@ Create a minimal app:
 import { act, state } from "@rotorsoft/act";
 import { z } from "zod";
 
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({
