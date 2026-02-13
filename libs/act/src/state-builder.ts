@@ -99,6 +99,11 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
   };
 };
 
+/** Helper: a single-key record mapping an action name to its Zod schema. */
+type ActionEntry<K extends string = string, AX extends Schema = Schema> = {
+  [P in K]: ZodType<AX>;
+};
+
 /**
  * Builder interface for defining actions (commands) on a state.
  *
@@ -121,24 +126,27 @@ export type ActionBuilder<
    * Defines an action (command) that can be executed on this state.
    *
    * Actions represent intents to change state - they should be named in imperative form
-   * (e.g., "createUser", "incrementCounter", "placeOrder"). Actions are validated against
+   * (e.g., "CreateUser", "IncrementCounter", "PlaceOrder"). Actions are validated against
    * their schema and must emit at least one event.
+   *
+   * Pass a `{ ActionName: schema }` record — use shorthand `{ ActionName }`
+   * when the variable name matches the action name. The key becomes the
+   * action name, the value the Zod schema.
    *
    * @template K - Action name (string literal type)
    * @template AX - Action payload schema type
-   * @param action - The action name (should be unique within this state)
-   * @param schema - Zod schema for the action payload
+   * @param entry - Single-key record `{ ActionName: schema }`
    * @returns An object with `.given()` and `.emit()` for further configuration
    *
    * @example Simple action without invariants
    * ```typescript
-   * .on("increment", z.object({ by: z.number() }))
+   * .on({ increment: z.object({ by: z.number() }) })
    *   .emit((action) => ["Incremented", { amount: action.by }])
    * ```
    *
    * @example Action with business rules
    * ```typescript
-   * .on("withdraw", z.object({ amount: z.number() }))
+   * .on({ withdraw: z.object({ amount: z.number() }) })
    *   .given([
    *     (_, snap) => snap.state.balance >= 0 || "Account closed",
    *     (_, snap, action) => snap.state.balance >= action.amount || "Insufficient funds"
@@ -146,19 +154,15 @@ export type ActionBuilder<
    *   .emit((action) => ["Withdrawn", { amount: action.amount }])
    * ```
    *
-   * @example Action emitting multiple events
+   * @example Action with shorthand (variable name matches action name)
    * ```typescript
-   * .on("completeOrder", z.object({ orderId: z.string() }))
-   *   .emit((action) => [
-   *     ["OrderCompleted", { orderId: action.orderId }],
-   *     ["InventoryReserved", { orderId: action.orderId }],
-   *     ["PaymentProcessed", { orderId: action.orderId }]
-   *   ])
+   * const OpenTicket = z.object({ title: z.string() });
+   * .on({ OpenTicket })
+   *   .emit((action) => ["TicketOpened", { title: action.title }])
    * ```
    */
   on: <K extends string, AX extends Schema>(
-    action: K,
-    schema: ZodType<AX>
+    entry: ActionEntry<K, AX>
   ) => {
     /**
      * Adds business rule invariants that must hold before the action can execute.
@@ -289,7 +293,7 @@ export type ActionBuilder<
    *   .init(() => ({ count: 0 }))
    *   .emits({ Incremented: z.object({ amount: z.number() }) })
    *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
-   *   .on("increment", z.object({ by: z.number() }))
+   *   .on({ increment: z.object({ by: z.number() }) })
    *     .emit((action) => ["Incremented", { amount: action.by }])
    *   .build(); // Returns State<S, E, A, N>
    * ```
@@ -331,7 +335,7 @@ export type ActionBuilder<
  *   .patch({
  *     Incremented: (event, state) => ({ count: state.count + event.data.amount })
  *   })
- *   .on("increment", z.object({ by: z.number() }))
+ *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => ["Incremented", { amount: action.by }])
  *   .build();
  * ```
@@ -354,19 +358,19 @@ export type ActionBuilder<
  *     Withdrawn: (event, state) => ({ balance: state.balance - event.data.amount }),
  *     Closed: () => ({ status: "closed", balance: 0 })
  *   })
- *   .on("deposit", z.object({ amount: z.number() }))
+ *   .on({ deposit: z.object({ amount: z.number() }) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Account must be open"
  *     ])
  *     .emit((action) => ["Deposited", { amount: action.amount }])
- *   .on("withdraw", z.object({ amount: z.number() }))
+ *   .on({ withdraw: z.object({ amount: z.number() }) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Account must be open",
  *       (_, snap, action) =>
  *         snap.state.balance >= action.amount || "Insufficient funds"
  *     ])
  *     .emit((action) => ["Withdrawn", { amount: action.amount }])
- *   .on("close", z.object({}))
+ *   .on({ close: z.object({}) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Already closed",
  *       (_, snap) => snap.state.balance === 0 || "Balance must be zero"
@@ -391,9 +395,9 @@ export type ActionBuilder<
  *     UserCreated: (event) => event.data,
  *     UserLoggedIn: (_, state) => ({ loginCount: state.loginCount + 1 })
  *   })
- *   .on("createUser", z.object({ name: z.string(), email: z.string() }))
+ *   .on({ createUser: z.object({ name: z.string(), email: z.string() }) })
  *     .emit((action) => ["UserCreated", action])
- *   .on("login", z.object({}))
+ *   .on({ login: z.object({}) })
  *     .emit(() => ["UserLoggedIn", {}])
  *   .snap((snap) => snap.patches >= 10) // Snapshot every 10 events
  *   .build();
@@ -439,7 +443,12 @@ function action_builder<
   N extends string = string,
 >(state: State<S, E, A, N>): ActionBuilder<S, E, A, N> {
   return {
-    on<K extends string, AX extends Schema>(action: K, schema: ZodType<AX>) {
+    on<K extends string, AX extends Schema>(entry: ActionEntry<K, AX>) {
+      const keys = Object.keys(entry);
+      if (keys.length !== 1) throw new Error(".on() requires exactly one key");
+      const action = keys[0] as K;
+      const schema = entry[action];
+
       if (action in state.actions)
         throw new Error(`Duplicate action "${action}"`);
 

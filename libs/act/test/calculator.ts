@@ -103,7 +103,7 @@ const Calculator = state("Calculator", State)
       operator: undefined,
     }),
   })
-  .on("PressKey", Actions.PressKey)
+  .on({ PressKey: Actions.PressKey })
   .emit(({ key }, { state }) => {
     if (key === ".") return ["DotPressed", {}];
     if (key === "=") {
@@ -114,7 +114,7 @@ const Calculator = state("Calculator", State)
       ? ["DigitPressed", { digit: key as Digits }]
       : ["OperatorPressed", { operator: key as Operators }];
   })
-  .on("Clear", Actions.Clear)
+  .on({ Clear: Actions.Clear })
   .given([
     {
       description: "Must be dirty",

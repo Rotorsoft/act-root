@@ -110,7 +110,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, state) => ({ count: state.count + event.data.amount })
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
     .emit((action, state) => ["Incremented", { amount: action.by }])
   .build();
 ```
@@ -197,7 +197,7 @@ Dynamic stream discovery through correlation metadata:
 Business rules enforced before actions execute:
 
 ```typescript
-.on("closeTicket", z.object({ reason: z.string() }))
+.on({ closeTicket: z.object({ reason: z.string() }) })
   .given([
     (_, snap) => snap.state.status === "open" || "Ticket must be open",
     (target, snap) => snap.state.assignedTo === target.actor.id || "Must be assigned to you"

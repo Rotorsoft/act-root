@@ -13,7 +13,7 @@ describe("partial-state", () => {
     .patch({
       Incremented: (event, state) => ({ count: state.count + event.data.by }),
     })
-    .on("increment", z.object({ by: z.number() }))
+    .on({ increment: z.object({ by: z.number() }) })
     .emit((action) => ["Incremented", { by: action.by }])
     .build();
 
@@ -23,7 +23,7 @@ describe("partial-state", () => {
     .patch({
       Labeled: (event) => ({ label: event.data.label }),
     })
-    .on("setLabel", z.object({ label: z.string() }))
+    .on({ setLabel: z.object({ label: z.string() }) })
     .emit((action) => ["Labeled", { label: action.label }])
     .build();
 
@@ -63,7 +63,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0, label: "" }))
       .emits({ Other: ZodEmpty })
       .patch({ Other: () => ({}) })
-      .on("increment", ZodEmpty)
+      .on({ increment: ZodEmpty })
       .emit(() => ["Other", {}])
       .build();
 
@@ -77,7 +77,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0, label: "" }))
       .emits({ Incremented: z.object({ by: z.number() }) })
       .patch({ Incremented: () => ({}) })
-      .on("other", ZodEmpty)
+      .on({ other: ZodEmpty })
       .emit(() => ["Incremented", { by: 0 }])
       .build();
 
@@ -113,7 +113,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0, label: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
-      .on("doX", ZodEmpty)
+      .on({ doX: ZodEmpty })
       .emit(() => ["X", {}])
       .snap(() => true)
       .build();
@@ -122,7 +122,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0, label: "" }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
-      .on("doY", ZodEmpty)
+      .on({ doY: ZodEmpty })
       .emit(() => ["Y", {}])
       .build();
 
@@ -136,7 +136,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0 }))
       .emits({ incremented: ZodEmpty })
       .patch({ incremented: (_, state) => ({ count: state.count + 1 }) })
-      .on("increment", ZodEmpty)
+      .on({ increment: ZodEmpty })
       .emit(() => ["incremented", {}])
       .build();
 
@@ -170,7 +170,7 @@ describe("partial-state", () => {
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e) => ({ count: e.data.n }) })
-      .on("setCount", z.object({ n: z.number() }))
+      .on({ setCount: z.object({ n: z.number() }) })
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
@@ -178,7 +178,7 @@ describe("partial-state", () => {
       .init(() => ({ label: "" }))
       .emits({ Named: z.object({ label: z.string() }) })
       .patch({ Named: (e) => ({ label: e.data.label }) })
-      .on("setName", z.object({ label: z.string() }))
+      .on({ setName: z.object({ label: z.string() }) })
       .emit((a) => ["Named", { label: a.label }])
       .build();
 
@@ -197,7 +197,7 @@ describe("partial-state", () => {
       .init(() => ({ x: 10 }))
       .emits({ A: ZodEmpty })
       .patch({ A: () => ({}) })
-      .on("doA", ZodEmpty)
+      .on({ doA: ZodEmpty })
       .emit(() => ["A", {}])
       .build();
 
@@ -205,7 +205,7 @@ describe("partial-state", () => {
       .init(() => ({ y: "default" }))
       .emits({ B: ZodEmpty })
       .patch({ B: () => ({}) })
-      .on("doB", ZodEmpty)
+      .on({ doB: ZodEmpty })
       .emit(() => ["B", {}])
       .build();
 
@@ -221,7 +221,7 @@ describe("partial-state", () => {
       .init(() => ({ shared: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
-      .on("doX", ZodEmpty)
+      .on({ doX: ZodEmpty })
       .emit(() => ["X", {}])
       .build();
 
@@ -229,7 +229,7 @@ describe("partial-state", () => {
       .init(() => ({ shared: undefined }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
-      .on("doY", ZodEmpty)
+      .on({ doY: ZodEmpty })
       .emit(() => ["Y", {}])
       .build();
 
@@ -242,7 +242,7 @@ describe("partial-state", () => {
       .init(() => ({ field: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
-      .on("doX", ZodEmpty)
+      .on({ doX: ZodEmpty })
       .emit(() => ["X", {}])
       .build();
 
@@ -250,7 +250,7 @@ describe("partial-state", () => {
       .init(() => ({ field: 0 }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
-      .on("doY", ZodEmpty)
+      .on({ doY: ZodEmpty })
       .emit(() => ["Y", {}])
       .build();
 
@@ -262,7 +262,7 @@ describe("partial-state", () => {
       .init(() => ({ total: 0 }))
       .emits({ Added: z.object({ n: z.number() }) })
       .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
-      .on("add", z.object({ n: z.number() }))
+      .on({ add: z.object({ n: z.number() }) })
       .emit((a) => ["Added", { n: a.n }])
       .build();
 
@@ -270,7 +270,7 @@ describe("partial-state", () => {
       .init(() => ({ tag: "" }))
       .emits({ Tagged: z.object({ tag: z.string() }) })
       .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
-      .on("tag", z.object({ tag: z.string() }))
+      .on({ tag: z.object({ tag: z.string() }) })
       .emit((a) => ["Tagged", { tag: a.tag }])
       .build();
 
@@ -290,7 +290,7 @@ describe("partial-state", () => {
       .init(() => ({ val: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
-      .on("doX", ZodEmpty)
+      .on({ doX: ZodEmpty })
       .emit(() => ["X", {}])
       .build();
 
@@ -298,7 +298,7 @@ describe("partial-state", () => {
       .init(() => ({ val: undefined }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
-      .on("doY", ZodEmpty)
+      .on({ doY: ZodEmpty })
       .emit(() => ["Y", {}])
       .build();
 
@@ -313,7 +313,7 @@ describe("partial-state", () => {
       .init(() => ({ locked: false }))
       .emits({ Locked: ZodEmpty })
       .patch({ Locked: () => ({ locked: true }) })
-      .on("lock", ZodEmpty)
+      .on({ lock: ZodEmpty })
       .emit(() => ["Locked", {}])
       .build();
 
@@ -324,7 +324,7 @@ describe("partial-state", () => {
       .init(() => ({ locked: false }))
       .emits({ Attempted: ZodEmpty })
       .patch({ Attempted: () => ({}) })
-      .on("attempt", ZodEmpty)
+      .on({ attempt: ZodEmpty })
       .given([{ description: "Must not be locked", valid: (s) => !s.locked }])
       .emit(() => ["Attempted", {}])
       .build();

@@ -49,15 +49,15 @@ export const Todo = state("Todo", TodoState)
       updatedAt: event.created.toISOString(),
     }),
   })
-  .on("create", CreateTodo)
+  .on({ create: CreateTodo })
   .emit((action) => ["TodoCreated", { text: action.text }])
-  .on("update", UpdateTodo)
+  .on({ update: UpdateTodo })
   .emit((action, state) => {
     if (!state || ("deleted" in state && state.deleted))
       throw new Error("Todo not found");
     return ["TodoUpdated", { text: action.text }];
   })
-  .on("delete", DeleteTodo)
+  .on({ delete: DeleteTodo })
   .emit((_action, state) => {
     if (!state || ("deleted" in state && state.deleted))
       throw new Error("Todo not found");

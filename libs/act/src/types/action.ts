@@ -210,7 +210,7 @@ export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
  *
  * @example Using snapshot in action handler
  * ```typescript
- * .on("increment", z.object({ by: z.number() }))
+ * .on({ increment: z.object({ by: z.number() }) })
  *   .emit((action, snapshot) => {
  *     console.log("Current count:", snapshot.state.count);
  *     console.log("Events applied:", snapshot.patches);

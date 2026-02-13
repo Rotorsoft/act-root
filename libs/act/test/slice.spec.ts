@@ -16,7 +16,7 @@ describe("slice", () => {
     .patch({
       Incremented: (event, state) => ({ count: state.count + event.data.by }),
     })
-    .on("increment", z.object({ by: z.number() }))
+    .on({ increment: z.object({ by: z.number() }) })
     .emit((action) => ["Incremented", { by: action.by }])
     .build();
 
@@ -26,7 +26,7 @@ describe("slice", () => {
     .patch({
       Labeled: (event) => ({ label: event.data.label }),
     })
-    .on("setLabel", z.object({ label: z.string() }))
+    .on({ setLabel: z.object({ label: z.string() }) })
     .emit((action) => ["Labeled", { label: action.label }])
     .build();
 
@@ -147,7 +147,7 @@ describe("slice", () => {
       .init(() => ({ total: 0 }))
       .emits({ Added: z.object({ n: z.number() }) })
       .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
-      .on("add", z.object({ n: z.number() }))
+      .on({ add: z.object({ n: z.number() }) })
       .emit((a) => ["Added", { n: a.n }])
       .build();
 
@@ -155,7 +155,7 @@ describe("slice", () => {
       .init(() => ({ tag: "" }))
       .emits({ Tagged: z.object({ tag: z.string() }) })
       .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
-      .on("tag", z.object({ tag: z.string() }))
+      .on({ tag: z.object({ tag: z.string() }) })
       .emit((a) => ["Tagged", { tag: a.tag }])
       .build();
 
@@ -177,7 +177,7 @@ describe("slice", () => {
       .init(() => ({ v: 0 }))
       .emits({ E1: ZodEmpty })
       .patch({ E1: () => ({}) })
-      .on("doIt", ZodEmpty)
+      .on({ doIt: ZodEmpty })
       .emit(() => ["E1", {}])
       .build();
 
@@ -185,7 +185,7 @@ describe("slice", () => {
       .init(() => ({ w: 0 }))
       .emits({ E2: ZodEmpty })
       .patch({ E2: () => ({}) })
-      .on("doIt", ZodEmpty)
+      .on({ doIt: ZodEmpty })
       .emit(() => ["E2", {}])
       .build();
 
@@ -202,7 +202,7 @@ describe("slice", () => {
       .init(() => ({ v: 0 }))
       .emits({ SameEvent: ZodEmpty })
       .patch({ SameEvent: () => ({}) })
-      .on("doX", ZodEmpty)
+      .on({ doX: ZodEmpty })
       .emit(() => ["SameEvent", {}])
       .build();
 
@@ -210,7 +210,7 @@ describe("slice", () => {
       .init(() => ({ w: 0 }))
       .emits({ SameEvent: ZodEmpty })
       .patch({ SameEvent: () => ({}) })
-      .on("doY", ZodEmpty)
+      .on({ doY: ZodEmpty })
       .emit(() => ["SameEvent", {}])
       .build();
 
@@ -229,7 +229,7 @@ describe("slice", () => {
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e, s) => ({ count: s.count + e.data.n }) })
-      .on("count", z.object({ n: z.number() }))
+      .on({ count: z.object({ n: z.number() }) })
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
@@ -237,7 +237,7 @@ describe("slice", () => {
       .init(() => ({ entries: 0 }))
       .emits({ Logged: ZodEmpty })
       .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })
-      .on("log", ZodEmpty)
+      .on({ log: ZodEmpty })
       .emit(() => ["Logged", {}])
       .build();
 
@@ -267,7 +267,7 @@ describe("slice", () => {
       .init(() => ({ count: 0 }))
       .emits({ incremented: ZodEmpty })
       .patch({ incremented: (_, state) => ({ count: state.count + 1 }) })
-      .on("increment", ZodEmpty)
+      .on({ increment: ZodEmpty })
       .emit(() => ["incremented", {}])
       .build();
 
@@ -285,7 +285,7 @@ describe("slice", () => {
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e, s) => ({ count: s.count + e.data.n }) })
-      .on("count", z.object({ n: z.number() }))
+      .on({ count: z.object({ n: z.number() }) })
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
@@ -293,7 +293,7 @@ describe("slice", () => {
       .init(() => ({ entries: 0 }))
       .emits({ Logged: ZodEmpty })
       .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })
-      .on("log", ZodEmpty)
+      .on({ log: ZodEmpty })
       .emit(() => ["Logged", {}])
       .build();
 
