@@ -2,42 +2,20 @@ import { slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import * as errors from "./errors.js";
+import {
+  AssignTicket,
+  EscalateTicket,
+  ReassignTicket,
+  RequestTicketEscalation,
+} from "./schemas/ticket.action.schemas.js";
+import {
+  TicketAssigned,
+  TicketEscalated,
+  TicketEscalationRequested,
+  TicketReassigned,
+} from "./schemas/ticket.event.schemas.js";
 import { Message } from "./schemas/ticket.state.schemas.js";
 import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
-
-// --- Action schemas ---
-const AssignTicket = z
-  .object({
-    agentId: z.uuid(),
-    reassignAfter: z.date(),
-    escalateAfter: z.date(),
-  })
-  .describe("Assigns the ticket to an agent");
-const RequestTicketEscalation = z
-  .object({})
-  .describe("Requests a ticket escalation");
-const EscalateTicket = z
-  .object({ requestId: z.uuid(), requestedById: z.uuid() })
-  .describe("Escalates the ticket");
-const ReassignTicket = z
-  .object({
-    agentId: z.uuid(),
-    reassignAfter: z.date(),
-    escalateAfter: z.date(),
-  })
-  .describe("Reassigns the ticket");
-
-// --- Event schemas ---
-const TicketAssigned = AssignTicket.describe(
-  "An agent was assigned to the ticket"
-);
-const TicketEscalationRequested = z
-  .object({ requestedById: z.uuid(), requestId: z.uuid() })
-  .describe("A ticket escalation was requested");
-const TicketEscalated = EscalateTicket.and(
-  z.object({ escalationId: z.uuid() })
-).describe("The ticket was escalated");
-const TicketReassigned = ReassignTicket.describe("The ticket was reassigned");
 
 // --- State ---
 export const TicketOperations = state(

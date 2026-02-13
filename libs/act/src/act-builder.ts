@@ -6,6 +6,7 @@
  */
 import { Act } from "./act.js";
 import { _this_, _void_, registerState } from "./merge.js";
+import { isProjection, type Projection } from "./projection-builder.js";
 import { isSlice, type Slice } from "./slice-builder.js";
 import type {
   Committed,
@@ -86,7 +87,10 @@ export type ActBuilder<
       MX extends Record<string, Schema>,
     >(
       slice: Slice<SX, EX, AX, MX>
-    ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>);
+    ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>) &
+    (<EX extends Schemas>(
+      projection: Projection<EX>
+    ) => ActBuilder<S, E & EX, A, M>);
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -237,7 +241,31 @@ export function act<
   }
 ): ActBuilder<S, E, A, M> {
   const builder: ActBuilder<S, E, A, M> = {
-    with: ((input: State<any, any, any> | Slice<any, any, any, any>) => {
+    with: ((
+      input: State<any, any, any> | Slice<any, any, any, any> | Projection<any>
+    ) => {
+      if (isProjection(input)) {
+        // PROJECTION: copy event schemas and reactions (no states)
+        for (const eventName of Object.keys(input.events)) {
+          const projRegister = input.events[eventName];
+          const existing = (registry.events as Record<string, any>)[eventName];
+          if (!existing) {
+            // Register the event schema from the projection
+            (registry.events as Record<string, any>)[eventName] = {
+              schema: projRegister.schema,
+              reactions: new Map(projRegister.reactions),
+            };
+          } else {
+            // Merge reactions into existing event entry (deduplicate names)
+            for (const [name, reaction] of projRegister.reactions) {
+              let key = name;
+              while (existing.reactions.has(key)) key = `${key}_p`;
+              existing.reactions.set(key, reaction);
+            }
+          }
+        }
+        return act(states, registry as Registry<any, any, any>);
+      }
       if (isSlice(input)) {
         // SLICE: merge all states and copy reactions
         for (const s of input.states.values()) {

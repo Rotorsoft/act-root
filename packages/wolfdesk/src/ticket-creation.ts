@@ -1,36 +1,21 @@
-import { slice, state, ZodEmpty } from "@rotorsoft/act";
+import { slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
 import { z } from "zod";
 import * as errors from "./errors.js";
+import {
+  CloseTicket,
+  MarkTicketResolved,
+  OpenTicket,
+} from "./schemas/ticket.action.schemas.js";
+import {
+  TicketClosed,
+  TicketOpened,
+  TicketResolved,
+} from "./schemas/ticket.event.schemas.js";
 import { Message, Priority } from "./schemas/ticket.state.schemas.js";
 import { assignAgent } from "./services/agent.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 import { TicketOperations } from "./ticket-operations.js";
-
-// --- Action schemas ---
-const OpenTicket = z
-  .object({
-    productId: z.uuid(),
-    supportCategoryId: z.uuid(),
-    priority: z.enum(Priority),
-    title: z.string().min(1),
-    message: z.string().min(1),
-    closeAfter: z.date().optional(),
-  })
-  .describe("Opens a new ticket");
-const CloseTicket = ZodEmpty.describe("Closes the ticket");
-const MarkTicketResolved = ZodEmpty.describe("Flags ticket as resolved");
-
-// --- Event schemas ---
-const TicketOpened = OpenTicket.and(
-  z.object({ userId: z.uuid(), messageId: z.uuid() })
-).describe("A new ticket was opened");
-const TicketClosed = z
-  .object({ closedById: z.uuid() })
-  .describe("The ticket was closed");
-const TicketResolved = z
-  .object({ resolvedById: z.uuid() })
-  .describe("The ticket was marked as resolved");
 
 // --- State ---
 export const TicketCreation = state(
