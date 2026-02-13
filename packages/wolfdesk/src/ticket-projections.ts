@@ -1,12 +1,14 @@
-import { type AsCommitted } from "@rotorsoft/act";
+import { type CommittedOf } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
-import { builder } from "./bootstrap.js";
 import { db, tickets } from "./drizzle/index.js";
+import { TicketCreation } from "./ticket-creation.js";
+import { TicketMessaging } from "./ticket-messaging.js";
+import { TicketOperations } from "./ticket-operations.js";
 
 export async function opened({
   stream,
   data,
-}: AsCommitted<typeof builder.events, "TicketOpened">) {
+}: CommittedOf<typeof TicketCreation.events, "TicketOpened">) {
   const { closeAfter, ...other } = data;
   await db
     .insert(tickets)
@@ -23,7 +25,7 @@ export async function opened({
 export async function closed({
   stream,
   data,
-}: AsCommitted<typeof builder.events, "TicketClosed">) {
+}: CommittedOf<typeof TicketCreation.events, "TicketClosed">) {
   await db
     .update(tickets)
     .set(data)
@@ -31,10 +33,31 @@ export async function closed({
     .then(() => console.log(`${stream} => closed`));
 }
 
+export async function resolved({
+  stream,
+  data,
+}: CommittedOf<typeof TicketCreation.events, "TicketResolved">) {
+  await db
+    .update(tickets)
+    .set(data)
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => resolved`));
+}
+
+export async function messageAdded({
+  stream,
+}: CommittedOf<typeof TicketMessaging.events, "MessageAdded">) {
+  await db
+    .update(tickets)
+    .set({ messages: sql`${tickets.messages} + 1` })
+    .where(eq(tickets.id, stream))
+    .then(() => console.log(`${stream} => messageAdded`));
+}
+
 export async function assigned({
   stream,
   data,
-}: AsCommitted<typeof builder.events, "TicketAssigned">) {
+}: CommittedOf<typeof TicketOperations.events, "TicketAssigned">) {
   const { reassignAfter, escalateAfter, ...other } = data;
   await db
     .update(tickets)
@@ -47,20 +70,10 @@ export async function assigned({
     .then(() => console.log(`${stream} => assigned`));
 }
 
-export async function messageAdded({
-  stream,
-}: AsCommitted<typeof builder.events, "MessageAdded">) {
-  await db
-    .update(tickets)
-    .set({ messages: sql`${tickets.messages} + 1` })
-    .where(eq(tickets.id, stream))
-    .then(() => console.log(`${stream} => messageAdded`));
-}
-
 export async function escalated({
   stream,
   data,
-}: AsCommitted<typeof builder.events, "TicketEscalated">) {
+}: CommittedOf<typeof TicketOperations.events, "TicketEscalated">) {
   await db
     .update(tickets)
     .set({ escalationId: data.requestId })
@@ -71,7 +84,7 @@ export async function escalated({
 export async function reassigned({
   stream,
   data,
-}: AsCommitted<typeof builder.events, "TicketReassigned">) {
+}: CommittedOf<typeof TicketOperations.events, "TicketReassigned">) {
   const { reassignAfter, escalateAfter, ...other } = data;
   await db
     .update(tickets)
@@ -82,15 +95,4 @@ export async function reassigned({
     })
     .where(eq(tickets.id, stream))
     .then(() => console.log(`${stream} => reassigned`));
-}
-
-export async function resolved({
-  stream,
-  data,
-}: AsCommitted<typeof builder.events, "TicketResolved">) {
-  await db
-    .update(tickets)
-    .set(data)
-    .where(eq(tickets.id, stream))
-    .then(() => console.log(`${stream} => resolved`));
 }

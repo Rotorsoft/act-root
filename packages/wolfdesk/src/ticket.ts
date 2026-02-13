@@ -5,7 +5,7 @@ export {
   mustBeUserOrAgent,
 } from "./ticket-invariants.js";
 
-// Partial state definitions
-export { TicketCreation } from "./ticket-creation.js";
-export { TicketMessaging } from "./ticket-messaging.js";
-export { TicketOperations } from "./ticket-operations.js";
+// Partial state definitions and slices
+export { TicketCreation, TicketCreationSlice } from "./ticket-creation.js";
+export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
+export { TicketOperations, TicketOpsSlice } from "./ticket-operations.js";
