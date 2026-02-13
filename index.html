@@ -510,6 +510,94 @@
         box-shadow: none;
         transform: translateY(-2px) scale(1.04);
       }
+      /* ADVANCED PATTERNS */
+      .patterns-panel {
+        background: var(--bg-panel);
+        border-radius: 18px;
+        box-shadow: 0 4px 24px 0 #3bb0ff22;
+        border: 1px solid var(--accent-fade);
+        padding: 2.1rem 2.2rem 1.7rem 2.2rem;
+        width: 100%;
+        margin: 0 0 2.5rem 0;
+      }
+      .patterns-tabs {
+        display: flex;
+        gap: 0;
+        border-bottom: 2px solid var(--accent-fade);
+        margin-bottom: 1.4rem;
+        overflow-x: auto;
+      }
+      .patterns-tab {
+        background: none;
+        border: none;
+        color: var(--text-muted);
+        font-family: "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        font-size: 0.88rem;
+        font-weight: 600;
+        padding: 0.6em 1.1em;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -2px;
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+      }
+      .patterns-tab:hover {
+        color: var(--accent);
+      }
+      .patterns-tab.active {
+        color: var(--code-green);
+        border-bottom-color: var(--code-green);
+      }
+      .patterns-content {
+        display: none;
+      }
+      .patterns-content.active {
+        display: block;
+      }
+      .patterns-content h4 {
+        color: var(--accent);
+        font-size: 1.05rem;
+        font-weight: 700;
+        margin: 0 0 0.5em 0;
+        font-family: "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+      }
+      .patterns-content p {
+        color: var(--text-muted);
+        font-size: 0.95rem;
+        line-height: 1.6;
+        margin: 0 0 1em 0;
+      }
+      .patterns-content .arch-note {
+        color: var(--code-green);
+        font-size: 0.85rem;
+        font-family: "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        margin-top: 0.8em;
+        opacity: 0.85;
+      }
+      .patterns-code {
+        background: #181a20;
+        border-radius: 8px;
+        border: 1px solid var(--accent-fade);
+        padding: 0.7em 1.1em;
+        margin: 0;
+        font-family: "JetBrains Mono", "Fira Mono", "Menlo", "Consolas", monospace;
+        color: #b5cdfa;
+        font-size: 0.82rem;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      @media (max-width: 700px) {
+        .patterns-panel {
+          padding: 1.2rem 1rem 1rem 1rem;
+        }
+        .patterns-tab {
+          font-size: 0.78rem;
+          padding: 0.5em 0.7em;
+        }
+        .patterns-code {
+          font-size: 0.75rem;
+        }
+      }
       .fade-section {
         opacity: 0;
         transform: translateY(40px);
@@ -1104,6 +1192,160 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
         })();
       </script>
 
+      <!-- ADVANCED COMPOSITION PATTERNS -->
+      <section class="section fade-section" style="width: 100%; padding: 0; margin-bottom: 2.5rem">
+        <div style="display: flex; align-items: center; margin-bottom: 0.7em; margin-top: 0.5em">
+          <span class="icon" style="margin-right: 0.5em; display: flex; align-items: center">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--code-green)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+              <polyline points="2 17 12 22 22 17"></polyline>
+              <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+          </span>
+          <h2 style="font-size: 1.08rem; font-weight: 800; color: var(--code-green); margin: 0">
+            Advanced Composition Patterns
+          </h2>
+        </div>
+        <div class="patterns-panel">
+          <div class="patterns-tabs" role="tablist">
+            <button class="patterns-tab active" data-tab="slices" role="tab">Vertical Slices</button>
+            <button class="patterns-tab" data-tab="projections" role="tab">Projections</button>
+            <button class="patterns-tab" data-tab="partial" role="tab">Partial States</button>
+            <button class="patterns-tab" data-tab="invariants" role="tab">Invariants</button>
+            <button class="patterns-tab" data-tab="orchestrator" role="tab">Orchestrator</button>
+          </div>
+
+          <!-- Tab 1: Vertical Slices -->
+          <div class="patterns-content active" id="tab-slices">
+            <h4>Group states and reactions into feature modules</h4>
+            <p>
+              Each slice owns a set of partial states and their scoped reactions.
+              Handlers receive a typed <code style="color: var(--code-green)">Dispatcher</code> for cross-state coordination.
+            </p>
+<pre class="patterns-code"><code class="language-typescript">const TicketCreationSlice = slice()
+  .with(TicketCreation)      // partial state
+  .with(TicketOperations)    // another partial state
+
+  .on("TicketOpened")
+  .do(async function assign(event, _stream, app) {
+    const agent = assignAgent(event.stream, event.data.supportCategoryId);
+    await app.do("AssignTicket",
+      { stream: event.stream, actor: { id: randomUUID(), name: "assign" } },
+      agent, event
+    );
+  })
+  .build();</code></pre>
+            <div class="arch-note">WolfDesk uses 3 slices: Creation, Operations, and Messaging — each a self-contained feature boundary.</div>
+          </div>
+
+          <!-- Tab 2: Projections -->
+          <div class="patterns-content" id="tab-projections">
+            <h4>Build read-model updaters from events</h4>
+            <p>
+              Projections react to events and update external state (databases, caches).
+              Unlike slices, handlers are pure side effects — no <code style="color: var(--code-green)">Dispatcher</code> needed.
+            </p>
+<pre class="patterns-code"><code class="language-typescript">const TicketProjection = projection("tickets")
+  .on({ TicketOpened })
+    .do(async function opened({ stream, data }) {
+      await db.insert(tickets).values({ id: stream, ...data });
+    })
+  .on({ TicketClosed })
+    .do(async function closed({ stream, data }) {
+      await db.update(tickets).set(data).where(eq(tickets.id, stream));
+    })
+  .on({ MessageAdded })
+    .do(async function messageAdded({ stream }) {
+      await db.update(tickets)
+        .set({ messages: sql`${tickets.messages} + 1` })
+        .where(eq(tickets.id, stream));
+    })
+  .build();</code></pre>
+            <div class="arch-note">Default target "tickets" is inherited by all handlers. Override per-handler with .to() or .void().</div>
+          </div>
+
+          <!-- Tab 3: Partial State Composition -->
+          <div class="patterns-content" id="tab-partial">
+            <h4>Compose multiple partial states into a single aggregate</h4>
+            <p>
+              Split a complex aggregate into focused partial states that share the same stream.
+              Each partial declares only the fields it needs. Schemas merge automatically at build time.
+            </p>
+<pre class="patterns-code"><code class="language-typescript">// Three partials share the Ticket stream
+const TicketCreation = state({ Ticket: TicketCreationState })
+  .init(() => ({ title: "", productId: "", userId: "", priority: "Low", messages: {} }))
+  .emits({ TicketOpened, TicketClosed, TicketResolved })
+  .patch({ TicketOpened: ... , TicketClosed: ... , TicketResolved: ... })
+  .on({ OpenTicket }).emit(...)
+  .on({ CloseTicket }).given([mustBeOpen]).emit(...)
+  .build();
+
+const TicketOperations = state({ Ticket: TicketOperationsState })
+  .init(() => ({ productId: "", userId: "", messages: {} }))
+  .emits({ TicketAssigned, TicketEscalated, TicketReassigned })
+  // ... each partial adds its own actions and events
+  .build();
+
+const TicketMessaging = state({ Ticket: TicketMessagingState })
+  // ... handles AddMessage, MarkMessageDelivered, AcknowledgeMessage
+  .build();</code></pre>
+            <div class="arch-note">All three share the name "Ticket" — the orchestrator merges their schemas via ZodObject.extend().</div>
+          </div>
+
+          <!-- Tab 4: Invariants -->
+          <div class="patterns-content" id="tab-invariants">
+            <h4>Define reusable business rules across slices</h4>
+            <p>
+              Invariants are typed constraints checked before actions execute.
+              Define them once, reuse across any state via <code style="color: var(--code-green)">.given([invariant])</code>.
+            </p>
+<pre class="patterns-code"><code class="language-typescript">import { type Invariant } from "@rotorsoft/act";
+
+export const mustBeOpen: Invariant&lt;{ productId: string; closedById?: string }&gt; = {
+  description: "Ticket must be open",
+  valid: (state) => !!state.productId && !state.closedById,
+};
+
+export const mustBeUser: Invariant&lt;{ productId: string; userId: string }&gt; = {
+  description: "Must be the owner",
+  valid: (state, actor) => state.userId === actor?.id,
+};
+
+// Use in any state builder:
+.on({ CloseTicket }).given([mustBeOpen]).emit(...)
+.on({ RequestEscalation }).given([mustBeOpen, mustBeUser]).emit(...)</code></pre>
+            <div class="arch-note">Typed against minimal interfaces — TypeScript contravariance ensures Invariant&lt;SuperType&gt; is assignable to Invariant&lt;SubType&gt;.</div>
+          </div>
+
+          <!-- Tab 5: Orchestrator Wiring -->
+          <div class="patterns-content" id="tab-orchestrator">
+            <h4>Wire everything together with the Act orchestrator</h4>
+            <p>
+              The <code style="color: var(--code-green)">act()</code> builder accepts States, Slices, and Projections via <code style="color: var(--code-green)">.with()</code>.
+              Schemas and reactions merge automatically — one line per feature module.
+            </p>
+<pre class="patterns-code"><code class="language-typescript">import { act } from "@rotorsoft/act";
+
+export const app = act()
+  .with(TicketCreationSlice)    // slice: states + scoped reactions
+  .with(TicketMessagingSlice)   // slice: states + scoped reactions
+  .with(TicketOpsSlice)         // slice: states + scoped reactions
+  .with(TicketProjection)       // projection: read-model updaters
+  .build();
+
+// Execute actions
+await app.do("OpenTicket", { stream: "ticket-1", actor }, payload);
+
+// Load merged state (all partials combined)
+const snapshot = await app.load("Ticket", "ticket-1");
+
+// Process reactions
+await app.drain({ streamLimit: 100, eventLimit: 1000 });</code></pre>
+            <div class="arch-note">3 slices + 1 projection compose into a complete ticketing system. Each feature module is independently testable.</div>
+          </div>
+        </div>
+      </section>
+
       <!-- FEATURES -->
       <section class="features section fade-section">
         <div
@@ -1324,6 +1566,27 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
       document
         .querySelector(".logo-caption")
         .addEventListener("mouseenter", animateLogoT);
+
+      // Tab switching for advanced patterns panel
+      document.querySelectorAll(".patterns-tab").forEach(function (tab) {
+        tab.addEventListener("click", function () {
+          document
+            .querySelectorAll(".patterns-tab")
+            .forEach(function (t) { t.classList.remove("active"); });
+          document
+            .querySelectorAll(".patterns-content")
+            .forEach(function (c) { c.classList.remove("active"); });
+          tab.classList.add("active");
+          var target = document.getElementById("tab-" + tab.getAttribute("data-tab"));
+          if (target) target.classList.add("active");
+          // Re-highlight with Prism if available
+          if (window.Prism && target) {
+            target.querySelectorAll("code.language-typescript").forEach(function (block) {
+              Prism.highlightElement(block);
+            });
+          }
+        });
+      });
     </script>
   </body>
 </html>
