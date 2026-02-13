@@ -24,7 +24,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, state) => ({ count: state.count + event.amount }),
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
   .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
@@ -34,7 +34,7 @@ const TodoList = state("TodoList", z.object({ todos: z.array(z.string()) }))
   .patch({
     Added: (event, state) => ({ todos: [...state.todos, event.todo] }),
   })
-  .on("add", z.object({ todo: z.string() }))
+  .on({ add: z.object({ todo: z.string() }) })
   .emit((action) => ["Added", { todo: action.todo }])
   .build();
 

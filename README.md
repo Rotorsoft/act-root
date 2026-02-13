@@ -93,7 +93,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, state) => ({ count: state.count + event.data.amount }),
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
   .emit((action, state) => ["Incremented", { amount: action.by }])
   .build();
 
@@ -105,6 +105,30 @@ await app.do(
   { by: 1 }
 );
 console.log(await app.load(Counter, "counter1"));
+```
+
+### Compose with Slices and Projections
+
+Use `slice()` to group partial states with scoped reactions (vertical slice architecture), and `projection()` to build read-model updaters. The `act().with()` method accepts `State`, `Slice`, or `Projection`:
+
+```ts
+import { act, projection, slice } from "@rotorsoft/act";
+
+// Projection — read-model updater, handlers receive (event, stream)
+const CounterProjection = projection("counters")
+  .on({ Incremented: z.object({ amount: z.number() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
+
+// Slice — partial state + scoped reactions, handlers receive (event, stream, app)
+const CounterSlice = slice()
+  .with(Counter)
+  .on("Incremented")
+    .do(async (event, _stream, app) => { /* dispatch actions via app */ })
+    .void()
+  .build();
+
+const app = act().with(Counter).with(CounterSlice).with(CounterProjection).build();
 ```
 
 ## Documentation
