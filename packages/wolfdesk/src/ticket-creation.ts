@@ -1,6 +1,5 @@
 import { slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod";
 import * as errors from "./errors.js";
 import {
   CloseTicket,
@@ -12,25 +11,16 @@ import {
   TicketOpened,
   TicketResolved,
 } from "./schemas/ticket.event.schemas.js";
-import { Message, Priority } from "./schemas/ticket.state.schemas.js";
+import {
+  Priority,
+  TicketCreationState,
+} from "./schemas/ticket.state.schemas.js";
 import { assignAgent } from "./services/agent.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 import { TicketOperations } from "./ticket-operations.js";
 
 // --- State ---
-export const TicketCreation = state({
-  Ticket: z.object({
-    productId: z.uuid(),
-    supportCategoryId: z.uuid(),
-    priority: z.enum(Priority),
-    title: z.string().min(1),
-    userId: z.uuid(),
-    messages: z.record(z.uuid(), Message),
-    closedById: z.uuid().optional(),
-    resolvedById: z.uuid().optional(),
-    closeAfter: z.date().optional(),
-  }),
-})
+export const TicketCreation = state({ Ticket: TicketCreationState })
   .init(() => ({
     title: "",
     productId: "",

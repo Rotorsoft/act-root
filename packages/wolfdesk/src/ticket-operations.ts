@@ -1,6 +1,5 @@
 import { slice, state } from "@rotorsoft/act";
 import { randomUUID } from "crypto";
-import { z } from "zod";
 import * as errors from "./errors.js";
 import {
   AssignTicket,
@@ -14,23 +13,11 @@ import {
   TicketEscalationRequested,
   TicketReassigned,
 } from "./schemas/ticket.event.schemas.js";
-import { Message } from "./schemas/ticket.state.schemas.js";
+import { TicketOperationsState } from "./schemas/ticket.state.schemas.js";
 import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
 
 // --- State ---
-export const TicketOperations = state({
-  Ticket: z.object({
-    productId: z.uuid(),
-    userId: z.uuid(),
-    messages: z.record(z.uuid(), Message),
-    agentId: z.uuid().optional(),
-    requestId: z.uuid().optional(),
-    requestedById: z.uuid().optional(),
-    escalationId: z.uuid().optional(),
-    reassignAfter: z.date().optional(),
-    escalateAfter: z.date().optional(),
-  }),
-})
+export const TicketOperations = state({ Ticket: TicketOperationsState })
   .init(() => ({
     productId: "",
     userId: "",
