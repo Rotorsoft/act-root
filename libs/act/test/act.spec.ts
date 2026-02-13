@@ -2,7 +2,7 @@ import { z } from "zod";
 import { act, sleep, state, store, ZodEmpty } from "../src/index.js";
 
 describe("act", () => {
-  const counter = state("Counter", z.object({ count: z.number() }))
+  const counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ incremented: ZodEmpty, decremented: ZodEmpty, ignored: ZodEmpty })
     .patch({
@@ -18,7 +18,7 @@ describe("act", () => {
     .emit(() => ["ignored", {}])
     .build();
 
-  const dummy = state("Dummy", z.object({ count: z.number() }))
+  const dummy = state({ Dummy: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ added: ZodEmpty, ignored2: ZodEmpty })
     .patch({
@@ -176,7 +176,7 @@ describe("act", () => {
 
   it("should load unregistered state by object (fallback to stateOrName)", async () => {
     // Create a state not registered via .with()
-    const unregistered = state("Unregistered", z.object({ val: z.number() }))
+    const unregistered = state({ Unregistered: z.object({ val: z.number() }) })
       .init(() => ({ val: 0 }))
       .emits({ Evt: ZodEmpty })
       .patch({ Evt: () => ({}) })

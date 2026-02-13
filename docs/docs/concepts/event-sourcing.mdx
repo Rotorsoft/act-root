@@ -20,13 +20,12 @@ A user browses an e-commerce site, adds and removes items from their shopping ca
 ```typescript
 import { state, z } from "@rotorsoft/act";
 
-const Cart = state(
-  "Cart",
-  z.object({
+const Cart = state({
+  Cart: z.object({
     items: z.array(z.object({ sku: z.string(), qty: z.number() })),
     checkedOut: z.boolean(),
-  })
-)
+  }),
+})
   .init(() => ({ items: [], checkedOut: false }))
   .emits({
     ItemAdded: z.object({ sku: z.string(), qty: z.number() }),

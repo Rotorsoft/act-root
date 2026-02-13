@@ -17,9 +17,8 @@ Suppose you want to model an order with multiple states and transitions:
 ```typescript
 import { state, z } from "@rotorsoft/act";
 
-const Order = state(
-  "Order",
-  z.object({
+const Order = state({
+  Order: z.object({
     status: z.enum([
       "pending",
       "confirmed",
@@ -29,8 +28,8 @@ const Order = state(
     ]),
     items: z.array(z.object({ sku: z.string(), qty: z.number() })),
     trackingNumber: z.string().optional(),
-  })
-)
+  }),
+})
   .init(() => ({ status: "pending", items: [] }))
   .emits({
     Confirmed: z.object({}),
@@ -70,14 +69,13 @@ A support ticket can be open, assigned, escalated, resolved, or closed, with sub
 ```typescript
 import { state, z } from "@rotorsoft/act";
 
-const Ticket = state(
-  "Ticket",
-  z.object({
+const Ticket = state({
+  Ticket: z.object({
     status: z.enum(["open", "assigned", "escalated", "resolved", "closed"]),
     assignedTo: z.string().optional(),
     escalationLevel: z.number().optional(),
-  })
-)
+  }),
+})
   .init(() => ({ status: "open" }))
   .emits({
     Assigned: z.object({ user: z.string() }),

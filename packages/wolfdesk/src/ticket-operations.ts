@@ -18,9 +18,8 @@ import { Message } from "./schemas/ticket.state.schemas.js";
 import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
 
 // --- State ---
-export const TicketOperations = state(
-  "Ticket",
-  z.object({
+export const TicketOperations = state({
+  Ticket: z.object({
     productId: z.uuid(),
     userId: z.uuid(),
     messages: z.record(z.uuid(), Message),
@@ -30,8 +29,8 @@ export const TicketOperations = state(
     escalationId: z.uuid().optional(),
     reassignAfter: z.date().optional(),
     escalateAfter: z.date().optional(),
-  })
-)
+  }),
+})
   .init(() => ({
     productId: "",
     userId: "",

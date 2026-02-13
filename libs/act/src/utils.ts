@@ -115,7 +115,7 @@ const is_mergeable = (value: any): boolean =>
  * import { state } from "@rotorsoft/act";
  * import { z } from "zod";
  *
- * const Counter = state("Counter", z.object({ count: z.number() }))
+ * const Counter = state({ Counter: z.object({ count: z.number() }) })
  *   .init(() => ({ count: 0 }))
  *   .emits({ Incremented: z.object({ by: z.number() }) })
  *   .patch({
@@ -218,7 +218,7 @@ export const patch = <S extends Schema>(
  * import { state } from "@rotorsoft/act";
  * import { z } from "zod";
  *
- * const Counter = state("Counter", z.object({ count: z.number() }))
+ * const Counter = state({ Counter: z.object({ count: z.number() }) })
  *   .init(() => ({ count: 0 }))
  *   .emits({ Incremented: z.object({ by: z.number().positive() }) })
  *   .on({ increment: z.object({ by: z.number() }) })

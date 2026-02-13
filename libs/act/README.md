@@ -24,7 +24,7 @@ pnpm add @rotorsoft/act
 import { act, state } from "@rotorsoft/act";
 import { z } from "zod";
 
-const Counter = state("Counter", z.object({ count: z.number() }))
+const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({
@@ -138,7 +138,7 @@ Events can be retrieved in two ways:
 Replaying all events from the beginning for every request can be expensive for long-lived streams. Act supports configurable snapshotting:
 
 ```typescript
-const Account = state("Account", schema)
+const Account = state({ Account: schema })
   // ...
   .snap((snap) => snap.patchCount >= 10) // snapshot every 10 events
   .build();

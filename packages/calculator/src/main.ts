@@ -18,12 +18,11 @@ export type BoardState = Record<(typeof DIGITS)[number], number>;
 /**
  * DigitBoard state: tracks the count of each digit key pressed (0-9)
  */
-export const DigitBoard = state(
-  "DigitBoard",
-  z.object(
+export const DigitBoard = state({
+  DigitBoard: z.object(
     Object.fromEntries(DIGITS.map((d) => [d, z.number().int().default(0)]))
-  )
-)
+  ),
+})
   .init(() => Object.fromEntries(DIGITS.map((d) => [d, 0])) as BoardState)
   .emits({ DigitCounted: z.object({ digit: z.enum(DIGITS) }) })
   .patch({
@@ -39,12 +38,11 @@ export const DigitBoard = state(
 /**
  * Calculator projection: tracks the result of each calculator
  */
-const CalculatorResult = state(
-  "CalculatorResult",
-  z.object({
+const CalculatorResult = state({
+  CalculatorResult: z.object({
     result: z.number(),
-  })
-)
+  }),
+})
   .init(() => ({ result: 0 }))
   .emits({ ResultProjected: z.object({ result: z.number() }) })
   .patch({ ResultProjected: ({ data }) => data })

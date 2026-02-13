@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { act, type Actor, dispose, state, ZodEmpty } from "../src/index.js";
 
-const A1 = state("A1", z.object({}))
+const A1 = state({ A1: z.object({}) })
   .init(() => ({}))
   .emits({ Event1: z.object({}), Event2: z.object({}) })
   .patch({ Event1: () => ({}), Event2: () => ({}) })
@@ -11,7 +11,7 @@ const A1 = state("A1", z.object({}))
   .emit(() => ["Event2", {}])
   .build();
 
-const A2 = state("A2", ZodEmpty)
+const A2 = state({ A2: ZodEmpty })
   .init(() => ({}))
   .emits({ Event22: ZodEmpty })
   .patch({ Event22: () => ({}) })
@@ -19,7 +19,7 @@ const A2 = state("A2", ZodEmpty)
   .emit(() => ["Event22", {}])
   .build();
 
-const A3 = state("A3", ZodEmpty)
+const A3 = state({ A3: ZodEmpty })
   .init(() => ({}))
   .emits({ Event1: ZodEmpty, Event2: ZodEmpty })
   .patch({ Event1: () => ({}), Event2: () => ({}) })
@@ -130,7 +130,7 @@ describe("Builder", () => {
 
   it("should trigger the void resolver through the Act API", async () => {
     // Define a state with an action and event
-    const testState = state("S", z.object({}))
+    const testState = state({ S: z.object({}) })
       .init(() => ({}))
       .emits({ E: z.object({}) })
       .patch({ E: () => ({}) })
@@ -153,7 +153,7 @@ describe("Builder", () => {
   });
 
   it("should execute a reaction with a custom resolver using .to()", () => {
-    const testState = state("S2", z.object({}))
+    const testState = state({ S2: z.object({}) })
       .init(() => ({}))
       .emits({ E: z.object({}) })
       .patch({ E: () => ({}) })

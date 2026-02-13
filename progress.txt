@@ -49,3 +49,9 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Files: README.md, AGENT.md, CLAUDE.md, libs/act/README.md, libs/act-pg/README.md, docs/docs/intro.md, docs/docs/concepts/configuration.md, docs/docs/concepts/event-sourcing.mdx, docs/docs/concepts/state-management.mdx, docs/docs/api/act/src/functions/state.md, progress.txt
 - Changes: Replaced all .on("name", schema) two-argument syntax with .on({ name: schema }) record shorthand across all docs. Added Projection Builder and Slice Builder sections to CLAUDE.md and AGENT.md with API signatures and examples. Updated Act Orchestrator docs to show .with() accepting State/Slice/Projection. Added projection/slice examples to root README and libs/act/README. Updated Code Organization sections with new builder files.
 - Decisions: Documented handler signature differences: projection handlers get (event, stream), slice handlers get (event, stream, app). Slice .on() uses string event names (not record shorthand) since events come from registered states.
+
+[2026-02-13] #390 feat: replace state("Name", schema) with state({ Name: schema }) record shorthand
+- Files: libs/act/src/state-builder.ts, libs/act/test/state-builder.spec.ts, docs/static/index.html, performance/act-performance/package.json, all test files, all example packages, all docs
+- Changes: Replaced state() two-argument signature with single-argument record shorthand state({ Name: schema }), matching .on() pattern. Updated all call sites across tests, examples (calculator, wolfdesk, performance), and documentation. Fixed outdated .on() syntax in landing page. Bumped performance @rotorsoft/act dep to ^0.10.0.
+- Decisions: Breaking change — no backward compat for old two-arg form. Same StateEntry pattern as ActionEntry. Runtime throws on non-single-key records.
+- Tests: 5 new tests for record shorthand. All 235 tests pass, 100% coverage.

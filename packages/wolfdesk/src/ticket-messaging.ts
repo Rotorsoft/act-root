@@ -17,14 +17,13 @@ import { deliverMessage } from "./services/notification.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 
 // --- State ---
-export const TicketMessaging = state(
-  "Ticket",
-  z.object({
+export const TicketMessaging = state({
+  Ticket: z.object({
     productId: z.uuid(),
     userId: z.uuid(),
     messages: z.record(z.uuid(), Message),
-  })
-)
+  }),
+})
   .init(() => ({
     productId: "",
     userId: "",

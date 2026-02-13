@@ -99,6 +99,11 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
   };
 };
 
+/** Helper: a single-key record mapping a state name to its Zod schema. */
+type StateEntry<K extends string = string, S extends Schema = Schema> = {
+  [P in K]: ZodType<S>;
+};
+
 /** Helper: a single-key record mapping an action name to its Zod schema. */
 type ActionEntry<K extends string = string, AX extends Schema = Schema> = {
   [P in K]: ZodType<AX>;
@@ -289,7 +294,7 @@ export type ActionBuilder<
    *
    * @example
    * ```typescript
-   * const Counter = state("Counter", schema)
+   * const Counter = state({ Counter: schema })
    *   .init(() => ({ count: 0 }))
    *   .emits({ Incremented: z.object({ amount: z.number() }) })
    *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
@@ -318,8 +323,7 @@ export type ActionBuilder<
  * 6. Snapshotting strategy via `.snap()`
  *
  * @template S - Zod schema type defining the shape of the state
- * @param name - Unique identifier for this state type (e.g., "Counter", "User", "Order")
- * @param state - Zod schema defining the structure of the state
+ * @param entry - Single-key record mapping state name to Zod schema (e.g., `{ Counter: z.object({ count: z.number() }) }`)
  * @returns A StateBuilder instance for fluent API configuration
  *
  * @example Basic counter state
@@ -327,7 +331,7 @@ export type ActionBuilder<
  * import { state } from "@rotorsoft/act";
  * import { z } from "zod";
  *
- * const Counter = state("Counter", z.object({ count: z.number() }))
+ * const Counter = state({ Counter: z.object({ count: z.number() }) })
  *   .init(() => ({ count: 0 }))
  *   .emits({
  *     Incremented: z.object({ amount: z.number() })
@@ -342,11 +346,11 @@ export type ActionBuilder<
  *
  * @example State with multiple events and invariants
  * ```typescript
- * const BankAccount = state("BankAccount", z.object({
+ * const BankAccount = state({ BankAccount: z.object({
  *   balance: z.number(),
  *   currency: z.string(),
  *   status: z.enum(["open", "closed"])
- * }))
+ * }) })
  *   .init(() => ({ balance: 0, currency: "USD", status: "open" }))
  *   .emits({
  *     Deposited: z.object({ amount: z.number() }),
@@ -381,11 +385,11 @@ export type ActionBuilder<
  *
  * @example State with snapshotting
  * ```typescript
- * const User = state("User", z.object({
+ * const User = state({ User: z.object({
  *   name: z.string(),
  *   email: z.string(),
  *   loginCount: z.number()
- * }))
+ * }) })
  *   .init((data) => ({ ...data, loginCount: 0 }))
  *   .emits({
  *     UserCreated: z.object({ name: z.string(), email: z.string() }),
@@ -409,9 +413,12 @@ export type ActionBuilder<
  * @see {@link https://rotorsoft.github.io/act-root/docs/examples/calculator | Calculator Example}
  */
 export function state<N extends string, S extends Schema>(
-  name: N,
-  state: ZodType<S>
+  entry: StateEntry<N, S>
 ): StateBuilder<S, N> {
+  const keys = Object.keys(entry);
+  if (keys.length !== 1) throw new Error("state() requires exactly one key");
+  const name = keys[0] as N;
+  const stateSchema = (entry as Record<string, ZodType<S>>)[name];
   return {
     init(init: () => Readonly<S>) {
       return {
@@ -422,7 +429,7 @@ export function state<N extends string, S extends Schema>(
               return action_builder<S, E, {}, N>({
                 events,
                 actions: {},
-                state,
+                state: stateSchema,
                 name,
                 init,
                 patch,

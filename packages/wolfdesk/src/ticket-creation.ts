@@ -18,9 +18,8 @@ import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 import { TicketOperations } from "./ticket-operations.js";
 
 // --- State ---
-export const TicketCreation = state(
-  "Ticket",
-  z.object({
+export const TicketCreation = state({
+  Ticket: z.object({
     productId: z.uuid(),
     supportCategoryId: z.uuid(),
     priority: z.enum(Priority),
@@ -30,8 +29,8 @@ export const TicketCreation = state(
     closedById: z.uuid().optional(),
     resolvedById: z.uuid().optional(),
     closeAfter: z.date().optional(),
-  })
-)
+  }),
+})
   .init(() => ({
     title: "",
     productId: "",

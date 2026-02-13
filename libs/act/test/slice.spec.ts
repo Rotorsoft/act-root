@@ -10,7 +10,7 @@ describe("slice", () => {
     label: z.string(),
   });
 
-  const PartA = state("Thing", schema)
+  const PartA = state({ Thing: schema })
     .init(() => ({ count: 0, label: "" }))
     .emits({ Incremented: z.object({ by: z.number() }) })
     .patch({
@@ -20,7 +20,7 @@ describe("slice", () => {
     .emit((action) => ["Incremented", { by: action.by }])
     .build();
 
-  const PartB = state("Thing", schema)
+  const PartB = state({ Thing: schema })
     .init(() => ({ count: 0, label: "" }))
     .emits({ Labeled: z.object({ label: z.string() }) })
     .patch({
@@ -143,7 +143,7 @@ describe("slice", () => {
   it("should merge same-name partial states across slices at act level", async () => {
     const stream = nextStream();
 
-    const CountA = state("Counter", z.object({ total: z.number() }))
+    const CountA = state({ Counter: z.object({ total: z.number() }) })
       .init(() => ({ total: 0 }))
       .emits({ Added: z.object({ n: z.number() }) })
       .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
@@ -151,7 +151,7 @@ describe("slice", () => {
       .emit((a) => ["Added", { n: a.n }])
       .build();
 
-    const CountB = state("Counter", z.object({ tag: z.string() }))
+    const CountB = state({ Counter: z.object({ tag: z.string() }) })
       .init(() => ({ tag: "" }))
       .emits({ Tagged: z.object({ tag: z.string() }) })
       .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
@@ -173,7 +173,7 @@ describe("slice", () => {
   });
 
   it("should detect duplicate actions across slices", () => {
-    const S1 = state("X", z.object({ v: z.number() }))
+    const S1 = state({ X: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ E1: ZodEmpty })
       .patch({ E1: () => ({}) })
@@ -181,7 +181,7 @@ describe("slice", () => {
       .emit(() => ["E1", {}])
       .build();
 
-    const S2 = state("Y", z.object({ w: z.number() }))
+    const S2 = state({ Y: z.object({ w: z.number() }) })
       .init(() => ({ w: 0 }))
       .emits({ E2: ZodEmpty })
       .patch({ E2: () => ({}) })
@@ -198,7 +198,7 @@ describe("slice", () => {
   });
 
   it("should detect duplicate events across slices", () => {
-    const S1 = state("X", z.object({ v: z.number() }))
+    const S1 = state({ X: z.object({ v: z.number() }) })
       .init(() => ({ v: 0 }))
       .emits({ SameEvent: ZodEmpty })
       .patch({ SameEvent: () => ({}) })
@@ -206,7 +206,7 @@ describe("slice", () => {
       .emit(() => ["SameEvent", {}])
       .build();
 
-    const S2 = state("Y", z.object({ w: z.number() }))
+    const S2 = state({ Y: z.object({ w: z.number() }) })
       .init(() => ({ w: 0 }))
       .emits({ SameEvent: ZodEmpty })
       .patch({ SameEvent: () => ({}) })
@@ -225,7 +225,7 @@ describe("slice", () => {
   it("should support cross-slice reactions at the act level", async () => {
     const stream = nextStream();
 
-    const Counter = state("Counter", z.object({ count: z.number() }))
+    const Counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e, s) => ({ count: s.count + e.data.n }) })
@@ -233,7 +233,7 @@ describe("slice", () => {
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
-    const Logger = state("Log", z.object({ entries: z.number() }))
+    const Logger = state({ Log: z.object({ entries: z.number() }) })
       .init(() => ({ entries: 0 }))
       .emits({ Logged: ZodEmpty })
       .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })
@@ -263,7 +263,7 @@ describe("slice", () => {
   it("should still support act().with(State) (backward compat)", async () => {
     const stream = nextStream();
 
-    const counter = state("Counter", z.object({ count: z.number() }))
+    const counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ incremented: ZodEmpty })
       .patch({ incremented: (_, state) => ({ count: state.count + 1 }) })
@@ -281,7 +281,7 @@ describe("slice", () => {
     const counterStream = nextStream();
     const logStream = nextStream();
 
-    const Counter = state("Counter", z.object({ count: z.number() }))
+    const Counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e, s) => ({ count: s.count + e.data.n }) })
@@ -289,7 +289,7 @@ describe("slice", () => {
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
-    const Logger = state("Log", z.object({ entries: z.number() }))
+    const Logger = state({ Log: z.object({ entries: z.number() }) })
       .init(() => ({ entries: 0 }))
       .emits({ Logged: ZodEmpty })
       .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })
