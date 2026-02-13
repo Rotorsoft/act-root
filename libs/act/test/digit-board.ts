@@ -32,7 +32,7 @@ export const DigitBoard = state(
       [data.digit]: (state as BoardState)[data.digit] + 1,
     }),
   })
-  .on("CountDigit", z.object({ digit: z.enum(DIGITS) }))
+  .on({ CountDigit: z.object({ digit: z.enum(DIGITS) }) })
   .emit(({ digit }) => ["DigitCounted", { digit }])
   .build();
 
@@ -48,7 +48,7 @@ export const CalculatorResult = state(
   .init(() => ({ result: 0 }))
   .emits({ ResultProjected: z.object({ result: z.number() }) })
   .patch({ ResultProjected: ({ data }) => data })
-  .on("ProjectResult", z.object({ result: z.number() }))
+  .on({ ProjectResult: z.object({ result: z.number() }) })
   .emit(({ result }) => ["ResultProjected", { result }])
   .build();
 

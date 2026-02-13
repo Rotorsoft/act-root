@@ -43,7 +43,7 @@ export const TicketMessaging = state(
     }),
   })
 
-  .on("AddMessage", AddMessage)
+  .on({ AddMessage })
   .given([mustBeOpen, mustBeUserOrAgent])
   .emit((data, _, { actor }) => [
     "MessageAdded",
@@ -54,7 +54,7 @@ export const TicketMessaging = state(
     },
   ])
 
-  .on("MarkMessageDelivered", MarkMessageDelivered)
+  .on({ MarkMessageDelivered })
   .given([mustBeOpen])
   .emit((data, { state }) => {
     if (!state.messages[data.messageId])
@@ -62,7 +62,7 @@ export const TicketMessaging = state(
     return ["MessageDelivered", data];
   })
 
-  .on("AcknowledgeMessage", AcknowledgeMessage)
+  .on({ AcknowledgeMessage })
   .given([mustBeOpen])
   .emit((data, snapshot, { stream, actor }) => {
     const msg = snapshot.state.messages[data.messageId];

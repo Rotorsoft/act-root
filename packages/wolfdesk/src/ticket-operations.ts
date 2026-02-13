@@ -50,11 +50,11 @@ export const TicketOperations = state(
     TicketReassigned: ({ data }) => data,
   })
 
-  .on("AssignTicket", AssignTicket)
+  .on({ AssignTicket })
   .given([mustBeOpen])
   .emit((data) => ["TicketAssigned", data])
 
-  .on("RequestTicketEscalation", RequestTicketEscalation)
+  .on({ RequestTicketEscalation })
   .given([mustBeOpen, mustBeUser])
   .emit((_, { state }, { stream, actor }) => {
     if (state.escalateAfter && state.escalateAfter > new Date())
@@ -72,7 +72,7 @@ export const TicketOperations = state(
     ];
   })
 
-  .on("EscalateTicket", EscalateTicket)
+  .on({ EscalateTicket })
   .given([mustBeOpen])
   .emit((data, { state }, { stream, actor }) => {
     if (state.escalationId)
@@ -84,7 +84,7 @@ export const TicketOperations = state(
     return ["TicketEscalated", { ...data, escalationId: randomUUID() }];
   })
 
-  .on("ReassignTicket", ReassignTicket)
+  .on({ ReassignTicket })
   .given([mustBeOpen])
   .emit((data, { state }, { stream, actor }) => {
     if (!state.escalationId)

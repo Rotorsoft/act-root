@@ -26,7 +26,7 @@ describe("projection", () => {
     .patch({
       Incremented: (event, state) => ({ count: state.count + event.data.by }),
     })
-    .on("increment", z.object({ by: z.number() }))
+    .on({ increment: z.object({ by: z.number() }) })
     .emit((action) => ["Incremented", { by: action.by }])
     .build();
 
@@ -226,6 +226,16 @@ describe("projection", () => {
     const events = app_.registry.events as Record<string, any>;
     expect(events["ExternalEvent"]).toBeDefined();
     expect(events["ExternalEvent"].reactions.size).toBe(1);
+  });
+
+  it("should throw when .on() receives multiple keys", () => {
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
+      projection("target").on({
+        A: z.object({}),
+        B: z.object({}),
+      } as any)
+    ).toThrow(".on() requires exactly one key");
   });
 
   it("should expose .events on projection builder", () => {

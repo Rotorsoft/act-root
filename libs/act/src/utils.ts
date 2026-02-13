@@ -221,7 +221,7 @@ export const patch = <S extends Schema>(
  * const Counter = state("Counter", z.object({ count: z.number() }))
  *   .init(() => ({ count: 0 }))
  *   .emits({ Incremented: z.object({ by: z.number().positive() }) })
- *   .on("increment", z.object({ by: z.number() }))
+ *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => {
  *       // validate() is called automatically before this runs
  *       // action.by is guaranteed to be a number

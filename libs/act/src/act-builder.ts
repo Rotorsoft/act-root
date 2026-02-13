@@ -197,7 +197,7 @@ export type ActBuilder<
  *   .init(() => ({ count: 0 }))
  *   .emits({ Incremented: z.object({ amount: z.number() }) })
  *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
- *   .on("increment", z.object({ by: z.number() }))
+ *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => ["Incremented", { amount: action.by }])
  *   .build();
  *

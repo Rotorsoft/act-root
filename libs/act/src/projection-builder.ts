@@ -150,7 +150,9 @@ export function projection<E extends Schemas = {}>(
 
   const builder: ProjectionBuilder<E> = {
     on: <K extends string, D extends Schema>(entry: EventEntry<K, D>) => {
-      const event = Object.keys(entry)[0] as K;
+      const keys = Object.keys(entry);
+      if (keys.length !== 1) throw new Error(".on() requires exactly one key");
+      const event = keys[0] as K;
       const schema = entry[event];
 
       // Register the event schema if not already present

@@ -61,7 +61,7 @@ export const TicketCreation = state(
     TicketResolved: ({ data }) => data,
   })
 
-  .on("OpenTicket", OpenTicket)
+  .on({ OpenTicket })
   .emit((data, { state }, { stream, actor }) => {
     if (state.productId) throw new errors.TicketCannotOpenTwiceError(stream);
     return [
@@ -70,11 +70,11 @@ export const TicketCreation = state(
     ];
   })
 
-  .on("CloseTicket", CloseTicket)
+  .on({ CloseTicket })
   .given([mustBeOpen])
   .emit((_, __, { actor }) => ["TicketClosed", { closedById: actor.id }])
 
-  .on("MarkTicketResolved", MarkTicketResolved)
+  .on({ MarkTicketResolved })
   .given([mustBeOpen, mustBeUserOrAgent])
   .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
 

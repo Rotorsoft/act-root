@@ -10,11 +10,11 @@ describe("act", () => {
       decremented: (_, state) => ({ count: state.count - 1 }),
       ignored: () => ({}),
     })
-    .on("increment", ZodEmpty)
+    .on({ increment: ZodEmpty })
     .emit(() => ["incremented", {}])
-    .on("decrement", ZodEmpty)
+    .on({ decrement: ZodEmpty })
     .emit(() => ["decremented", {}])
-    .on("ignore", ZodEmpty)
+    .on({ ignore: ZodEmpty })
     .emit(() => ["ignored", {}])
     .build();
 
@@ -25,9 +25,9 @@ describe("act", () => {
       added: () => ({ count: 1 }),
       ignored2: () => ({}),
     })
-    .on("add", ZodEmpty)
+    .on({ add: ZodEmpty })
     .emit(() => ["added", {}])
-    .on("ignore2", ZodEmpty)
+    .on({ ignore2: ZodEmpty })
     .emit(() => ["ignored2", {}])
     .build();
 
@@ -180,7 +180,7 @@ describe("act", () => {
       .init(() => ({ val: 0 }))
       .emits({ Evt: ZodEmpty })
       .patch({ Evt: () => ({}) })
-      .on("doEvt", ZodEmpty)
+      .on({ doEvt: ZodEmpty })
       .emit(() => ["Evt", {}])
       .build();
 
