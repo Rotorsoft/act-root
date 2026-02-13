@@ -8,9 +8,9 @@ const counter = state("Counter", z.object({ count: z.number() }))
     incremented: (_, state) => ({ count: state.count + 1 }),
     decremented: (_, state) => ({ count: state.count - 1 }),
   })
-  .on("increment", ZodEmpty)
+  .on({ increment: ZodEmpty })
   .emit(() => ["incremented", {}])
-  .on("decrement", ZodEmpty)
+  .on({ decrement: ZodEmpty })
   .emit(() => ["decremented", {}])
   .build();
 

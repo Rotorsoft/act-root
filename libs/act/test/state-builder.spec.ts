@@ -17,12 +17,24 @@ describe("state-builder", () => {
       .init(() => ({ count: 0 }))
       .emits(events)
       .patch(patch)
-      .on("inc", z.object({}))
+      .on({ inc: z.object({}) })
       .emit(() => ["Incremented", { by: 1 }]);
 
     expect(() =>
-      builder.on("inc", z.object({})).emit(() => ["Incremented", { by: 1 }])
+      builder.on({ inc: z.object({}) }).emit(() => ["Incremented", { by: 1 }])
     ).toThrow('Duplicate action "inc"');
+  });
+
+  it("should throw when .on() receives multiple keys", () => {
+    const builder = state("test", counter)
+      .init(() => ({ count: 0 }))
+      .emits(events)
+      .patch(patch);
+
+    expect(() =>
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- intentionally testing invalid input
+      builder.on({ a: z.object({}), b: z.object({}) } as any)
+    ).toThrow(".on() requires exactly one key");
   });
 
   it("should build a state with given and snap", () => {
@@ -30,7 +42,7 @@ describe("state-builder", () => {
       .init(() => ({ count: 0 }))
       .emits(events)
       .patch(patch)
-      .on("inc", z.object({}))
+      .on({ inc: z.object({}) })
       .given([])
       .emit(() => ["Incremented", { by: 1 }])
       .snap(() => true)

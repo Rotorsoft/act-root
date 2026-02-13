@@ -9,3 +9,6 @@ export {
 export { TicketCreation, TicketCreationSlice } from "./ticket-creation.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
 export { TicketOperations, TicketOpsSlice } from "./ticket-operations.js";
+
+// Projection
+export { TicketProjection } from "./ticket-projections.js";

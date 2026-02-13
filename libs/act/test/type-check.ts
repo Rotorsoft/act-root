@@ -15,7 +15,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, s) => ({ count: s.count + event.data.amount }),
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
   .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
@@ -23,7 +23,7 @@ const Logger = state("Logger", z.object({ entries: z.number() }))
   .init(() => ({ entries: 0 }))
   .emits({ Logged: z.object({ message: z.string() }) })
   .patch({ Logged: (_, s) => ({ entries: s.entries + 1 }) })
-  .on("log", z.object({ message: z.string() }))
+  .on({ log: z.object({ message: z.string() }) })
   .emit((a) => ["Logged", { message: a.message }])
   .build();
 

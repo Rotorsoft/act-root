@@ -18,7 +18,7 @@ const me = state("me", z.object({ count: z.number() }))
     INCREMENT: (event, state) => ({ count: state.count + event.data.by }),
     SNAP_EVENT: (event) => event.data,
   })
-  .on("increment", z.object({ count: z.number() }))
+  .on({ increment: z.object({ count: z.number() }) })
   .given([
     {
       valid: () => false,
