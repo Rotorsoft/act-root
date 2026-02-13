@@ -177,6 +177,9 @@ async function main() {
     }
   }
 
+  // Final drain to process remaining reactions
+  await app.drain({ streamLimit: 5, eventLimit: 25 });
+
   // Show final calculator state
   await printStreamStates();
 
@@ -193,6 +196,9 @@ async function main() {
       timestamp: e.created,
     }))
   );
+
+  // Clean up: stop the correlation pump so the process can exit
+  app.stop_correlations();
 }
 
 void main();
