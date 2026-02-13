@@ -5,16 +5,12 @@ import {
   CloseTicket,
   MarkTicketResolved,
   OpenTicket,
-} from "./schemas/ticket.action.schemas.js";
-import {
+  Priority,
   TicketClosed,
+  TicketCreationState,
   TicketOpened,
   TicketResolved,
-} from "./schemas/ticket.event.schemas.js";
-import {
-  Priority,
-  TicketCreationState,
-} from "./schemas/ticket.state.schemas.js";
+} from "./schemas/ticket.schemas.js";
 import { assignAgent } from "./services/agent.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 import { TicketOperations } from "./ticket-operations.js";
@@ -74,6 +70,7 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
 export const TicketCreationSlice = slice()
   .with(TicketCreation)
   .with(TicketOperations)
+
   .on("TicketOpened").do(async function assign(event, _stream, app) {
     const agent = assignAgent(
       event.stream,

@@ -6,14 +6,12 @@ import {
   EscalateTicket,
   ReassignTicket,
   RequestTicketEscalation,
-} from "./schemas/ticket.action.schemas.js";
-import {
   TicketAssigned,
   TicketEscalated,
   TicketEscalationRequested,
+  TicketOperationsState,
   TicketReassigned,
-} from "./schemas/ticket.event.schemas.js";
-import { TicketOperationsState } from "./schemas/ticket.state.schemas.js";
+} from "./schemas/ticket.schemas.js";
 import { mustBeOpen, mustBeUser } from "./ticket-invariants.js";
 
 // --- State ---

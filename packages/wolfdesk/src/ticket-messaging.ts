@@ -5,13 +5,11 @@ import {
   AcknowledgeMessage,
   AddMessage,
   MarkMessageDelivered,
-} from "./schemas/ticket.action.schemas.js";
-import {
   MessageAdded,
   MessageDelivered,
   MessageRead,
-} from "./schemas/ticket.event.schemas.js";
-import { TicketMessagingState } from "./schemas/ticket.state.schemas.js";
+  TicketMessagingState,
+} from "./schemas/ticket.schemas.js";
 import { deliverMessage } from "./services/notification.js";
 import { mustBeOpen, mustBeUserOrAgent } from "./ticket-invariants.js";
 
@@ -77,6 +75,7 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
 // prettier-ignore
 export const TicketMessagingSlice = slice()
   .with(TicketMessaging)
+
   .on("MessageAdded").do(async function deliver(event, _stream, app) {
     await deliverMessage(event.data);
     await app.do(
