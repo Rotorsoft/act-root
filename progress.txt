@@ -61,3 +61,8 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Changes: Fixed calculator dependency from ^0.6.33 (stale npm) to workspace:* so it uses the local framework with record shorthand API. Added stop_correlations() cleanup so process exits. Added advanced composition patterns panel to landing page with 5 tabbed sections (Vertical Slices, Projections, Partial States, Invariants, Orchestrator) using real WolfDesk code examples.
 - Decisions: Used workspace:* to match other example packages. Tabs use Prism.js for syntax highlighting (already loaded by landing page). Kept panel static per issue requirements.
 - Issues: Pre-existing lint/typecheck errors unrelated to this change (missing client/tsconfig.eslint.json, unused @ts-expect-error directives).
+
+[2026-02-13] #394 fix(calculator): replace workspace:* with published npm version for StackBlitz compatibility
+- Files: packages/calculator/package.json, pnpm-lock.yaml
+- Changes: Replaced "workspace:*" with "^0.11.0" for @rotorsoft/act dependency so StackBlitz (which uses npm, not pnpm) can resolve the package. Matches approach used by performance/act-performance.
+- Decisions: Used ^0.11.0 (current published version). pnpm resolves published versions to local workspace packages when available, so local dev is unaffected.
