@@ -51,7 +51,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, state) => ({ count: state.count + event.amount }),
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
   .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 

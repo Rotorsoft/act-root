@@ -48,13 +48,13 @@ const Order = state(
     Delivered: (e, s) => ({ ...s, status: "delivered" }),
     Cancelled: (e, s) => ({ ...s, status: "cancelled" }),
   })
-  .on("confirm", z.object({}))
+  .on({ confirm: z.object({}) })
   .emit(() => ["Confirmed", {}])
-  .on("ship", z.object({ trackingNumber: z.string() }))
+  .on({ ship: z.object({ trackingNumber: z.string() }) })
   .emit((a) => ["Shipped", { trackingNumber: a.trackingNumber }])
-  .on("deliver", z.object({}))
+  .on({ deliver: z.object({}) })
   .emit(() => ["Delivered", {}])
-  .on("cancel", z.object({ reason: z.string() }))
+  .on({ cancel: z.object({ reason: z.string() }) })
   .emit((a) => ["Cancelled", { reason: a.reason }])
   .build();
 ```
@@ -95,13 +95,13 @@ const Ticket = state(
     Resolved: (e, s) => ({ ...s, status: "resolved" }),
     Closed: (e, s) => ({ ...s, status: "closed" }),
   })
-  .on("assign", z.object({ user: z.string() }))
+  .on({ assign: z.object({ user: z.string() }) })
   .emit((a) => ["Assigned", { user: a.user }])
-  .on("escalate", z.object({ level: z.number() }))
+  .on({ escalate: z.object({ level: z.number() }) })
   .emit((a) => ["Escalated", { level: a.level }])
-  .on("resolve", z.object({}))
+  .on({ resolve: z.object({}) })
   .emit(() => ["Resolved", {}])
-  .on("close", z.object({}))
+  .on({ close: z.object({}) })
   .emit(() => ["Closed", {}])
   .build();
 ```

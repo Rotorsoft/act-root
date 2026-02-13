@@ -115,15 +115,68 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .build();
 ```
 
+### Projection Builder
+
+Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive a `Dispatcher`.
+
+```typescript
+import { projection } from "@rotorsoft/act";
+
+// Handlers receive (event, stream)
+const TicketProjection = projection("tickets")
+  .on({ TicketOpened })
+    .do(async ({ stream, data }) => {
+      await db.insert(tickets).values({ id: stream, ...data });
+    })
+  .on({ TicketClosed })
+    .do(async ({ stream, data }) => {
+      await db.update(tickets).set(data).where(eq(tickets.id, stream));
+    })
+  .build();
+```
+
+- `projection(target?)` - Creates a builder; optional default target stream for all handlers
+- `.on({ EventName: schema })` - Register an event handler (record shorthand)
+- `.do(handler)` - Handler receives `(event, stream)`
+- `.to(resolver)` / `.void()` - Override the default resolver per handler
+- `.build()` - Returns a `Projection` with `_tag: "Projection"`
+
+### Slice Builder
+
+Slices group partial states with scoped reactions into self-contained feature modules (vertical slice architecture). Handlers receive a typed `Dispatcher` for cross-state action dispatch.
+
+```typescript
+import { slice } from "@rotorsoft/act";
+
+// Handlers receive (event, stream, app) — app is a typed Dispatcher
+const CreationSlice = slice()
+  .with(TicketCreation)
+  .with(TicketOperations)
+  .on("TicketOpened")
+    .do(async (event, _stream, app) => {
+      await app.do("AssignTicket", target, payload, event);
+    })
+    .void()
+  .build();
+```
+
+- `slice()` - Creates a builder
+- `.with(state)` - Register a partial state (include all states whose actions handlers need)
+- `.on(eventName)` - React to an event from the slice's states (string, not record)
+- `.do(handler)` - Handler receives `(event, stream, app)` where `app` is a `Dispatcher`
+- `.to(resolver)` / `.void()` - Set the target stream resolver
+- `.build()` - Returns a `Slice` with `_tag: "Slice"`
+
 ### Act Orchestrator
 
-The main orchestrator wires together states and reactions:
+The main orchestrator wires together states, slices, projections, and reactions. The `.with()` method accepts `State`, `Slice`, or `Projection`:
 
 ```typescript
 const app = act()
-  .with(Counter)
-  .with(OtherState)
-  .on("SomeEvent")
+  .with(Counter)           // State
+  .with(CreationSlice)     // Slice
+  .with(TicketProjection)  // Projection
+  .on("SomeEvent")         // Inline reaction
     .do(handler)
     .to(resolver)  // or .void() for side effects only
   .build();
@@ -217,8 +270,12 @@ Control when snapshots are taken:
 
 ### Core Library (`libs/act/src`)
 
-- **`state.ts`** - State builder API and types
-- **`act.ts`** - Act orchestrator builder API
+- **`state-builder.ts`** - State builder API and types
+- **`act-builder.ts`** - Act orchestrator builder API
+- **`slice-builder.ts`** - Slice builder for vertical slice architecture
+- **`projection-builder.ts`** - Projection builder for read-model updaters
+- **`merge.ts`** - Shared merge utilities for schema/state composition
+- **`act.ts`** - Act orchestrator runtime
 - **`store/`** - Store interface and InMemoryStore implementation
 - **`logger.ts`** - Pino-based logging
 - **`errors.ts`** - Framework error types

@@ -44,11 +44,11 @@ const Cart = state(
     }),
     CheckedOut: (e, s) => ({ ...s, checkedOut: true }),
   })
-  .on("addItem", z.object({ sku: z.string(), qty: z.number() }))
+  .on({ addItem: z.object({ sku: z.string(), qty: z.number() }) })
   .emit((a) => ["ItemAdded", { sku: a.sku, qty: a.qty }])
-  .on("removeItem", z.object({ sku: z.string() }))
+  .on({ removeItem: z.object({ sku: z.string() }) })
   .emit((a) => ["ItemRemoved", { sku: a.sku }])
-  .on("checkout", z.object({}))
+  .on({ checkout: z.object({}) })
   .emit(() => ["CheckedOut", {}])
   .build();
 

@@ -30,7 +30,7 @@ const Counter = state("Counter", z.object({ count: z.number() }))
   .patch({
     Incremented: (event, state) => ({ count: state.count + event.data.amount }),
   })
-  .on("increment", z.object({ by: z.number() }))
+  .on({ increment: z.object({ by: z.number() }) })
     .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
@@ -39,6 +39,30 @@ const app = act().with(Counter).build();
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 5 });
 const snapshot = await app.load(Counter, "counter1");
 console.log(snapshot.state.count); // 5
+```
+
+## Projections & Slices
+
+Use `projection()` to build read-model updaters and `slice()` for vertical slice architecture. The `act().with()` method accepts `State`, `Slice`, or `Projection`:
+
+```typescript
+import { projection, slice } from "@rotorsoft/act";
+
+// Projection — read-model updater, handlers receive (event, stream)
+const CounterProjection = projection("counters")
+  .on({ Incremented: z.object({ amount: z.number() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
+
+// Slice — partial state + scoped reactions, handlers receive (event, stream, app)
+const CounterSlice = slice()
+  .with(Counter)
+  .on("Incremented")
+    .do(async (event, _stream, app) => { /* dispatch actions via app */ })
+    .void()
+  .build();
+
+const app = act().with(Counter).with(CounterSlice).with(CounterProjection).build();
 ```
 
 ## Related
