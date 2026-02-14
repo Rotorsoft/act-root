@@ -131,6 +131,40 @@ const CounterSlice = slice()
 const app = act().with(Counter).with(CounterSlice).with(CounterProjection).build();
 ```
 
+## AI-Assisted Application Scaffolding
+
+This repository includes a [Claude Code skill](https://code.claude.com/docs/en/skills) that guides AI agents through building new applications with the Act framework from functional specifications (event modeling diagrams, event storming artifacts, or user stories).
+
+### Install as a project skill (recommended for Act-based repos)
+
+Copy the skill into your project's `.claude/skills/` directory:
+
+```sh
+# From your new project root
+mkdir -p .claude/skills
+cp -r /path/to/act-root/.claude/skills/scaffold-act-app .claude/skills/
+```
+
+Then invoke it in Claude Code:
+
+```
+/scaffold-act-app
+```
+
+### Install as a personal skill (available across all projects)
+
+```sh
+cp -r /path/to/act-root/.claude/skills/scaffold-act-app ~/.claude/skills/
+```
+
+### What the skill covers
+
+- **Spec-to-code mapping** — translates event modeling / event storming artifacts to framework builders
+- **Monorepo template** — complete workspace configuration (pnpm, TypeScript, Vite, Vitest, tRPC, React)
+- **10-step build process** — schemas, invariants, states, slices, projections, bootstrap, router, client, tests, dependencies
+- **Strict rules** — immutable events, Zod mandatory, actor context, partial patches, causation tracking
+- **Production guide** — PostgreSQL store, background processing, automated jobs, error handling
+
 ## Documentation
 
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/)

@@ -66,3 +66,8 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Files: packages/calculator/package.json, pnpm-lock.yaml
 - Changes: Replaced "workspace:*" with "^0.11.0" for @rotorsoft/act dependency so StackBlitz (which uses npm, not pnpm) can resolve the package. Matches approach used by performance/act-performance.
 - Decisions: Used ^0.11.0 (current published version). pnpm resolves published versions to local workspace packages when available, so local dev is unaffected.
+
+[2026-02-14] #398 docs: add scaffold-act-app Claude Code skill
+- Files: .claude/skills/scaffold-act-app/SKILL.md (new), .claude/skills/scaffold-act-app/monorepo-template.md (new), .claude/skills/scaffold-act-app/production.md (new), README.md, progress.txt
+- Changes: Created Claude Code skill following the Agent Skills standard with YAML frontmatter, progressive disclosure pattern (SKILL.md under 500 lines + supporting files for templates and production guide). Updated README with skill installation instructions (project and personal). Covers spec-to-code mapping, 10-step build process, strict rules, and completion checklist.
+- Decisions: Used `.claude/skills/` directory convention per Claude Code docs. Split into SKILL.md (main build process), monorepo-template.md (config files), and production.md (deployment guide). Named `scaffold-act-app` for clarity when used as a personal/cross-project skill.
