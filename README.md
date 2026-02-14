@@ -133,33 +133,33 @@ const app = act().with(Counter).with(CounterSlice).with(CounterProjection).build
 
 ## AI-Assisted Application Scaffolding
 
-This repository includes a [Claude Code skill](https://code.claude.com/docs/en/skills) that guides AI agents through building new applications with the Act framework from functional specifications (event modeling diagrams, event storming artifacts, or user stories).
+Build a complete Act application from a functional specification using [Claude Code](https://claude.ai/code) and the included skill.
 
-### Install as a project skill (recommended for Act-based repos)
-
-Copy the skill into your project's `.claude/skills/` directory:
+### Install the skill
 
 ```sh
-# From your new project root
+# Project skill (recommended) — available in this repo
 mkdir -p .claude/skills
 cp -r /path/to/act-root/.claude/skills/scaffold-act-app .claude/skills/
-```
 
-Then invoke it in Claude Code:
-
-```
-/scaffold-act-app
-```
-
-### Install as a personal skill (available across all projects)
-
-```sh
+# Personal skill — available across all projects
 cp -r /path/to/act-root/.claude/skills/scaffold-act-app ~/.claude/skills/
 ```
 
+### Usage workflow
+
+1. Open Claude Code in an empty directory (or your new project root)
+2. Tell Claude: **"Build me an app from this spec: `<link-or-file>`"**
+3. Claude fetches the spec, identifies the format, and maps domain artifacts to framework concepts
+4. Claude scaffolds the monorepo — domain logic, tRPC API, React client, and tests
+5. Review, iterate, deploy
+
+Any spec format works: event modeling diagrams, event storming boards, JSON configs, user stories, or plain prose.
+
 ### What the skill covers
 
-- **Spec-to-code mapping** — translates event modeling / event storming artifacts to framework builders
+- **Generic spec parsing** — vocabulary mapping from any modeling tool to framework concepts
+- **Spec-to-code mapping** — translates aggregates, commands, events, policies, and read models to framework builders
 - **Monorepo template** — complete workspace configuration (pnpm, TypeScript, Vite, Vitest, tRPC, React)
 - **10-step build process** — schemas, invariants, states, slices, projections, bootstrap, router, client, tests, dependencies
 - **Strict rules** — immutable events, Zod mandatory, actor context, partial patches, causation tracking

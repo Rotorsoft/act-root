@@ -24,6 +24,82 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 
 **Event Storming**: Blue = Action, Orange = Event + Patch, Yellow = State, Lilac = Reaction, Green = Projection, Red = Invariant.
 
+## Analyze the Specification
+
+Before writing any code, fetch and parse the spec to extract domain artifacts. This section applies to **any** spec format — event modeling diagrams, event storming boards, domain stories, user stories, config files, or prose requirements.
+
+### Fetch and Parse
+
+1. Fetch the spec URL (or read the provided file/text)
+2. Identify the format (JSON config, Miro export, markdown, YAML, prose, etc.)
+3. Extract domain artifacts using the vocabulary mapping below
+
+### Generic Vocabulary Mapping
+
+Specs use varied terminology. Map to framework concepts:
+
+| Spec Term (any tool/language) | Framework Concept | Builder API |
+|---|---|---|
+| Aggregate, Entity, Actor, Domain Object | State | `state({ Name: schema })` |
+| Command, Action, Intent, Request | Action | `.on({ ActionName: schema })` |
+| Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + `.patch({})` |
+| Read Model, View, Query Model, Projection | Projection | `projection("target").on({ Event }).do(handler)` |
+| Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().on("Event").do(handler)` |
+| Invariant, Guard, Business Rule, Precondition, Constraint | Invariant | `.given([{ description, valid }])` |
+| Specification, Acceptance Criteria, Given-When-Then, Scenario | Test case | `describe / it` block |
+| Screen, UI, View, Page | Client component | tRPC procedure + React component |
+| Bounded Context, Module, Feature, Slice | Slice | `slice().with(State)` |
+| External Event, Integration Event | Reaction trigger | Event from another aggregate's stream |
+
+### Field Type Mapping
+
+Map spec field types to Zod schemas:
+
+| Spec Type | Zod Schema |
+|---|---|
+| UUID, ID | `z.uuid()` |
+| String, Text | `z.string()` |
+| Number, Integer, Int | `z.int()` |
+| Double, Float, Decimal | `z.number()` |
+| Boolean, Bool | `z.boolean()` |
+| Date, DateTime, Timestamp | `z.iso.datetime()` |
+| List, Array, Collection | `z.array(innerSchema)` |
+| Enum | `z.enum(["A", "B"])` |
+| Optional, Nullable | `.optional()` |
+
+### Deriving State Shape
+
+The state schema is the **accumulation of all event fields** for that aggregate:
+
+1. Collect every event the aggregate emits
+2. Union all their fields — that is the state shape
+3. `init()` returns zero/empty values for each field (`""` for strings, `0` for numbers, `false` for booleans, `[]` for arrays)
+
+### External vs Internal Events
+
+- **Internal events** — emitted by the aggregate's own actions → define in `.emits({})` and `.patch({})`
+- **External/integration events** — emitted by other aggregates → handle as **reaction triggers** in a slice (`.on("ExternalEvent").do(handler)`) or at the act level
+
+### Given/When/Then → Tests
+
+Translate spec scenarios directly into test cases:
+
+- **Given** (preconditions) → seed events via `app.do()` to set up state
+- **When** (action) → dispatch the action under test via `app.do()`
+- **Then** (assertions) → assert emitted events, final state (`app.load()`), or expected errors (`rejects.toThrow()`)
+
+```typescript
+it("should close an open ticket", async () => {
+  // Given — an open ticket
+  await app.do("OpenTicket", target, { title: "Bug" });
+  // When — close it
+  await app.do("CloseTicket", target, { reason: "Fixed" });
+  // Then — state reflects closure
+  const snap = await app.load(Ticket, target.stream);
+  expect(snap.state.status).toBe("Closed");
+});
+```
+
 ## Monorepo Architecture
 
 ```
