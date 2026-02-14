@@ -17,7 +17,7 @@ store(new PostgresStore({
 }));
 ```
 
-Install: `pnpm -F @my-app/server add @rotorsoft/act-pg`
+Install: `pnpm -F @my-app/app add @rotorsoft/act-pg`
 
 ## Background Processing
 

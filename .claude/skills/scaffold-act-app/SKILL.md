@@ -115,11 +115,22 @@ my-app/
 │   │   │   └── index.ts          # Barrel exports
 │   │   └── test/
 │   │       └── <feature>.spec.ts
-│   ├── server/           # tRPC API layer
-│   │   └── src/server.ts
-│   └── client/           # React + Vite frontend
-│       └── src/
-│           ├── trpc.ts, App.tsx, main.tsx
+│   └── app/              # Server + Client in one package
+│       ├── src/
+│       │   ├── api/              # tRPC router + bootstrap
+│       │   │   ├── index.ts      # Router + AppRouter type
+│       │   │   └── builder.ts    # act bootstrap + drain wiring
+│       │   ├── client/           # React + Vite frontend
+│       │   │   ├── App.tsx
+│       │   │   ├── main.tsx
+│       │   │   └── trpc.ts
+│       │   ├── server.ts         # Production server (static + API)
+│       │   └── dev-server.ts     # Dev server (Vite middleware + API)
+│       ├── index.html
+│       ├── vite.config.ts
+│       ├── tsconfig.json         # References app + server configs
+│       ├── tsconfig.app.json     # Client + API (bundler resolution)
+│       └── tsconfig.server.json  # Server + API (emit JS)
 ├── package.json
 ├── pnpm-workspace.yaml
 ├── tsconfig.base.json
@@ -250,40 +261,64 @@ export const app = act()
   .build();
 ```
 
-### Step 7 — tRPC Router
+### Step 7 — tRPC API (in `packages/app/src/api/`)
+
+Bootstrap the Act app and wire drain-on-commit:
 
 ```typescript
-import { app, Item } from "@my-app/domain";
-import { type Target } from "@rotorsoft/act";
-import { initTRPC } from "@trpc/server";
-import { createHTTPServer } from "@trpc/server/adapters/standalone";
-import cors from "cors";
+// packages/app/src/api/builder.ts
+import { act } from "@rotorsoft/act";
+import { ItemSlice } from "@my-app/domain";
 
-const t = initTRPC.create();
-export const appRouter = t.router({
-  CreateItem: t.procedure
-    .input(Item.actions.CreateItem)  // Zod schema from state
-    .mutation(({ input }) => {
-      const target: Target = { stream: crypto.randomUUID(), actor: { id: "user-1", name: "User" } };
-      return app.do("CreateItem", target, input);
-    }),
+export const app = act()
+  .with(ItemSlice)
+  .build();
+
+// Drain projections after every commit
+app.on("committed", () => {
+  app.drain().catch(console.error);
 });
-export type AppRouter = typeof appRouter;
-
-createHTTPServer({ middleware: cors(), router: appRouter }).listen(4000);
 ```
 
-### Step 8 — React Client
+Define the tRPC router — import domain types from `@my-app/domain`, app from `./builder.js`:
 
 ```typescript
-// trpc.ts
-import { type AppRouter } from "@my-app/server";
-import { QueryClient } from "@tanstack/react-query";
-import { createTRPCReact, httpLink } from "@trpc/react-query";
+// packages/app/src/api/index.ts
+import { Item } from "@my-app/domain";
+import { type Target } from "@rotorsoft/act";
+import { initTRPC } from "@trpc/server";
+import { app } from "./builder.js";
+
+const t = initTRPC.create();
+export const router = t.router({
+  CreateItem: t.procedure
+    .input(Item.actions.CreateItem)  // Zod schema from state
+    .mutation(async ({ input }) => {
+      const target: Target = { stream: crypto.randomUUID(), actor: { id: "user-1", name: "User" } };
+      await app.do("CreateItem", target, input);
+      return { success: true, id: target.stream };
+    }),
+  getItem: t.procedure
+    .input(z.string())
+    .query(async ({ input }) => {
+      const snap = await app.load(Item, input);
+      return { state: snap.state };
+    }),
+});
+export type AppRouter = typeof router;
+export { app };
+```
+
+### Step 8 — React Client (in `packages/app/src/client/`)
+
+The client imports `AppRouter` from the same package via relative path:
+
+```typescript
+// packages/app/src/client/trpc.ts
+import { createTRPCReact } from "@trpc/react-query";
+import type { AppRouter } from "../../api/index.js";
 
 export const trpc = createTRPCReact<AppRouter>();
-export const queryClient = new QueryClient();
-export const client = trpc.createClient({ links: [httpLink({ url: "http://localhost:4000" })] });
 ```
 
 ### Step 9 — Tests
