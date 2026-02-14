@@ -81,3 +81,8 @@ Each entry documents: date, feature, decisions, files changed, tests, and concer
 - Files: .claude/skills/scaffold-act-app/SKILL.md, .claude/skills/scaffold-act-app/monorepo-template.md, .claude/skills/scaffold-act-app/production.md, progress.txt
 - Changes: Merged separate server and client packages into a single `app` package matching the rent-stream reference. App has `src/api/` (tRPC router + bootstrap), `src/client/` (React), `src/server.ts` (production), and `src/dev-server.ts` (dev). Updated SKILL.md architecture diagram, Steps 7-8, and monorepo-template.md with new package.json, tsconfig files, install commands. Fixed production.md install reference.
 - Decisions: Followed rent-stream's 2-package pattern (domain + app). Client imports AppRouter via relative path from same package. Separate tsconfig files for client (bundler resolution, noEmit) and server (ESNext, emits JS).
+
+[2026-02-14] #400 docs: add ES course project memory and API reference to scaffold skill
+- Files: .claude/skills/scaffold-act-app/act-api.md (new), .claude/skills/scaffold-act-app/SKILL.md, CLAUDE.md, progress.txt
+- Changes: Created act-api.md API quick-reference covering 8 memory items (config validation, patch/emit handler signatures, ZodEmpty, void vs to drain behavior, correlate-before-drain, Invariant type, store().seed()). Added inline warnings to SKILL.md about .void() drain behavior (Step 4), correlate-before-drain (Steps 6 and 9), and package.json config validation (Monorepo Architecture). Updated CLAUDE.md Event Correlation and Slice Builder sections with same critical gotchas. Added references bar to SKILL.md header.
+- Decisions: All type signatures verified against framework source. Kept act-api.md as standalone reference file linked from SKILL.md header.

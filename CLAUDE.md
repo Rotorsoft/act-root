@@ -167,6 +167,8 @@ const CreationSlice = slice()
 - `.to(resolver)` / `.void()` - Set the target stream resolver
 - `.build()` - Returns a `Slice` with `_tag: "Slice"`
 
+**Important:** `.void()` reactions are **never processed by `drain()`** — the void resolver returns `undefined`, so drain filters them out. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Use `.void()` only for inline side effects that don't need drain processing.
+
 ### Act Orchestrator
 
 The main orchestrator wires together states, slices, projections, and reactions. The `.with()` method accepts `State`, `Slice`, or `Projection`:
@@ -242,8 +244,10 @@ Dynamic stream discovery through correlation metadata:
 
 - Each action/event includes `correlation` (request ID) and `causation` (what triggered it)
 - Reactions can discover new streams to process by querying uncommitted events
-- `app.correlate()` - Manual correlation
+- `app.correlate()` - Manual correlation (must be called before `drain()` to discover target streams)
 - `app.start_correlations()` - Periodic background correlation
+
+**Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.on("committed", () => { app.correlate().then(() => app.drain()).catch(console.error); })` or `app.start_correlations()` for background discovery.
 
 ### Invariants
 

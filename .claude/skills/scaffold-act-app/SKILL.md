@@ -7,6 +7,8 @@ description: Scaffolds a new TypeScript application using the @rotorsoft/act eve
 
 Build a TypeScript monorepo application using `@rotorsoft/act` from a functional specification.
 
+**References:** [act-api.md](act-api.md) (type signatures & gotchas) · [monorepo-template.md](monorepo-template.md) (config files) · [production.md](production.md) (deployment)
+
 ## Spec-to-Code Mapping
 
 | Spec Artifact | Framework Artifact | Builder / API |
@@ -137,6 +139,8 @@ my-app/
 └── vitest.config.ts
 ```
 
+> **Important:** Every `package.json` that imports `@rotorsoft/act` must have `name` and `version` fields (both `z.string().min(1)`). Act reads `package.json` from CWD at import time and validates these fields — missing or empty values cause a startup error.
+
 For complete workspace configuration files, see [monorepo-template.md](monorepo-template.md).
 
 ## Build Process
@@ -226,9 +230,11 @@ export const ItemSlice = slice()
     // Pass event as 4th arg for causation tracking
     await app.do("SomeAction", target, payload, event);
   })
-  .void()  // or .to("target-stream") or .to((event) => ({ target: "..." }))
+  .to((event) => ({ target: event.stream }))  // target stream for drain processing
   .build();
 ```
+
+> **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §4.
 
 ### Step 5 — Define Projections
 
@@ -260,6 +266,8 @@ export const app = act()
   .with(ItemProjection)
   .build();
 ```
+
+> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. In production, use `app.on("committed", ...)` to trigger correlation and drain after each commit. See [act-api.md](act-api.md) §5.
 
 ### Step 7 — tRPC API (in `packages/app/src/api/`)
 
@@ -349,6 +357,7 @@ describe("Item", () => {
   it("should process reactions", async () => {
     const t = target();
     await app.do("CreateItem", t, { name: "Test" });
+    await app.correlate();  // discover reaction target streams first
     await app.drain({ streamLimit: 10, eventLimit: 100 });
   });
 });
