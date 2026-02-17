@@ -16,7 +16,7 @@
     "@act/calculator": "workspace:*",
     "@rotorsoft/act": "workspace:*",
     "@rotorsoft/act-pg": "workspace:*",
-    "@trpc/server": "11.9.0",
+    "@trpc/server": "11.10.0",
     "cors": "^2.8.6",
     "zod": "^4.3.6"
   },
