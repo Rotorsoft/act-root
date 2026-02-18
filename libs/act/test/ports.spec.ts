@@ -32,13 +32,11 @@ describe("exit signal handlers", () => {
   });
 
   it("should exit on uncaughtException", () => {
-    // @ts-expect-error simulate uncaughtException
     process.emit("uncaughtException");
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
   });
 
   it("should exit on unhandledRejection", () => {
-    // @ts-expect-error simulate unhandledRejection
     process.emit("unhandledRejection");
     expect(disposeAndExitSpy).toHaveBeenCalledWith("ERROR");
   });

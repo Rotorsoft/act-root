@@ -6,7 +6,7 @@
  * Each @ts-expect-error must fire (unused directive = regression).
  */
 import { z } from "zod";
-import { act, slice, state } from "../src/index.js";
+import { act, projection, slice, state } from "../src/index.js";
 
 // ── Define test states ──────────────────────────────────────────────
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -172,4 +172,64 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   const app = act().with(CounterSlice).with(Logger).build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
+}
+
+// ── TEST 13: ReactionHandler.app is typed Dispatcher (not any) ──────
+{
+  const _app = act()
+    .with(Counter)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      // app should be Dispatcher<A>, not any — autocomplete works
+      void app.do("increment", target, { by: 1 });
+      // @ts-expect-error - wrong payload shape for typed Dispatcher
+      void app.do("increment", target, { wrong: "field" });
+    })
+    .void()
+    .build();
+}
+
+// ── TEST 14: Dispatcher.do() returns typed result (not any) ─────────
+{
+  const app = act().with(Counter).build();
+  void app.do("increment", target, { by: 1 }).then((snapshots) => {
+    // Result is Snapshot[], not any
+    const _patches: number = snapshots[0].patches;
+    const _snaps: number = snapshots[0].snaps;
+  });
+}
+
+// ── TEST 15: Standalone projection requires event-subset ────────────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const ValidProj = projection("counters")
+    .on({ Incremented })
+    .do(async () => {})
+    .build();
+
+  // Counter emits Incremented — this should compile
+  void act().with(Counter).with(ValidProj);
+
+  const Unknown = z.object({ x: z.number() });
+  const InvalidProj = projection("other")
+    .on({ Unknown })
+    .do(async () => {})
+    .build();
+
+  // @ts-expect-error - Unknown is not in Counter's events
+  void act().with(Counter).with(InvalidProj);
+}
+
+// ── TEST 16: Slice .on().do() handler app is typed Dispatcher ───────
+{
+  const _s = slice()
+    .with(Counter)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      void app.do("increment", target, { by: 1 });
+      // @ts-expect-error - wrong payload shape
+      void app.do("increment", target, { wrong: "field" });
+    })
+    .void()
+    .build();
 }

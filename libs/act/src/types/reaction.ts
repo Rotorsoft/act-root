@@ -4,7 +4,13 @@
  * @category Types
  * Types for reactions, leases, and fetch results in the Act Framework.
  */
-import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
+import type {
+  Committed,
+  Dispatcher,
+  Schema,
+  Schemas,
+  Snapshot,
+} from "./action.js";
 
 /**
  * Reaction handler function that processes committed events.
@@ -19,6 +25,7 @@ import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
  *
  * @template E - Event schemas
  * @template K - Event name
+ * @template A - Action schemas (defaults to Schemas for stored reactions)
  * @param event - The committed event that triggered this reaction
  * @param stream - The target stream name for this reaction
  * @returns Promise resolving to an action tuple or void
@@ -39,11 +46,15 @@ import type { Committed, Schema, Schemas, Snapshot } from "./action.js";
  *
  * @see {@link Reaction} for complete reaction configuration
  */
-export type ReactionHandler<E extends Schemas, K extends keyof E> = (
+export type ReactionHandler<
+  E extends Schemas,
+  K extends keyof E,
+  A extends Schemas = Schemas,
+> = (
   event: Committed<E, K>,
   stream: string,
-  app: any
-) => Promise<Snapshot<E, Schema> | void>;
+  app: Dispatcher<A>
+) => Promise<Snapshot<Schema, E> | void>;
 
 /**
  * Resolver for determining which stream a reaction should target.

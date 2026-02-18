@@ -117,7 +117,7 @@ export type SliceBuilder<
         event: Committed<E, K>,
         stream: string,
         app: Dispatcher<A>
-      ) => Promise<Snapshot<E, Schema> | void>,
+      ) => Promise<Snapshot<Schema, E> | void>,
       options?: Partial<ReactionOptions>
     ) => SliceBuilder<S, E, A, M> & {
       to: (
@@ -219,7 +219,7 @@ export function slice<
           event: Committed<E, K>,
           stream: string,
           app: Dispatcher<A>
-        ) => Promise<Snapshot<E, Schema> | void>,
+        ) => Promise<Snapshot<Schema, E> | void>,
         options?: Partial<ReactionOptions>
       ) => {
         const reaction: Reaction<E, K> = {

@@ -89,8 +89,10 @@ export type ActBuilder<
       slice: Slice<SX, EX, AX, MX>
     ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>) &
     (<EX extends Schemas>(
-      projection: Projection<EX>
-    ) => ActBuilder<S, E & EX, A, M>);
+      projection: [Exclude<keyof EX, keyof E>] extends [never]
+        ? Projection<EX>
+        : never
+    ) => ActBuilder<S, E, A, M>);
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -136,7 +138,7 @@ export type ActBuilder<
         event: Committed<E, K>,
         stream: string,
         app: Dispatcher<A>
-      ) => Promise<Snapshot<E, Schema> | void>,
+      ) => Promise<Snapshot<Schema, E> | void>,
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A, M> & {
       /**
@@ -300,7 +302,7 @@ export function act<
           event: Committed<E, K>,
           stream: string,
           app: Dispatcher<A>
-        ) => Promise<Snapshot<E, Schema> | void>,
+        ) => Promise<Snapshot<Schema, E> | void>,
         options?: Partial<ReactionOptions>
       ) => {
         const reaction: Reaction<E, K> = {
