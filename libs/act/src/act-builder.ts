@@ -5,7 +5,7 @@
  * Fluent builder for composing event-sourced applications.
  */
 import { Act } from "./act.js";
-import { _this_, _void_, registerState } from "./merge.js";
+import { _this_, _void_, mergeProjection, registerState } from "./merge.js";
 import { isProjection, type Projection } from "./projection-builder.js";
 import { isSlice, type Slice } from "./slice-builder.js";
 import type {
@@ -238,7 +238,8 @@ export function act<
   registry: Registry<S, E, A> = {
     actions: {} as Registry<S, E, A>["actions"],
     events: {} as Registry<S, E, A>["events"],
-  }
+  },
+  pendingProjections: Projection<any>[] = []
 ): ActBuilder<S, E, A, M> {
   const builder: ActBuilder<S, E, A, M> = {
     with: ((
@@ -246,25 +247,12 @@ export function act<
     ) => {
       if (isProjection(input)) {
         // PROJECTION: copy event schemas and reactions (no states)
-        for (const eventName of Object.keys(input.events)) {
-          const projRegister = input.events[eventName];
-          const existing = (registry.events as Record<string, any>)[eventName];
-          if (!existing) {
-            // Register the event schema from the projection
-            (registry.events as Record<string, any>)[eventName] = {
-              schema: projRegister.schema,
-              reactions: new Map(projRegister.reactions),
-            };
-          } else {
-            // Merge reactions into existing event entry (deduplicate names)
-            for (const [name, reaction] of projRegister.reactions) {
-              let key = name;
-              while (existing.reactions.has(key)) key = `${key}_p`;
-              existing.reactions.set(key, reaction);
-            }
-          }
-        }
-        return act(states, registry as Registry<any, any, any>);
+        mergeProjection(input, registry.events);
+        return act(
+          states,
+          registry as Registry<any, any, any>,
+          pendingProjections
+        );
       }
       if (isSlice(input)) {
         // SLICE: merge all states and copy reactions
@@ -283,11 +271,21 @@ export function act<
             )[eventName].reactions.set(name, reaction);
           }
         }
-        return act(states, registry as Registry<any, any, any>);
+        // Defer embedded projections to build() time
+        pendingProjections.push(...input.projections);
+        return act(
+          states,
+          registry as Registry<any, any, any>,
+          pendingProjections
+        );
       }
       // STATE: register directly
       registerState(input, states, registry.actions, registry.events);
-      return act(states, registry as Registry<any, any, any>);
+      return act(
+        states,
+        registry as Registry<any, any, any>,
+        pendingProjections
+      );
     }) as ActBuilder<S, E, A, M>["with"],
     /**
      * Adds a reaction to an event.
@@ -337,7 +335,12 @@ export function act<
         };
       },
     }),
-    build: () => new Act<S, E, A, M>(registry, states),
+    build: () => {
+      for (const proj of pendingProjections) {
+        mergeProjection(proj, registry.events as Record<string, any>);
+      }
+      return new Act<S, E, A, M>(registry, states);
+    },
     events: registry.events,
   };
   return builder;

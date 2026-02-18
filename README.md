@@ -121,14 +121,17 @@ const CounterProjection = projection("counters")
   .build();
 
 // Slice — partial state + scoped reactions, handlers receive (event, stream, app)
+// Projections can be embedded in slices when their events are a subset of the slice's events
 const CounterSlice = slice()
   .with(Counter)
+  .projection(CounterProjection)  // embed projection (events must be subset of slice events)
   .on("Incremented")
     .do(async (event, _stream, app) => { /* dispatch actions via app */ })
     .void()
   .build();
 
-const app = act().with(Counter).with(CounterSlice).with(CounterProjection).build();
+// Standalone projections work at the act() level for cross-slice events
+const app = act().with(CounterSlice).build();
 ```
 
 ## AI-Assisted Application Scaffolding

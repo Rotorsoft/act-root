@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { act, slice, state, store, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  projection,
+  slice,
+  state,
+  store,
+  ZodEmpty,
+} from "../src/index.js";
 
 describe("slice", () => {
   beforeEach(async () => {
@@ -366,5 +373,176 @@ describe("slice", () => {
     const snap = await app.load("Thing", stream);
     expect(snap.state.count).toBe(2);
     expect(snap.state.label).toBe("merged");
+  });
+
+  // --- Embedded projection tests ---
+
+  it("should build a slice with an embedded projection", () => {
+    const Incremented = z.object({ by: z.number() });
+    const proj = projection("counters")
+      .on({ Incremented })
+      .do(async () => {})
+      .build();
+
+    const s = slice().with(PartA).projection(proj).build();
+
+    expect(s._tag).toBe("Slice");
+    expect(s.projections).toHaveLength(1);
+    expect(s.projections[0]).toBe(proj);
+  });
+
+  it("should merge embedded projection reactions into act registry", async () => {
+    const stream = nextStream();
+    const projected = vi.fn();
+
+    const Incremented = z.object({ by: z.number() });
+    const proj = projection("counters")
+      .on({ Incremented })
+      .do(async function project(event) {
+        await Promise.resolve();
+        projected(event.data);
+      })
+      .build();
+
+    const ThingSlice = slice().with(PartA).projection(proj).build();
+    const app = act().with(ThingSlice).with(PartB).build();
+
+    await app.do("increment", { stream, actor }, { by: 7 });
+    await app.correlate();
+    await app.drain();
+
+    expect(projected).toHaveBeenCalledWith({ by: 7 });
+  });
+
+  it("should fire both slice reactions and embedded projection handlers", async () => {
+    const stream = nextStream();
+    const sliceHandler = vi.fn().mockResolvedValue(undefined);
+    const projHandler = vi.fn().mockResolvedValue(undefined);
+
+    const Incremented = z.object({ by: z.number() });
+    const proj = projection("counters")
+      .on({ Incremented })
+      .do(projHandler)
+      .build();
+
+    const ThingSlice = slice()
+      .with(PartA)
+      .projection(proj)
+      .on("Incremented")
+      .do(sliceHandler)
+      .build();
+
+    const app = act().with(ThingSlice).build();
+
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.correlate();
+    await app.drain();
+    await app.drain();
+
+    expect(sliceHandler).toHaveBeenCalled();
+    expect(projHandler).toHaveBeenCalled();
+  });
+
+  it("should not pass dispatcher to embedded projection handlers", async () => {
+    const stream = nextStream();
+    let receivedEvent: any;
+    let receivedStream: string | undefined;
+
+    const Incremented = z.object({ by: z.number() });
+    const proj = projection("counters")
+      .on({ Incremented })
+      .do(async function spy(event, stream) {
+        await Promise.resolve();
+        receivedEvent = event;
+        receivedStream = stream;
+      })
+      .build();
+
+    const ThingSlice = slice().with(PartA).projection(proj).build();
+    const app = act().with(ThingSlice).build();
+
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.correlate();
+    await app.drain();
+
+    // Projection handler received correct args
+    expect(receivedEvent.data).toEqual({ by: 1 });
+    expect(receivedStream).toBe("counters");
+    // The handler's declared parameter count is 2 (no dispatcher)
+    const [reaction] = [...proj.events["Incremented"].reactions.values()];
+    expect(reaction.handler.length).toBe(2);
+  });
+
+  it("should deduplicate names when projection and slice have same handler name", () => {
+    const Incremented = z.object({ by: z.number() });
+    const projHandler = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(projHandler, "name", { value: "myHandler" });
+    const proj = projection("counters")
+      .on({ Incremented })
+      .do(projHandler)
+      .build();
+
+    // Slice reaction with same handler name
+    const sliceHandler = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(sliceHandler, "name", { value: "myHandler" });
+    const ThingSlice = slice()
+      .with(PartA)
+      .projection(proj)
+      .on("Incremented")
+      .do(sliceHandler)
+      .build();
+
+    const app = act().with(ThingSlice).build();
+    const events = app.registry.events as Record<string, any>;
+
+    // Both should be registered — projection handler deduped with "_p" suffix
+    const names = [...events["Incremented"].reactions.keys()];
+    expect(names).toContain("myHandler");
+    expect(names).toContain("myHandler_p");
+  });
+
+  it("should compose multiple slices with embedded projections", async () => {
+    const stream = nextStream();
+    const projA = vi.fn().mockResolvedValue(undefined);
+    const projB = vi.fn().mockResolvedValue(undefined);
+
+    const Incremented = z.object({ by: z.number() });
+    const Labeled = z.object({ label: z.string() });
+
+    const ProjA = projection("counters").on({ Incremented }).do(projA).build();
+
+    const ProjB = projection("labels").on({ Labeled }).do(projB).build();
+
+    const SliceA = slice().with(PartA).projection(ProjA).build();
+    const SliceB = slice().with(PartB).projection(ProjB).build();
+
+    const app = act().with(SliceA).with(SliceB).build();
+
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("setLabel", { stream, actor }, { label: "test" });
+    await app.correlate();
+    await app.drain();
+
+    expect(projA).toHaveBeenCalled();
+    expect(projB).toHaveBeenCalled();
+  });
+
+  it("should still support standalone act().with(projection) (backward compat)", async () => {
+    const stream = nextStream();
+    const handler = vi.fn().mockResolvedValue(undefined);
+
+    const Incremented = z.object({ by: z.number() });
+    const StandaloneProj = projection("counters")
+      .on({ Incremented })
+      .do(handler)
+      .build();
+
+    const app = act().with(PartA).with(StandaloneProj).build();
+
+    await app.do("increment", { stream, actor }, { by: 5 });
+    await app.correlate();
+    await app.drain();
+
+    expect(handler).toHaveBeenCalled();
   });
 });
