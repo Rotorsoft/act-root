@@ -212,7 +212,7 @@ describe("projection", () => {
     expect(names).toContain("second");
   });
 
-  it("should register projection-only events not from any state", () => {
+  it("should reject projection with events not in registered states", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const ExternalEvent = z.object({ source: z.string() });
 
@@ -221,8 +221,11 @@ describe("projection", () => {
       .do(handler)
       .build();
 
+    // Projection events must be a subset of app's state events
+    // @ts-expect-error - ExternalEvent is not in Counter's events
     const app_ = act().with(Counter).with(ExternalProjection).build();
 
+    // Runtime still works (constraint is compile-time only)
     const events = app_.registry.events as Record<string, any>;
     expect(events["ExternalEvent"]).toBeDefined();
     expect(events["ExternalEvent"].reactions.size).toBe(1);

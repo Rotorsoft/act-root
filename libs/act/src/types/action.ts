@@ -396,5 +396,5 @@ export interface Dispatcher<A extends Schemas> {
     payload: Readonly<A[K]>,
     reactingTo?: Committed<Schemas, string>,
     skipValidation?: boolean
-  ): Promise<any>;
+  ): Promise<Snapshot<any, any>[]>;
 }
