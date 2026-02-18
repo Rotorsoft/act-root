@@ -224,7 +224,7 @@ export const SNAP_EVENT = "__snapshot__";
  *
  * // Now build your app - it will use PostgreSQL
  * const app = act()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .build();
  * ```
  *

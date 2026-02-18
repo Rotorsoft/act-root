@@ -1,12 +1,5 @@
 import { z } from "zod";
-import {
-  act,
-  isProjection,
-  projection,
-  slice,
-  state,
-  store,
-} from "../src/index.js";
+import { act, projection, slice, state, store } from "../src/index.js";
 
 describe("projection", () => {
   beforeEach(async () => {
@@ -39,17 +32,6 @@ describe("projection", () => {
     expect(p._tag).toBe("Projection");
     expect(p.events["Incremented"]).toBeDefined();
     expect(p.events["Incremented"].reactions.size).toBe(1);
-  });
-
-  it("should identify projections with isProjection()", () => {
-    const p = projection("target")
-      .on({ Incremented })
-      .do(async () => {})
-      .build();
-
-    expect(isProjection(p)).toBe(true);
-    expect(isProjection(null)).toBe(false);
-    expect(isProjection({ _tag: "Slice" })).toBe(false);
   });
 
   it("should use default target from projection(target)", () => {
@@ -148,7 +130,7 @@ describe("projection", () => {
     }
   });
 
-  it("should merge projection reactions into act() via .with()", async () => {
+  it("should merge projection reactions into act() via .withState()", async () => {
     const stream = nextStream();
     const projected = vi.fn();
 
@@ -160,7 +142,10 @@ describe("projection", () => {
       })
       .build();
 
-    const app_ = act().with(Counter).with(CounterProjection).build();
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(CounterProjection)
+      .build();
 
     await app_.do("increment", { stream, actor }, { by: 5 });
     await app_.correlate();
@@ -175,7 +160,7 @@ describe("projection", () => {
     const projHandler = vi.fn().mockResolvedValue(undefined);
 
     const CounterSlice = slice()
-      .with(Counter)
+      .withState(Counter)
       .on("Incremented")
       .do(sliceHandler)
       .build();
@@ -185,7 +170,10 @@ describe("projection", () => {
       .do(projHandler)
       .build();
 
-    const app_ = act().with(CounterSlice).with(CounterProjection).build();
+    const app_ = act()
+      .withSlice(CounterSlice)
+      .withProjection(CounterProjection)
+      .build();
 
     await app_.do("increment", { stream, actor }, { by: 3 });
     await app_.correlate();
@@ -222,8 +210,11 @@ describe("projection", () => {
       .build();
 
     // Projection events must be a subset of app's state events
-    // @ts-expect-error - ExternalEvent is not in Counter's events
-    const app_ = act().with(Counter).with(ExternalProjection).build();
+    const app_ = act()
+      .withState(Counter)
+      // @ts-expect-error - ExternalEvent is not in Counter's events
+      .withProjection(ExternalProjection)
+      .build();
 
     // Runtime still works (constraint is compile-time only)
     const events = app_.registry.events as Record<string, any>;

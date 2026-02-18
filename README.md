@@ -97,7 +97,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit((action, state) => ["Incremented", { amount: action.by }])
   .build();
 
-const app = act().with(Counter).build();
+const app = act().withState(Counter).build();
 
 await app.do(
   "increment",
@@ -109,7 +109,7 @@ console.log(await app.load(Counter, "counter1"));
 
 ### Compose with Slices and Projections
 
-Use `slice()` to group partial states with scoped reactions (vertical slice architecture), and `projection()` to build read-model updaters. The `act().with()` method accepts `State`, `Slice`, or `Projection`:
+Use `slice()` to group partial states with scoped reactions (vertical slice architecture), and `projection()` to build read-model updaters. Use `.withState()`, `.withSlice()`, and `.withProjection()` to compose them:
 
 ```ts
 import { act, projection, slice } from "@rotorsoft/act";
@@ -123,15 +123,15 @@ const CounterProjection = projection("counters")
 // Slice — partial state + scoped reactions, handlers receive (event, stream, app)
 // Projections can be embedded in slices when their events are a subset of the slice's events
 const CounterSlice = slice()
-  .with(Counter)
-  .projection(CounterProjection)  // embed projection (events must be subset of slice events)
+  .withState(Counter)
+  .withProjection(CounterProjection)  // embed projection (events must be subset of slice events)
   .on("Incremented")
     .do(async (event, _stream, app) => { /* dispatch actions via app */ })
     .void()
   .build();
 
 // Standalone projections work at the act() level for cross-slice events
-const app = act().with(CounterSlice).build();
+const app = act().withSlice(CounterSlice).build();
 ```
 
 ## AI-Assisted Application Scaffolding

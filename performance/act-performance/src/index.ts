@@ -57,7 +57,7 @@ const projector = usePg
 
 // Composed "Todo" app with state and reactions
 export const app = act()
-  .with(Todo)
+  .withState(Todo)
   .on("TodoCreated")
   .do(projector.projectTodoCreated)
   .to(projection_resolver)

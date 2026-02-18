@@ -70,7 +70,7 @@ const DEFAULT_CONFIG: Config = {
  * }));
  *
  * const app = act()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .build();
  * ```
  *

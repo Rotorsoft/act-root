@@ -56,7 +56,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .build();
 
 // Create an application
-const app = act().with(Counter).build();
+const app = act().withState(Counter).build();
 
 // Use the application
 const actor = { id: "user1", name: "User" };

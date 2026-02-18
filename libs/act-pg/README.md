@@ -45,7 +45,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
     .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
-const app = act().with(Counter).build();
+const app = act().withState(Counter).build();
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
 ```
 

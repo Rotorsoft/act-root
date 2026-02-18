@@ -29,9 +29,9 @@ const Logger = state({ Logger: z.object({ entries: z.number() }) })
 
 const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
-// ── TEST 1: act().with(State) accumulates action types ──────────────
+// ── TEST 1: act().withState(State) accumulates action types ──────────────
 {
-  const app = act().with(Counter).build();
+  const app = act().withState(Counter).build();
   void app.do("increment", target, { by: 5 });
   // @ts-expect-error - "nonexistent" is not a valid action
   void app.do("nonexistent", target, {});
@@ -39,10 +39,10 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void app.do("increment", target, { wrong: "field" });
 }
 
-// ── TEST 2: act().with(State).on() autocompletes events ─────────────
+// ── TEST 2: act().withState(State).on() autocompletes events ─────────────
 {
   const _app = act()
-    .with(Counter)
+    .withState(Counter)
     .on("Incremented")
     .do(async (event) => {
       const _amount: number = event.data.amount;
@@ -51,9 +51,9 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 }
 
-// ── TEST 3: Multiple .with() accumulates all types ──────────────────
+// ── TEST 3: Multiple .withState() accumulates all types ──────────────────
 {
-  const app = act().with(Counter).with(Logger).build();
+  const app = act().withState(Counter).withState(Logger).build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "hello" });
   // @ts-expect-error - wrong payload for this action
@@ -63,8 +63,8 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 // ── TEST 4: .on() in builder sees all accumulated events ────────────
 {
   const _builder = act()
-    .with(Counter)
-    .with(Logger)
+    .withState(Counter)
+    .withState(Logger)
     .on("Incremented")
     .do(async (event) => {
       const _amt: number = event.data.amount;
@@ -77,10 +77,10 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .void();
 }
 
-// ── TEST 5: slice().with(State) scopes events ───────────────────────
+// ── TEST 5: slice().withState(State) scopes events ───────────────────────
 {
   const _s = slice()
-    .with(Counter)
+    .withState(Counter)
     .on("Incremented")
     .do(async (event) => {
       const _amount: number = event.data.amount;
@@ -89,11 +89,11 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 }
 
-// ── TEST 6: act().with(Slice) merges types correctly ────────────────
+// ── TEST 6: act().withState(Slice) merges types correctly ────────────────
 {
-  const CounterSlice = slice().with(Counter).build();
-  const LoggerSlice = slice().with(Logger).build();
-  const app = act().with(CounterSlice).with(LoggerSlice).build();
+  const CounterSlice = slice().withState(Counter).build();
+  const LoggerSlice = slice().withState(Logger).build();
+  const app = act().withSlice(CounterSlice).withSlice(LoggerSlice).build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
   // @ts-expect-error - wrong payload
@@ -102,11 +102,11 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 7: Cross-slice reactions at act level ──────────────────────
 {
-  const CounterSlice = slice().with(Counter).build();
-  const LoggerSlice = slice().with(Logger).build();
+  const CounterSlice = slice().withState(Counter).build();
+  const LoggerSlice = slice().withState(Logger).build();
   const _app = act()
-    .with(CounterSlice)
-    .with(LoggerSlice)
+    .withSlice(CounterSlice)
+    .withSlice(LoggerSlice)
     .on("Incremented")
     .do(async (event) => {
       const _amount: number = event.data.amount;
@@ -122,7 +122,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 8: load() with state name ──────────────────────────────────
 {
-  const app = act().with(Counter).with(Logger).build();
+  const app = act().withState(Counter).withState(Logger).build();
   void app.load(Counter, "s1").then((snap) => {
     const _count: number = snap.state.count;
   });
@@ -133,7 +133,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 9: drain() return type uses app's event types ──────────────
 {
-  const app = act().with(Counter).build();
+  const app = act().withState(Counter).build();
   void app.drain().then((result) => {
     if (result.fetched.length > 0) {
       const _event = result.fetched[0].events[0];
@@ -146,7 +146,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 10: query() return type preserves event types ──────────────
 {
-  const app = act().with(Counter).with(Logger).build();
+  const app = act().withState(Counter).withState(Logger).build();
   void app.query({ stream: "s1" }).then(({ first }) => {
     if (first) {
       const s: string = "hello";
@@ -158,7 +158,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 11: load by name provides typed state ──────────────────────
 {
-  const app = act().with(Counter).with(Logger).build();
+  const app = act().withState(Counter).withState(Logger).build();
   void app.load("Counter", "s1").then((snap) => {
     const _count: number = snap.state.count;
     // @ts-expect-error - Logger props shouldn't be on Counter snapshot
@@ -168,8 +168,8 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 12: Mixed slices and direct states ─────────────────────────
 {
-  const CounterSlice = slice().with(Counter).build();
-  const app = act().with(CounterSlice).with(Logger).build();
+  const CounterSlice = slice().withState(Counter).build();
+  const app = act().withSlice(CounterSlice).withState(Logger).build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
 }
@@ -177,7 +177,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 // ── TEST 13: ReactionHandler.app is typed Dispatcher (not any) ──────
 {
   const _app = act()
-    .with(Counter)
+    .withState(Counter)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
       // app should be Dispatcher<A>, not any — autocomplete works
@@ -191,7 +191,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 14: Dispatcher.do() returns typed result (not any) ─────────
 {
-  const app = act().with(Counter).build();
+  const app = act().withState(Counter).build();
   void app.do("increment", target, { by: 1 }).then((snapshots) => {
     // Result is Snapshot[], not any
     const _patches: number = snapshots[0].patches;
@@ -208,7 +208,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   // Counter emits Incremented — this should compile
-  void act().with(Counter).with(ValidProj);
+  void act().withState(Counter).withProjection(ValidProj);
 
   const Unknown = z.object({ x: z.number() });
   const InvalidProj = projection("other")
@@ -217,13 +217,13 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   // @ts-expect-error - Unknown is not in Counter's events
-  void act().with(Counter).with(InvalidProj);
+  void act().withState(Counter).withProjection(InvalidProj);
 }
 
 // ── TEST 16: Slice .on().do() handler app is typed Dispatcher ───────
 {
   const _s = slice()
-    .with(Counter)
+    .withState(Counter)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
       void app.do("increment", target, { by: 1 });
@@ -234,7 +234,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 }
 
-// ── TEST 17: slice().with(State).projection(Proj) — types flow ──────
+// ── TEST 17: slice().withState(State).withState(Proj) — types flow ────────────
 {
   const Incremented = z.object({ amount: z.number() });
   const CounterProj = projection("counters")
@@ -246,10 +246,10 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   // Projection events are subset of slice events — should compile
-  const _s = slice().with(Counter).projection(CounterProj).build();
+  const _s = slice().withState(Counter).withProjection(CounterProj).build();
 }
 
-// ── TEST 18: slice+projection — projection event-subset constraint ──
+// ── TEST 18: slice+projection — event-subset constraint via .withState() ──
 {
   const Unknown = z.object({ x: z.number() });
   const BadProj = projection("bad")
@@ -258,10 +258,10 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   // @ts-expect-error - Unknown is not in Counter's events
-  void slice().with(Counter).projection(BadProj);
+  void slice().withState(Counter).withProjection(BadProj);
 }
 
-// ── TEST 19: slice().with(A).with(B).projection(Proj).on().do() ─────
+// ── TEST 19: slice().withState(A).withState(B).withState(Proj).on().do() ───────────
 {
   const Incremented = z.object({ amount: z.number() });
   const CounterProj = projection("counters")
@@ -270,9 +270,9 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   const _s = slice()
-    .with(Counter)
-    .with(Logger)
-    .projection(CounterProj)
+    .withState(Counter)
+    .withState(Logger)
+    .withProjection(CounterProj)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
       // Handler receives Dispatcher<A_Counter & A_Logger>
@@ -290,7 +290,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 // ── TEST 20: slice .on() event names constrained to slice events ────
 {
   const _s = slice()
-    .with(Counter)
+    .withState(Counter)
     // @ts-expect-error - "Logged" is not an event from Counter
     .on("Logged");
 }
@@ -298,8 +298,8 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 // ── TEST 21: slice .do() handler event data is typed ────────────────
 {
   const _s = slice()
-    .with(Counter)
-    .with(Logger)
+    .withState(Counter)
+    .withState(Logger)
     .on("Incremented")
     .do(async (event) => {
       // Event data matches Incremented schema
@@ -328,8 +328,8 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   const CounterSlice = slice()
-    .with(Counter)
-    .projection(CounterProj)
+    .withState(Counter)
+    .withProjection(CounterProj)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
       void app.do("increment", target, { by: 1 });
@@ -337,7 +337,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .void()
     .build();
 
-  const app = act().with(CounterSlice).with(Logger).build();
+  const app = act().withSlice(CounterSlice).withState(Logger).build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
   // @ts-expect-error - wrong action
@@ -348,10 +348,10 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 
 // ── TEST 23: act .on() handler Dispatcher has all actions ───────────
 {
-  const CounterSlice = slice().with(Counter).build();
+  const CounterSlice = slice().withState(Counter).build();
   const _app = act()
-    .with(CounterSlice)
-    .with(Logger)
+    .withSlice(CounterSlice)
+    .withState(Logger)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
       // Dispatcher should see both Counter and Logger actions
@@ -367,7 +367,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
 // ── TEST 24: act .on() rejects unknown event names ──────────────────
 {
   void act()
-    .with(Counter)
+    .withState(Counter)
     // @ts-expect-error - "UnknownEvent" not in Counter events
     .on("UnknownEvent");
 }
@@ -397,7 +397,11 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .build();
 
   // Both events exist in the app — should compile
-  const app = act().with(Counter).with(Logger).with(MultiProj).build();
+  const app = act()
+    .withState(Counter)
+    .withState(Logger)
+    .withProjection(MultiProj)
+    .build();
   void app.do("increment", target, { by: 1 });
   void app.do("log", target, { message: "test" });
 }

@@ -11,8 +11,8 @@ export * from "./ticket.js";
 
 // prettier-ignore
 export const app = act()
-  .with(TicketCreationSlice)
-  .with(TicketMessagingSlice)
-  .with(TicketOpsSlice)
-  .with(TicketProjection)
+  .withSlice(TicketCreationSlice)
+  .withSlice(TicketMessagingSlice)
+  .withSlice(TicketOpsSlice)
+  .withProjection(TicketProjection)
   .build();

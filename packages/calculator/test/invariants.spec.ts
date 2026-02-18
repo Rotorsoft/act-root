@@ -10,7 +10,7 @@ import { Calculator } from "../src/index.js";
 describe("calculator invariants", () => {
   const actor: Actor = { id: "1", name: "Calculator" };
   const stream = "I";
-  const app = act().with(Calculator).build();
+  const app = act().withState(Calculator).build();
 
   afterAll(async () => {
     await dispose()();

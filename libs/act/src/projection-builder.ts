@@ -22,7 +22,7 @@ import type {
 
 /**
  * A self-contained projection grouping read-model update handlers.
- * Projections are composed into an Act orchestrator via `act().with(projection)`.
+ * Projections are composed into an Act orchestrator via `act().withProjection(projection)`.
  *
  * @template E - Event schemas handled by this projection
  */
@@ -30,13 +30,6 @@ export type Projection<E extends Schemas> = {
   readonly _tag: "Projection";
   readonly events: EventRegister<E>;
 };
-
-/**
- * Type guard for distinguishing Projection from State and Slice objects.
- */
-export function isProjection(x: any): x is Projection<any> {
-  return x != null && x._tag === "Projection";
-}
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
 type EventEntry<K extends string = string, D extends Schema = Schema> = {
@@ -59,7 +52,7 @@ type DoResult<
  * Fluent builder interface for composing projections.
  *
  * Provides a chainable API for registering event handlers that update
- * read models. Unlike slices, projections have no `.with()` for states
+ * read models. Unlike slices, projections have no `.withState()` for states
  * and handlers do not receive a `Dispatcher`.
  *
  * When a default target is provided via `projection("target")`, all

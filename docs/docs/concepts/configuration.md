@@ -38,7 +38,7 @@ const TodoList = state({ TodoList: z.object({ todos: z.array(z.string()) }) })
   .emit((action) => ["Added", { todo: action.todo }])
   .build();
 
-const app = act().with(Counter).with(TodoList).build();
+const app = act().withState(Counter).withState(TodoList).build();
 ```
 
 ---

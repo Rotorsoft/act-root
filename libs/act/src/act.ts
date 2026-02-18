@@ -182,8 +182,8 @@ export class Act<
    * @example Reaction triggering another action
    * ```typescript
    * const app = act()
-   *   .with(Order)
-   *   .with(Inventory)
+   *   .withState(Order)
+   *   .withState(Inventory)
    *   .on("OrderPlaced")
    *     .do(async (event, context) => {
    *       // This action is triggered by an event
@@ -233,7 +233,7 @@ export class Act<
    *
    * Accepts either a State definition object or a state name string. When
    * using a string, the merged state (from partial states registered via
-   * `.with()`) is resolved by name.
+   * `.withState()`) is resolved by name.
    *
    * @template SX - State schema type
    * @template EX - Event schemas type
@@ -660,8 +660,8 @@ export class Act<
    * @example Dynamic stream creation
    * ```typescript
    * const app = act()
-   *   .with(User)
-   *   .with(UserStats)
+   *   .withState(User)
+   *   .withState(UserStats)
    *   .on("UserLoggedIn")
    *     .do(async (event) => ["incrementLoginCount", {}])
    *     .to((event) => ({

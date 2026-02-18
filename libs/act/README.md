@@ -34,7 +34,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
     .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
-const app = act().with(Counter).build();
+const app = act().withState(Counter).build();
 
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 5 });
 const snapshot = await app.load(Counter, "counter1");
@@ -43,7 +43,7 @@ console.log(snapshot.state.count); // 5
 
 ## Projections & Slices
 
-Use `projection()` to build read-model updaters and `slice()` for vertical slice architecture. The `act().with()` method accepts `State`, `Slice`, or `Projection`:
+Use `projection()` to build read-model updaters and `slice()` for vertical slice architecture. Use `.withState()`, `.withSlice()`, and `.withProjection()` to compose them:
 
 ```typescript
 import { projection, slice } from "@rotorsoft/act";
@@ -57,15 +57,15 @@ const CounterProjection = projection("counters")
 // Slice — partial state + scoped reactions, handlers receive (event, stream, app)
 // Projections can be embedded in slices when their events are a subset of the slice's events
 const CounterSlice = slice()
-  .with(Counter)
-  .projection(CounterProjection)  // embed projection (events must be subset of slice events)
+  .withState(Counter)
+  .withProjection(CounterProjection)  // embed projection (events must be subset of slice events)
   .on("Incremented")
     .do(async (event, _stream, app) => { /* dispatch actions via app */ })
     .void()
   .build();
 
 // Standalone projections work at the act() level for cross-slice events
-const app = act().with(CounterSlice).build();
+const app = act().withSlice(CounterSlice).build();
 ```
 
 ## Related
@@ -186,8 +186,8 @@ Reactions are asynchronous handlers triggered by events. They can update other s
 
 ```typescript
 const app = act()
-  .with(Account)
-  .with(AuditLog)
+  .withState(Account)
+  .withState(AuditLog)
   .on("Deposited")
     .do((event) => [{ name: "LogEntry", data: { message: `Deposit: ${event.data.amount}` } }])
     .to((event) => `audit-${event.stream}`)  // resolver determines target stream

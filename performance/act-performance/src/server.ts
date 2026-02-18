@@ -50,7 +50,7 @@ async function main() {
 
   // Compose the app with state and reactions
   const actApp = act()
-    .with(Todo)
+    .withState(Todo)
     .on("TodoCreated")
     .do(projector.projectTodoCreated)
     .to(projection_resolver)

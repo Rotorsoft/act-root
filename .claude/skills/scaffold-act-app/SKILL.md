@@ -19,8 +19,8 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 | Business Rule / Guard | Invariant | `.given([{ description, valid }])` |
 | Policy / Process Manager | Reaction (Slice or Act) | `.on("Event").do(handler)` |
 | Read Model / Query | Projection | `projection("target").on({ Event }).do(handler)` |
-| Bounded Context / Feature | Slice | `slice().with(State)` |
-| System / Orchestrator | Act | `act().with(State\|Slice\|Projection).build()` |
+| Bounded Context / Feature | Slice | `slice().withState(State)` |
+| System / Orchestrator | Act | `act().withState(State).withSlice(Slice).withProjection(Projection).build()` |
 
 **Event Modeling**: Blue = Action, Orange = Event + Patch, Green = Projection, Lilac = Reaction, Aggregate swim lane = State.
 
@@ -46,11 +46,11 @@ Specs use varied terminology. Map to framework concepts:
 | Command, Action, Intent, Request | Action | `.on({ ActionName: schema })` |
 | Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + `.patch({})` |
 | Read Model, View, Query Model, Projection | Projection | `projection("target").on({ Event }).do(handler)` |
-| Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().on("Event").do(handler)` |
+| Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().withState(State).on("Event").do(handler)` |
 | Invariant, Guard, Business Rule, Precondition, Constraint | Invariant | `.given([{ description, valid }])` |
 | Specification, Acceptance Criteria, Given-When-Then, Scenario | Test case | `describe / it` block |
 | Screen, UI, View, Page | Client component | tRPC procedure + React component |
-| Bounded Context, Module, Feature, Slice | Slice | `slice().with(State)` |
+| Bounded Context, Module, Feature, Slice | Slice | `slice().withState(State)` |
 | External Event, Integration Event | Reaction trigger | Event from another aggregate's stream |
 
 ### Field Type Mapping
@@ -113,7 +113,7 @@ my-app/
 │   │   │   ├── invariants.ts     # Business rules
 │   │   │   ├── <feature>.ts      # State + Slice per feature
 │   │   │   ├── projections.ts    # Read-model updaters
-│   │   │   ├── bootstrap.ts      # act().with(...).build()
+│   │   │   ├── bootstrap.ts      # act().withState/withSlice/withProjection().build()
 │   │   │   └── index.ts          # Barrel exports
 │   │   └── test/
 │   │       └── <feature>.spec.ts
@@ -223,7 +223,7 @@ import { slice } from "@rotorsoft/act";
 import { Item } from "./item.js";
 
 export const ItemSlice = slice()
-  .with(Item)
+  .withState(Item)
   .on("ItemCreated")  // plain string, NOT record shorthand
   .do(async function notify(event, _stream, app) {
     // app is a typed Dispatcher — use for cross-state actions
@@ -262,8 +262,8 @@ import { ItemSlice } from "./item.js";
 import { ItemProjection } from "./projections.js";
 
 export const app = act()
-  .with(ItemSlice)
-  .with(ItemProjection)
+  .withSlice(ItemSlice)
+  .withProjection(ItemProjection)
   .build();
 ```
 
@@ -279,7 +279,7 @@ import { act } from "@rotorsoft/act";
 import { ItemSlice } from "@my-app/domain";
 
 export const app = act()
-  .with(ItemSlice)
+  .withSlice(ItemSlice)
   .build();
 
 // Drain projections after every commit

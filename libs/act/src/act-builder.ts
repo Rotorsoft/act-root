@@ -6,8 +6,8 @@
  */
 import { Act } from "./act.js";
 import { _this_, _void_, mergeProjection, registerState } from "./merge.js";
-import { isProjection, type Projection } from "./projection-builder.js";
-import { isSlice, type Slice } from "./slice-builder.js";
+import type { Projection } from "./projection-builder.js";
+import type { Slice } from "./slice-builder.js";
 import type {
   Committed,
   Dispatcher,
@@ -28,7 +28,9 @@ import type {
  * Fluent builder interface for composing event-sourced applications.
  *
  * Provides a chainable API for:
- * - Registering states or slices via `.with()`
+ * - Registering states via `.withState()`
+ * - Registering slices via `.withSlice()`
+ * - Registering projections via `.withProjection()`
  * - Defining event reactions via `.on()` → `.do()` → `.to()` or `.void()`
  * - Building the orchestrator via `.build()`
  *
@@ -47,27 +49,14 @@ export type ActBuilder<
   M extends Record<string, Schema> = {},
 > = {
   /**
-   * Registers a state definition or a slice with the builder.
+   * Registers a state definition with the builder.
    *
-   * When receiving a State, it registers the state's actions and events.
-   * When receiving a Slice, it merges all the slice's states and reactions.
-   * State names, action names, and event names must be unique across the application
-   * (partial states with the same name are merged automatically).
+   * State names, action names, and event names must be unique across the
+   * application (partial states with the same name are merged automatically).
    *
    * @throws {Error} If duplicate action or event names are detected
-   *
-   * @example Register a state
-   * ```typescript
-   * const app = act().with(Counter).build();
-   * ```
-   *
-   * @example Register a slice
-   * ```typescript
-   * const CounterSlice = slice().with(Counter).on("Incremented").do(log).void().build();
-   * const app = act().with(CounterSlice).build();
-   * ```
    */
-  with: (<
+  withState: <
     SX extends Schema,
     EX extends Schemas,
     AX extends Schemas,
@@ -79,20 +68,35 @@ export type ActBuilder<
     E & EX,
     A & AX,
     M & { [K in NX]: SX }
-  >) &
-    (<
-      SX extends SchemaRegister<AX>,
-      EX extends Schemas,
-      AX extends Schemas,
-      MX extends Record<string, Schema>,
-    >(
-      slice: Slice<SX, EX, AX, MX>
-    ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>) &
-    (<EX extends Schemas>(
-      projection: [Exclude<keyof EX, keyof E>] extends [never]
-        ? Projection<EX>
-        : never
-    ) => ActBuilder<S, E, A, M>);
+  >;
+  /**
+   * Registers a slice with the builder.
+   *
+   * Merges all the slice's states and reactions into the application.
+   * State names, action names, and event names must be unique across the
+   * application (partial states with the same name are merged automatically).
+   *
+   * @throws {Error} If duplicate action or event names are detected
+   */
+  withSlice: <
+    SX extends SchemaRegister<AX>,
+    EX extends Schemas,
+    AX extends Schemas,
+    MX extends Record<string, Schema>,
+  >(
+    slice: Slice<SX, EX, AX, MX>
+  ) => ActBuilder<S & SX, E & EX, A & AX, M & MX>;
+  /**
+   * Registers a standalone projection with the builder.
+   *
+   * The projection's events must be a subset of events already registered
+   * via `.withState()` or `.withSlice()`.
+   */
+  withProjection: <EX extends Schemas>(
+    projection: [Exclude<keyof EX, keyof E>] extends [never]
+      ? Projection<EX>
+      : never
+  ) => ActBuilder<S, E, A, M>;
   /**
    * Begins defining a reaction to a specific event.
    *
@@ -103,36 +107,10 @@ export type ActBuilder<
    * @template K - Event name (must be a registered event)
    * @param event - The event name to react to
    * @returns An object with `.do()` method to define the reaction handler
-   *
-   * @example
-   * ```typescript
-   * const app = act()
-   *   .with(User)
-   *   .on("UserCreated")  // React to UserCreated events
-   *     .do(async (event) => {
-   *       await sendWelcomeEmail(event.data.email);
-   *     })
-   *     .void()
-   *   .build();
-   * ```
    */
   on: <K extends keyof E>(
     event: K
   ) => {
-    /**
-     * Defines the reaction handler function for the event.
-     *
-     * The handler receives the committed event and can:
-     * - Perform side effects (send emails, call APIs, etc.)
-     * - Return an action tuple `[actionName, payload]` to trigger another action
-     * - Return `void` or `undefined` for side-effect-only reactions
-     *
-     * @param handler - The reaction handler function
-     * @param options - Optional reaction configuration
-     * @param options.blockOnError - Block this stream if handler fails (default: true)
-     * @param options.maxRetries - Maximum retry attempts on failure (default: 3)
-     * @returns The builder with `.to()` and `.void()` methods for routing configuration
-     */
     do: (
       handler: (
         event: Committed<E, K>,
@@ -141,18 +119,7 @@ export type ActBuilder<
       ) => Promise<Snapshot<Schema, E> | void>,
       options?: Partial<ReactionOptions>
     ) => ActBuilder<S, E, A, M> & {
-      /**
-       * Routes the reaction to a specific target stream.
-       *
-       * @param resolver - Target stream name (string) or resolver function
-       * @returns The builder for chaining
-       */
       to: (resolver: ReactionResolver<E, K> | string) => ActBuilder<S, E, A, M>;
-      /**
-       * Marks the reaction as void (side-effect only, no target stream).
-       *
-       * @returns The builder for chaining
-       */
       void: () => ActBuilder<S, E, A, M>;
     };
   };
@@ -176,51 +143,24 @@ export type ActBuilder<
 /**
  * Creates a new Act orchestrator builder for composing event-sourced applications.
  *
- * The Act orchestrator is responsible for:
- * - Managing state instances (aggregates)
- * - Executing actions and committing events
- * - Processing reactions (event handlers)
- * - Coordinating event-driven workflows
- *
- * Use the fluent API to register states or slices with `.with()`, define event
- * reactions with `.on()`, and build the orchestrator with `.build()`.
- *
- * @template S - State schema register type
- * @template E - Event schemas type
- * @template A - Action schemas type
- * @returns An ActBuilder instance for fluent API configuration
- *
  * @example Basic application with single state
  * ```typescript
- * import { act, state } from "@rotorsoft/act";
- * import { z } from "zod";
- *
- * const Counter = state({ Counter: z.object({ count: z.number() }) })
- *   .init(() => ({ count: 0 }))
- *   .emits({ Incremented: z.object({ amount: z.number() }) })
- *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
- *   .on({ increment: z.object({ by: z.number() }) })
- *     .emit((action) => ["Incremented", { amount: action.by }])
- *   .build();
- *
  * const app = act()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .build();
  * ```
  *
  * @example Application with slices (vertical slice architecture)
  * ```typescript
- * import { act, slice, state } from "@rotorsoft/act";
- *
  * const CounterSlice = slice()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .on("Incremented")
  *     .do(async (event) => { console.log("incremented!"); })
  *     .void()
  *   .build();
  *
  * const app = act()
- *   .with(CounterSlice)
+ *   .withSlice(CounterSlice)
  *   .build();
  * ```
  *
@@ -244,58 +184,63 @@ export function act<
   pendingProjections: Projection<any>[] = []
 ): ActBuilder<S, E, A, M> {
   const builder: ActBuilder<S, E, A, M> = {
-    with: ((
-      input: State<any, any, any> | Slice<any, any, any, any> | Projection<any>
+    withState: <
+      SX extends Schema,
+      EX extends Schemas,
+      AX extends Schemas,
+      NX extends string = string,
+    >(
+      state: State<SX, EX, AX, NX>
     ) => {
-      if (isProjection(input)) {
-        // PROJECTION: copy event schemas and reactions (no states)
-        mergeProjection(input, registry.events);
-        return act(
-          states,
-          registry as Registry<any, any, any>,
-          pendingProjections
-        );
-      }
-      if (isSlice(input)) {
-        // SLICE: merge all states and copy reactions
-        for (const s of input.states.values()) {
-          registerState(s, states, registry.actions, registry.events);
-        }
-        // Copy reactions from slice's event register
-        for (const eventName of Object.keys(input.events)) {
-          const sliceRegister = input.events[eventName];
-          for (const [name, reaction] of sliceRegister.reactions) {
-            (
-              registry.events as Record<
-                string,
-                { reactions: Map<string, unknown> }
-              >
-            )[eventName].reactions.set(name, reaction);
-          }
-        }
-        // Defer embedded projections to build() time
-        pendingProjections.push(...input.projections);
-        return act(
-          states,
-          registry as Registry<any, any, any>,
-          pendingProjections
-        );
-      }
-      // STATE: register directly
-      registerState(input, states, registry.actions, registry.events);
-      return act(
+      registerState(state, states, registry.actions, registry.events);
+      return act<
+        S & { [K in keyof AX]: SX },
+        E & EX,
+        A & AX,
+        M & { [K in NX]: SX }
+      >(
         states,
-        registry as Registry<any, any, any>,
+        registry as unknown as Registry<
+          S & { [K in keyof AX]: SX },
+          E & EX,
+          A & AX
+        >,
         pendingProjections
       );
-    }) as ActBuilder<S, E, A, M>["with"],
-    /**
-     * Adds a reaction to an event.
-     *
-     * @template K The type of event
-     * @param event The event to add a reaction to
-     * @returns The builder
-     */
+    },
+    withSlice: <
+      SX extends SchemaRegister<AX>,
+      EX extends Schemas,
+      AX extends Schemas,
+      MX extends Record<string, Schema>,
+    >(
+      input: Slice<SX, EX, AX, MX>
+    ) => {
+      for (const s of input.states.values()) {
+        registerState(s, states, registry.actions, registry.events);
+      }
+      for (const eventName of Object.keys(input.events)) {
+        const sliceRegister = input.events[eventName];
+        for (const [name, reaction] of sliceRegister.reactions) {
+          (
+            registry.events as Record<
+              string,
+              { reactions: Map<string, unknown> }
+            >
+          )[eventName].reactions.set(name, reaction);
+        }
+      }
+      pendingProjections.push(...input.projections);
+      return act<S & SX, E & EX, A & AX, M & MX>(
+        states,
+        registry as unknown as Registry<S & SX, E & EX, A & AX>,
+        pendingProjections
+      );
+    },
+    withProjection: <EX extends Schemas>(proj: Projection<EX>) => {
+      mergeProjection(proj, registry.events);
+      return act<S, E, A, M>(states, registry, pendingProjections);
+    },
     on: <K extends keyof E>(event: K) => ({
       do: (
         handler: (

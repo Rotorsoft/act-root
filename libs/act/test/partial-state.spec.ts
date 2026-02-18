@@ -30,12 +30,12 @@ describe("partial-state", () => {
   const actor = { id: "a", name: "a" };
 
   it("should merge two partials with the same name", () => {
-    const app = act().with(PartA).with(PartB).build();
+    const app = act().withState(PartA).withState(PartB).build();
     expect(app).toBeDefined();
   });
 
   it("should execute actions from both partials", async () => {
-    const app = act().with(PartA).with(PartB).build();
+    const app = act().withState(PartA).withState(PartB).build();
 
     await app.do("increment", { stream: "s1", actor }, { by: 3 });
     await app.do("setLabel", { stream: "s1", actor }, { label: "hello" });
@@ -46,7 +46,7 @@ describe("partial-state", () => {
   });
 
   it("should reconstruct state from events across all partials", async () => {
-    const app = act().with(PartA).with(PartB).build();
+    const app = act().withState(PartA).withState(PartB).build();
 
     await app.do("increment", { stream: "s2", actor }, { by: 1 });
     await app.do("setLabel", { stream: "s2", actor }, { label: "first" });
@@ -67,7 +67,7 @@ describe("partial-state", () => {
       .emit(() => ["Other", {}])
       .build();
 
-    expect(() => act().with(PartA).with(DupAction)).toThrow(
+    expect(() => act().withState(PartA).withState(DupAction)).toThrow(
       'Duplicate action "increment"'
     );
   });
@@ -81,7 +81,7 @@ describe("partial-state", () => {
       .emit(() => ["Incremented", { by: 0 }])
       .build();
 
-    expect(() => act().with(PartA).with(DupEvent)).toThrow(
+    expect(() => act().withState(PartA).withState(DupEvent)).toThrow(
       'Duplicate event "Incremented"'
     );
   });
@@ -91,10 +91,10 @@ describe("partial-state", () => {
     const onLabeled = vi.fn().mockResolvedValue(undefined);
 
     const app = act()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(onIncremented)
-      .with(PartB)
+      .withState(PartB)
       .on("Labeled")
       .do(onLabeled)
       .build();
@@ -127,7 +127,7 @@ describe("partial-state", () => {
       .build();
 
     // snap from first partial should survive merge
-    const app = act().with(WithSnap).with(WithoutSnap).build();
+    const app = act().withState(WithSnap).withState(WithoutSnap).build();
     expect(app).toBeDefined();
   });
 
@@ -140,14 +140,14 @@ describe("partial-state", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const app = act().with(counter).build();
+    const app = act().withState(counter).build();
     await app.do("increment", { stream: "c1", actor }, {});
     const snap = await app.load(counter, "c1");
     expect(snap.state.count).toBe(1);
   });
 
   it("should load merged state by name", async () => {
-    const app = act().with(PartA).with(PartB).build();
+    const app = act().withState(PartA).withState(PartB).build();
 
     await app.do("increment", { stream: "n1", actor }, { by: 7 });
     await app.do("setLabel", { stream: "n1", actor }, { label: "byname" });
@@ -158,7 +158,7 @@ describe("partial-state", () => {
   });
 
   it("should throw when loading unknown state by name", async () => {
-    const app = act().with(PartA).build();
+    const app = act().withState(PartA).build();
     // @ts-expect-error "Unknown" is not a registered state name
     await expect(app.load("Unknown", "s1")).rejects.toThrow(
       'State "Unknown" not found'
@@ -166,7 +166,7 @@ describe("partial-state", () => {
   });
 
   it("should merge partial schemas with non-overlapping fields", async () => {
-    const SliceA = state({ Merged: z.object({ count: z.number() }) })
+    const PartialA = state({ Merged: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))
       .emits({ Counted: z.object({ n: z.number() }) })
       .patch({ Counted: (e) => ({ count: e.data.n }) })
@@ -174,7 +174,7 @@ describe("partial-state", () => {
       .emit((a) => ["Counted", { n: a.n }])
       .build();
 
-    const SliceB = state({ Merged: z.object({ label: z.string() }) })
+    const PartialB = state({ Merged: z.object({ label: z.string() }) })
       .init(() => ({ label: "" }))
       .emits({ Named: z.object({ label: z.string() }) })
       .patch({ Named: (e) => ({ label: e.data.label }) })
@@ -182,7 +182,7 @@ describe("partial-state", () => {
       .emit((a) => ["Named", { label: a.label }])
       .build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withState(PartialA).withState(PartialB).build();
 
     await app.do("setCount", { stream: "m1", actor }, { n: 42 });
     await app.do("setName", { stream: "m1", actor }, { label: "hello" });
@@ -193,7 +193,7 @@ describe("partial-state", () => {
   });
 
   it("should merge init functions from partials", async () => {
-    const SliceA = state({ InitMerge: z.object({ x: z.number() }) })
+    const PartialA = state({ InitMerge: z.object({ x: z.number() }) })
       .init(() => ({ x: 10 }))
       .emits({ A: ZodEmpty })
       .patch({ A: () => ({}) })
@@ -201,7 +201,7 @@ describe("partial-state", () => {
       .emit(() => ["A", {}])
       .build();
 
-    const SliceB = state({ InitMerge: z.object({ y: z.string() }) })
+    const PartialB = state({ InitMerge: z.object({ y: z.string() }) })
       .init(() => ({ y: "default" }))
       .emits({ B: ZodEmpty })
       .patch({ B: () => ({}) })
@@ -209,7 +209,7 @@ describe("partial-state", () => {
       .emit(() => ["B", {}])
       .build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withState(PartialA).withState(PartialB).build();
     await app.do("doA", { stream: "i1", actor }, {});
     const snap = await app.load("InitMerge", "i1");
     expect(snap.state.x).toBe(10);
@@ -217,7 +217,7 @@ describe("partial-state", () => {
   });
 
   it("should allow overlapping keys with same base type", () => {
-    const SliceA = state({ Overlap: z.object({ shared: z.string() }) })
+    const PartialA = state({ Overlap: z.object({ shared: z.string() }) })
       .init(() => ({ shared: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -225,7 +225,7 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state({
+    const PartialB = state({
       Overlap: z.object({ shared: z.string().optional() }),
     })
       .init(() => ({ shared: undefined }))
@@ -236,11 +236,11 @@ describe("partial-state", () => {
       .build();
 
     // Same base type (ZodString) - should not throw
-    expect(() => act().with(SliceA).with(SliceB)).not.toThrow();
+    expect(() => act().withState(PartialA).withState(PartialB)).not.toThrow();
   });
 
   it("should throw on overlapping keys with different base types", () => {
-    const SliceA = state({ Conflict: z.object({ field: z.string() }) })
+    const PartialA = state({ Conflict: z.object({ field: z.string() }) })
       .init(() => ({ field: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -248,7 +248,7 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state({ Conflict: z.object({ field: z.number() }) })
+    const PartialB = state({ Conflict: z.object({ field: z.number() }) })
       .init(() => ({ field: 0 }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -256,11 +256,13 @@ describe("partial-state", () => {
       .emit(() => ["Y", {}])
       .build();
 
-    expect(() => act().with(SliceA).with(SliceB)).toThrow("Schema conflict");
+    expect(() => act().withState(PartialA).withState(PartialB)).toThrow(
+      "Schema conflict"
+    );
   });
 
   it("should reconstruct state from cross-partial events", async () => {
-    const SliceA = state({ Cross: z.object({ total: z.number() }) })
+    const PartialA = state({ Cross: z.object({ total: z.number() }) })
       .init(() => ({ total: 0 }))
       .emits({ Added: z.object({ n: z.number() }) })
       .patch({ Added: (e, s) => ({ total: s.total + e.data.n }) })
@@ -268,7 +270,7 @@ describe("partial-state", () => {
       .emit((a) => ["Added", { n: a.n }])
       .build();
 
-    const SliceB = state({ Cross: z.object({ tag: z.string() }) })
+    const PartialB = state({ Cross: z.object({ tag: z.string() }) })
       .init(() => ({ tag: "" }))
       .emits({ Tagged: z.object({ tag: z.string() }) })
       .patch({ Tagged: (e) => ({ tag: e.data.tag }) })
@@ -276,7 +278,7 @@ describe("partial-state", () => {
       .emit((a) => ["Tagged", { tag: a.tag }])
       .build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withState(PartialA).withState(PartialB).build();
     await app.do("add", { stream: "c1", actor }, { n: 1 });
     await app.do("tag", { stream: "c1", actor }, { tag: "a" });
     await app.do("add", { stream: "c1", actor }, { n: 2 });
@@ -288,7 +290,7 @@ describe("partial-state", () => {
   });
 
   it("should not conflict on optional wrapping of same base type", () => {
-    const SliceA = state({ OptWrap: z.object({ val: z.string() }) })
+    const PartialA = state({ OptWrap: z.object({ val: z.string() }) })
       .init(() => ({ val: "" }))
       .emits({ X: ZodEmpty })
       .patch({ X: () => ({}) })
@@ -296,7 +298,9 @@ describe("partial-state", () => {
       .emit(() => ["X", {}])
       .build();
 
-    const SliceB = state({ OptWrap: z.object({ val: z.string().optional() }) })
+    const PartialB = state({
+      OptWrap: z.object({ val: z.string().optional() }),
+    })
       .init(() => ({ val: undefined }))
       .emits({ Y: ZodEmpty })
       .patch({ Y: () => ({}) })
@@ -304,7 +308,7 @@ describe("partial-state", () => {
       .emit(() => ["Y", {}])
       .build();
 
-    expect(() => act().with(SliceA).with(SliceB)).not.toThrow();
+    expect(() => act().withState(PartialA).withState(PartialB)).not.toThrow();
   });
 
   it("should merge given (invariants) from partials", async () => {
@@ -330,8 +334,8 @@ describe("partial-state", () => {
       .build();
 
     const app = act()
-      .with(PartWithInvariant)
-      .with(PartWithGuardedAction)
+      .withState(PartWithInvariant)
+      .withState(PartWithGuardedAction)
       .build();
 
     await app.do("lock", { stream: "g1", actor }, {});

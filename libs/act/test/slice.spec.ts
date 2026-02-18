@@ -44,7 +44,7 @@ describe("slice", () => {
   const nextStream = () => `slice-test-${++streamId}`;
 
   it("should build a slice with states and empty reactions", () => {
-    const s = slice().with(PartA).build();
+    const s = slice().withState(PartA).build();
     expect(s._tag).toBe("Slice");
     expect(s.states.size).toBe(1);
     expect(s.states.has("Thing")).toBe(true);
@@ -54,14 +54,19 @@ describe("slice", () => {
 
   it("should register scoped reactions via .on().do().void()", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
-    const s = slice().with(PartA).on("Incremented").do(handler).void().build();
+    const s = slice()
+      .withState(PartA)
+      .on("Incremented")
+      .do(handler)
+      .void()
+      .build();
 
     expect(s.events["Incremented"].reactions.size).toBe(1);
   });
 
   it("should generate a reaction name for anonymous handlers", () => {
     const s = slice()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(async () => {})
       .void()
@@ -74,7 +79,7 @@ describe("slice", () => {
   it("should register scoped reactions via .on().do().to() with string", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const s = slice()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(handler)
       .to("target-stream")
@@ -87,7 +92,7 @@ describe("slice", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const resolver = (event: any) => ({ target: event.stream });
     const s = slice()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(handler)
       .to(resolver)
@@ -96,17 +101,17 @@ describe("slice", () => {
     expect(s.events["Incremented"].reactions.size).toBe(1);
   });
 
-  it("should merge act().with(Slice) states and reactions into act registry", async () => {
+  it("should merge act().withState(Slice) states and reactions into act registry", async () => {
     const stream = nextStream();
     const onIncremented = vi.fn().mockResolvedValue(undefined);
 
     const ThingSlice = slice()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(onIncremented)
       .build();
 
-    const app = act().with(ThingSlice).with(PartB).build();
+    const app = act().withSlice(ThingSlice).withState(PartB).build();
 
     await app.do("increment", { stream, actor }, { by: 3 });
     await app.do("setLabel", { stream, actor }, { label: "hello" });
@@ -125,14 +130,14 @@ describe("slice", () => {
     const onLabeled = vi.fn().mockResolvedValue(undefined);
 
     const SliceA = slice()
-      .with(PartA)
+      .withState(PartA)
       .on("Incremented")
       .do(onIncremented)
       .build();
 
-    const SliceB = slice().with(PartB).on("Labeled").do(onLabeled).build();
+    const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withSlice(SliceA).withSlice(SliceB).build();
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.do("setLabel", { stream, actor }, { label: "test" });
@@ -166,10 +171,10 @@ describe("slice", () => {
       .emit((a) => ["Tagged", { tag: a.tag }])
       .build();
 
-    const SliceA = slice().with(CountA).build();
-    const SliceB = slice().with(CountB).build();
+    const SliceA = slice().withState(CountA).build();
+    const SliceB = slice().withState(CountB).build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withSlice(SliceA).withSlice(SliceB).build();
 
     await app.do("add", { stream, actor }, { n: 5 });
     await app.do("tag", { stream, actor }, { tag: "merged" });
@@ -196,10 +201,10 @@ describe("slice", () => {
       .emit(() => ["E2", {}])
       .build();
 
-    const Slice1 = slice().with(S1).build();
-    const Slice2 = slice().with(S2).build();
+    const Slice1 = slice().withState(S1).build();
+    const Slice2 = slice().withState(S2).build();
 
-    expect(() => act().with(Slice1).with(Slice2)).toThrow(
+    expect(() => act().withSlice(Slice1).withSlice(Slice2)).toThrow(
       'Duplicate action "doIt"'
     );
   });
@@ -221,10 +226,10 @@ describe("slice", () => {
       .emit(() => ["SameEvent", {}])
       .build();
 
-    const Slice1 = slice().with(S1).build();
-    const Slice2 = slice().with(S2).build();
+    const Slice1 = slice().withState(S1).build();
+    const Slice2 = slice().withState(S2).build();
 
-    expect(() => act().with(Slice1).with(Slice2)).toThrow(
+    expect(() => act().withSlice(Slice1).withSlice(Slice2)).toThrow(
       'Duplicate event "SameEvent"'
     );
   });
@@ -248,14 +253,14 @@ describe("slice", () => {
       .emit(() => ["Logged", {}])
       .build();
 
-    const CounterSlice = slice().with(Counter).build();
-    const LoggerSlice = slice().with(Logger).build();
+    const CounterSlice = slice().withState(Counter).build();
+    const LoggerSlice = slice().withState(Logger).build();
 
     // Cross-slice reaction: react to Counter event at act level
     const crossHandler = vi.fn().mockResolvedValue(undefined);
     const app = act()
-      .with(CounterSlice)
-      .with(LoggerSlice)
+      .withSlice(CounterSlice)
+      .withSlice(LoggerSlice)
       .on("Counted")
       .do(crossHandler)
       .build();
@@ -267,7 +272,7 @@ describe("slice", () => {
     expect(crossHandler).toHaveBeenCalled();
   });
 
-  it("should still support act().with(State) (backward compat)", async () => {
+  it("should still support act().withState(State) (backward compat)", async () => {
     const stream = nextStream();
 
     const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -278,7 +283,7 @@ describe("slice", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const app = act().with(counter).build();
+    const app = act().withState(counter).build();
     await app.do("increment", { stream, actor }, {});
     const snap = await app.load(counter, stream);
     expect(snap.state.count).toBe(1);
@@ -304,10 +309,10 @@ describe("slice", () => {
       .emit(() => ["Logged", {}])
       .build();
 
-    const CounterSlice = slice().with(Counter).build();
+    const CounterSlice = slice().withState(Counter).build();
 
     // Mix: slice + direct state
-    const app = act().with(CounterSlice).with(Logger).build();
+    const app = act().withSlice(CounterSlice).withState(Logger).build();
 
     await app.do("count", { stream: counterStream, actor }, { n: 5 });
     await app.do("log", { stream: logStream, actor }, {});
@@ -319,7 +324,7 @@ describe("slice", () => {
   });
 
   it("should expose .events on slice builder for AsCommitted typing", () => {
-    const b = slice().with(PartA);
+    const b = slice().withState(PartA);
     // The events property should exist and have the event register
     expect(b.events).toBeDefined();
     expect(b.events["Incremented"]).toBeDefined();
@@ -333,16 +338,16 @@ describe("slice", () => {
 
     // SliceA includes both PartA and PartB so its handler can dispatch setLabel
     const SliceA = slice()
-      .with(PartA)
-      .with(PartB)
+      .withState(PartA)
+      .withState(PartB)
       .on("Incremented")
       .do(onIncremented)
       .build();
 
     // SliceB also includes PartB (shared state) — no conflict at composition
-    const SliceB = slice().with(PartB).on("Labeled").do(onLabeled).build();
+    const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withSlice(SliceA).withSlice(SliceB).build();
 
     await app.do("increment", { stream, actor }, { by: 7 });
     await app.do("setLabel", { stream, actor }, { label: "shared" });
@@ -359,14 +364,14 @@ describe("slice", () => {
 
   it("should merge multiple partials within a single slice", async () => {
     const stream = nextStream();
-    const s = slice().with(PartA).with(PartB).build();
+    const s = slice().withState(PartA).withState(PartB).build();
 
     expect(s.states.size).toBe(1); // both are "Thing", merged
     expect(s.events["Incremented"]).toBeDefined();
     expect(s.events["Labeled"]).toBeDefined();
 
     // Compose into act and verify it works
-    const app = act().with(s).build();
+    const app = act().withSlice(s).build();
     await app.do("increment", { stream, actor }, { by: 2 });
     await app.do("setLabel", { stream, actor }, { label: "merged" });
 
@@ -384,7 +389,7 @@ describe("slice", () => {
       .do(async () => {})
       .build();
 
-    const s = slice().with(PartA).projection(proj).build();
+    const s = slice().withState(PartA).withProjection(proj).build();
 
     expect(s._tag).toBe("Slice");
     expect(s.projections).toHaveLength(1);
@@ -404,8 +409,8 @@ describe("slice", () => {
       })
       .build();
 
-    const ThingSlice = slice().with(PartA).projection(proj).build();
-    const app = act().with(ThingSlice).with(PartB).build();
+    const ThingSlice = slice().withState(PartA).withProjection(proj).build();
+    const app = act().withSlice(ThingSlice).withState(PartB).build();
 
     await app.do("increment", { stream, actor }, { by: 7 });
     await app.correlate();
@@ -426,13 +431,13 @@ describe("slice", () => {
       .build();
 
     const ThingSlice = slice()
-      .with(PartA)
-      .projection(proj)
+      .withState(PartA)
+      .withProjection(proj)
       .on("Incremented")
       .do(sliceHandler)
       .build();
 
-    const app = act().with(ThingSlice).build();
+    const app = act().withSlice(ThingSlice).build();
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -458,8 +463,8 @@ describe("slice", () => {
       })
       .build();
 
-    const ThingSlice = slice().with(PartA).projection(proj).build();
-    const app = act().with(ThingSlice).build();
+    const ThingSlice = slice().withState(PartA).withProjection(proj).build();
+    const app = act().withSlice(ThingSlice).build();
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -486,13 +491,13 @@ describe("slice", () => {
     const sliceHandler = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(sliceHandler, "name", { value: "myHandler" });
     const ThingSlice = slice()
-      .with(PartA)
-      .projection(proj)
+      .withState(PartA)
+      .withProjection(proj)
       .on("Incremented")
       .do(sliceHandler)
       .build();
 
-    const app = act().with(ThingSlice).build();
+    const app = act().withSlice(ThingSlice).build();
     const events = app.registry.events as Record<string, any>;
 
     // Both should be registered — projection handler deduped with "_p" suffix
@@ -513,10 +518,10 @@ describe("slice", () => {
 
     const ProjB = projection("labels").on({ Labeled }).do(projB).build();
 
-    const SliceA = slice().with(PartA).projection(ProjA).build();
-    const SliceB = slice().with(PartB).projection(ProjB).build();
+    const SliceA = slice().withState(PartA).withProjection(ProjA).build();
+    const SliceB = slice().withState(PartB).withProjection(ProjB).build();
 
-    const app = act().with(SliceA).with(SliceB).build();
+    const app = act().withSlice(SliceA).withSlice(SliceB).build();
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.do("setLabel", { stream, actor }, { label: "test" });
@@ -527,7 +532,7 @@ describe("slice", () => {
     expect(projB).toHaveBeenCalled();
   });
 
-  it("should still support standalone act().with(projection) (backward compat)", async () => {
+  it("should still support standalone act().withProjection(projection) (backward compat)", async () => {
     const stream = nextStream();
     const handler = vi.fn().mockResolvedValue(undefined);
 
@@ -537,7 +542,7 @@ describe("slice", () => {
       .do(handler)
       .build();
 
-    const app = act().with(PartA).with(StandaloneProj).build();
+    const app = act().withState(PartA).withProjection(StandaloneProj).build();
 
     await app.do("increment", { stream, actor }, { by: 5 });
     await app.correlate();

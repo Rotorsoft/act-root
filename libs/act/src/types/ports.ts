@@ -52,7 +52,7 @@ export type Disposable = { dispose: Disposer };
  * }));
  *
  * const app = act()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .build();
  * ```
  *

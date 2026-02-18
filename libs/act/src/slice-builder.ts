@@ -25,7 +25,7 @@ import type {
 /**
  * A self-contained functional slice grouping partial states with their
  * scoped reactions. Slices are composed into an Act orchestrator via
- * `act().with(slice)`.
+ * `act().withSlice(slice)`.
  *
  * @template S - Schema register for states
  * @template E - Event schemas from this slice's states
@@ -50,19 +50,10 @@ export type Slice<
 };
 
 /**
- * Type guard for distinguishing Slice from State objects.
- */
-export function isSlice(x: any): x is Slice<any, any, any, any> {
-  return x != null && x._tag === "Slice";
-}
-
-/**
  * Fluent builder interface for composing functional slices.
  *
- * Provides a chainable API for registering states and defining reactions,
- * scoped to the slice's own events. Include all states whose actions your
- * handlers need via `.with()` — the `app` parameter in `.do()` handlers
- * is typed with every action registered in the slice.
+ * Provides a chainable API for registering states and projections,
+ * and defining reactions scoped to the slice's own events.
  *
  * @template S - Schema register for states
  * @template E - Event schemas
@@ -77,13 +68,13 @@ export type SliceBuilder<
   M extends Record<string, Schema> = {},
 > = {
   /**
-   * Registers a partial state definition with the slice.
+   * Registers a state definition with the slice.
    *
    * Include every state whose actions your reaction handlers need to
    * dispatch. Duplicate registrations (same state in multiple slices)
    * are handled automatically at composition time.
    */
-  with: <
+  withState: <
     SX extends Schema,
     EX extends Schemas,
     AX extends Schemas,
@@ -97,14 +88,15 @@ export type SliceBuilder<
     M & { [K in NX]: SX }
   >;
   /**
-   * Embeds a built Projection within this slice for encapsulated
-   * feature composition. The projection's events must be a subset
-   * of events from states already registered via `.with()`.
-   * Projection handlers preserve their `(event, stream)` signature
-   * and do not receive a Dispatcher.
+   * Embeds a built Projection within this slice. The projection's events
+   * must be a subset of events from states already registered via
+   * `.withState()`. Projection handlers preserve their `(event, stream)`
+   * signature and do not receive a Dispatcher.
    */
-  projection: <EP extends Schemas>(
-    proj: [Exclude<keyof EP, keyof E>] extends [never] ? Projection<EP> : never
+  withProjection: <EP extends Schemas>(
+    projection: [Exclude<keyof EP, keyof E>] extends [never]
+      ? Projection<EP>
+      : never
   ) => SliceBuilder<S, E, A, M>;
   /**
    * Begins defining a reaction scoped to this slice's events.
@@ -145,14 +137,10 @@ export type SliceBuilder<
  * reactions into self-contained feature modules. Reactions defined in a slice
  * are type-scoped to events from that slice's states only.
  *
- * Include all states whose actions your handlers dispatch via `.with()`.
- * When multiple slices share the same state, duplicates are merged
- * automatically at `act().with(slice)` composition time.
- *
  * @example Single-state slice with typed dispatch
  * ```typescript
  * const CounterSlice = slice()
- *   .with(Counter)
+ *   .withState(Counter)
  *   .on("Incremented")
  *     .do(async (event, _stream, app) => {
  *       await app.do("reset", target, {});
@@ -164,8 +152,8 @@ export type SliceBuilder<
  * @example Cross-state dispatch (include both states)
  * ```typescript
  * const CreationSlice = slice()
- *   .with(TicketCreation)
- *   .with(TicketOperations) // handler can dispatch AssignTicket
+ *   .withState(TicketCreation)
+ *   .withState(TicketOperations) // handler can dispatch AssignTicket
  *   .on("TicketOpened").do(async (event, _stream, app) => {
  *     await app.do("AssignTicket", target, payload, event);
  *   })
@@ -188,7 +176,7 @@ export function slice<
   projections: Projection<any>[] = []
 ): SliceBuilder<S, E, A, M> {
   const builder: SliceBuilder<S, E, A, M> = {
-    with: <
+    withState: <
       SX extends Schema,
       EX extends Schemas,
       AX extends Schemas,
@@ -209,7 +197,7 @@ export function slice<
         projections
       );
     },
-    projection: <EP extends Schemas>(proj: Projection<EP>) => {
+    withProjection: <EP extends Schemas>(proj: Projection<EP>) => {
       projections.push(proj);
       return slice<S, E, A, M>(states, actions, events, projections);
     },

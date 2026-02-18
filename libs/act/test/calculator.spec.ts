@@ -13,7 +13,7 @@ describe("calculator lifecycle", () => {
   let correlation = "";
   let midpoint: Date = new Date();
 
-  const builder = act().with(Calculator);
+  const builder = act().withState(Calculator);
   const app = builder.build();
 
   beforeAll(async () => {

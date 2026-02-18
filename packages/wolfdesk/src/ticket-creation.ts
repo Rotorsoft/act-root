@@ -68,8 +68,8 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
 // --- Slice ---
 // prettier-ignore
 export const TicketCreationSlice = slice()
-  .with(TicketCreation)
-  .with(TicketOperations)
+  .withState(TicketCreation)
+  .withState(TicketOperations)
 
   .on("TicketOpened").do(async function assign(event, _stream, app) {
     const agent = assignAgent(

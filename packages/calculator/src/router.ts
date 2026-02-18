@@ -2,7 +2,7 @@ import { act, Target } from "@rotorsoft/act";
 import { initTRPC } from "@trpc/server";
 import { Calculator } from "./calculator.js";
 
-const app = act().with(Calculator).build();
+const app = act().withState(Calculator).build();
 const t = initTRPC.create();
 const target: Target = {
   stream: "calculator",

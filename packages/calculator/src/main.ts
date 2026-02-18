@@ -63,9 +63,9 @@ async function main() {
 
   // Build the app with Calculator and DigitBoard
   const app = act()
-    .with(Calculator)
-    .with(DigitBoard)
-    .with(CalculatorResult)
+    .withState(Calculator)
+    .withState(DigitBoard)
+    .withState(CalculatorResult)
     // React to every digit pressed and update the projection board
     .on("DigitPressed")
     .do(async function CountDigits(event) {

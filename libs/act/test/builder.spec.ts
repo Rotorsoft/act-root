@@ -36,7 +36,7 @@ describe("Builder", () => {
 
   it("should act ok, but no events emitted", async () => {
     const app = act()
-      .with(A1)
+      .withState(A1)
       .on("Event1")
       .do(() => Promise.resolve())
       .void()
@@ -50,13 +50,13 @@ describe("Builder", () => {
   });
 
   it("should throw duplicate action", () => {
-    const builder = act().with(A1);
-    expect(() => builder.with(A2)).toThrow('Duplicate action "Act1"');
+    const builder = act().withState(A1);
+    expect(() => builder.withState(A2)).toThrow('Duplicate action "Act1"');
   });
 
   it("should throw duplicate event", () => {
-    const builder = act().with(A1);
-    expect(() => builder.with(A3)).toThrow('Duplicate event "Event1"');
+    const builder = act().withState(A1);
+    expect(() => builder.withState(A3)).toThrow('Duplicate event "Event1"');
   });
 
   it("should throw on duplicate action or event", () => {
@@ -80,13 +80,13 @@ describe("Builder", () => {
       patch: { e: () => ({}) },
       on: { a: () => ["e", {}] as [string, object] },
     };
-    builder.with(state1);
-    expect(() => builder.with(state2)).toThrow("Duplicate action");
+    builder.withState(state1);
+    expect(() => builder.withState(state2)).toThrow("Duplicate action");
   });
 
   it("should allow chaining .on().do().to() and .on().do().void()", () => {
     const app = act()
-      .with(A1)
+      .withState(A1)
       .on("Event1")
       .do(() => Promise.resolve())
       .to("custom")
@@ -99,7 +99,7 @@ describe("Builder", () => {
 
   it("should execute a reaction with void resolver", () => {
     const builder = act()
-      .with(A1)
+      .withState(A1)
       .on("Event1")
       .do(function voidHandler() {
         return Promise.resolve();
@@ -140,7 +140,7 @@ describe("Builder", () => {
 
     // Build an app with a void reaction for event E
     const app = act()
-      .with(testState)
+      .withState(testState)
       .on("E")
       .do(() => Promise.resolve())
       .void()
@@ -167,7 +167,7 @@ describe("Builder", () => {
     }
 
     const builder = act()
-      .with(testState)
+      .withState(testState)
       .on("E")
       .do(customHandler)
       .to(customResolver);
@@ -196,7 +196,7 @@ describe("Builder", () => {
     function defaultHandler() {
       return Promise.resolve();
     }
-    const builder = act().with(A1).on("Event1").do(defaultHandler);
+    const builder = act().withState(A1).on("Event1").do(defaultHandler);
 
     const reaction = builder.events.Event1.reactions.get("defaultHandler");
     // The resolver should be the _this_ function from act-builder
@@ -225,7 +225,7 @@ describe("Builder", () => {
     function optHandler() {
       return Promise.resolve();
     }
-    const builder = act().with(A1).on("Event1").do(optHandler, {
+    const builder = act().withState(A1).on("Event1").do(optHandler, {
       blockOnError: false,
       maxRetries: 1,
     });
@@ -257,8 +257,8 @@ describe("Builder", () => {
       on: { nonB: () => ["nonE2", {}] as [string, object] },
     };
     const builder = act();
-    builder.with(s1);
-    expect(() => builder.with(s2)).not.toThrow();
+    builder.withState(s1);
+    expect(() => builder.withState(s2)).not.toThrow();
   });
 
   it("should allow multiple reactions for the same event with different handlers", () => {
@@ -269,7 +269,7 @@ describe("Builder", () => {
       return Promise.resolve();
     }
     const builder = act()
-      .with(A1)
+      .withState(A1)
       .on("Event1")
       .do(handlerA)
       .to("streamA")

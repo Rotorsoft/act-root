@@ -40,12 +40,12 @@ describe("act", () => {
   });
 
   const app = act()
-    .with(counter)
+    .withState(counter)
     .on("incremented")
     .do(onIncremented)
     .on("decremented")
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
-    .with(dummy)
+    .withState(dummy)
     .on("added")
     .do(() => Promise.resolve())
     .build();
@@ -175,7 +175,7 @@ describe("act", () => {
   });
 
   it("should load unregistered state by object (fallback to stateOrName)", async () => {
-    // Create a state not registered via .with()
+    // Create a state not registered via .withState()
     const unregistered = state({ Unregistered: z.object({ val: z.number() }) })
       .init(() => ({ val: 0 }))
       .emits({ Evt: ZodEmpty })

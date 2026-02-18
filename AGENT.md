@@ -150,9 +150,9 @@ import { slice } from "@rotorsoft/act";
 
 // Handlers receive (event, stream, app) — app is a typed Dispatcher
 const CreationSlice = slice()
-  .with(TicketCreation)
-  .with(TicketOperations)
-  .projection(TicketProjection)  // embed projection (events must be subset of slice events)
+  .withState(TicketCreation)
+  .withState(TicketOperations)
+  .withProjection(TicketProjection)  // embed projection (events must be subset of slice events)
   .on("TicketOpened")
     .do(async (event, _stream, app) => {
       await app.do("AssignTicket", target, payload, event);
@@ -162,8 +162,8 @@ const CreationSlice = slice()
 ```
 
 - `slice()` - Creates a builder
-- `.with(state)` - Register a partial state (include all states whose actions handlers need)
-- `.projection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no Dispatcher.
+- `.withState(state)` - Register a partial state (include all states whose actions handlers need)
+- `.withProjection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no Dispatcher.
 - `.on(eventName)` - React to an event from the slice's states (string, not record)
 - `.do(handler)` - Handler receives `(event, stream, app)` where `app` is a `Dispatcher`
 - `.to(resolver)` / `.void()` - Set the target stream resolver
@@ -171,14 +171,14 @@ const CreationSlice = slice()
 
 ### Act Orchestrator
 
-The main orchestrator wires together states, slices, projections, and reactions. The `.with()` method accepts `State`, `Slice`, or `Projection`:
+The main orchestrator wires together states, slices, projections, and reactions using separate typed methods:
 
 ```typescript
 const app = act()
-  .with(Counter)           // State
-  .with(CreationSlice)     // Slice (may embed projections via .projection())
-  .with(TicketProjection)  // Standalone Projection (for cross-slice events)
-  .on("SomeEvent")         // Inline reaction
+  .withState(Counter)              // State
+  .withSlice(CreationSlice)        // Slice (may embed projections via .withProjection())
+  .withProjection(TicketProjection) // Standalone Projection (for cross-slice events)
+  .on("SomeEvent")                 // Inline reaction
     .do(handler)
     .to(resolver)  // or .void() for side effects only
   .build();

@@ -74,7 +74,7 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
 // --- Slice ---
 // prettier-ignore
 export const TicketMessagingSlice = slice()
-  .with(TicketMessaging)
+  .withState(TicketMessaging)
 
   .on("MessageAdded").do(async function deliver(event, _stream, app) {
     await deliverMessage(event.data);

@@ -24,7 +24,7 @@ export const onDecremented = vi.fn().mockImplementation(async () => {
 });
 
 export const app = act()
-  .with(counter)
+  .withState(counter)
   .on("incremented")
   .do(
     onIncremented as ReactionHandler<
