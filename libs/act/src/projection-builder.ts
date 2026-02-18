@@ -144,7 +144,7 @@ export function projection<E extends Schemas = {}>(
   target?: string,
   events: EventRegister<E> = {} as EventRegister<E>
 ): ProjectionBuilder<E> {
-  const defaultResolver: ReactionResolver<any, any> | undefined = target
+  const defaultResolver: { target: string } | undefined = target
     ? { target }
     : undefined;
 
@@ -170,8 +170,8 @@ export function projection<E extends Schemas = {}>(
             stream: string
           ) => Promise<void>
         ) => {
-          const reaction: Reaction<any, any> = {
-            handler: handler as ReactionHandler<any, any>,
+          const reaction: Reaction<E & { [P in K]: D }, K> = {
+            handler: handler as ReactionHandler<E & { [P in K]: D }, K>,
             resolver: defaultResolver ?? _this_,
             options: {
               blockOnError: true,

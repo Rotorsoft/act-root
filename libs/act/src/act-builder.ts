@@ -305,8 +305,8 @@ export function act<
         ) => Promise<Snapshot<Schema, E> | void>,
         options?: Partial<ReactionOptions>
       ) => {
-        const reaction: Reaction<E, K> = {
-          handler: handler as ReactionHandler<E, K>,
+        const reaction: Reaction<E, K, A> = {
+          handler: handler as ReactionHandler<E, K, A>,
           resolver: _this_,
           options: {
             blockOnError: options?.blockOnError ?? true,
