@@ -83,7 +83,7 @@ export default defineConfig({
   "version": "0.0.1",
   "main": "./src/index.ts",
   "dependencies": {
-    "@rotorsoft/act": "^0.11.1",
+    "@rotorsoft/act": "^0.13.0",
     "zod": "^4.3.6"
   }
 }
@@ -116,7 +116,7 @@ export default defineConfig({
   },
   "dependencies": {
     "@my-app/domain": "workspace:*",
-    "@rotorsoft/act": "^0.11.1",
+    "@rotorsoft/act": "^0.13.0",
     "@tanstack/react-query": "^5.90.21",
     "@trpc/client": "11.9.0",
     "@trpc/react-query": "11.9.0",
