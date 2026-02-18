@@ -6,6 +6,7 @@
  * self-contained functional slices (vertical slice architecture).
  */
 import { _this_, _void_, registerState } from "./merge.js";
+import type { Projection } from "./projection-builder.js";
 import type {
   Committed,
   Dispatcher,
@@ -41,6 +42,7 @@ export type Slice<
   readonly _tag: "Slice";
   readonly states: Map<string, State<any, any, any>>;
   readonly events: EventRegister<E>;
+  readonly projections: ReadonlyArray<Projection<any>>;
   /** @internal phantom field for type-level state schema tracking */
   readonly _S?: S;
   /** @internal phantom field for type-level state name tracking */
@@ -94,6 +96,16 @@ export type SliceBuilder<
     A & AX,
     M & { [K in NX]: SX }
   >;
+  /**
+   * Embeds a built Projection within this slice for encapsulated
+   * feature composition. The projection's events must be a subset
+   * of events from states already registered via `.with()`.
+   * Projection handlers preserve their `(event, stream)` signature
+   * and do not receive a Dispatcher.
+   */
+  projection: <EP extends Schemas>(
+    proj: [Exclude<keyof EP, keyof E>] extends [never] ? Projection<EP> : never
+  ) => SliceBuilder<S, E, A, M>;
   /**
    * Begins defining a reaction scoped to this slice's events.
    */
@@ -172,7 +184,8 @@ export function slice<
 >(
   states: Map<string, State<any, any, any>> = new Map(),
   actions: Record<string, any> = {},
-  events: EventRegister<E> = {} as EventRegister<E>
+  events: EventRegister<E> = {} as EventRegister<E>,
+  projections: Projection<any>[] = []
 ): SliceBuilder<S, E, A, M> {
   const builder: SliceBuilder<S, E, A, M> = {
     with: <
@@ -189,7 +202,16 @@ export function slice<
         E & EX,
         A & AX,
         M & { [K in NX]: SX }
-      >(states, actions, events as unknown as EventRegister<E & EX>);
+      >(
+        states,
+        actions,
+        events as unknown as EventRegister<E & EX>,
+        projections
+      );
+    },
+    projection: <EP extends Schemas>(proj: Projection<EP>) => {
+      projections.push(proj);
+      return slice<S, E, A, M>(states, actions, events, projections);
     },
     on: <K extends keyof E>(event: K) => ({
       do: (
@@ -235,6 +257,7 @@ export function slice<
       _tag: "Slice" as const,
       states,
       events,
+      projections,
     }),
     events,
   };

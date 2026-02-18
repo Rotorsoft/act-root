@@ -2,9 +2,10 @@
  * @module merge
  * @category Builders
  *
- * Shared utilities for merging partial states across builders.
+ * Shared utilities for merging partial states and projections across builders.
  */
 import { ZodObject, type ZodType } from "zod";
+import type { Projection } from "./projection-builder.js";
 import type { Schema, State } from "./types/index.js";
 
 /**
@@ -119,6 +120,32 @@ export function registerState(
         schema: state.events[name],
         reactions: new Map(),
       };
+    }
+  }
+}
+
+/**
+ * Merges a projection's event schemas and reactions into an event registry,
+ * deduplicating reaction names by appending "_p" on collision.
+ */
+export function mergeProjection(
+  proj: Projection<any>,
+  events: Record<string, any>
+): void {
+  for (const eventName of Object.keys(proj.events)) {
+    const projRegister = proj.events[eventName];
+    const existing = events[eventName];
+    if (!existing) {
+      events[eventName] = {
+        schema: projRegister.schema,
+        reactions: new Map(projRegister.reactions),
+      };
+    } else {
+      for (const [name, reaction] of projRegister.reactions) {
+        let key = name;
+        while (existing.reactions.has(key)) key = `${key}_p`;
+        existing.reactions.set(key, reaction);
+      }
     }
   }
 }
