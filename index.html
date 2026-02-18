@@ -869,7 +869,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .on({ increment: z.object({ by: z.number() }) })
   .emit((action, state) => ["Incremented", { amount: action.by }])
   .build();
-const app = act().with(Counter).build();
+const app = act().withState(Counter).build();
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
 console.log(await app.load(Counter, "counter1"));</code></pre>
             <button
@@ -1223,8 +1223,8 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
               Handlers receive a typed <code style="color: var(--code-green)">Dispatcher</code> for cross-state coordination.
             </p>
 <pre class="patterns-code"><code class="language-typescript">const TicketCreationSlice = slice()
-  .with(TicketCreation)      // partial state
-  .with(TicketOperations)    // another partial state
+  .withState(TicketCreation)      // partial state
+  .withState(TicketOperations)    // another partial state
 
   .on("TicketOpened")
   .do(async function assign(event, _stream, app) {
@@ -1321,16 +1321,16 @@ export const mustBeUser: Invariant&lt;{ productId: string; userId: string }&gt; 
           <div class="patterns-content" id="tab-orchestrator">
             <h4>Wire everything together with the Act orchestrator</h4>
             <p>
-              The <code style="color: var(--code-green)">act()</code> builder accepts States, Slices, and Projections via <code style="color: var(--code-green)">.with()</code>.
+              The <code style="color: var(--code-green)">act()</code> builder uses <code style="color: var(--code-green)">.withState()</code>, <code style="color: var(--code-green)">.withSlice()</code>, and <code style="color: var(--code-green)">.withProjection()</code> for type-safe composition.
               Schemas and reactions merge automatically — one line per feature module.
             </p>
 <pre class="patterns-code"><code class="language-typescript">import { act } from "@rotorsoft/act";
 
 export const app = act()
-  .with(TicketCreationSlice)    // slice: states + scoped reactions
-  .with(TicketMessagingSlice)   // slice: states + scoped reactions
-  .with(TicketOpsSlice)         // slice: states + scoped reactions
-  .with(TicketProjection)       // projection: read-model updaters
+  .withSlice(TicketCreationSlice)    // slice: states + scoped reactions
+  .withSlice(TicketMessagingSlice)   // slice: states + scoped reactions
+  .withSlice(TicketOpsSlice)         // slice: states + scoped reactions
+  .withProjection(TicketProjection)  // projection: read-model updaters
   .build();
 
 // Execute actions
