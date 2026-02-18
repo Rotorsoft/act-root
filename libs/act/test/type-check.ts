@@ -233,3 +233,171 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .void()
     .build();
 }
+
+// ── TEST 17: slice().with(State).projection(Proj) — types flow ──────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const CounterProj = projection("counters")
+    .on({ Incremented })
+    .do(async (event) => {
+      // Projection handler gets typed event data
+      const _amt: number = event.data.amount;
+    })
+    .build();
+
+  // Projection events are subset of slice events — should compile
+  const _s = slice().with(Counter).projection(CounterProj).build();
+}
+
+// ── TEST 18: slice+projection — projection event-subset constraint ──
+{
+  const Unknown = z.object({ x: z.number() });
+  const BadProj = projection("bad")
+    .on({ Unknown })
+    .do(async () => {})
+    .build();
+
+  // @ts-expect-error - Unknown is not in Counter's events
+  void slice().with(Counter).projection(BadProj);
+}
+
+// ── TEST 19: slice().with(A).with(B).projection(Proj).on().do() ─────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const CounterProj = projection("counters")
+    .on({ Incremented })
+    .do(async () => {})
+    .build();
+
+  const _s = slice()
+    .with(Counter)
+    .with(Logger)
+    .projection(CounterProj)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      // Handler receives Dispatcher<A_Counter & A_Logger>
+      void app.do("increment", target, { by: 1 });
+      void app.do("log", target, { message: "hello" });
+      // @ts-expect-error - wrong action name
+      void app.do("nonexistent", target, {});
+      // @ts-expect-error - wrong payload for log
+      void app.do("log", target, { by: 1 });
+    })
+    .void()
+    .build();
+}
+
+// ── TEST 20: slice .on() event names constrained to slice events ────
+{
+  const _s = slice()
+    .with(Counter)
+    // @ts-expect-error - "Logged" is not an event from Counter
+    .on("Logged");
+}
+
+// ── TEST 21: slice .do() handler event data is typed ────────────────
+{
+  const _s = slice()
+    .with(Counter)
+    .with(Logger)
+    .on("Incremented")
+    .do(async (event) => {
+      // Event data matches Incremented schema
+      const _amt: number = event.data.amount;
+      // @ts-expect-error - "message" is not on Incremented event
+      event.data.message;
+    })
+    .void()
+    .on("Logged")
+    .do(async (event) => {
+      // Event data matches Logged schema
+      const _msg: string = event.data.message;
+      // @ts-expect-error - "amount" is not on Logged event
+      event.data.amount;
+    })
+    .void()
+    .build();
+}
+
+// ── TEST 22: act+slice+projection — full composition ────────────────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const CounterProj = projection("counters")
+    .on({ Incremented })
+    .do(async () => {})
+    .build();
+
+  const CounterSlice = slice()
+    .with(Counter)
+    .projection(CounterProj)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      void app.do("increment", target, { by: 1 });
+    })
+    .void()
+    .build();
+
+  const app = act().with(CounterSlice).with(Logger).build();
+  void app.do("increment", target, { by: 1 });
+  void app.do("log", target, { message: "test" });
+  // @ts-expect-error - wrong action
+  void app.do("nonexistent", target, {});
+  // @ts-expect-error - wrong payload
+  void app.do("increment", target, { message: "wrong" });
+}
+
+// ── TEST 23: act .on() handler Dispatcher has all actions ───────────
+{
+  const CounterSlice = slice().with(Counter).build();
+  const _app = act()
+    .with(CounterSlice)
+    .with(Logger)
+    .on("Incremented")
+    .do(async (_event, _stream, app) => {
+      // Dispatcher should see both Counter and Logger actions
+      void app.do("increment", target, { by: 1 });
+      void app.do("log", target, { message: "reacted" });
+      // @ts-expect-error - wrong action name
+      void app.do("nonexistent", target, {});
+    })
+    .void()
+    .build();
+}
+
+// ── TEST 24: act .on() rejects unknown event names ──────────────────
+{
+  void act()
+    .with(Counter)
+    // @ts-expect-error - "UnknownEvent" not in Counter events
+    .on("UnknownEvent");
+}
+
+// ── TEST 25: projection handler gets typed event data ───────────────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const _proj = projection("counters")
+    .on({ Incremented })
+    .do(async (event) => {
+      const _amt: number = event.data.amount;
+      // @ts-expect-error - "message" is not on Incremented
+      event.data.message;
+    })
+    .build();
+}
+
+// ── TEST 26: act+standalone-projection composition ──────────────────
+{
+  const Incremented = z.object({ amount: z.number() });
+  const Logged = z.object({ message: z.string() });
+  const MultiProj = projection("readmodel")
+    .on({ Incremented })
+    .do(async () => {})
+    .on({ Logged })
+    .do(async () => {})
+    .build();
+
+  // Both events exist in the app — should compile
+  const app = act().with(Counter).with(Logger).with(MultiProj).build();
+  void app.do("increment", target, { by: 1 });
+  void app.do("log", target, { message: "test" });
+}

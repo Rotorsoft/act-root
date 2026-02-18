@@ -123,8 +123,12 @@ export type ReactionOptions = {
  * @property resolver - The reaction resolver.
  * @property options - The reaction options.
  */
-export type Reaction<E extends Schemas, K extends keyof E = keyof E> = {
-  readonly handler: ReactionHandler<E, K>;
+export type Reaction<
+  E extends Schemas,
+  K extends keyof E = keyof E,
+  A extends Schemas = Schemas,
+> = {
+  readonly handler: ReactionHandler<E, K, A>;
   readonly resolver: ReactionResolver<E, K>;
   readonly options: ReactionOptions;
 };
