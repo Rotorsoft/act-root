@@ -17,6 +17,8 @@ Every package that imports `@rotorsoft/act` must have a valid `package.json` wit
 
 ## 2. Patch Handler Signature
 
+`.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom reducer logic.
+
 ```typescript
 type PatchHandler<S, E, K> = (
   event: Committed<E, K>,  // committed event — access payload via event.data
@@ -25,16 +27,20 @@ type PatchHandler<S, E, K> = (
 ```
 
 **Key points:**
+- `.patch()` is **optional** — events default to passthrough (event data merges into state)
 - Access event payload via `event.data`, not the event directly
 - The second argument is the current state, not the snapshot
 - Return only the fields that change — do NOT spread the full state
 
 ```typescript
+// Only override events that need custom logic
+.emits({ ItemCreated, ItemClosed, ItemResolved })
 .patch({
   ItemCreated: ({ data }, state) => ({ name: data.name, status: "Open" }),
   //            ^^^^^^^^  ^^^^^
   //            event      current state (2nd arg)
 })
+// ItemClosed and ItemResolved use passthrough — no entry needed
 ```
 
 ## 3. ZodEmpty — Empty Payload Schema
@@ -155,6 +161,9 @@ type Emitted<E> = [EventName, EventData];
 
 **Common patterns:**
 ```typescript
+// String passthrough — action payload becomes event data directly
+.emit("TicketAssigned")
+
 // Destructuring style
 .emit((data, { state }, { actor }) => ["ItemCreated", { ...data, createdBy: actor.id }])
 

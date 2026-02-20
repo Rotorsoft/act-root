@@ -40,7 +40,7 @@ await store().seed();
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: (e, s) => ({ count: s.count + e.data.amount }) })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })  // optional — only for custom reducers
   .on({ increment: z.object({ by: z.number() }) })
     .emit((action) => ["Incremented", { amount: action.by }])
   .build();

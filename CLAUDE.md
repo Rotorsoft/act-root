@@ -99,7 +99,7 @@ pnpm -F shared drizzle:migrate
 
 ### State Builder Pattern
 
-States are built using a fluent API:
+States are built using a fluent API. `.emits()` declares events with passthrough reducers by default (`({ data }) => data`). Use `.patch()` only for events that need custom reducers. Use `.emit("EventName")` for actions where the payload passes through directly as event data.
 
 ```typescript
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -107,11 +107,20 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emits({
     Incremented: z.object({ amount: z.number() })
   })
-  .patch({
-    Incremented: (event, state) => ({ count: state.count + event.data.amount })
+  .patch({  // optional — only for events needing custom reducers
+    Incremented: ({ data }, state) => ({ count: state.count + data.amount })
   })
   .on({ increment: z.object({ by: z.number() }) })
-    .emit((action, state) => ["Incremented", { amount: action.by }])
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+
+// Simpler: when event data matches state shape and action payload matches event data
+const DigitBoard = state({ DigitBoard: schema })
+  .init(() => defaults)
+  .emits({ DigitCounted: z.object({ digit: z.enum(DIGITS) }) })
+  // no .patch() needed — passthrough is the default
+  .on({ CountDigit: z.object({ digit: z.enum(DIGITS) }) })
+    .emit("DigitCounted")  // string passthrough — action payload becomes event data
   .build();
 ```
 
@@ -261,7 +270,7 @@ Business rules enforced before actions execute:
     (_, snap) => snap.state.status === "open" || "Ticket must be open",
     (target, snap) => snap.state.assignedTo === target.actor.id || "Must be assigned to you"
   ])
-  .emit((action, snap) => ["TicketClosed", { reason: action.reason }])
+  .emit("TicketClosed")  // passthrough — action payload { reason } becomes event data
 ```
 
 ### Snapshotting Strategy

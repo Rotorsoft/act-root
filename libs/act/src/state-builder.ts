@@ -58,7 +58,7 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
      *
      * @template E - Event schemas type
      * @param events - Object mapping event names to Zod schemas
-     * @returns A builder with `.patch()` to define event handlers
+     * @returns An ActionBuilder (with optional `.patch()` to override specific reducers)
      *
      * @example
      * ```typescript
@@ -71,28 +71,30 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
      */
     emits: <E extends Schemas>(
       events: ZodTypes<E>
-    ) => {
+      // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
+    ) => ActionBuilder<S, E, {}, N> & {
       /**
-       * Defines how each event updates (patches) the state.
+       * Overrides specific event reducers. Events without a custom patch
+       * default to passthrough: `({ data }) => data` (event data merges
+       * into state).
        *
-       * Patch handlers are reducers - pure functions that take an event and current state,
-       * and return the changes to apply. Return partial state objects; unchanged fields
-       * are preserved automatically.
-       *
-       * @param patch - Object mapping event names to patch handler functions
+       * @param patch - Partial map of event names to patch handler functions
        * @returns An ActionBuilder for defining actions
        *
-       * @example
+       * @example Only override the events that need custom logic
        * ```typescript
+       * .emits({ TicketOpened, TicketClosed, TicketResolved })
        * .patch({
-       *   Incremented: (event, state) => ({ count: state.count + event.data.amount }),
-       *   Decremented: (event, state) => ({ count: state.count - event.data.amount }),
-       *   Reset: () => ({ count: 0 })
+       *   TicketOpened: ({ data }) => {
+       *     const { message, messageId, userId, ...other } = data;
+       *     return { ...other, userId, messages: { [messageId]: { ... } } };
+       *   },
        * })
+       * // TicketClosed and TicketResolved use passthrough
        * ```
        */
       patch: (
-        patch: PatchHandlers<S, E>
+        patch: Partial<PatchHandlers<S, E>>
         // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
       ) => ActionBuilder<S, E, {}, N>;
     };
@@ -195,19 +197,27 @@ export type ActionBuilder<
        * and must return one or more events to emit. Events are applied to state
        * via the patch handlers defined earlier.
        *
-       * @param handler - Function that returns events to emit
+       * Pass a string event name for passthrough: the action payload becomes
+       * the event data directly.
+       *
+       * @param handler - Function that returns events to emit, or event name string for passthrough
        * @returns The ActionBuilder for chaining more actions
        *
-       * @example
+       * @example Custom handler
        * ```typescript
        * .emit((action, snapshot) => {
        *   const newBalance = snapshot.state.balance + action.amount;
        *   return ["Deposited", { amount: action.amount, newBalance }];
        * })
        * ```
+       *
+       * @example Passthrough (action payload = event data)
+       * ```typescript
+       * .emit("TicketAssigned")
+       * ```
        */
       emit: (
-        handler: ActionHandler<S, E, { [P in K]: AX }, K>
+        handler: ActionHandler<S, E, { [P in K]: AX }, K> | (keyof E & string)
       ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
     };
     /**
@@ -217,8 +227,16 @@ export type ActionBuilder<
      * and must return one or more events to emit. Return a single event as
      * `["EventName", data]` or multiple events as an array of event tuples.
      *
-     * @param handler - Function that returns events to emit
+     * Pass a string event name for passthrough: the action payload becomes
+     * the event data directly.
+     *
+     * @param handler - Function that returns events to emit, or event name string for passthrough
      * @returns The ActionBuilder for chaining more actions
+     *
+     * @example Passthrough (action payload = event data)
+     * ```typescript
+     * .emit("Incremented")
+     * ```
      *
      * @example Single event
      * ```typescript
@@ -232,22 +250,9 @@ export type ActionBuilder<
      *   ["LogUpdated", { message: `Incremented by ${action.by}` }]
      * ])
      * ```
-     *
-     * @example Conditional events
-     * ```typescript
-     * .emit((action, snapshot) => {
-     *   if (snapshot.state.count + action.by >= 100) {
-     *     return [
-     *       ["Incremented", { amount: action.by }],
-     *       ["MilestoneReached", { milestone: 100 }]
-     *     ];
-     *   }
-     *   return ["Incremented", { amount: action.by }];
-     * })
-     * ```
      */
     emit: (
-      handler: ActionHandler<S, E, { [P in K]: AX }, K>
+      handler: ActionHandler<S, E, { [P in K]: AX }, K> | (keyof E & string)
     ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
   };
   /**
@@ -297,7 +302,7 @@ export type ActionBuilder<
    * const Counter = state({ Counter: schema })
    *   .init(() => ({ count: 0 }))
    *   .emits({ Incremented: z.object({ amount: z.number() }) })
-   *   .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
+   *   .patch({ Incremented: ({ data }, state) => ({ count: state.count + data.amount }) })
    *   .on({ increment: z.object({ by: z.number() }) })
    *     .emit((action) => ["Incremented", { amount: action.by }])
    *   .build(); // Returns State<S, E, A, N>
@@ -316,9 +321,9 @@ export type ActionBuilder<
  *
  * The state builder provides a fluent API for defining:
  * 1. Initial state via `.init()`
- * 2. Event types via `.emits()`
- * 3. Event handlers (reducers) via `.patch()`
- * 4. Actions (commands) via `.on()` → `.emit()`
+ * 2. Event types via `.emits()` — all events default to passthrough (`({ data }) => data`)
+ * 3. Custom event reducers via `.patch()` (optional — only for events that need custom logic)
+ * 4. Actions (commands) via `.on()` → `.emit()` — pass an event name string for passthrough
  * 5. Business rules (invariants) via `.given()`
  * 6. Snapshotting strategy via `.snap()`
  *
@@ -326,7 +331,7 @@ export type ActionBuilder<
  * @param entry - Single-key record mapping state name to Zod schema (e.g., `{ Counter: z.object({ count: z.number() }) }`)
  * @returns A StateBuilder instance for fluent API configuration
  *
- * @example Basic counter state
+ * @example Basic counter state (with custom patch)
  * ```typescript
  * import { state } from "@rotorsoft/act";
  * import { z } from "zod";
@@ -336,11 +341,22 @@ export type ActionBuilder<
  *   .emits({
  *     Incremented: z.object({ amount: z.number() })
  *   })
- *   .patch({
- *     Incremented: (event, state) => ({ count: state.count + event.data.amount })
+ *   .patch({  // optional — only for events needing custom reducers
+ *     Incremented: ({ data }, state) => ({ count: state.count + data.amount })
  *   })
  *   .on({ increment: z.object({ by: z.number() }) })
  *     .emit((action) => ["Incremented", { amount: action.by }])
+ *   .build();
+ * ```
+ *
+ * @example Passthrough state (no custom patch or emit needed)
+ * ```typescript
+ * const DigitBoard = state({ DigitBoard: z.object({ digit: z.string() }) })
+ *   .init(() => ({ digit: "" }))
+ *   .emits({ DigitCounted: z.object({ digit: z.string() }) })
+ *   // no .patch() — passthrough is the default (event data merges into state)
+ *   .on({ CountDigit: z.object({ digit: z.string() }) })
+ *     .emit("DigitCounted")  // string passthrough — action payload becomes event data
  *   .build();
  * ```
  *
@@ -357,29 +373,29 @@ export type ActionBuilder<
  *     Withdrawn: z.object({ amount: z.number() }),
  *     Closed: z.object({})
  *   })
- *   .patch({
- *     Deposited: (event, state) => ({ balance: state.balance + event.data.amount }),
- *     Withdrawn: (event, state) => ({ balance: state.balance - event.data.amount }),
+ *   .patch({  // only override events needing custom logic
+ *     Deposited: ({ data }, state) => ({ balance: state.balance + data.amount }),
+ *     Withdrawn: ({ data }, state) => ({ balance: state.balance - data.amount }),
  *     Closed: () => ({ status: "closed", balance: 0 })
  *   })
  *   .on({ deposit: z.object({ amount: z.number() }) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Account must be open"
  *     ])
- *     .emit((action) => ["Deposited", { amount: action.amount }])
+ *     .emit("Deposited")  // passthrough — action payload { amount } becomes event data
  *   .on({ withdraw: z.object({ amount: z.number() }) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Account must be open",
  *       (_, snap, action) =>
  *         snap.state.balance >= action.amount || "Insufficient funds"
  *     ])
- *     .emit((action) => ["Withdrawn", { amount: action.amount }])
+ *     .emit("Withdrawn")
  *   .on({ close: z.object({}) })
  *     .given([
  *       (_, snap) => snap.state.status === "open" || "Already closed",
  *       (_, snap) => snap.state.balance === 0 || "Balance must be zero"
  *     ])
- *     .emit(() => ["Closed", {}])
+ *     .emit("Closed")
  *   .build();
  * ```
  *
@@ -395,14 +411,14 @@ export type ActionBuilder<
  *     UserCreated: z.object({ name: z.string(), email: z.string() }),
  *     UserLoggedIn: z.object({})
  *   })
- *   .patch({
- *     UserCreated: (event) => event.data,
+ *   .patch({  // only override events needing custom logic
  *     UserLoggedIn: (_, state) => ({ loginCount: state.loginCount + 1 })
  *   })
+ *   // UserCreated uses passthrough — event data merges into state
  *   .on({ createUser: z.object({ name: z.string(), email: z.string() }) })
- *     .emit((action) => ["UserCreated", action])
+ *     .emit("UserCreated")  // passthrough
  *   .on({ login: z.object({}) })
- *     .emit(() => ["UserLoggedIn", {}])
+ *     .emit("UserLoggedIn")
  *   .snap((snap) => snap.patches >= 10) // Snapshot every 10 events
  *   .build();
  * ```
@@ -423,8 +439,27 @@ export function state<N extends string, S extends Schema>(
     init(init: () => Readonly<S>) {
       return {
         emits<E extends Schema>(events: ZodTypes<E>) {
-          return {
-            patch(patch: PatchHandlers<S, E>) {
+          // Default passthrough patches: event data merges into state
+          const defaultPatch = Object.fromEntries(
+            Object.keys(events).map((k) => [
+              k,
+              ({ data }: { data: any }) => data,
+            ])
+          ) as unknown as PatchHandlers<S, E>;
+
+          // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
+          const builder = action_builder<S, E, {}, N>({
+            events,
+            actions: {},
+            state: stateSchema,
+            name,
+            init,
+            patch: defaultPatch,
+            on: {},
+          });
+
+          return Object.assign(builder, {
+            patch(customPatch: Partial<PatchHandlers<S, E>>) {
               // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
               return action_builder<S, E, {}, N>({
                 events,
@@ -432,11 +467,11 @@ export function state<N extends string, S extends Schema>(
                 state: stateSchema,
                 name,
                 init,
-                patch,
+                patch: { ...defaultPatch, ...customPatch },
                 on: {},
               });
             },
-          };
+          });
         },
       };
     },
@@ -469,8 +504,15 @@ function action_builder<
         return { emit };
       }
 
-      function emit(handler: ActionHandler<S, E, NewA, K>) {
-        on[action] = handler;
+      function emit(
+        handler: ActionHandler<S, E, NewA, K> | (keyof E & string)
+      ) {
+        if (typeof handler === "string") {
+          const eventName = handler;
+          on[action] = ((payload: any) => [eventName, payload]) as any;
+        } else {
+          on[action] = handler;
+        }
         return action_builder<S, E, NewA, N>({
           ...state,
           actions,

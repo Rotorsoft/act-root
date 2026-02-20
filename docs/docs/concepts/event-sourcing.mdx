@@ -32,7 +32,7 @@ const Cart = state({
     ItemRemoved: z.object({ sku: z.string() }),
     CheckedOut: z.object({}),
   })
-  .patch({
+  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
     ItemAdded: (e, s) => ({
       ...s,
       items: [...s.items, { sku: e.sku, qty: e.qty }],
@@ -44,11 +44,11 @@ const Cart = state({
     CheckedOut: (e, s) => ({ ...s, checkedOut: true }),
   })
   .on({ addItem: z.object({ sku: z.string(), qty: z.number() }) })
-  .emit((a) => ["ItemAdded", { sku: a.sku, qty: a.qty }])
+  .emit("ItemAdded")  // passthrough — action payload becomes event data
   .on({ removeItem: z.object({ sku: z.string() }) })
-  .emit((a) => ["ItemRemoved", { sku: a.sku }])
+  .emit("ItemRemoved")
   .on({ checkout: z.object({}) })
-  .emit(() => ["CheckedOut", {}])
+  .emit("CheckedOut")
   .build();
 
 // Example committed event (matching framework type):

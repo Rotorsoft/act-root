@@ -21,8 +21,8 @@ import { act, state, z } from "@rotorsoft/act";
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({
-    Incremented: (event, state) => ({ count: state.count + event.amount }),
+  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
+    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
   })
   .on({ increment: z.object({ by: z.number() }) })
   .emit((action) => ["Incremented", { amount: action.by }])
@@ -31,11 +31,11 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 const TodoList = state({ TodoList: z.object({ todos: z.array(z.string()) }) })
   .init(() => ({ todos: [] }))
   .emits({ Added: z.object({ todo: z.string() }) })
-  .patch({
+  .patch({  // optional — only for events needing custom reducers
     Added: (event, state) => ({ todos: [...state.todos, event.todo] }),
   })
   .on({ add: z.object({ todo: z.string() }) })
-  .emit((action) => ["Added", { todo: action.todo }])
+  .emit("Added")  // passthrough — action payload becomes event data
   .build();
 
 const app = act().withState(Counter).withState(TodoList).build();

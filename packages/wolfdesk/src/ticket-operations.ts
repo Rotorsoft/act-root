@@ -27,16 +27,10 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
     TicketEscalated,
     TicketReassigned,
   })
-  .patch({
-    TicketAssigned: ({ data }) => data,
-    TicketEscalationRequested: ({ data }) => data,
-    TicketEscalated: ({ data }) => data,
-    TicketReassigned: ({ data }) => data,
-  })
 
   .on({ AssignTicket })
   .given([mustBeOpen])
-  .emit((data) => ["TicketAssigned", data])
+  .emit("TicketAssigned")
 
   .on({ RequestTicketEscalation })
   .given([mustBeOpen, mustBeUser])

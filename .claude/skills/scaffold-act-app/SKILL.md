@@ -15,7 +15,7 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 |---|---|---|
 | Aggregate / Entity | State | `state({ Name: schema })` |
 | Command | Action | `.on({ ActionName: schema })` |
-| Domain Event | Event + Patch | `.emits({ Event: schema })` + `.patch({...})` |
+| Domain Event | Event + Patch | `.emits({ Event: schema })` + optional `.patch({...})` for custom reducers |
 | Business Rule / Guard | Invariant | `.given([{ description, valid }])` |
 | Policy / Process Manager | Reaction (Slice or Act) | `.on("Event").do(handler)` |
 | Read Model / Query | Projection | `projection("target").on({ Event }).do(handler)` |
@@ -44,7 +44,7 @@ Specs use varied terminology. Map to framework concepts:
 |---|---|---|
 | Aggregate, Entity, Actor, Domain Object | State | `state({ Name: schema })` |
 | Command, Action, Intent, Request | Action | `.on({ ActionName: schema })` |
-| Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + `.patch({})` |
+| Domain Event, Fact, State Change | Event | `.emits({ Event: schema })` + optional `.patch({})` for custom reducers |
 | Read Model, View, Query Model, Projection | Projection | `projection("target").on({ Event }).do(handler)` |
 | Policy, Process Manager, Automation, Saga, Reactor | Reaction | `slice().withState(State).on("Event").do(handler)` |
 | Invariant, Guard, Business Rule, Precondition, Constraint | Invariant | `.given([{ description, valid }])` |
@@ -79,7 +79,7 @@ The state schema is the **accumulation of all event fields** for that aggregate:
 
 ### External vs Internal Events
 
-- **Internal events** — emitted by the aggregate's own actions → define in `.emits({})` and `.patch({})`
+- **Internal events** — emitted by the aggregate's own actions → define in `.emits({})` and optionally `.patch({})` for custom reducers (passthrough is the default)
 - **External/integration events** — emitted by other aggregates → handle as **reaction triggers** in a slice (`.on("ExternalEvent").do(handler)`) or at the act level
 
 ### Given/When/Then → Tests
@@ -196,7 +196,7 @@ import { mustBeOpen } from "./invariants.js";
 export const Item = state({ Item: ItemState })
   .init(() => ({ name: "", status: "Open", createdBy: "" }))
   .emits({ ItemCreated, ItemClosed })
-  .patch({
+  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
     ItemCreated: ({ data }) => ({ name: data.name, createdBy: data.createdBy }),
     ItemClosed: ({ data }) => ({ closedBy: data.closedBy, status: "Closed" }),
   })
@@ -208,7 +208,9 @@ export const Item = state({ Item: ItemState })
   .build();
 ```
 
-**Builder chain**: `state({})` → `.init()` → `.emits({})` → `.patch({})` → `.on({})` → `.given([])` → `.emit(handler)` → `.build()`
+**Builder chain**: `state({})` → `.init()` → `.emits({})` → optional `.patch({})` → `.on({})` → `.given([])` → `.emit(handler | "EventName")` → `.build()`
+
+**Passthrough defaults**: `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom logic. Use `.emit("EventName")` when the action payload maps directly to event data.
 
 **Emit handler**: `(actionPayload, snapshot, target) => [EventName, data]` — destructure as `(data, { state }, { stream, actor })`.
 

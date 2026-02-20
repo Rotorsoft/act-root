@@ -37,7 +37,7 @@ const Order = state({
     Delivered: z.object({}),
     Cancelled: z.object({ reason: z.string() }),
   })
-  .patch({
+  .patch({  // optional — only for events needing custom reducers
     Confirmed: (e, s) => ({ ...s, status: "confirmed" }),
     Shipped: (e, s) => ({
       ...s,
@@ -48,13 +48,13 @@ const Order = state({
     Cancelled: (e, s) => ({ ...s, status: "cancelled" }),
   })
   .on({ confirm: z.object({}) })
-  .emit(() => ["Confirmed", {}])
+  .emit("Confirmed")  // passthrough — action payload becomes event data
   .on({ ship: z.object({ trackingNumber: z.string() }) })
-  .emit((a) => ["Shipped", { trackingNumber: a.trackingNumber }])
+  .emit("Shipped")
   .on({ deliver: z.object({}) })
-  .emit(() => ["Delivered", {}])
+  .emit("Delivered")
   .on({ cancel: z.object({ reason: z.string() }) })
-  .emit((a) => ["Cancelled", { reason: a.reason }])
+  .emit("Cancelled")
   .build();
 ```
 
@@ -83,7 +83,7 @@ const Ticket = state({
     Resolved: z.object({}),
     Closed: z.object({}),
   })
-  .patch({
+  .patch({  // optional — only for events needing custom reducers
     Assigned: (e, s) => ({ ...s, status: "assigned", assignedTo: e.user }),
     Escalated: (e, s) => ({
       ...s,
@@ -94,13 +94,13 @@ const Ticket = state({
     Closed: (e, s) => ({ ...s, status: "closed" }),
   })
   .on({ assign: z.object({ user: z.string() }) })
-  .emit((a) => ["Assigned", { user: a.user }])
+  .emit("Assigned")  // passthrough — action payload becomes event data
   .on({ escalate: z.object({ level: z.number() }) })
-  .emit((a) => ["Escalated", { level: a.level }])
+  .emit("Escalated")
   .on({ resolve: z.object({}) })
-  .emit(() => ["Resolved", {}])
+  .emit("Resolved")
   .on({ close: z.object({}) })
-  .emit(() => ["Closed", {}])
+  .emit("Closed")
   .build();
 ```
 

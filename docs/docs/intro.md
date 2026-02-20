@@ -48,8 +48,8 @@ import { act, state, z } from "@rotorsoft/act";
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({
-    Incremented: (event, state) => ({ count: state.count + event.amount }),
+  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
+    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
   })
   .on({ increment: z.object({ by: z.number() }) })
   .emit((action) => ["Incremented", { amount: action.by }])

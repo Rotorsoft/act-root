@@ -90,11 +90,11 @@ import { z } from "zod";
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({
-    Incremented: (event, state) => ({ count: state.count + event.data.amount }),
+  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
+    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
   })
   .on({ increment: z.object({ by: z.number() }) })
-  .emit((action, state) => ["Incremented", { amount: action.by }])
+  .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
 const app = act().withState(Counter).build();

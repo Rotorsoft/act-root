@@ -42,8 +42,6 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
         },
       };
     },
-    TicketClosed: ({ data }) => data,
-    TicketResolved: ({ data }) => data,
   })
 
   .on({ OpenTicket })
