@@ -865,9 +865,9 @@ import { z } from "zod";
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: (event, state) => ({ count: state.count + event.data.amount }) })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) }) // optional
   .on({ increment: z.object({ by: z.number() }) })
-  .emit((action, state) => ["Incremented", { amount: action.by }])
+  .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 const app = act().withState(Counter).build();
 await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
@@ -1275,15 +1275,15 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
 const TicketCreation = state({ Ticket: TicketCreationState })
   .init(() => ({ title: "", productId: "", userId: "", priority: "Low", messages: {} }))
   .emits({ TicketOpened, TicketClosed, TicketResolved })
-  .patch({ TicketOpened: ... , TicketClosed: ... , TicketResolved: ... })
+  .patch({ TicketOpened: ... })  // optional — only custom reducers
   .on({ OpenTicket }).emit(...)
-  .on({ CloseTicket }).given([mustBeOpen]).emit(...)
+  .on({ CloseTicket }).given([mustBeOpen]).emit("TicketClosed")  // passthrough
   .build();
 
 const TicketOperations = state({ Ticket: TicketOperationsState })
   .init(() => ({ productId: "", userId: "", messages: {} }))
   .emits({ TicketAssigned, TicketEscalated, TicketReassigned })
-  // ... each partial adds its own actions and events
+  .on({ AssignTicket }).given([mustBeOpen]).emit("TicketAssigned")  // passthrough
   .build();
 
 const TicketMessaging = state({ Ticket: TicketMessagingState })
@@ -1312,8 +1312,8 @@ export const mustBeUser: Invariant&lt;{ productId: string; userId: string }&gt; 
 };
 
 // Use in any state builder:
-.on({ CloseTicket }).given([mustBeOpen]).emit(...)
-.on({ RequestEscalation }).given([mustBeOpen, mustBeUser]).emit(...)</code></pre>
+.on({ CloseTicket }).given([mustBeOpen]).emit("TicketClosed")  // passthrough
+.on({ RequestEscalation }).given([mustBeOpen, mustBeUser]).emit("TicketEscalationRequested")</code></pre>
             <div class="arch-note">Typed against minimal interfaces — TypeScript contravariance ensures Invariant&lt;SuperType&gt; is assignable to Invariant&lt;SubType&gt;.</div>
           </div>
 
