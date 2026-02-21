@@ -5,6 +5,7 @@
  * Types for reactions, leases, and fetch results in the Act Framework.
  */
 import type {
+  Actor,
   Committed,
   Dispatcher,
   Schema,
@@ -23,9 +24,10 @@ import type {
  * Handlers are called during drain cycles and support automatic retries
  * with configurable error handling.
  *
- * @template E - Event schemas
- * @template K - Event name
- * @template A - Action schemas (defaults to Schemas for stored reactions)
+ * @template TEvents - Event schemas
+ * @template TKey - Event name
+ * @template TActions - Action schemas (defaults to Schemas for stored reactions)
+ * @template TActor - Actor type extending base Actor
  * @param event - The committed event that triggered this reaction
  * @param stream - The target stream name for this reaction
  * @returns Promise resolving to an action tuple or void
@@ -47,14 +49,15 @@ import type {
  * @see {@link Reaction} for complete reaction configuration
  */
 export type ReactionHandler<
-  E extends Schemas,
-  K extends keyof E,
-  A extends Schemas = Schemas,
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+  TActions extends Schemas = Schemas,
+  TActor extends Actor = Actor,
 > = (
-  event: Committed<E, K>,
+  event: Committed<TEvents, TKey>,
   stream: string,
-  app: Dispatcher<A>
-) => Promise<Snapshot<Schema, E> | void>;
+  app: Dispatcher<TActions, TActor>
+) => Promise<Snapshot<Schema, TEvents> | void>;
 
 /**
  * Resolver for determining which stream a reaction should target.
@@ -66,8 +69,8 @@ export type ReactionHandler<
  * Resolvers can also specify source streams for optimization, allowing the drain
  * process to efficiently fetch only relevant events.
  *
- * @template E - Event schemas
- * @template K - Event name
+ * @template TEvents - Event schemas
+ * @template TKey - Event name
  * @param event - The committed event (for dynamic resolvers)
  * @returns Target stream configuration or undefined to skip
  *
@@ -99,10 +102,13 @@ export type ReactionHandler<
  *
  * @see {@link Reaction} for complete reaction configuration
  */
-export type ReactionResolver<E extends Schemas, K extends keyof E> =
+export type ReactionResolver<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+> =
   | { target: string; source?: string } // static
   | ((
-      event: Committed<E, K>
+      event: Committed<TEvents, TKey>
     ) => { target: string; source?: string } | undefined); // dynamic
 
 /**
@@ -117,33 +123,36 @@ export type ReactionOptions = {
 
 /**
  * Defines a reaction to an event.
- * @template E - Event schemas.
- * @template K - Event name.
+ * @template TEvents - Event schemas.
+ * @template TKey - Event name.
+ * @template TActions - Action schemas.
+ * @template TActor - Actor type extending base Actor.
  * @property handler - The reaction handler.
  * @property resolver - The reaction resolver.
  * @property options - The reaction options.
  */
 export type Reaction<
-  E extends Schemas,
-  K extends keyof E = keyof E,
-  A extends Schemas = Schemas,
+  TEvents extends Schemas,
+  TKey extends keyof TEvents = keyof TEvents,
+  TActions extends Schemas = Schemas,
+  TActor extends Actor = Actor,
 > = {
-  readonly handler: ReactionHandler<E, K, A>;
-  readonly resolver: ReactionResolver<E, K>;
+  readonly handler: ReactionHandler<TEvents, TKey, TActions, TActor>;
+  readonly resolver: ReactionResolver<TEvents, TKey>;
   readonly options: ReactionOptions;
 };
 
 /**
  * Payload for a reaction.
- * @template E - Event schemas.
+ * @template TEvents - Event schemas.
  * @property handler - The reaction handler.
  * @property resolver - The reaction resolver.
  * @property options - The reaction options.
  * @property event - The committed event triggering the reaction.
  * @property source - The source stream.
  */
-export type ReactionPayload<E extends Schemas> = Reaction<E> & {
-  readonly event: Committed<E, keyof E>;
+export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
+  readonly event: Committed<TEvents, keyof TEvents>;
   readonly source?: string;
 };
 
@@ -163,19 +172,19 @@ export type Poll = {
 
 /**
  * Result of fetching events from the store for processing.
- * @template E - Event schemas.
+ * @template TEvents - Event schemas.
  * @property stream - The stream name
  * @property source - The source stream(s) (name or RegExp), or undefined when sourcing from all streams.
  * @property at - The last event sequence number processed by the stream.
  * @property lagging - Whether the stream is lagging behind.
  * @property events - The list of next committed events to be processed by the stream.
  */
-export type Fetch<E extends Schemas> = Array<{
+export type Fetch<TEvents extends Schemas> = Array<{
   readonly stream: string;
   readonly source?: string;
   readonly at: number;
   readonly lagging: boolean;
-  readonly events: Committed<E, keyof E>[];
+  readonly events: Committed<TEvents, keyof TEvents>[];
 }>;
 
 /**
@@ -243,8 +252,8 @@ export type DrainOptions = {
  * @property acked - The acked events.
  * @property blocked - The blocked events (with error).
  */
-export type Drain<E extends Schemas> = {
-  readonly fetched: Fetch<E>;
+export type Drain<TEvents extends Schemas> = {
+  readonly fetched: Fetch<TEvents>;
   readonly leased: Lease[];
   readonly acked: Lease[];
   readonly blocked: Array<Lease & { readonly error: string }>;

@@ -20,6 +20,7 @@ export const ActorSchema = z
     id: z.string(),
     name: z.string(),
   })
+  .loose()
   .readonly();
 
 /**
@@ -31,6 +32,7 @@ export const TargetSchema = z
     actor: ActorSchema,
     expectedVersion: z.number().optional(),
   })
+  .loose()
   .readonly();
 
 /**

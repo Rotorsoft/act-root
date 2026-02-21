@@ -5,7 +5,6 @@ import {
   CommittedMetaSchema,
   EventMetaSchema,
   QuerySchema,
-  TargetSchema,
 } from "./schemas.js";
 
 /**
@@ -46,6 +45,8 @@ export type Actor = z.infer<typeof ActorSchema>;
  * and who is performing it. The target combines the stream identifier
  * with actor context for complete audit trail.
  *
+ * @template TActor - Actor type extending base Actor (default: Actor)
+ *
  * @example Basic target
  * ```typescript
  * const target: Target = {
@@ -65,7 +66,11 @@ export type Actor = z.infer<typeof ActorSchema>;
  * }, userData);
  * ```
  */
-export type Target = z.infer<typeof TargetSchema>;
+export type Target<TActor extends Actor = Actor> = {
+  readonly stream: string;
+  readonly actor: TActor;
+  readonly expectedVersion?: number;
+};
 
 /**
  * Metadata describing the causation of an event.
@@ -135,8 +140,8 @@ export type ZodTypes<T extends Schemas> = {
  * Messages are the basic building blocks of the event log. Each message
  * has a name (event type) and data (event payload).
  *
- * @template E - Schemas map
- * @template K - Event/action name
+ * @template TEvents - Schemas map
+ * @template TKey - Event/action name
  *
  * @example
  * ```typescript
@@ -146,11 +151,11 @@ export type ZodTypes<T extends Schemas> = {
  * };
  * ```
  */
-export type Message<E extends Schemas, K extends keyof E> = {
+export type Message<TEvents extends Schemas, TKey extends keyof TEvents> = {
   /** The event or action name */
-  readonly name: K;
+  readonly name: TKey;
   /** The event or action payload */
-  readonly data: Readonly<E[K]>;
+  readonly data: Readonly<TEvents[TKey]>;
 };
 
 /**
@@ -160,8 +165,8 @@ export type Message<E extends Schemas, K extends keyof E> = {
  * the event was created, including correlation and causation information for
  * tracing event-driven workflows.
  *
- * @template E - Schemas map
- * @template K - Event name
+ * @template TEvents - Schemas map
+ * @template TKey - Event name
  *
  * @example
  * ```typescript
@@ -185,8 +190,10 @@ export type Message<E extends Schemas, K extends keyof E> = {
  *
  * @see {@link CommittedMeta} for metadata structure
  */
-export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
-  CommittedMeta;
+export type Committed<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+> = Message<TEvents, TKey> & CommittedMeta;
 
 /**
  * Snapshot of state at a specific point in time.
@@ -195,8 +202,8 @@ export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
  * metadata about how many events have been applied (patches) and how many
  * snapshots have been taken for optimization.
  *
- * @template S - State schema
- * @template E - Event schemas
+ * @template TState - State schema
+ * @template TEvents - Event schemas
  *
  * @example
  * ```typescript
@@ -218,11 +225,11 @@ export type Committed<E extends Schemas, K extends keyof E> = Message<E, K> &
  *   })
  * ```
  */
-export type Snapshot<S extends Schema, E extends Schemas> = {
+export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
   /** Current state data */
-  readonly state: S;
+  readonly state: TState;
   /** Event that created this snapshot (undefined for initial state) */
-  readonly event?: Committed<E, keyof E>;
+  readonly event?: Committed<TEvents, keyof TEvents>;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
@@ -231,126 +238,131 @@ export type Snapshot<S extends Schema, E extends Schemas> = {
 
 /**
  * An invariant is a condition that must always hold true for a state.
- * @template S - State schema.
+ * @template TState - State schema.
+ * @template TActor - Actor type extending base Actor.
  */
-export type Invariant<S extends Schema> = {
+export type Invariant<TState extends Schema, TActor extends Actor = Actor> = {
   description: string;
-  valid: (state: Readonly<S>, actor?: Actor) => boolean;
+  valid: (state: Readonly<TState>, actor?: TActor) => boolean;
 };
 
 /**
  * Represents an emitted event tuple from an action handler.
- * @template E - Event schemas.
+ * @template TEvents - Event schemas.
  */
-export type Emitted<E extends Schemas> = {
-  [K in keyof E]: readonly [K, Readonly<E[K]>];
-}[keyof E];
+export type Emitted<TEvents extends Schemas> = {
+  [TKey in keyof TEvents]: readonly [TKey, Readonly<TEvents[TKey]>];
+}[keyof TEvents];
 
 /**
  * Bundles the Zod types for state, events, and actions.
- * @template S - State schema.
- * @template E - Event schemas.
- * @template A - Action schemas.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
+ * @template TActions - Action schemas.
  */
 export type StateSchemas<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
 > = {
-  readonly events: ZodTypes<E>;
-  readonly actions: ZodTypes<A>;
-  readonly state: ZodType<S>;
+  readonly events: ZodTypes<TEvents>;
+  readonly actions: ZodTypes<TActions>;
+  readonly state: ZodType<TState>;
 };
 
 /**
  * Handles patching state in response to a committed event.
- * @template S - State schema.
- * @template E - Event schemas.
- * @template K - Event name.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
+ * @template TKey - Event name.
  */
 export type PatchHandler<
-  S extends Schema,
-  E extends Schemas,
-  K extends keyof E,
-> = (event: Committed<E, K>, state: Readonly<S>) => Readonly<Patch<S>>;
+  TState extends Schema,
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+> = (
+  event: Committed<TEvents, TKey>,
+  state: Readonly<TState>
+) => Readonly<Patch<TState>>;
 
 /**
  * Maps event names to their patch handlers.
- * @template S - State schema.
- * @template E - Event schemas.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
  */
-export type PatchHandlers<S extends Schema, E extends Schemas> = {
-  [K in keyof E]: PatchHandler<S, E, K>;
+export type PatchHandlers<TState extends Schema, TEvents extends Schemas> = {
+  [TKey in keyof TEvents]: PatchHandler<TState, TEvents, TKey>;
 };
 
 /**
  * Handles an action, producing one or more emitted events.
- * @template S - State schema.
- * @template E - Event schemas.
- * @template A - Action schemas.
- * @template K - Action name.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
+ * @template TActions - Action schemas.
+ * @template TKey - Action name.
  */
 export type ActionHandler<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  K extends keyof A,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TKey extends keyof TActions,
 > = (
-  action: Readonly<A[K]>,
-  snapshot: Readonly<Snapshot<S, E>>,
+  action: Readonly<TActions[TKey]>,
+  snapshot: Readonly<Snapshot<TState, TEvents>>,
   target: Target
-) => Emitted<E> | Emitted<E>[] | undefined;
+) => Emitted<TEvents> | Emitted<TEvents>[] | undefined;
 
 /**
  * Maps action names to their handlers.
- * @template S - State schema.
- * @template E - Event schemas.
- * @template A - Action schemas.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
+ * @template TActions - Action schemas.
  */
 export type ActionHandlers<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
 > = {
-  [K in keyof A]: ActionHandler<S, E, A, K>;
+  [TKey in keyof TActions]: ActionHandler<TState, TEvents, TActions, TKey>;
 };
 
 /**
  * Maps action names to invariants that must hold after the action.
- * @template S - State schema.
- * @template A - Action schemas.
+ * @template TState - State schema.
+ * @template TActions - Action schemas.
  */
-export type GivenHandlers<S extends Schema, A extends Schemas> = {
-  [K in keyof A]?: Invariant<S>[];
+export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
+  [TKey in keyof TActions]?: Invariant<TState>[];
 };
 
 /**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
- * @template S - State schema.
- * @template E - Event schemas.
- * @template A - Action schemas.
+ * @template TState - State schema.
+ * @template TEvents - Event schemas.
+ * @template TActions - Action schemas.
+ * @template TName - State name literal.
  */
 export type State<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  N extends string = string,
-> = StateSchemas<S, E, A> & {
-  name: N;
-  init: () => Readonly<S>;
-  patch: PatchHandlers<S, E>;
-  on: ActionHandlers<S, E, A>;
-  given?: GivenHandlers<S, A>;
-  snap?: (snapshot: Snapshot<S, E>) => boolean;
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TName extends string = string,
+> = StateSchemas<TState, TEvents, TActions> & {
+  name: TName;
+  init: () => Readonly<TState>;
+  patch: PatchHandlers<TState, TEvents>;
+  on: ActionHandlers<TState, TEvents, TActions>;
+  given?: GivenHandlers<TState, TActions>;
+  snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
 };
 
 /**
  * Extracts the raw action schemas from a State definition.
  *
- * Use this to recover the `A` type parameter from a built State object,
+ * Use this to recover the `TActions` type parameter from a built State object,
  * enabling construction of typed dispatchers without circular imports.
  *
- * @template T - A State object (or any object with `readonly actions: ZodTypes<A>`)
+ * @template T - A State object (or any object with `readonly actions: ZodTypes<TActions>`)
  *
  * @example
  * ```typescript
@@ -373,7 +385,8 @@ export type InferActions<
  * Construct with {@link InferActions} to avoid circular imports between
  * slice files and the bootstrap module.
  *
- * @template A - Action schemas (maps action names to payload types)
+ * @template TActions - Action schemas (maps action names to payload types)
+ * @template TActor - Actor type extending base Actor
  *
  * @example
  * ```typescript
@@ -389,11 +402,14 @@ export type InferActions<
  * }
  * ```
  */
-export interface Dispatcher<A extends Schemas> {
-  do<K extends keyof A & string>(
-    action: K,
-    target: Target,
-    payload: Readonly<A[K]>,
+export interface Dispatcher<
+  TActions extends Schemas,
+  TActor extends Actor = Actor,
+> {
+  do<TKey extends keyof TActions & string>(
+    action: TKey,
+    target: Target<TActor>,
+    payload: Readonly<TActions[TKey]>,
     reactingTo?: Committed<Schemas, string>,
     skipValidation?: boolean
   ): Promise<Snapshot<any, any>[]>;

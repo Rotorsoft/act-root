@@ -24,28 +24,28 @@ import type {
  * A self-contained projection grouping read-model update handlers.
  * Projections are composed into an Act orchestrator via `act().withProjection(projection)`.
  *
- * @template E - Event schemas handled by this projection
+ * @template TEvents - Event schemas handled by this projection
  */
-export type Projection<E extends Schemas> = {
+export type Projection<TEvents extends Schemas> = {
   readonly _tag: "Projection";
-  readonly events: EventRegister<E>;
+  readonly events: EventRegister<TEvents>;
 };
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
-type EventEntry<K extends string = string, D extends Schema = Schema> = {
-  [P in K]: ZodType<D>;
+type EventEntry<TKey extends string = string, TData extends Schema = Schema> = {
+  [P in TKey]: ZodType<TData>;
 };
 
 /** Infer the handler-result type after registering one event. */
 type DoResult<
-  E extends Schemas,
-  K extends string,
-  D extends Schema,
-> = ProjectionBuilder<E & { [P in K]: D }> & {
+  TEvents extends Schemas,
+  TKey extends string,
+  TData extends Schema,
+> = ProjectionBuilder<TEvents & { [P in TKey]: TData }> & {
   to: (
-    resolver: ReactionResolver<E & { [P in K]: D }, K> | string
-  ) => ProjectionBuilder<E & { [P in K]: D }>;
-  void: () => ProjectionBuilder<E & { [P in K]: D }>;
+    resolver: ReactionResolver<TEvents & { [P in TKey]: TData }, TKey> | string
+  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }>;
+  void: () => ProjectionBuilder<TEvents & { [P in TKey]: TData }>;
 };
 
 /**
@@ -59,9 +59,9 @@ type DoResult<
  * handlers inherit that resolver. Per-handler `.to()` or `.void()` can
  * still override it.
  *
- * @template E - Event schemas
+ * @template TEvents - Event schemas
  */
-export type ProjectionBuilder<E extends Schemas> = {
+export type ProjectionBuilder<TEvents extends Schemas> = {
   /**
    * Begins defining a projection handler for a specific event.
    *
@@ -69,24 +69,24 @@ export type ProjectionBuilder<E extends Schemas> = {
    * when the variable name matches the event name. The key becomes the
    * event name, the value the Zod schema.
    */
-  on: <K extends string, D extends Schema>(
-    entry: EventEntry<K, D>
+  on: <TKey extends string, TData extends Schema>(
+    entry: EventEntry<TKey, TData>
   ) => {
     do: (
       handler: (
-        event: Committed<E & { [P in K]: D }, K>,
+        event: Committed<TEvents & { [P in TKey]: TData }, TKey>,
         stream: string
       ) => Promise<void>
-    ) => DoResult<E, K, D>;
+    ) => DoResult<TEvents, TKey, TData>;
   };
   /**
    * Builds and returns the Projection data structure.
    */
-  build: () => Projection<E>;
+  build: () => Projection<TEvents>;
   /**
    * The registered event schemas and their reaction maps.
    */
-  readonly events: EventRegister<E>;
+  readonly events: EventRegister<TEvents>;
 };
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
@@ -133,19 +133,21 @@ export type ProjectionBuilder<E extends Schemas> = {
  * @see {@link ProjectionBuilder} for builder methods
  * @see {@link Projection} for the output type
  */
-export function projection<E extends Schemas = {}>(
+export function projection<TEvents extends Schemas = {}>(
   target?: string,
-  events: EventRegister<E> = {} as EventRegister<E>
-): ProjectionBuilder<E> {
+  events: EventRegister<TEvents> = {} as EventRegister<TEvents>
+): ProjectionBuilder<TEvents> {
   const defaultResolver: { target: string } | undefined = target
     ? { target }
     : undefined;
 
-  const builder: ProjectionBuilder<E> = {
-    on: <K extends string, D extends Schema>(entry: EventEntry<K, D>) => {
+  const builder: ProjectionBuilder<TEvents> = {
+    on: <TKey extends string, TData extends Schema>(
+      entry: EventEntry<TKey, TData>
+    ) => {
       const keys = Object.keys(entry);
       if (keys.length !== 1) throw new Error(".on() requires exactly one key");
-      const event = keys[0] as K;
+      const event = keys[0] as TKey;
       const schema = entry[event];
 
       // Register the event schema if not already present
@@ -159,12 +161,15 @@ export function projection<E extends Schemas = {}>(
       return {
         do: (
           handler: (
-            event: Committed<E & { [P in K]: D }, K>,
+            event: Committed<TEvents & { [P in TKey]: TData }, TKey>,
             stream: string
           ) => Promise<void>
         ) => {
-          const reaction: Reaction<E & { [P in K]: D }, K> = {
-            handler: handler as ReactionHandler<E & { [P in K]: D }, K>,
+          const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
+            handler: handler as ReactionHandler<
+              TEvents & { [P in TKey]: TData },
+              TKey
+            >,
             resolver: defaultResolver ?? _this_,
             options: {
               blockOnError: true,
@@ -175,13 +180,17 @@ export function projection<E extends Schemas = {}>(
           const name = handler.name || `${event}_${register.reactions.size}`;
           register.reactions.set(name, reaction);
 
-          const nextBuilder = projection<E & { [P in K]: D }>(
+          const nextBuilder = projection<TEvents & { [P in TKey]: TData }>(
             target,
-            events as EventRegister<E & { [P in K]: D }>
+            events as EventRegister<TEvents & { [P in TKey]: TData }>
           );
           return {
             ...nextBuilder,
-            to(resolver: ReactionResolver<E & { [P in K]: D }, K> | string) {
+            to(
+              resolver:
+                | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
+                | string
+            ) {
               register.reactions.set(name, {
                 ...reaction,
                 resolver:
