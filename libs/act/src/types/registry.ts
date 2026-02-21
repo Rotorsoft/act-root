@@ -12,40 +12,47 @@ import type { Reaction } from "./reaction.js";
 /**
  * Reactions register
  */
-export type ReactionsRegister<E extends Schemas, K extends keyof E> = {
-  schema: ZodType<E[K]>;
-  reactions: Map<string, Reaction<E, K>>;
+export type ReactionsRegister<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+> = {
+  schema: ZodType<TEvents[TKey]>;
+  reactions: Map<string, Reaction<TEvents, TKey>>;
 };
 
 /**
  * Maps event names to their schema and registered reactions.
- * @template E - Event schemas.
+ * @template TEvents - Event schemas.
  */
-export type EventRegister<E extends Schemas> = {
-  [K in keyof E]: ReactionsRegister<E, K>;
+export type EventRegister<TEvents extends Schemas> = {
+  [TKey in keyof TEvents]: ReactionsRegister<TEvents, TKey>;
 };
 
 /**
  * Maps action names to their schema definitions.
- * @template A - Action schemas.
+ * @template TSchemaReg - Schema register for actions.
  */
-export type SchemaRegister<A> = { [K in keyof A]: Schema };
+export type SchemaRegister<TSchemaReg> = {
+  [TKey in keyof TSchemaReg]: Schema;
+};
 
 /**
  * Registry of all actions and events for a domain.
- * @template S - State schemas.
- * @template E - Event schemas.
- * @template A - Action schemas.
+ * @template TSchemaReg - State schemas.
+ * @template TEvents - Event schemas.
+ * @template TActions - Action schemas.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  */
 export type Registry<
-  S extends SchemaRegister<A>,
-  E extends Schemas,
-  A extends Schemas,
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
 > = {
-  readonly actions: { [K in keyof A]: State<S[K], E, A> };
-  readonly events: EventRegister<E>;
+  readonly actions: {
+    [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
+  };
+  readonly events: EventRegister<TEvents>;
 };
 
 /**

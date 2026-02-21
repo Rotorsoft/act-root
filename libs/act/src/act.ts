@@ -4,6 +4,7 @@ import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, logger, store } from "./ports.js";
 import type {
+  Actor,
   Committed,
   Drain,
   DrainOptions,
@@ -41,15 +42,18 @@ const tracer = build_tracer(config().logLevel);
  * - Register event listeners with `.on("committed", ...)` and `.on("acked", ...)` to react to lifecycle events.
  * - Use `.query()` to analyze event streams for analytics or debugging.
  *
- * @template S SchemaRegister for state
- * @template E Schemas for events
- * @template A Schemas for actions
+ * @template TSchemaReg SchemaRegister for state
+ * @template TEvents Schemas for events
+ * @template TActions Schemas for actions
+ * @template TStateMap Map of state names to state schemas
+ * @template TActor Actor type extending base Actor
  */
 export class Act<
-  S extends SchemaRegister<A>,
-  E extends Schemas,
-  A extends Schemas,
-  M extends Record<string, Schema> = Record<string, never>,
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TStateMap extends Record<string, Schema> = Record<string, never>,
+  TActor extends Actor = Actor,
 > {
   private _emitter = new EventEmitter();
   private _drain_locked = false;
@@ -63,7 +67,7 @@ export class Act<
    * @param args The event payload
    * @returns true if the event had listeners, false otherwise
    */
-  emit(event: "committed", args: Snapshot<S, E>[]): boolean;
+  emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
   emit(event: "acked", args: Lease[]): boolean;
   emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
   emit(event: string, args: any): boolean {
@@ -77,7 +81,10 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  on(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
+  on(
+    event: "committed",
+    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
+  ): this;
   on(event: "acked", listener: (args: Lease[]) => void): this;
   on(
     event: "blocked",
@@ -95,7 +102,10 @@ export class Act<
    * @param listener The callback function
    * @returns this (for chaining)
    */
-  off(event: "committed", listener: (args: Snapshot<S, E>[]) => void): this;
+  off(
+    event: "committed",
+    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
+  ): this;
   off(event: "acked", listener: (args: Lease[]) => void): this;
   off(
     event: "blocked",
@@ -113,7 +123,7 @@ export class Act<
    * @param states Map of state names to their (potentially merged) state definitions
    */
   constructor(
-    public readonly registry: Registry<S, E, A>,
+    public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map()
   ) {
     dispose(() => {
@@ -134,7 +144,7 @@ export class Act<
    * 5. Applies events to create new state
    * 6. Commits events to the store with optimistic concurrency control
    *
-   * @template K - Action name from registered actions
+   * @template TKey - Action name from registered actions
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
@@ -206,22 +216,22 @@ export class Act<
    * @see {@link Snapshot} for return value structure
    * @see {@link ValidationError}, {@link InvariantError}, {@link ConcurrencyError}
    */
-  async do<K extends keyof A>(
-    action: K,
-    target: Target,
-    payload: Readonly<A[K]>,
-    reactingTo?: Committed<E, string & keyof E>,
+  async do<TKey extends keyof TActions>(
+    action: TKey,
+    target: Target<TActor>,
+    payload: Readonly<TActions[TKey]>,
+    reactingTo?: Committed<TEvents, string & keyof TEvents>,
     skipValidation = false
   ) {
     const snapshots = await es.action(
       this.registry.actions[action],
       action,
-      target,
+      target as Target,
       payload,
       reactingTo,
       skipValidation
     );
-    this.emit("committed", snapshots as Snapshot<S, E>[]);
+    this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
     return snapshots;
   }
 
@@ -235,9 +245,9 @@ export class Act<
    * using a string, the merged state (from partial states registered via
    * `.withState()`) is resolved by name.
    *
-   * @template SX - State schema type
-   * @template EX - Event schemas type
-   * @template AX - Action schemas type
+   * @template TNewState - State schema type
+   * @template TNewEvents - Event schemas type
+   * @template TNewActions - Action schemas type
    * @param state - The state definition or state name to load
    * @param stream - The stream ID (state instance identifier)
    * @param callback - Optional callback invoked with the loaded snapshot
@@ -266,18 +276,22 @@ export class Act<
    *
    * @see {@link Snapshot} for snapshot structure
    */
-  async load<SX extends Schema, EX extends Schemas, AX extends Schemas>(
-    state: State<SX, EX, AX>,
+  async load<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
-    callback?: (snapshot: Snapshot<SX, EX>) => void
-  ): Promise<Snapshot<SX, EX>>;
-  async load<K extends keyof M & string>(
-    name: K,
+    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void
+  ): Promise<Snapshot<TNewState, TNewEvents>>;
+  async load<TKey extends keyof TStateMap & string>(
+    name: TKey,
     stream: string,
-    callback?: (snapshot: Snapshot<M[K], E>) => void
-  ): Promise<Snapshot<M[K], E>>;
-  async load<SX extends Schema>(
-    stateOrName: State<SX, any, any> | string,
+    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void
+  ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
+  async load<TNewState extends Schema>(
+    stateOrName: State<TNewState, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>> {
@@ -345,15 +359,15 @@ export class Act<
    */
   async query(
     query: Query,
-    callback?: (event: Committed<E, keyof E>) => void
+    callback?: (event: Committed<TEvents, keyof TEvents>) => void
   ): Promise<{
-    first?: Committed<E, keyof E>;
-    last?: Committed<E, keyof E>;
+    first?: Committed<TEvents, keyof TEvents>;
+    last?: Committed<TEvents, keyof TEvents>;
     count: number;
   }> {
-    let first: Committed<E, keyof E> | undefined = undefined,
-      last: Committed<E, keyof E> | undefined = undefined;
-    const count = await store().query<E>((e) => {
+    let first: Committed<TEvents, keyof TEvents> | undefined = undefined,
+      last: Committed<TEvents, keyof TEvents> | undefined = undefined;
+    const count = await store().query<TEvents>((e) => {
       !first && (first = e);
       last = e;
       callback && callback(e);
@@ -387,9 +401,11 @@ export class Act<
    *
    * @see {@link query} for large result sets
    */
-  async query_array(query: Query): Promise<Committed<E, keyof E>[]> {
-    const events: Committed<E, keyof E>[] = [];
-    await store().query<E>((e) => events.push(e), query);
+  async query_array(
+    query: Query
+  ): Promise<Committed<TEvents, keyof TEvents>[]> {
+    const events: Committed<TEvents, keyof TEvents>[] = [];
+    await store().query<TEvents>((e) => events.push(e), query);
     return events;
   }
 
@@ -406,7 +422,7 @@ export class Act<
    */
   private async handle(
     lease: Lease,
-    payloads: ReactionPayload<E>[]
+    payloads: ReactionPayload<TEvents>[]
   ): Promise<{
     readonly lease: Lease;
     readonly handled: number;
@@ -516,7 +532,7 @@ export class Act<
     streamLimit = 10,
     eventLimit = 10,
     leaseMillis = 10_000,
-  }: DrainOptions = {}): Promise<Drain<E>> {
+  }: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
@@ -538,7 +554,7 @@ export class Act<
 
           const leases = new Map<
             string,
-            { lease: Lease; payloads: ReactionPayload<E>[] }
+            { lease: Lease; payloads: ReactionPayload<TEvents>[] }
           >();
 
           // compute fetch window max event id
@@ -569,7 +585,7 @@ export class Act<
                 retry: 0,
                 lagging,
               },
-              payloads: payloads as ReactionPayload<E>[],
+              payloads: payloads as ReactionPayload<TEvents>[],
             });
           });
 
@@ -679,9 +695,9 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ leased: Lease[]; last_id: number }> {
-    const correlated = new Map<string, ReactionPayload<E>[]>();
+    const correlated = new Map<string, ReactionPayload<TEvents>[]>();
     let last_id = query.after || -1;
-    await store().query<E>((event) => {
+    await store().query<TEvents>((event) => {
       last_id = event.id;
       const register = this.registry.events[event.name];
       // skip events with no registered reactions

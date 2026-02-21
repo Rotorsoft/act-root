@@ -30,16 +30,16 @@ import { patch, validate } from "./utils.js";
  *
  * Snapshots are used to optimize state reconstruction for aggregates with long event streams.
  *
- * @template S The type of state
- * @template E The type of events
+ * @template TState The type of state
+ * @template TEvents The type of events
  * @param snapshot The snapshot to save
  * @returns Promise that resolves when the snapshot is saved
  *
  * @example
  * await snap(snapshot);
  */
-export async function snap<S extends Schema, E extends Schemas>(
-  snapshot: Snapshot<S, E>
+export async function snap<TState extends Schema, TEvents extends Schemas>(
+  snapshot: Snapshot<TState, TEvents>
 ): Promise<void> {
   try {
     const { id, stream, name, meta, version } = snapshot.event!;
@@ -61,9 +61,9 @@ export async function snap<S extends Schema, E extends Schemas>(
 /**
  * Loads a snapshot of the state from the store by replaying events and applying patches.
  *
- * @template S The type of state
- * @template E The type of events
- * @template A The type of actions
+ * @template TState The type of state
+ * @template TEvents The type of events
+ * @template TActions The type of actions
  * @param me The state machine definition
  * @param stream The stream (instance) to load
  * @param callback (Optional) Callback to receive the loaded snapshot as it is built
@@ -73,23 +73,23 @@ export async function snap<S extends Schema, E extends Schemas>(
  * const snapshot = await load(Counter, "counter1");
  */
 export async function load<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
 >(
-  me: State<S, E, A>,
+  me: State<TState, TEvents, TActions>,
   stream: string,
-  callback?: (snapshot: Snapshot<S, E>) => void
-): Promise<Snapshot<S, E>> {
-  let state = me.init ? me.init() : ({} as S);
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+): Promise<Snapshot<TState, TEvents>> {
+  let state = me.init ? me.init() : ({} as TState);
   let patches = 0;
   let snaps = 0;
-  let event: Committed<E, string> | undefined;
+  let event: Committed<TEvents, string> | undefined;
   await store().query(
     (e) => {
-      event = e as Committed<E, string>;
+      event = e as Committed<TEvents, string>;
       if (e.name === SNAP_EVENT) {
-        state = e.data as S;
+        state = e.data as TState;
         snaps++;
         patches = 0;
       } else if (me.patch[e.name]) {
@@ -109,10 +109,10 @@ export async function load<
  *
  * This function validates the action, applies business invariants, emits events, and commits them to the event store.
  *
- * @template S The type of state
- * @template E The type of events
- * @template A The type of actionSchemas
- * @template K The type of action to execute
+ * @template TState The type of state
+ * @template TEvents The type of events
+ * @template TActions The type of actionSchemas
+ * @template TKey The type of action to execute
  * @param me The state machine definition
  * @param action The action to execute
  * @param target The target (stream, actor, etc.)
@@ -125,18 +125,18 @@ export async function load<
  * const snapshot = await action(Counter, "increment", { stream: "counter1", actor }, { by: 1 });
  */
 export async function action<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  K extends keyof A,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TKey extends keyof TActions,
 >(
-  me: State<S, E, A>,
-  action: K,
+  me: State<TState, TEvents, TActions>,
+  action: TKey,
   target: Target,
-  payload: Readonly<A[K]>,
+  payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false
-): Promise<Snapshot<S, E>[]> {
+): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
@@ -175,8 +175,8 @@ export async function action<
   }
 
   const tuples = Array.isArray(result[0])
-    ? (result as Emitted<E>[]) // array of tuples
-    : ([result] as Emitted<E>[]); // single tuple
+    ? (result as Emitted<TEvents>[]) // array of tuples
+    : ([result] as Emitted<TEvents>[]); // single tuple
 
   const emitted = tuples.map(([name, data]) => ({
     name,

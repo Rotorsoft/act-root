@@ -54,10 +54,10 @@ export function mergeSchemas(
  * Merges two init functions by spreading both results together.
  * Each partial only provides its own defaults.
  */
-export function mergeInits<S extends Schema>(
-  existing: () => Readonly<S>,
-  incoming: () => Readonly<S>
-): () => Readonly<S> {
+export function mergeInits<TState extends Schema>(
+  existing: () => Readonly<TState>,
+  incoming: () => Readonly<TState>
+): () => Readonly<TState> {
   return () => ({ ...existing(), ...incoming() });
 }
 

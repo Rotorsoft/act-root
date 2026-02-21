@@ -8,6 +8,7 @@
 import { _this_, _void_, registerState } from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 import type {
+  Actor,
   Committed,
   Dispatcher,
   EventRegister,
@@ -27,26 +28,30 @@ import type {
  * scoped reactions. Slices are composed into an Act orchestrator via
  * `act().withSlice(slice)`.
  *
- * @template S - Schema register for states
- * @template E - Event schemas from this slice's states
- * @template A - Action schemas from this slice's states
- * @template M - Map of state names to state schemas
+ * @template TSchemaReg - Schema register for states
+ * @template TEvents - Event schemas from this slice's states
+ * @template TActions - Action schemas from this slice's states
+ * @template TStateMap - Map of state names to state schemas
+ * @template TActor - Actor type extending base Actor
  */
 export type Slice<
-  S extends SchemaRegister<A>,
-  E extends Schemas,
-  A extends Schemas,
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  M extends Record<string, Schema> = {},
+  TStateMap extends Record<string, Schema> = {},
+  TActor extends Actor = Actor,
 > = {
   readonly _tag: "Slice";
   readonly states: Map<string, State<any, any, any>>;
-  readonly events: EventRegister<E>;
+  readonly events: EventRegister<TEvents>;
   readonly projections: ReadonlyArray<Projection<any>>;
   /** @internal phantom field for type-level state schema tracking */
-  readonly _S?: S;
+  readonly _S?: TSchemaReg;
   /** @internal phantom field for type-level state name tracking */
-  readonly _M?: M;
+  readonly _M?: TStateMap;
+  /** @internal phantom field for type-level actor tracking */
+  readonly _TActor?: TActor;
 };
 
 /**
@@ -55,17 +60,19 @@ export type Slice<
  * Provides a chainable API for registering states and projections,
  * and defining reactions scoped to the slice's own events.
  *
- * @template S - Schema register for states
- * @template E - Event schemas
- * @template A - Action schemas
- * @template M - Map of state names to state schemas
+ * @template TSchemaReg - Schema register for states
+ * @template TEvents - Event schemas
+ * @template TActions - Action schemas
+ * @template TStateMap - Map of state names to state schemas
+ * @template TActor - Actor type extending base Actor
  */
 export type SliceBuilder<
-  S extends SchemaRegister<A>,
-  E extends Schemas,
-  A extends Schemas,
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  M extends Record<string, Schema> = {},
+  TStateMap extends Record<string, Schema> = {},
+  TActor extends Actor = Actor,
 > = {
   /**
    * Registers a state definition with the slice.
@@ -75,17 +82,18 @@ export type SliceBuilder<
    * are handled automatically at composition time.
    */
   withState: <
-    SX extends Schema,
-    EX extends Schemas,
-    AX extends Schemas,
-    NX extends string = string,
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+    TNewName extends string = string,
   >(
-    state: State<SX, EX, AX, NX>
+    state: State<TNewState, TNewEvents, TNewActions, TNewName>
   ) => SliceBuilder<
-    S & { [K in keyof AX]: SX },
-    E & EX,
-    A & AX,
-    M & { [K in NX]: SX }
+    TSchemaReg & { [K in keyof TNewActions]: TNewState },
+    TEvents & TNewEvents,
+    TActions & TNewActions,
+    TStateMap & { [K in TNewName]: TNewState },
+    TActor
   >;
   /**
    * Embeds a built Projection within this slice. The projection's events
@@ -93,39 +101,45 @@ export type SliceBuilder<
    * `.withState()`. Projection handlers preserve their `(event, stream)`
    * signature and do not receive a Dispatcher.
    */
-  withProjection: <EP extends Schemas>(
-    projection: [Exclude<keyof EP, keyof E>] extends [never]
-      ? Projection<EP>
+  withProjection: <TNewEvents extends Schemas>(
+    projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
+      ? Projection<TNewEvents>
       : never
-  ) => SliceBuilder<S, E, A, M>;
+  ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
   /**
    * Begins defining a reaction scoped to this slice's events.
    */
-  on: <K extends keyof E>(
-    event: K
+  on: <TKey extends keyof TEvents>(
+    event: TKey
   ) => {
     do: (
       handler: (
-        event: Committed<E, K>,
+        event: Committed<TEvents, TKey>,
         stream: string,
-        app: Dispatcher<A>
-      ) => Promise<Snapshot<Schema, E> | void>,
+        app: Dispatcher<TActions, TActor>
+      ) => Promise<Snapshot<Schema, TEvents> | void>,
       options?: Partial<ReactionOptions>
-    ) => SliceBuilder<S, E, A, M> & {
+    ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> & {
       to: (
-        resolver: ReactionResolver<E, K> | string
-      ) => SliceBuilder<S, E, A, M>;
-      void: () => SliceBuilder<S, E, A, M>;
+        resolver: ReactionResolver<TEvents, TKey> | string
+      ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+      void: () => SliceBuilder<
+        TSchemaReg,
+        TEvents,
+        TActions,
+        TStateMap,
+        TActor
+      >;
     };
   };
   /**
    * Builds and returns the Slice data structure.
    */
-  build: () => Slice<S, E, A, M>;
+  build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
   /**
    * The registered event schemas and their reaction maps.
    */
-  readonly events: EventRegister<E>;
+  readonly events: EventRegister<TEvents>;
 };
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
@@ -165,53 +179,68 @@ export type SliceBuilder<
  */
 export function slice<
   // @ts-expect-error empty schema
-  S extends SchemaRegister<A> = {},
-  E extends Schemas = {},
-  A extends Schemas = {},
-  M extends Record<string, Schema> = {},
+  TSchemaReg extends SchemaRegister<TActions> = {},
+  TEvents extends Schemas = {},
+  TActions extends Schemas = {},
+  TStateMap extends Record<string, Schema> = {},
+  TActor extends Actor = Actor,
 >(
   states: Map<string, State<any, any, any>> = new Map(),
   actions: Record<string, any> = {},
-  events: EventRegister<E> = {} as EventRegister<E>,
+  events: EventRegister<TEvents> = {} as EventRegister<TEvents>,
   projections: Projection<any>[] = []
-): SliceBuilder<S, E, A, M> {
-  const builder: SliceBuilder<S, E, A, M> = {
+): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
+  const builder: SliceBuilder<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    TStateMap,
+    TActor
+  > = {
     withState: <
-      SX extends Schema,
-      EX extends Schemas,
-      AX extends Schemas,
-      NX extends string = string,
+      TNewState extends Schema,
+      TNewEvents extends Schemas,
+      TNewActions extends Schemas,
+      TNewName extends string = string,
     >(
-      state: State<SX, EX, AX, NX>
+      state: State<TNewState, TNewEvents, TNewActions, TNewName>
     ) => {
       registerState(state, states, actions, events as Record<string, unknown>);
       return slice<
-        S & { [K in keyof AX]: SX },
-        E & EX,
-        A & AX,
-        M & { [K in NX]: SX }
+        TSchemaReg & { [K in keyof TNewActions]: TNewState },
+        TEvents & TNewEvents,
+        TActions & TNewActions,
+        TStateMap & { [K in TNewName]: TNewState },
+        TActor
       >(
         states,
         actions,
-        events as unknown as EventRegister<E & EX>,
+        events as unknown as EventRegister<TEvents & TNewEvents>,
         projections
       );
     },
-    withProjection: <EP extends Schemas>(proj: Projection<EP>) => {
+    withProjection: <TNewEvents extends Schemas>(
+      proj: Projection<TNewEvents>
+    ) => {
       projections.push(proj);
-      return slice<S, E, A, M>(states, actions, events, projections);
+      return slice<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
+        states,
+        actions,
+        events,
+        projections
+      );
     },
-    on: <K extends keyof E>(event: K) => ({
+    on: <TKey extends keyof TEvents>(event: TKey) => ({
       do: (
         handler: (
-          event: Committed<E, K>,
+          event: Committed<TEvents, TKey>,
           stream: string,
-          app: Dispatcher<A>
-        ) => Promise<Snapshot<Schema, E> | void>,
+          app: Dispatcher<TActions, TActor>
+        ) => Promise<Snapshot<Schema, TEvents> | void>,
         options?: Partial<ReactionOptions>
       ) => {
-        const reaction: Reaction<E, K, A> = {
-          handler: handler as ReactionHandler<E, K, A>,
+        const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
+          handler: handler as ReactionHandler<TEvents, TKey, TActions, TActor>,
           resolver: _this_,
           options: {
             blockOnError: options?.blockOnError ?? true,
@@ -223,7 +252,7 @@ export function slice<
         events[event].reactions.set(name, reaction);
         return {
           ...builder,
-          to(resolver: ReactionResolver<E, K> | string) {
+          to(resolver: ReactionResolver<TEvents, TKey> | string) {
             events[event].reactions.set(name, {
               ...reaction,
               resolver:

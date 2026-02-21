@@ -24,12 +24,16 @@ import {
  * Provides a fluent API to configure the initial state, event types,
  * and event handlers (reducers) before moving to action configuration.
  *
- * @template S - State schema type
+ * @template TState - State schema type
+ * @template TName - State name literal type
  *
  * @see {@link state} for usage examples
  * @see {@link ActionBuilder} for action configuration
  */
-export type StateBuilder<S extends Schema, N extends string = string> = {
+export type StateBuilder<
+  TState extends Schema,
+  TName extends string = string,
+> = {
   /**
    * Defines the initial state for new state instances.
    *
@@ -49,14 +53,14 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
    * .init((data) => ({ ...data, createdAt: new Date() }))
    * ```
    */
-  init: (init: () => Readonly<S>) => {
+  init: (init: () => Readonly<TState>) => {
     /**
      * Declares the event types that this state can emit.
      *
      * Events represent facts that have happened - they should be named in past tense.
      * Each event is defined with a Zod schema for type safety and runtime validation.
      *
-     * @template E - Event schemas type
+     * @template TEvents - Event schemas type
      * @param events - Object mapping event names to Zod schemas
      * @returns An ActionBuilder (with optional `.patch()` to override specific reducers)
      *
@@ -69,10 +73,10 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
      * })
      * ```
      */
-    emits: <E extends Schemas>(
-      events: ZodTypes<E>
+    emits: <TEvents extends Schemas>(
+      events: ZodTypes<TEvents>
       // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
-    ) => ActionBuilder<S, E, {}, N> & {
+    ) => ActionBuilder<TState, TEvents, {}, TName> & {
       /**
        * Overrides specific event reducers. Events without a custom patch
        * default to passthrough: `({ data }) => data` (event data merges
@@ -94,21 +98,27 @@ export type StateBuilder<S extends Schema, N extends string = string> = {
        * ```
        */
       patch: (
-        patch: Partial<PatchHandlers<S, E>>
+        patch: Partial<PatchHandlers<TState, TEvents>>
         // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature that Record<string, never> would add, keeping keyof A precise
-      ) => ActionBuilder<S, E, {}, N>;
+      ) => ActionBuilder<TState, TEvents, {}, TName>;
     };
   };
 };
 
 /** Helper: a single-key record mapping a state name to its Zod schema. */
-type StateEntry<K extends string = string, S extends Schema = Schema> = {
-  [P in K]: ZodType<S>;
+type StateEntry<
+  TKey extends string = string,
+  TState extends Schema = Schema,
+> = {
+  [P in TKey]: ZodType<TState>;
 };
 
 /** Helper: a single-key record mapping an action name to its Zod schema. */
-type ActionEntry<K extends string = string, AX extends Schema = Schema> = {
-  [P in K]: ZodType<AX>;
+type ActionEntry<
+  TKey extends string = string,
+  TNewActions extends Schema = Schema,
+> = {
+  [P in TKey]: ZodType<TNewActions>;
 };
 
 /**
@@ -117,17 +127,18 @@ type ActionEntry<K extends string = string, AX extends Schema = Schema> = {
  * Actions represent user/system intents to modify state. Each action is validated
  * against a schema, can have business rule invariants, and must emit one or more events.
  *
- * @template S - State schema type
- * @template E - Event schemas type
- * @template A - Action schemas type
+ * @template TState - State schema type
+ * @template TEvents - Event schemas type
+ * @template TActions - Action schemas type
+ * @template TName - State name literal type
  *
  * @see {@link state} for complete usage examples
  */
 export type ActionBuilder<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  N extends string = string,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TName extends string = string,
 > = {
   /**
    * Defines an action (command) that can be executed on this state.
@@ -140,8 +151,8 @@ export type ActionBuilder<
    * when the variable name matches the action name. The key becomes the
    * action name, the value the Zod schema.
    *
-   * @template K - Action name (string literal type)
-   * @template AX - Action payload schema type
+   * @template TKey - Action name (string literal type)
+   * @template TNewActions - Action payload schema type
    * @param entry - Single-key record `{ ActionName: schema }`
    * @returns An object with `.given()` and `.emit()` for further configuration
    *
@@ -168,8 +179,8 @@ export type ActionBuilder<
    *   .emit((action) => ["TicketOpened", { title: action.title }])
    * ```
    */
-  on: <K extends string, AX extends Schema>(
-    entry: ActionEntry<K, AX>
+  on: <TKey extends string, TNewActions extends Schema>(
+    entry: ActionEntry<TKey, TNewActions>
   ) => {
     /**
      * Adds business rule invariants that must hold before the action can execute.
@@ -189,7 +200,7 @@ export type ActionBuilder<
      * ])
      * ```
      */
-    given: (rules: Invariant<S>[]) => {
+    given: (rules: Invariant<TState>[]) => {
       /**
        * Defines the action handler that emits events.
        *
@@ -217,8 +228,15 @@ export type ActionBuilder<
        * ```
        */
       emit: (
-        handler: ActionHandler<S, E, { [P in K]: AX }, K> | (keyof E & string)
-      ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
+        handler:
+          | ActionHandler<TState, TEvents, { [P in TKey]: TNewActions }, TKey>
+          | (keyof TEvents & string)
+      ) => ActionBuilder<
+        TState,
+        TEvents,
+        TActions & { [P in TKey]: TNewActions },
+        TName
+      >;
     };
     /**
      * Defines the action handler that emits events.
@@ -252,8 +270,15 @@ export type ActionBuilder<
      * ```
      */
     emit: (
-      handler: ActionHandler<S, E, { [P in K]: AX }, K> | (keyof E & string)
-    ) => ActionBuilder<S, E, A & { [P in K]: AX }, N>;
+      handler:
+        | ActionHandler<TState, TEvents, { [P in TKey]: TNewActions }, TKey>
+        | (keyof TEvents & string)
+    ) => ActionBuilder<
+      TState,
+      TEvents,
+      TActions & { [P in TKey]: TNewActions },
+      TName
+    >;
   };
   /**
    * Defines a snapshotting strategy to optimize state reconstruction.
@@ -287,8 +312,8 @@ export type ActionBuilder<
    * ```
    */
   snap: (
-    snap: (snapshot: Snapshot<S, E>) => boolean
-  ) => ActionBuilder<S, E, A, N>;
+    snap: (snapshot: Snapshot<TState, TEvents>) => boolean
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Finalizes and builds the state definition.
    *
@@ -305,10 +330,10 @@ export type ActionBuilder<
    *   .patch({ Incremented: ({ data }, state) => ({ count: state.count + data.amount }) })
    *   .on({ increment: z.object({ by: z.number() }) })
    *     .emit((action) => ["Incremented", { amount: action.by }])
-   *   .build(); // Returns State<S, E, A, N>
+   *   .build(); // Returns State<TState, TEvents, TActions, TName>
    * ```
    */
-  build: () => State<S, E, A, N>;
+  build: () => State<TState, TEvents, TActions, TName>;
 };
 
 /**
@@ -327,7 +352,7 @@ export type ActionBuilder<
  * 5. Business rules (invariants) via `.given()`
  * 6. Snapshotting strategy via `.snap()`
  *
- * @template S - Zod schema type defining the shape of the state
+ * @template TState - Zod schema type defining the shape of the state
  * @param entry - Single-key record mapping state name to Zod schema (e.g., `{ Counter: z.object({ count: z.number() }) }`)
  * @returns A StateBuilder instance for fluent API configuration
  *
@@ -428,27 +453,27 @@ export type ActionBuilder<
  * @see {@link https://rotorsoft.github.io/act-root/docs/intro | Getting Started Guide}
  * @see {@link https://rotorsoft.github.io/act-root/docs/examples/calculator | Calculator Example}
  */
-export function state<N extends string, S extends Schema>(
-  entry: StateEntry<N, S>
-): StateBuilder<S, N> {
+export function state<TName extends string, TState extends Schema>(
+  entry: StateEntry<TName, TState>
+): StateBuilder<TState, TName> {
   const keys = Object.keys(entry);
   if (keys.length !== 1) throw new Error("state() requires exactly one key");
-  const name = keys[0] as N;
-  const stateSchema = (entry as Record<string, ZodType<S>>)[name];
+  const name = keys[0] as TName;
+  const stateSchema = (entry as Record<string, ZodType<TState>>)[name];
   return {
-    init(init: () => Readonly<S>) {
+    init(init: () => Readonly<TState>) {
       return {
-        emits<E extends Schema>(events: ZodTypes<E>) {
+        emits<TEvents extends Schema>(events: ZodTypes<TEvents>) {
           // Default passthrough patches: event data merges into state
           const defaultPatch = Object.fromEntries(
             Object.keys(events).map((k) => [
               k,
               ({ data }: { data: any }) => data,
             ])
-          ) as unknown as PatchHandlers<S, E>;
+          ) as unknown as PatchHandlers<TState, TEvents>;
 
           // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
-          const builder = action_builder<S, E, {}, N>({
+          const builder = action_builder<TState, TEvents, {}, TName>({
             events,
             actions: {},
             state: stateSchema,
@@ -459,9 +484,9 @@ export function state<N extends string, S extends Schema>(
           });
 
           return Object.assign(builder, {
-            patch(customPatch: Partial<PatchHandlers<S, E>>) {
+            patch(customPatch: Partial<PatchHandlers<TState, TEvents>>) {
               // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
-              return action_builder<S, E, {}, N>({
+              return action_builder<TState, TEvents, {}, TName>({
                 events,
                 actions: {},
                 state: stateSchema,
@@ -479,33 +504,46 @@ export function state<N extends string, S extends Schema>(
 }
 
 function action_builder<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  N extends string = string,
->(state: State<S, E, A, N>): ActionBuilder<S, E, A, N> {
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TName extends string = string,
+>(
+  state: State<TState, TEvents, TActions, TName>
+): ActionBuilder<TState, TEvents, TActions, TName> {
   return {
-    on<K extends string, AX extends Schema>(entry: ActionEntry<K, AX>) {
+    on<TKey extends string, TNewActions extends Schema>(
+      entry: ActionEntry<TKey, TNewActions>
+    ) {
       const keys = Object.keys(entry);
       if (keys.length !== 1) throw new Error(".on() requires exactly one key");
-      const action = keys[0] as K;
+      const action = keys[0] as TKey;
       const schema = entry[action];
 
       if (action in state.actions)
         throw new Error(`Duplicate action "${action}"`);
 
-      type NewA = A & { [P in K]: AX };
-      const actions = { ...state.actions, [action]: schema } as ZodTypes<NewA>;
-      const on = { ...state.on } as ActionHandlers<S, E, NewA>;
-      const _given = { ...state.given } as GivenHandlers<S, NewA>;
+      type MergedActions = TActions & { [P in TKey]: TNewActions };
+      const actions = {
+        ...state.actions,
+        [action]: schema,
+      } as ZodTypes<MergedActions>;
+      const on = { ...state.on } as ActionHandlers<
+        TState,
+        TEvents,
+        MergedActions
+      >;
+      const _given = { ...state.given } as GivenHandlers<TState, MergedActions>;
 
-      function given(rules: Invariant<S>[]) {
+      function given(rules: Invariant<TState>[]) {
         _given[action] = rules;
         return { emit };
       }
 
       function emit(
-        handler: ActionHandler<S, E, NewA, K> | (keyof E & string)
+        handler:
+          | ActionHandler<TState, TEvents, MergedActions, TKey>
+          | (keyof TEvents & string)
       ) {
         if (typeof handler === "string") {
           const eventName = handler;
@@ -513,7 +551,7 @@ function action_builder<
         } else {
           on[action] = handler;
         }
-        return action_builder<S, E, NewA, N>({
+        return action_builder<TState, TEvents, MergedActions, TName>({
           ...state,
           actions,
           on,
@@ -524,11 +562,14 @@ function action_builder<
       return { given, emit };
     },
 
-    snap(snap: (snapshot: Snapshot<S, E>) => boolean) {
-      return action_builder<S, E, A, N>({ ...state, snap });
+    snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
+      return action_builder<TState, TEvents, TActions, TName>({
+        ...state,
+        snap,
+      });
     },
 
-    build(): State<S, E, A, N> {
+    build(): State<TState, TEvents, TActions, TName> {
       return state;
     },
   };

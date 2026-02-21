@@ -1,4 +1,11 @@
-import type { Message, Schema, Schemas, Snapshot, Target } from "./action.js";
+import type {
+  Actor,
+  Message,
+  Schema,
+  Schemas,
+  Snapshot,
+  Target,
+} from "./action.js";
 
 /**
  * @packageDocumentation
@@ -79,10 +86,11 @@ export class ValidationError extends Error {
  * This error provides complete context about what action was attempted and
  * why it was rejected.
  *
- * @template S - State schema type
- * @template E - Event schemas type
- * @template A - Action schemas type
- * @template K - Action name
+ * @template TState - State schema type
+ * @template TEvents - Event schemas type
+ * @template TActions - Action schemas type
+ * @template TKey - Action name
+ * @template TActor - Actor type extending base Actor
  *
  * @example Catching invariant violations
  * ```typescript
@@ -140,20 +148,21 @@ export class ValidationError extends Error {
  * @see {@link Invariant} for defining business rules
  */
 export class InvariantError<
-  S extends Schema,
-  E extends Schemas,
-  A extends Schemas,
-  K extends keyof A,
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TKey extends keyof TActions,
+  TActor extends Actor = Actor,
 > extends Error {
   constructor(
     /** The action that was attempted */
-    readonly action: K,
+    readonly action: TKey,
     /** The action payload that was provided */
-    readonly payload: Readonly<A[K]>,
+    readonly payload: Readonly<TActions[TKey]>,
     /** The target stream and actor context */
-    readonly target: Target,
+    readonly target: Target<TActor>,
     /** The current state snapshot when invariant was checked */
-    readonly snapshot: Snapshot<S, E>,
+    readonly snapshot: Snapshot<TState, TEvents>,
     /** Human-readable description of why the invariant failed */
     readonly description: string
   ) {
