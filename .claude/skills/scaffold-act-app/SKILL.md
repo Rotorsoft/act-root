@@ -20,7 +20,7 @@ Build a TypeScript monorepo application using `@rotorsoft/act` from a functional
 | Policy / Process Manager | Reaction (Slice or Act) | `.on("Event").do(handler)` |
 | Read Model / Query | Projection | `projection("target").on({ Event }).do(handler)` |
 | Bounded Context / Feature | Slice | `slice().withState(State)` |
-| System / Orchestrator | Act | `act().withState(State).withSlice(Slice).withProjection(Projection).build()` |
+| System / Orchestrator | Act | `act().withActor<T>().withSlice(Slice).build()` |
 
 **Event Modeling**: Blue = Action, Orange = Event + Patch, Green = Projection, Lilac = Reaction, Aggregate swim lane = State.
 
@@ -52,6 +52,7 @@ Specs use varied terminology. Map to framework concepts:
 | Screen, UI, View, Page | Client component | tRPC procedure + React component |
 | Bounded Context, Module, Feature, Slice | Slice | `slice().withState(State)` |
 | External Event, Integration Event | Reaction trigger | Event from another aggregate's stream |
+| User Role, Permission, Auth | Actor type + middleware | `withActor<T>()` + tRPC middleware |
 
 ### Field Type Mapping
 
@@ -109,25 +110,36 @@ my-app/
 ├── packages/
 │   ├── domain/           # Pure domain logic — zero infrastructure deps
 │   │   ├── src/
-│   │   │   ├── schemas.ts        # Zod schemas (actions, events, state)
+│   │   │   ├── schemas.ts        # Zod schemas (actions, events, state) + AppActor type
 │   │   │   ├── invariants.ts     # Business rules
-│   │   │   ├── <feature>.ts      # State + Slice per feature
-│   │   │   ├── projections.ts    # Read-model updaters
-│   │   │   ├── bootstrap.ts      # act().withState/withSlice/withProjection().build()
+│   │   │   ├── <feature>.ts      # State + Slice per feature (co-locate projection)
+│   │   │   ├── bootstrap.ts      # act().withActor<T>().withSlice().build()
 │   │   │   └── index.ts          # Barrel exports
 │   │   └── test/
 │   │       └── <feature>.spec.ts
 │   └── app/              # Server + Client in one package
 │       ├── src/
-│       │   ├── api/              # tRPC router + bootstrap
-│       │   │   ├── index.ts      # Router + AppRouter type
-│       │   │   └── builder.ts    # act bootstrap + drain wiring
+│       │   ├── api/              # tRPC router (decomposed)
+│       │   │   ├── index.ts      # Router composition + AppRouter type
+│       │   │   ├── trpc.ts       # tRPC init + middleware (public/authed/admin)
+│       │   │   ├── context.ts    # Request context + token verification
+│       │   │   ├── helpers.ts    # drainAll(), eventBus, serialization
+│       │   │   ├── auth.ts       # Token signing, password hashing
+│       │   │   ├── auth.routes.ts    # Auth endpoints (login, signup, OAuth)
+│       │   │   ├── domain.routes.ts  # Domain mutations + queries
+│       │   │   └── events.routes.ts  # SSE subscription
 │       │   ├── client/           # React + Vite frontend
-│       │   │   ├── App.tsx
-│       │   │   ├── main.tsx
-│       │   │   └── trpc.ts
+│       │   │   ├── App.tsx           # Root (providers, splitLink for SSE)
+│       │   │   ├── main.tsx          # Entry point
+│       │   │   ├── trpc.ts           # tRPC React client
+│       │   │   ├── types.ts          # Shared client types
+│       │   │   ├── data/             # Static catalog data
+│       │   │   ├── hooks/            # Custom hooks (useAuth, useCart, useEventStream)
+│       │   │   ├── components/       # UI components
+│       │   │   ├── views/            # Page-level views
+│       │   │   └── styles/           # CSS files
 │       │   ├── server.ts         # Production server (static + API)
-│       │   └── dev-server.ts     # Dev server (Vite middleware + API)
+│       │   └── dev-server.ts     # Dev server (seed data + API)
 │       ├── index.html
 │       ├── vite.config.ts
 │       ├── tsconfig.json         # References app + server configs
@@ -145,31 +157,42 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 
 ## Build Process
 
-### Step 1 — Define Schemas
+### Step 1 — Define Schemas & Actor Type
 
-All Zod schemas in `packages/domain/src/schemas.ts`.
+All Zod schemas and the custom actor type in `packages/domain/src/schemas.ts`.
 
 ```typescript
+import type { Actor } from "@rotorsoft/act";
 import { ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
+
+// === Custom Actor (extends base Actor with app-specific fields) ===
+export type AppActor = Actor & {
+  picture?: string;
+  role: "admin" | "user" | "system";
+};
+
+export const systemActor: AppActor = { id: "system", name: "System", role: "system" };
 
 // Actions
 export const CreateItem = z.object({ name: z.string().min(1) });
 export const CloseItem = ZodEmpty;
 
 // Events (immutable — never modify published schemas)
-export const ItemCreated = z.object({ name: z.string(), createdBy: z.uuid() });
-export const ItemClosed = z.object({ closedBy: z.uuid() });
+export const ItemCreated = z.object({ name: z.string(), createdBy: z.string() });
+export const ItemClosed = z.object({ closedBy: z.string() });
 
 // State
 export const ItemState = z.object({
   name: z.string(),
   status: z.string(),
-  createdBy: z.uuid(),
+  createdBy: z.string(),
 });
 ```
 
 Use `ZodEmpty` for empty payloads. Use `.and()` or `.extend()` for composition.
+
+**AppActor pattern**: Extend the base `Actor` type with domain-specific fields like `role` for authorization. Define a `systemActor` constant for reactions and seed scripts.
 
 ### Step 2 — Define Invariants
 
@@ -216,134 +239,139 @@ export const Item = state({ Item: ItemState })
 
 **Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act.
 
-### Step 4 — Define Slices
+### Step 4 — Define Slices with Co-located Projections
 
-Group states with reactions for vertical slice architecture:
+Group states with reactions and projections for vertical slice architecture. Each feature file exports both the State and Slice, co-locating the projection:
 
 ```typescript
-import { slice } from "@rotorsoft/act";
+import { projection, slice, state } from "@rotorsoft/act";
 import { Item } from "./item.js";
+import { ItemCreated, ItemClosed } from "./schemas.js";
 
+// === Projection co-located with slice ===
+const items = new Map<string, { name: string; status: string }>();
+
+export const ItemProjection = projection("items")
+  .on({ ItemCreated })
+  .do(async (event) => {
+    items.set(event.stream, { name: event.data.name, status: "Open" });
+  })
+  .on({ ItemClosed })
+  .do(async (event) => {
+    const item = items.get(event.stream);
+    if (item) item.status = "Closed";
+  })
+  .build();
+
+// === Query functions for the read model ===
+export function getItems() {
+  return Object.fromEntries(items.entries());
+}
+
+export function clearItems() {
+  items.clear();
+}
+
+// === Slice ===
 export const ItemSlice = slice()
   .withState(Item)
+  .withProjection(ItemProjection)
   .on("ItemCreated")  // plain string, NOT record shorthand
-  .do(async function notify(event, _stream, app) {
+  .do(async function notify(event, stream, app) {
     // app is a typed Dispatcher — use for cross-state actions
     // Pass event as 4th arg for causation tracking
-    await app.do("SomeAction", target, payload, event);
+    await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
   })
   .to((event) => ({ target: event.stream }))  // target stream for drain processing
   .build();
 ```
 
+**Co-location pattern**: Keep projection, query functions, and `clear*()` helpers together with the slice. This keeps the read model close to the events that build it.
+
+**Query functions**: Export plain functions (`getItems()`, `getItemsByActor()`) that query the in-memory projection state. These are called from tRPC query procedures.
+
+**clear*() helpers**: Export a `clear*()` function to reset projection state in tests.
+
 > **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §4.
 
-### Step 5 — Define Projections
+### Step 5 — Cross-Aggregate Projections
 
-Update read models from events:
+Projections can consume events from multiple aggregates. Include the additional state in the slice to make the events available:
 
 ```typescript
-import { projection } from "@rotorsoft/act";
-import { ItemCreated } from "./schemas.js";
+// inventory.ts — consumes events from both Inventory and Cart aggregates
+import { Cart } from "./cart.js";
 
-export const ItemProjection = projection("items")
-  .on({ ItemCreated })  // record shorthand (like state .on)
-  .do(async function created({ stream, data }) {
-    await db.insert(items).values({ id: stream, ...data });
-  })
+export const InventorySlice = slice()
+  .withState(Cart)        // needed to consume CartPublished events
+  .withState(Inventory)
+  .withProjection(InventoryProjection)
   .build();
 ```
 
-Projection handlers receive `(event, stream)` — no Dispatcher.
-
-### Step 6 — Bootstrap
+### Step 6 — Bootstrap with Generic Actor
 
 ```typescript
 import { act } from "@rotorsoft/act";
+import type { AppActor } from "./schemas.js";
 import { ItemSlice } from "./item.js";
-import { ItemProjection } from "./projections.js";
+import { InventorySlice } from "./inventory.js";
 
 export const app = act()
+  .withActor<AppActor>()    // generic actor type — enforces typed actors in app.do()
   .withSlice(ItemSlice)
-  .withProjection(ItemProjection)
+  .withSlice(InventorySlice)
   .build();
 ```
 
-> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. In production, use `app.on("committed", ...)` to trigger correlation and drain after each commit. See [act-api.md](act-api.md) §5.
+**`withActor<T>()`**: Sets the actor type for the entire app. All `app.do()` calls will require `target.actor` to satisfy `T`. Define `AppActor` extending `Actor` in schemas.ts.
+
+> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use the `scheduleDrain()` pattern for non-blocking, debounced processing that signals the UI only after all reactions complete. See [act-api.md](act-api.md) §6.
 
 ### Step 7 — tRPC API (in `packages/app/src/api/`)
 
-Bootstrap the Act app and wire drain-on-commit:
+Decompose the API into focused route modules. See [monorepo-template.md](monorepo-template.md) for complete file contents.
 
-```typescript
-// packages/app/src/api/builder.ts
-import { act } from "@rotorsoft/act";
-import { ItemSlice } from "@my-app/domain";
+| File | Purpose | Key pattern |
+|---|---|---|
+| `trpc.ts` | tRPC init + middleware | `publicProcedure`, `authedProcedure`, `adminProcedure` |
+| `context.ts` | Request context | Extract `AppActor` from Bearer token via `verifyToken()` |
+| `auth.ts` | Token + password crypto | HMAC-signed tokens, scrypt password hashing (zero deps) |
+| `helpers.ts` | `scheduleDrain()` + `eventBus` | Non-blocking, debounced drain; signals SSE after reactions complete |
+| `auth.routes.ts` | Auth endpoints | login, signup, me, assignRole, listUsers |
+| `domain.routes.ts` | Domain mutations + queries | `app.do()` + `scheduleDrain()` per mutation; query projections |
+| `events.routes.ts` | SSE subscription | `tracked()` yields with `eventBus` for live updates |
+| `index.ts` | Router composition | `t.mergeRouters()` + export `AppRouter` type |
 
-export const app = act()
-  .withSlice(ItemSlice)
-  .build();
-
-// Drain projections after every commit
-app.on("committed", () => {
-  app.drain().catch(console.error);
-});
-```
-
-Define the tRPC router — import domain types from `@my-app/domain`, app from `./builder.js`:
-
-```typescript
-// packages/app/src/api/index.ts
-import { Item } from "@my-app/domain";
-import { type Target } from "@rotorsoft/act";
-import { initTRPC } from "@trpc/server";
-import { app } from "./builder.js";
-
-const t = initTRPC.create();
-export const router = t.router({
-  CreateItem: t.procedure
-    .input(Item.actions.CreateItem)  // Zod schema from state
-    .mutation(async ({ input }) => {
-      const target: Target = { stream: crypto.randomUUID(), actor: { id: "user-1", name: "User" } };
-      await app.do("CreateItem", target, input);
-      return { success: true, id: target.stream };
-    }),
-  getItem: t.procedure
-    .input(z.string())
-    .query(async ({ input }) => {
-      const snap = await app.load(Item, input);
-      return { state: snap.state };
-    }),
-});
-export type AppRouter = typeof router;
-export { app };
-```
+**Key rules:**
+- Call `scheduleDrain()` after every `app.do()` in mutations — non-blocking, returns immediately
+- Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
+- SSE uses `eventBus.emit("committed")` which fires only after `correlate()` + `drain()` complete
 
 ### Step 8 — React Client (in `packages/app/src/client/`)
 
-The client imports `AppRouter` from the same package via relative path:
+See [monorepo-template.md](monorepo-template.md) for complete file contents (`App.tsx`, `trpc.ts`, `main.tsx`, hooks).
 
-```typescript
-// packages/app/src/client/trpc.ts
-import { createTRPCReact } from "@trpc/react-query";
-import type { AppRouter } from "../../api/index.js";
-
-export const trpc = createTRPCReact<AppRouter>();
-```
+**Key patterns:**
+- `App.tsx` uses `splitLink` — routes subscriptions through `httpSubscriptionLink` (SSE), mutations/queries through `httpLink`
+- `useEventStream` hook subscribes to SSE, deduplicates by event ID, and calls `utils.<query>.invalidate()` on relevant events
+- `useAuth` hook provides `AuthProvider` context with `signIn`, `signUp`, `signOut`, and role-based access (`isAdmin`)
 
 ### Step 9 — Tests
 
 ```typescript
 import { describe, it, expect, beforeEach } from "vitest";
 import { store, type Target } from "@rotorsoft/act";
-import { app, Item } from "../src/index.js";
+import { app, Item, clearItems, getItems, type AppActor } from "../src/index.js";
 
-const target = (stream = crypto.randomUUID()): Target => ({
-  stream, actor: { id: "user-1", name: "Test" },
-});
+const actor: AppActor = { id: "user-1", name: "Test", role: "user" };
+const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 
 describe("Item", () => {
-  beforeEach(async () => { await store().seed(); });
+  beforeEach(async () => {
+    await store().seed();
+    clearItems();        // reset projections between tests
+  });
 
   it("should create", async () => {
     const t = target();
@@ -356,14 +384,20 @@ describe("Item", () => {
     await expect(app.do("CloseItem", target(), {})).rejects.toThrow();
   });
 
-  it("should process reactions", async () => {
+  it("should process reactions and projections", async () => {
     const t = target();
     await app.do("CreateItem", t, { name: "Test" });
     await app.correlate();  // discover reaction target streams first
     await app.drain({ streamLimit: 10, eventLimit: 100 });
+
+    // Verify projection was updated
+    const items = getItems();
+    expect(items[t.stream]).toBeDefined();
   });
 });
 ```
+
+**Test isolation**: Always call `store().seed()` AND `clear*()` for each projection in `beforeEach`. This ensures both event store and read models are clean.
 
 ### Step 10 — Install Dependencies
 
@@ -373,14 +407,16 @@ See [monorepo-template.md](monorepo-template.md) for complete `package.json` fil
 
 1. **Immutable events** — Never modify a published event schema. Add new events instead.
 2. **Zod schemas mandatory** — All actions, events, and states require Zod schemas. Use `ZodEmpty` for empty payloads.
-3. **Actor context required** — Every `app.do()` needs `Target` with `{ stream, actor: { id, name } }`.
+3. **Actor context required** — Every `app.do()` needs `Target` with `{ stream, actor: { id, name } }`. Use `withActor<AppActor>()` to enforce typed actors.
 4. **Partial patches** — Patch handlers return only changed fields, not the full state.
 5. **Causation tracking** — Pass triggering event as 4th arg in reactions: `app.do(action, target, payload, event)`.
 6. **Domain isolation** — `packages/domain` has zero infrastructure deps (except `@rotorsoft/act` and `zod`).
-7. **InMemoryStore for tests** — Default store. Call `store().seed()` in `beforeEach`.
+7. **InMemoryStore for tests** — Default store. Call `store().seed()` in `beforeEach`. Call `clear*()` for each projection.
 8. **TypeScript strict mode** — All packages use `"strict": true`.
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
+11. **API decomposition** — Split tRPC router into focused route files (`auth.routes.ts`, `domain.routes.ts`, `events.routes.ts`). Keep `trpc.ts` for init + middleware, `context.ts` for request context, `helpers.ts` for shared utilities.
+12. **scheduleDrain() after mutations** — Call `scheduleDrain()` after every `app.do()` in API mutations. This is non-blocking (returns immediately), debounced (coalesces rapid commits), and signals the UI via eventBus only after all reactions and projections are fully processed.
 
 ## Error Handling
 
@@ -395,12 +431,17 @@ For production deployment (PostgresStore, background processing, automated jobs)
 ## Completion Checklist
 
 - [ ] All Zod schemas defined for actions, events, and states
+- [ ] AppActor type defined extending Actor, systemActor constant exported
 - [ ] Every action emits at least one event
 - [ ] Patch handlers are pure functions returning partial state
 - [ ] Invariants enforce all business rules
 - [ ] Reactions pass triggering event for causation tracking
-- [ ] Tests use InMemoryStore with `store().seed()` in `beforeEach`
+- [ ] Projections co-located with slices, with query and clear functions
+- [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
-- [ ] tRPC router uses `State.actions.ActionName` as input validators
+- [ ] tRPC API decomposed into route files with typed middleware
+- [ ] SSE subscription wired with eventBus for live events
+- [ ] `scheduleDrain()` called after mutations (non-blocking, debounced, signals UI after reactions)
+- [ ] Client uses `splitLink` for SSE subscriptions + HTTP for mutations/queries
 - [ ] Types compile with `npx tsc --noEmit`

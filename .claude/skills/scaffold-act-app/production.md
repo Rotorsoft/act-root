@@ -1,5 +1,7 @@
 # Production Deployment
 
+Covers production-specific concerns beyond what's in [monorepo-template.md](monorepo-template.md). The template already provides `scheduleDrain()`, `eventBus`, auth crypto, `createContext()`, and dev seed scripts.
+
 ## Switch to PostgreSQL
 
 ```typescript
@@ -19,13 +21,12 @@ store(new PostgresStore({
 
 Install: `pnpm -F @my-app/app add @rotorsoft/act-pg`
 
-## Background Processing
+## Background Correlation (Large-Scale)
+
+For high-throughput deployments, use periodic background correlation instead of (or in addition to) the debounced `scheduleDrain()` from helpers.ts:
 
 ```typescript
-// Drain reactions continuously on commit
-app.on("committed", () => void app.drain());
-
-// Periodic correlation resolution
+// Periodic correlation resolution — discovers new reaction streams every 3s
 const stop = app.start_correlations({ after: 0, limit: 10 }, 3000);
 
 // Graceful shutdown
@@ -40,9 +41,7 @@ process.on("SIGTERM", () => {
 Query projected read models and dispatch actions on schedules:
 
 ```typescript
-import { type Actor } from "@rotorsoft/act";
-
-const systemActor: Actor = { id: "system", name: "AutoClose" };
+import { systemActor } from "@my-app/domain";
 
 async function autoClose(batchSize: number) {
   const stale = await db.select()
@@ -99,3 +98,10 @@ const events = await app.query_array({ stream: "my-stream" });
 ```
 
 Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose framework logging (uses pino).
+
+## Seed Data for Development
+
+See `dev-server.ts` in [monorepo-template.md](monorepo-template.md) for the complete seed pattern. Key points:
+- Use `systemActor` for seed actions
+- Call `correlate()` + `drain()` in a loop after seeding to process all reactions and projections
+- Seed an admin user with `hashPassword()` for development access
