@@ -265,11 +265,20 @@ Dynamic stream discovery through correlation metadata:
 Business rules enforced before actions execute:
 
 ```typescript
+import { type Invariant } from "@rotorsoft/act";
+
+const mustBeOpen: Invariant<{ status: string }> = {
+  description: "Ticket must be open",
+  valid: (state) => state.status === "open",
+};
+
+const mustBeAssigned: Invariant<{ assignedTo: string }, { id: string; name: string }> = {
+  description: "Must be assigned to you",
+  valid: (state, actor) => state.assignedTo === actor?.id,
+};
+
 .on({ closeTicket: z.object({ reason: z.string() }) })
-  .given([
-    (_, snap) => snap.state.status === "open" || "Ticket must be open",
-    (target, snap) => snap.state.assignedTo === target.actor.id || "Must be assigned to you"
-  ])
+  .given([mustBeOpen, mustBeAssigned])
   .emit("TicketClosed")  // passthrough — action payload { reason } becomes event data
 ```
 

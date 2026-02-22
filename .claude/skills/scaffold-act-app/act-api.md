@@ -15,7 +15,40 @@ Act reads `package.json` from CWD at import time. The `name` and `version` field
 
 Every package that imports `@rotorsoft/act` must have a valid `package.json` with these fields.
 
-## 2. Patch Handler Signature
+## 2. Generic Actor Type — withActor\<T\>()
+
+Use `withActor<T>()` to enforce a typed actor across the entire app. Extend the base `Actor` type with domain-specific fields:
+
+```typescript
+// packages/domain/src/schemas.ts
+import type { Actor } from "@rotorsoft/act";
+
+export type AppActor = Actor & {
+  picture?: string;
+  role: "admin" | "user" | "system";
+};
+
+export const systemActor: AppActor = { id: "system", name: "System", role: "system" };
+```
+
+```typescript
+// packages/domain/src/bootstrap.ts
+import { act } from "@rotorsoft/act";
+import type { AppActor } from "./schemas.js";
+
+export const app = act()
+  .withActor<AppActor>()   // all app.do() calls require AppActor-shaped actors
+  .withSlice(ItemSlice)
+  .build();
+```
+
+**Key points:**
+- `withActor<T>()` takes no runtime argument — it's a pure type-level constraint
+- All `target.actor` objects passed to `app.do()` must satisfy `T`
+- Use `systemActor` in reactions, seed scripts, and internal automation
+- The actor is available in emit handlers via `target.actor` and in invariants via the optional second parameter
+
+## 3. Patch Handler Signature
 
 `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom reducer logic.
 
@@ -43,7 +76,7 @@ type PatchHandler<S, E, K> = (
 // ItemClosed and ItemResolved use passthrough — no entry needed
 ```
 
-## 3. ZodEmpty — Empty Payload Schema
+## 4. ZodEmpty — Empty Payload Schema
 
 ```typescript
 // Definition in @rotorsoft/act
@@ -61,7 +94,7 @@ export const ItemClosed = ZodEmpty; // event with no data
 
 Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validation.
 
-## 4. Void Reactions — NEVER Processed by drain()
+## 5. Void Reactions — NEVER Processed by drain()
 
 **Critical:** `.void()` sets a reaction's resolver to return `undefined`. During `drain()`, reactions with `undefined` targets are **filtered out and skipped entirely**.
 
@@ -88,7 +121,7 @@ Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validat
 .to("fixed-stream-name")                             // static target
 ```
 
-## 5. Correlate Before Drain — Required for InMemoryStore
+## 6. Correlate Before Drain — scheduleDrain() Pattern
 
 `app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().lease()`. Without this step, `drain()` won't find streams to process.
 
@@ -101,7 +134,49 @@ await app.drain();
 await app.drain();  // returns empty results
 ```
 
-**In tests:** Always call `correlate()` before `drain()`:
+**scheduleDrain()** — the production pattern for API mutations. Non-blocking, debounced, signals UI only after reactions complete:
+
+```typescript
+import { EventEmitter } from "node:events";
+
+// Event bus for SSE — only signals AFTER reactions complete
+export const eventBus = new EventEmitter();
+eventBus.setMaxListeners(100);
+
+let drainTimer: ReturnType<typeof setTimeout> | null = null;
+let draining = false;
+
+async function executeDrain() {
+  if (draining) return;       // skip if already running
+  draining = true;
+  try {
+    for (let i = 0; i < 2; i++) {  // 2 iterations for chained reactions
+      const { leased } = await app.correlate({ after: -1, limit: 100 });
+      if (leased.length === 0) break;
+      await app.drain({ streamLimit: 10, eventLimit: 100 });
+    }
+  } finally {
+    draining = false;
+  }
+  eventBus.emit("committed");  // signal UI AFTER reactions + projections done
+}
+
+export function scheduleDrain() {
+  if (drainTimer) clearTimeout(drainTimer);
+  drainTimer = setTimeout(() => {
+    drainTimer = null;
+    executeDrain().catch(console.error);
+  }, 10);  // 10ms debounce coalesces rapid commits
+}
+```
+
+**Key design:**
+- **Non-blocking**: `scheduleDrain()` returns immediately — mutations don't wait for drain
+- **Debounced**: Multiple rapid `app.do()` calls coalesce into one drain cycle (10ms window)
+- **Guarded**: `draining` flag prevents concurrent drain cycles
+- **UI signal after completion**: `eventBus.emit("committed")` fires only after all correlate/drain iterations finish, so SSE clients see a consistent view
+
+**In tests:** Call `correlate()` + `drain()` directly (synchronous, no debounce):
 ```typescript
 it("should process reactions", async () => {
   await app.do("CreateItem", target, { name: "Test" });
@@ -110,16 +185,21 @@ it("should process reactions", async () => {
 });
 ```
 
-**In production:** Use `app.on("committed", ...)` with `app.drain()` for immediate processing, or `app.start_correlations()` for periodic background discovery:
+**In API mutations:** Call `scheduleDrain()` and return immediately:
 ```typescript
-app.on("committed", () => {
-  app.correlate().then(() => app.drain()).catch(console.error);
+CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
+  await app.do("CreateItem", target, input);
+  scheduleDrain();  // fire-and-forget — UI notified via SSE
+  return { success: true };
 });
-// OR for background processing:
+```
+
+**For background processing:** Use `app.start_correlations()` for periodic discovery:
+```typescript
 const stop = app.start_correlations({ after: 0, limit: 100 }, 5000);
 ```
 
-## 6. Invariant Type
+## 7. Invariant Type
 
 ```typescript
 type Invariant<S extends Schema> = {
@@ -146,7 +226,7 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 
 The `valid` function returns `true` if the rule passes, `false` if violated. When violated, the framework throws an `InvariantError` with the `description`.
 
-## 7. Emit Handler Signature
+## 8. Emit Handler Signature
 
 ```typescript
 type ActionHandler<S, E, A, K> = (
@@ -167,6 +247,15 @@ type Emitted<E> = [EventName, EventData];
 // Destructuring style
 .emit((data, { state }, { actor }) => ["ItemCreated", { ...data, createdBy: actor.id }])
 
+// Computed fields from action payload
+.emit((data) => [
+  "CartSubmitted",
+  {
+    orderedProducts: data.items,
+    totalPrice: data.items.reduce((sum, item) => sum + parseFloat(item.price || "0"), 0),
+  },
+])
+
 // Multiple events
 .emit((data, { state }) => [
   ["ItemCreated", { name: data.name }],
@@ -183,19 +272,38 @@ type Emitted<E> = [EventName, EventData];
 **Parameters:**
 1. `action` — The validated action payload (the Zod-parsed input)
 2. `snapshot` — Has `.state` (current state), `.patches` (event count), `.snaps` (snapshot count), `.event` (last event)
-3. `target` — Has `.stream` (stream ID), `.actor` (actor object with `.id` and `.name`)
+3. `target` — Has `.stream` (stream ID), `.actor` (actor object with `.id` and `.name`, plus any fields from `withActor<T>()`)
 
-## 8. store().seed() — Test Isolation
+## 9. store().seed() — Test Isolation
 
 ```typescript
 import { store } from "@rotorsoft/act";
 
 beforeEach(async () => {
   await store().seed();
+  clearItems();           // also reset in-memory projections
+  clearUsers();           // each projection needs its own clear
 });
 ```
 
 `seed()` initializes or resets the store. For InMemoryStore, call it in `beforeEach` (or `beforeAll`) to ensure a clean state between tests. For PostgresStore, it creates necessary tables and indexes.
+
+**Projection cleanup**: In-memory projections (Maps, arrays) persist across tests. Export `clear*()` functions from each projection module and call them in `beforeEach` alongside `store().seed()`.
+
+```typescript
+// In projection module
+const items = new Map<string, ItemView>();
+
+export function clearItems() { items.clear(); }
+
+// In test file
+beforeEach(async () => {
+  await store().seed();
+  clearItems();
+  clearOrders();
+  clearUsers();
+});
+```
 
 **Port pattern:** `store()` returns the current store adapter (defaults to InMemoryStore). To switch adapters:
 ```typescript
