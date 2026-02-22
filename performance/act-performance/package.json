@@ -10,7 +10,7 @@
     "throughput:parallel": "docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js"
   },
   "dependencies": {
-    "@rotorsoft/act": "^0.14.0",
+    "@rotorsoft/act": "^0.15.0",
     "@rotorsoft/act-pg": "^0.8.0",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
