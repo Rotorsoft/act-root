@@ -121,7 +121,7 @@ Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validat
 .to("fixed-stream-name")                             // static target
 ```
 
-## 6. Correlate Before Drain — scheduleDrain() Pattern
+## 6. Correlate Before Drain — settle() Pattern
 
 `app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().lease()`. Without this step, `drain()` won't find streams to process.
 
@@ -134,47 +134,36 @@ await app.drain();
 await app.drain();  // returns empty results
 ```
 
-**scheduleDrain()** — the production pattern for API mutations. Non-blocking, debounced, signals UI only after reactions complete:
+**`app.settle()`** — the production pattern for API mutations. Non-blocking, debounced, runs correlate→drain in a loop, emits `"settled"` when the system reaches a consistent state:
 
 ```typescript
-import { EventEmitter } from "node:events";
+// In API mutations — fire-and-forget
+await app.do("CreateItem", target, input);
+app.settle();  // non-blocking, debounced — UI notified via "settled" event
 
-// Event bus for SSE — only signals AFTER reactions complete
-export const eventBus = new EventEmitter();
-eventBus.setMaxListeners(100);
+// Subscribe to settled event for SSE notifications
+app.on("settled", (drain) => {
+  // drain has { fetched, leased, acked, blocked }
+  // notify SSE clients that the system is consistent
+});
+```
 
-let drainTimer: ReturnType<typeof setTimeout> | null = null;
-let draining = false;
-
-async function executeDrain() {
-  if (draining) return;       // skip if already running
-  draining = true;
-  try {
-    for (let i = 0; i < 2; i++) {  // 2 iterations for chained reactions
-      const { leased } = await app.correlate({ after: -1, limit: 100 });
-      if (leased.length === 0) break;
-      await app.drain({ streamLimit: 10, eventLimit: 100 });
-    }
-  } finally {
-    draining = false;
-  }
-  eventBus.emit("committed");  // signal UI AFTER reactions + projections done
-}
-
-export function scheduleDrain() {
-  if (drainTimer) clearTimeout(drainTimer);
-  drainTimer = setTimeout(() => {
-    drainTimer = null;
-    executeDrain().catch(console.error);
-  }, 10);  // 10ms debounce coalesces rapid commits
-}
+**`settle()` options:**
+```typescript
+app.settle({
+  debounceMs: 10,                      // debounce window (default: 10ms)
+  correlate: { after: -1, limit: 100 }, // correlate query (default)
+  maxPasses: 5,                         // max correlate→drain loops (default: 5)
+  streamLimit: 10,                      // passed to drain()
+  eventLimit: 100,                      // passed to drain()
+});
 ```
 
 **Key design:**
-- **Non-blocking**: `scheduleDrain()` returns immediately — mutations don't wait for drain
-- **Debounced**: Multiple rapid `app.do()` calls coalesce into one drain cycle (10ms window)
-- **Guarded**: `draining` flag prevents concurrent drain cycles
-- **UI signal after completion**: `eventBus.emit("committed")` fires only after all correlate/drain iterations finish, so SSE clients see a consistent view
+- **Non-blocking**: `settle()` returns immediately — mutations don't wait for drain
+- **Debounced**: Multiple rapid `app.do()` calls coalesce into one settle cycle (10ms window)
+- **Guarded**: Internal `_settling` flag prevents concurrent settle cycles
+- **Lifecycle event**: `"settled"` fires only after all correlate/drain iterations finish, so SSE clients see a consistent view
 
 **In tests:** Call `correlate()` + `drain()` directly (synchronous, no debounce):
 ```typescript
@@ -185,11 +174,11 @@ it("should process reactions", async () => {
 });
 ```
 
-**In API mutations:** Call `scheduleDrain()` and return immediately:
+**In API mutations:** Call `settle()` and return immediately:
 ```typescript
 CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
   await app.do("CreateItem", target, input);
-  scheduleDrain();  // fire-and-forget — UI notified via SSE
+  app.settle();  // fire-and-forget — UI notified via "settled" event
   return { success: true };
 });
 ```

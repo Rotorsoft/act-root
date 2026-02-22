@@ -15,6 +15,7 @@ import type {
   Schema,
   SchemaRegister,
   Schemas,
+  SettleOptions,
   Snapshot,
   State,
   Target,
@@ -58,7 +59,10 @@ export class Act<
   private _emitter = new EventEmitter();
   private _drain_locked = false;
   private _drain_lag2lead_ratio = 0.5;
-  private _correlation_interval: NodeJS.Timeout | undefined = undefined;
+  private _correlation_timer: ReturnType<typeof setInterval> | undefined =
+    undefined;
+  private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
+  private _settling = false;
 
   /**
    * Emit a lifecycle event (internal use, but can be used for custom listeners).
@@ -70,6 +74,7 @@ export class Act<
   emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
   emit(event: "acked", args: Lease[]): boolean;
   emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
+  emit(event: "settled", args: Drain<TEvents>): boolean;
   emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
   }
@@ -90,6 +95,7 @@ export class Act<
     event: "blocked",
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
+  on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
     return this;
@@ -111,6 +117,7 @@ export class Act<
     event: "blocked",
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
+  off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   off(event: string, listener: (args: any) => void): this {
     this._emitter.off(event, listener);
     return this;
@@ -129,6 +136,7 @@ export class Act<
     dispose(() => {
       this._emitter.removeAllListeners();
       this.stop_correlations();
+      this.stop_settling();
       return Promise.resolve();
     });
   }
@@ -467,7 +475,7 @@ export class Act<
   /**
    * Processes pending reactions by draining uncommitted events from the event store.
    *
-   * The drain process:
+   * Runs a single drain cycle:
    * 1. Polls the store for streams with uncommitted events
    * 2. Leases streams to prevent concurrent processing
    * 3. Fetches events for each leased stream
@@ -477,7 +485,8 @@ export class Act<
    * Drain uses a dual-frontier strategy to balance processing of new streams (lagging)
    * vs active streams (leading). The ratio adapts based on event pressure.
    *
-   * Call this method periodically in a background loop, or after committing events.
+   * Call `correlate()` before `drain()` to discover target streams. For a higher-level
+   * API that handles debouncing, correlation, and signaling automatically, use {@link settle}.
    *
    * @param options - Drain configuration options
    * @param options.streamLimit - Maximum number of streams to process per cycle (default: 10)
@@ -485,46 +494,20 @@ export class Act<
    * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
    * @returns Drain statistics with fetched, leased, acked, and blocked counts
    *
-   * @example Basic drain loop
+   * @example In tests and scripts
    * ```typescript
-   * // Process reactions after each action
    * await app.do("createUser", target, payload);
+   * await app.correlate();
    * await app.drain();
    * ```
    *
-   * @example Background drain worker
+   * @example In production, prefer settle()
    * ```typescript
-   * setInterval(async () => {
-   *   try {
-   *     const result = await app.drain({
-   *       streamLimit: 20,
-   *       eventLimit: 50
-   *     });
-   *     if (result.acked.length) {
-   *       console.log(`Processed ${result.acked.length} streams`);
-   *     }
-   *   } catch (error) {
-   *     console.error("Drain error:", error);
-   *   }
-   * }, 5000); // Every 5 seconds
+   * await app.do("CreateItem", target, input);
+   * app.settle(); // debounced correlate→drain, emits "settled"
    * ```
    *
-   * @example With lifecycle listeners
-   * ```typescript
-   * app.on("acked", (leases) => {
-   *   console.log(`Acknowledged ${leases.length} streams`);
-   * });
-   *
-   * app.on("blocked", (blocked) => {
-   *   console.error(`Blocked ${blocked.length} streams due to errors`);
-   *   blocked.forEach(({ stream, error }) => {
-   *     console.error(`Stream ${stream}: ${error}`);
-   *   });
-   * });
-   *
-   * await app.drain();
-   * ```
-   *
+   * @see {@link settle} for debounced correlate→drain with lifecycle events
    * @see {@link correlate} for dynamic stream discovery
    * @see {@link start_correlations} for automatic correlation
    */
@@ -794,11 +777,11 @@ export class Act<
     frequency = 10_000,
     callback?: (leased: Lease[]) => void
   ): boolean {
-    if (this._correlation_interval) return false;
+    if (this._correlation_timer) return false;
 
     const limit = query.limit || 100;
     let after = query.after || -1;
-    this._correlation_interval = setInterval(
+    this._correlation_timer = setInterval(
       () =>
         this.correlate({ ...query, after, limit })
           .then((result) => {
@@ -829,9 +812,81 @@ export class Act<
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    if (this._correlation_interval) {
-      clearInterval(this._correlation_interval);
-      this._correlation_interval = undefined;
+    if (this._correlation_timer) {
+      clearInterval(this._correlation_timer);
+      this._correlation_timer = undefined;
     }
+  }
+
+  /**
+   * Cancels any pending or active settle cycle.
+   *
+   * @see {@link settle}
+   */
+  stop_settling() {
+    if (this._settle_timer) {
+      clearTimeout(this._settle_timer);
+      this._settle_timer = undefined;
+    }
+  }
+
+  /**
+   * Debounced, non-blocking correlate→drain cycle.
+   *
+   * Call this after `app.do()` to schedule a background drain. Multiple rapid
+   * calls within the debounce window are coalesced into a single cycle. Runs
+   * correlate→drain in a loop until the system reaches a consistent state,
+   * then emits the `"settled"` lifecycle event.
+   *
+   * @param options - Settle configuration options
+   * @param options.debounceMs - Debounce window in milliseconds (default: 10)
+   * @param options.correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
+   * @param options.maxPasses - Maximum correlate→drain loops (default: 5)
+   * @param options.streamLimit - Maximum streams per drain cycle (default: 10)
+   * @param options.eventLimit - Maximum events per stream (default: 10)
+   * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
+   *
+   * @example API mutations
+   * ```typescript
+   * await app.do("CreateItem", target, input);
+   * app.settle(); // non-blocking, returns immediately
+   *
+   * app.on("settled", (drain) => {
+   *   // notify SSE clients, invalidate caches, etc.
+   * });
+   * ```
+   *
+   * @see {@link drain} for single synchronous drain cycles
+   * @see {@link correlate} for manual correlation
+   */
+  settle(options: SettleOptions = {}): void {
+    const {
+      debounceMs = 10,
+      correlate: correlateQuery = { after: -1, limit: 100 },
+      maxPasses = 5,
+      ...drainOptions
+    } = options;
+
+    if (this._settle_timer) clearTimeout(this._settle_timer);
+    this._settle_timer = setTimeout(() => {
+      this._settle_timer = undefined;
+      if (this._settling) return;
+      this._settling = true;
+
+      (async () => {
+        let lastDrain: Drain<TEvents> | undefined;
+        for (let i = 0; i < maxPasses; i++) {
+          const { leased } = await this.correlate(correlateQuery);
+          if (leased.length === 0 && i > 0) break;
+          lastDrain = await this.drain(drainOptions);
+          if (!lastDrain.acked.length && !lastDrain.blocked.length) break;
+        }
+        if (lastDrain) this.emit("settled", lastDrain);
+      })()
+        .catch((err) => logger.error(err))
+        .finally(() => {
+          this._settling = false;
+        });
+    }, debounceMs);
   }
 }

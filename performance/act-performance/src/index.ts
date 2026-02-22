@@ -1,7 +1,6 @@
 import {
   act,
   type Committed,
-  type DrainOptions,
   type Schemas,
   sleep,
   store,
@@ -164,7 +163,7 @@ async function main(
 
 // 👉 Change drain options to evaluate performance at different load levels
 const drainFrequency = 500;
-const drainOptions: DrainOptions = {
+const drainOptions = {
   streamLimit: 15,
   eventLimit: 20,
 };
