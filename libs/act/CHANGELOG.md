@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.15.0...@rotorsoft/act-v0.16.0) (2026-02-22)
+
+
+### Features
+
+* **act:** add settle() for debounced correlate→drain with "settled" lifecycle event ([303cc4b](https://github.com/rotorsoft/act-root/commit/303cc4b4dc4ac7d65cf8b05077e780fac393404f))
+
 # [@rotorsoft/act-v0.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.14.0...@rotorsoft/act-v0.15.0) (2026-02-21)
 
 
