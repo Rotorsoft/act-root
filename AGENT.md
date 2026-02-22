@@ -200,6 +200,9 @@ const snapshot = await app.load(Counter, "counter1");
 
 // Process reactions (event-driven workflows)
 await app.drain({ streamLimit: 100, eventLimit: 1000 });
+
+// Debounced correlate→drain for production (non-blocking, emits "settled" when done)
+app.settle();
 ```
 
 ### Event Sourcing Model
@@ -254,6 +257,7 @@ Dynamic stream discovery through correlation metadata:
 - Each action/event includes `correlation` (request ID) and `causation` (what triggered it)
 - Reactions can discover new streams to process by querying uncommitted events
 - `app.correlate()` - Manual correlation
+- `app.settle()` - Debounced, non-blocking correlate→drain loop; emits `"settled"` when done
 - `app.start_correlations()` - Periodic background correlation
 
 ### Invariants

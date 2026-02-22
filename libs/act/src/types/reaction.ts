@@ -8,6 +8,7 @@ import type {
   Actor,
   Committed,
   Dispatcher,
+  Query,
   Schema,
   Schemas,
   Snapshot,
@@ -257,4 +258,21 @@ export type Drain<TEvents extends Schemas> = {
   readonly leased: Lease[];
   readonly acked: Lease[];
   readonly blocked: Array<Lease & { readonly error: string }>;
+};
+
+/**
+ * Options for the debounced settle cycle.
+ *
+ * Extends {@link DrainOptions} with parameters that control the debounce
+ * window, the correlation query, and the maximum number of correlate→drain
+ * passes.
+ *
+ * @property debounceMs - Debounce window in milliseconds (default: 10)
+ * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
+ * @property maxPasses - Maximum correlate→drain loops (default: 5)
+ */
+export type SettleOptions = DrainOptions & {
+  readonly debounceMs?: number;
+  readonly correlate?: Query;
+  readonly maxPasses?: number;
 };

@@ -73,27 +73,27 @@ describe("act", () => {
     await app.correlate();
 
     // should drain the first two events...  third event should throw and stop drain
-    let drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    let drained = await app.drain({ leaseMillis: 1 });
     expect(drained.acked.length).toBe(1);
     expect(drained.acked[0].at).toBe(1);
     expect(onIncremented).toHaveBeenCalledTimes(2);
     expect(onDecremented).toHaveBeenCalledTimes(1);
 
     // first fully failed
-    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    drained = await app.drain({ leaseMillis: 1 });
     console.log("first try", drained);
     expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
     // second fully failed (first retry)
-    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    drained = await app.drain({ leaseMillis: 1 });
     console.log("second try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(3);
 
     // third fully failed (second retry) - should block
-    drained = await app.drain({ leaseMillis: 1 }); // 1ms leases to test blocking
+    drained = await app.drain({ leaseMillis: 1 });
     console.log("third try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(1);
@@ -212,5 +212,149 @@ describe("act", () => {
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedPoll.mockClear();
+  });
+
+  describe("settle", () => {
+    it("should debounce multiple rapid calls into a single settle cycle", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      await app.do("increment", { stream: "debounce-test", actor }, {});
+      // Rapid-fire settle calls — only the last timer fires
+      app.settle({ debounceMs: 20 });
+      app.settle({ debounceMs: 20 });
+      app.settle({ debounceMs: 20 });
+
+      // Wait for debounce + processing
+      await sleep(300);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+      const drain = settledListener.mock.calls[0][0];
+      expect(drain).toHaveProperty("fetched");
+      expect(drain).toHaveProperty("leased");
+      expect(drain).toHaveProperty("acked");
+      expect(drain).toHaveProperty("blocked");
+
+      app.off("settled", settledListener);
+    });
+
+    it("should emit 'settled' event after reactions complete", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      await app.do("increment", { stream: "settled-event", actor }, {});
+      app.settle({ debounceMs: 5 });
+
+      await sleep(300);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+
+      app.off("settled", settledListener);
+    });
+
+    it("should be a no-op when already settling", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      // Slow down correlate so the first settle is still running when the second fires
+      const originalCorrelate = app.correlate.bind(app);
+      const spy = vi.spyOn(app, "correlate").mockImplementation(async (q) => {
+        await sleep(100);
+        return originalCorrelate(q);
+      });
+
+      await app.do("increment", { stream: "settle-guard", actor }, {});
+      // First call starts the cycle
+      app.settle({ debounceMs: 1 });
+      await sleep(20); // Let the timer fire and settle begin
+      // Second call while settling — timer fires but guard returns
+      app.settle({ debounceMs: 1 });
+      await sleep(500);
+
+      // Only 1 settled emission — second was guarded
+      expect(settledListener).toHaveBeenCalledTimes(1);
+
+      spy.mockRestore();
+      app.off("settled", settledListener);
+    });
+
+    it("should respect custom options", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      await app.do("increment", { stream: "settle-opts", actor }, {});
+      app.settle({
+        debounceMs: 5,
+        correlate: { after: -1, limit: 50 },
+        maxPasses: 2,
+        streamLimit: 5,
+        eventLimit: 5,
+      });
+
+      await sleep(300);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+
+      app.off("settled", settledListener);
+    });
+
+    it("should stop_settling cancel a pending timer", async () => {
+      app.settle({ debounceMs: 500 });
+      app.stop_settling(); // cancels before it fires
+      await sleep(600);
+      // no error, no settle cycle ran
+    });
+
+    it("should not emit settled when maxPasses is 0", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      app.settle({ debounceMs: 1, maxPasses: 0 });
+      await sleep(100);
+      expect(settledListener).not.toHaveBeenCalled();
+
+      app.off("settled", settledListener);
+    });
+
+    it("should break early when correlate returns no leases on second pass", async () => {
+      const settledListener = vi.fn();
+      app.on("settled", settledListener);
+
+      // Mock correlate: first call returns a lease so loop continues,
+      // second call returns empty → triggers i>0 break
+      let correlateCount = 0;
+      const correlateSpy = vi.spyOn(app, "correlate").mockImplementation(() => {
+        correlateCount++;
+        if (correlateCount === 1)
+          return Promise.resolve({
+            leased: [{ stream: "x", at: 0, by: "test" }],
+          } as any);
+        return Promise.resolve({ leased: [] } as any);
+      });
+      // Mock drain to return acked work so the loop doesn't break at line 882
+      const drainSpy = vi.spyOn(app, "drain").mockResolvedValue({
+        fetched: [],
+        leased: [],
+        acked: [{ stream: "x", at: 1, by: "test", retry: 0, lagging: false }],
+        blocked: [],
+      });
+
+      app.settle({ debounceMs: 1, maxPasses: 5 });
+      await sleep(300);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+      expect(correlateCount).toBe(2); // ran 2 passes, broke on second
+
+      correlateSpy.mockRestore();
+      drainSpy.mockRestore();
+      app.off("settled", settledListener);
+    });
+
+    it("should handle errors in settle gracefully", async () => {
+      const spy = vi
+        .spyOn(app, "correlate")
+        .mockRejectedValue(new Error("settle-error"));
+
+      app.settle({ debounceMs: 1 });
+      await sleep(300);
+      // settle caught the error internally — no unhandled rejection
+      spy.mockRestore();
+    });
   });
 });

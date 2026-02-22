@@ -235,11 +235,22 @@ While events within a stream are processed in order, multiple streams can be pro
 The `drain` method processes pending reactions across all subscribed streams:
 
 ```typescript
-// Process pending reactions
+// Process pending reactions (synchronous, single cycle)
 await app.drain({ streamLimit: 100, eventLimit: 1000 });
+
+// Debounced correlate→drain for production (non-blocking, emits "settled" when done)
+app.settle();
+
+// Subscribe to the "settled" lifecycle event
+app.on("settled", (drain) => {
+  // drain has { fetched, leased, acked, blocked }
+  // notify SSE clients, update caches, etc.
+});
 ```
 
 Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed events are re-leased automatically.
+
+The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), runs correlate→drain in a loop until the system is consistent, and emits a `"settled"` event when done.
 
 ### Real-Time Notifications
 

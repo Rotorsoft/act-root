@@ -313,12 +313,9 @@ export function verifyPassword(password: string, stored: string): boolean {
 }
 ```
 
-### packages/app/src/api/helpers.ts (debounced drainAll + event bus)
+### packages/app/src/api/helpers.ts (event serialization)
 
 ```typescript
-import { app } from "@my-app/domain";
-import { EventEmitter } from "node:events";
-
 export type SerializedEvent = {
   id: number;
   name: string;
@@ -340,41 +337,6 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
     meta: e.meta as SerializedEvent["meta"],
   }));
 }
-
-// Event bus for SSE subscriptions — only signals AFTER reactions complete
-export const eventBus = new EventEmitter();
-eventBus.setMaxListeners(100);
-
-// Debounced, non-blocking drain — coalesces rapid commits into one drain cycle
-let drainTimer: ReturnType<typeof setTimeout> | null = null;
-let draining = false;
-
-async function executeDrain() {
-  if (draining) return;
-  draining = true;
-  try {
-    for (let i = 0; i < 2; i++) {
-      const { leased } = await app.correlate({ after: -1, limit: 100 });
-      if (leased.length === 0) break;
-      await app.drain({ streamLimit: 10, eventLimit: 100 });
-    }
-  } finally {
-    draining = false;
-  }
-  // Signal UI AFTER all reactions and projections are processed
-  eventBus.emit("committed");
-}
-
-/**
- * Schedule a drain cycle (debounced, non-blocking).
- * Call this after app.do() — it returns immediately and drains in the background.
- * The eventBus "committed" event fires only after reactions complete,
- * so SSE clients receive a consistent view of the world.
- */
-export function scheduleDrain() {
-  if (drainTimer) clearTimeout(drainTimer);
-  drainTimer = setTimeout(() => { drainTimer = null; executeDrain().catch(console.error); }, 10);
-}
 ```
 
 ### packages/app/src/api/domain.routes.ts (domain commands + queries)
@@ -382,7 +344,6 @@ export function scheduleDrain() {
 ```typescript
 import { app, getItems } from "@my-app/domain";
 import { z } from "zod";
-import { scheduleDrain } from "./helpers.js";
 import { t, authedProcedure, adminProcedure, publicProcedure } from "./trpc.js";
 
 export const domainRouter = t.router({
@@ -391,7 +352,7 @@ export const domainRouter = t.router({
     .mutation(async ({ input, ctx }) => {
       const target = { stream: crypto.randomUUID(), actor: ctx.actor };
       await app.do("CreateItem", target, input);
-      scheduleDrain();  // non-blocking — UI notified via SSE after reactions complete
+      app.settle();  // non-blocking — UI notified via "settled" event after reactions complete
       return { success: true, id: target.stream };
     }),
 
@@ -404,7 +365,7 @@ export const domainRouter = t.router({
 ```typescript
 import { app } from "@my-app/domain";
 import { tracked } from "@trpc/server";
-import { eventBus, serializeEvents } from "./helpers.js";
+import { serializeEvents } from "./helpers.js";
 import { t, publicProcedure } from "./trpc.js";
 
 export const eventsRouter = t.router({
@@ -416,8 +377,8 @@ export const eventsRouter = t.router({
 
     let lastId = existing.length > 0 ? existing[existing.length - 1].id : -1;
     let notify: (() => void) | null = null;
-    const onCommitted = () => { if (notify) { notify(); notify = null; } };
-    eventBus.on("committed", onCommitted);
+    const onSettled = () => { if (notify) { notify(); notify = null; } };
+    app.on("settled", onSettled);
 
     try {
       while (!signal?.aborted) {
@@ -434,7 +395,7 @@ export const eventsRouter = t.router({
         }
       }
     } finally {
-      eventBus.off("committed", onCommitted);
+      app.off("settled", onSettled);
     }
   }),
 });
@@ -447,7 +408,6 @@ import { app, getAllUsers, getUserByEmail, getUserByProviderId, systemActor } fr
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { hashPassword, signToken, verifyPassword } from "./auth.js";
-import { scheduleDrain } from "./helpers.js";
 import { t, publicProcedure, authedProcedure, adminProcedure } from "./trpc.js";
 
 export const authRouter = t.router({
@@ -472,7 +432,7 @@ export const authRouter = t.router({
       await app.do("RegisterUser", { stream: input.username, actor: { ...systemActor, name: "AuthSystem" } }, {
         email: input.username, name: input.name, provider: "local", providerId: input.username, passwordHash,
       });
-      scheduleDrain();
+      app.settle();
       const user = getUserByEmail(input.username);
       if (!user) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Failed to register" });
       const token = signToken({ email: user.email });
@@ -486,7 +446,7 @@ export const authRouter = t.router({
     .mutation(async ({ input, ctx }) => {
       if (!getUserByEmail(input.email)) throw new TRPCError({ code: "NOT_FOUND", message: "User not found" });
       await app.do("AssignRole", { stream: input.email, actor: ctx.actor }, { role: input.role });
-      scheduleDrain();
+      app.settle();
       return { success: true };
     }),
 
@@ -572,7 +532,7 @@ const server = createHTTPServer({
 const port = Number(process.env.PORT) || 4000;
 server.listen(port);
 
-await app.drain();
+app.settle();
 console.log(`Server listening on http://localhost:${port}`);
 ```
 

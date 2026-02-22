@@ -202,6 +202,9 @@ const snapshot = await app.load(Counter, "counter1");
 
 // Process reactions (event-driven workflows)
 await app.drain({ streamLimit: 100, eventLimit: 1000 });
+
+// Debounced correlate→drain for production (non-blocking, emits "settled" when done)
+app.settle();
 ```
 
 ### Event Sourcing Model
@@ -256,9 +259,10 @@ Dynamic stream discovery through correlation metadata:
 - Each action/event includes `correlation` (request ID) and `causation` (what triggered it)
 - Reactions can discover new streams to process by querying uncommitted events
 - `app.correlate()` - Manual correlation (must be called before `drain()` to discover target streams)
+- `app.settle()` - Debounced, non-blocking correlate→drain loop; emits `"settled"` when done
 - `app.start_correlations()` - Periodic background correlation
 
-**Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.on("committed", () => { app.correlate().then(() => app.drain()).catch(console.error); })` or `app.start_correlations()` for background discovery.
+**Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.settle()` for debounced correlate→drain with a `"settled"` lifecycle event, or `app.start_correlations()` for background discovery.
 
 ### Invariants
 
@@ -400,6 +404,7 @@ Both stream leasing and version-based optimistic concurrency must be implemented
 
 - Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose logging
 - Use `app.on("committed", ...)` to observe all state changes
+- Use `app.on("settled", ...)` to react when `settle()` completes all correlate/drain passes
 - Use `app.on("blocked", ...)` to catch reaction processing failures
 - Query events directly: `await app.query_array({ stream: "mystream" })`
 

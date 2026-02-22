@@ -1,6 +1,6 @@
 # Production Deployment
 
-Covers production-specific concerns beyond what's in [monorepo-template.md](monorepo-template.md). The template already provides `scheduleDrain()`, `eventBus`, auth crypto, `createContext()`, and dev seed scripts.
+Covers production-specific concerns beyond what's in [monorepo-template.md](monorepo-template.md). The template already provides `app.settle()`, auth crypto, `createContext()`, and dev seed scripts.
 
 ## Switch to PostgreSQL
 
@@ -23,7 +23,7 @@ Install: `pnpm -F @my-app/app add @rotorsoft/act-pg`
 
 ## Background Correlation (Large-Scale)
 
-For high-throughput deployments, use periodic background correlation instead of (or in addition to) the debounced `scheduleDrain()` from helpers.ts:
+For high-throughput deployments, use periodic background correlation instead of (or in addition to) `app.settle()`:
 
 ```typescript
 // Periodic correlation resolution — discovers new reaction streams every 3s
@@ -89,6 +89,9 @@ await app.drain({
 ```typescript
 // Observe all state changes
 app.on("committed", (snapshots) => { /* log, metrics */ });
+
+// React when system settles after settle() completes
+app.on("settled", (drain) => { /* notify SSE clients, update caches */ });
 
 // Catch reaction failures
 app.on("blocked", (leases) => { /* alert on blocked streams */ });

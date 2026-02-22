@@ -123,7 +123,7 @@ my-app/
 │       │   │   ├── index.ts      # Router composition + AppRouter type
 │       │   │   ├── trpc.ts       # tRPC init + middleware (public/authed/admin)
 │       │   │   ├── context.ts    # Request context + token verification
-│       │   │   ├── helpers.ts    # drainAll(), eventBus, serialization
+│       │   │   ├── helpers.ts    # serializeEvents() for SSE payloads
 │       │   │   ├── auth.ts       # Token signing, password hashing
 │       │   │   ├── auth.routes.ts    # Auth endpoints (login, signup, OAuth)
 │       │   │   ├── domain.routes.ts  # Domain mutations + queries
@@ -326,7 +326,7 @@ export const app = act()
 
 **`withActor<T>()`**: Sets the actor type for the entire app. All `app.do()` calls will require `target.actor` to satisfy `T`. Define `AppActor` extending `Actor` in schemas.ts.
 
-> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use the `scheduleDrain()` pattern for non-blocking, debounced processing that signals the UI only after all reactions complete. See [act-api.md](act-api.md) §6.
+> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §6.
 
 ### Step 7 — tRPC API (in `packages/app/src/api/`)
 
@@ -337,16 +337,16 @@ Decompose the API into focused route modules. See [monorepo-template.md](monorep
 | `trpc.ts` | tRPC init + middleware | `publicProcedure`, `authedProcedure`, `adminProcedure` |
 | `context.ts` | Request context | Extract `AppActor` from Bearer token via `verifyToken()` |
 | `auth.ts` | Token + password crypto | HMAC-signed tokens, scrypt password hashing (zero deps) |
-| `helpers.ts` | `scheduleDrain()` + `eventBus` | Non-blocking, debounced drain; signals SSE after reactions complete |
+| `helpers.ts` | Event serialization | `serializeEvents()` for SSE payloads |
 | `auth.routes.ts` | Auth endpoints | login, signup, me, assignRole, listUsers |
 | `domain.routes.ts` | Domain mutations + queries | `app.do()` + `scheduleDrain()` per mutation; query projections |
-| `events.routes.ts` | SSE subscription | `tracked()` yields with `eventBus` for live updates |
+| `events.routes.ts` | SSE subscription | `tracked()` yields with `app.on("settled")` for live updates |
 | `index.ts` | Router composition | `t.mergeRouters()` + export `AppRouter` type |
 
 **Key rules:**
-- Call `scheduleDrain()` after every `app.do()` in mutations — non-blocking, returns immediately
+- Call `app.settle()` after every `app.do()` in mutations — non-blocking, returns immediately
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
-- SSE uses `eventBus.emit("committed")` which fires only after `correlate()` + `drain()` complete
+- SSE uses `app.on("settled", ...)` which fires only after `correlate()` + `drain()` complete
 
 ### Step 8 — React Client (in `packages/app/src/client/`)
 
@@ -416,7 +416,7 @@ See [monorepo-template.md](monorepo-template.md) for complete `package.json` fil
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
 11. **API decomposition** — Split tRPC router into focused route files (`auth.routes.ts`, `domain.routes.ts`, `events.routes.ts`). Keep `trpc.ts` for init + middleware, `context.ts` for request context, `helpers.ts` for shared utilities.
-12. **scheduleDrain() after mutations** — Call `scheduleDrain()` after every `app.do()` in API mutations. This is non-blocking (returns immediately), debounced (coalesces rapid commits), and signals the UI via eventBus only after all reactions and projections are fully processed.
+12. **settle() after mutations** — Call `app.settle()` after every `app.do()` in API mutations. This is non-blocking (returns immediately), debounced (coalesces rapid commits), and emits a `"settled"` event only after all correlate/drain iterations and projections are fully processed.
 
 ## Error Handling
 
@@ -441,7 +441,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] tRPC API decomposed into route files with typed middleware
-- [ ] SSE subscription wired with eventBus for live events
-- [ ] `scheduleDrain()` called after mutations (non-blocking, debounced, signals UI after reactions)
+- [ ] SSE subscription wired with `app.on("settled")` for live events
+- [ ] `app.settle()` called after mutations (non-blocking, debounced, emits "settled" after reactions)
 - [ ] Client uses `splitLink` for SSE subscriptions + HTTP for mutations/queries
 - [ ] Types compile with `npx tsc --noEmit`
