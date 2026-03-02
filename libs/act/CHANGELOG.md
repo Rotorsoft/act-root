@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.17.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.16.0...@rotorsoft/act-v0.17.0) (2026-03-02)
+
+
+### Features
+
+* **act:** add InferEvents utility type ([6d740ae](https://github.com/rotorsoft/act-root/commit/6d740ae8cea53f92ea1b4123dd0b83581ea92740))
+
 # [@rotorsoft/act-v0.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.15.0...@rotorsoft/act-v0.16.0) (2026-02-22)
 
 
