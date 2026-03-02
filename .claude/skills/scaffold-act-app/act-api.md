@@ -52,11 +52,13 @@ export const app = act()
 
 `.emits()` creates default passthrough reducers (`({ data }) => data`) for all events. Use `.patch()` only to override events that need custom reducer logic.
 
+The framework exports `PatchHandlers<TState, TEvents>` — use it to type the `.patch()` map explicitly when needed:
+
 ```typescript
-type PatchHandler<S, E, K> = (
-  event: Committed<E, K>,  // committed event — access payload via event.data
-  state: Readonly<S>       // current state BEFORE this patch
-) => Readonly<Patch<S>>;   // return only changed fields (partial state)
+import type { PatchHandlers } from "@rotorsoft/act";
+
+// Each handler: (event: Committed<TEvents, K>, state: Readonly<TState>) => Readonly<Patch<TState>>
+// event.data is the event payload; return only the fields that change
 ```
 
 **Key points:**
@@ -76,7 +78,36 @@ type PatchHandler<S, E, K> = (
 // ItemClosed and ItemResolved use passthrough — no entry needed
 ```
 
-## 4. ZodEmpty — Empty Payload Schema
+## 4. InferEvents / InferActions — Utility Types
+
+**Never recreate mapped types manually.** Use these framework-provided utilities to extract inferred types from built State objects:
+
+```typescript
+import type { InferEvents, InferActions } from "@rotorsoft/act";
+
+// Extract inferred event types from a State
+type Events = InferEvents<typeof Item>;
+// => { ItemCreated: { name: string; createdBy: string }; ItemClosed: { closedBy: string } }
+
+// Extract inferred action types from a State
+type Actions = InferActions<typeof Item>;
+// => { CreateItem: { name: string }; CloseItem: Record<string, never> }
+
+// Combine multiple states (useful for typed Dispatcher construction)
+type AllEvents = InferEvents<typeof StateA> & InferEvents<typeof StateB>;
+type AllActions = InferActions<typeof StateA> & InferActions<typeof StateB>;
+```
+
+**Do NOT write this manually:**
+```typescript
+// ❌ Don't do this
+type Events = { [K in keyof typeof EventSchemas]: z.infer<(typeof EventSchemas)[K]> };
+
+// ✅ Do this instead
+type Events = InferEvents<typeof MyState>;
+```
+
+## 5. ZodEmpty — Empty Payload Schema
 
 ```typescript
 // Definition in @rotorsoft/act
@@ -94,7 +125,7 @@ export const ItemClosed = ZodEmpty; // event with no data
 
 Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validation.
 
-## 5. Void Reactions — NEVER Processed by drain()
+## 6. Void Reactions — NEVER Processed by drain()
 
 **Critical:** `.void()` sets a reaction's resolver to return `undefined`. During `drain()`, reactions with `undefined` targets are **filtered out and skipped entirely**.
 
@@ -121,7 +152,7 @@ Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validat
 .to("fixed-stream-name")                             // static target
 ```
 
-## 6. Correlate Before Drain — settle() Pattern
+## 7. Correlate Before Drain — settle() Pattern
 
 `app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().lease()`. Without this step, `drain()` won't find streams to process.
 
@@ -188,7 +219,7 @@ CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
 const stop = app.start_correlations({ after: 0, limit: 100 }, 5000);
 ```
 
-## 7. Invariant Type
+## 8. Invariant Type
 
 ```typescript
 type Invariant<S extends Schema> = {
@@ -215,7 +246,7 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 
 The `valid` function returns `true` if the rule passes, `false` if violated. When violated, the framework throws an `InvariantError` with the `description`.
 
-## 8. Emit Handler Signature
+## 9. Emit Handler Signature
 
 ```typescript
 type ActionHandler<S, E, A, K> = (
@@ -263,7 +294,7 @@ type Emitted<E> = [EventName, EventData];
 2. `snapshot` — Has `.state` (current state), `.patches` (event count), `.snaps` (snapshot count), `.event` (last event)
 3. `target` — Has `.stream` (stream ID), `.actor` (actor object with `.id` and `.name`, plus any fields from `withActor<T>()`)
 
-## 9. store().seed() — Test Isolation
+## 10. store().seed() — Test Isolation
 
 ```typescript
 import { store } from "@rotorsoft/act";

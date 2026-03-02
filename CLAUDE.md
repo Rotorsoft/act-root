@@ -124,6 +124,23 @@ const DigitBoard = state({ DigitBoard: schema })
   .build();
 ```
 
+### Utility Types
+
+`InferEvents` and `InferActions` extract inferred types from a built State object, avoiding repetition of the Zod-to-plain-type mapping boilerplate.
+
+```typescript
+import type { InferEvents, InferActions } from "@rotorsoft/act";
+
+type Events = InferEvents<typeof Counter>;
+// => { Incremented: { amount: number } }
+
+type Actions = InferActions<typeof Counter>;
+// => { increment: { by: number } }
+
+// Combine multiple states:
+type AllEvents = InferEvents<typeof StateA> & InferEvents<typeof StateB>;
+```
+
 ### Projection Builder
 
 Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive a `Dispatcher`.

@@ -292,7 +292,7 @@ export const ItemSlice = slice()
 
 **clear*() helpers**: Export a `clear*()` function to reset projection state in tests.
 
-> **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §4.
+> **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §6 (Void Reactions).
 
 ### Step 5 — Cross-Aggregate Projections
 
@@ -326,7 +326,7 @@ export const app = act()
 
 **`withActor<T>()`**: Sets the actor type for the entire app. All `app.do()` calls will require `target.actor` to satisfy `T`. Define `AppActor` extending `Actor` in schemas.ts.
 
-> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §6.
+> **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §7 (Correlate Before Drain).
 
 ### Step 7 — tRPC API (in `packages/app/src/api/`)
 
