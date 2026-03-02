@@ -379,6 +379,26 @@ export type InferActions<
 };
 
 /**
+ * Extracts the raw event schemas from a State definition.
+ *
+ * Use this to recover the `TEvents` type parameter from a built State object,
+ * enabling typed event handling without repeating the mapped type boilerplate.
+ *
+ * @template T - A State object (or any object with `readonly events: ZodTypes<TEvents>`)
+ *
+ * @example
+ * ```typescript
+ * type Events = InferEvents<typeof Counter>;
+ * // => { Incremented: { amount: number } }
+ * ```
+ */
+export type InferEvents<
+  T extends { readonly events: Record<string, ZodType> },
+> = {
+  [K in keyof T["events"]]: T["events"][K] extends ZodType<infer V> ? V : never;
+};
+
+/**
  * Typed interface for the `app.do()` method, enabling reaction handlers
  * to dispatch actions with full autocomplete.
  *
