@@ -121,6 +121,7 @@ export default defineConfig({
   "dependencies": {
     "@my-app/domain": "workspace:*",
     "@rotorsoft/act": "^0.15.0",
+    "@rotorsoft/act-sse": "^0.1.0",
     "@tanstack/react-query": "^5.90.21",
     "@trpc/client": "11.10.0",
     "@trpc/react-query": "11.10.0",
@@ -345,30 +346,91 @@ export function serializeEvents(events: Array<{ id: number; name: unknown; data:
 import { app, getItems } from "@my-app/domain";
 import { z } from "zod";
 import { t, authedProcedure, adminProcedure, publicProcedure } from "./trpc.js";
+import { broadcastState } from "./broadcast.js";
+import { doAction } from "./app.js";
 
 export const domainRouter = t.router({
   CreateItem: authedProcedure
     .input(z.object({ name: z.string() }))
     .mutation(async ({ input, ctx }) => {
-      const target = { stream: crypto.randomUUID(), actor: ctx.actor };
-      await app.do("CreateItem", target, input);
-      app.settle();  // non-blocking — UI notified via "settled" event after reactions complete
-      return { success: true, id: target.stream };
+      const stream = crypto.randomUUID();
+      const snap = await doAction("CreateItem", { stream, actor: ctx.actor }, input);
+      broadcastState(stream, snap);  // incremental patch to SSE subscribers
+      app.settle();                  // non-blocking — projections + reactions
+      return { success: true, id: stream };
     }),
 
   getItems: publicProcedure.query(() => getItems()),
 });
 ```
 
-### packages/app/src/api/events.routes.ts (SSE subscription)
+### packages/app/src/api/events.routes.ts (SSE subscriptions)
+
+Two subscriptions: `onStateChange` for real-time incremental state push (uses `@rotorsoft/act-sse`), and `onEvent` for event stream replay.
 
 ```typescript
 import { app } from "@my-app/domain";
 import { tracked } from "@trpc/server";
+import { z } from "zod";
 import { serializeEvents } from "./helpers.js";
 import { t, publicProcedure } from "./trpc.js";
+import { broadcast, presence, broadcastPresenceChange } from "./broadcast.js";
+import type { BroadcastMessage } from "@rotorsoft/act-sse";
 
 export const eventsRouter = t.router({
+  /**
+   * Real-time state broadcast — incremental patches over SSE.
+   * Uses @rotorsoft/act-sse for automatic RFC 6902 patch computation.
+   */
+  onStateChange: publicProcedure
+    .input(z.object({ streamId: z.string(), identityId: z.string().optional() }).optional())
+    .subscription(async function* ({ input, signal }) {
+      const streamId = input?.streamId;
+      if (!streamId) return;
+
+      const identityId = input?.identityId;
+      let resolve: (() => void) | null = null;
+      let pending: BroadcastMessage | null = null;
+
+      const cleanup = broadcast.subscribe(streamId, (msg) => {
+        pending = msg;
+        if (resolve) { resolve(); resolve = null; }
+      });
+
+      if (identityId) {
+        presence.add(streamId, identityId);
+        broadcastPresenceChange(streamId);
+      }
+
+      try {
+        // Yield current state on connect (always full state for reconnects)
+        const cached = broadcast.getState(streamId);
+        if (cached) yield { _type: "full" as const, ...cached, serverTime: new Date().toISOString() };
+
+        while (!signal?.aborted) {
+          if (!pending) {
+            await new Promise<void>((r) => {
+              resolve = r;
+              signal?.addEventListener("abort", () => r(), { once: true });
+            });
+          }
+          if (signal?.aborted) break;
+          if (pending) {
+            const msg = pending;
+            pending = null;
+            yield msg;
+          }
+        }
+      } finally {
+        cleanup();
+        if (identityId) {
+          presence.remove(streamId, identityId);
+          broadcastPresenceChange(streamId);
+        }
+      }
+    }),
+
+  /** Event stream — for replays and admin tools */
   onEvent: publicProcedure.subscription(async function*({ signal }) {
     const existing = await app.query_array({ after: -1 });
     for (const e of serializeEvents(existing)) {
@@ -399,6 +461,56 @@ export const eventsRouter = t.router({
     }
   }),
 });
+```
+
+### packages/app/src/api/broadcast.ts (broadcast setup)
+
+App-specific broadcast setup using `@rotorsoft/act-sse`. Customize `deriveState()` and `applyPresence()` for your domain.
+
+```typescript
+import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-sse";
+import type { BroadcastState } from "@rotorsoft/act-sse";
+
+// Extend with app-specific fields
+export type AppState = BroadcastState & {
+  // ... your domain state shape
+};
+
+export const broadcast = new BroadcastChannel<AppState>();
+export const presence = new PresenceTracker();
+
+type Snap = { state?: any; event?: { version: number; created: Date } };
+
+/** Broadcast state after every app.do() — single entry point. */
+export function broadcastState(streamId: string, snap: Snap) {
+  const state = snap?.state;
+  if (!state) return;
+
+  const fullState: AppState = {
+    ...state,
+    _v: snap.event!.version,
+    // ... app-specific computed fields (deadlines, etc.)
+  };
+
+  // Overlay presence on human players/users
+  const withPresence = applyPresence(fullState, streamId);
+  broadcast.publish(streamId, withPresence);
+}
+
+/** Re-broadcast with updated presence (called on connect/disconnect). */
+export function broadcastPresenceChange(streamId: string) {
+  const cached = broadcast.getState(streamId);
+  if (!cached) return;
+  const withPresence = applyPresence(cached, streamId);
+  broadcast.publishOverlay(streamId, withPresence);
+}
+
+function applyPresence(state: AppState, streamId: string): AppState {
+  // App-specific presence overlay — e.g., set `connected` on each player/user
+  const online = presence.getOnline(streamId);
+  // ... overlay online status onto state
+  return state;
+}
 ```
 
 ### packages/app/src/api/auth.routes.ts (authentication endpoints)
@@ -624,7 +736,52 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-## App client — hooks/useEventStream.ts (SSE + query invalidation)
+## App client — hooks/useStateStream.ts (incremental state sync via act-sse)
+
+Receives incremental patches or full state from the server, applies them to the React Query cache with version validation. Falls back to full refetch on version mismatch.
+
+```typescript
+// packages/app/src/client/hooks/useStateStream.ts
+import { useCallback, useState } from "react";
+import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+import { trpc } from "../trpc.js";
+
+export function useStateStream(streamId: string | null, identityId?: string) {
+  const [connected, setConnected] = useState(false);
+  const utils = trpc.useUtils();
+
+  const onStarted = useCallback(() => {
+    setConnected(true);
+    if (streamId) utils.getState.invalidate({ streamId });
+  }, [streamId, utils]);
+
+  trpc.onStateChange.useSubscription(
+    streamId ? { streamId, identityId } : undefined,
+    {
+      onStarted,
+      onData: (msg) => {
+        if (!streamId) return;
+        const cached = utils.getState.getData({ streamId }) as any;
+        const result = applyBroadcastMessage(msg as any, cached);
+
+        if (result.ok) {
+          utils.getState.setData({ streamId }, result.state as any);
+        } else if (result.reason === "behind" || result.reason === "patch-failed") {
+          utils.getState.invalidate({ streamId });
+        }
+        // "stale" → no-op (client already has newer state from mutation response)
+      },
+      onError: () => setConnected(false),
+    }
+  );
+
+  return { connected };
+}
+```
+
+## App client — hooks/useEventStream.ts (event log via SSE)
+
+For event replay views and admin tools. Uses the `onEvent` subscription with deduplication.
 
 ```typescript
 // packages/app/src/client/hooks/useEventStream.ts
@@ -758,6 +915,6 @@ pnpm add -Dw typescript tsx vitest @vitest/coverage-v8
 pnpm -F @my-app/domain add @rotorsoft/act zod
 
 # App (server + client combined)
-pnpm -F @my-app/app add @my-app/domain @rotorsoft/act @trpc/server @trpc/client @trpc/react-query @tanstack/react-query cors react react-dom zod
+pnpm -F @my-app/app add @my-app/domain @rotorsoft/act @rotorsoft/act-sse @trpc/server @trpc/client @trpc/react-query @tanstack/react-query cors react react-dom zod
 pnpm -F @my-app/app add -D @types/cors @types/react @types/react-dom @vitejs/plugin-react typescript vite
 ```

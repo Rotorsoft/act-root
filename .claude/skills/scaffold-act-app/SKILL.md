@@ -7,7 +7,7 @@ description: Scaffolds a new TypeScript application using the @rotorsoft/act eve
 
 Build a TypeScript monorepo application using `@rotorsoft/act` from a functional specification.
 
-**References:** [act-api.md](act-api.md) (type signatures & gotchas) · [monorepo-template.md](monorepo-template.md) (config files) · [production.md](production.md) (deployment)
+**References:** [act-api.md](act-api.md) (type signatures & gotchas) · [monorepo-template.md](monorepo-template.md) (config files) · [production.md](production.md) (deployment & real-time patterns with `@rotorsoft/act-sse`)
 
 ## Spec-to-Code Mapping
 
@@ -125,16 +125,17 @@ my-app/
 │       │   │   ├── context.ts    # Request context + token verification
 │       │   │   ├── helpers.ts    # serializeEvents() for SSE payloads
 │       │   │   ├── auth.ts       # Token signing, password hashing
+│       │   │   ├── broadcast.ts      # BroadcastChannel + PresenceTracker (act-sse)
 │       │   │   ├── auth.routes.ts    # Auth endpoints (login, signup, OAuth)
 │       │   │   ├── domain.routes.ts  # Domain mutations + queries
-│       │   │   └── events.routes.ts  # SSE subscription
+│       │   │   └── events.routes.ts  # SSE subscriptions (state + events)
 │       │   ├── client/           # React + Vite frontend
 │       │   │   ├── App.tsx           # Root (providers, splitLink for SSE)
 │       │   │   ├── main.tsx          # Entry point
 │       │   │   ├── trpc.ts           # tRPC React client
 │       │   │   ├── types.ts          # Shared client types
 │       │   │   ├── data/             # Static catalog data
-│       │   │   ├── hooks/            # Custom hooks (useAuth, useCart, useEventStream)
+│       │   │   ├── hooks/            # Custom hooks (useAuth, useStateStream, useEventStream)
 │       │   │   ├── components/       # UI components
 │       │   │   ├── views/            # Page-level views
 │       │   │   └── styles/           # CSS files
@@ -338,15 +339,18 @@ Decompose the API into focused route modules. See [monorepo-template.md](monorep
 | `context.ts` | Request context | Extract `AppActor` from Bearer token via `verifyToken()` |
 | `auth.ts` | Token + password crypto | HMAC-signed tokens, scrypt password hashing (zero deps) |
 | `helpers.ts` | Event serialization | `serializeEvents()` for SSE payloads |
+| `broadcast.ts` | Real-time state broadcast | `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-sse` |
 | `auth.routes.ts` | Auth endpoints | login, signup, me, assignRole, listUsers |
-| `domain.routes.ts` | Domain mutations + queries | `app.do()` + `scheduleDrain()` per mutation; query projections |
-| `events.routes.ts` | SSE subscription | `tracked()` yields with `app.on("settled")` for live updates |
+| `domain.routes.ts` | Domain mutations + queries | `app.do()` + `broadcastState()` per mutation; query projections |
+| `events.routes.ts` | SSE subscriptions | `onStateChange` (incremental patches) + `onEvent` (replay) |
 | `index.ts` | Router composition | `t.mergeRouters()` + export `AppRouter` type |
 
 **Key rules:**
 - Call `app.settle()` after every `app.do()` in mutations — non-blocking, returns immediately
+- Call `broadcastState(streamId, snap)` after every `app.do()` — pushes incremental patches via `act-sse`
 - Use `authedProcedure` / `adminProcedure` for authorization (middleware narrows `ctx.actor`)
-- SSE uses `app.on("settled", ...)` which fires only after `correlate()` + `drain()` complete
+- `onStateChange` SSE uses `broadcast.subscribe()` from `act-sse` for real-time state push
+- `onEvent` SSE uses `app.on("settled", ...)` which fires only after `correlate()` + `drain()` complete
 
 ### Step 8 — React Client (in `packages/app/src/client/`)
 
@@ -354,7 +358,8 @@ See [monorepo-template.md](monorepo-template.md) for complete file contents (`Ap
 
 **Key patterns:**
 - `App.tsx` uses `splitLink` — routes subscriptions through `httpSubscriptionLink` (SSE), mutations/queries through `httpLink`
-- `useEventStream` hook subscribes to SSE, deduplicates by event ID, and calls `utils.<query>.invalidate()` on relevant events
+- `useStateStream` hook subscribes to `onStateChange` SSE, applies incremental patches via `applyBroadcastMessage()` from `@rotorsoft/act-sse`
+- `useEventStream` hook subscribes to `onEvent` SSE, deduplicates by event ID, and calls `utils.<query>.invalidate()` on relevant events
 - `useAuth` hook provides `AuthProvider` context with `signIn`, `signUp`, `signOut`, and role-based access (`isAdmin`)
 
 ### Step 9 — Tests
@@ -441,7 +446,11 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] tRPC API decomposed into route files with typed middleware
-- [ ] SSE subscription wired with `app.on("settled")` for live events
+- [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-sse`
+- [ ] `broadcastState()` called after every `app.do()` — sets `_v` from `snap.event.version`
+- [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
+- [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
 - [ ] `app.settle()` called after mutations (non-blocking, debounced, emits "settled" after reactions)
+- [ ] Client `useStateStream` hook uses `applyBroadcastMessage()` from `@rotorsoft/act-sse`
 - [ ] Client uses `splitLink` for SSE subscriptions + HTTP for mutations/queries
 - [ ] Types compile with `npx tsc --noEmit`

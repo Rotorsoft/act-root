@@ -104,7 +104,9 @@ Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose framework logging (uses p
 
 ## Real-Time Application Patterns
 
-These patterns apply when building apps that need live state push (SSE/WebSockets) on top of act's event sourcing.
+These patterns apply when building apps that need live state push (SSE/WebSockets) on top of act's event sourcing. Use `@rotorsoft/act-sse` for incremental state broadcast.
+
+Install: `pnpm -F @my-app/app add @rotorsoft/act-sse`
 
 ### `app.do()` Returns One Snapshot Per Event — Use the Last One
 
@@ -127,29 +129,161 @@ async function doAction(action: string, target: any, payload: any) {
 }
 ```
 
+### Incremental State Broadcast with `@rotorsoft/act-sse`
+
+Instead of sending the full aggregate state to every client after each action, `act-sse` computes RFC 6902 JSON Patches between consecutive states and sends only the diff — falling back to full state when the patch is too large or the client needs to resync.
+
+**Version contract:** `_v` is always set from `snap.event.version` — the event store's monotonic stream version. No separate version counters.
+
+```
+  app.do() → snap
+      │
+      ▼
+  deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
+  state._v = snap.event.version  ← event store version is the single source of truth
+      │
+      ▼
+  broadcast.publish(streamId, state)
+      │
+      ├── compare(prev, state) → RFC 6902 ops
+      ├── ops ≤ threshold  → PatchMessage  { _type: "patch", _baseV, _v, _patch }
+      ├── ops > threshold  → FullStateMessage { _type: "full", _v, ...state }
+      └── push to all SSE subscribers
+      │
+      ▼
+  Client: applyBroadcastMessage(msg, cached)
+      │
+      ├── full   → accept if _v ≥ cachedV
+      ├── patch  → apply if _baseV === cachedV
+      ├── stale  → skip (client ahead, mutation response arrived first)
+      └── behind → invalidate + refetch (client missed a version)
+```
+
+### Server-Side Setup
+
+```typescript
+import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-sse";
+import type { BroadcastState } from "@rotorsoft/act-sse";
+
+// Extend BroadcastState with your app-specific fields
+type MyAppState = BroadcastState & {
+  // ... your domain state shape
+  turnDeadline: string | null;
+};
+
+// Create broadcast channel + presence tracker
+const broadcast = new BroadcastChannel<MyAppState>({
+  maxPatchOps: 50,   // fall back to full state above this
+  cacheSize: 50,     // LRU cache entries
+});
+const presence = new PresenceTracker();
+
+// After every app.do() — the single broadcast entry point
+function broadcastState(streamId: string, snap: Snap) {
+  const state = deriveFullState(snap);           // app-specific state derivation
+  state._v = snap.event.version;                 // MUST set from event store version
+  const withPresence = applyPresence(state, streamId); // app-specific overlay
+  broadcast.publish(streamId, withPresence);
+}
+
+// For non-event state changes (e.g. presence toggle)
+function broadcastPresenceChange(streamId: string) {
+  const cached = broadcast.getState(streamId);
+  if (!cached) return;
+  const withPresence = applyPresence(cached, streamId);
+  broadcast.publishOverlay(streamId, withPresence);
+}
+```
+
+### Client-Side Patch Application
+
+```typescript
+import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+
+// In SSE onData handler (React Query):
+onData: (msg) => {
+  const cached = utils.getState.getData({ streamId });
+  const result = applyBroadcastMessage(msg, cached);
+
+  if (result.ok) {
+    utils.getState.setData({ streamId }, result.state);
+  } else if (result.reason === "behind" || result.reason === "patch-failed") {
+    utils.getState.invalidate({ streamId }); // trigger full refetch
+  }
+  // "stale" → no-op (client already has newer state from mutation response)
+}
+```
+
+### SSE Subscription Pattern (tRPC)
+
+```typescript
+import type { BroadcastMessage } from "@rotorsoft/act-sse";
+
+onStateChange: publicProcedure
+  .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
+  .subscription(async function* ({ input, signal }) {
+    const { streamId, identityId } = input;
+
+    let resolve: (() => void) | null = null;
+    let pending: BroadcastMessage<MyAppState> | null = null;
+
+    const cleanup = broadcast.subscribe(streamId, (msg) => {
+      pending = msg;
+      if (resolve) { resolve(); resolve = null; }
+    });
+
+    if (identityId) {
+      presence.add(streamId, identityId);
+      broadcastPresenceChange(streamId);
+    }
+
+    try {
+      // Yield current state on connect (always full state for reconnects)
+      const cached = broadcast.getState(streamId);
+      if (cached) yield { _type: "full" as const, ...cached, serverTime: new Date().toISOString() };
+
+      while (!signal?.aborted) {
+        if (!pending) {
+          await new Promise<void>((r) => {
+            resolve = r;
+            signal?.addEventListener("abort", () => r(), { once: true });
+          });
+        }
+        if (signal?.aborted) break;
+        if (pending) {
+          const msg = pending;
+          pending = null;
+          yield msg;
+        }
+      }
+    } finally {
+      cleanup();
+      if (identityId) {
+        presence.remove(streamId, identityId);
+        broadcastPresenceChange(streamId);
+      }
+    }
+  }),
+```
+
 ### Aggregate Snapshots vs Projection State
 
 The snapshot from `app.do()` has all event patches applied — it is the authoritative current state. Projections run asynchronously via `settle()` and can lag behind by any amount.
 
 **Rule: The hot path (API responses, SSE push, in-memory cache) must use aggregate snapshots, never projection state.**
 
-When your app maintains an in-memory cache for real-time push, keep two separate caches:
-- **Live cache** — seeded only from aggregate snapshots after `app.do()`. Serves SSE subscribers and reconnecting clients.
-- **Projection cache** — private to the projection. Used for its own read-modify-write cycle.
+The `BroadcastChannel` from `act-sse` maintains an LRU cache seeded from aggregate snapshots. Projections should maintain their own cache to avoid double-apply bugs.
 
 ```typescript
-// Hot path: seed live cache from aggregate snapshot
-function broadcastState(streamId: string, snap: Snap) {
-  const state = deriveFullState(snap);
-  liveCache.set(streamId, state);
-  pushToSubscribers(streamId, state);
-}
+// Hot path: broadcast from aggregate snapshot (uses act-sse internally)
+const snap = await doAction("Update", target, payload);
+broadcastState(streamId, snap);
 
 // Projection: writes DB + its own cache only
 async function writeProjection(streamId: string, state: State) {
   await db.upsert(streamId, state);
   projCache.set(streamId, state);
-  // NEVER write to liveCache here — projection state may be stale
+  // NEVER write to broadcast.cache here — projection state may be stale
 }
 ```
 
@@ -160,7 +294,7 @@ If a projection's read-modify-write falls back to the live cache on a miss, it r
 ```typescript
 // BUG — live cache holds post-event snapshots, projection double-applies
 async function upsertProjection(streamId, mutator) {
-  let state = projCache.get(streamId) ?? liveCache.get(streamId);
+  let state = projCache.get(streamId) ?? broadcast.getState(streamId);
   mutator(state); // patches applied twice
   await writeProjection(streamId, state);
 }
@@ -178,7 +312,7 @@ async function upsertProjection(streamId, mutator) {
 
 ### Single Broadcast Function
 
-All code paths that call `app.do()` — API handlers, background workers, timers — should funnel through one broadcast function. This guarantees consistent cache seeding, subscriber push, and side effects (e.g., scheduling timers).
+All code paths that call `app.do()` — API handlers, background workers, timers — should funnel through one broadcast function that calls `broadcast.publish()`. This guarantees consistent cache seeding, subscriber push, and side effects (e.g., scheduling timers).
 
 ```typescript
 const snap = await doAction("SomeAction", target, payload);

@@ -6,6 +6,9 @@
     },
     {
       "path": "./libs/act-pg"
+    },
+    {
+      "path": "./libs/act-sse"
     }
   ]
 }
