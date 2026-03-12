@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-sse",
   "type": "module",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Incremental state broadcast over SSE for act apps",
   "author": "rotorsoft",
   "license": "MIT",
