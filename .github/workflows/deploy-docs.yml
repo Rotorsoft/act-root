@@ -10,6 +10,9 @@ on:
     branches: [master]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   filter:
     runs-on: ubuntu-latest
@@ -22,6 +25,7 @@ jobs:
             docs:
               - 'libs/act/src/**'
               - 'libs/act-pg/src/**'
+              - 'libs/act-sse/src/**'
               - 'docs/**'
     outputs:
       docs: ${{ steps.filter.outputs.docs }}
