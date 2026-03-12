@@ -56,16 +56,6 @@ describe("exit signal handlers", () => {
     await disposeAndExit("ERROR");
     expect(exit).toHaveBeenCalledWith(1);
   });
-
-  it.skip("should not exit in test environment", async () => {
-    process.env.NODE_ENV = "test";
-    const { disposeAndExit } = await import("../src/ports.js");
-    const exit = vi
-      .spyOn(process, "exit")
-      .mockImplementation(() => undefined as never);
-    await disposeAndExit("EXIT");
-    expect(exit).not.toHaveBeenCalled();
-  });
 });
 
 describe("tracer", () => {
