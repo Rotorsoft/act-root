@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.18.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.17.1...@rotorsoft/act-v0.18.0) (2026-03-13)
+
+
+### Features
+
+* replace RFC 6902 JSON Patch with domain patches ([e6b96bd](https://github.com/rotorsoft/act-root/commit/e6b96bd3d624f064d956779760f64fdd0fc3e362))
+
 # [@rotorsoft/act-v0.17.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.17.0...@rotorsoft/act-v0.17.1) (2026-03-12)
 
 
