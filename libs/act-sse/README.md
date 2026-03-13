@@ -1,86 +1,91 @@
 # @rotorsoft/act-sse
 
-Incremental state broadcast over SSE for [act](https://github.com/rotorsoft/act-root) event-sourced apps.
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
+[![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Instead of sending the full aggregate state to every connected client after each action, `act-sse` computes RFC 6902 JSON Patches between consecutive states and sends only the diff — falling back to full state when the patch is too large or the client needs to resync.
+Incremental state broadcast over SSE for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps. Zero dependencies.
 
-## Install
+Instead of sending full aggregate state after each action, `act-sse` forwards the domain patches that event handlers already compute — sending only what changed as version-keyed partials.
 
-```bash
+## Installation
+
+```sh
 npm install @rotorsoft/act-sse
 # or
 pnpm add @rotorsoft/act-sse
 ```
 
+**Requirements:** Node.js >= 22.18.0
+
 ## Architecture
 
 ```
-  app.do() → snap
+  app.do() → Snapshot[] (each carries its event's domain patch)
       │
       ▼
   deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
   state._v = snap.event.version  ← event store version is the single source of truth
       │
       ▼
-  broadcast.publish(streamId, state)
+  broadcast.publish(streamId, state, patches)
       │
-      ├── compare(prev, state) → RFC 6902 ops
-      ├── ops ≤ threshold  → PatchMessage  { _type: "patch", _baseV, _v, _patch }
-      ├── ops > threshold  → FullStateMessage { _type: "full", _v, ...state }
+      └── version-key each patch → { "5": { count: 3 }, "6": { name: "updated" } }
       └── push to all SSE subscribers
       │
       ▼
-  Client: applyBroadcastMessage(msg, cached)
+  Client: applyPatchMessage(msg, cached)
       │
-      ├── full   → accept if _v ≥ cachedV
-      ├── patch  → apply if _baseV === cachedV
-      ├── stale  → skip (client ahead, mutation response arrived first)
-      └── behind → invalidate + refetch (client missed a version)
+      ├── contiguous → deep merge patches in version order
+      ├── stale      → skip (client already ahead)
+      └── behind     → invalidate + refetch (client missed versions)
 ```
+
+## Wire Format
+
+```typescript
+// Version-keyed domain patches
+// Keys = state version after that patch is applied
+// Values = domain patch (deep partial of state)
+{
+  "5": { territories: { brazil: { armies: 3 } } },
+  "6": { currentPlayerIndex: 2, phase: "reinforce" }
+}
+```
+
+Multi-event commits produce multiple version-keyed entries. Version gaps trigger full state refetch on the client.
 
 ## Server Usage
 
 ```typescript
-import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-sse";
+import { BroadcastChannel } from "@rotorsoft/act-sse";
 
-// Create a typed broadcast channel for your app state
-const broadcast = new BroadcastChannel<MyAppState>({
-  maxPatchOps: 50,   // fall back to full state above this (default: 50)
-  cacheSize: 50,     // LRU cache entries (default: 50)
-});
-
-const presence = new PresenceTracker();
+const broadcast = new BroadcastChannel<MyAppState>();
 
 // After every app.do():
-const snap = await doAction(action, { stream: streamId, actor }, payload);
-const state = deriveState(snap);           // your app-specific state derivation
-state._v = snap.event.version;             // MUST set from event store version
-broadcast.publish(streamId, state);
+const snaps = await app.do(action, target, payload);
+const snap = snaps.at(-1)!;
+const patches = snaps.map(s => s.patch).filter(Boolean);
+const state = deriveState(snap);
+broadcast.publish(streamId, state, patches);
 
 // For non-event state changes (e.g. presence overlay):
-broadcast.publishOverlay(streamId, stateWithPresence);
+broadcast.publishOverlay(streamId, { players: { pid: { connected: true } } });
 
 // SSE subscription (tRPC example):
 onStateChange: publicProcedure
-  .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
+  .input(z.object({ streamId: z.string() }))
   .subscription(async function* ({ input, signal }) {
-    const { streamId, identityId } = input;
-
     let resolve: (() => void) | null = null;
-    let pending: BroadcastMessage | null = null;
+    let pending: PatchMessage | null = null;
 
-    const cleanup = broadcast.subscribe(streamId, (msg) => {
+    const cleanup = broadcast.subscribe(input.streamId, (msg) => {
       pending = msg;
       if (resolve) { resolve(); resolve = null; }
     });
 
-    if (identityId) presence.add(streamId, identityId);
-
     try {
-      // Yield current state on connect
-      const cached = broadcast.getState(streamId);
-      if (cached) yield { _type: "full" as const, ...cached, serverTime: new Date().toISOString() };
-
       while (!signal?.aborted) {
         if (!pending) {
           await new Promise<void>((r) => {
@@ -89,15 +94,10 @@ onStateChange: publicProcedure
           });
         }
         if (signal?.aborted) break;
-        if (pending) {
-          const msg = pending;
-          pending = null;
-          yield msg;
-        }
+        if (pending) { const msg = pending; pending = null; yield msg; }
       }
     } finally {
       cleanup();
-      if (identityId) presence.remove(streamId, identityId);
     }
   }),
 ```
@@ -105,21 +105,20 @@ onStateChange: publicProcedure
 ## Client Usage
 
 ```typescript
-import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+import { applyPatchMessage } from "@rotorsoft/act-sse";
 
 // In your SSE onData handler (React Query example):
 onData: (msg) => {
   const cached = utils.getState.getData({ streamId });
-  const result = applyBroadcastMessage(msg, cached);
+  const result = applyPatchMessage(msg, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
   } else if (result.reason === "behind") {
-    // Client missed a version — trigger full refetch
+    // Client missed versions — trigger full refetch
     utils.getState.invalidate({ streamId });
   }
   // "stale" → no-op (client already has newer state from mutation response)
-  // "patch-failed" → same as behind, trigger resync
 }
 ```
 
@@ -131,33 +130,33 @@ Server-side broadcast manager with per-stream subscriber channels and LRU state 
 
 | Method | Description |
 |--------|-------------|
-| `publish(streamId, state)` | Compute patch, cache state, push to subscribers |
-| `publishOverlay(streamId, state)` | Same-version update (e.g. presence change) |
+| `publish(streamId, state, patches?)` | Cache state, version-key patches, push to subscribers |
+| `publishOverlay(streamId, patch)` | Same-version update (e.g. presence change) |
 | `subscribe(streamId, cb)` | Register subscriber, returns cleanup function |
 | `getState(streamId)` | Get cached state (for reconnects) |
 | `getSubscriberCount(streamId)` | Number of active subscribers |
 | `cache` | Direct access to `StateCache` instance |
 
-### `applyBroadcastMessage(msg, cached)`
+### `applyPatchMessage(msg, cached)`
 
 Client-side patch applicator. Returns `{ ok: true, state }` or `{ ok: false, reason }`.
 
-Reasons: `"stale"` (skip), `"behind"` (resync), `"patch-failed"` (resync).
+Reasons: `"stale"` (skip), `"behind"` (resync).
+
+### `patch(original, patches)`
+
+Browser-safe deep merge utility. Deep merges plain objects, replaces arrays and other non-mergeable types (Date, Map, Set, RegExp, TypedArrays). Deletes keys set to `null` or `undefined`.
 
 ### `StateCache<S>`
 
 Generic LRU cache. Methods: `get`, `set`, `delete`, `has`, `size`, `entries`.
 
-### `PresenceTracker`
-
-Ref-counted presence tracking. Methods: `add`, `remove`, `getOnline`, `isOnline`.
-
-### Message Types
+### Types
 
 ```typescript
-type FullStateMessage<S> = S & { _type: "full"; serverTime: string };
-type PatchMessage = { _type: "patch"; _v: number; _baseV: number; _patch: Operation[]; serverTime: string };
-type BroadcastMessage<S> = FullStateMessage<S> | PatchMessage;
+type BroadcastState = Record<string, unknown> & { _v: number };
+type PatchMessage<S extends BroadcastState> = Record<number, DeepPartial<S>>;
+type Subscriber<S extends BroadcastState> = (msg: PatchMessage<S>) => void;
 ```
 
 ## Version Contract
@@ -173,8 +172,14 @@ Typical savings for a game/collaborative app with ~5KB state:
 | Single field change | ~5,000 | ~150 | 97% |
 | Multi-field update | ~5,000 | ~400 | 92% |
 | Presence toggle | ~5,000 | ~80 | 98% |
-| Large structural change | ~5,000 | ~5,000 (fallback) | 0% |
+
+## Related
+
+- [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) - Core framework
+- [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) - PostgreSQL adapter
+- [Documentation](https://rotorsoft.github.io/act-root/)
+- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
 
 ## License
 
-MIT
+[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)
