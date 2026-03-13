@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sse-v1.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.1.0...@rotorsoft/act-sse-v1.1.1) (2026-03-13)
+
+
+### Bug Fixes
+
+* **act-sse:** guard SharedArrayBuffer for browser environments ([cfd3e20](https://github.com/rotorsoft/act-root/commit/cfd3e20b618573c1c48141919e0d2f39cd2d155f))
+
 # [@rotorsoft/act-sse-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.0.1...@rotorsoft/act-sse-v1.1.0) (2026-03-13)
 
 
