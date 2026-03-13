@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sse-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.0.1...@rotorsoft/act-sse-v1.1.0) (2026-03-13)
+
+
+### Features
+
+* replace RFC 6902 JSON Patch with domain patches ([e6b96bd](https://github.com/rotorsoft/act-root/commit/e6b96bd3d624f064d956779760f64fdd0fc3e362))
+
 # [@rotorsoft/act-sse-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.0.0...@rotorsoft/act-sse-v1.0.1) (2026-03-12)
 
 
