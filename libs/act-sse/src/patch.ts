@@ -18,7 +18,7 @@ const UNMERGEABLES = [
   WeakMap,
   WeakSet,
   ArrayBuffer,
-  SharedArrayBuffer,
+  ...(typeof SharedArrayBuffer !== "undefined" ? [SharedArrayBuffer] : []),
   DataView,
   Int8Array,
   Uint8Array,
