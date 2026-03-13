@@ -393,17 +393,16 @@ export class PostgresStore implements Store {
           expectedVersion
         );
 
-      const committed = await Promise.all(
-        msgs.map(async ({ name, data }) => {
-          version++;
-          const sql = `
-          INSERT INTO ${this._fqt}(name, data, stream, version, meta) 
+      const committed: Committed<E, keyof E>[] = [];
+      for (const { name, data } of msgs) {
+        version++;
+        const sql = `
+          INSERT INTO ${this._fqt}(name, data, stream, version, meta)
           VALUES($1, $2, $3, $4, $5) RETURNING *`;
-          const vals = [name, data, stream, version, meta];
-          const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
-          return rows.at(0)!;
-        })
-      );
+        const vals = [name, data, stream, version, meta];
+        const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
+        committed.push(rows.at(0)!);
+      }
 
       await client
         .query(
