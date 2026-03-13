@@ -1,5 +1,3 @@
-import type { Operation } from "fast-json-patch";
-
 /**
  * Base constraint for state objects managed by the broadcast system.
  * Apps extend this with their own domain state shape.
@@ -10,46 +8,26 @@ export type BroadcastState = Record<string, unknown> & {
 };
 
 /**
- * Full state message — sent on initial connect, resync, or when patch is too large.
+ * Recursive deep partial — mirrors act core's Patch<T>.
  */
-export type FullStateMessage<S extends BroadcastState = BroadcastState> = S & {
-  _type: "full";
-  serverTime: string;
+
+type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends Record<string, any> ? DeepPartial<T[K]> : T[K];
 };
 
 /**
- * Incremental patch message — sent when the diff is small enough.
- * Client applies RFC 6902 operations to its cached state at _baseV to reach _v.
+ * SSE message: version-keyed domain patches.
+ * Keys are stringified version numbers, values are domain patches (deep partials).
+ * Multi-event commits produce multiple version-keyed entries.
  */
-export type PatchMessage = {
-  _type: "patch";
-  /** Target version after applying the patch */
-  _v: number;
-  /** Version the patch applies to (client must have this version cached) */
-  _baseV: number;
-  /** RFC 6902 JSON Patch operations */
-  _patch: Operation[];
-  serverTime: string;
-};
+export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
+  number,
+  DeepPartial<S>
+>;
 
 /**
- * Discriminated union sent over SSE — client switches on `_type`.
- */
-export type BroadcastMessage<S extends BroadcastState = BroadcastState> =
-  | FullStateMessage<S>
-  | PatchMessage;
-
-/**
- * Subscriber callback — receives either a patch or full state message.
+ * Subscriber callback — receives version-keyed patch messages.
  */
 export type Subscriber<S extends BroadcastState = BroadcastState> = (
-  msg: BroadcastMessage<S>
+  msg: PatchMessage<S>
 ) => void;
-
-/**
- * Options for creating a broadcast channel.
- */
-export type BroadcastOptions = {
-  /** Max RFC 6902 operations before falling back to full state (default: 50) */
-  maxPatchOps?: number;
-};

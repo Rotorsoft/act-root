@@ -234,6 +234,8 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
   readonly patches: number;
   /** Number of snapshots taken for this stream */
   readonly snaps: number;
+  /** Domain patch applied by this event (undefined for initial/loaded state) */
+  readonly patch?: Readonly<Patch<TState>>;
 };
 
 /**

@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BroadcastChannel } from "../src/broadcast.js";
-import type {
-  BroadcastMessage,
-  BroadcastState,
-  FullStateMessage,
-  PatchMessage,
-} from "../src/types.js";
+import type { BroadcastState, PatchMessage } from "../src/types.js";
 
 type TestState = BroadcastState & {
   name: string;
@@ -18,45 +13,43 @@ function makeState(v: number, overrides?: Partial<TestState>): TestState {
 }
 
 describe("BroadcastChannel", () => {
-  it("sends full state on first publish (no previous cached)", () => {
+  it("sends empty patch message on publish with no patches", () => {
     const bc = new BroadcastChannel<TestState>();
-    const msgs: BroadcastMessage<TestState>[] = [];
+    const msgs: PatchMessage<TestState>[] = [];
     bc.subscribe("s1", (m) => msgs.push(m));
 
     bc.publish("s1", makeState(1));
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0]._type).toBe("full");
-    expect((msgs[0] as FullStateMessage<TestState>)._v).toBe(1);
+    expect(Object.keys(msgs[0])).toHaveLength(0); // no patches = empty message
   });
 
-  it("sends patch when diff is small", () => {
+  it("sends version-keyed patches", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(1, { count: 0 }));
 
-    const msgs: BroadcastMessage<TestState>[] = [];
+    const msgs: PatchMessage<TestState>[] = [];
     bc.subscribe("s1", (m) => msgs.push(m));
-    bc.publish("s1", makeState(2, { count: 1 }));
+    bc.publish("s1", makeState(2, { count: 1 }), [{ count: 1 }]);
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0]._type).toBe("patch");
-    const patch = msgs[0] as PatchMessage;
-    expect(patch._baseV).toBe(1);
-    expect(patch._v).toBe(2);
-    expect(patch._patch.length).toBeGreaterThan(0);
+    expect(msgs[0][2]).toEqual({ count: 1 });
   });
 
-  it("sends full state when patch exceeds maxPatchOps", () => {
-    const bc = new BroadcastChannel<TestState>({ maxPatchOps: 2 });
-    bc.publish("s1", makeState(1, { count: 0, name: "a", items: [] }));
+  it("sends multiple version keys for multi-event commits", () => {
+    const bc = new BroadcastChannel<TestState>();
+    bc.publish("s1", makeState(1));
 
-    const msgs: BroadcastMessage<TestState>[] = [];
+    const msgs: PatchMessage<TestState>[] = [];
     bc.subscribe("s1", (m) => msgs.push(m));
-    // Change 3 fields → 3+ ops, exceeds maxPatchOps=2
-    bc.publish("s1", makeState(2, { count: 99, name: "b", items: ["x"] }));
+    bc.publish("s1", makeState(3, { count: 5, name: "updated" }), [
+      { count: 3 },
+      { count: 5, name: "updated" },
+    ]);
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0]._type).toBe("full");
+    expect(msgs[0][2]).toEqual({ count: 3 });
+    expect(msgs[0][3]).toEqual({ count: 5, name: "updated" });
   });
 
   it("caches state for reconnects", () => {
@@ -71,7 +64,7 @@ describe("BroadcastChannel", () => {
 
   it("subscribe returns cleanup function", () => {
     const bc = new BroadcastChannel<TestState>();
-    const msgs: BroadcastMessage<TestState>[] = [];
+    const msgs: PatchMessage<TestState>[] = [];
     const cleanup = bc.subscribe("s1", (m) => msgs.push(m));
 
     bc.publish("s1", makeState(1));
@@ -101,50 +94,31 @@ describe("BroadcastChannel", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(5, { name: "original" }));
 
-    const msgs: BroadcastMessage<TestState>[] = [];
+    const msgs: PatchMessage<TestState>[] = [];
     bc.subscribe("s1", (m) => msgs.push(m));
-    bc.publishOverlay("s1", makeState(5, { name: "overlayed" }));
+    bc.publishOverlay("s1", { name: "overlayed" });
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0]._type).toBe("patch");
-    const patch = msgs[0] as PatchMessage;
-    expect(patch._baseV).toBe(5);
-    expect(patch._v).toBe(5);
+    expect(msgs[0][5]).toEqual({ name: "overlayed" });
   });
 
   it("publishOverlay returns undefined when no cached state", () => {
     const bc = new BroadcastChannel<TestState>();
-    const result = bc.publishOverlay("missing", makeState(1));
+    const result = bc.publishOverlay("missing", { name: "x" });
     expect(result).toBeUndefined();
   });
 
-  it("publishOverlay works with no subscribers", () => {
+  it("publishOverlay updates cache", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(5, { name: "original" }));
-    // No subscribe — exercises the !subs?.size branch in publishOverlay
-    const result = bc.publishOverlay("s1", makeState(5, { name: "changed" }));
-    expect(result).toBeDefined();
-    expect(result!._type).toBe("patch");
-  });
-
-  it("sends full state when publishing identical state (zero-diff)", () => {
-    const bc = new BroadcastChannel<TestState>();
-    const state = makeState(1, { name: "same" });
-    bc.publish("s1", state);
-
-    const msgs: BroadcastMessage<TestState>[] = [];
-    bc.subscribe("s1", (m) => msgs.push(m));
-    bc.publish("s1", { ...state }); // identical content
-
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]._type).toBe("full"); // zero ops → full state fallback
+    bc.publishOverlay("s1", { name: "changed" });
+    expect(bc.getState("s1")?.name).toBe("changed");
   });
 
   it("exposes cache accessor", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(1));
     expect(bc.cache.get("s1")?._v).toBe(1);
-    // entries() iteration
     const entries = [...bc.cache.entries()];
     expect(entries).toHaveLength(1);
     expect(entries[0][0]).toBe("s1");
@@ -152,8 +126,8 @@ describe("BroadcastChannel", () => {
 
   it("isolates streams from each other", () => {
     const bc = new BroadcastChannel<TestState>();
-    const msgs1: BroadcastMessage<TestState>[] = [];
-    const msgs2: BroadcastMessage<TestState>[] = [];
+    const msgs1: PatchMessage<TestState>[] = [];
+    const msgs2: PatchMessage<TestState>[] = [];
 
     bc.subscribe("s1", (m) => msgs1.push(m));
     bc.subscribe("s2", (m) => msgs2.push(m));

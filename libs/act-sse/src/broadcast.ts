@@ -1,21 +1,13 @@
-import { compare } from "fast-json-patch";
+import { patch as applyPatch } from "./patch.js";
 import { StateCache } from "./state-cache.js";
-import type {
-  BroadcastMessage,
-  BroadcastOptions,
-  BroadcastState,
-  Subscriber,
-} from "./types.js";
-
-const DEFAULT_MAX_PATCH_OPS = 50;
+import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
 
 /**
  * Server-side broadcast channel for incremental state sync over SSE.
  *
  * Manages per-stream subscriber sets and an LRU state cache. When state
- * changes, computes an RFC 6902 JSON Patch against the previous cached
- * state and pushes either a patch (small diff) or full state (large diff
- * or first broadcast) to all subscribers.
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
  *
  * ## Usage
  *
@@ -23,9 +15,10 @@ const DEFAULT_MAX_PATCH_OPS = 50;
  * const broadcast = new BroadcastChannel<MyState>();
  *
  * // After every app.do():
- * const snap = await doAction(...);
- * const state = deriveState(snap);       // app-specific state derivation
- * broadcast.publish(streamId, state);    // computes patch + pushes to SSE
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
  *
  * // In SSE subscription:
  * const cleanup = broadcast.subscribe(streamId, (msg) => {
@@ -35,7 +28,6 @@ const DEFAULT_MAX_PATCH_OPS = 50;
  *
  * // Initial state for reconnects:
  * const cached = broadcast.getState(streamId);
- * if (cached) yield { _type: "full", ...cached, serverTime: ... };
  * ```
  *
  * ## Version Contract
@@ -47,26 +39,32 @@ const DEFAULT_MAX_PATCH_OPS = 50;
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
   private stateCache: StateCache<S>;
-  private maxPatchOps: number;
 
-  constructor(options?: BroadcastOptions & { cacheSize?: number }) {
+  constructor(options?: { cacheSize?: number }) {
     this.stateCache = new StateCache<S>(options?.cacheSize ?? 50);
-    this.maxPatchOps = options?.maxPatchOps ?? DEFAULT_MAX_PATCH_OPS;
   }
 
   /**
-   * Publish new state for a stream. Computes a patch against the previously
-   * cached state and pushes to all subscribers.
+   * Publish domain patches from a commit.
+   * patches[i] corresponds to version baseV + i + 1.
    *
    * @param streamId - The event store stream ID
    * @param state - Full state with `_v` set from `snap.event.version`
-   * @returns The broadcast message that was sent (or undefined if no subscribers and no cache change)
+   * @param patches - Array of domain patches, one per emitted event
    */
-  publish(streamId: string, state: S): BroadcastMessage<S> {
-    const prev = this.stateCache.get(streamId);
+  publish(
+    streamId: string,
+    state: S,
+    patches: Partial<S>[] = []
+  ): PatchMessage<S> {
     this.stateCache.set(streamId, state);
 
-    const msg = this.computeMessage(prev, state);
+    const baseV = state._v - patches.length;
+    const msg: PatchMessage<S> = {};
+    patches.forEach((p, i) => {
+      msg[baseV + i + 1] = p;
+    });
+
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -77,15 +75,19 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   /**
    * Publish a state update that doesn't change the event version
    * (e.g. presence overlay, computed field refresh).
-   * Uses the same version as the cached state for _baseV and _v.
+   * Uses the same version as the cached state, single entry.
    */
-  publishOverlay(streamId: string, state: S): BroadcastMessage<S> | undefined {
+  publishOverlay(
+    streamId: string,
+    overlayPatch: Partial<S>
+  ): PatchMessage<S> | undefined {
     const prev = this.stateCache.get(streamId);
     if (!prev) return undefined;
 
+    const state = applyPatch(prev, overlayPatch) as S;
     this.stateCache.set(streamId, state);
 
-    const msg = this.computeMessage(prev, state);
+    const msg: PatchMessage<S> = { [state._v]: overlayPatch };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -121,32 +123,5 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   /** Direct access to the state cache (for app-specific reads like presence). */
   get cache(): StateCache<S> {
     return this.stateCache;
-  }
-
-  // --- internals ---
-
-  private computeMessage(prev: S | undefined, next: S): BroadcastMessage<S> {
-    const serverTime = new Date().toISOString();
-
-    if (!prev) {
-      return { _type: "full", ...next, serverTime };
-    }
-
-    const ops = compare(prev, next);
-    if (ops.length === 0) {
-      // No actual diff — still send full state so subscribers get serverTime refresh
-      return { _type: "full", ...next, serverTime };
-    }
-    if (ops.length > this.maxPatchOps) {
-      return { _type: "full", ...next, serverTime };
-    }
-
-    return {
-      _type: "patch",
-      _v: next._v,
-      _baseV: prev._v,
-      _patch: ops,
-      serverTime,
-    };
   }
 }
