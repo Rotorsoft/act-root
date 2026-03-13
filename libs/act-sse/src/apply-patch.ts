@@ -1,34 +1,28 @@
-import { applyPatch } from "fast-json-patch";
-import type { BroadcastMessage, BroadcastState } from "./types.js";
+import { patch as deepMerge } from "./patch.js";
+import type { BroadcastState, PatchMessage } from "./types.js";
 
 /**
- * Result of applying a broadcast message to cached client state.
+ * Result of applying a patch message to cached client state.
  */
 export type ApplyResult<S extends BroadcastState = BroadcastState> =
   | { ok: true; state: S }
-  | { ok: false; reason: "stale" | "behind" | "patch-failed" };
+  | { ok: false; reason: "stale" | "behind" };
 
 /**
- * Apply a broadcast message to the client's cached state.
- *
- * Handles both full state and incremental patches with version validation.
- * Returns the new state on success, or a failure reason that the client
- * can use to decide whether to resync.
+ * Apply a version-keyed patch message to the client's cached state.
  *
  * ## Version logic
  *
- * - **Full state**: accepted if `msg._v >= cachedV` (or no cached state)
- * - **Patch**:
- *   - `_baseV < cachedV` → "stale" (client ahead, skip — mutation response arrived first)
- *   - `_baseV > cachedV` → "behind" (client missed a version, must resync)
- *   - `_baseV === cachedV` → apply patch ops
+ * - All patches older than cached → "stale" (client already ahead)
+ * - Gap between cached version and first patch → "behind" (client missed versions, must resync)
+ * - Contiguous from cached version → apply in order
  *
  * ## Usage (React Query)
  *
  * ```typescript
  * onData: (msg) => {
  *   const cached = utils.getState.getData({ streamId });
- *   const result = applyBroadcastMessage(msg, cached);
+ *   const result = applyPatchMessage(msg, cached);
  *   if (result.ok) {
  *     utils.getState.setData({ streamId }, result.state);
  *   } else if (result.reason === "behind") {
@@ -38,32 +32,30 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  * }
  * ```
  */
-export function applyBroadcastMessage<S extends BroadcastState>(
-  msg: BroadcastMessage<S>,
+export function applyPatchMessage<S extends BroadcastState>(
+  msg: PatchMessage<S>,
   cached: S | null | undefined
 ): ApplyResult<S> {
   const cachedV = cached?._v ?? 0;
+  const versions = Object.keys(msg)
+    .map(Number)
+    .sort((a, b) => a - b);
 
-  if (msg._type === "full") {
-    if (msg._v < cachedV) return { ok: false, reason: "stale" };
-    // Strip _type from the state stored in cache
-    const { _type, ...state } = msg;
-    return { ok: true, state: state as S };
+  if (!versions.length) return { ok: false, reason: "stale" };
+
+  const minV = versions[0];
+  const maxV = versions[versions.length - 1];
+
+  // All patches are older than what we have
+  if (maxV <= cachedV) return { ok: false, reason: "stale" };
+  // Gap — we missed versions
+  if (!cached || minV > cachedV + 1) return { ok: false, reason: "behind" };
+
+  // Apply patches in version order, skipping any we already have
+  let state = cached;
+  for (const v of versions) {
+    if (v <= cachedV) continue; // already applied
+    state = { ...deepMerge(state, msg[v]), _v: v } as S;
   }
-
-  // Patch message
-  if (msg._baseV < cachedV) return { ok: false, reason: "stale" };
-  if (msg._baseV > cachedV) return { ok: false, reason: "behind" };
-
-  // _baseV === cachedV — apply
-  if (!cached) return { ok: false, reason: "behind" };
-
-  try {
-    const clone = structuredClone(cached);
-    applyPatch(clone, msg._patch, true); // mutates clone in-place, throws on validation failure
-    clone._v = msg._v;
-    return { ok: true, state: clone };
-  } catch {
-    return { ok: false, reason: "patch-failed" };
-  }
+  return { ok: true, state };
 }

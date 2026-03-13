@@ -4,34 +4,31 @@
  *
  * Incremental state broadcast over SSE for act event-sourced apps.
  *
- * Provides server-side broadcast with automatic RFC 6902 JSON Patch
- * computation, an LRU state cache, presence tracking, and a client-side
+ * Provides server-side broadcast with domain patch forwarding,
+ * an LRU state cache, presence tracking, and a client-side
  * patch applicator with version validation and resync detection.
  *
  * ## Architecture
  *
  * ```
- *   app.do() → snap
+ *   app.do() → snapshots (each carries its domain patch)
  *       │
  *       ▼
  *   deriveState(snap)          ← app-specific (overlay presence, deadlines, etc.)
  *   state._v = snap.event.version
  *       │
  *       ▼
- *   broadcast.publish(streamId, state)
+ *   broadcast.publish(streamId, state, patches)
  *       │
- *       ├── compare(prev, state) → RFC 6902 ops
- *       ├── if ops ≤ threshold → PatchMessage { _baseV, _v, _patch }
- *       ├── if ops > threshold → FullStateMessage { _v, ...state }
+ *       ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2 }
  *       └── push to all SSE subscribers
  *       │
  *       ▼
- *   Client: applyBroadcastMessage(msg, cached)
+ *   Client: applyPatchMessage(msg, cached)
  *       │
- *       ├── full  → accept if _v ≥ cachedV
- *       ├── patch → apply if _baseV === cachedV
- *       ├── stale → skip (_baseV < cachedV, mutation response arrived first)
- *       └── behind → resync (_baseV > cachedV, client missed a version)
+ *       ├── contiguous → deep-merge patches in version order
+ *       ├── stale    → skip (client already ahead)
+ *       └── behind   → resync (client missed versions)
  * ```
  *
  * ## Version Contract
@@ -40,16 +37,10 @@
  * No separate version counters. The event store is the single source of truth.
  */
 
-export { applyBroadcastMessage } from "./apply-patch.js";
+export { applyPatchMessage } from "./apply-patch.js";
 export type { ApplyResult } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
+export { patch } from "./patch.js";
 export { PresenceTracker } from "./presence.js";
 export { StateCache } from "./state-cache.js";
-export type {
-  BroadcastMessage,
-  BroadcastOptions,
-  BroadcastState,
-  FullStateMessage,
-  PatchMessage,
-  Subscriber,
-} from "./types.js";
+export type { BroadcastState, PatchMessage, Subscriber } from "./types.js";

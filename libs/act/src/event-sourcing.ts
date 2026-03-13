@@ -219,9 +219,10 @@ export async function action<
 
   let { state, patches } = snapshot;
   const snapshots = committed.map((event) => {
-    state = patch(state, me.patch[event.name](event, state));
+    const p = me.patch[event.name](event, state);
+    state = patch(state, p);
     patches++;
-    return { event, state, patches, snaps: snapshot.snaps };
+    return { event, state, patches, snaps: snapshot.snaps, patch: p };
   });
 
   // fire and forget snaps
