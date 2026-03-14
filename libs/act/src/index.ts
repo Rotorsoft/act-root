@@ -7,6 +7,7 @@ import "./signals.js";
  */
 export * from "./act-builder.js";
 export * from "./act.js";
+export * from "./adapters/index.js";
 export * from "./config.js";
 export * from "./ports.js";
 export * from "./projection-builder.js";

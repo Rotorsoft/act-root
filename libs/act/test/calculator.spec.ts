@@ -62,11 +62,17 @@ describe("calculator lifecycle", () => {
   });
 
   it("should load the state with callback", async () => {
-    let max = 0;
-    await app.load(Calculator, stream, (snap) => {
-      max = Math.max(max, snap.snaps);
+    // With always-on cache, warm load replays 0 events (all cached)
+    // so callback is only called for events after the cache checkpoint
+    let callCount = 0;
+    const snapshot = await app.load(Calculator, stream, () => {
+      callCount++;
     });
-    expect(max).toBe(1);
+    // Callback not called when cache is warm and no new events exist
+    expect(callCount).toBe(0);
+    // But the returned snapshot still reflects the full state including snaps
+    expect(snapshot.snaps).toBe(1);
+    expect(snapshot.patches).toBe(5);
   });
 
   it("should query by stream", async () => {

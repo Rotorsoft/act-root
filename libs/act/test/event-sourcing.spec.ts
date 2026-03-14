@@ -93,7 +93,7 @@ describe("event-sourcing", () => {
     expect(events[1].data.count).toBe(1);
   });
 
-  it("should load from a snapshot event", async () => {
+  it("should load from a snapshot event on cold start", async () => {
     const s = store();
     await s.commit("s", [{ name: SNAP_EVENT, data: { count: 100 } }], {
       correlation: "c",

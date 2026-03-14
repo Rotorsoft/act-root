@@ -1,7 +1,9 @@
 import { pino } from "pino";
+import { InMemoryCache } from "./adapters/InMemoryCache.js";
 import { InMemoryStore } from "./adapters/InMemoryStore.js";
 import { config } from "./config.js";
 import type {
+  Cache,
   Disposable,
   Disposer,
   Fetch,
@@ -266,6 +268,22 @@ export const SNAP_EVENT = "__snapshot__";
  */
 export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
+});
+
+/**
+ * Gets or injects the singleton cache.
+ *
+ * By default, Act uses an in-memory LRU cache. For distributed deployments,
+ * inject a Redis-backed cache before building your application.
+ *
+ * Cache unifies snapshotting — `snap()` writes to cache instead of the event store,
+ * and `load()` checks cache before querying the store for tail events.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The singleton cache instance
+ */
+export const cache = port(function cache(adapter?: Cache) {
+  return adapter || new InMemoryCache();
 });
 
 /**

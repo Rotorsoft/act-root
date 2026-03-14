@@ -9,9 +9,43 @@ import type {
   EventMeta,
   Message,
   Query,
+  Schema,
   Schemas,
 } from "./action.js";
 import type { Lease, Poll } from "./reaction.js";
+
+/**
+ * A cached snapshot entry for a stream.
+ *
+ * @template TState - The state schema type
+ */
+export interface CacheEntry<TState extends Schema> {
+  readonly state: TState;
+  readonly version: number;
+  readonly event_id: number;
+  readonly patches: number;
+  readonly snaps: number;
+}
+
+/**
+ * Cache port for storing stream snapshots in-process.
+ *
+ * Implementations should provide fast key-value access with bounded memory.
+ * The async interface is forward-compatible with external caches (e.g., Redis).
+ *
+ * @template TState - The state schema type
+ */
+export interface Cache extends Disposable {
+  get<TState extends Schema>(
+    stream: string
+  ): Promise<CacheEntry<TState> | undefined>;
+  set<TState extends Schema>(
+    stream: string,
+    entry: CacheEntry<TState>
+  ): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
+}
 
 /**
  * A function that disposes of a resource asynchronously.

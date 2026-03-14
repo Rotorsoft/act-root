@@ -141,8 +141,8 @@ describe("partial-state", () => {
       .build();
 
     const app = act().withState(counter).build();
-    await app.do("increment", { stream: "c1", actor }, {});
-    const snap = await app.load(counter, "c1");
+    await app.do("increment", { stream: "compat1", actor }, {});
+    const snap = await app.load(counter, "compat1");
     expect(snap.state.count).toBe(1);
   });
 
