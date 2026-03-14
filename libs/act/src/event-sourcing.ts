@@ -7,7 +7,7 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
-import { logger, SNAP_EVENT, store } from "./ports.js";
+import { cache, logger, SNAP_EVENT, store } from "./ports.js";
 import { InvariantError } from "./types/errors.js";
 import type {
   Committed,
@@ -82,11 +82,13 @@ export async function load<
   stream: string,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void
 ): Promise<Snapshot<TState, TEvents>> {
-  let state = me.init ? me.init() : ({} as TState);
-  let patches = 0;
-  let snaps = 0;
+  const cached = await cache()?.get<TState>(stream);
+  let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
+  let patches = cached?.patches ?? 0;
+  let snaps = cached?.snaps ?? 0;
   let event: Committed<TEvents, string> | undefined;
-  await store().query(
+
+  const count = await store().query(
     (e) => {
       event = e as Committed<TEvents, string>;
       if (e.name === SNAP_EVENT) {
@@ -99,9 +101,24 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream, with_snaps: true }
+    { stream, with_snaps: true, after: cached?.event_id }
   );
-  logger.trace(state as object, `🟢 load ${stream}`);
+
+  // Update cache with latest state
+  if (event) {
+    void cache()?.set<TState>(stream, {
+      state,
+      version: event.version,
+      event_id: event.id,
+      patches,
+      snaps,
+    });
+  }
+
+  logger.trace(
+    state as object,
+    `🟢 load ${stream}${cached && count === 0 ? " (cached)" : ""}`
+  );
   return { event, state, patches, snaps };
 }
 
@@ -210,13 +227,22 @@ export async function action<
     `🔴 commit ${stream}.${emitted.map((e) => e.name).join(", ")}`
   );
 
-  const committed = await store().commit(
-    stream,
-    emitted,
-    meta,
-    // TODO: review reactions not enforcing expected version
-    reactingTo ? undefined : expected
-  );
+  let committed;
+  try {
+    committed = await store().commit(
+      stream,
+      emitted,
+      meta,
+      // TODO: review reactions not enforcing expected version
+      reactingTo ? undefined : expected
+    );
+  } catch (error) {
+    // Invalidate cache on concurrency errors — cached state is stale
+    if ((error as { name?: string }).name === "ERR_CONCURRENCY") {
+      void cache()?.invalidate(stream);
+    }
+    throw error;
+  }
 
   let { state, patches } = snapshot;
   const snapshots = committed.map((event) => {
@@ -226,8 +252,19 @@ export async function action<
     return { event, state, patches, snaps: snapshot.snaps, patch: p };
   });
 
-  // fire and forget snaps
+  // Update cache with post-commit state
   const last = snapshots.at(-1)!;
+  if (last.event) {
+    void cache()?.set<TState>(stream, {
+      state: last.state,
+      version: last.event.version,
+      event_id: last.event.id,
+      patches: last.patches,
+      snaps: last.snaps,
+    });
+  }
+
+  // fire and forget snaps
   me.snap && me.snap(last) && void snap(last);
 
   return snapshots;

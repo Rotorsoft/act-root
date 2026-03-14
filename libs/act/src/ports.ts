@@ -2,6 +2,7 @@ import { pino } from "pino";
 import { InMemoryStore } from "./adapters/InMemoryStore.js";
 import { config } from "./config.js";
 import type {
+  Cache,
   Disposable,
   Disposer,
   Fetch,
@@ -85,6 +86,11 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   if (code === "ERROR" && config().env === "production") return;
 
   await Promise.all(disposers.map((disposer) => disposer()));
+  if (_cache) {
+    await _cache.dispose();
+    logger.info(`🔌 disposed ${_cache.constructor.name}`);
+    _cache = undefined;
+  }
   await Promise.all(
     [...adapters.values()].reverse().map(async (adapter) => {
       await adapter.dispose();
@@ -267,6 +273,26 @@ export const SNAP_EVENT = "__snapshot__";
 export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
+
+// Cache is opt-in — nullable singleton (not created by default)
+let _cache: Cache | undefined;
+
+/**
+ * Gets or injects the optional cache port.
+ *
+ * Unlike `store()`, cache is opt-in. Call `cache(new InMemoryCache())` to enable.
+ * Without injection, `cache()` returns `undefined` and all loads hit the store.
+ *
+ * @param adapter - Optional cache implementation to inject
+ * @returns The cache instance or undefined
+ */
+export function cache(adapter?: Cache): Cache | undefined {
+  if (adapter) {
+    _cache = adapter;
+    logger.info(`🔌 injected cache:${adapter.constructor.name}`);
+  }
+  return _cache;
+}
 
 /**
  * Tracer builder for logging fetches, leases, etc.
