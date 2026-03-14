@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.0...@rotorsoft/act-patch-v1.0.1) (2026-03-14)
+
+
+### Bug Fixes
+
+* **docs:** escape curly braces in patch docstring for MDX compatibility ([64c2b45](https://github.com/rotorsoft/act-root/commit/64c2b45bd7d74d926a8a4345c80766f4bd6943c4))
+
 # @rotorsoft/act-patch-v1.0.0 (2026-03-14)
 
 
