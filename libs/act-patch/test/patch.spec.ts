@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { is_mergeable, patch } from "../src/index.js";
+import { patch } from "../src/index.js";
 
 type Schema = Record<string, any>;
 
@@ -292,30 +292,33 @@ describe("patch", () => {
       });
     });
   });
-});
 
-describe("is_mergeable", () => {
-  it("returns true for plain objects", () => {
-    expect(is_mergeable({ a: 1 })).toBe(true);
-    expect(is_mergeable({})).toBe(true);
-  });
+  describe("wide objects (>16 keys, two-pass path)", () => {
+    it("patches a single key in a wide object", () => {
+      const wide: Schema = {};
+      for (let i = 0; i < 20; i++) wide[`k${i}`] = i;
+      const result = patch(wide, { k10: 999 });
+      expect(result.k10).toBe(999);
+      expect(result.k0).toBe(0);
+      expect(result.k19).toBe(19);
+      expect(Object.keys(result)).toHaveLength(20);
+    });
 
-  it("returns false for null/undefined/primitives", () => {
-    expect(is_mergeable(null)).toBe(false);
-    expect(is_mergeable(undefined)).toBe(false);
-    expect(is_mergeable(42)).toBe(false);
-    expect(is_mergeable("str")).toBe(false);
-    expect(is_mergeable(true)).toBe(false);
-  });
+    it("deletes a key in a wide object", () => {
+      const wide: Schema = {};
+      for (let i = 0; i < 20; i++) wide[`k${i}`] = i;
+      const result = patch(wide, { k5: null });
+      expect(result.k5).toBeUndefined();
+      expect(Object.keys(result)).toHaveLength(19);
+    });
 
-  it("returns false for unmergeable types", () => {
-    expect(is_mergeable([])).toBe(false);
-    expect(is_mergeable(new Date())).toBe(false);
-    expect(is_mergeable(new Map())).toBe(false);
-    expect(is_mergeable(new Set())).toBe(false);
-    expect(is_mergeable(/regex/)).toBe(false);
-    expect(is_mergeable(new ArrayBuffer(8))).toBe(false);
-    expect(is_mergeable(new Uint8Array(1))).toBe(false);
-    expect(is_mergeable(new DataView(new ArrayBuffer(8)))).toBe(false);
+    it("deep merges nested value in a wide object", () => {
+      const wide: Schema = {};
+      for (let i = 0; i < 20; i++) wide[`k${i}`] = i;
+      wide.nested = { a: 1, b: 2 };
+      const result = patch(wide, { nested: { a: 10 } });
+      expect(result.nested).toEqual({ a: 10, b: 2 });
+      expect(result.k0).toBe(0);
+    });
   });
 });

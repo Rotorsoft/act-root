@@ -6,5 +6,5 @@
  * Zero dependencies, browser-safe.
  */
 
-export { is_mergeable, patch } from "./patch.js";
+export { patch } from "./patch.js";
 export type { DeepPartial, Patch, Schema } from "./types.js";
