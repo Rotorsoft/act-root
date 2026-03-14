@@ -194,11 +194,11 @@ Cache and snapshots are the same checkpoint pattern at different layers:
 
 On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On cache miss, the store is queried with `with_snaps: true` to find the latest snapshot and replay only events after it.
 
-#### Benchmark Results
+#### Why cache on every commit, not just on snap?
 
-`load()` throughput in ops/s — higher is better. Benchmarks measure warm-cache reads (cache populated during seeding, then `load()` called repeatedly).
+An alternative design would update the cache only at snap boundaries — since snap and cache are the same checkpoint concept. We benchmarked both strategies to test this theory.
 
-**PostgresStore** — production adapter, async I/O:
+**Cache on every commit** (current — `action()` updates cache after every successful commit):
 
 | Events | No snap | @10 | @50 | @75 | @100 |
 |---:|---:|---:|---:|---:|---:|
@@ -206,15 +206,27 @@ On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On
 | **500** | **6,371** | 5,639 | 5,590 | 6,223 | 5,488 |
 | **2,000** | 4,257 | **5,329** | 4,573 | 4,812 | 4,039 |
 
-**InMemoryStore** — test/dev adapter:
+**Cache only on snap** (alternative — cache is only populated when `snap()` fires):
 
 | Events | No snap | @10 | @50 | @75 | @100 |
 |---:|---:|---:|---:|---:|---:|
-| **50** | 837 | 803 | 829 | 821 | **850** |
-| **500** | 846 | 842 | 849 | 846 | **854** |
-| **2,000** | **859** | 857 | 848 | 828 | 839 |
+| **50** | 608 | 5,845 | 6,098 | 694 | 1,006 |
+| **500** | 212 | **6,481** | 4,955 | 570 | 5,074 |
+| **2,000** | 101 | **6,827** | 5,993 | 675 | 4,039 |
 
-> **Why is InMemoryStore slower than PG?** Every `InMemoryStore` method starts with `await sleep(0)` (`setTimeout(resolve, 0)`) to simulate async behavior. This event-loop yield costs ~1ms per call, capping throughput at ~1,000 ops/s regardless of stream length. PG's indexed query for 0 new events returns in ~0.15ms. The InMemory numbers are artificially bounded — they measure event-loop overhead, not cache performance.
+The snap-only strategy has three critical problems:
+
+1. **States without `.snap()` get no cache at all** — the "no snap" column falls back to full PG replay on every `load()`, showing the same 608→101 ops/s degradation as the pre-cache baseline. Any state that doesn't configure snapping loses all caching benefit.
+
+2. **Cache misses between snap boundaries** — with snap@75, cache is only populated every 75 events. After seeding 50 events, no snap has fired yet, so the cache is empty. The 50-event @75 result (694 ops/s) is barely better than no cache. At 500 events, @75 only fires 6 times — after seeding, the cache holds the state from the last snap point, and `load()` must replay up to 74 tail events from the store.
+
+3. **Fire-and-forget race conditions** — `snap()` is async (`void snap(last)`). Without the cache absorbing the version, the next `action()` call's `load()` races with the snap commit. If the `__snapshot__` event lands in the store before `load()` runs, the expected version shifts, causing `ERR_CONCURRENCY` errors. This makes seeding unreliable without artificial delays between snap boundaries.
+
+The snap-only results that match the every-commit numbers (@10 at 500/2000 events) are cases where the cache happens to be warm from a recent snap. But this is fragile — it depends on the stream length being a favorable multiple of the snap interval.
+
+**Conclusion:** Cache on every commit is the right design. The cost of a `Map.set()` per commit is negligible, but the benefit is absolute: every `load()` after the first action is a guaranteed cache hit with zero store replay, regardless of whether snap is configured.
+
+> **InMemoryStore note:** InMemory benchmarks show ~830 ops/s across all configurations because every `InMemoryStore` method starts with `await sleep(0)` (`setTimeout(resolve, 0)`) to simulate async behavior. This event-loop yield costs ~1ms per call, capping throughput at ~1,000 ops/s. PG's indexed query for 0 new events returns in ~0.15ms.
 
 **Compared to pre-cache baselines** (PG, no cache):
 
@@ -225,14 +237,6 @@ On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On
 | **2,000** | 92 | 4,257 | **46×** |
 
 Without cache, every `load()` replays the full event stream from PG — throughput degrades linearly with stream length (655 → 92 ops/s). With always-on cache, throughput is flat (~4,000–7,000 ops/s) regardless of stream length.
-
-Key takeaways:
-
-- **Cache is the dominant optimization** — 7–46× speedup over uncached PG reads. The benefit scales with stream length because longer streams have more events to skip.
-- **Stream length doesn't matter for warm reads** — 50 and 2,000 events perform within ~30% of each other. The cache absorbs replay cost entirely.
-- **Snap interval is noise for warm reads** — all snap configurations perform within benchmark variance. Snaps only affect cold starts (cache miss, process restart, LRU eviction).
-- **Snap write contention is visible on long streams** — at 2,000 events, snap configurations show more variance due to fire-and-forget `snap()` writing to PG asynchronously. This contention is minor but measurable.
-- **Optimal snap interval for cold starts** — @50–@75 balances cold-start replay savings against write overhead. @10 is too frequent (excessive writes), @100 is too infrequent (long replays on cache miss).
 
 ### Performance Considerations
 
