@@ -16,8 +16,9 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .emit((a) => ["Incremented", { by: a.count }])
   .build();
 
-// Same state with snapshotting every 10 events
-const CounterSnap = state({ CounterSnap: z.object({ count: z.number() }) })
+const CounterSnap10 = state({
+  CounterSnap10: z.object({ count: z.number() }),
+})
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ by: z.number() }) })
   .patch({
@@ -28,8 +29,36 @@ const CounterSnap = state({ CounterSnap: z.object({ count: z.number() }) })
   .snap((s) => s.patches >= 10)
   .build();
 
+const CounterSnap50 = state({
+  CounterSnap50: z.object({ count: z.number() }),
+})
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ by: z.number() }) })
+  .patch({
+    Incremented: (event, s) => ({ count: s.count + event.data.by }),
+  })
+  .on({ increment: z.object({ count: z.number() }) })
+  .emit((a) => ["Incremented", { by: a.count }])
+  .snap((s) => s.patches >= 50)
+  .build();
+
+const CounterSnap100 = state({
+  CounterSnap100: z.object({ count: z.number() }),
+})
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ by: z.number() }) })
+  .patch({
+    Incremented: (event, s) => ({ count: s.count + event.data.by }),
+  })
+  .on({ increment: z.object({ count: z.number() }) })
+  .emit((a) => ["Incremented", { by: a.count }])
+  .snap((s) => s.patches >= 100)
+  .build();
+
 const target = { stream: "bench", actor: { id: "a", name: "a" } };
-const snapTarget = { stream: "bench-snap", actor: { id: "a", name: "a" } };
+const snap10Target = { stream: "bench-s10", actor: { id: "a", name: "a" } };
+const snap50Target = { stream: "bench-s50", actor: { id: "a", name: "a" } };
+const snap100Target = { stream: "bench-s100", actor: { id: "a", name: "a" } };
 
 function pgStore() {
   return new PostgresStore({
@@ -39,23 +68,27 @@ function pgStore() {
   });
 }
 
-async function seedEvents(n: number, withSnap = false) {
+async function seedEvents(n: number, snapInterval?: 10 | 50 | 100) {
   store(pgStore());
   await store().drop();
   await store().seed();
-  if (withSnap) {
-    // Seed with snap — must wait between actions for fire-and-forget
-    // snapshot commits to complete before the next action loads
+  if (snapInterval) {
+    const me =
+      snapInterval === 10
+        ? CounterSnap10
+        : snapInterval === 50
+          ? CounterSnap50
+          : CounterSnap100;
+    const t =
+      snapInterval === 10
+        ? snap10Target
+        : snapInterval === 50
+          ? snap50Target
+          : snap100Target;
     for (let i = 0; i < n; i++) {
-      await action(
-        CounterSnap,
-        "increment",
-        snapTarget,
-        { count: 1 },
-        undefined,
-        true
-      );
-      if ((i + 1) % 10 === 0) await new Promise((r) => setTimeout(r, 200));
+      await action(me, "increment", t, { count: 1 }, undefined, true);
+      if ((i + 1) % snapInterval === 0)
+        await new Promise((r) => setTimeout(r, 200));
     }
     // Final wait for last snapshot
     await new Promise((r) => setTimeout(r, 100));
@@ -81,14 +114,40 @@ describe("PG: load() with 100 events", () => {
   );
 
   bench(
-    "with snap, no cache",
+    "snap@10, no cache",
     async () => {
-      await load(CounterSnap, "bench-snap");
+      await load(CounterSnap10, "bench-s10");
     },
     {
       async setup() {
         await dispose()();
-        await seedEvents(100, true);
+        await seedEvents(100, 10);
+      },
+    }
+  );
+
+  bench(
+    "snap@50, no cache",
+    async () => {
+      await load(CounterSnap50, "bench-s50");
+    },
+    {
+      async setup() {
+        await dispose()();
+        await seedEvents(100, 50);
+      },
+    }
+  );
+
+  bench(
+    "snap@100, no cache",
+    async () => {
+      await load(CounterSnap100, "bench-s100");
+    },
+    {
+      async setup() {
+        await dispose()();
+        await seedEvents(100, 100);
       },
     }
   );
@@ -109,16 +168,16 @@ describe("PG: load() with 100 events", () => {
   );
 
   bench(
-    "with snap + cache (warm)",
+    "snap@10 + cache (warm)",
     async () => {
-      await load(CounterSnap, "bench-snap");
+      await load(CounterSnap10, "bench-s10");
     },
     {
       async setup() {
         await dispose()();
-        await seedEvents(100, true);
+        await seedEvents(100, 10);
         cache(new InMemoryCache());
-        await load(CounterSnap, "bench-snap");
+        await load(CounterSnap10, "bench-s10");
       },
     }
   );
@@ -139,14 +198,40 @@ describe("PG: load() with 1000 events", () => {
   );
 
   bench(
-    "with snap, no cache",
+    "snap@10, no cache",
     async () => {
-      await load(CounterSnap, "bench-snap");
+      await load(CounterSnap10, "bench-s10");
     },
     {
       async setup() {
         await dispose()();
-        await seedEvents(1000, true);
+        await seedEvents(1000, 10);
+      },
+    }
+  );
+
+  bench(
+    "snap@50, no cache",
+    async () => {
+      await load(CounterSnap50, "bench-s50");
+    },
+    {
+      async setup() {
+        await dispose()();
+        await seedEvents(1000, 50);
+      },
+    }
+  );
+
+  bench(
+    "snap@100, no cache",
+    async () => {
+      await load(CounterSnap100, "bench-s100");
+    },
+    {
+      async setup() {
+        await dispose()();
+        await seedEvents(1000, 100);
       },
     }
   );
@@ -167,16 +252,16 @@ describe("PG: load() with 1000 events", () => {
   );
 
   bench(
-    "with snap + cache (warm)",
+    "snap@10 + cache (warm)",
     async () => {
-      await load(CounterSnap, "bench-snap");
+      await load(CounterSnap10, "bench-s10");
     },
     {
       async setup() {
         await dispose()();
-        await seedEvents(1000, true);
+        await seedEvents(1000, 10);
         cache(new InMemoryCache());
-        await load(CounterSnap, "bench-snap");
+        await load(CounterSnap10, "bench-s10");
       },
     }
   );
