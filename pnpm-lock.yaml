@@ -9,10 +9,10 @@ importers:
   .:
     dependencies:
       '@rotorsoft/act':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:libs/act
       '@rotorsoft/act-pg':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:libs/act-pg
     devDependencies:
       '@commitlint/cli':
@@ -170,7 +170,7 @@ importers:
   libs/act:
     dependencies:
       '@rotorsoft/act-patch':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../act-patch
       pino:
         specifier: ^10.3.1
@@ -187,7 +187,7 @@ importers:
   libs/act-pg:
     dependencies:
       '@rotorsoft/act':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../act
       pg:
         specifier: ^8.20.0
@@ -203,7 +203,7 @@ importers:
   libs/act-sse:
     dependencies:
       '@rotorsoft/act-patch':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../act-patch
 
   packages/calculator:
@@ -228,13 +228,13 @@ importers:
   packages/client:
     dependencies:
       '@act/calculator':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act-pg
       '@tanstack/react-query':
         specifier: ^5.90.21
@@ -292,13 +292,13 @@ importers:
   packages/server:
     dependencies:
       '@act/calculator':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../calculator
       '@rotorsoft/act':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.12.0
@@ -320,10 +320,10 @@ importers:
         specifier: ^0.17.0
         version: 0.17.0
       '@rotorsoft/act':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../../libs/act-pg
       '@trpc/server':
         specifier: 11.12.0

@@ -13,9 +13,9 @@
   "keywords": [],
   "license": "ISC",
   "dependencies": {
-    "@act/calculator": "workspace:*",
-    "@rotorsoft/act": "workspace:*",
-    "@rotorsoft/act-pg": "workspace:*",
+    "@act/calculator": "workspace:^",
+    "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-pg": "workspace:^",
     "@trpc/server": "11.12.0",
     "cors": "^2.8.6",
     "zod": "^4.3.6"
