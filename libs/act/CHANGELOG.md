@@ -1,3 +1,13 @@
+# [@rotorsoft/act-v0.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.19.1...@rotorsoft/act-v0.20.0) (2026-03-14)
+
+
+### Features
+
+* **act:** add Cache port with InMemoryCache LRU adapter ([561f183](https://github.com/rotorsoft/act-root/commit/561f183345c9fa36daafea98ff0601759515d67d)), closes [#453](https://github.com/rotorsoft/act-root/issues/453)
+* **act:** add PostgresStore cache benchmark and fix coverage ([8f8a901](https://github.com/rotorsoft/act-root/commit/8f8a901f326b637d94de075c129dbb3bc6e0d04d))
+* **act:** add snap variants to cache benchmarks ([83ae55b](https://github.com/rotorsoft/act-root/commit/83ae55ba421669453280764729c1fae87372e81b))
+* **act:** always-on cache with snap timing fix ([f797233](https://github.com/rotorsoft/act-root/commit/f7972335ee507bffe75b184e599b5b6298aaeee4))
+
 # [@rotorsoft/act-v0.19.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.19.0...@rotorsoft/act-v0.19.1) (2026-03-14)
 
 
