@@ -1,8 +1,8 @@
+import { patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 import {
   config,
   extend,
-  patch,
   sleep,
   validate,
   ValidationError,

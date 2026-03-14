@@ -2,14 +2,11 @@ import { type ZodError, type ZodType, prettifyError } from "zod";
 import { config } from "./config.js";
 import { ValidationError } from "./types/index.js";
 
-export { patch } from "@rotorsoft/act-patch";
-
 /**
  * @module utils
  * @category Utilities
- * Utility functions for patching state, validation, extending objects, and async helpers.
+ * Utility functions for validation, extending objects, and async helpers.
  *
- * - Use `patch()` to immutably update state with patches (re-exported from @rotorsoft/act-patch).
  * - Use `validate()` to validate payloads against Zod schemas.
  * - Use `extend()` to merge and validate configuration objects.
  * - Use `sleep()` for async delays.
