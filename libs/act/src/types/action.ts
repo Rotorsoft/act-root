@@ -1,3 +1,4 @@
+import type { Patch } from "@rotorsoft/act-patch";
 import { z, ZodType } from "zod";
 import {
   ActorSchema,
@@ -117,14 +118,6 @@ export type Schemas = Record<string, Schema>;
  * An empty schema (no properties).
  */
 export type EmptySchema = Record<string, never>;
-
-/**
- * A recursive partial type for patching state objects.
- * @template T - The base type to patch.
- */
-export type Patch<T> = {
-  [K in keyof T]?: T[K] extends Schema ? Patch<T[K]> : T[K];
-};
 
 /**
  * Maps schema names to their Zod type representations.

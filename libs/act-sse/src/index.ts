@@ -37,10 +37,10 @@
  * No separate version counters. The event store is the single source of truth.
  */
 
+export { patch } from "@rotorsoft/act-patch";
 export { applyPatchMessage } from "./apply-patch.js";
 export type { ApplyResult } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
-export { patch } from "./patch.js";
 export { PresenceTracker } from "./presence.js";
 export { StateCache } from "./state-cache.js";
 export type { BroadcastState, PatchMessage, Subscriber } from "./types.js";

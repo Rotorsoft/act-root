@@ -5,6 +5,7 @@
  * Utilities for event sourcing, snapshotting, and event store interaction.
  */
 
+import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
 import { logger, SNAP_EVENT, store } from "./ports.js";
 import { InvariantError } from "./types/errors.js";
@@ -18,7 +19,7 @@ import type {
   State,
   Target,
 } from "./types/index.js";
-import { patch, validate } from "./utils.js";
+import { validate } from "./utils.js";
 
 /**
  * Event sourcing utilities for snapshotting, loading, and committing actions/events.

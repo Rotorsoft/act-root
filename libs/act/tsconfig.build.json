@@ -6,6 +6,11 @@
     "declarationDir": "dist/@types",
     "tsBuildInfoFile": "dist/.tsbuildinfo",
   },
+  "references": [
+    {
+      "path": "../act-patch/tsconfig.build.json"
+    }
+  ],
   "include": [
     "src"
   ],

@@ -169,6 +169,9 @@ importers:
 
   libs/act:
     dependencies:
+      '@rotorsoft/act-patch':
+        specifier: workspace:*
+        version: link:../act-patch
       pino:
         specifier: ^10.3.1
         version: 10.3.1
@@ -178,6 +181,8 @@ importers:
       zod:
         specifier: ^4.3.6
         version: 4.3.6
+
+  libs/act-patch: {}
 
   libs/act-pg:
     dependencies:
@@ -195,7 +200,11 @@ importers:
         specifier: ^8.18.0
         version: 8.18.0
 
-  libs/act-sse: {}
+  libs/act-sse:
+    dependencies:
+      '@rotorsoft/act-patch':
+        specifier: workspace:*
+        version: link:../act-patch
 
   packages/calculator:
     dependencies:

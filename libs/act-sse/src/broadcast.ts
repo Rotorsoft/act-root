@@ -1,4 +1,4 @@
-import { patch as applyPatch } from "./patch.js";
+import { patch as applyPatch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
 

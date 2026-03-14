@@ -1,4 +1,4 @@
-import { patch as deepMerge } from "./patch.js";
+import { patch as deepMerge } from "@rotorsoft/act-patch";
 import type { BroadcastState, PatchMessage } from "./types.js";
 
 /**

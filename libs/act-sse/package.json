@@ -35,5 +35,7 @@
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@rotorsoft/act-patch": "workspace:*"
+  }
 }

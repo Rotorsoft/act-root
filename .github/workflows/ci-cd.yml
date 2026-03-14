@@ -58,7 +58,7 @@ jobs:
     strategy:
       max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
       matrix:
-        lib: [act, act-pg, act-sse]
+        lib: [act, act-patch, act-pg, act-sse]
 
     steps:
       - uses: actions/checkout@v4
