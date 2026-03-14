@@ -254,15 +254,13 @@ export async function action<
 
   // Update cache with post-commit state
   const last = snapshots.at(-1)!;
-  if (last.event) {
-    void cache()?.set<TState>(stream, {
-      state: last.state,
-      version: last.event.version,
-      event_id: last.event.id,
-      patches: last.patches,
-      snaps: last.snaps,
-    });
-  }
+  void cache()?.set<TState>(stream, {
+    state: last.state,
+    version: last.event.version,
+    event_id: last.event.id,
+    patches: last.patches,
+    snaps: last.snaps,
+  });
 
   // fire and forget snaps
   me.snap && me.snap(last) && void snap(last);
