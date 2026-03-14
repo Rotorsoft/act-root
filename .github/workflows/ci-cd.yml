@@ -74,7 +74,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: pnpm install
-      - run: pnpm build
+      - run: pnpm -F @rotorsoft/${{ matrix.lib }}... build
 
       - name: configure git
         run: |
