@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.0.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.1...@rotorsoft/act-patch-v1.0.2) (2026-03-14)
+
+
+### Performance Improvements
+
+* **act-patch:** hybrid copy strategy and O(1) mergeability check ([2d479cb](https://github.com/rotorsoft/act-root/commit/2d479cbb263adb7b8c2ecae68107e0f107ace00e))
+
 # [@rotorsoft/act-patch-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.0...@rotorsoft/act-patch-v1.0.1) (2026-03-14)
 
 
