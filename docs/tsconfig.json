@@ -12,13 +12,17 @@
       ],
       "@rotorsoft/act-pg": [
         "libs/act-pg/src/index.ts"
+      ],
+      "@rotorsoft/act-sse": [
+        "libs/act-sse/src/index.ts"
       ]
     }
   },
   "include": [
     "../libs/act/src/**/*",
     "../libs/act-patch/src/**/*",
-    "../libs/act-pg/src/**/*"
+    "../libs/act-pg/src/**/*",
+    "../libs/act-sse/src/**/*"
   ],
   "exclude": [
     "../packages/**"
