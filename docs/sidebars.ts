@@ -41,8 +41,18 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-patch",
+          href: "/docs/api/act-patch/src",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-pg",
           href: "/docs/api/act-pg/src",
+        },
+        {
+          type: "link",
+          label: "@rotorsoft/act-sse",
+          href: "/docs/api/act-sse/src",
         },
       ],
     },
