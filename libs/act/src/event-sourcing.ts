@@ -62,6 +62,10 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
 /**
  * Loads a snapshot of the state from the store by replaying events and applying patches.
  *
+ * First checks the cache for a checkpoint, then queries the store for events
+ * committed after the cached position. On cache miss, replays from the store
+ * (using snapshots if available to avoid full replay).
+ *
  * @template TState The type of state
  * @template TEvents The type of events
  * @template TActions The type of actions
@@ -82,7 +86,7 @@ export async function load<
   stream: string,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void
 ): Promise<Snapshot<TState, TEvents>> {
-  const cached = await cache()?.get<TState>(stream);
+  const cached = await cache().get<TState>(stream);
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
@@ -101,12 +105,12 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream, with_snaps: true, after: cached?.event_id }
+    { stream, with_snaps: !cached, after: cached?.event_id }
   );
 
   // Update cache with latest state
   if (event) {
-    void cache()?.set<TState>(stream, {
+    void cache().set<TState>(stream, {
       state,
       version: event.version,
       event_id: event.id,
@@ -239,7 +243,7 @@ export async function action<
   } catch (error) {
     // Invalidate cache on concurrency errors — cached state is stale
     if ((error as { name?: string }).name === "ERR_CONCURRENCY") {
-      void cache()?.invalidate(stream);
+      void cache().invalidate(stream);
     }
     throw error;
   }
@@ -252,18 +256,21 @@ export async function action<
     return { event, state, patches, snaps: snapshot.snaps, patch: p };
   });
 
-  // Update cache with post-commit state
+  // fire and forget snaps
   const last = snapshots.at(-1)!;
-  void cache()?.set<TState>(stream, {
+  const snapped = me.snap && me.snap(last);
+
+  // Update cache with post-commit state (reset patches if snapped)
+  void cache().set<TState>(stream, {
     state: last.state,
     version: last.event.version,
     event_id: last.event.id,
-    patches: last.patches,
-    snaps: last.snaps,
+    patches: snapped ? 0 : last.patches,
+    snaps: snapped ? last.snaps + 1 : last.snaps,
   });
 
-  // fire and forget snaps
-  me.snap && me.snap(last) && void snap(last);
+  // persist snap to store for cold start durability
+  if (snapped) void snap(last);
 
   return snapshots;
 }

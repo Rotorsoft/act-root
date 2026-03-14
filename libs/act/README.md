@@ -171,54 +171,76 @@ Custom store implementations must fulfill the `Store` interface contract (see [C
 
 ### Cache
 
-The cache port is an opt-in layer that avoids full event replay on every `load()`. When enabled, `load()` checks the cache first and only replays events committed after the cached snapshot. Actions update the cache automatically after each successful commit and invalidate on concurrency errors.
+Cache is always-on with `InMemoryCache` as the default. It avoids full event replay on every `load()` by storing the latest state checkpoint in memory. On `load()`, the cache is checked first — only events committed after the cached position are replayed from the store. Actions update the cache automatically after each successful commit and invalidate on concurrency errors.
 
 ```typescript
 import { cache } from "@rotorsoft/act";
-import { InMemoryCache } from "@rotorsoft/act";
 
-// Enable caching (must be called before first load)
-cache(new InMemoryCache({ maxSize: 1000 })); // LRU, default maxSize is 1000
+// Cache is active by default (InMemoryCache, LRU, maxSize 1000)
+// load() and action() use it transparently — no setup needed
 
-// load() and action() use the cache transparently
-const snapshot = await app.load(Counter, "counter1");
+// Replace with a custom adapter (e.g., Redis) for distributed caching:
+cache(new RedisCache({ url: "redis://localhost:6379" }));
 ```
 
 The `Cache` interface is async, so you can implement adapters backed by Redis or other external caches. `InMemoryCache` is included as a fast, in-process LRU implementation.
 
-Cache disposal is automatic — `InMemoryCache` is registered in the adapters map and cleaned up on shutdown alongside the store.
+#### Snapshots vs Cache
 
-#### Benchmark Results (PostgresStore)
+Cache and snapshots are the same checkpoint pattern at different layers:
 
-`load()` throughput in ops/s — higher is better. Tested across short (50), medium (500), and long (2,000) event streams with snap intervals of 10, 50, 75, and 100:
+- **Cache** (in-memory) — checked first on every `load()`. Eliminates store round-trips entirely on warm hits.
+- **Snapshots** (in-store) — written to the event store as `__snapshot__` events. Used as a fallback on cache miss (cold start, eviction, process restart) to avoid replaying the entire event stream.
 
-| Events | No snap | @10 | @50 | @75 | @100 | Cache | @10+C | @50+C | @75+C | @100+C |
-|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| **50** | 655 | 674 | 668 | 667 | 659 | 6,995 | **7,319** | 6,733 | 6,937 | 6,648 |
-| **500** | 215 | 246 | 205 | 204 | 195 | 6,128 | 5,478 | **6,792** | 6,456 | 6,467 |
-| **2,000** | 92 | 84 | 90 | 85 | 103 | 7,078 | 6,655 | 6,709 | **7,506** | 4,639 |
+On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On cache miss, the store is queried with `with_snaps: true` to find the latest snapshot and replay only events after it.
 
-Speedup vs no-snap baseline:
+#### Benchmark Results
 
-| Events | Cache only | Best snap+cache | Multiplier |
+`load()` throughput in ops/s — higher is better. Benchmarks measure warm-cache reads (cache populated during seeding, then `load()` called repeatedly).
+
+**PostgresStore** — production adapter, async I/O:
+
+| Events | No snap | @10 | @50 | @75 | @100 |
+|---:|---:|---:|---:|---:|---:|
+| **50** | 4,872 | 5,881 | 6,480 | **7,058** | 6,949 |
+| **500** | **6,371** | 5,639 | 5,590 | 6,223 | 5,488 |
+| **2,000** | 4,257 | **5,329** | 4,573 | 4,812 | 4,039 |
+
+**InMemoryStore** — test/dev adapter:
+
+| Events | No snap | @10 | @50 | @75 | @100 |
+|---:|---:|---:|---:|---:|---:|
+| **50** | 837 | 803 | 829 | 821 | **850** |
+| **500** | 846 | 842 | 849 | 846 | **854** |
+| **2,000** | **859** | 857 | 848 | 828 | 839 |
+
+> **Why is InMemoryStore slower than PG?** Every `InMemoryStore` method starts with `await sleep(0)` (`setTimeout(resolve, 0)`) to simulate async behavior. This event-loop yield costs ~1ms per call, capping throughput at ~1,000 ops/s regardless of stream length. PG's indexed query for 0 new events returns in ~0.15ms. The InMemory numbers are artificially bounded — they measure event-loop overhead, not cache performance.
+
+**Compared to pre-cache baselines** (PG, no cache):
+
+| Events | Without cache | With cache | Speedup |
 |---:|---:|---:|---:|
-| **50** | 11× | @10+cache 11× | ~same |
-| **500** | 28× | @50+cache 32× | 1.1× |
-| **2,000** | 77× | @75+cache 82× | 1.1× |
+| **50** | 655 | 4,872 | **7×** |
+| **500** | 215 | 6,371 | **30×** |
+| **2,000** | 92 | 4,257 | **46×** |
+
+Without cache, every `load()` replays the full event stream from PG — throughput degrades linearly with stream length (655 → 92 ops/s). With always-on cache, throughput is flat (~4,000–7,000 ops/s) regardless of stream length.
 
 Key takeaways:
 
-- **Snapshots alone don't help** — across all stream lengths, snap-only throughput is within noise of the no-snap baseline (and sometimes *worse*). The PG round-trip to read a snapshot offsets the replay savings.
-- **Cache is the dominant optimization** — warm cache delivers 11–77× speedup by skipping PG entirely. The benefit scales with stream length.
-- **Snap + cache provides marginal extra gain** — the best snap+cache combination is only ~10% faster than cache alone. Snaps matter primarily on cache *misses* (cold start, eviction, invalidation), where they limit replay length.
-- **Optimal snap interval grows with stream length** — @10 wins for short streams, @50 for medium, @75 for long. Too-frequent snapshots add write overhead; too-infrequent ones don't help on cache misses.
-- **Avoid snap@100 on long streams** — at 2,000 events, @100+cache (4,639 ops/s) was significantly slower than cache alone (7,078 ops/s), likely due to snapshot write contention with the fire-and-forget pattern.
+- **Cache is the dominant optimization** — 7–46× speedup over uncached PG reads. The benefit scales with stream length because longer streams have more events to skip.
+- **Stream length doesn't matter for warm reads** — 50 and 2,000 events perform within ~30% of each other. The cache absorbs replay cost entirely.
+- **Snap interval is noise for warm reads** — all snap configurations perform within benchmark variance. Snaps only affect cold starts (cache miss, process restart, LRU eviction).
+- **Snap write contention is visible on long streams** — at 2,000 events, snap configurations show more variance due to fire-and-forget `snap()` writing to PG asynchronously. This contention is minor but measurable.
+- **Optimal snap interval for cold starts** — @50–@75 balances cold-start replay savings against write overhead. @10 is too frequent (excessive writes), @100 is too infrequent (long replays on cache miss).
 
 ### Performance Considerations
 
+- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput regardless of stream length. No configuration needed.
+- **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
+- **Cache invalidation is automatic** — concurrency errors (`ERR_CONCURRENCY`) invalidate the stale cache entry, forcing a fresh load from the store on the next access.
+- **Snap writes are fire-and-forget** — `snap()` commits to the store asynchronously after `action()` returns. The cache is updated synchronously within `action()`, so subsequent reads see the post-snap state immediately without waiting for the store write.
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
-- Use the cache port for read-heavy workloads — it eliminates full event replay on cache hits.
-- Use snapshots for states with long event histories to limit replay length on cache misses.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
 - Active event streams remain in fast storage; consider archival strategies for very large datasets.
 

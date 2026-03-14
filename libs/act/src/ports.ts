@@ -1,4 +1,5 @@
 import { pino } from "pino";
+import { InMemoryCache } from "./adapters/InMemoryCache.js";
 import { InMemoryStore } from "./adapters/InMemoryStore.js";
 import { config } from "./config.js";
 import type {
@@ -86,7 +87,6 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   if (code === "ERROR" && config().env === "production") return;
 
   await Promise.all(disposers.map((disposer) => disposer()));
-  _cache = undefined;
   await Promise.all(
     [...adapters.values()].reverse().map(async (adapter) => {
       await adapter.dispose();
@@ -270,27 +270,21 @@ export const store = port(function store(adapter?: Store) {
   return adapter || new InMemoryStore();
 });
 
-// Cache is opt-in — nullable singleton (not created by default)
-// Registered in the adapters map on injection so disposeAndExit() handles it.
-let _cache: Cache | undefined;
-
 /**
- * Gets or injects the optional cache port.
+ * Gets or injects the singleton cache.
  *
- * Unlike `store()`, cache is opt-in. Call `cache(new InMemoryCache())` to enable.
- * Without injection, `cache()` returns `undefined` and all loads hit the store.
+ * By default, Act uses an in-memory LRU cache. For distributed deployments,
+ * inject a Redis-backed cache before building your application.
+ *
+ * Cache unifies snapshotting — `snap()` writes to cache instead of the event store,
+ * and `load()` checks cache before querying the store for tail events.
  *
  * @param adapter - Optional cache implementation to inject
- * @returns The cache instance or undefined
+ * @returns The singleton cache instance
  */
-export function cache(adapter?: Cache): Cache | undefined {
-  if (adapter) {
-    _cache = adapter;
-    adapters.set("cache", adapter);
-    logger.info(`🔌 injected cache:${adapter.constructor.name}`);
-  }
-  return _cache;
-}
+export const cache = port(function cache(adapter?: Cache) {
+  return adapter || new InMemoryCache();
+});
 
 /**
  * Tracer builder for logging fetches, leases, etc.

@@ -20,7 +20,7 @@ const target = { stream: "c1", actor: { id: "a", name: "a" } };
 describe("cache integration", () => {
   beforeEach(async () => {
     store(new InMemoryStore());
-    cache(new InMemoryCache());
+    // cache is always-on (InMemoryCache default)
     await store().seed();
   });
 
@@ -83,16 +83,5 @@ describe("cache integration", () => {
     const c = cache() as InMemoryCache;
     const entry = await c.get("c1");
     expect(entry).toBeUndefined();
-  });
-
-  it("works without cache (opt-in)", async () => {
-    // Dispose to clear cache, then don't re-inject
-    await dispose()();
-    store(new InMemoryStore());
-    // No cache() call — should work normally
-
-    await action(Counter, "increment", target, { count: 5 }, undefined, true);
-    const snap = await load(Counter, "c1");
-    expect(snap.state.count).toBe(5);
   });
 });

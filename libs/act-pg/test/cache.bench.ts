@@ -1,13 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { bench, describe } from "vitest";
 import { z } from "zod";
-import { InMemoryCache } from "../../act/src/adapters/InMemoryCache.js";
 import { action, load } from "../../act/src/event-sourcing.js";
-import { cache, dispose, store } from "../../act/src/ports.js";
+import { dispose, store } from "../../act/src/ports.js";
 import { state } from "../../act/src/state-builder.js";
 import { PostgresStore } from "../src/PostgresStore.js";
-
-// --- State definitions (one per snap interval) ---
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -108,7 +105,7 @@ async function seedSnap(n: number, cfg: SnapConfig) {
   await new Promise((r) => setTimeout(r, 100));
 }
 
-// --- Short streams: 50 events ---
+// Cache is always on — benchmarks test stream length × snap interval
 
 describe("PG: load() 50 events", () => {
   bench(
@@ -138,41 +135,7 @@ describe("PG: load() 50 events", () => {
       }
     );
   }
-
-  bench(
-    "cache",
-    async () => {
-      await load(Counter, noSnapStream);
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(50);
-        cache(new InMemoryCache());
-        await load(Counter, noSnapStream);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}+cache`,
-      async () => {
-        await load(cfg.me, cfg.stream);
-      },
-      {
-        async setup() {
-          await dispose()();
-          await seedSnap(50, cfg);
-          cache(new InMemoryCache());
-          await load(cfg.me, cfg.stream);
-        },
-      }
-    );
-  }
 });
-
-// --- Medium streams: 500 events ---
 
 describe("PG: load() 500 events", () => {
   bench(
@@ -202,41 +165,7 @@ describe("PG: load() 500 events", () => {
       }
     );
   }
-
-  bench(
-    "cache",
-    async () => {
-      await load(Counter, noSnapStream);
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(500);
-        cache(new InMemoryCache());
-        await load(Counter, noSnapStream);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}+cache`,
-      async () => {
-        await load(cfg.me, cfg.stream);
-      },
-      {
-        async setup() {
-          await dispose()();
-          await seedSnap(500, cfg);
-          cache(new InMemoryCache());
-          await load(cfg.me, cfg.stream);
-        },
-      }
-    );
-  }
 });
-
-// --- Long streams: 2000 events ---
 
 describe("PG: load() 2000 events", () => {
   bench(
@@ -262,38 +191,6 @@ describe("PG: load() 2000 events", () => {
         async setup() {
           await dispose()();
           await seedSnap(2000, cfg);
-        },
-      }
-    );
-  }
-
-  bench(
-    "cache",
-    async () => {
-      await load(Counter, noSnapStream);
-    },
-    {
-      async setup() {
-        await dispose()();
-        await seedNoSnap(2000);
-        cache(new InMemoryCache());
-        await load(Counter, noSnapStream);
-      },
-    }
-  );
-
-  for (const [label, cfg] of Object.entries(snaps)) {
-    bench(
-      `${label}+cache`,
-      async () => {
-        await load(cfg.me, cfg.stream);
-      },
-      {
-        async setup() {
-          await dispose()();
-          await seedSnap(2000, cfg);
-          cache(new InMemoryCache());
-          await load(cfg.me, cfg.stream);
         },
       }
     );
