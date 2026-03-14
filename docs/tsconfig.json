@@ -7,6 +7,9 @@
       "@rotorsoft/act": [
         "libs/act/src/index.ts"
       ],
+      "@rotorsoft/act-patch": [
+        "libs/act-patch/src/index.ts"
+      ],
       "@rotorsoft/act-pg": [
         "libs/act-pg/src/index.ts"
       ]
@@ -14,6 +17,7 @@
   },
   "include": [
     "../libs/act/src/**/*",
+    "../libs/act-patch/src/**/*",
     "../libs/act-pg/src/**/*"
   ],
   "exclude": [
