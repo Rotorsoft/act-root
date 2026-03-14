@@ -24,6 +24,7 @@ jobs:
           filters: |
             docs:
               - 'libs/act/src/**'
+              - 'libs/act-patch/src/**'
               - 'libs/act-pg/src/**'
               - 'libs/act-sse/src/**'
               - 'docs/**'
