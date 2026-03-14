@@ -52,7 +52,7 @@ export const is_mergeable = (value: unknown): boolean =>
  * 1. Short-circuits on empty patch — returns original by reference (zero allocation)
  * 2. Fast-path for primitives — skips is_mergeable when typeof !== "object"
  * 3. Structural sharing — unpatched subtrees reuse the original reference
- * 4. Two-pass key enumeration — avoids temporary { ...original, ...patches } spread
+ * 4. Two-pass key enumeration — avoids temporary spread allocation
  * 5. Prototype-free result — Object.create(null) avoids prototype-chain lookups
  *
  * @param original - The original state object to patch (not mutated)
