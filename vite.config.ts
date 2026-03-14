@@ -4,6 +4,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: {
     alias: {
+      "@rotorsoft/act-patch": path.resolve(
+        __dirname,
+        "libs/act-patch/src/index.ts"
+      ),
+      "@rotorsoft/act-sse": path.resolve(
+        __dirname,
+        "libs/act-sse/src/index.ts"
+      ),
       "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
     },
   },
