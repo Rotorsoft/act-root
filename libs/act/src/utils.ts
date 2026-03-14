@@ -1,153 +1,19 @@
 import { type ZodError, type ZodType, prettifyError } from "zod";
 import { config } from "./config.js";
-import type { Patch, Schema } from "./types/index.js";
 import { ValidationError } from "./types/index.js";
 
-/** These objects are copied instead of deep merged */
-const UNMERGEABLES = [
-  RegExp,
-  Date,
-  Array,
-  Map,
-  Set,
-  WeakMap,
-  WeakSet,
-  ArrayBuffer,
-  SharedArrayBuffer,
-  DataView,
-  Int8Array,
-  Uint8Array,
-  Uint8ClampedArray,
-  Int16Array,
-  Uint16Array,
-  Int32Array,
-  Uint32Array,
-  Float32Array,
-  Float64Array,
-];
-
-const is_mergeable = (value: any): boolean =>
-  !!value &&
-  typeof value === "object" &&
-  !UNMERGEABLES.some((t) => value instanceof t);
+export { patch } from "@rotorsoft/act-patch";
 
 /**
  * @module utils
  * @category Utilities
  * Utility functions for patching state, validation, extending objects, and async helpers.
  *
- * - Use `patch()` to immutably update state with patches.
+ * - Use `patch()` to immutably update state with patches (re-exported from @rotorsoft/act-patch).
  * - Use `validate()` to validate payloads against Zod schemas.
  * - Use `extend()` to merge and validate configuration objects.
  * - Use `sleep()` for async delays.
  */
-
-/**
- * Immutably applies patches to a state object, creating a new copy.
- *
- * This function performs deep merging for plain objects while preserving
- * immutability. Special types (Arrays, Dates, Maps, etc.) are replaced
- * entirely rather than merged. Setting a property to `undefined` or `null`
- * removes it from the resulting object.
- *
- * Used internally by the framework to apply event patches to state, but
- * can also be used directly for state transformations.
- *
- * **Merging rules:**
- * - Plain objects: Deep merge recursively
- * - Arrays, Dates, RegExp, Maps, Sets, TypedArrays: Replace entirely
- * - `undefined` or `null` values: Delete the property
- * - Primitives: Replace with patch value
- *
- * @param original - The original state object to patch
- * @param patches - The patches to apply (partial state)
- * @returns A new state object with patches applied
- *
- * @example Simple property update
- * ```typescript
- * import { patch } from "@rotorsoft/act";
- *
- * const state = { count: 0, name: "Alice" };
- * const updated = patch(state, { count: 5 });
- * // Result: { count: 5, name: "Alice" }
- * // Original unchanged: { count: 0, name: "Alice" }
- * ```
- *
- * @example Nested object patching
- * ```typescript
- * const state = {
- *   user: { id: 1, name: "Alice", email: "alice@example.com" },
- *   settings: { theme: "dark" }
- * };
- *
- * const updated = patch(state, {
- *   user: { email: "newemail@example.com" }
- * });
- * // Result: {
- * //   user: { id: 1, name: "Alice", email: "newemail@example.com" },
- * //   settings: { theme: "dark" }
- * // }
- * ```
- *
- * @example Property deletion
- * ```typescript
- * const state = { count: 5, temp: "value", flag: true };
- *
- * const updated = patch(state, {
- *   temp: undefined,  // Delete temp
- *   flag: null        // Delete flag
- * });
- * // Result: { count: 5 }
- * ```
- *
- * @example Array replacement (not merged)
- * ```typescript
- * const state = { items: [1, 2, 3], meta: { count: 3 } };
- *
- * const updated = patch(state, {
- *   items: [4, 5]  // Arrays are replaced, not merged
- * });
- * // Result: { items: [4, 5], meta: { count: 3 } }
- * ```
- *
- * @example In event handlers
- * ```typescript
- * import { state } from "@rotorsoft/act";
- * import { z } from "zod";
- *
- * const Counter = state({ Counter: z.object({ count: z.number() }) })
- *   .init(() => ({ count: 0 }))
- *   .emits({ Incremented: z.object({ by: z.number() }) })
- *   .patch({
- *     Incremented: (event, state) => {
- *       // patch() is called internally here
- *       return { count: state.count + event.data.by };
- *     }
- *   });
- * ```
- *
- * @see {@link Patch} for the patch type definition
- */
-export const patch = <S extends Schema>(
-  original: Readonly<S>,
-  patches: Readonly<Patch<S>>
-): Readonly<S> => {
-  const copy = {} as Record<string, any>;
-  Object.keys({ ...original, ...patches }).forEach((key) => {
-    const patched_value = patches[key as keyof typeof patches];
-    const original_value = original[key as keyof typeof original];
-    const patched = patches && key in patches;
-    const deleted =
-      patched &&
-      (typeof patched_value === "undefined" || patched_value === null);
-    const value = patched && !deleted ? patched_value : original_value;
-    !deleted &&
-      (copy[key] = is_mergeable(value)
-        ? patch(original_value || {}, patched_value || {})
-        : value);
-  });
-  return copy as S;
-};
 
 /**
  * Validates a payload against a Zod schema.

@@ -123,7 +123,7 @@ export type EmptySchema = Record<string, never>;
  * @template T - The base type to patch.
  */
 export type Patch<T> = {
-  [K in keyof T]?: T[K] extends Schema ? Patch<T[K]> : T[K];
+  [K in keyof T]?: T[K] extends Schema ? Patch<T[K]> | null : T[K] | null;
 };
 
 /**

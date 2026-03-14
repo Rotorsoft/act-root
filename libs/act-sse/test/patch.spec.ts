@@ -76,11 +76,11 @@ describe("patch", () => {
     expect(result).toEqual({ a: 1, nested: { x: 1 } });
   });
 
-  it("preserves unpatched object values via deep copy", () => {
+  it("structural sharing: unpatched subtrees reuse reference", () => {
     const original: Schema = { unchanged: { deep: true }, patched: "old" };
     const result = patch(original, { patched: "new" });
     expect(result).toEqual({ unchanged: { deep: true }, patched: "new" });
-    expect(result.unchanged).not.toBe(original.unchanged);
+    expect(result.unchanged).toBe(original.unchanged);
   });
 
   it("replaces RegExp instances (not merged)", () => {

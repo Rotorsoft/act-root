@@ -34,7 +34,6 @@ describe("utils", () => {
     it("should delete keys with undefined or null values", () => {
       const prevState = { a: 1, b: 2, c: 10 };
       const currState = { b: undefined, c: null, d: null };
-      // @ts-expect-error invalid currState
       const patchedState = patch(prevState, currState);
       expect(patchedState).toEqual({ a: 1 });
     });
@@ -98,7 +97,7 @@ describe("utils", () => {
       const original = { a: 1, b: "test" };
       const result = patch(original, {});
       expect(result).toEqual(original);
-      expect(result).not.toBe(original); // should be a copy
+      expect(result).toBe(original); // short-circuit: zero allocation
     });
 
     it("patches a shallow value", () => {
@@ -115,7 +114,6 @@ describe("utils", () => {
 
     it("deletes a key with null", () => {
       const original = { a: 1, b: 2 };
-      // @ts-expect-error type mismatch
       const result = patch(original, { b: null });
       expect(result).toEqual({ a: 1 });
     });

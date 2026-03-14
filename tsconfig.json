@@ -5,6 +5,9 @@
       "path": "./libs/act"
     },
     {
+      "path": "./libs/act-patch"
+    },
+    {
       "path": "./libs/act-pg"
     },
     {
