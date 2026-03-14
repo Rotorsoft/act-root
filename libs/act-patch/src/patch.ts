@@ -1,35 +1,5 @@
 import type { Patch, Schema } from "./types.js";
 
-/** These objects are replaced instead of deep merged */
-const UNMERGEABLES = [
-  RegExp,
-  Date,
-  Array,
-  Map,
-  Set,
-  WeakMap,
-  WeakSet,
-  ArrayBuffer,
-  /* v8 ignore next */
-  ...(typeof SharedArrayBuffer !== "undefined" ? [SharedArrayBuffer] : []),
-  DataView,
-  Int8Array,
-  Uint8Array,
-  Uint8ClampedArray,
-  Int16Array,
-  Uint16Array,
-  Int32Array,
-  Uint32Array,
-  Float32Array,
-  Float64Array,
-];
-
-/** Returns true if the value is a plain object eligible for deep merging. */
-export const is_mergeable = (value: unknown): boolean =>
-  !!value &&
-  typeof value === "object" &&
-  !UNMERGEABLES.some((t) => value instanceof t);
-
 /**
  * Immutably deep-merges `patches` into `original`.
  *
@@ -48,13 +18,6 @@ export const is_mergeable = (value: unknown): boolean =>
  * is only ever updated through new patches. This is the same approach used by
  * Immer, Redux Toolkit, and other immutable state libraries.
  *
- * **Optimizations:**
- * 1. Short-circuits on empty patch — returns original by reference (zero allocation)
- * 2. Fast-path for primitives — skips is_mergeable when typeof !== "object"
- * 3. Structural sharing — unpatched subtrees reuse the original reference
- * 4. Two-pass key enumeration — avoids temporary spread allocation
- * 5. Prototype-free result — Object.create(null) avoids prototype-chain lookups
- *
  * @param original - The original state object to patch (not mutated)
  * @param patches - The patches to apply (recursive partial of the state shape)
  * @returns A new state object with patches applied, sharing unpatched subtree references
@@ -63,38 +26,37 @@ export const patch = <S extends Schema>(
   original: Readonly<S>,
   patches: Readonly<Patch<S>> | null | undefined
 ): Readonly<S> => {
-  // Guard: null/undefined patches — return original by reference
   if (!patches) return original;
 
   const patchKeys = Object.keys(patches);
-
-  // Short-circuit: no patches — return original by reference (zero allocation)
   if (patchKeys.length === 0) return original;
 
-  const copy = Object.create(null) as Record<string, any>;
+  // Spread is faster for small objects; two-pass avoids spread overhead on large ones
   const origKeys = Object.keys(original);
+  const copy: Record<string, any> =
+    origKeys.length <= 16 ? { ...original } : Object.create(null);
 
-  // Copy original keys not present in patches (structural sharing)
-  for (let i = 0; i < origKeys.length; i++) {
-    const key = origKeys[i];
-    if (key in patches) continue;
-    // Reuse reference — no deep copy of unpatched subtrees
-    copy[key] = original[key as keyof S];
+  if (origKeys.length > 16) {
+    for (let i = 0; i < origKeys.length; i++) {
+      const key = origKeys[i];
+      if (key in patches) continue;
+      copy[key] = original[key as keyof S];
+    }
   }
 
-  // Apply patch keys
   for (let i = 0; i < patchKeys.length; i++) {
     const key = patchKeys[i];
     const patched_value = patches[key as keyof typeof patches];
-    // Fast delete check
-    if (patched_value === undefined || patched_value === null) continue;
-    // Fast-path: primitive values skip is_mergeable entirely
+    if (patched_value === undefined || patched_value === null) {
+      delete copy[key];
+      continue;
+    }
     if (typeof patched_value !== "object") {
       copy[key] = patched_value;
       continue;
     }
-    // Object value — check if it should be deep merged or replaced
-    if (is_mergeable(patched_value)) {
+    const ctor = (patched_value as object).constructor;
+    if (ctor === Object || ctor === undefined) {
       const original_value = original[key as keyof S];
       copy[key] = patch(
         (original_value || {}) as Schema,
