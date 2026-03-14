@@ -108,17 +108,6 @@ export async function load<
     { stream, with_snaps: !cached, after: cached?.event_id }
   );
 
-  // Update cache with latest state
-  if (event) {
-    void cache().set<TState>(stream, {
-      state,
-      version: event.version,
-      event_id: event.id,
-      patches,
-      snaps,
-    });
-  }
-
   logger.trace(
     state as object,
     `🟢 load ${stream}${cached && count === 0 ? " (cached)" : ""}`
