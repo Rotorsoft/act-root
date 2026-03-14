@@ -190,19 +190,29 @@ Cache disposal is automatic — `InMemoryCache` is registered in the adapters ma
 
 #### Benchmark Results (PostgresStore)
 
-`load()` throughput in ops/s — higher is better:
+`load()` throughput in ops/s — higher is better. Tested across short (50), medium (500), and long (2,000) event streams with snap intervals of 10, 50, 75, and 100:
 
-| Events | No snap | Snap @10 | Snap @50 | Snap @100 | Cache | Snap @10 + cache |
-|---:|---:|---:|---:|---:|---:|---:|
-| **100** | 486 | 474 | 407 | 593 | 6,718 (14×) | 7,675 (16×) |
-| **1,000** | 154 | 114 | 178 | 135 | 3,215 (21×) | 6,452 (42×) |
+| Events | No snap | @10 | @50 | @75 | @100 | Cache | @10+C | @50+C | @75+C | @100+C |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **50** | 655 | 674 | 668 | 667 | 659 | 6,995 | **7,319** | 6,733 | 6,937 | 6,648 |
+| **500** | 215 | 246 | 205 | 204 | 195 | 6,128 | 5,478 | **6,792** | 6,456 | 6,467 |
+| **2,000** | 92 | 84 | 90 | 85 | 103 | 7,078 | 6,655 | 6,709 | **7,506** | 4,639 |
+
+Speedup vs no-snap baseline:
+
+| Events | Cache only | Best snap+cache | Multiplier |
+|---:|---:|---:|---:|
+| **50** | 11× | @10+cache 11× | ~same |
+| **500** | 28× | @50+cache 32× | 1.1× |
+| **2,000** | 77× | @75+cache 82× | 1.1× |
 
 Key takeaways:
 
-- **Snapshots alone have marginal impact** — the overhead of reading snapshots from PG offsets the replay savings for streams under ~1,000 events. With 100 events, snap@50 is actually *slower* than no snap.
-- **Cache dominates** — a warm cache skips PG entirely, yielding 14–21× speedup on its own.
-- **Snap + cache is the best combination** — at 1,000 events, snap@10 + cache is 2× faster than cache alone (42× vs 21× over baseline). On a cache miss, the snapshot limits replay to at most 9 events instead of 1,000.
-- **Choose snap interval based on stream length** — for streams that grow into the hundreds or thousands, snap@10 ensures fast recovery on cache misses. For shorter streams, snapshotting adds overhead without benefit.
+- **Snapshots alone don't help** — across all stream lengths, snap-only throughput is within noise of the no-snap baseline (and sometimes *worse*). The PG round-trip to read a snapshot offsets the replay savings.
+- **Cache is the dominant optimization** — warm cache delivers 11–77× speedup by skipping PG entirely. The benefit scales with stream length.
+- **Snap + cache provides marginal extra gain** — the best snap+cache combination is only ~10% faster than cache alone. Snaps matter primarily on cache *misses* (cold start, eviction, invalidation), where they limit replay length.
+- **Optimal snap interval grows with stream length** — @10 wins for short streams, @50 for medium, @75 for long. Too-frequent snapshots add write overhead; too-infrequent ones don't help on cache misses.
+- **Avoid snap@100 on long streams** — at 2,000 events, @100+cache (4,639 ops/s) was significantly slower than cache alone (7,078 ops/s), likely due to snapshot write contention with the fire-and-forget pattern.
 
 ### Performance Considerations
 
