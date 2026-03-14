@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.19.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.18.0...@rotorsoft/act-v0.19.0) (2026-03-14)
+
+
+### Features
+
+* **act-patch:** extract shared patch utility into @rotorsoft/act-patch ([7831b4c](https://github.com/rotorsoft/act-root/commit/7831b4cc87b6fcdca4f7ac36529784e01e3fa506)), closes [#452](https://github.com/rotorsoft/act-root/issues/452)
+
 # [@rotorsoft/act-v0.18.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.17.1...@rotorsoft/act-v0.18.0) (2026-03-13)
 
 
