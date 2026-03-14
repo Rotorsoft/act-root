@@ -86,11 +86,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   if (code === "ERROR" && config().env === "production") return;
 
   await Promise.all(disposers.map((disposer) => disposer()));
-  if (_cache) {
-    await _cache.dispose();
-    logger.info(`🔌 disposed ${_cache.constructor.name}`);
-    _cache = undefined;
-  }
+  _cache = undefined;
   await Promise.all(
     [...adapters.values()].reverse().map(async (adapter) => {
       await adapter.dispose();
@@ -275,6 +271,7 @@ export const store = port(function store(adapter?: Store) {
 });
 
 // Cache is opt-in — nullable singleton (not created by default)
+// Registered in the adapters map on injection so disposeAndExit() handles it.
 let _cache: Cache | undefined;
 
 /**
@@ -289,6 +286,7 @@ let _cache: Cache | undefined;
 export function cache(adapter?: Cache): Cache | undefined {
   if (adapter) {
     _cache = adapter;
+    adapters.set("cache", adapter);
     logger.info(`🔌 injected cache:${adapter.constructor.name}`);
   }
   return _cache;
