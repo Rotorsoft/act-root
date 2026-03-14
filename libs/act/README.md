@@ -169,10 +169,39 @@ store(new PostgresStore({ host: "localhost", database: "myapp", user: "postgres"
 
 Custom store implementations must fulfill the `Store` interface contract (see [CLAUDE.md](../../CLAUDE.md) or the source for details).
 
+### Cache
+
+The cache port is an opt-in layer that avoids full event replay on every `load()`. When enabled, `load()` checks the cache first and only replays events committed after the cached snapshot. Actions update the cache automatically after each successful commit and invalidate on concurrency errors.
+
+```typescript
+import { cache } from "@rotorsoft/act";
+import { InMemoryCache } from "@rotorsoft/act";
+
+// Enable caching (must be called before first load)
+cache(new InMemoryCache({ maxSize: 1000 })); // LRU, default maxSize is 1000
+
+// load() and action() use the cache transparently
+const snapshot = await app.load(Counter, "counter1");
+```
+
+The `Cache` interface is async, so you can implement adapters backed by Redis or other external caches. `InMemoryCache` is included as a fast, in-process LRU implementation.
+
+Cache disposal is automatic — `InMemoryCache` is registered in the adapters map and cleaned up on shutdown alongside the store.
+
+#### Benchmark Results (PostgresStore)
+
+| Scenario | No snap, no cache | With snap | Cache (warm) | Snap + cache |
+|---:|---:|---:|---:|---:|
+| **100 events** | 521 ops/s | 508 ops/s | 6,344 ops/s (12×) | 6,268 ops/s (12×) |
+| **1,000 events** | 149 ops/s | 129 ops/s | 5,639 ops/s (38×) | 6,455 ops/s (43×) |
+
+With a warm cache, `load()` skips event replay entirely (0 events to replay), yielding 12–43× throughput improvement depending on stream length. The benefit grows with longer event histories where full replay is most expensive.
+
 ### Performance Considerations
 
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
-- Use snapshots for states with long event histories to avoid full replay on every load.
+- Use the cache port for read-heavy workloads — it eliminates full event replay on cache hits.
+- Use snapshots for states with long event histories to limit replay length on cache misses.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
 - Active event streams remain in fast storage; consider archival strategies for very large datasets.
 
