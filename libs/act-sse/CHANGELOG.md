@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sse-v1.2.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.2.0...@rotorsoft/act-sse-v1.2.1) (2026-03-14)
+
+
+### Bug Fixes
+
+* **act:** use workspace:^ and order CD matrix by dependency chain ([4a5287e](https://github.com/rotorsoft/act-root/commit/4a5287eb53a038cf8e81fcc8493427f7125fd94e))
+
 # [@rotorsoft/act-sse-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sse-v1.1.1...@rotorsoft/act-sse-v1.2.0) (2026-03-14)
 
 
