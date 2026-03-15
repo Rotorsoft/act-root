@@ -201,6 +201,7 @@ On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On
 - **Cache invalidation is automatic** — concurrency errors (`ERR_CONCURRENCY`) invalidate the stale cache entry, forcing a fresh load from the store on the next access.
 - **Snap writes are fire-and-forget** — `snap()` commits to the store asynchronously after `action()` returns. The cache is updated synchronously within `action()`, so subsequent reads see the post-snap state immediately without waiting for the store write.
 - **Atomic claim eliminates poll→lease overhead** — `claim()` fuses discovery and locking into a single SQL transaction using `FOR UPDATE SKIP LOCKED`, saving one round-trip per drain cycle and eliminating contention between workers.
+- **Batch fetch with source deduplication** — streams sharing the same source are fetched in a single query, collapsing N round-trips to M unique sources.
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
 

@@ -555,17 +555,51 @@ export class Act<
         if (!leased.length)
           return { fetched: [], leased: [], acked: [], blocked: [] };
 
-        // Fetch events for each leased stream
-        const fetched = await Promise.all(
-          leased.map(async ({ stream, source, at, lagging }) => {
+        // Batch fetch: group leased streams by (source, at) to deduplicate queries
+        const fetchGroups = new Map<
+          string,
+          { source?: string; at: number; streams: typeof leased }
+        >();
+        for (const lease of leased) {
+          const key = `${lease.source ?? ""}:${lease.at}`;
+          const group = fetchGroups.get(key);
+          if (group) {
+            group.streams.push(lease);
+          } else {
+            fetchGroups.set(key, {
+              source: lease.source,
+              at: lease.at,
+              streams: [lease],
+            });
+          }
+        }
+
+        // One query per unique (source, at) — collapses N queries to M where M ≤ N
+        const groupResults = await Promise.all(
+          [...fetchGroups.values()].map(async ({ source, at }) => {
             const events = await this.query_array({
               stream: source,
               after: at,
               limit: eventLimit,
             });
-            return { stream, source, at, lagging, events } as const;
+            return { source, at, events };
           })
         );
+
+        // Map results back to each leased stream
+        const eventsByKey = new Map<
+          string,
+          Committed<TEvents, keyof TEvents>[]
+        >();
+        for (const { source, at, events } of groupResults) {
+          eventsByKey.set(`${source ?? ""}:${at}`, events);
+        }
+
+        const fetched = leased.map(({ stream, source, at, lagging }) => {
+          const key = `${source ?? ""}:${at}`;
+          const events = eventsByKey.get(key) || [];
+          return { stream, source, at, lagging, events } as const;
+        });
         tracer.fetched(fetched);
 
         const payloadsMap = new Map<string, ReactionPayload<TEvents>[]>();
