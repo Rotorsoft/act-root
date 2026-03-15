@@ -130,6 +130,15 @@ describe("PostgresStore", () => {
     it("returns 0 on empty input", async () => {
       await expect(store.subscribe([])).resolves.toBe(0);
     });
+
+    it("returns 0 when rowCount is undefined", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- mock
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
+        rows: [],
+        rowCount: undefined,
+      } as any);
+      await expect(store.subscribe([{ stream: "s" }])).resolves.toBe(0);
+    });
   });
 
   describe("ack", () => {

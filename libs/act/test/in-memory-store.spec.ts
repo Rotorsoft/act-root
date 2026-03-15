@@ -245,5 +245,26 @@ describe("InMemoryStore", () => {
       ]);
       expect(blocked.length).toBe(0);
     });
+
+    it("should not claim already-leased streams", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "L5" }]);
+      // Claim with long lease
+      const claimed = await s.claim(1, 0, "worker-1", 100000);
+      expect(claimed.length).toBe(1);
+      // Second claim should skip the leased stream
+      const claimed2 = await s.claim(1, 0, "worker-2", 100000);
+      expect(claimed2.find((l) => l.stream === "L5")).toBeUndefined();
+    });
+
+    it("should not ack with wrong lease holder", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "L6" }]);
+      const claimed = await s.claim(1, 0, "worker-1", 100000);
+      expect(claimed.length).toBe(1);
+      // Ack with wrong holder — should be silently ignored
+      const acked = await s.ack([{ ...claimed[0], by: "wrong-worker" }]);
+      expect(acked.length).toBe(0);
+    });
   });
 });

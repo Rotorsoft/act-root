@@ -45,6 +45,9 @@ describe("act", () => {
     .do(onIncremented)
     .on("decremented")
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
+    .on("ignored")
+    .do(() => Promise.resolve())
+    .void() // void resolver — correlate should skip this
     .withState(dummy)
     .on("added")
     .do(() => Promise.resolve())
@@ -102,6 +105,9 @@ describe("act", () => {
 
   it("should not do anything when ignored events are emitted", async () => {
     await app.do("ignore", { stream: "s", actor }, {});
+    // correlate should skip void reactions (resolver returns undefined)
+    const { subscribed } = await app.correlate({ limit: 200 });
+    expect(subscribed).toBe(0); // void reactions don't create subscriptions
     const drained = await app.drain();
     expect(drained.acked.length).toBe(0);
   });
