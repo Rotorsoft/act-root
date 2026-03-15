@@ -143,6 +143,22 @@ describe("PostgresStore", () => {
       expect(result).toEqual({ subscribed: 0, watermark: -1 });
     });
 
+    it("handles undefined rowCount in INSERT", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(
+          vi
+            .fn()
+            .mockResolvedValueOnce({}) // BEGIN
+            .mockResolvedValueOnce({ rowCount: undefined }) // INSERT
+            .mockResolvedValueOnce({ rows: [{ max: 42 }] }) // SELECT MAX(at)
+            .mockResolvedValueOnce({}) // COMMIT
+        )
+      );
+      const result = await store.subscribe([{ stream: "s" }]);
+      expect(result).toEqual({ subscribed: 0, watermark: 42 });
+    });
+
     it("swallows DB error", async () => {
       vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
         // @ts-expect-error mock
