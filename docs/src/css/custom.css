@@ -1,1 +1,57 @@
- 
+/* Act documentation theme — complements the dark landing page */
+
+:root {
+  --ifm-color-primary: #3bb0ff;
+  --ifm-color-primary-dark: #1da0ff;
+  --ifm-color-primary-darker: #0e98ff;
+  --ifm-color-primary-darkest: #007cd4;
+  --ifm-color-primary-light: #59bfff;
+  --ifm-color-primary-lighter: #68c5ff;
+  --ifm-color-primary-lightest: #96d8ff;
+  --ifm-font-family-base: "Inter", system-ui, -apple-system, sans-serif;
+  --ifm-font-family-monospace: "JetBrains Mono", "Fira Code", monospace;
+  --ifm-code-font-size: 90%;
+  --ifm-heading-font-weight: 700;
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #3bb0ff;
+  --ifm-color-primary-dark: #1da0ff;
+  --ifm-color-primary-darker: #0e98ff;
+  --ifm-color-primary-darkest: #007cd4;
+  --ifm-color-primary-light: #59bfff;
+  --ifm-color-primary-lighter: #68c5ff;
+  --ifm-color-primary-lightest: #96d8ff;
+  --ifm-background-color: #1b1d23;
+  --ifm-background-surface-color: #22252d;
+}
+
+/* Tighter heading spacing */
+.markdown h2 {
+  margin-top: 2rem;
+}
+
+.markdown h3 {
+  margin-top: 1.5rem;
+}
+
+/* Code block styling */
+.prism-code {
+  border-radius: 8px;
+}
+
+/* Sidebar polish */
+.menu__link {
+  font-size: 0.9rem;
+}
+
+/* Table styling */
+.markdown table {
+  display: table;
+  width: 100%;
+}
+
+.markdown table th {
+  font-weight: 600;
+  text-align: left;
+}

@@ -13,6 +13,8 @@ This is a pnpm monorepo with two main sections:
 - **`/libs`** - Core framework libraries
   - `@rotorsoft/act` - Core event sourcing framework
   - `@rotorsoft/act-pg` - PostgreSQL adapter for production
+  - `@rotorsoft/act-patch` - Immutable deep-merge patch utility
+  - `@rotorsoft/act-sse` - Server-Sent Events for incremental state broadcast
 
 - **`/packages`** - Example applications
   - `calculator` - Simple state machine example
@@ -232,9 +234,11 @@ app.settle();
 - **Optimistic concurrency** - Version-based conflict detection
 - **Stream isolation** - Each state instance has its own event stream
 
-### Store Abstraction
+### Port/Adapter Pattern
 
-The framework uses a port/adapter pattern for persistence:
+The framework uses a port/adapter pattern for persistence and caching via singleton accessors:
+
+#### Store
 
 - **InMemoryStore** - Default, useful for tests and prototyping
 - **PostgresStore** - Production-ready with leasing, snapshots, and connection pooling
@@ -255,6 +259,31 @@ store(new PostgresStore({
   table: "events"
 }));
 ```
+
+#### Cache
+
+Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It stores the latest state checkpoint per stream, avoiding full event replay on every `load()`. Actions update the cache after each successful commit; concurrency errors invalidate stale entries.
+
+```typescript
+import { cache } from "@rotorsoft/act";
+
+// Cache is active by default — load() and action() use it transparently
+// Replace with a custom adapter (e.g., Redis) for distributed caching:
+cache(new RedisCache({ url: "redis://localhost:6379" }));
+```
+
+The `Cache` interface is async for forward-compatibility with external caches:
+
+```typescript
+interface Cache extends Disposable {
+  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
+  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
+}
+```
+
+**Cache vs Snapshots:** Both are checkpoints at different layers. Cache (in-memory) is checked first on every `load()`, eliminating store round-trips on warm hits. Snapshots (in-store as `__snapshot__` events) are the fallback on cache miss (cold start, LRU eviction, process restart). On cache hit, snapshot events are skipped (`with_snaps: false`).
 
 ## Key Architectural Patterns
 
@@ -305,11 +334,13 @@ const mustBeAssigned: Invariant<{ assignedTo: string }, { id: string; name: stri
 
 ### Snapshotting Strategy
 
-Control when snapshots are taken:
+Control when snapshots are taken for cold-start resilience (on cache miss, process restart, or LRU eviction, snapshots limit how much of the event stream must be replayed):
 
 ```typescript
-.snap((snap) => snap.patchCount >= 10)  // Snapshot every 10 events
+.snap((snap) => snap.patches >= 10)  // Snapshot every 10 events
 ```
+
+Snap writes are fire-and-forget — the cache is updated synchronously within `action()`, so subsequent reads see the post-commit state immediately without waiting for the store write.
 
 ## Code Organization
 
@@ -321,7 +352,9 @@ Control when snapshots are taken:
 - **`projection-builder.ts`** - Projection builder for read-model updaters
 - **`merge.ts`** - Shared merge utilities for schema/state composition
 - **`act.ts`** - Act orchestrator runtime
-- **`store/`** - Store interface and InMemoryStore implementation
+- **`ports.ts`** - Singleton port/adapter pattern for `store()` and `cache()`
+- **`adapters/`** - Built-in adapters (InMemoryStore, InMemoryCache)
+- **`event-sourcing.ts`** - Core `load()` and `action()` functions with cache integration
 - **`logger.ts`** - Pino-based logging
 - **`errors.ts`** - Framework error types
 - **`types.ts`** - Core type definitions (Message, Committed, Snapshot, etc.)
@@ -360,8 +393,9 @@ Each example demonstrates different framework capabilities:
 
 ### Testing Patterns
 
-- Tests use the InMemoryStore by default (fast, isolated)
-- Use `store().seed()` to reset state between tests
+- Tests use the InMemoryStore and InMemoryCache by default (fast, isolated)
+- Use `store().seed()` in `beforeEach` to reset state between tests
+- Use `dispose()()` in `afterAll` to clean up all adapters (store, cache, and any custom disposers)
 - Create helper functions for common action sequences
 - Verify both events and final state in assertions
 - Test invariant violations with `expect(async () => ...).rejects.toThrow()`
@@ -381,7 +415,7 @@ The project uses conventional commits with a custom validation hook:
 ## Important Constraints
 
 - **Node >= 22.18.0** required
-- **pnpm >= 10.27.0** required (not npm or yarn)
+- **pnpm >= 10.32.1** required (not npm or yarn)
 - **TypeScript strict mode** enabled
 - **Zod schemas required** for all actions, events, and state
 - **Immutable events** - never mutate event data
@@ -408,6 +442,30 @@ interface Store {
 
 Both stream leasing and version-based optimistic concurrency must be implemented correctly.
 
+## Cache Interface Contract
+
+If implementing a custom cache (e.g., Redis for distributed deployments), you must implement:
+
+```typescript
+interface Cache extends Disposable {
+  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;  // Lookup
+  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>; // Store checkpoint
+  invalidate(stream: string): Promise<void>;                             // Remove entry
+  clear(): Promise<void>;                                                // Remove all entries
+  dispose(): Promise<void>;                                              // Cleanup resources
+}
+
+interface CacheEntry<TState> {
+  readonly state: TState;      // Latest state
+  readonly version: number;    // Stream version
+  readonly event_id: number;   // Last processed event ID
+  readonly patches: number;    // Events since last snapshot
+  readonly snaps: number;      // Total snapshots taken
+}
+```
+
+The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default 1000).
+
 ## Troubleshooting
 
 ### Common Issues
@@ -427,7 +485,9 @@ Both stream leasing and version-based optimistic concurrency must be implemented
 
 ### Performance
 
-- Use snapshots for states with long event histories
+- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput regardless of stream length. No configuration needed.
+- **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
+- **Cache invalidation is automatic** — concurrency errors invalidate the stale cache entry, forcing a fresh load on the next access.
 - Tune `streamLimit` and `eventLimit` in drain options
 - Monitor lease times - if too short, streams thrash; if too long, processing slows
 - PostgreSQL: Add indexes on stream, version, and created columns

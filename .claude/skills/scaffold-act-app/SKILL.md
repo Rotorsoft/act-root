@@ -365,8 +365,8 @@ See [monorepo-template.md](monorepo-template.md) for complete file contents (`Ap
 ### Step 9 — Tests
 
 ```typescript
-import { describe, it, expect, beforeEach } from "vitest";
-import { store, type Target } from "@rotorsoft/act";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { store, dispose, type Target } from "@rotorsoft/act";
 import { app, Item, clearItems, getItems, type AppActor } from "../src/index.js";
 
 const actor: AppActor = { id: "user-1", name: "Test", role: "user" };
@@ -375,7 +375,11 @@ const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 describe("Item", () => {
   beforeEach(async () => {
     await store().seed();
-    clearItems();        // reset projections between tests
+    clearItems();           // reset projections between tests
+  });
+
+  afterAll(async () => {
+    await dispose()();      // disposes all adapters (store, cache, etc.)
   });
 
   it("should create", async () => {
@@ -402,7 +406,7 @@ describe("Item", () => {
 });
 ```
 
-**Test isolation**: Always call `store().seed()` AND `clear*()` for each projection in `beforeEach`. This ensures both event store and read models are clean.
+**Test isolation**: Always call `store().seed()` and `clear*()` for each projection in `beforeEach`. Use `dispose()()` in `afterAll` to clean up all adapters (store, cache, etc.).
 
 ### Step 10 — Install Dependencies
 
@@ -416,7 +420,7 @@ See [monorepo-template.md](monorepo-template.md) for complete `package.json` fil
 4. **Partial patches** — Patch handlers return only changed fields, not the full state.
 5. **Causation tracking** — Pass triggering event as 4th arg in reactions: `app.do(action, target, payload, event)`.
 6. **Domain isolation** — `packages/domain` has zero infrastructure deps (except `@rotorsoft/act` and `zod`).
-7. **InMemoryStore for tests** — Default store. Call `store().seed()` in `beforeEach`. Call `clear*()` for each projection.
+7. **InMemoryStore + InMemoryCache for tests** — Default store and cache. Call `store().seed()` in `beforeEach` and `dispose()()` in `afterAll`. Call `clear*()` for each projection in `beforeEach`.
 8. **TypeScript strict mode** — All packages use `"strict": true`.
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
@@ -442,7 +446,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Invariants enforce all business rules
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
-- [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`
+- [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`, `dispose()()` in `afterAll`
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] tRPC API decomposed into route files with typed middleware

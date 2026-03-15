@@ -1,27 +1,104 @@
+---
+id: calculator
+title: Calculator
+---
+
 # Calculator Example
 
-This example demonstrates a simple calculator implemented using the Act Framework. It showcases how to define state machines, actions, and events for basic arithmetic operations, and how to compose workflows using event-driven design.
+A simple calculator demonstrating core Act patterns: state machines, multiple event types, conditional emit logic, invariants, and snapshotting.
 
-## What You'll Learn
+**Source:** [packages/calculator/src/](https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src)
 
-- How to define a state machine for a calculator
-- How to model actions (key presses) and events (state changes)
-- How to use reactions to build workflows
-- How to test and run the example
+## Patterns Demonstrated
 
-## Source Files
+### Single State Machine
 
-- [calculator.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/calculator.ts): Calculator state machine and logic
-- [main.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/main.ts): Example usage and entry point
-- [index.ts](https://github.com/rotorsoft/act-root/blob/master/packages/calculator/src/index.ts): Module entry
+The calculator is a single state with left/right operands, an operator, and a result:
 
-## How It Works
+```typescript
+const State = z.object({
+  left: z.string().optional(),
+  right: z.string().optional(),
+  operator: z.enum(["+", "-", "*", "/"]).optional(),
+  result: z.number(),
+});
 
-1. The calculator state machine models the left/right operands, operator, and result.
-2. Actions represent key presses (digits, operators, dot, equals, clear).
-3. Events are emitted for each key press and drive state transitions.
-4. The main example demonstrates pressing keys, updating state, and reacting to events.
+const Calculator = state({ Calculator: State })
+  .init(() => ({ result: 0 }))
+  // ...
+```
 
-## Usage
+### Multiple Event Types from One Action
 
-See the source files above for implementation details and usage examples.
+A single `PressKey` action emits different events based on the key pressed:
+
+```typescript
+.on({ PressKey: z.object({ key: z.enum(KEYS) }) })
+  .emit(({ key }, { state }) => {
+    if (key === ".") return ["DotPressed", {}];
+    if (key === "=") return [["EqualsPressed", {}]];  // array of tuples
+    return DIGITS.includes(key)
+      ? ["DigitPressed", { digit: key }]
+      : ["OperatorPressed", { operator: key }];
+  })
+```
+
+### Custom Patch Reducers
+
+Each event type has its own reducer logic:
+
+```typescript
+.patch({
+  DigitPressed: ({ data }, state) => append(state, data.digit),
+  OperatorPressed: ({ data }, state) => compute(state, data.operator),
+  DotPressed: (_, state) => {
+    const current = state.operator ? state.right : state.left;
+    if (current?.includes(".")) return {};  // no-op
+    return append(state, ".");
+  },
+  EqualsPressed: (_, state) => compute(state),
+  Cleared: () => ({ result: 0, left: undefined, right: undefined, operator: undefined }),
+})
+```
+
+### Invariants
+
+The `Clear` action enforces that the calculator has state to clear:
+
+```typescript
+.on({ Clear: ZodEmpty })
+  .given([{
+    description: "Must be dirty",
+    valid: (state) => !!state.left || !!state.right || !!state.result || !!state.operator,
+  }])
+  .emit(() => ["Cleared", {}])
+```
+
+### Snapshotting
+
+Snapshots are taken every 12 events for cold-start performance:
+
+```typescript
+.snap((s) => s.patches > 12)
+```
+
+### ZodEmpty
+
+Events and actions with no payload use `ZodEmpty`:
+
+```typescript
+import { ZodEmpty } from "@rotorsoft/act";
+
+const Events = {
+  DotPressed: ZodEmpty,
+  EqualsPressed: ZodEmpty,
+  Cleared: ZodEmpty,
+};
+```
+
+## Running
+
+```bash
+pnpm dev:calculator
+pnpm -F calculator test
+```

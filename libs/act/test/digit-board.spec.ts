@@ -1,10 +1,14 @@
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { store } from "../src/index.js";
+import { dispose, store } from "../src/index.js";
 import { actor, app } from "./digit-board.js";
 
 describe("digit-board", () => {
   beforeAll(() => {
     store(new InMemoryStore());
+  });
+
+  afterAll(async () => {
+    await dispose()();
   });
 
   it("should count digits", async () => {

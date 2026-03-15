@@ -1,9 +1,13 @@
 import { z } from "zod";
-import { act, projection, slice, state, store } from "../src/index.js";
+import { act, dispose, projection, slice, state, store } from "../src/index.js";
 
 describe("projection", () => {
   beforeEach(async () => {
     await store().drop();
+  });
+
+  afterAll(async () => {
+    await dispose()();
   });
 
   const actor = { id: "a", name: "a" };

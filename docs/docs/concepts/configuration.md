@@ -1,180 +1,156 @@
-# Builders & Adapters
-
-## Tips for Builders & Adapters
-
-- Use `StateBuilder` to define state machines, actions, events, and validation logic in a fluent, type-safe way.
-- Use `ActBuilder` to compose applications from multiple state machines and reactions.
-- Adapters allow you to swap event stores (e.g., in-memory, Postgres, custom) without changing business logic.
-- Use reactions to decouple workflows and integrate with external systems.
-- Visualize your application architecture to clarify how builders and adapters interact.
-
+---
+id: configuration
+title: Builders & Adapters
 ---
 
-## Example 1: Composing State Machines with Builders
+# Builders & Adapters
 
-**Scenario:**
-You want to define two state machines (e.g., a Counter and a TodoList) and compose them into a single application using `ActBuilder`.
+Act uses a fluent builder pattern for defining domain logic and a port/adapter pattern for infrastructure concerns.
+
+## State Builder
+
+Define state machines with actions, events, and validation:
 
 ```typescript
-import { act, state, z } from "@rotorsoft/act";
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
+  .patch({
     Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
   })
   .on({ increment: z.object({ by: z.number() }) })
-  .emit((action) => ["Incremented", { amount: action.by }])
+    .emit((action) => ["Incremented", { amount: action.by }])
   .build();
-
-const TodoList = state({ TodoList: z.object({ todos: z.array(z.string()) }) })
-  .init(() => ({ todos: [] }))
-  .emits({ Added: z.object({ todo: z.string() }) })
-  .patch({  // optional — only for events needing custom reducers
-    Added: (event, state) => ({ todos: [...state.todos, event.todo] }),
-  })
-  .on({ add: z.object({ todo: z.string() }) })
-  .emit("Added")  // passthrough — action payload becomes event data
-  .build();
-
-const app = act().withState(Counter).withState(TodoList).build();
 ```
 
----
+## Projection Builder
 
-## Example 2: Using a Postgres or Custom Store Adapter
+Read-model updaters that react to events:
 
-**Scenario:**
-You want to use a Postgres event store in production and an in-memory store for testing, without changing your application logic. You inject the adapter using the `store()` function before any event processing.
+```typescript
+import { projection } from "@rotorsoft/act";
+
+const CounterProjection = projection("counters")
+  .on({ Incremented: z.object({ amount: z.number() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
+```
+
+## Slice Builder
+
+Vertical feature modules grouping states, projections, and reactions:
+
+```typescript
+import { slice } from "@rotorsoft/act";
+
+const CounterSlice = slice()
+  .withState(Counter)
+  .withProjection(CounterProjection)
+  .on("Incremented")
+    .do(async (event, stream, app) => { /* cross-state dispatch via app */ })
+    .to((event) => ({ target: event.stream }))
+  .build();
+```
+
+## Act Orchestrator
+
+Compose everything into an application:
+
+```typescript
+import { act } from "@rotorsoft/act";
+
+const app = act()
+  .withSlice(CounterSlice)
+  .withState(AnotherState)
+  .withProjection(StandaloneProjection)
+  .on("SomeEvent")
+    .do(handler)
+    .to(resolver)
+  .build();
+```
+
+## Port/Adapter Pattern
+
+Infrastructure concerns (storage, caching) use singleton adapters injected via port functions.
+
+### Store
 
 ```typescript
 import { store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 
-store(
-  new PostgresStore({
-    host: process.env.PGHOST || "localhost",
-    port: Number(process.env.PGPORT) || 5432,
-    database: process.env.PGDATABASE || "postgres",
-    user: process.env.PGUSER || "postgres",
-    password: process.env.PGPASSWORD || "postgres",
-    schema: "public", // or your custom schema
-    table: "events", // or your custom table
-  })
-);
+// Development: in-memory (default)
+const s = store();
+
+// Production: inject PostgreSQL
+store(new PostgresStore({
+  host: "localhost",
+  database: "myapp",
+  user: "postgres",
+  password: "secret",
+  schema: "public",
+  table: "events",
+}));
 ```
 
----
+### Cache
 
-## How to Build a Custom Store Adapter
-
-**Scenario:**
-You want to connect your application to a custom event store (e.g., a cloud database). Implement the `Store` interface and inject your adapter using the `store()` function.
+Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default:
 
 ```typescript
-import type {
-  Store,
-  EventMeta,
-  Message,
-  Committed,
-  Schemas,
-} from "@rotorsoft/act";
+import { cache } from "@rotorsoft/act";
 
-export class MyCustomStore implements Store {
-  async seed() {
-    /* ... */
-  }
-  async drop() {
-    /* ... */
-  }
-  async dispose() {
-    /* ... */
-  }
-  async commit<E extends Schemas>(
-    stream: string,
-    msgs: Message<E, keyof E>[],
-    meta: EventMeta,
-    expectedVersion?: number
-  ): Promise<Committed<E, keyof E>[]> {
-    // Your persistence logic here
-    return [];
-  }
-  async query<E extends Schemas>(
-    callback: (event: Committed<E, keyof E>) => void,
-    query?: any
-  ): Promise<number> {
-    // Your query logic here
-    return 0;
-  }
-  async fetch<E extends Schemas>(limit: number) {
-    /* ... */ return { streams: [], events: [] };
-  }
-  async lease(leases: any[]) {
-    /* ... */ return [];
-  }
-  async ack(leases: any[]) {
-    /* ... */
-  }
+// Default: InMemoryCache — no setup needed
+// For distributed deployments:
+cache(new RedisCache({ url: "redis://localhost:6379" }));
+```
+
+The `Cache` interface is async for forward-compatibility with external caches:
+
+```typescript
+interface Cache extends Disposable {
+  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
+  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
 }
-
-// Inject your custom store
-import { store } from "@rotorsoft/act";
-store(new MyCustomStore());
 ```
 
----
+### Resource Disposal
 
-## Advanced: Lease Management & Reliable Event Stream Processing
+All adapters are cleaned up via `dispose()()`:
 
-Building a robust custom store adapter is much more than just persisting events—it requires careful design for distributed, reliable, and efficient event stream processing, with **lease management** at its core.
+```typescript
+import { dispose } from "@rotorsoft/act";
 
-### What is a Lease?
+// Register custom cleanup
+dispose(async () => {
+  await redis.quit();
+});
 
-A lease is a temporary claim on a stream for processing. It ensures that only one process (or worker) is handling a given event stream at a time, supporting distributed, parallel, and fault-tolerant event processing.
-
-### Key Methods
-
-- **`fetch(limit)`**: Returns a batch of streams and events that are ready for processing (not blocked or already leased).
-- **`lease(leases)`**: Attempts to acquire leases on the given streams. Should atomically mark streams as leased (with a timeout/expiry).
-- **`ack(leases)`**: Acknowledges processing is complete, updates stream positions, and releases the lease.
-
-### Challenges
-
-- **Atomicity:** Leasing and updating stream positions must be atomic to avoid race conditions.
-- **Timeouts:** Leases must expire if a worker crashes or hangs, so other workers can take over.
-- **Retries:** Support for retrying failed streams, with backoff or retry counters.
-- **Blocking:** Ability to block streams that are in an error state or require manual intervention.
-- **Scalability:** Efficiently handle many streams and high event throughput.
-
-### Best Practices
-
-- Use transactions for all lease and commit operations.
-- Index your stream and lease tables for fast lookups and updates.
-- Handle lease expiry: If a lease is not acknowledged in time, it should become available for other workers.
-- Support retries and backoff for failed processing.
-- Log and monitor lease acquisition, expiry, and errors for observability.
-
-### Sample Lease Table Schema (for SQL-based stores)
-
-```sql
-CREATE TABLE streams (
-  stream VARCHAR PRIMARY KEY,
-  at INT NOT NULL DEFAULT -1,
-  retry SMALLINT NOT NULL DEFAULT 0,
-  blocked BOOLEAN NOT NULL DEFAULT FALSE,
-  leased_by UUID,
-  leased_at INT,
-  leased_until TIMESTAMPTZ
-);
+// Trigger cleanup (graceful shutdown or test teardown)
+await dispose()();
 ```
 
-### Summary Table
+## Custom Store Implementation
 
-| Method | Purpose                                  | Complexity/Notes                          |
-| ------ | ---------------------------------------- | ----------------------------------------- |
-| fetch  | Find streams/events ready for processing | Must filter out blocked/leased streams    |
-| lease  | Atomically acquire leases on streams     | Use transactions/locking, set expiry      |
-| ack    | Release lease, update stream position    | Must be atomic, handle errors and retries |
+Implement the `Store` interface for custom backends:
 
-> **Note:** Lease management is critical for correctness and reliability in distributed event-driven systems. Study the [PostgresStore](https://github.com/rotorsoft/act/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference implementation.
+```typescript
+interface Store extends Disposable {
+  seed(): Promise<void>;
+  drop(): Promise<void>;
+  commit(stream, messages, meta, expectedVersion?): Promise<Committed[]>;
+  query(callback, filter?): Promise<number>;
+  poll(lagging, leading): Promise<Poll[]>;
+  lease(leases, millis): Promise<Lease[]>;
+  ack(leases): Promise<Lease[]>;
+  block(leases): Promise<(Lease & { error })[]>;
+  dispose(): Promise<void>;
+}
+```
+
+Both stream leasing and version-based optimistic concurrency must be implemented correctly. See the [PostgresStore source](https://github.com/rotorsoft/act-root/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference.
