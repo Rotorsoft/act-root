@@ -345,8 +345,8 @@ importers:
         specifier: ^0.17.1
         version: 0.17.1
       '@rotorsoft/act-pg':
-        specifier: ^0.8.3
-        version: 0.8.3
+        specifier: ^0.8.4
+        version: 0.8.4
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -2620,16 +2620,20 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-pg@0.8.3':
-    resolution: {integrity: sha512-jXM6QaDkJgOYyYOxbyrmCzf6WRWpjk6UcWyUbfjij5CQZMMYKF7a4X5rwNll583ilo9xNgW6KbtHqnFP4pphdw==}
+  '@rotorsoft/act-patch@1.0.2':
+    resolution: {integrity: sha512-lWAZt/WUyQmO5XOXtV4y5Np4+H4oEPXxQ40yWlg/AiXxmyH16/zq0/lWgTHkNuRYQS2MvyaTEOI78cAC8GAqgw==}
+    engines: {node: '>=22.18.0'}
+
+  '@rotorsoft/act-pg@0.8.4':
+    resolution: {integrity: sha512-OQxlyYmTs5L0eZ+bfrxFWj3obsCpxM80bODZoTPG5mV7ew4D2dj1Ucr4KV8BvPLKZDBDLRwIqO9DS71C6IPdsg==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.17.1':
     resolution: {integrity: sha512-05iWMUmLZj4DnXh/TTRlb1awm8jtfbqzENnpgdSDdF8NFxBFOGyR5qUOYtXrLt4zbrkMnGwKnte+zd62CDA8mQ==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act@0.18.0':
-    resolution: {integrity: sha512-xJe4SxNo2jP3FTmP22oPZAdTTKy375Gk+d6zvCtcx54tT+vx1vPjejN04Q93107mYHdnbOfwJlkdIQ3Oz9Pcfg==}
+  '@rotorsoft/act@0.19.1':
+    resolution: {integrity: sha512-KKaH2v5YrghNz2MnMDtq3m9vGm86MPeYVeECq41xeCLG5YPaDWZqjk6EHxtP2Gonfkl/INihfeLj1ray/e0IQg==}
     engines: {node: '>=22.18.0'}
 
   '@rspack/binding-darwin-arm64@1.7.0':
@@ -11700,9 +11704,11 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.54.0':
     optional: true
 
-  '@rotorsoft/act-pg@0.8.3':
+  '@rotorsoft/act-patch@1.0.2': {}
+
+  '@rotorsoft/act-pg@0.8.4':
     dependencies:
-      '@rotorsoft/act': 0.18.0
+      '@rotorsoft/act': 0.19.1
       pg: 8.20.0
       zod: 4.3.6
     transitivePeerDependencies:
@@ -11714,8 +11720,9 @@ snapshots:
       pino-pretty: 13.1.3
       zod: 4.3.6
 
-  '@rotorsoft/act@0.18.0':
+  '@rotorsoft/act@0.19.1':
     dependencies:
+      '@rotorsoft/act-patch': 1.0.2
       pino: 10.3.1
       pino-pretty: 13.1.3
       zod: 4.3.6
