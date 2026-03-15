@@ -358,18 +358,22 @@ export class InMemoryStore implements Store {
   /**
    * Registers streams for event processing.
    * @param streams - Streams to register with optional source.
-   * @returns Number of newly registered streams.
+   * @returns subscribed count and current max watermark.
    */
   async subscribe(streams: Array<{ stream: string; source?: string }>) {
     await sleep();
-    let count = 0;
+    let subscribed = 0;
     for (const { stream, source } of streams) {
       if (!this._streams.has(stream)) {
         this._streams.set(stream, new InMemoryStream(stream, source));
-        count++;
+        subscribed++;
       }
     }
-    return count;
+    let watermark = -1;
+    for (const s of this._streams.values()) {
+      if (s.at > watermark) watermark = s.at;
+    }
+    return { subscribed, watermark };
   }
 
   /**

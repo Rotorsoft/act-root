@@ -95,3 +95,87 @@ The Store interface was also simplified:
 | — | `subscribe(streams)` |
 
 Net reduction of 139 lines in the first commit, plus cleaner separation of concerns: `claim` for drain, `subscribe` for correlate, `ack`/`block` for finalization.
+
+---
+
+## Correlation Checkpoint & Static Resolver Optimization (v0.22.0)
+
+**Issue:** #465 — Advancing correlation checkpoint + eager static subscription.
+
+### Problem
+
+The framework already handles long streams efficiently — once a stream is subscribed, the per-stream watermark (`at`) ensures `claim()` + drain picks up new events without needing correlate. And `start_correlations()` already advances its scan position between ticks.
+
+However, `settle()` passed a static `{ after: -1, limit: 100 }` to correlate on every call, re-scanning the same early events and re-evaluating all resolvers (static and dynamic) against already-subscribed targets. While harmless (subscribe is idempotent), this was wasted work — especially for apps with only static resolvers where correlate adds no value.
+
+### Strategy
+
+Three optimizations working together:
+
+1. **Resolver classification at build time** — each reaction is tagged as static (object resolver) or dynamic (function resolver). Static resolvers have a known target at build time; dynamic resolvers depend on event data.
+
+2. **Eager static subscription** — static resolver targets are subscribed once at init via `store().subscribe()`. The subscribed set is tracked in-memory. Correlate never re-evaluates static resolvers.
+
+3. **Advancing checkpoint initialized from watermarks** — on cold start, `max(at)` from the streams table provides the starting position (no new checkpoint storage needed). After init, the checkpoint advances via `last_id` from correlate. `settle()` and `start_correlations()` use the shared checkpoint.
+
+### How it works
+
+**Cold start:**
+- `_init_correlation()` reads `max(at)` from existing subscription watermarks
+- Subscribes all static targets (idempotent upsert — one query)
+- Sets checkpoint to `max(at)`
+
+**Ongoing (with dynamic resolvers):**
+- `correlate()` scans only from checkpoint, only evaluates dynamic resolvers
+- Skips events already scanned, skips static resolvers entirely
+- Checkpoint advances to `last_id`
+
+**Ongoing (static resolvers only):**
+- `correlate()` returns immediately — no event scan, no DB query
+- `settle()` goes straight to `drain()`
+
+### Benchmark
+
+The throughput improvement for settle cycles is minimal when resolvers are cheap (`_this_` style), because the correlate scan cost is already low. The value is in correctness and scalability:
+
+| Metric | Before | After |
+|---|---|---|
+| Cold-start scan position | Always -1 (beginning) | `max(at)` from watermarks |
+| Static targets | Re-subscribed every correlate | Subscribed once at init |
+| Dynamic resolver scan | Always from first page | From checkpoint forward |
+| No-dynamic shortcut | No — always scans | Skips correlate entirely |
+| Events beyond limit | Never discovered | Discovered via advancing checkpoint |
+
+### Benchmark 1: Static-only correlate cycles (50 cycles, PG)
+
+Apps with only static resolvers (`_this_`, `.to("target")`) — correlate is skipped entirely.
+
+| Events | Before (ms/cycle) | After (ms/cycle) | Speedup |
+|---:|---:|---:|---|
+| **100** | 2.73 | 0.38 | **7.2x** |
+| **500** | 2.60 | 0.39 | **6.7x** |
+| **2,000** | 1.93 | 0.23 | **8.4x** |
+
+### Benchmark 2: Dynamic resolver correlate cycles (50 cycles, PG)
+
+Apps with dynamic resolvers — checkpoint advances past already-scanned events.
+
+| Events | Before (ms/cycle) | After (ms/cycle) | Speedup |
+|---:|---:|---:|---|
+| **100** | 3.09 | 0.56 | **5.5x** |
+| **500** | 4.67 | 0.43 | **10.9x** |
+| **2,000** | 2.36 | 0.33 | **7.2x** |
+
+### Benchmark 3: Cold-start first correlate (PG)
+
+First correlate after bootstrap — reads `max(at)` from watermarks.
+
+| Events | Before (ms) | After (ms) | Speedup |
+|---:|---:|---:|---|
+| **100** | 3.8 | 4.0 | ~same |
+| **500** | 5.3 | 2.8 | **1.9x** |
+| **2,000** | 14.8 | 7.6 | **1.9x** |
+
+### No new interface methods
+
+The cold-start checkpoint is read via `subscribe()` which now returns `{ subscribed, watermark }` — the watermark (max `at` across all subscriptions) is computed internally by each store adapter alongside the upsert, in a single transaction. No new Store methods, no new tables or columns.

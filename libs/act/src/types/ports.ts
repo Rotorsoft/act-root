@@ -258,23 +258,25 @@ export interface Store extends Disposable {
    * Upserts stream entries so they become visible to {@link claim}. Used by
    * `correlate()` to register dynamically discovered reaction target streams.
    *
+   * Also returns the current maximum watermark across all subscribed streams,
+   * used internally for correlation checkpoint initialization on cold start.
+   *
    * @param streams - Streams to register with optional source hint
-   * @returns Number of newly registered streams (excludes already-known streams)
+   * @returns `subscribed` count of newly registered streams, `watermark` max `at` across all streams
    *
    * @example
    * ```typescript
-   * const count = await store().subscribe([
+   * const { subscribed, watermark } = await store().subscribe([
    *   { stream: "stats-user-1", source: "user-1" },
    *   { stream: "stats-user-2", source: "user-2" },
    * ]);
-   * console.log(`Registered ${count} new streams`);
    * ```
    *
    * @see {@link claim} for discovering and leasing registered streams
    */
   subscribe: (
     streams: Array<{ stream: string; source?: string }>
-  ) => Promise<number>;
+  ) => Promise<{ subscribed: number; watermark: number }>;
 
   /**
    * Blocks streams after persistent processing failures.

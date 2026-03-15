@@ -109,6 +109,8 @@ Correlation enables dynamic stream discovery:
 - `app.correlate()` scans events, discovers new target streams via reaction resolvers, and registers them with `subscribe()`. Returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams
 - Must be called before `drain()` to register streams
 
+**Optimization:** Resolvers are classified at build time as static or dynamic. Static targets (`_this_`, `.to("target")`) are subscribed once at init. An advancing checkpoint ensures correlate only scans new events. When no dynamic resolvers exist, correlate is skipped entirely — settle goes straight to drain.
+
 ### The Drain Cycle
 
 `drain()` processes pending reactions:

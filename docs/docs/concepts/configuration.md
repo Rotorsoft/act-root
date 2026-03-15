@@ -146,7 +146,7 @@ interface Store extends Disposable {
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
   query(callback, filter?): Promise<number>;
   claim(lagging, leading, by, millis): Promise<Lease[]>;
-  subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;
+  subscribe(streams): Promise<{ subscribed: number; watermark: number }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<(Lease & { error })[]>;
   dispose(): Promise<void>;

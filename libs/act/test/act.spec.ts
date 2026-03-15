@@ -220,6 +220,35 @@ describe("act", () => {
     mockedClaim.mockRestore();
   });
 
+  it("should handle dynamic correlate where targets already subscribed", async () => {
+    // Build a separate app with a dynamic resolver
+    const dynState = state({ Dyn: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ DynEvt: ZodEmpty })
+      .patch({ DynEvt: () => ({}) })
+      .on({ doDyn: ZodEmpty })
+      .emit(() => ["DynEvt", {}])
+      .build();
+
+    const dynApp = act()
+      .withState(dynState)
+      .on("DynEvt")
+      .do(() => Promise.resolve())
+      .to((event) => ({ target: `dyn-${event.stream}` }))
+      .build();
+
+    await dynApp.do("doDyn", { stream: "x", actor }, {});
+    // First correlate discovers "dyn-x"
+    const r1 = await dynApp.correlate({ limit: 100 });
+    expect(r1.subscribed).toBe(1);
+    // Second correlate — same events, target already subscribed
+    // Reset checkpoint to force re-scan
+    (dynApp as any)._correlation_checkpoint = -1;
+    (dynApp as any)._subscribed_statics.delete("dyn-x");
+    const r2 = await dynApp.correlate({ limit: 100 });
+    expect(r2.subscribed).toBe(0); // already subscribed from r1
+  });
+
   describe("settle", () => {
     it("should debounce multiple rapid calls into a single settle cycle", async () => {
       const settledListener = vi.fn();
