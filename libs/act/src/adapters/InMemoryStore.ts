@@ -373,6 +373,18 @@ export class InMemoryStore implements Store {
   }
 
   /**
+   * Returns the maximum watermark across all subscribed streams.
+   */
+  async max_at() {
+    await sleep();
+    let max = -1;
+    for (const s of this._streams.values()) {
+      if (s.at > max) max = s.at;
+    }
+    return max;
+  }
+
+  /**
    * Acknowledge completion of processing for leased streams.
    * @param leases - Leases to acknowledge, including last processed watermark and lease holder.
    */

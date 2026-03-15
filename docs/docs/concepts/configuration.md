@@ -147,6 +147,7 @@ interface Store extends Disposable {
   query(callback, filter?): Promise<number>;
   claim(lagging, leading, by, millis): Promise<Lease[]>;
   subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;
+  max_at(): Promise<number>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<(Lease & { error })[]>;
   dispose(): Promise<void>;

@@ -519,6 +519,16 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Returns the maximum watermark across all subscribed streams.
+   */
+  async max_at(): Promise<number> {
+    const { rows } = await this._pool.query<{ max: number | null }>(
+      `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
+    );
+    return rows[0]?.max ?? -1;
+  }
+
+  /**
    * Registers streams for event processing.
    * Upserts stream entries so they become visible to claim().
    * @param streams - Streams to register with optional source.

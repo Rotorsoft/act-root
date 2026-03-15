@@ -310,6 +310,8 @@ Dynamic stream discovery through correlation metadata:
 
 **Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store via `subscribe()`. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.settle()` for debounced correlate→drain with a `"settled"` lifecycle event, or `app.start_correlations()` for background discovery.
 
+**Correlation optimization:** At build time, resolvers are classified as static (known target) or dynamic (function). Static targets are subscribed once at init; correlate only scans for dynamic resolvers. An in-memory checkpoint advances `after` across calls, initialized from `max(at)` on the streams table at cold start. When no dynamic resolvers exist, correlate is skipped entirely in settle.
+
 ### Invariants
 
 Business rules enforced before actions execute:
@@ -441,6 +443,7 @@ interface Store extends Disposable {
   query(callback, filter?): Promise<number>;      // Read events
   claim(lagging, leading, by, millis): Promise<Lease[]>;  // Atomic discover + lock streams
   subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;  // Register streams for processing
+  max_at(): Promise<number>;                      // Max watermark across subscriptions (-1 if none)
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   dispose(): Promise<void>;                       // Cleanup resources

@@ -17,7 +17,9 @@ describe("digit-board", () => {
     await app.do("PressKey", { stream: "A", actor }, { key: "3" });
 
     const { subscribed } = await app.correlate();
-    expect(subscribed).toBe(1);
+    // "Board" static target is subscribed at init, not during correlate
+    // Dynamic target "CalculatorA" is not yet triggered (no OperatorPressed)
+    expect(subscribed).toBe(0);
 
     // drain digit board stream
     const drained = await app.drain();

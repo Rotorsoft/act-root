@@ -277,6 +277,17 @@ export interface Store extends Disposable {
   ) => Promise<number>;
 
   /**
+   * Returns the maximum watermark across all subscribed streams.
+   *
+   * Used internally to initialize the correlation checkpoint on cold start.
+   * The max `at` represents the highest event ID fully processed by any stream,
+   * which is a safe starting point for correlation scanning.
+   *
+   * @returns The highest `at` value, or -1 if no streams are subscribed
+   */
+  max_at: () => Promise<number>;
+
+  /**
    * Blocks streams after persistent processing failures.
    *
    * Blocked streams won't be returned by {@link claim} until manually unblocked.
