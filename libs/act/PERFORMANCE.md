@@ -98,7 +98,7 @@ Net reduction of 139 lines in the first commit, plus cleaner separation of conce
 
 ---
 
-## Watermark-Aware Claim Filtering (v0.22.0)
+## Watermark-Aware Claim Filtering (v0.23.0)
 
 **Issue:** #467 — Skip caught-up streams in `claim()`.
 
