@@ -219,4 +219,14 @@ In the drain handle phase, `fetched.find((f) => f.stream === lease.stream)` perf
 
 ### Fix
 
-Convert `fetched` array to `Map<string, ...>` before the handle loop. O(N) to build, O(1) per lookup. Provable complexity improvement — no benchmark needed.
+Convert `fetched` array to `Map<string, ...>` before the handle loop. O(N) to build, O(1) per lookup.
+
+### Benchmark (PostgreSQL, 20 drain cycles)
+
+| Streams | find() (ms/cycle) | Map (ms/cycle) | Improvement |
+|---:|---:|---:|---|
+| **50** | 5.7 | 4.3 | **25% faster** |
+| **100** | 6.4 | 5.4 | **16% faster** |
+| **200** | 9.9 | 8.9 | **10% faster** |
+
+The improvement is modest because drain cycles are dominated by DB I/O (claim, fetch, ack), not in-memory array scanning. The fix is free (one line, no downside) but not a bottleneck at realistic scales.
