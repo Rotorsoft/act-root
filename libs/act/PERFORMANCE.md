@@ -98,48 +98,9 @@ Net reduction of 139 lines in the first commit, plus cleaner separation of conce
 
 ---
 
-## Watermark-Aware Claim Filtering (v0.23.0)
-
-**Issue:** #467 — Skip caught-up streams in `claim()`.
-
-### Problem
-
-`claim()` returned all available (unblocked, unleased) streams regardless of whether they had pending events. In steady state, most streams are caught up — drain would claim them, fetch events, find nothing, and ack with the same position. Wasted work that scales with total stream count.
-
-### Strategy: EXISTS filter with index-friendly exact match
-
-Add an `EXISTS` subquery to the `available` CTE in `claim()` that checks for events beyond the stream's watermark. Newly subscribed streams (`at < 0`) bypass the filter — they always need their first drain.
-
-```sql
-WHERE blocked = false
-  AND (leased_by IS NULL OR leased_until <= NOW())
-  AND (s.at < 0 OR EXISTS (
-    SELECT 1 FROM events e
-    WHERE e.id > s.at
-      AND e.name <> '__snapshot__'
-      AND (s.source IS NULL OR e.stream = COALESCE(s.source, s.stream))
-    LIMIT 1
-  ))
-```
-
-Key: uses `=` (not `~` regex) for the stream match, which leverages the `(stream, version)` unique index. Source-less subscriptions (projections) match any event.
-
-### Benchmark (PostgreSQL, 20 drain cycles after catching up)
-
-| Config | Baseline claimed | Filtered claimed | Baseline (ms/cycle) | Filtered (ms/cycle) | Improvement |
-|---|---:|---:|---:|---:|---|
-| **50 total, 5 active** | 500 | 5 | 19.1 | 2.4 | **8x faster** |
-| **200 total, 10 active** | 2,161 | 12 | 23.2 | 6.9 | **3.4x faster** |
-| **500 total, 10 active** | 5,209 | 18 | 21.3 | 13.0 | **64% faster** |
-| **500 total, 50 active** | 5,416 | 58 | 24.0 | 15.6 | **35% faster** |
-
-The filter eliminates wasted claims — only streams with pending events are returned. At 200 streams with 10 active, claim returns 12 instead of 2,161 (216x fewer), and the drain cycle is 3.4x faster.
-
----
-
 ## Correlation Checkpoint & Static Resolver Optimization (v0.22.0)
 
-**Issue:** #465 — Advancing correlation checkpoint + eager static subscription.
+**PR:** #472 — Advancing correlation checkpoint + eager static subscription.
 
 ### Problem
 
@@ -172,18 +133,6 @@ Three optimizations working together:
 **Ongoing (static resolvers only):**
 - `correlate()` returns immediately — no event scan, no DB query
 - `settle()` goes straight to `drain()`
-
-### Benchmark
-
-The throughput improvement for settle cycles is minimal when resolvers are cheap (`_this_` style), because the correlate scan cost is already low. The value is in correctness and scalability:
-
-| Metric | Before | After |
-|---|---|---|
-| Cold-start scan position | Always -1 (beginning) | `max(at)` from watermarks |
-| Static targets | Re-subscribed every correlate | Subscribed once at init |
-| Dynamic resolver scan | Always from first page | From checkpoint forward |
-| No-dynamic shortcut | No — always scans | Skips correlate entirely |
-| Events beyond limit | Never discovered | Discovered via advancing checkpoint |
 
 ### Benchmark 1: Static-only correlate cycles (50 cycles, PG)
 
@@ -218,3 +167,42 @@ First correlate after bootstrap — reads `max(at)` from watermarks.
 ### No new interface methods
 
 The cold-start checkpoint is read via `subscribe()` which now returns `{ subscribed, watermark }` — the watermark (max `at` across all subscriptions) is computed internally by each store adapter alongside the upsert, in a single transaction. No new Store methods, no new tables or columns.
+
+---
+
+## Watermark-Aware Claim Filtering (v0.23.0)
+
+**PR:** #474 — Skip caught-up streams in `claim()`.
+
+### Problem
+
+`claim()` returned all available (unblocked, unleased) streams regardless of whether they had pending events. In steady state, most streams are caught up — drain would claim them, fetch events, find nothing, and ack with the same position. Wasted work that scales with total stream count.
+
+### Strategy: EXISTS filter with index-friendly exact match
+
+Add an `EXISTS` subquery to the `available` CTE in `claim()` that checks for events beyond the stream's watermark. Newly subscribed streams (`at < 0`) bypass the filter — they always need their first drain.
+
+```sql
+WHERE blocked = false
+  AND (leased_by IS NULL OR leased_until <= NOW())
+  AND (s.at < 0 OR EXISTS (
+    SELECT 1 FROM events e
+    WHERE e.id > s.at
+      AND e.name <> '__snapshot__'
+      AND (s.source IS NULL OR e.stream = COALESCE(s.source, s.stream))
+    LIMIT 1
+  ))
+```
+
+Key: uses `=` (not `~` regex) for the stream match, which leverages the `(stream, version)` unique index. Source-less subscriptions (projections) match any event.
+
+### Benchmark (PostgreSQL, 20 drain cycles after catching up)
+
+| Config | Baseline claimed | Filtered claimed | Baseline (ms/cycle) | Filtered (ms/cycle) | Improvement |
+|---|---:|---:|---:|---:|---|
+| **50 total, 5 active** | 500 | 5 | 19.1 | 2.4 | **8x faster** |
+| **200 total, 10 active** | 2,161 | 12 | 23.2 | 6.9 | **3.4x faster** |
+| **500 total, 10 active** | 5,209 | 18 | 21.3 | 13.0 | **64% faster** |
+| **500 total, 50 active** | 5,416 | 58 | 24.0 | 15.6 | **35% faster** |
+
+The filter eliminates wasted claims — only streams with pending events are returned. At 200 streams with 10 active, claim returns 12 instead of 2,161 (216x fewer), and the drain cycle is 3.4x faster.
