@@ -442,8 +442,7 @@ interface Store extends Disposable {
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;  // Append events
   query(callback, filter?): Promise<number>;      // Read events
   claim(lagging, leading, by, millis): Promise<Lease[]>;  // Atomic discover + lock streams
-  subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;  // Register streams for processing
-  max_at(): Promise<number>;                      // Max watermark across subscriptions (-1 if none)
+  subscribe(streams): Promise<{ subscribed: number; watermark: number }>;  // Register streams + max watermark
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   dispose(): Promise<void>;                       // Cleanup resources

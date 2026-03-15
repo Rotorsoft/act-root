@@ -174,10 +174,6 @@ First correlate after bootstrap — reads `max(at)` from watermarks.
 | **500** | 5.3 | 2.8 | **1.9x** |
 | **2,000** | 14.8 | 7.6 | **1.9x** |
 
-### Interface addition
+### No new interface methods
 
-```
-max_at(): Promise<number>  // Returns MAX(at) from subscriptions, or -1
-```
-
-Used internally by `_init_correlation()` to read the cold-start checkpoint from existing subscription watermarks — no new checkpoint tables or columns.
+The cold-start checkpoint is read via `subscribe()` which now returns `{ subscribed, watermark }` — the watermark (max `at` across all subscriptions) is computed internally by each store adapter alongside the upsert, in a single transaction. No new Store methods, no new tables or columns.

@@ -708,15 +708,11 @@ export class Act<
     if (this._correlation_initialized) return;
     this._correlation_initialized = true;
 
-    // Cold-start checkpoint from existing subscription watermarks
-    this._correlation_checkpoint = await store().max_at();
-
-    // Subscribe static targets (upsert — no-op if already exist)
-    if (this._static_targets.length) {
-      await store().subscribe(this._static_targets);
-      for (const { stream } of this._static_targets) {
-        this._subscribed_statics.add(stream);
-      }
+    // Subscribe static targets + read cold-start checkpoint from watermarks
+    const { watermark } = await store().subscribe(this._static_targets);
+    this._correlation_checkpoint = watermark;
+    for (const { stream } of this._static_targets) {
+      this._subscribed_statics.add(stream);
     }
   }
 
@@ -772,7 +768,7 @@ export class Act<
         stream,
         source,
       }));
-      const subscribed = await store().subscribe(streams);
+      const { subscribed } = await store().subscribe(streams);
       if (subscribed) {
         tracer.correlated(streams);
         // Track newly subscribed dynamic targets

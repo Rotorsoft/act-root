@@ -160,11 +160,11 @@ describe("InMemoryStore", () => {
 
     it("should subscribe and claim streams", async () => {
       const s = store();
-      const count = await s.subscribe([{ stream: "L1" }]);
-      expect(count).toBe(1);
+      const { subscribed } = await s.subscribe([{ stream: "L1" }]);
+      expect(subscribed).toBe(1);
       // Subscribe again — already exists
-      const count2 = await s.subscribe([{ stream: "L1" }]);
-      expect(count2).toBe(0);
+      const { subscribed: subscribed2 } = await s.subscribe([{ stream: "L1" }]);
+      expect(subscribed2).toBe(0);
       // Claim should return the subscribed stream
       const claimed = await s.claim(1, 0, "worker-1", 10000);
       expect(claimed.length).toBe(1);

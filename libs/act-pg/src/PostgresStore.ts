@@ -519,35 +519,43 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Returns the maximum watermark across all subscribed streams.
-   */
-  async max_at(): Promise<number> {
-    const { rows } = await this._pool.query<{ max: number | null }>(
-      `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
-    );
-    return rows[0]?.max ?? -1;
-  }
-
-  /**
    * Registers streams for event processing.
    * Upserts stream entries so they become visible to claim().
+   * Also returns the current max watermark across all subscriptions.
    * @param streams - Streams to register with optional source.
-   * @returns Number of newly registered streams.
+   * @returns subscribed count and current max watermark.
    */
   async subscribe(
     streams: Array<{ stream: string; source?: string }>
-  ): Promise<number> {
-    if (!streams.length) return 0;
-    const { rowCount } = await this._pool.query(
-      `
-      INSERT INTO ${this._fqs} (stream, source)
-      SELECT s->>'stream', s->>'source'
-      FROM jsonb_array_elements($1::jsonb) AS s
-      ON CONFLICT (stream) DO NOTHING
-      `,
-      [JSON.stringify(streams)]
-    );
-    return rowCount ?? 0;
+  ): Promise<{ subscribed: number; watermark: number }> {
+    const client = await this._pool.connect();
+    try {
+      await client.query("BEGIN");
+      let subscribed = 0;
+      if (streams.length) {
+        const { rowCount } = await client.query(
+          `
+          INSERT INTO ${this._fqs} (stream, source)
+          SELECT s->>'stream', s->>'source'
+          FROM jsonb_array_elements($1::jsonb) AS s
+          ON CONFLICT (stream) DO NOTHING
+          `,
+          [JSON.stringify(streams)]
+        );
+        subscribed = rowCount ?? 0;
+      }
+      const { rows } = await client.query<{ max: number | null }>(
+        `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
+      );
+      await client.query("COMMIT");
+      return { subscribed, watermark: rows[0]?.max ?? -1 };
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      logger.error(error);
+      return { subscribed: 0, watermark: -1 };
+    } finally {
+      client.release();
+    }
   }
 
   /**

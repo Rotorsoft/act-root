@@ -127,17 +127,29 @@ describe("PostgresStore", () => {
   });
 
   describe("subscribe", () => {
-    it("returns 0 on empty input", async () => {
-      await expect(store.subscribe([])).resolves.toBe(0);
+    it("returns defaults on empty input", async () => {
+      // Empty input still queries max_at via client
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(
+          vi
+            .fn()
+            .mockResolvedValueOnce({}) // BEGIN
+            .mockResolvedValueOnce({ rows: [{ max: null }] }) // SELECT MAX(at)
+            .mockResolvedValueOnce({}) // COMMIT
+        )
+      );
+      const result = await store.subscribe([]);
+      expect(result).toEqual({ subscribed: 0, watermark: -1 });
     });
 
-    it("returns 0 when rowCount is undefined", async () => {
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- mock
-      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue({
-        rows: [],
-        rowCount: undefined,
-      } as any);
-      await expect(store.subscribe([{ stream: "s" }])).resolves.toBe(0);
+    it("swallows DB error", async () => {
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(vi.fn().mockRejectedValue(new Error("subscribe error")))
+      );
+      const result = await store.subscribe([{ stream: "s" }]);
+      expect(result).toEqual({ subscribed: 0, watermark: -1 });
     });
   });
 
