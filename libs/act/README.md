@@ -194,72 +194,17 @@ Cache and snapshots are the same checkpoint pattern at different layers:
 
 On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On cache miss, the store is queried with `with_snaps: true` to find the latest snapshot and replay only events after it.
 
-#### Why cache on every commit, not just on snap?
-
-An alternative design would update the cache only at snap boundaries — since snap and cache are the same checkpoint concept. We benchmarked both strategies to test this theory.
-
-**Cache on every commit** (current — `action()` updates cache after every successful commit):
-
-| Events | No snap | @10 | @50 | @75 | @100 |
-|---:|---:|---:|---:|---:|---:|
-| **50** | 4,872 | 5,881 | 6,480 | **7,058** | 6,949 |
-| **500** | **6,371** | 5,639 | 5,590 | 6,223 | 5,488 |
-| **2,000** | 4,257 | **5,329** | 4,573 | 4,812 | 4,039 |
-
-**Cache only on snap** (alternative — cache is only populated when `snap()` fires):
-
-| Events | No snap | @10 | @50 | @75 | @100 |
-|---:|---:|---:|---:|---:|---:|
-| **50** | 608 | 5,845 | 6,098 | 694 | 1,006 |
-| **500** | 212 | **6,481** | 4,955 | 570 | 5,074 |
-| **2,000** | 101 | **6,827** | 5,993 | 675 | 4,039 |
-
-The snap-only strategy has three critical problems:
-
-1. **States without `.snap()` get no cache at all** — the "no snap" column falls back to full PG replay on every `load()`, showing the same 608→101 ops/s degradation as the pre-cache baseline. Any state that doesn't configure snapping loses all caching benefit.
-
-2. **Cache misses between snap boundaries** — with snap@75, cache is only populated every 75 events. After seeding 50 events, no snap has fired yet, so the cache is empty. The 50-event @75 result (694 ops/s) is barely better than no cache. At 500 events, @75 only fires 6 times — after seeding, the cache holds the state from the last snap point, and `load()` must replay up to 74 tail events from the store.
-
-3. **Fire-and-forget race conditions** — `snap()` is async (`void snap(last)`). Without the cache absorbing the version, the next `action()` call's `load()` races with the snap commit. If the `__snapshot__` event lands in the store before `load()` runs, the expected version shifts, causing `ERR_CONCURRENCY` errors. This makes seeding unreliable without artificial delays between snap boundaries.
-
-The snap-only results that match the every-commit numbers (@10 at 500/2000 events) are cases where the cache happens to be warm from a recent snap. But this is fragile — it depends on the stream length being a favorable multiple of the snap interval.
-
-**Conclusion:** Cache on every commit is the right design. The cost of a `Map.set()` per commit is negligible, but the benefit is absolute: every `load()` after the first action is a guaranteed cache hit with zero store replay, regardless of whether snap is configured.
-
-> **InMemoryStore note:** InMemory benchmarks show ~830 ops/s across all configurations because every `InMemoryStore` method starts with `await sleep(0)` (`setTimeout(resolve, 0)`) to simulate async behavior. This event-loop yield costs ~1ms per call, capping throughput at ~1,000 ops/s. PG's indexed query for 0 new events returns in ~0.15ms.
-
-**Compared to pre-cache baselines** (PG, no cache):
-
-| Events | Without cache | With cache | Speedup |
-|---:|---:|---:|---:|
-| **50** | 655 | 4,872 | **7×** |
-| **500** | 215 | 6,371 | **30×** |
-| **2,000** | 92 | 4,257 | **46×** |
-
-Without cache, every `load()` replays the full event stream from PG — throughput degrades linearly with stream length (655 → 92 ops/s). With always-on cache, throughput is flat (~4,000–7,000 ops/s) regardless of stream length.
-
 ### Performance Considerations
 
-- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput regardless of stream length. No configuration needed.
+- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput (7-46x faster than uncached). No configuration needed.
 - **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
 - **Cache invalidation is automatic** — concurrency errors (`ERR_CONCURRENCY`) invalidate the stale cache entry, forcing a fresh load from the store on the next access.
 - **Snap writes are fire-and-forget** — `snap()` commits to the store asynchronously after `action()` returns. The cache is updated synchronously within `action()`, so subsequent reads see the post-snap state immediately without waiting for the store write.
+- **Atomic claim eliminates poll→lease overhead** — `claim()` fuses discovery and locking into a single SQL transaction using `FOR UPDATE SKIP LOCKED`, saving one round-trip per drain cycle and eliminating contention between workers.
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
-- Active event streams remain in fast storage; consider archival strategies for very large datasets.
-- **Atomic claim eliminates poll→lease overhead** — the `claim()` method fuses discovery and locking into a single SQL transaction, saving one round-trip per drain cycle and eliminating the race condition between poll and lease.
 
-#### Drain cycle benchmarks (PostgreSQL)
-
-Comparison of the two-phase poll→lease approach vs the atomic `claim()` method:
-
-| Streams | poll→lease (ops/s) | claim (ops/s) | poll→lease (ms) | claim (ms) | Improvement |
-|---:|---:|---:|---:|---:|---|
-| **10** | 36.7 | 40.6 | 27.2 | 24.6 | **11% faster** |
-| **50** | 45.4 | 46.0 | 22.0 | 21.7 | **~1% faster** |
-| **100** | 39.0 | 45.8 | 25.7 | 21.8 | **17% faster** |
-
-The `claim()` approach shows consistent improvement, most visible at higher stream counts (100 streams: 17% faster). The improvement comes from eliminating one DB round-trip and removing the race condition where polled streams could be grabbed by another worker before the lease phase. Under multi-worker contention (not shown here), the improvement is more significant because `FOR UPDATE SKIP LOCKED` prevents workers from competing for the same rows.
+For detailed benchmark data and performance evolution history, see [PERFORMANCE.md](../../PERFORMANCE.md).
 
 ## Event-Driven Processing
 

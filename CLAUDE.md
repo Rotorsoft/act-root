@@ -391,6 +391,13 @@ Each example demonstrates different framework capabilities:
 4. Update example applications to demonstrate usage
 5. Ensure both InMemoryStore and PostgresStore support the feature
 
+### Documentation Guidelines
+
+- **README** — shows current patterns and strategies only, not historical benchmarks
+- **PERFORMANCE.md** — tracks performance evolution with before/after benchmark data per optimization
+- When adding a performance optimization, add benchmark results to `PERFORMANCE.md` and link from README
+- READMEs should briefly mention the pattern/strategy and reference `PERFORMANCE.md` for details
+
 ### Testing Patterns
 
 - Tests use the InMemoryStore and InMemoryCache by default (fast, isolated)
