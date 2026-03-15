@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.23.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.23.0...@rotorsoft/act-v0.23.1) (2026-03-15)
+
+
+### Bug Fixes
+
+* **act:** advance correlation checkpoint after subscribe succeeds ([ea55030](https://github.com/rotorsoft/act-root/commit/ea55030cbf4ae14da10783c26bf8aebd6e7f6908))
+
 # [@rotorsoft/act-v0.23.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.22.0...@rotorsoft/act-v0.23.0) (2026-03-15)
 
 
