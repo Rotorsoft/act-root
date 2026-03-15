@@ -194,63 +194,21 @@ Cache and snapshots are the same checkpoint pattern at different layers:
 
 On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On cache miss, the store is queried with `with_snaps: true` to find the latest snapshot and replay only events after it.
 
-#### Why cache on every commit, not just on snap?
-
-An alternative design would update the cache only at snap boundaries — since snap and cache are the same checkpoint concept. We benchmarked both strategies to test this theory.
-
-**Cache on every commit** (current — `action()` updates cache after every successful commit):
-
-| Events | No snap | @10 | @50 | @75 | @100 |
-|---:|---:|---:|---:|---:|---:|
-| **50** | 4,872 | 5,881 | 6,480 | **7,058** | 6,949 |
-| **500** | **6,371** | 5,639 | 5,590 | 6,223 | 5,488 |
-| **2,000** | 4,257 | **5,329** | 4,573 | 4,812 | 4,039 |
-
-**Cache only on snap** (alternative — cache is only populated when `snap()` fires):
-
-| Events | No snap | @10 | @50 | @75 | @100 |
-|---:|---:|---:|---:|---:|---:|
-| **50** | 608 | 5,845 | 6,098 | 694 | 1,006 |
-| **500** | 212 | **6,481** | 4,955 | 570 | 5,074 |
-| **2,000** | 101 | **6,827** | 5,993 | 675 | 4,039 |
-
-The snap-only strategy has three critical problems:
-
-1. **States without `.snap()` get no cache at all** — the "no snap" column falls back to full PG replay on every `load()`, showing the same 608→101 ops/s degradation as the pre-cache baseline. Any state that doesn't configure snapping loses all caching benefit.
-
-2. **Cache misses between snap boundaries** — with snap@75, cache is only populated every 75 events. After seeding 50 events, no snap has fired yet, so the cache is empty. The 50-event @75 result (694 ops/s) is barely better than no cache. At 500 events, @75 only fires 6 times — after seeding, the cache holds the state from the last snap point, and `load()` must replay up to 74 tail events from the store.
-
-3. **Fire-and-forget race conditions** — `snap()` is async (`void snap(last)`). Without the cache absorbing the version, the next `action()` call's `load()` races with the snap commit. If the `__snapshot__` event lands in the store before `load()` runs, the expected version shifts, causing `ERR_CONCURRENCY` errors. This makes seeding unreliable without artificial delays between snap boundaries.
-
-The snap-only results that match the every-commit numbers (@10 at 500/2000 events) are cases where the cache happens to be warm from a recent snap. But this is fragile — it depends on the stream length being a favorable multiple of the snap interval.
-
-**Conclusion:** Cache on every commit is the right design. The cost of a `Map.set()` per commit is negligible, but the benefit is absolute: every `load()` after the first action is a guaranteed cache hit with zero store replay, regardless of whether snap is configured.
-
-> **InMemoryStore note:** InMemory benchmarks show ~830 ops/s across all configurations because every `InMemoryStore` method starts with `await sleep(0)` (`setTimeout(resolve, 0)`) to simulate async behavior. This event-loop yield costs ~1ms per call, capping throughput at ~1,000 ops/s. PG's indexed query for 0 new events returns in ~0.15ms.
-
-**Compared to pre-cache baselines** (PG, no cache):
-
-| Events | Without cache | With cache | Speedup |
-|---:|---:|---:|---:|
-| **50** | 655 | 4,872 | **7×** |
-| **500** | 215 | 6,371 | **30×** |
-| **2,000** | 92 | 4,257 | **46×** |
-
-Without cache, every `load()` replays the full event stream from PG — throughput degrades linearly with stream length (655 → 92 ops/s). With always-on cache, throughput is flat (~4,000–7,000 ops/s) regardless of stream length.
-
 ### Performance Considerations
 
-- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput regardless of stream length. No configuration needed.
+- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput (7-46x faster than uncached). No configuration needed.
 - **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
 - **Cache invalidation is automatic** — concurrency errors (`ERR_CONCURRENCY`) invalidate the stale cache entry, forcing a fresh load from the store on the next access.
 - **Snap writes are fire-and-forget** — `snap()` commits to the store asynchronously after `action()` returns. The cache is updated synchronously within `action()`, so subsequent reads see the post-snap state immediately without waiting for the store write.
+- **Atomic claim eliminates poll→lease overhead** — `claim()` fuses discovery and locking into a single SQL transaction using `FOR UPDATE SKIP LOCKED`, saving one round-trip per drain cycle and eliminating contention between workers.
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
-- Active event streams remain in fast storage; consider archival strategies for very large datasets.
+
+For detailed benchmark data and performance evolution history, see [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Event-Driven Processing
 
-Act handles event-driven workflows through stream leasing and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
+Act handles event-driven workflows through atomic stream claiming and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
 
 ### Reactions
 
@@ -268,27 +226,28 @@ const app = act()
 
 Resolvers dynamically determine which stream a reaction targets, enabling flexible event routing without hardcoded dependencies. They can include source regex patterns to limit which streams trigger the reaction.
 
-### Stream Leasing
+### Stream Claiming
 
-Rather than processing events immediately, Act uses a leasing mechanism to coordinate distributed consumers. The application fetches events and pushes them to reaction handlers by leasing correlated streams:
+Rather than processing events immediately, Act uses an atomic claim mechanism to coordinate distributed consumers. The `claim()` method atomically discovers and locks streams in a single operation using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This is the same pattern used by pgBoss, Graphile Worker, and other production job queues.
 
 - **Per-stream ordering** — Events within a stream are processed sequentially.
-- **Temporary ownership** — Leases expire after a configurable duration, allowing re-processing if a consumer fails.
-- **Backpressure** — Only a limited number of leases can be active at a time, preventing consumer overload.
+- **Temporary ownership** — Claims expire after a configurable duration, allowing re-processing if a consumer fails.
+- **Zero-contention** — `FOR UPDATE SKIP LOCKED` means workers never block each other; locked rows are silently skipped.
+- **Backpressure** — Only a limited number of claims can be active at a time, preventing consumer overload.
 
-If a lease expires due to failure, the stream is automatically re-leased to another consumer, ensuring no event is permanently lost.
+If a claim expires due to failure, the stream is automatically re-claimed by another consumer, ensuring no event is permanently lost.
 
 ### Event Correlation
 
 Act tracks causation chains across actions and reactions using correlation metadata:
 
 - Each action/event carries a `correlation` ID (request trace) and `causation` ID (what triggered it).
-- Reactions can discover new streams to process by querying uncommitted events with matching correlation IDs.
+- `app.correlate()` scans events, discovers new target streams via reaction resolvers, and registers them with `subscribe()`. It returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams.
 - This enables full workflow tracing — from the initial user action through every downstream reaction.
 
 ```typescript
-// Correlate events to discover new streams for processing
-await app.correlate();
+// Correlate events to discover and subscribe new streams for processing
+const { subscribed, last_id } = await app.correlate();
 
 // Or run periodic background correlation
 app.start_correlations();
@@ -315,12 +274,12 @@ app.settle();
 
 // Subscribe to the "settled" lifecycle event
 app.on("settled", (drain) => {
-  // drain has { fetched, leased, acked, blocked }
+  // drain has { fetched, claimed, acked, blocked }
   // notify SSE clients, update caches, etc.
 });
 ```
 
-Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed events are re-leased automatically.
+Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed streams are re-claimed automatically.
 
 The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), runs correlate→drain in a loop until the system is consistent, and emits a `"settled"` event when done.
 

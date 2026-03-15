@@ -70,7 +70,7 @@ afterAll(async () => {
 
 ## Event-Driven Processing
 
-Act handles event-driven workflows through stream leasing and correlation. The event store itself acts as the message backbone — no external message queues needed.
+Act handles event-driven workflows through atomic stream claiming and correlation. The event store itself acts as the message backbone — no external message queues needed.
 
 ### Reactions
 
@@ -92,32 +92,32 @@ const app = act()
 - **`.to(resolver)`** — reaction is processed by `drain()`. The resolver returns `{ target: string, source?: string }`.
 - **`.void()`** — reaction is **never processed by `drain()`**. Use only for inline side effects (logging, metrics).
 
-### Stream Leasing
+### Stream Claiming
 
-Act uses a leasing mechanism to coordinate distributed consumers:
+Act uses an atomic claim mechanism to coordinate distributed consumers. The `claim()` method discovers and locks streams in a single operation using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — zero-contention competing consumers where workers never block each other:
 
 - **Per-stream ordering** — events within a stream are processed sequentially
-- **Temporary ownership** — leases expire after a configurable duration
-- **Backpressure** — only a limited number of leases active at a time
+- **Temporary ownership** — claims expire after a configurable duration
+- **Zero-contention** — locked rows are silently skipped, no blocking between workers
+- **Backpressure** — only a limited number of claims active at a time
 
 ### Event Correlation
 
 Correlation enables dynamic stream discovery:
 
 - Each action/event carries `correlation` (request trace) and `causation` (what triggered it) metadata
-- `app.correlate()` scans events and discovers new target streams via reaction resolvers
+- `app.correlate()` scans events, discovers new target streams via reaction resolvers, and registers them with `subscribe()`. Returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams
 - Must be called before `drain()` to register streams
 
 ### The Drain Cycle
 
 `drain()` processes pending reactions:
 
-1. **Poll** — find streams with uncommitted events
-2. **Fetch** — load events for each stream
+1. **Claim** — atomically discover and lock streams with pending events (uses `FOR UPDATE SKIP LOCKED` for zero-contention)
+2. **Fetch** — load events for each claimed stream
 3. **Match** — find reactions whose resolvers target each stream
-4. **Lease** — acquire exclusive locks
-5. **Handle** — execute reaction handlers
-6. **Ack/Block** — release successful leases or block failed streams
+4. **Handle** — execute reaction handlers
+5. **Ack/Block** — release successful claims or block failed streams
 
 ```typescript
 // In tests

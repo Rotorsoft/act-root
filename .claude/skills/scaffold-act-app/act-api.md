@@ -154,7 +154,7 @@ Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validat
 
 ## 7. Correlate Before Drain — settle() Pattern
 
-`app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().lease()`. Without this step, `drain()` won't find streams to process.
+`app.correlate()` scans events, resolves reaction targets, and **registers new streams** with the store via `store().subscribe()`. Without this step, `drain()` won't find streams to process.
 
 ```typescript
 // ✅ Correct — correlate discovers streams, then drain processes them

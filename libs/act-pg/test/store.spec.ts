@@ -291,7 +291,7 @@ describe("pg store", () => {
       await app.do("increment", { stream: "blocking", actor }, {});
 
       const correlated = await app.correlate({ limit: 100 });
-      expect(correlated.leased.length).toBe(1);
+      expect(correlated.subscribed).toBe(1);
 
       let drained = await app.drain({ streamLimit: 100, eventLimit: 100 });
       expect(drained.acked.length).toBe(1);
@@ -403,59 +403,37 @@ describe("pg store", () => {
       expect(result.length).toBe(6);
     });
 
-    it("should not lease blocked or old streams and should ack only valid leases", async () => {
+    it("should subscribe and claim streams", async () => {
       const s = store();
-      // Lease a new stream
-      const leases = await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      expect(leases.length).toBe(1);
-      // Block the stream
-      await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 }],
-        0
-      );
-      // Try to lease again with old at (should not update)
-      const leases2 = await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      expect(leases2.length).toBe(1);
-      // Ack with valid lease
-      await s.ack([
-        { stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 },
-      ]);
-      // Ack with old lease (should not throw)
-      await s.ack([
-        { stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 },
-      ]);
+      // Subscribe new streams
+      const count = await s.subscribe([{ stream: "L1" }]);
+      expect(count).toBe(1);
+      // Subscribe again — already exists
+      const count2 = await s.subscribe([{ stream: "L1" }]);
+      expect(count2).toBe(0);
+      // Claim should return the subscribed stream
+      const claimed = await s.claim(1, 0, "worker-1", 10000);
+      expect(claimed.length).toBe(1);
+      expect(claimed[0].stream).toBe("L1");
+      // Ack the claim
+      await s.ack([claimed[0]]);
     });
 
-    it("should not lease a blocked stream", async () => {
+    it("should not claim blocked streams", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "L2", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      const leases = await s.lease(
-        [{ stream: "L2", lagging: false, by: "actor", at: 1, retry: 0 }],
-        0
-      );
-      expect(leases.length).toBe(1);
-    });
-
-    it("should not update state when ack is called with lower at", async () => {
-      const s = store();
-      await s.lease(
-        [{ stream: "L3", lagging: false, by: "actor", at: 2, retry: 0 }],
-        0
-      );
-      // Ack with lower at
-      await s.ack([
-        { stream: "L3", lagging: false, by: "actor", at: 1, retry: 0 },
-      ]);
-      // No error, state unchanged
+      await s.subscribe([{ stream: "block-test" }]);
+      // Claim all available, find our stream
+      const claimed = await s.claim(100, 0, "worker-1", 10000);
+      const target = claimed.find((l) => l.stream === "block-test");
+      expect(target).toBeDefined();
+      // Ack other streams so they don't interfere, block our target
+      const others = claimed.filter((l) => l.stream !== "block-test");
+      if (others.length) await s.ack(others);
+      const blocked = await s.block([{ ...target!, error: "test" }]);
+      expect(blocked.length).toBe(1);
+      // Claim again — blocked stream should not appear
+      const claimed2 = await s.claim(100, 100, "worker-2", 10000);
+      expect(claimed2.find((l) => l.stream === "block-test")).toBeUndefined();
     });
 
     it("should throw ConcurrencyError on commit with wrong expectedVersion", async () => {
@@ -482,64 +460,52 @@ describe("pg store", () => {
 
     it("should not block a stream if not leased by same drainer", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "L4", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      const leases = await s.lease(
-        [{ stream: "L4", lagging: false, by: "actor", at: 1, retry: 0 }],
-        100000
-      );
-      expect(leases.length).toBe(1);
+      await s.subscribe([{ stream: "block-wrong-drainer" }]);
+      const claimed = await s.claim(100, 0, "actor", 100000);
+      const target = claimed.find((l) => l.stream === "block-wrong-drainer")!;
+      expect(target).toBeDefined();
+      // Ack others
+      const others = claimed.filter((l) => l.stream !== "block-wrong-drainer");
+      if (others.length) await s.ack(others);
 
-      // Try to block the stream
+      // Try to block with different drainer
       const blocked = await s.block([
-        {
-          stream: "L4",
-          lagging: false,
-          by: "actor2",
-          at: 2,
-          retry: 0,
-          error: "error",
-        },
+        { ...target, by: "actor2", error: "error" },
       ]);
       expect(blocked.length).toBe(0);
     });
 
     it("should block a stream when leased by same drainer", async () => {
       const s = store();
-      const leases = await s.lease(
-        [{ stream: "L5", lagging: false, by: "blocker", at: 0, retry: 0 }],
-        100000
-      );
-      expect(leases.length).toBe(1);
+      await s.subscribe([{ stream: "block-same-drainer" }]);
+      const claimed = await s.claim(100, 0, "blocker", 100000);
+      const target = claimed.find((l) => l.stream === "block-same-drainer")!;
+      expect(target).toBeDefined();
+      // Ack others
+      const others = claimed.filter((l) => l.stream !== "block-same-drainer");
+      if (others.length) await s.ack(others);
 
-      const blocked = await s.block([
-        {
-          stream: "L5",
-          lagging: false,
-          by: "blocker",
-          at: 1,
-          retry: 0,
-          error: "test error",
-        },
-      ]);
+      const blocked = await s.block([{ ...target, error: "test error" }]);
       expect(blocked.length).toBe(1);
-      expect(blocked[0].stream).toBe("L5");
-      expect(blocked[0].source).toBeUndefined();
+      expect(blocked[0].stream).toBe("block-same-drainer");
       expect(blocked[0].error).toBe("test error");
     });
 
-    it("should poll", async () => {
-      await store().lease(
-        [{ stream: "makeitlast", lagging: false, by: "x", at: 0, retry: 0 }],
-        0
+    it("should claim with dual frontiers", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "dual-frontier-test" }]);
+      // Claim all, ack our target with high watermark
+      const claimed = await s.claim(100, 0, "w", 1);
+      const target = claimed.find((l) => l.stream === "dual-frontier-test");
+      expect(target).toBeDefined();
+      await s.ack(
+        claimed.map((l) =>
+          l.stream === "dual-frontier-test" ? { ...l, at: 1000 } : l
+        )
       );
-      await store().ack([
-        { stream: "makeitlast", lagging: false, by: "x", at: 1000, retry: 0 },
-      ]);
-      const result = await store().poll(1, 1);
-      expect(result.at(-1)?.stream).toEqual("makeitlast");
+      // Now claim with leading frontier — highest watermark should be our stream
+      const result = await s.claim(0, 1, "w", 1);
+      expect(result.at(-1)?.stream).toEqual("dual-frontier-test");
     });
   });
 });

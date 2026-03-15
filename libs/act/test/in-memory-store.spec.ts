@@ -158,106 +158,57 @@ describe("InMemoryStore", () => {
       expect(result.length).toBe(6);
     });
 
-    it("should not lease blocked or old streams and should ack only valid leases", async () => {
+    it("should subscribe and claim streams", async () => {
       const s = store();
-      // Lease a new stream
-      const leases = await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      expect(leases.length).toBe(1);
-      // Block the stream
-      await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 }],
-        0
-      );
-      // Try to lease again with old at (should not update)
-      const leases2 = await s.lease(
-        [{ stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      expect(leases2.length).toBe(1);
-      // Ack with valid lease
-      await s.ack([
-        { stream: "L1", lagging: false, by: "actor", at: 1, retry: 0 },
-      ]);
-      // Ack with old lease (should not throw)
-      await s.ack([
-        { stream: "L1", lagging: false, by: "actor", at: 0, retry: 0 },
-      ]);
+      const count = await s.subscribe([{ stream: "L1" }]);
+      expect(count).toBe(1);
+      // Subscribe again — already exists
+      const count2 = await s.subscribe([{ stream: "L1" }]);
+      expect(count2).toBe(0);
+      // Claim should return the subscribed stream
+      const claimed = await s.claim(1, 0, "worker-1", 10000);
+      expect(claimed.length).toBe(1);
+      expect(claimed[0].stream).toBe("L1");
+      // Ack the claim
+      await s.ack([claimed[0]]);
     });
 
-    it("should poll", async () => {
+    it("should claim with dual frontiers", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "F1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        1
-      );
-      await s.lease(
-        [{ stream: "F2", lagging: false, by: "actor", at: 0, retry: 0 }],
-        1
-      );
-      await s.ack([
-        { stream: "F1", lagging: false, by: "actor", at: 1, retry: 0 },
-      ]);
-      await s.ack([
-        { stream: "F2", lagging: false, by: "actor", at: 2, retry: 0 },
-      ]);
-      const result = await s.poll(2, 2);
-      expect(result.length).toBe(4);
+      await s.subscribe([{ stream: "F1" }, { stream: "F2" }]);
+      // Claim and ack with different watermarks
+      const claimed = await s.claim(2, 0, "actor", 1);
+      await s.ack(claimed.map((l, i) => ({ ...l, at: i + 1 })));
+      // Both frontiers should find streams
+      const result = await s.claim(2, 2, "actor", 1);
+      expect(result.length).toBeGreaterThan(0);
     });
 
-    it("should poll events with and without streams", async () => {
-      const s = store();
-      // No streams
-      let result = await s.poll(1, 1);
-      expect(result.length).toBe(0);
-      // Add a stream and commit events
-      await s.lease(
-        [{ stream: "F1", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      await s.commit("F1", [{ name: "A", data: {} }], {
-        correlation: "f1",
-        causation: {},
-      });
-      result = await s.poll(1, 1);
-      expect(result.length).toBe(2);
-    });
-
-    it("should poll with no streams", async () => {
-      const { InMemoryStore } = await import(
-        "../src/adapters/InMemoryStore.js"
-      );
-      const store = new InMemoryStore();
-      const result = await store.poll(1, 1);
+    it("should claim with no streams", async () => {
+      const { InMemoryStore } =
+        await import("../src/adapters/InMemoryStore.js");
+      const s = new InMemoryStore();
+      const result = await s.claim(1, 1, "actor", 1);
       expect(result).toEqual([]);
     });
 
-    it("should not lease a blocked stream", async () => {
+    it("should not claim blocked streams", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "L2", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      const leases = await s.lease(
-        [{ stream: "L2", lagging: false, by: "actor", at: 1, retry: 0 }],
-        0
-      );
-      expect(leases.length).toBe(1);
+      await s.subscribe([{ stream: "L2" }]);
+      const claimed = await s.claim(1, 0, "actor", 10000);
+      expect(claimed.length).toBe(1);
+      await s.block([{ ...claimed[0], error: "test" }]);
+      // Blocked stream should not appear
+      const claimed2 = await s.claim(10, 10, "actor2", 10000);
+      expect(claimed2.find((l) => l.stream === "L2")).toBeUndefined();
     });
 
-    it("should not update state when ack is called with lower at", async () => {
+    it("should ack with lower at without error", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "L3", lagging: false, by: "actor", at: 2, retry: 0 }],
-        0
-      );
-      // Ack with lower at
-      await s.ack([
-        { stream: "L3", lagging: false, by: "actor", at: 1, retry: 0 },
-      ]);
-      // No error, state unchanged
+      await s.subscribe([{ stream: "L3" }]);
+      const claimed = await s.claim(1, 0, "actor", 10000);
+      // Ack with lower at — should not throw
+      await s.ack([{ ...claimed[0], at: 1 }]);
     });
 
     it("should throw ConcurrencyError on commit with wrong expectedVersion", async () => {
@@ -284,28 +235,36 @@ describe("InMemoryStore", () => {
 
     it("should not block a stream if not leased by same drainer", async () => {
       const s = store();
-      await s.lease(
-        [{ stream: "L4", lagging: false, by: "actor", at: 0, retry: 0 }],
-        0
-      );
-      const leases = await s.lease(
-        [{ stream: "L4", lagging: false, by: "actor", at: 1, retry: 0 }],
-        100000
-      );
-      expect(leases.length).toBe(1);
+      await s.subscribe([{ stream: "L4" }]);
+      const claimed = await s.claim(1, 0, "actor", 100000);
+      expect(claimed.length).toBe(1);
 
-      // Try to block the stream
+      // Try to block with different drainer
       const blocked = await s.block([
-        {
-          stream: "L4",
-          lagging: false,
-          by: "actor2",
-          at: 2,
-          retry: 0,
-          error: "error",
-        },
+        { ...claimed[0], by: "actor2", error: "error" },
       ]);
       expect(blocked.length).toBe(0);
+    });
+
+    it("should not claim already-leased streams", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "L5" }]);
+      // Claim with long lease
+      const claimed = await s.claim(1, 0, "worker-1", 100000);
+      expect(claimed.length).toBe(1);
+      // Second claim should skip the leased stream
+      const claimed2 = await s.claim(1, 0, "worker-2", 100000);
+      expect(claimed2.find((l) => l.stream === "L5")).toBeUndefined();
+    });
+
+    it("should not ack with wrong lease holder", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "L6" }]);
+      const claimed = await s.claim(1, 0, "worker-1", 100000);
+      expect(claimed.length).toBe(1);
+      // Ack with wrong holder — should be silently ignored
+      const acked = await s.ack([{ ...claimed[0], by: "wrong-worker" }]);
+      expect(acked.length).toBe(0);
     });
   });
 });

@@ -12,7 +12,7 @@ import type {
   Schema,
   Schemas,
 } from "./action.js";
-import type { Lease, Poll } from "./reaction.js";
+import type { Lease } from "./reaction.js";
 
 /**
  * A cached snapshot entry for a stream.
@@ -196,62 +196,6 @@ export interface Store extends Disposable {
   ) => Promise<number>;
 
   /**
-   * Polls for streams that need reaction processing.
-   *
-   * Returns streams that have uncommitted events, ordered by their watermark.
-   * Uses a dual-frontier approach:
-   * - **Lagging**: New or behind streams (ascending watermark)
-   * - **Leading**: Active streams (descending watermark)
-   *
-   * Only returns unblocked streams that aren't currently leased.
-   *
-   * @param lagging - Max streams to return from lagging frontier
-   * @param leading - Max streams to return from leading frontier
-   * @returns Array of poll results with stream, source, watermark, and lag status
-   *
-   * @example
-   * ```typescript
-   * const polled = await store().poll(5, 5); // 5 lagging + 5 leading
-   * polled.forEach(({ stream, at, lagging }) => {
-   *   console.log(`${stream} at ${at} (lagging: ${lagging})`);
-   * });
-   * ```
-   *
-   * @see {@link Lease} for lease management
-   */
-  poll: (lagging: number, leading: number) => Promise<Poll[]>;
-
-  /**
-   * Acquires leases for exclusive stream processing.
-   *
-   * Leasing prevents multiple workers from processing the same stream concurrently.
-   * Only grants leases if:
-   * - Stream isn't currently leased by another worker
-   * - Lease hasn't expired
-   * - Stream isn't blocked due to errors
-   *
-   * @param leases - Array of lease requests
-   * @param millis - Lease duration in milliseconds
-   * @returns Array of successfully granted leases
-   *
-   * @example
-   * ```typescript
-   * const granted = await store().lease([
-   *   { stream: "user-123", by: workerId, at: 0, retry: 0, lagging: false }
-   * ], 10000); // 10 second lease
-   *
-   * if (granted.length > 0) {
-   *   // Process events...
-   *   await store().ack(granted);
-   * }
-   * ```
-   *
-   * @see {@link poll} for finding streams to lease
-   * @see {@link ack} for acknowledging completion
-   */
-  lease: (leases: Lease[], millis: number) => Promise<Lease[]>;
-
-  /**
    * Acknowledges successful processing of leased streams.
    *
    * Updates the watermark to indicate events have been processed successfully.
@@ -262,19 +206,80 @@ export interface Store extends Disposable {
    *
    * @example
    * ```typescript
-   * const leased = await store().lease([...], 10000);
+   * const leased = await store().claim(5, 5, randomUUID(), 10000);
    * // Process events up to ID 150
    * await store().ack(leased.map(l => ({ ...l, at: 150 })));
    * ```
    *
-   * @see {@link lease} for acquiring leases
+   * @see {@link claim} for acquiring leases
    */
   ack: (leases: Lease[]) => Promise<Lease[]>;
 
   /**
+   * Atomically discovers and leases streams for reaction processing.
+   *
+   * Combines {@link poll} and {@link lease} into a single operation, eliminating
+   * the race condition where another worker can grab a stream between poll and lease.
+   *
+   * PostgresStore uses `FOR UPDATE SKIP LOCKED` for zero-contention competing
+   * consumer semantics — workers never block each other, each grabbing different
+   * streams atomically. InMemoryStore fuses its poll+lease logic equivalently.
+   *
+   * Used by `Act.drain()` as the primary stream acquisition method.
+   *
+   * @param lagging - Max streams from the lagging frontier (ascending watermark)
+   * @param leading - Max streams from the leading frontier (descending watermark)
+   * @param by - Unique lease holder identifier (UUID)
+   * @param millis - Lease duration in milliseconds
+   * @returns Array of successfully leased streams with metadata
+   *
+   * @example
+   * ```typescript
+   * const leased = await store().claim(5, 5, randomUUID(), 10000);
+   * leased.forEach(({ stream, at, lagging }) => {
+   *   console.log(`Leased ${stream} at ${at} (lagging: ${lagging})`);
+   * });
+   * ```
+   *
+   * @see {@link subscribe} for registering new streams (used by correlate)
+   * @see {@link ack} for acknowledging completion
+   * @see {@link block} for blocking failed streams
+   */
+  claim: (
+    lagging: number,
+    leading: number,
+    by: string,
+    millis: number
+  ) => Promise<Lease[]>;
+
+  /**
+   * Registers streams for event processing.
+   *
+   * Upserts stream entries so they become visible to {@link claim}. Used by
+   * `correlate()` to register dynamically discovered reaction target streams.
+   *
+   * @param streams - Streams to register with optional source hint
+   * @returns Number of newly registered streams (excludes already-known streams)
+   *
+   * @example
+   * ```typescript
+   * const count = await store().subscribe([
+   *   { stream: "stats-user-1", source: "user-1" },
+   *   { stream: "stats-user-2", source: "user-2" },
+   * ]);
+   * console.log(`Registered ${count} new streams`);
+   * ```
+   *
+   * @see {@link claim} for discovering and leasing registered streams
+   */
+  subscribe: (
+    streams: Array<{ stream: string; source?: string }>
+  ) => Promise<number>;
+
+  /**
    * Blocks streams after persistent processing failures.
    *
-   * Blocked streams won't be returned by {@link poll} until manually unblocked.
+   * Blocked streams won't be returned by {@link claim} until manually unblocked.
    * This prevents poison messages from repeatedly failing and consuming resources.
    *
    * Streams are typically blocked when:
@@ -300,7 +305,7 @@ export interface Store extends Disposable {
    * }
    * ```
    *
-   * @see {@link lease} for lease management
+   * @see {@link claim} for lease management
    */
   block: (
     leases: Array<Lease & { error: string }>

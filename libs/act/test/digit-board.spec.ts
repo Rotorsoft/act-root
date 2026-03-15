@@ -16,8 +16,8 @@ describe("digit-board", () => {
     await app.do("PressKey", { stream: "A", actor }, { key: "2" });
     await app.do("PressKey", { stream: "A", actor }, { key: "3" });
 
-    const { leased } = await app.correlate();
-    expect(leased.length).toBe(1);
+    const { subscribed } = await app.correlate();
+    expect(subscribed).toBe(1);
 
     // drain digit board stream
     const drained = await app.drain();

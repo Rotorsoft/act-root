@@ -311,53 +311,65 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
-   * @param lagging - Max number of streams to poll in ascending order.
-   * @param leading - Max number of streams to poll in descending order.
-   * @returns The polled streams.
+   * Atomically discovers and leases streams for processing.
+   * Fuses poll + lease into a single operation.
+   * @param lagging - Max streams from lagging frontier.
+   * @param leading - Max streams from leading frontier.
+   * @param by - Lease holder identifier.
+   * @param millis - Lease duration in milliseconds.
+   * @returns Granted leases.
    */
-  async poll(lagging: number, leading: number) {
+  async claim(lagging: number, leading: number, by: string, millis: number) {
     await sleep();
-    const a = [...this._streams.values()]
-      .filter((s) => s.is_avaliable)
+    const available = [...this._streams.values()].filter((s) => s.is_avaliable);
+    const lag = available
       .sort((a, b) => a.at - b.at)
       .slice(0, lagging)
-      .map(({ stream, source, at }) => ({
-        stream,
-        source,
-        at,
+      .map((s) => ({
+        stream: s.stream,
+        source: s.source,
+        at: s.at,
         lagging: true,
       }));
-    const b = [...this._streams.values()]
-      .filter((s) => s.is_avaliable)
+    const lead = available
       .sort((a, b) => b.at - a.at)
       .slice(0, leading)
-      .map(({ stream, source, at }) => ({
-        stream,
-        source,
-        at,
+      .map((s) => ({
+        stream: s.stream,
+        source: s.source,
+        at: s.at,
         lagging: false,
       }));
-    return [...a, ...b];
+    // deduplicate (a stream can appear in both frontiers)
+    const seen = new Set<string>();
+    const combined = [...lag, ...lead].filter((p) => {
+      if (seen.has(p.stream)) return false;
+      seen.add(p.stream);
+      return true;
+    });
+    // lease each atomically
+    return combined
+      .map((p) =>
+        this._streams.get(p.stream)?.lease({ ...p, by, retry: 0 }, millis)
+      )
+      .filter((l) => !!l);
   }
 
   /**
-   * Lease streams for processing (e.g., for distributed consumers).
-   * @param leases - Lease requests for streams, including end-of-lease watermark, lease holder, and source stream.
-   * @param leaseMilis - Lease duration in milliseconds.
-   * @returns Granted leases.
+   * Registers streams for event processing.
+   * @param streams - Streams to register with optional source.
+   * @returns Number of newly registered streams.
    */
-  async lease(leases: Lease[], millis: number) {
+  async subscribe(streams: Array<{ stream: string; source?: string }>) {
     await sleep();
-    return leases
-      .map((l) => {
-        if (!this._streams.has(l.stream)) {
-          // store new correlations
-          this._streams.set(l.stream, new InMemoryStream(l.stream, l.source));
-        }
-        return this._streams.get(l.stream)?.lease(l, millis);
-      })
-      .filter((l) => !!l);
+    let count = 0;
+    for (const { stream, source } of streams) {
+      if (!this._streams.has(stream)) {
+        this._streams.set(stream, new InMemoryStream(stream, source));
+        count++;
+      }
+    }
+    return count;
   }
 
   /**

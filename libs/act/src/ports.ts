@@ -291,7 +291,7 @@ export const cache = port(function cache(adapter?: Cache) {
  */
 export function build_tracer(logLevel: LogLevel): {
   fetched: <E extends Schemas>(fetched: Fetch<E>) => void;
-  correlated: (leases: Lease[]) => void;
+  correlated: (streams: Array<{ stream: string; source?: string }>) => void;
   leased: (leases: Lease[]) => void;
   acked: (leases: Lease[]) => void;
   blocked: (leases: Array<Lease & { error: string }>) => void;
@@ -310,8 +310,8 @@ export function build_tracer(logLevel: LogLevel): {
         );
         logger.trace(data, "⚡️ fetch");
       },
-      correlated: (leases: Lease[]) => {
-        const data = leases.map(({ stream }) => stream).join(" ");
+      correlated: (streams: Array<{ stream: string; source?: string }>) => {
+        const data = streams.map(({ stream }) => stream).join(" ");
         logger.trace(`⚡️ correlate ${data}`);
       },
       leased: (leases: Lease[]) => {
