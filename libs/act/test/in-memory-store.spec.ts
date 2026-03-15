@@ -176,10 +176,31 @@ describe("InMemoryStore", () => {
     it("should claim with dual frontiers", async () => {
       const s = store();
       await s.subscribe([{ stream: "F1" }, { stream: "F2" }]);
-      // Claim and ack with different watermarks
+      // Commit events so streams have work
+      await s.commit("F1", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      await s.commit("F2", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      // Claim and ack F2 with higher watermark
       const claimed = await s.claim(2, 0, "actor", 1);
-      await s.ack(claimed.map((l, i) => ({ ...l, at: i + 1 })));
-      // Both frontiers should find streams
+      expect(claimed.length).toBe(2);
+      await s.ack(
+        claimed.map((l) => ({ ...l, at: l.stream === "F2" ? 1 : 0 }))
+      );
+      // Add more events so streams have pending work
+      await s.commit("F1", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      await s.commit("F2", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      // Both frontiers should find streams with pending events
       const result = await s.claim(2, 2, "actor", 1);
       expect(result.length).toBeGreaterThan(0);
     });

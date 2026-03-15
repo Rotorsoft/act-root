@@ -466,9 +466,16 @@ export class PostgresStore implements Store {
         WITH
         available AS (
           SELECT stream, source, at
-          FROM ${this._fqs}
+          FROM ${this._fqs} s
           WHERE blocked = false
             AND (leased_by IS NULL OR leased_until <= NOW())
+            AND (s.at < 0 OR EXISTS (
+              SELECT 1 FROM ${this._fqt} e
+              WHERE e.id > s.at
+                AND e.name <> '${SNAP_EVENT}'
+                AND (s.source IS NULL OR e.stream = COALESCE(s.source, s.stream))
+              LIMIT 1
+            ))
           FOR UPDATE SKIP LOCKED
         ),
         lag AS (
