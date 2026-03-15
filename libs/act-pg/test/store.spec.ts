@@ -494,18 +494,30 @@ describe("pg store", () => {
     it("should claim with dual frontiers", async () => {
       const s = store();
       await s.subscribe([{ stream: "dual-frontier-test" }]);
-      // Claim all, ack our target with high watermark
+      // Commit events so the stream has work
+      await s.commit(
+        "dual-frontier-test",
+        [
+          { name: "A", data: {} },
+          { name: "A", data: {} },
+        ],
+        { correlation: "c", causation: {} }
+      );
+      // Claim all, ack our target with watermark at first event
       const claimed = await s.claim(100, 0, "w", 1);
       const target = claimed.find((l) => l.stream === "dual-frontier-test");
       expect(target).toBeDefined();
+      // Ack with watermark below max event so stream still has pending work
       await s.ack(
         claimed.map((l) =>
-          l.stream === "dual-frontier-test" ? { ...l, at: 1000 } : l
+          l.stream === "dual-frontier-test" ? { ...l, at: target!.at + 1 } : l
         )
       );
-      // Now claim with leading frontier — highest watermark should be our stream
-      const result = await s.claim(0, 1, "w", 1);
-      expect(result.at(-1)?.stream).toEqual("dual-frontier-test");
+      // Now claim with leading frontier — stream still has pending events
+      const result = await s.claim(0, 100, "w", 1);
+      expect(
+        result.find((l) => l.stream === "dual-frontier-test")
+      ).toBeDefined();
     });
   });
 });

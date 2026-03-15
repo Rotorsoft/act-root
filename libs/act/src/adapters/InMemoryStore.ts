@@ -321,7 +321,17 @@ export class InMemoryStore implements Store {
    */
   async claim(lagging: number, leading: number, by: string, millis: number) {
     await sleep();
-    const available = [...this._streams.values()].filter((s) => s.is_avaliable);
+    const available = [...this._streams.values()].filter(
+      (s) =>
+        s.is_avaliable &&
+        (s.at < 0 ||
+          this._events.some(
+            (e) =>
+              e.id > s.at &&
+              e.name !== SNAP_EVENT &&
+              (!s.source || RegExp(s.source).test(e.stream))
+          ))
+    );
     const lag = available
       .sort((a, b) => a.at - b.at)
       .slice(0, lagging)
