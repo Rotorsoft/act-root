@@ -1,3 +1,15 @@
+# [@rotorsoft/act-v0.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.20.0...@rotorsoft/act-v0.21.0) (2026-03-15)
+
+
+### Features
+
+* **act:** replace poll/lease with claim/subscribe ([18a1444](https://github.com/rotorsoft/act-root/commit/18a1444f287046d1b1612e7f35f02f11e0a4e729))
+
+
+### Performance Improvements
+
+* **act:** add multi-worker contention benchmark ([9787cb6](https://github.com/rotorsoft/act-root/commit/9787cb6caec65787fd80f8f4aa31674ddd121a1f))
+
 # [@rotorsoft/act-v0.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.19.1...@rotorsoft/act-v0.20.0) (2026-03-14)
 
 
