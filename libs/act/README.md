@@ -204,7 +204,7 @@ On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On
 - Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
 - The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
 
-For detailed benchmark data and performance evolution history, see [PERFORMANCE.md](../../PERFORMANCE.md).
+For detailed benchmark data and performance evolution history, see [PERFORMANCE.md](PERFORMANCE.md).
 
 ## Event-Driven Processing
 
