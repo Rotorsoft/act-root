@@ -249,6 +249,44 @@ describe("act", () => {
     expect(r2.subscribed).toBe(0); // already subscribed from r1
   });
 
+  it("should not advance checkpoint if subscribe fails", async () => {
+    const dynState = state({ Dyn2: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ Dyn2Evt: ZodEmpty })
+      .patch({ Dyn2Evt: () => ({}) })
+      .on({ doDyn2: ZodEmpty })
+      .emit(() => ["Dyn2Evt", {}])
+      .build();
+
+    const dynApp = act()
+      .withState(dynState)
+      .on("Dyn2Evt")
+      .do(() => Promise.resolve())
+      .to((event) => ({ target: `dyn2-${event.stream}` }))
+      .build();
+
+    await dynApp.do("doDyn2", { stream: "y", actor }, {});
+
+    // Mock subscribe to fail
+    const subscribeSpy = vi
+      .spyOn(store(), "subscribe")
+      .mockRejectedValueOnce(new Error("subscribe failed"));
+
+    // First correlate should throw — checkpoint must NOT advance
+    const checkpoint = (dynApp as any)._correlation_checkpoint;
+    await expect(dynApp.correlate({ limit: 100 })).rejects.toThrow(
+      "subscribe failed"
+    );
+    expect((dynApp as any)._correlation_checkpoint).toBe(checkpoint);
+
+    // Restore subscribe
+    subscribeSpy.mockRestore();
+
+    // Second correlate should re-scan the same events and succeed
+    const r = await dynApp.correlate({ limit: 100 });
+    expect(r.subscribed).toBe(1);
+  });
+
   describe("settle", () => {
     it("should debounce multiple rapid calls into a single settle cycle", async () => {
       const settledListener = vi.fn();
