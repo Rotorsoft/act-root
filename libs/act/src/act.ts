@@ -521,9 +521,20 @@ export class Act<
         this._drain_locked = true;
         const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
         const leading = streamLimit - lagging;
-        const polled = await store().poll(lagging, leading);
+
+        // Atomically discover and lease streams (competing consumer pattern)
+        const leased = await store().claim(
+          lagging,
+          leading,
+          randomUUID(),
+          leaseMillis
+        );
+        if (!leased.length)
+          return { fetched: [], leased: [], acked: [], blocked: [] };
+
+        // Fetch events for each leased stream
         const fetched = await Promise.all(
-          polled.map(async ({ stream, source, at, lagging }) => {
+          leased.map(async ({ stream, source, at, lagging }) => {
             const events = await this.query_array({
               stream: source,
               after: at,
@@ -535,10 +546,7 @@ export class Act<
         if (fetched.length) {
           tracer.fetched(fetched);
 
-          const leases = new Map<
-            string,
-            { lease: Lease; payloads: ReactionPayload<TEvents>[] }
-          >();
+          const payloadsMap = new Map<string, ReactionPayload<TEvents>[]>();
 
           // compute fetch window max event id
           const fetch_window_at = fetched.reduce(
@@ -546,7 +554,7 @@ export class Act<
             0
           );
 
-          fetched.forEach(({ stream, lagging, events }) => {
+          fetched.forEach(({ stream, events }) => {
             const payloads = events.flatMap((event) => {
               const register = this.registry.events[event.name];
               if (!register) return [];
@@ -560,28 +568,23 @@ export class Act<
                 })
                 .map((reaction) => ({ ...reaction, event }));
             });
-            leases.set(stream, {
-              lease: {
-                stream,
-                by: randomUUID(),
-                at: events.at(-1)?.id || fetch_window_at, // ff when no matching events
-                retry: 0,
-                lagging,
-              },
-              payloads: payloads as ReactionPayload<TEvents>[],
-            });
+            payloadsMap.set(stream, payloads as ReactionPayload<TEvents>[]);
           });
 
-          const leased = await store().lease(
-            [...leases.values()].map(({ lease }) => lease),
-            leaseMillis
-          );
           tracer.leased(leased);
 
           const handled = await Promise.all(
-            leased.map((lease) =>
-              this.handle(lease, leases.get(lease.stream)!.payloads)
-            )
+            leased.map((lease) => {
+              // fast-forward watermark using fetched events or window max
+              const streamFetch = fetched.find(
+                (f) => f.stream === lease.stream
+              );
+              const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
+              return this.handle(
+                { ...lease, at },
+                payloadsMap.get(lease.stream) || []
+              );
+            })
           );
 
           // adaptive drain ratio based on handled events, favors frontier with highest pressure (clamped between 20% and 80%)
@@ -677,8 +680,11 @@ export class Act<
    */
   async correlate(
     query: Query = { after: -1, limit: 10 }
-  ): Promise<{ leased: Lease[]; last_id: number }> {
-    const correlated = new Map<string, ReactionPayload<TEvents>[]>();
+  ): Promise<{ subscribed: number; last_id: number }> {
+    const correlated = new Map<
+      string,
+      { source?: string; payloads: ReactionPayload<TEvents>[] }
+    >();
     let last_id = query.after || -1;
     await store().query<TEvents>((event) => {
       last_id = event.id;
@@ -690,31 +696,31 @@ export class Act<
             typeof reaction.resolver === "function"
               ? reaction.resolver(event)
               : reaction.resolver;
-          resolved &&
-            (
-              correlated.get(resolved.target) ||
-              correlated.set(resolved.target, []).get(resolved.target)!
-            ).push({ ...reaction, source: resolved.source, event });
+          if (resolved) {
+            const entry = correlated.get(resolved.target) || {
+              source: resolved.source,
+              payloads: [],
+            };
+            entry.payloads.push({
+              ...reaction,
+              source: resolved.source,
+              event,
+            });
+            correlated.set(resolved.target, entry);
+          }
         }
       }
     }, query);
     if (correlated.size) {
-      const leases = [...correlated.entries()].map(([stream, payloads]) => ({
+      const streams = [...correlated.entries()].map(([stream, { source }]) => ({
         stream,
-        // TODO: by convention, the first defined source wins (this can be tricky)
-        source: payloads.find((p) => p.source)?.source || undefined,
-        by: randomUUID(),
-        at: 0,
-        retry: 0,
-        lagging: true,
-        payloads,
+        source,
       }));
-      // register leases with 0ms lease timeout (just to tag the new streams)
-      const leased = await store().lease(leases, 0);
-      leased.length && tracer.correlated(leased);
-      return { leased, last_id };
+      const subscribed = await store().subscribe(streams);
+      subscribed && tracer.correlated(streams);
+      return { subscribed, last_id };
     }
-    return { leased: [], last_id };
+    return { subscribed: 0, last_id };
   }
 
   /**
@@ -775,7 +781,7 @@ export class Act<
   start_correlations(
     query: Query = {},
     frequency = 10_000,
-    callback?: (leased: Lease[]) => void
+    callback?: (subscribed: number) => void
   ): boolean {
     if (this._correlation_timer) return false;
 
@@ -786,7 +792,7 @@ export class Act<
         this.correlate({ ...query, after, limit })
           .then((result) => {
             after = result.last_id;
-            if (callback && result.leased.length) callback(result.leased);
+            if (callback && result.subscribed) callback(result.subscribed);
           })
           .catch(console.error),
       frequency
@@ -876,8 +882,8 @@ export class Act<
       (async () => {
         let lastDrain: Drain<TEvents> | undefined;
         for (let i = 0; i < maxPasses; i++) {
-          const { leased } = await this.correlate(correlateQuery);
-          if (leased.length === 0 && i > 0) break;
+          const { subscribed } = await this.correlate(correlateQuery);
+          if (subscribed === 0 && i > 0) break;
           lastDrain = await this.drain(drainOptions);
           if (!lastDrain.acked.length && !lastDrain.blocked.length) break;
         }

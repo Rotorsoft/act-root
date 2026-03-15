@@ -158,20 +158,6 @@ export type ReactionPayload<TEvents extends Schemas> = Reaction<TEvents> & {
 };
 
 /**
- * Poll details for stream processing.
- * @property stream - The target stream name.
- * @property source - The source stream.
- * @property at - The lease watermark.
- * @property lagging - Whether the stream is lagging behind.
- */
-export type Poll = {
-  readonly stream: string;
-  readonly source?: string;
-  readonly at: number;
-  readonly lagging: boolean;
-};
-
-/**
  * Result of fetching events from the store for processing.
  * @template TEvents - Event schemas.
  * @property stream - The stream name

@@ -3,7 +3,6 @@ import type {
   EventMeta,
   Lease,
   Message,
-  Poll,
   Query,
   Schemas,
   Store,
@@ -434,117 +433,82 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Polls the store for unblocked streams needing processing, ordered by lease watermark ascending.
-   * @param lagging - Max number of streams to poll in ascending order.
-   * @param leading - Max number of streams to poll in descending order.
-   * @returns The polled streams.
-   */
-  async poll(lagging: number, leading: number) {
-    const { rows } = await this._pool.query<Poll>(
-      `
-      WITH
-      lag AS (
-        SELECT stream, source, at, TRUE AS lagging
-        FROM ${this._fqs}
-        WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
-        ORDER BY at ASC
-        LIMIT $1
-      ),
-      lead AS (
-        SELECT stream, source, at, FALSE AS lagging
-        FROM ${this._fqs}
-        WHERE blocked = false AND (leased_by IS NULL OR leased_until <= NOW())
-        ORDER BY at DESC
-        LIMIT $2
-      ),
-      combined AS (
-        SELECT * FROM lag
-        UNION ALL
-        SELECT * FROM lead
-      )
-      SELECT DISTINCT ON (stream) stream, source, at, lagging
-      FROM combined
-      ORDER BY stream, at;
-      `,
-      [lagging, leading]
-    );
-    return rows;
-  }
-
-  /**
-   * Lease streams for reaction processing, marking them as in-progress.
+   * Atomically discovers and leases streams for reaction processing.
    *
-   * @param leases - Lease requests for streams, including end-of-lease watermark, lease holder, and source stream.
-   * @param millis - Lease duration in milliseconds.
-   * @returns Array of leased objects with updated lease info
+   * Uses `FOR UPDATE SKIP LOCKED` to implement zero-contention competing consumers:
+   * - Workers never block each other — locked rows are silently skipped
+   * - Discovery and locking happen in a single atomic transaction
+   * - No wasted polls — every returned stream is exclusively owned
+   *
+   * @param lagging - Max streams from lagging frontier (ascending watermark)
+   * @param leading - Max streams from leading frontier (descending watermark)
+   * @param by - Lease holder identifier (UUID)
+   * @param millis - Lease duration in milliseconds
+   * @returns Leased streams with metadata
    */
-  async lease(leases: Lease[], millis: number): Promise<Lease[]> {
+  async claim(
+    lagging: number,
+    leading: number,
+    by: string,
+    millis: number
+  ): Promise<Lease[]> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
-      // insert new streams
-      await client.query(
-        `
-        INSERT INTO ${this._fqs} (stream, source)
-        SELECT lease->>'stream', lease->>'source'
-        FROM jsonb_array_elements($1::jsonb) AS lease
-        ON CONFLICT (stream) DO NOTHING
-        `,
-        [JSON.stringify(leases)]
-      );
-      // set leases
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
-        leased_at: number;
-        leased_by: string;
-        leased_until: number;
+        at: number;
         retry: number;
         lagging: boolean;
       }>(
         `
-      WITH input AS (
-        SELECT * FROM jsonb_to_recordset($1::jsonb)
-        AS x(stream text, at int, by text, lagging boolean)
-      ), free AS (
-        SELECT s.stream FROM ${this._fqs} s
-        JOIN input i ON s.stream = i.stream
-        WHERE s.leased_by IS NULL OR s.leased_until <= NOW()
-        FOR UPDATE
-      )
-      UPDATE ${this._fqs} s
-      SET
-        leased_by = i.by,
-        leased_at = i.at,
-        leased_until = NOW() + ($2::integer || ' milliseconds')::interval,
-        retry = CASE WHEN $2::integer > 0 THEN s.retry + 1 ELSE s.retry END
-      FROM input i, free f
-      WHERE s.stream = f.stream AND s.stream = i.stream
-      RETURNING s.stream, s.source, s.leased_at, s.leased_by, s.leased_until, s.retry, i.lagging
-      `,
-        [JSON.stringify(leases), millis]
+        WITH
+        available AS (
+          SELECT stream, source, at
+          FROM ${this._fqs}
+          WHERE blocked = false
+            AND (leased_by IS NULL OR leased_until <= NOW())
+          FOR UPDATE SKIP LOCKED
+        ),
+        lag AS (
+          SELECT stream, source, at, TRUE AS lagging
+          FROM available
+          ORDER BY at ASC
+          LIMIT $1
+        ),
+        lead AS (
+          SELECT stream, source, at, FALSE AS lagging
+          FROM available
+          ORDER BY at DESC
+          LIMIT $2
+        ),
+        combined AS (
+          SELECT DISTINCT ON (stream) stream, source, at, lagging
+          FROM (SELECT * FROM lag UNION ALL SELECT * FROM lead) t
+          ORDER BY stream, at
+        )
+        UPDATE ${this._fqs} s
+        SET
+          leased_by = $3,
+          leased_until = NOW() + ($4::integer || ' milliseconds')::interval,
+          retry = s.retry + 1
+        FROM combined c
+        WHERE s.stream = c.stream
+        RETURNING s.stream, s.source, s.at, s.retry, c.lagging
+        `,
+        [lagging, leading, by, millis]
       );
       await client.query("COMMIT");
 
-      return rows.map(
-        ({
-          stream,
-          source,
-          leased_at,
-          leased_by,
-          leased_until,
-          retry,
-          lagging,
-        }) => ({
-          stream,
-          source: source ?? undefined,
-          at: leased_at,
-          by: leased_by,
-          until: new Date(leased_until),
-          retry,
-          lagging,
-        })
-      );
+      return rows.map(({ stream, source, at, retry, lagging }) => ({
+        stream,
+        source: source ?? undefined,
+        at,
+        by,
+        retry,
+        lagging,
+      }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       logger.error(error);
@@ -552,6 +516,28 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Registers streams for event processing.
+   * Upserts stream entries so they become visible to claim().
+   * @param streams - Streams to register with optional source.
+   * @returns Number of newly registered streams.
+   */
+  async subscribe(
+    streams: Array<{ stream: string; source?: string }>
+  ): Promise<number> {
+    if (!streams.length) return 0;
+    const { rowCount } = await this._pool.query(
+      `
+      INSERT INTO ${this._fqs} (stream, source)
+      SELECT s->>'stream', s->>'source'
+      FROM jsonb_array_elements($1::jsonb) AS s
+      ON CONFLICT (stream) DO NOTHING
+      `,
+      [JSON.stringify(streams)]
+    );
+    return rowCount ?? 0;
   }
 
   /**

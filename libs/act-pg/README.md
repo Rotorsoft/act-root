@@ -96,7 +96,7 @@ if (process.env.NODE_ENV === "production") {
 - **ACID Transactions** - Events are committed atomically within PostgreSQL transactions
 - **Optimistic Concurrency** - Version-based conflict detection prevents lost updates
 - **Connection Pooling** - Uses [node-postgres](https://node-postgres.com/) Pool for efficient connection management
-- **Stream Leasing** - Distributed processing with lease-based coordination
+- **Atomic Stream Claiming** - Zero-contention competing consumers via `FOR UPDATE SKIP LOCKED`
 - **Auto Schema Setup** - `seed()` creates all required tables, indexes, and schema
 - **NOTIFY/LISTEN** - Real-time event notifications via PostgreSQL channels
 - **Multi-Tenant** - Isolate tenants using separate schemas
@@ -117,8 +117,19 @@ Calling `seed()` creates two tables:
 **Streams table** (`{schema}.{table}_streams`) - tracks stream processing state for reactions:
 - `stream` - stream identifier
 - `at` - last processed event position
-- `leased_by` / `leased_until` - distributed processing lease info
+- `leased_by` / `leased_until` - distributed processing claim info
 - `blocked` / `error` - error tracking for failed streams
+
+## Competing Consumer Pattern
+
+The PostgreSQL adapter uses `FOR UPDATE SKIP LOCKED` for atomic stream claiming — the idiomatic PostgreSQL competing consumer pattern. The `claim()` method discovers streams with pending events and locks them in a single query:
+
+- Workers never block each other — locked rows are silently skipped
+- No race between discovery and locking (unlike a separate poll + lease)
+- Same pattern used by pgBoss, Graphile Worker, and other production job queues
+- Enables horizontal scaling by simply adding more workers
+
+This replaces the previous two-step poll/lease approach, eliminating contention and simplifying the drain cycle.
 
 ## Related
 

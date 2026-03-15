@@ -241,7 +241,7 @@ The framework uses a port/adapter pattern for persistence and caching via single
 #### Store
 
 - **InMemoryStore** - Default, useful for tests and prototyping
-- **PostgresStore** - Production-ready with leasing, snapshots, and connection pooling
+- **PostgresStore** - Production-ready with atomic claim, snapshots, and connection pooling
 
 Switch stores using the `store()` singleton:
 
@@ -294,7 +294,7 @@ The framework's event processing uses two frontiers:
 - **Lagging frontier** - New or behind streams catch up quickly
 - **Leading frontier** - Active streams process continuously
 - **Fast-forwarding** - Prevents slow streams from blocking fast ones
-- **Parallel processing** - Multiple streams processed concurrently with leasing
+- **Parallel processing** - Multiple streams processed concurrently with atomic claiming
 
 This enables high-throughput event processing with eventual consistency guarantees.
 
@@ -304,11 +304,11 @@ Dynamic stream discovery through correlation metadata:
 
 - Each action/event includes `correlation` (request ID) and `causation` (what triggered it)
 - Reactions can discover new streams to process by querying uncommitted events
-- `app.correlate()` - Manual correlation (must be called before `drain()` to discover target streams)
-- `app.settle()` - Debounced, non-blocking correlate→drain loop; emits `"settled"` when done
+- `app.correlate()` - Manual correlation; returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams
+- `app.settle()` - Debounced, non-blocking correlate→drain loop; emits `"settled"` when done. Stops when `subscribed === 0` (no new streams discovered)
 - `app.start_correlations()` - Periodic background correlation
 
-**Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.settle()` for debounced correlate→drain with a `"settled"` lifecycle event, or `app.start_correlations()` for background discovery.
+**Important:** `correlate()` must be called before `drain()` to register reaction target streams with the store via `subscribe()`. Without correlation, `drain()` has no streams to process. In tests: `await app.correlate(); await app.drain();`. In production: use `app.settle()` for debounced correlate→drain with a `"settled"` lifecycle event, or `app.start_correlations()` for background discovery.
 
 ### Invariants
 
@@ -427,20 +427,20 @@ The project uses conventional commits with a custom validation hook:
 If implementing a custom store, you must implement:
 
 ```typescript
-interface Store {
-  seed(): Promise<void>                          // Initialize/reset
-  drop(): Promise<void>                          // Destroy
-  commit(stream, messages, meta, version?)       // Append events
-  query(callback, filter?)                       // Read events
-  poll(lagging, leading)                         // Find streams to process
-  lease(leases, millis)                          // Acquire processing locks
-  ack(leases)                                    // Release successful leases
-  block(leases)                                  // Block failed streams
-  dispose(): void                                // Cleanup resources
+interface Store extends Disposable {
+  seed(): Promise<void>;                          // Initialize/reset
+  drop(): Promise<void>;                          // Destroy
+  commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;  // Append events
+  query(callback, filter?): Promise<number>;      // Read events
+  claim(lagging, leading, by, millis): Promise<Lease[]>;  // Atomic discover + lock streams
+  subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;  // Register streams for processing
+  ack(leases): Promise<Lease[]>;                  // Release successful leases
+  block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
+  dispose(): Promise<void>;                       // Cleanup resources
 }
 ```
 
-Both stream leasing and version-based optimistic concurrency must be implemented correctly.
+`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This eliminates the race between discovery and locking that existed with the previous poll/lease two-step. `subscribe()` registers new streams for reaction processing (upserts into the streams table) and returns the count of newly registered streams. Version-based optimistic concurrency must be implemented correctly.
 
 ## Cache Interface Contract
 
@@ -489,6 +489,6 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
 - **Cache invalidation is automatic** — concurrency errors invalidate the stale cache entry, forcing a fresh load on the next access.
 - Tune `streamLimit` and `eventLimit` in drain options
-- Monitor lease times - if too short, streams thrash; if too long, processing slows
+- Monitor claim times - if too short, streams thrash; if too long, processing slows
 - PostgreSQL: Add indexes on stream, version, and created columns
 - Consider partitioning the events table for very large deployments

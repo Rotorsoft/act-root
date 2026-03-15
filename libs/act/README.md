@@ -250,7 +250,7 @@ Without cache, every `load()` replays the full event stream from PG — throughp
 
 ## Event-Driven Processing
 
-Act handles event-driven workflows through stream leasing and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
+Act handles event-driven workflows through atomic stream claiming and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
 
 ### Reactions
 
@@ -268,27 +268,28 @@ const app = act()
 
 Resolvers dynamically determine which stream a reaction targets, enabling flexible event routing without hardcoded dependencies. They can include source regex patterns to limit which streams trigger the reaction.
 
-### Stream Leasing
+### Stream Claiming
 
-Rather than processing events immediately, Act uses a leasing mechanism to coordinate distributed consumers. The application fetches events and pushes them to reaction handlers by leasing correlated streams:
+Rather than processing events immediately, Act uses an atomic claim mechanism to coordinate distributed consumers. The `claim()` method atomically discovers and locks streams in a single operation using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This is the same pattern used by pgBoss, Graphile Worker, and other production job queues.
 
 - **Per-stream ordering** — Events within a stream are processed sequentially.
-- **Temporary ownership** — Leases expire after a configurable duration, allowing re-processing if a consumer fails.
-- **Backpressure** — Only a limited number of leases can be active at a time, preventing consumer overload.
+- **Temporary ownership** — Claims expire after a configurable duration, allowing re-processing if a consumer fails.
+- **Zero-contention** — `FOR UPDATE SKIP LOCKED` means workers never block each other; locked rows are silently skipped.
+- **Backpressure** — Only a limited number of claims can be active at a time, preventing consumer overload.
 
-If a lease expires due to failure, the stream is automatically re-leased to another consumer, ensuring no event is permanently lost.
+If a claim expires due to failure, the stream is automatically re-claimed by another consumer, ensuring no event is permanently lost.
 
 ### Event Correlation
 
 Act tracks causation chains across actions and reactions using correlation metadata:
 
 - Each action/event carries a `correlation` ID (request trace) and `causation` ID (what triggered it).
-- Reactions can discover new streams to process by querying uncommitted events with matching correlation IDs.
+- `app.correlate()` scans events, discovers new target streams via reaction resolvers, and registers them with `subscribe()`. It returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams.
 - This enables full workflow tracing — from the initial user action through every downstream reaction.
 
 ```typescript
-// Correlate events to discover new streams for processing
-await app.correlate();
+// Correlate events to discover and subscribe new streams for processing
+const { subscribed, last_id } = await app.correlate();
 
 // Or run periodic background correlation
 app.start_correlations();
@@ -315,12 +316,12 @@ app.settle();
 
 // Subscribe to the "settled" lifecycle event
 app.on("settled", (drain) => {
-  // drain has { fetched, leased, acked, blocked }
+  // drain has { fetched, claimed, acked, blocked }
   // notify SSE clients, update caches, etc.
 });
 ```
 
-Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed events are re-leased automatically.
+Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed streams are re-claimed automatically.
 
 The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), runs correlate→drain in a loop until the system is consistent, and emits a `"settled"` event when done.
 

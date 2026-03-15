@@ -143,14 +143,14 @@ Implement the `Store` interface for custom backends:
 interface Store extends Disposable {
   seed(): Promise<void>;
   drop(): Promise<void>;
-  commit(stream, messages, meta, expectedVersion?): Promise<Committed[]>;
+  commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
   query(callback, filter?): Promise<number>;
-  poll(lagging, leading): Promise<Poll[]>;
-  lease(leases, millis): Promise<Lease[]>;
+  claim(lagging, leading, by, millis): Promise<Lease[]>;
+  subscribe(streams: Array<{ stream: string; source?: string }>): Promise<number>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<(Lease & { error })[]>;
   dispose(): Promise<void>;
 }
 ```
 
-Both stream leasing and version-based optimistic concurrency must be implemented correctly. See the [PostgresStore source](https://github.com/rotorsoft/act-root/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference.
+`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — zero-contention competing consumers where workers never block each other. `subscribe()` registers new streams for reaction processing and returns the count of newly registered streams. Version-based optimistic concurrency must be implemented correctly. See the [PostgresStore source](https://github.com/rotorsoft/act-root/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference.
