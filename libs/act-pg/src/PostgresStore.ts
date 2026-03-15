@@ -16,15 +16,7 @@ types.setTypeParser(types.builtins.JSONB, (val) =>
   JSON.parse(val, dateReviver)
 );
 
-type Config = Readonly<{
-  host: string;
-  port: number;
-  database: string;
-  user: string;
-  password: string;
-  schema: string;
-  table: string;
-}>;
+type Config = Readonly<{ schema: string; table: string }> & pg.PoolConfig;
 
 const DEFAULT_CONFIG: Config = {
   host: "localhost",
@@ -156,7 +148,8 @@ export class PostgresStore implements Store {
    */
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this._pool = new Pool(this.config);
+    const { schema: _, table: __, ...poolConfig } = this.config;
+    this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
   }
