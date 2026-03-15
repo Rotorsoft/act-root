@@ -595,10 +595,11 @@ export class Act<
 
         tracer.leased(leased);
 
+        const fetchedMap = new Map(fetched.map((f) => [f.stream, f]));
         const handled = await Promise.all(
           leased.map((lease) => {
             // fast-forward watermark using fetched events or window max
-            const streamFetch = fetched.find((f) => f.stream === lease.stream);
+            const streamFetch = fetchedMap.get(lease.stream);
             const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
             return this.handle(
               { ...lease, at },

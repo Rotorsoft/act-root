@@ -206,3 +206,17 @@ Key: uses `=` (not `~` regex) for the stream match, which leverages the `(stream
 | **500 total, 50 active** | 5,416 | 58 | 24.0 | 15.6 | **35% faster** |
 
 The filter eliminates wasted claims — only streams with pending events are returned. At 200 streams with 10 active, claim returns 12 instead of 2,161 (216x fewer), and the drain cycle is 3.4x faster.
+
+---
+
+## Drain Map Lookup (v0.24.0)
+
+**PR:** #475 — Replace O(N²) `fetched.find()` with O(1) Map lookup.
+
+### Problem
+
+In the drain handle phase, `fetched.find((f) => f.stream === lease.stream)` performed a linear scan for each leased stream — O(N) per lease, called N times = O(N²). At `streamLimit=100`, up to 10,000 iterations per drain cycle.
+
+### Fix
+
+Convert `fetched` array to `Map<string, ...>` before the handle loop. O(N) to build, O(1) per lookup. Provable complexity improvement — no benchmark needed.
