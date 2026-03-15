@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   act,
+  dispose,
   projection,
   slice,
   state,
@@ -11,6 +12,10 @@ import {
 describe("slice", () => {
   beforeEach(async () => {
     await store().drop();
+  });
+
+  afterAll(async () => {
+    await dispose()();
   });
   const schema = z.object({
     count: z.number(),

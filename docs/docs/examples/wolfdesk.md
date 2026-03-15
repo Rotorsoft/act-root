@@ -1,42 +1,163 @@
+---
+id: wolfdesk
+title: WolfDesk
+---
+
 # WolfDesk Example
 
-This example demonstrates a ticketing system (WolfDesk) built with the Act Framework. It highlights complex workflows, state management, and event-driven design, and shows how to model real-world business processes using state machines and events.
+A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, invariants with actor context, and background jobs.
 
-## What You'll Learn
+Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Khononov.
 
-- How to model a ticketing system as a set of state machines
-- How to define actions, events, and reactions for complex workflows
-- How to use schemas for validation and type safety
-- How to test and run the example
+**Source:** [packages/wolfdesk/src/](https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src)
 
-## Source Files
+## Architecture
 
-- [main.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/main.ts): Example usage and entry point
-- [ticket.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/ticket.ts): Ticket domain logic
-- [tickets.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/tickets.ts): Ticket collection logic
-- [bootstrap.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/bootstrap.ts): Initialization logic
-- [jobs.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/jobs.ts): Background jobs
-- [errors.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/errors.ts): Error definitions
+```
+bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSlice(Ops).withProjection(Projection).build()
+ticket-creation.ts    → TicketCreation state + TicketCreationSlice
+ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
+ticket-operations.ts  → TicketOperations state + TicketOpsSlice
+ticket-projections.ts → TicketProjection (read model)
+ticket-invariants.ts  → Business rules
+schemas/              → Zod schemas for actions, events, state
+services/             → External service stubs (agent assignment, notifications)
+jobs.ts               → Background processing
+```
 
-### Schemas
+## Patterns Demonstrated
 
-- [external.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/external.schemas.ts)
-- [ticket.state.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.state.schemas.ts)
-- [ticket.action.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.action.schemas.ts)
-- [ticket.event.schemas.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/schemas/ticket.event.schemas.ts)
+### Partial States
 
-### Services
+Three separate state definitions share the name `"Ticket"` and merge automatically:
 
-- [agent.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/services/agent.ts)
-- [notification.ts](https://github.com/rotorsoft/act-root/blob/master/packages/wolfdesk/src/services/notification.ts)
+```typescript
+// ticket-creation.ts
+const TicketCreation = state({ Ticket: TicketCreationState })
+  .emits({ TicketOpened, TicketClosed, TicketResolved })
+  // ...
 
-## How It Works
+// ticket-messaging.ts
+const TicketMessaging = state({ Ticket: TicketMessagingState })
+  .emits({ MessageAdded, AttachmentAdded })
+  // ...
 
-1. The ticket state machine models the lifecycle of a support ticket.
-2. Actions represent user or system commands (create, assign, resolve, etc.).
-3. Events are emitted for each action and drive state transitions.
-4. Reactions and background jobs automate workflows and notifications.
+// ticket-operations.ts
+const TicketOperations = state({ Ticket: TicketOperationsState })
+  .emits({ TicketAssigned, TicketEscalated })
+  // ...
+```
 
-## Usage
+When composed via `act().withSlice(...)`, these merge into a single `"Ticket"` state with all actions, events, and patches combined.
 
-See the source files above for implementation details and usage examples.
+### Vertical Slices
+
+Each feature is a self-contained slice with its state and reactions:
+
+```typescript
+export const TicketCreationSlice = slice()
+  .withState(TicketCreation)
+  .withState(TicketOperations)    // needed for cross-state dispatch
+  .on("TicketOpened")
+    .do(async function assign(event, _stream, app) {
+      const agent = assignAgent(event.stream, event.data.supportCategoryId, event.data.priority);
+      await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+    })
+  .build();
+```
+
+The slice includes `TicketOperations` because its reaction needs to dispatch `AssignTicket` (an action on that state).
+
+### Cross-Aggregate Reactions
+
+When a ticket is opened, the creation slice automatically assigns an agent by dispatching an action on the operations state:
+
+```typescript
+.on("TicketOpened").do(async function assign(event, _stream, app) {
+  await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+  //                                                                  ^^^^^ causation tracking
+})
+```
+
+The triggering event is passed as the 4th argument for correlation/causation tracking.
+
+### Invariants with Actor Context
+
+Business rules that check both state and the acting user:
+
+```typescript
+// ticket-invariants.ts
+export const mustBeOpen: Invariant<{ status: string }> = {
+  description: "Ticket must be open",
+  valid: (state) => state.status === "open",
+};
+
+export const mustBeUserOrAgent: Invariant<
+  { userId: string; agentId?: string },
+  Actor
+> = {
+  description: "Must be ticket owner or assigned agent",
+  valid: (state, actor) =>
+    state.userId === actor?.id || state.agentId === actor?.id,
+};
+
+// Used in state builder
+.on({ MarkTicketResolved })
+  .given([mustBeOpen, mustBeUserOrAgent])
+  .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
+```
+
+### Projections (Read Models)
+
+A standalone projection maintains a read model across all ticket events:
+
+```typescript
+export const TicketProjection = projection("tickets")
+  .on({ TicketOpened })
+    .do(async function opened({ stream, data }) {
+      await db.insert(tickets).values({ id: stream, ...data });
+    })
+  .on({ TicketAssigned })
+    .do(async function assigned({ stream, data }) {
+      await db.update(tickets).set(data).where(eq(tickets.id, stream));
+    })
+  .on({ MessageAdded })
+    .do(async function messageAdded({ stream }) {
+      await db.update(tickets)
+        .set({ messages: sql`${tickets.messages} + 1` })
+        .where(eq(tickets.id, stream));
+    })
+  .build();
+```
+
+### Composition
+
+Everything is wired together in `bootstrap.ts`:
+
+```typescript
+export const app = act()
+  .withSlice(TicketCreationSlice)
+  .withSlice(TicketMessagingSlice)
+  .withSlice(TicketOpsSlice)
+  .withProjection(TicketProjection)
+  .build();
+```
+
+### Custom Error Types
+
+Domain-specific errors for business logic:
+
+```typescript
+export class TicketCannotOpenTwiceError extends Error {
+  constructor(stream: string) {
+    super(`Ticket ${stream} is already open`);
+  }
+}
+```
+
+## Running
+
+```bash
+pnpm dev:wolfdesk
+pnpm -F wolfdesk test
+```

@@ -1,9 +1,13 @@
 import { z } from "zod";
-import { act, state, store } from "../src/index.js";
+import { act, dispose, state, store } from "../src/index.js";
 
 type MyActor = { id: string; name: string; role: string; tenantId: string };
 
 describe("actor generic", () => {
+  afterAll(async () => {
+    await dispose()();
+  });
+
   const Counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ Incremented: z.object({ by: z.number() }) })

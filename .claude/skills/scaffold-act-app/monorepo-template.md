@@ -17,8 +17,8 @@ packages:
   "name": "my-app",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22.18.0", "pnpm": ">=10.27.0" },
-  "packageManager": "pnpm@10.29.3",
+  "engines": { "node": ">=22.18.0", "pnpm": ">=10.32.1" },
+  "packageManager": "pnpm@10.32.1",
   "scripts": {
     "build": "pnpm -r build",
     "test": "vitest run",
@@ -85,7 +85,7 @@ export default defineConfig({
   "version": "0.0.1",
   "main": "./src/index.ts",
   "dependencies": {
-    "@rotorsoft/act": "^0.15.0",
+    "@rotorsoft/act": "^0.20.0",
     "zod": "^4.3.6"
   }
 }
@@ -120,7 +120,7 @@ export default defineConfig({
   },
   "dependencies": {
     "@my-app/domain": "workspace:*",
-    "@rotorsoft/act": "^0.15.0",
+    "@rotorsoft/act": "^0.20.0",
     "@rotorsoft/act-sse": "^0.1.0",
     "@tanstack/react-query": "^5.90.21",
     "@trpc/client": "11.10.0",

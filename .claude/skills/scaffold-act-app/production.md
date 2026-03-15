@@ -21,18 +21,66 @@ store(new PostgresStore({
 
 Install: `pnpm -F @my-app/app add @rotorsoft/act-pg`
 
+## Cache Strategy
+
+Cache is always-on by default with `InMemoryCache` (LRU, maxSize 1000). It stores the latest state checkpoint per stream, eliminating full event replay on every `load()`. Actions update the cache after each successful commit; concurrency errors invalidate stale entries automatically.
+
+### Single-Process Deployment
+
+No configuration needed — `InMemoryCache` works transparently. All `load()` calls after the first action are guaranteed cache hits with zero store replay, regardless of stream length.
+
+### Multi-Process / Distributed Deployment
+
+`InMemoryCache` is per-process — each worker maintains its own cache. This is fine for most deployments because:
+- Cache misses simply fall back to the store (with snapshots for cold-start resilience)
+- The cache is rebuilt naturally as actions are processed
+
+For workloads where cross-process cache sharing matters (e.g., many workers loading the same hot streams), implement the `Cache` interface backed by Redis:
+
+```typescript
+import { cache } from "@rotorsoft/act";
+
+cache(new RedisCache({ url: process.env.REDIS_URL ?? "redis://localhost:6379" }));
+```
+
+The `Cache` interface is async, so external adapters work without changing framework code:
+
+```typescript
+interface Cache extends Disposable {
+  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
+  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
+}
+```
+
+### Snapshots for Cold-Start Resilience
+
+On process restart or LRU eviction, the cache is empty. Configure `.snap()` on long-lived states to limit event replay from the store:
+
+```typescript
+const Account = state({ Account: schema })
+  // ...
+  .snap((s) => s.patches >= 50)  // snapshot every 50 events
+  .build();
+```
+
+Without snapshots, a cold-start `load()` replays the entire event stream. With snap@50, it replays at most 49 events from the last snapshot.
+
 ## Background Correlation (Large-Scale)
 
 For high-throughput deployments, use periodic background correlation instead of (or in addition to) `app.settle()`:
 
 ```typescript
+import { dispose } from "@rotorsoft/act";
+
 // Periodic correlation resolution — discovers new reaction streams every 3s
 const stop = app.start_correlations({ after: 0, limit: 10 }, 3000);
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
+// Graceful shutdown — dispose() cleans up all adapters (store, cache, etc.)
+process.on("SIGTERM", async () => {
   stop();
-  store().dispose();
+  await dispose()();
 });
 ```
 
@@ -321,7 +369,7 @@ broadcastState(streamId, snap); // single function, every path
 
 ### Bootstrap Order
 
-Initialize in this order: DB → event store → initial settle (replays events and runs projections) → warm caches → enable background processes.
+Initialize in this order: DB → event store (+ optional cache adapter) → initial settle (replays events and runs projections) → warm caches → enable background processes.
 
 ```typescript
 async function bootstrap() {

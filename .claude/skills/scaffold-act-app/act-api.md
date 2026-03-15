@@ -297,16 +297,20 @@ type Emitted<E> = [EventName, EventData];
 ## 10. store().seed() — Test Isolation
 
 ```typescript
-import { store } from "@rotorsoft/act";
+import { store, dispose } from "@rotorsoft/act";
 
 beforeEach(async () => {
   await store().seed();
   clearItems();           // also reset in-memory projections
   clearUsers();           // each projection needs its own clear
 });
+
+afterAll(async () => {
+  await dispose()();      // disposes all adapters (store, cache, etc.)
+});
 ```
 
-`seed()` initializes or resets the store. For InMemoryStore, call it in `beforeEach` (or `beforeAll`) to ensure a clean state between tests. For PostgresStore, it creates necessary tables and indexes.
+`seed()` initializes or resets the store. For InMemoryStore, call it in `beforeEach` (or `beforeAll`) to ensure a clean state between tests. For PostgresStore, it creates necessary tables and indexes. `dispose()()` cleans up all registered adapters (store, cache, and any custom disposers) — the cache is cleared automatically during disposal.
 
 **Projection cleanup**: In-memory projections (Maps, arrays) persist across tests. Export `clear*()` functions from each projection module and call them in `beforeEach` alongside `store().seed()`.
 
@@ -323,13 +327,111 @@ beforeEach(async () => {
   clearOrders();
   clearUsers();
 });
+
+afterAll(async () => {
+  await dispose()();  // cleans up store, cache, and all adapters
+});
 ```
 
-**Port pattern:** `store()` returns the current store adapter (defaults to InMemoryStore). To switch adapters:
+**Port pattern:** `store()` and `cache()` return the current adapters (defaults to InMemoryStore and InMemoryCache). To switch adapters:
 ```typescript
-import { store } from "@rotorsoft/act";
+import { store, cache } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 
-store(new PostgresStore({ /* config */ }));  // sets the adapter
+store(new PostgresStore({ /* config */ }));  // sets the store adapter
 await store().seed();                         // initializes it
+
+// For distributed deployments, replace the cache:
+cache(new RedisCache({ /* config */ }));      // sets the cache adapter
 ```
+
+## 11. Cache Port — Always-On State Caching
+
+Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It stores the latest state checkpoint per stream, eliminating full event replay on every `load()`.
+
+**How it works:**
+- `load()` checks `cache().get(stream)` first — on hit, only events after the cached position are replayed
+- `action()` updates the cache after every successful commit (`cache().set()`)
+- On `ConcurrencyError`, the stale cache entry is invalidated (`cache().invalidate()`)
+
+**Cache vs Snapshots:**
+- **Cache** (in-memory) — checked first on every `load()`. Eliminates store round-trips entirely on warm hits.
+- **Snapshots** (in-store as `__snapshot__` events) — fallback on cache miss (cold start, LRU eviction, process restart). Avoids replaying the entire event stream.
+
+```typescript
+import { cache } from "@rotorsoft/act";
+
+// Cache is active by default — no setup needed
+// load() and action() use it transparently
+
+// For distributed deployments, replace with a custom adapter:
+cache(new RedisCache({ url: "redis://localhost:6379" }));
+```
+
+The `Cache` interface is async for forward-compatibility with external caches (Redis, Memcached, etc.):
+
+```typescript
+interface Cache extends Disposable {
+  get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
+  set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
+}
+```
+
+## 12. Projection Builder
+
+Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive a `Dispatcher`.
+
+```typescript
+import { projection } from "@rotorsoft/act";
+
+const ItemProjection = projection("items")
+  .on({ ItemCreated })
+    .do(async ({ stream, data }) => {
+      items.set(stream, { name: data.name, status: "Open" });
+    })
+  .on({ ItemClosed })
+    .do(async ({ stream, data }) => {
+      const item = items.get(stream);
+      if (item) item.status = "Closed";
+    })
+  .build();
+```
+
+**API:**
+- `projection(target?)` — Creates a builder; optional default target stream
+- `.on({ EventName: schema })` — Register an event handler (record shorthand)
+- `.do(handler)` — Handler receives `(event, stream)` — no Dispatcher
+- `.to(resolver)` / `.void()` — Override the default resolver per handler
+- `.build()` — Returns a `Projection` with `_tag: "Projection"`
+
+## 13. Slice Builder — Vertical Slice Architecture
+
+Slices group partial states with scoped reactions into self-contained feature modules. Handlers receive a typed `Dispatcher` for cross-state action dispatch.
+
+```typescript
+import { slice } from "@rotorsoft/act";
+
+const ItemSlice = slice()
+  .withState(Item)
+  .withProjection(ItemProjection)  // embed projection (events must be subset of slice events)
+  .on("ItemCreated")  // plain string, NOT record shorthand
+    .do(async (event, stream, app) => {
+      // app is a typed Dispatcher — use for cross-state actions
+      await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+```
+
+**API:**
+- `slice()` — Creates a builder
+- `.withState(state)` — Register a partial state
+- `.withProjection(proj)` — Embed a built Projection (events must be a subset of slice events)
+- `.on(eventName)` — React to an event (string, not record)
+- `.do(handler)` — Handler receives `(event, stream, app)` where `app` is a `Dispatcher`
+- `.to(resolver)` / `.void()` — Set target stream resolver
+- `.build()` — Returns a `Slice` with `_tag: "Slice"`
+
+**Important:** `.void()` reactions are **never processed by `drain()`**. Use `.to(resolver)` for any reaction that must be discovered and executed during drain.
