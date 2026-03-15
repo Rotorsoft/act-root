@@ -104,7 +104,9 @@ Net reduction of 139 lines in the first commit, plus cleaner separation of conce
 
 ### Problem
 
-`correlate()` re-scanned from event 0 on every `settle()` call. With `limit: 100`, it only ever saw the first 100 events — new events beyond that window were never discovered. Additionally, every correlate call re-evaluated all resolvers (static and dynamic) and re-subscribed already-known targets.
+The framework already handles long streams efficiently — once a stream is subscribed, the per-stream watermark (`at`) ensures `claim()` + drain picks up new events without needing correlate. And `start_correlations()` already advances its scan position between ticks.
+
+However, `settle()` passed a static `{ after: -1, limit: 100 }` to correlate on every call, re-scanning the same early events and re-evaluating all resolvers (static and dynamic) against already-subscribed targets. While harmless (subscribe is idempotent), this was wasted work — especially for apps with only static resolvers where correlate adds no value.
 
 ### Strategy
 
