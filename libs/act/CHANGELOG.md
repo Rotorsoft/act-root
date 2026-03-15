@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.22.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.21.0...@rotorsoft/act-v0.22.0) (2026-03-15)
+
+
+### Features
+
+* **act:** correlation checkpoint with static resolver optimization ([2291906](https://github.com/rotorsoft/act-root/commit/2291906202aa5fdc332b7e9c96fc63fea85c8b8e))
+
 # [@rotorsoft/act-v0.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.20.0...@rotorsoft/act-v0.21.0) (2026-03-15)
 
 
