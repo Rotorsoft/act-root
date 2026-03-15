@@ -760,15 +760,14 @@ export class Act<
       { ...query, after }
     );
 
-    // Advance checkpoint
-    this._correlation_checkpoint = last_id;
-
     if (correlated.size) {
       const streams = [...correlated.entries()].map(([stream, { source }]) => ({
         stream,
         source,
       }));
       const { subscribed } = await store().subscribe(streams);
+      // Advance checkpoint only after subscribe succeeds
+      this._correlation_checkpoint = last_id;
       if (subscribed) {
         tracer.correlated(streams);
         // Track newly subscribed dynamic targets
@@ -778,6 +777,8 @@ export class Act<
       }
       return { subscribed, last_id };
     }
+    // No streams to subscribe — safe to advance
+    this._correlation_checkpoint = last_id;
     return { subscribed: 0, last_id };
   }
 
