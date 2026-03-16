@@ -255,7 +255,7 @@ export type Drain<TEvents extends Schemas> = {
  *
  * @property debounceMs - Debounce window in milliseconds (default: 10)
  * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
- * @property maxPasses - Maximum correlate→drain loops (default: 5)
+ * @property maxPasses - Maximum correlate→drain loops (default: 1)
  */
 export type SettleOptions = DrainOptions & {
   readonly debounceMs?: number;

@@ -198,6 +198,7 @@ Key: uses `=` (not `~` regex) for the stream match, which leverages the `(stream
 
 ### Benchmark (PostgreSQL, 20 drain cycles after catching up)
 
+
 | Config | Baseline claimed | Filtered claimed | Baseline (ms/cycle) | Filtered (ms/cycle) | Improvement |
 |---|---:|---:|---:|---:|---|
 | **50 total, 5 active** | 500 | 5 | 19.1 | 2.4 | **8x faster** |
@@ -206,3 +207,45 @@ Key: uses `=` (not `~` regex) for the stream match, which leverages the `(stream
 | **500 total, 50 active** | 5,416 | 58 | 24.0 | 15.6 | **35% faster** |
 
 The filter eliminates wasted claims — only streams with pending events are returned. At 200 streams with 10 active, claim returns 12 instead of 2,161 (216x fewer), and the drain cycle is 3.4x faster.
+
+---
+
+## Drain Skip for Non-Reactive Events (v0.24.0)
+
+**Issue:** #482 — Skip drain when committed events have no registered reactions.
+
+### Problem
+
+`drain()` runs the full claim → query → ack cycle (3 DB round-trips) even when none of the recently committed events have registered reactions. For apps where projections handle only a subset of event types (e.g., 7 lifecycle events out of 18 total), ~61% of drain cycles do no useful work.
+
+### Strategy: Build-time classification + runtime flag
+
+1. **Build-time:** `_reactive_events` set collects event names with at least one registered reaction in the `Act` constructor
+2. **In `do()`:** `_needs_drain` flag set when a committed event name matches `_reactive_events` (O(1) `Set.has()`)
+3. **In `drain()`:** return empty result immediately when `_needs_drain` is false — zero DB round-trips
+4. **Flag cleared** only when drain completes with nothing acked, blocked, or errored (fully caught up)
+5. **Cold start:** flag set in `_init_correlation()` to ensure historical events are processed
+
+Also changed `maxPasses` default from 5 to 1 — most apps need a single correlate→drain pass per settle. Apps with reaction chains can opt into `maxPasses: N`.
+
+### Benchmark (PostgreSQL, local, vitest bench)
+
+| Scenario | ops/s | mean (ms) |
+|---|---:|---:|
+| **Non-reactive event (drain skipped)** | 72 | 13.9 |
+| **Reactive event (full drain)** | 31 | 32.6 |
+| **Improvement** | **2.34x faster** | **19ms saved** |
+
+The 19ms saved per non-reactive cycle corresponds to the 3 DB round-trips (claim + query + ack) that are eliminated. In production with network latency to a remote database, the savings would be proportionally larger.
+
+### InMemoryStore benchmark (for comparison)
+
+| Scenario | ops/s | mean (ms) |
+|---|---:|---:|
+| **Non-reactive event (drain skipped)** | 281 | 3.6 |
+| **Reactive event (full drain)** | 109 | 9.2 |
+| **Improvement** | **2.58x faster** | **5.6ms saved** |
+
+### No interface changes
+
+Purely internal to `Act` — two new private fields (`_reactive_events`, `_needs_drain`), no Store interface changes.

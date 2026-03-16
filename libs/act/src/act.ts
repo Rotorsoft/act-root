@@ -933,7 +933,7 @@ export class Act<
    * @param options - Settle configuration options
    * @param options.debounceMs - Debounce window in milliseconds (default: 10)
    * @param options.correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
-   * @param options.maxPasses - Maximum correlate→drain loops (default: 5)
+   * @param options.maxPasses - Maximum correlate→drain loops (default: 1)
    * @param options.streamLimit - Maximum streams per drain cycle (default: 10)
    * @param options.eventLimit - Maximum events per stream (default: 10)
    * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
