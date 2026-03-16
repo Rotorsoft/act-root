@@ -395,6 +395,76 @@ async function bootstrap() {
 
 Only active entities replay events (typically few). Completed entities keep their DB summaries from the previous run.
 
+#### Projection Versioning — Rebuilding Stale Summaries
+
+When the summary shape changes (new fields, renamed fields, derived data), completed entities need their summaries rebuilt from the event log. SQL migrations can handle simple data transformations, but when the change requires replaying events through application logic (patches), use **projection versioning** — an application-level migration that runs once per version bump.
+
+**Schema:** Add a `summary_version` integer column (default 0) to the projection table.
+
+```sql
+-- Drizzle migration
+ALTER TABLE projections ADD COLUMN IF NOT EXISTS summary_version INTEGER NOT NULL DEFAULT 0;
+```
+
+**Version constant:** Bump this when `toSummary()` shape changes.
+
+```typescript
+// schema.ts
+export const SUMMARY_VERSION = 1; // bump to trigger rebuild on next deploy
+```
+
+**`writeSummary` stamps the version:**
+
+```typescript
+async function writeSummary(id: string, summary: Summary) {
+  await db.insert(projections)
+    .values({ id, summary, summaryVersion: SUMMARY_VERSION })
+    .onConflictDoUpdate({
+      target: projections.id,
+      set: { summary, summaryVersion: SUMMARY_VERSION },
+    });
+}
+```
+
+**Bootstrap queries for stale rows and rebuilds them once:**
+
+```typescript
+async function getStaleIds(): Promise<string[]> {
+  const rows = await db.select({ id: projections.id })
+    .from(projections)
+    .where(lt(projections.summaryVersion, SUMMARY_VERSION));
+  return rows.map((r) => r.id);
+}
+
+async function bootstrap() {
+  // ... initDb, settle, warm caches ...
+
+  // Seed broadcast cache for active entities (memory only, no DB write)
+  for (const id of activeIds) {
+    const state = await rebuildFromEvents(id, { persist: false });
+    broadcast.cache.set(id, { ...state, _v: 0 });
+  }
+
+  // Rebuild stale completed summaries — runs once per SUMMARY_VERSION bump
+  const staleIds = (await getStaleIds()).filter((id) => !activeIds.includes(id));
+  for (const id of staleIds) {
+    await rebuildFromEvents(id); // replays events, calls writeSummary (stamps version)
+  }
+  if (staleIds.length > 0) {
+    log.info("Bootstrap: rebuilt stale summaries", {
+      count: staleIds.length,
+      version: SUMMARY_VERSION,
+    });
+  }
+}
+```
+
+**Key properties:**
+- Active entities always rebuild into memory (broadcast cache doesn't survive restarts)
+- Completed entities rebuild only when `summary_version < SUMMARY_VERSION`
+- After rebuild, `writeSummary` stamps them — next restart skips them
+- SQL migrations handle pure data transforms; projection versioning handles changes requiring event replay through application patches
+
 ### Aggregate Snapshots vs Projection State
 
 The snapshot from `app.do()` has all event patches applied — it is the authoritative current state. Projections run asynchronously via `settle()` and can lag behind by any amount.
