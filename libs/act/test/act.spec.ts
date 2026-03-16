@@ -578,4 +578,62 @@ describe("act", () => {
     // Re-seed for other tests
     await store().seed();
   });
+
+  it("should handle app with zero reactions (no _needs_drain on init)", async () => {
+    // App with no reactions — _reactive_events is empty
+    const s = state({ NoRx: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ NoRxEvt: ZodEmpty })
+      .patch({ NoRxEvt: () => ({}) })
+      .on({ doNoRx: ZodEmpty })
+      .emit(() => ["NoRxEvt", {}])
+      .build();
+
+    const noRxApp = act().withState(s).build();
+    expect((noRxApp as any)._reactive_events.size).toBe(0);
+    // correlate inits but does NOT set _needs_drain (no reactive events)
+    await noRxApp.correlate();
+    expect((noRxApp as any)._needs_drain).toBe(false);
+    // drain skips immediately
+    const d = await noRxApp.drain();
+    expect(d.fetched.length).toBe(0);
+  });
+
+  it("should handle leased stream with no payloads in map", async () => {
+    // Claim returns two streams, but fetched only has events for one.
+    // The second stream won't have an entry in payloadsMap → `|| []` fallback.
+    const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
+      {
+        stream: "has-events",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: true,
+      },
+      {
+        stream: "no-events",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: false,
+      },
+    ]);
+    // query_array returns events only for the first stream's source
+    const origQueryArray = app.query_array.bind(app);
+    const mockQueryArray = vi
+      .spyOn(app, "query_array")
+      .mockImplementation(async (q) => {
+        if (q.stream === undefined) return origQueryArray(q);
+        return []; // no events for any stream
+      });
+    const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
+    (app as any)._needs_drain = true;
+    const d = await app.drain();
+    expect(d.leased.length).toBe(2);
+    mockClaim.mockRestore();
+    mockQueryArray.mockRestore();
+    mockAck.mockRestore();
+  });
 });
