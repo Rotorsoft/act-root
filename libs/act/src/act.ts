@@ -146,9 +146,7 @@ export class Act<
   ) {
     // Classify resolvers and reactive events at build time
     const statics: Array<{ stream: string; source?: string }> = [];
-    for (const [name, register] of Object.entries(
-      this.registry.events
-    ) as Array<[string, { reactions: Map<string, { resolver: unknown }> }]>) {
+    for (const [name, register] of Object.entries(this.registry.events)) {
       if (register.reactions.size > 0) {
         this._reactive_events.add(name);
       }
@@ -156,8 +154,10 @@ export class Act<
         if (typeof reaction.resolver === "function") {
           this._has_dynamic_resolvers = true;
         } else {
-          const r = reaction.resolver as { target: string; source?: string };
-          statics.push({ stream: r.target, source: r.source });
+          statics.push({
+            stream: reaction.resolver.target,
+            source: reaction.resolver.source,
+          });
         }
       }
     }
