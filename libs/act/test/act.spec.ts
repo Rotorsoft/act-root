@@ -253,6 +253,14 @@ describe("act", () => {
     expect(drained).toBeDefined();
   });
 
+  it("should handle zero leaseMillis without setting lease fields", async () => {
+    await app.do("increment", { stream: "lease-zero", actor }, {});
+    await app.correlate();
+    const d = await app.drain({ leaseMillis: 0 });
+    // With millis=0, lease fields aren't set — drain still runs but ack may not match
+    expect(d.leased.length).toBeGreaterThan(0);
+  });
+
   it("should exit drain loop on error", async () => {
     // mock store claim to throw
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
