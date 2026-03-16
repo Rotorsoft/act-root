@@ -295,6 +295,8 @@ export const ItemSlice = slice()
 
 > **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §6 (Void Reactions).
 
+**Lifecycle-only projections**: When using `act-sse` for real-time broadcast, projections only need to persist data for **lifecycle events** (entity created, member added, completed, deleted, etc.) — not every high-frequency operational event. The broadcast cache is the source of truth for full state; the DB stores lightweight summaries for cold-start recovery and list views. See [production.md](production.md) § Projection Optimization Strategies.
+
 ### Step 5 — Cross-Aggregate Projections
 
 Projections can consume events from multiple aggregates. Include the additional state in the slice to make the events available:
@@ -446,6 +448,7 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Invariants enforce all business rules
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
+- [ ] Projections register only lifecycle event handlers when using act-sse broadcast
 - [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`, `dispose()()` in `afterAll`
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
