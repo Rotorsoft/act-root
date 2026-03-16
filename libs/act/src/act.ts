@@ -155,7 +155,7 @@ export class Act<
       for (const reaction of register.reactions.values()) {
         if (typeof reaction.resolver === "function") {
           this._has_dynamic_resolvers = true;
-        } else if (reaction.resolver) {
+        } else {
           const r = reaction.resolver as { target: string; source?: string };
           statics.push({ stream: r.target, source: r.source });
         }
@@ -626,7 +626,7 @@ export class Act<
             const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
             return this.handle(
               { ...lease, at },
-              payloadsMap.get(lease.stream) || []
+              payloadsMap.get(lease.stream)!
             );
           })
         );

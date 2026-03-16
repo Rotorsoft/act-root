@@ -523,6 +523,12 @@ describe("act", () => {
     expect((staticApp as any)._subscribed_statics.has("my-static-target")).toBe(
       true
     );
+
+    // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
+    await staticApp.do("doStatic", { stream: "static-1", actor }, {});
+    await staticApp.correlate();
+    const d = await staticApp.drain();
+    expect(d.acked.length).toBeGreaterThan(0);
   });
 
   it("should clear _needs_drain when drain processes events with no results", async () => {
@@ -577,6 +583,33 @@ describe("act", () => {
     await dispose()();
     // Re-seed for other tests
     await store().seed();
+  });
+
+  it("should evaluate dynamic resolvers in correlate and skip static ones", async () => {
+    // Build an app with BOTH dynamic and static resolvers on the same event
+    // This forces correlate to enter the inner loop (has dynamic resolvers)
+    // and encounter both function and non-function resolvers
+    const s = state({ Mix: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ MixEvt: ZodEmpty })
+      .patch({ MixEvt: () => ({}) })
+      .on({ doMix: ZodEmpty })
+      .emit(() => ["MixEvt", {}])
+      .build();
+
+    const mixApp = act()
+      .withState(s)
+      .on("MixEvt")
+      .do(() => Promise.resolve())
+      .to("static-target") // static resolver
+      .on("MixEvt")
+      .do(() => Promise.resolve())
+      .to((e) => ({ target: `dyn-${e.stream}` })) // dynamic resolver
+      .build();
+
+    await mixApp.do("doMix", { stream: "mix-1", actor }, {});
+    const r = await mixApp.correlate({ limit: 500 });
+    expect(r.subscribed).toBe(1); // dynamic target discovered
   });
 
   it("should handle app with zero reactions (no _needs_drain on init)", async () => {
