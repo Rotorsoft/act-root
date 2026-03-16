@@ -9,6 +9,7 @@
  * @remarks
  * Import from this module to access all core framework types in one place.
  */
+export type { Patch } from "@rotorsoft/act-patch";
 export type * from "./action.js";
 export * from "./errors.js";
 export type * from "./ports.js";
