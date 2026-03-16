@@ -128,6 +128,26 @@ describe("act", () => {
     expect(drained2.acked.length).toBeGreaterThan(0);
   });
 
+  it("should drain when batch mixes non-reactive and reactive events", async () => {
+    // non-reactive event alone would skip, but a reactive event in the same batch forces drain
+    await app.do("ignore2", { stream: "s3", actor }, {});
+    await app.do("add", { stream: "s3", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.length).toBeGreaterThan(0);
+  });
+
+  it("should emit settled even when drain is skipped", async () => {
+    const settled = vi.fn();
+    app.on("settled", settled);
+    // non-reactive event — drain will be skipped
+    await app.do("ignore2", { stream: "s4", actor }, {});
+    app.settle({ debounceMs: 1 });
+    await sleep(100);
+    expect(settled).toHaveBeenCalled();
+    app.off("settled", settled);
+  });
+
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {
     const started = app.start_correlations({}, 10, vi.fn());
     expect(started).toBe(true);
