@@ -395,6 +395,76 @@ async function bootstrap() {
 
 Only active entities replay events (typically few). Completed entities keep their DB summaries from the previous run.
 
+#### Projection Versioning — Rebuilding Stale Projections
+
+When the projected read model shape changes (new fields, renamed fields, derived data), completed entities need their projections rebuilt from the event log. SQL migrations can handle simple data transformations, but when the change requires replaying events through application logic (patches), use **projection versioning** — an application-level migration that runs once per version bump.
+
+**Schema:** Add a `projection_version` integer column (default 0) to the projection table.
+
+```sql
+-- Drizzle migration
+ALTER TABLE projections ADD COLUMN IF NOT EXISTS projection_version INTEGER NOT NULL DEFAULT 0;
+```
+
+**Version constant:** Bump this when the projection shape changes.
+
+```typescript
+// schema.ts
+export const PROJECTION_VERSION = 1; // bump to trigger rebuild on next deploy
+```
+
+**`writeProjection` stamps the version:**
+
+```typescript
+async function writeProjection(id: string, data: ProjectionData) {
+  await db.insert(projections)
+    .values({ id, data, projectionVersion: PROJECTION_VERSION })
+    .onConflictDoUpdate({
+      target: projections.id,
+      set: { data, projectionVersion: PROJECTION_VERSION },
+    });
+}
+```
+
+**Bootstrap queries for stale rows and rebuilds them once:**
+
+```typescript
+async function getStaleIds(): Promise<string[]> {
+  const rows = await db.select({ id: projections.id })
+    .from(projections)
+    .where(lt(projections.projectionVersion, PROJECTION_VERSION));
+  return rows.map((r) => r.id);
+}
+
+async function bootstrap() {
+  // ... initDb, settle, warm caches ...
+
+  // Seed broadcast cache for active entities (memory only, no DB write)
+  for (const id of activeIds) {
+    const state = await rebuildFromEvents(id, { persist: false });
+    broadcast.cache.set(id, { ...state, _v: 0 });
+  }
+
+  // Rebuild stale projections — runs once per PROJECTION_VERSION bump
+  const staleIds = (await getStaleIds()).filter((id) => !activeIds.includes(id));
+  for (const id of staleIds) {
+    await rebuildFromEvents(id); // replays events, calls writeProjection (stamps version)
+  }
+  if (staleIds.length > 0) {
+    log.info("Bootstrap: rebuilt stale projections", {
+      count: staleIds.length,
+      version: PROJECTION_VERSION,
+    });
+  }
+}
+```
+
+**Key properties:**
+- Active entities always rebuild into memory (broadcast cache doesn't survive restarts)
+- Completed entities rebuild only when `projection_version < PROJECTION_VERSION`
+- After rebuild, `writeProjection` stamps them — next restart skips them
+- SQL migrations handle pure data transforms; projection versioning handles changes requiring event replay through application patches
+
 ### Aggregate Snapshots vs Projection State
 
 The snapshot from `app.do()` has all event patches applied — it is the authoritative current state. Projections run asynchronously via `settle()` and can lag behind by any amount.
