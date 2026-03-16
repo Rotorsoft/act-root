@@ -312,6 +312,8 @@ Dynamic stream discovery through correlation metadata:
 
 **Correlation optimization:** At build time, resolvers are classified as static (known target) or dynamic (function). Static targets are subscribed once at init; correlate only scans for dynamic resolvers. An in-memory checkpoint advances `after` across calls, initialized from `max(at)` on the streams table at cold start. When no dynamic resolvers exist, correlate is skipped entirely in settle.
 
+**Drain optimization:** At build time, `_reactive_events` collects event names with at least one registered reaction. In `do()`, the `_needs_drain` flag is set when a committed event matches. `drain()` returns immediately when the flag is false — saving 3 DB round-trips (claim, query, ack) per non-reactive cycle. The flag clears only when drain completes with nothing acked, blocked, or errored. Cold start sets the flag in `_init_correlation()` to process historical events. Default `maxPasses` is 1 (single correlate→drain pass per settle).
+
 ### Invariants
 
 Business rules enforced before actions execute:

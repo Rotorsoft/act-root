@@ -112,6 +112,22 @@ describe("act", () => {
     expect(drained.acked.length).toBe(0);
   });
 
+  it("should skip drain when committed events have no reactions", async () => {
+    // ignored2 has no registered reaction — drain should return immediately
+    await app.do("ignore2", { stream: "s2", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.fetched.length).toBe(0);
+    expect(drained.leased.length).toBe(0);
+    expect(drained.acked.length).toBe(0);
+
+    // reactive event should still drain normally
+    await app.do("add", { stream: "s2", actor }, {});
+    await app.correlate();
+    const drained2 = await app.drain();
+    expect(drained2.acked.length).toBeGreaterThan(0);
+  });
+
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {
     const started = app.start_correlations({}, 10, vi.fn());
     expect(started).toBe(true);
