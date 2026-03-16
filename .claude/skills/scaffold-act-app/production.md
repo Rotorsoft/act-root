@@ -314,6 +314,87 @@ onStateChange: publicProcedure
   }),
 ```
 
+### Projection Optimization Strategies
+
+Not all events need to hit the database. When a broadcast cache already serves real-time state to clients, projections can be optimized to only persist **summary data** for **lifecycle events** — the subset that changes entity existence or membership.
+
+#### Lifecycle-Only Projections
+
+Classify events into two tiers:
+
+| Tier | Examples | Projection behavior |
+|------|---------|---------------------|
+| **Lifecycle** — changes existence/membership | `Created`, `MemberAdded`, `Completed`, `Archived`, `Deleted` | Persist summary to DB |
+| **Operational** — high-frequency state changes | `Updated`, `ItemMoved`, `FieldChanged`, `EntryLogged` | Skip — broadcast cache is source of truth |
+
+The projection registers handlers **only for lifecycle events**. Operational events are not projected at all — the broadcast cache (seeded after every `app.do()`) is the single source of truth for full state.
+
+```typescript
+// Only lifecycle events — no operational handlers needed
+const OrderProjection = projection("orders")
+  .on({ OrderCreated })
+  .do(async (event) => { await persistSummary(event.stream); })
+  .on({ MemberAdded })
+  .do(async (event) => { await persistSummary(event.stream); })
+  .on({ OrderCompleted })
+  .do(async (event) => { await persistSummary(event.stream); })
+  .build();
+
+// Handler reads from broadcast cache (always hot after app.do())
+async function persistSummary(streamId: string): Promise<void> {
+  const state = broadcast.getState(streamId);
+  if (!state) return; // cold start — bootstrap will rebuild
+  const summary = toSummary(state); // lightweight ~500B vs ~2KB full state
+  await db.upsert(streamId, summary);
+}
+```
+
+**Impact:** A typical entity with 250 events might have only ~13 lifecycle events — **95% fewer DB writes**, with each write **75% smaller** (summary vs full state).
+
+#### List View Cache Freshness
+
+The DB projection only updates on lifecycle events, but list views need fresh aggregate counts (totals, progress indicators, etc.) after every event. Solve this with a `settled` listener that syncs broadcast cache → in-memory list cache:
+
+```typescript
+app.on("settled", () => {
+  for (const [id, state] of broadcast.cache.entries()) {
+    listCache.set(id, toSummary(state));
+  }
+});
+```
+
+The list cache stays fresh after every event batch. The DB only writes on lifecycle events. Clients get current data from the list cache; the DB is for cold-start recovery only.
+
+#### Cold-Start Recovery
+
+During server restart, the broadcast cache is empty. Projection handlers skip (no state to read). After `app.settle()` completes:
+
+1. Load summaries from DB (correct for completed/inactive entities from previous run)
+2. Rebuild **active** entities from event log → seed broadcast cache + overwrite summaries
+3. Enable background processes (timers, scheduled jobs, etc.)
+
+```typescript
+async function bootstrap() {
+  await initDb();
+  await store().seed();
+  await settleOnce(); // projection advances watermark, handlers skip
+
+  const entities = await getEntities(); // from DB (previous run)
+  const activeIds = Object.entries(entities)
+    .filter(([, e]) => e.status !== "completed")
+    .map(([id]) => id);
+
+  for (const id of activeIds) {
+    const state = await rebuildFromEvents(id);
+    broadcast.cache.set(id, { ...state, _v: 0 });
+  }
+
+  enableBackgroundProcesses();
+}
+```
+
+Only active entities replay events (typically few). Completed entities keep their DB summaries from the previous run.
+
 ### Aggregate Snapshots vs Projection State
 
 The snapshot from `app.do()` has all event patches applied — it is the authoritative current state. Projections run asynchronously via `settle()` and can lag behind by any amount.
