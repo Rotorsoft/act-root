@@ -266,6 +266,7 @@ describe("act", () => {
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
       throw new Error("test");
     });
+    (app as any)._needs_drain = true;
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedClaim.mockRestore();
