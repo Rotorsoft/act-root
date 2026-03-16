@@ -1,3 +1,20 @@
+# [@rotorsoft/act-v0.23.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.23.1...@rotorsoft/act-v0.23.2) (2026-03-16)
+
+
+### Bug Fixes
+
+* clear _needs_drain on empty claim, 100% line/function coverage, realistic PG bench ([08e350a](https://github.com/rotorsoft/act-root/commit/08e350a932d7a7deb7fe5101c346831c0386858a))
+* import Patch directly from act-patch instead of re-exporting ([8d2f6a5](https://github.com/rotorsoft/act-root/commit/8d2f6a5df5a040ce682635521b932a1af7ea86c1))
+* remove v8 ignore comments, clean up tests for act.ts 100% line/function coverage ([54a7ba9](https://github.com/rotorsoft/act-root/commit/54a7ba98f4d8fde040e49587d096556787e83f72))
+* resolve pre-existing type errors caught by CI typecheck ([5222bdd](https://github.com/rotorsoft/act-root/commit/5222bdd9a3f67712345caad6fa35bef424e03728))
+* restore millis guard in lease() as input validation, add test ([7c1831e](https://github.com/rotorsoft/act-root/commit/7c1831e4418035fdd904a5b37ff79b8a8129c7b8))
+
+
+### Performance Improvements
+
+* add drain-skip benchmark (2.58x faster for non-reactive events) ([c22cb68](https://github.com/rotorsoft/act-root/commit/c22cb689a0dffcd7d6d1cd8f948c2eb0f53b838a))
+* skip drain when no committed events have reactions ([765e4ea](https://github.com/rotorsoft/act-root/commit/765e4ea89226545c3c40354c4d09d98a9fdbddfa)), closes [#482](https://github.com/rotorsoft/act-root/issues/482)
+
 # [@rotorsoft/act-v0.23.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.23.0...@rotorsoft/act-v0.23.1) (2026-03-15)
 
 
