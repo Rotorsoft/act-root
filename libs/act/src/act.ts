@@ -574,8 +574,10 @@ export class Act<
           randomUUID(),
           leaseMillis
         );
-        if (!leased.length)
+        if (!leased.length) {
+          this._needs_drain = false;
           return { fetched: [], leased: [], acked: [], blocked: [] };
+        }
 
         // Fetch events for each leased stream
         const fetched = await Promise.all(

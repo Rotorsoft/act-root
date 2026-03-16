@@ -1,9 +1,9 @@
 /**
  * Benchmark: drain skip optimization for non-reactive events (PostgreSQL).
  *
- * Measures the cost of drain() when committed events have no registered
- * reactions vs events that do. With the _needs_drain optimization,
- * non-reactive drains return immediately without touching the store.
+ * Simulates a realistic workload: an entity with 18 event types where only 7
+ * have registered reactions (lifecycle events). The remaining 11 are
+ * high-frequency operational events that should skip drain entirely.
  *
  * Run: pnpm vitest bench libs/act-pg/test/drain-skip.bench.ts --run
  */
@@ -12,26 +12,90 @@ import { afterAll, beforeAll, bench, describe } from "vitest";
 import { z } from "zod";
 import { PostgresStore } from "../src/PostgresStore.js";
 
-const Counter = state({ Counter: z.object({ count: z.number() }) })
-  .init(() => ({ count: 0 }))
+// Simulate an entity with lifecycle + operational events
+const Entity = state({
+  Entity: z.object({
+    status: z.string(),
+    members: z.number(),
+    score: z.number(),
+  }),
+})
+  .init(() => ({ status: "active", members: 0, score: 0 }))
   .emits({
-    Incremented: ZodEmpty,
-    NoReaction: ZodEmpty,
+    // Lifecycle events (7) — have reactions
+    Created: ZodEmpty,
+    MemberAdded: ZodEmpty,
+    Started: ZodEmpty,
+    MemberRemoved: ZodEmpty,
+    Completed: ZodEmpty,
+    Archived: ZodEmpty,
+    Deleted: ZodEmpty,
+    // Operational events (11) — no reactions
+    Updated: ZodEmpty,
+    ScoreChanged: ZodEmpty,
+    ItemMoved: ZodEmpty,
+    EntryLogged: ZodEmpty,
+    FieldChanged: ZodEmpty,
+    StepAdvanced: ZodEmpty,
+    PhaseChanged: ZodEmpty,
+    CounterIncremented: ZodEmpty,
+    StatusToggled: ZodEmpty,
+    NoteAdded: ZodEmpty,
+    TagApplied: ZodEmpty,
   })
   .patch({
-    Incremented: (_, s) => ({ count: s.count + 1 }),
-    NoReaction: () => ({}),
+    Created: () => ({ status: "created" }),
+    MemberAdded: (_, s) => ({ members: s.members + 1 }),
+    Started: () => ({ status: "started" }),
+    MemberRemoved: (_, s) => ({ members: s.members - 1 }),
+    Completed: () => ({ status: "completed" }),
+    Archived: () => ({ status: "archived" }),
+    Deleted: () => ({ status: "deleted" }),
+    Updated: () => ({}),
+    ScoreChanged: (_, s) => ({ score: s.score + 1 }),
+    ItemMoved: () => ({}),
+    EntryLogged: () => ({}),
+    FieldChanged: () => ({}),
+    StepAdvanced: () => ({}),
+    PhaseChanged: () => ({}),
+    CounterIncremented: () => ({}),
+    StatusToggled: () => ({}),
+    NoteAdded: () => ({}),
+    TagApplied: () => ({}),
   })
-  .on({ increment: ZodEmpty })
-  .emit(() => ["Incremented", {}])
-  .on({ noReaction: ZodEmpty })
-  .emit(() => ["NoReaction", {}])
+  // Actions for both tiers
+  .on({ create: ZodEmpty })
+  .emit(() => ["Created", {}])
+  .on({ addMember: ZodEmpty })
+  .emit(() => ["MemberAdded", {}])
+  .on({ start: ZodEmpty })
+  .emit(() => ["Started", {}])
+  .on({ update: ZodEmpty })
+  .emit(() => ["Updated", {}])
+  .on({ changeScore: ZodEmpty })
+  .emit(() => ["ScoreChanged", {}])
+  .on({ moveItem: ZodEmpty })
+  .emit(() => ["ItemMoved", {}])
+  .on({ logEntry: ZodEmpty })
+  .emit(() => ["EntryLogged", {}])
   .build();
 
-// Only register a reaction for Incremented — NoReaction has none
+// Reactions only for lifecycle events — operational events have none
 const app = act()
-  .withState(Counter)
-  .on("Incremented")
+  .withState(Entity)
+  .on("Created")
+  .do(async () => {})
+  .on("MemberAdded")
+  .do(async () => {})
+  .on("Started")
+  .do(async () => {})
+  .on("MemberRemoved")
+  .do(async () => {})
+  .on("Completed")
+  .do(async () => {})
+  .on("Archived")
+  .do(async () => {})
+  .on("Deleted")
   .do(async () => {})
   .build();
 
@@ -56,14 +120,23 @@ afterAll(async () => {
   await dispose()();
 });
 
-describe("drain skip optimization (PostgreSQL)", () => {
-  bench("drain after non-reactive event (should skip)", async () => {
-    await app.do("noReaction", { stream: "bench-nr", actor }, {});
+describe("drain skip — 18 event types, 7 reactive (PostgreSQL)", () => {
+  bench("operational event (drain skipped — 0 DB trips)", async () => {
+    await app.do("update", { stream: "bench-op", actor }, {});
     await app.drain();
   });
 
-  bench("drain after reactive event (should process)", async () => {
-    await app.do("increment", { stream: "bench-r", actor }, {});
+  bench("lifecycle event (full drain — 3 DB trips)", async () => {
+    await app.do("addMember", { stream: "bench-lc", actor }, {});
+    await app.correlate();
+    await app.drain();
+  });
+
+  bench("mixed burst: 3 operational + 1 lifecycle", async () => {
+    await app.do("update", { stream: "bench-mix", actor }, {});
+    await app.do("changeScore", { stream: "bench-mix", actor }, {});
+    await app.do("logEntry", { stream: "bench-mix", actor }, {});
+    await app.do("addMember", { stream: "bench-mix", actor }, {});
     await app.correlate();
     await app.drain();
   });

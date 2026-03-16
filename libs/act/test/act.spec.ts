@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, sleep, state, store, ZodEmpty } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 
 describe("act", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -113,19 +113,26 @@ describe("act", () => {
   });
 
   it("should skip drain when committed events have no reactions", async () => {
-    // ignored2 has no registered reaction — drain should return immediately
-    await app.do("ignore2", { stream: "s2", actor }, {});
-    await app.correlate();
-    const drained = await app.drain();
-    expect(drained.fetched.length).toBe(0);
-    expect(drained.leased.length).toBe(0);
-    expect(drained.acked.length).toBe(0);
-
-    // reactive event should still drain normally
+    // Warm up: drain reactive events until fully caught up
     await app.do("add", { stream: "s2", actor }, {});
     await app.correlate();
-    const drained2 = await app.drain();
-    expect(drained2.acked.length).toBeGreaterThan(0);
+    // Drain until nothing left (InMemoryStore may need multiple passes)
+    let d;
+    do {
+      d = await app.drain();
+    } while (d.acked.length || d.blocked.length);
+
+    // Now _needs_drain is false. Non-reactive event should NOT set it.
+    await app.do("ignore2", { stream: "s2", actor }, {});
+    const skipped = await app.drain();
+    expect(skipped.fetched.length).toBe(0);
+    expect(skipped.leased.length).toBe(0);
+
+    // Reactive event should set _needs_drain and drain normally
+    await app.do("add", { stream: "s2", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.length).toBeGreaterThan(0);
   });
 
   it("should drain when batch mixes non-reactive and reactive events", async () => {
@@ -463,5 +470,112 @@ describe("act", () => {
       // settle caught the error internally — no unhandled rejection
       spy.mockRestore();
     });
+  });
+
+  it("should query events with callback", async () => {
+    await app.do("increment", { stream: "query-cb", actor }, {});
+    const events: any[] = [];
+    const result = await app.query({ stream: "query-cb" }, (e) =>
+      events.push(e)
+    );
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.first).toBeDefined();
+    expect(result.last).toBeDefined();
+    expect(events.length).toBe(result.count);
+  });
+
+  it("should load state by string name", async () => {
+    await app.do("increment", { stream: "load-by-name", actor }, {});
+    const snap = await app.load("Counter", "load-by-name");
+    expect(snap.state.count).toBe(1);
+  });
+
+  it("should throw when loading unknown state name", async () => {
+    await expect(app.load("NonExistent" as any, "x")).rejects.toThrow(
+      'State "NonExistent" not found'
+    );
+  });
+
+  it("should handle static resolver targets at build time", async () => {
+    const s = state({ Static: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ StaticEvt: ZodEmpty })
+      .patch({ StaticEvt: () => ({}) })
+      .on({ doStatic: ZodEmpty })
+      .emit(() => ["StaticEvt", {}])
+      .build();
+
+    const staticApp = act()
+      .withState(s)
+      .on("StaticEvt")
+      .do(() => Promise.resolve())
+      .to("my-static-target") // static resolver — covers constructor branch
+      .build();
+
+    // _static_targets and _subscribed_statics populated at build time
+    expect((staticApp as any)._static_targets.length).toBe(1);
+    expect((staticApp as any)._static_targets[0].stream).toBe(
+      "my-static-target"
+    );
+
+    // Correlate initializes subscriptions for static targets (covers _subscribed_statics.add)
+    await staticApp.correlate();
+    expect((staticApp as any)._subscribed_statics.has("my-static-target")).toBe(
+      true
+    );
+  });
+
+  it("should clear _needs_drain when drain processes events with no results", async () => {
+    await app.do("increment", { stream: "clear-flag", actor }, {});
+    await app.correlate();
+    let d;
+    do {
+      d = await app.drain();
+    } while (d.acked.length || d.blocked.length);
+    expect((app as any)._needs_drain).toBe(false);
+  });
+
+  it("should clear _needs_drain via handler path when drain finds no matching reactions", async () => {
+    // Mock: drain enters locked section, claims streams, but all handlers produce empty payloads
+    // This covers line 672 (_needs_drain = false after 0 acked/blocked/errors)
+    const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
+      {
+        stream: "mock-stream",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: true,
+      },
+    ]);
+    const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
+    const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
+    // Set _needs_drain manually
+    (app as any)._needs_drain = true;
+    const d = await app.drain();
+    expect(d.acked.length).toBe(0);
+    expect(d.blocked.length).toBe(0);
+    expect((app as any)._needs_drain).toBe(false);
+    mockClaim.mockRestore();
+    mockQuery.mockRestore();
+    mockAck.mockRestore();
+  });
+
+  it("should cleanup on dispose", async () => {
+    const s = state({ Disp: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ DispEvt: ZodEmpty })
+      .patch({ DispEvt: () => ({}) })
+      .on({ doDisp: ZodEmpty })
+      .emit(() => ["DispEvt", {}])
+      .build();
+
+    const dispApp = act().withState(s).build();
+    // Start correlations to have a timer to clean up
+    dispApp.start_correlations({}, 100);
+    // dispose should not throw
+    await dispose()();
+    // Re-seed for other tests
+    await store().seed();
   });
 });

@@ -212,7 +212,7 @@ The filter eliminates wasted claims — only streams with pending events are ret
 
 ## Drain Skip for Non-Reactive Events (v0.24.0)
 
-**Issue:** #482 — Skip drain when committed events have no registered reactions.
+**PR:** #484 — Skip drain when committed events have no registered reactions.
 
 ### Problem
 
@@ -223,20 +223,23 @@ The filter eliminates wasted claims — only streams with pending events are ret
 1. **Build-time:** `_reactive_events` set collects event names with at least one registered reaction in the `Act` constructor
 2. **In `do()`:** `_needs_drain` flag set when a committed event name matches `_reactive_events` (O(1) `Set.has()`)
 3. **In `drain()`:** return empty result immediately when `_needs_drain` is false — zero DB round-trips
-4. **Flag cleared** only when drain completes with nothing acked, blocked, or errored (fully caught up)
+4. **Flag cleared** when drain completes with nothing acked, blocked, or errored, or when claim returns no streams
 5. **Cold start:** flag set in `_init_correlation()` to ensure historical events are processed
 
 Also changed `maxPasses` default from 5 to 1 — most apps need a single correlate→drain pass per settle. Apps with reaction chains can opt into `maxPasses: N`.
 
-### Benchmark (PostgreSQL, local, vitest bench)
+### Benchmark (PostgreSQL, local, 18 event types / 7 reactive)
 
-| Scenario | ops/s | mean (ms) |
-|---|---:|---:|
-| **Non-reactive event (drain skipped)** | 72 | 13.9 |
-| **Reactive event (full drain)** | 31 | 32.6 |
-| **Improvement** | **2.34x faster** | **19ms saved** |
+Simulates a realistic entity with 18 event types where only 7 lifecycle events have registered reactions. The remaining 11 operational events skip drain entirely.
 
-The 19ms saved per non-reactive cycle corresponds to the 3 DB round-trips (claim + query + ack) that are eliminated. In production with network latency to a remote database, the savings would be proportionally larger.
+| Scenario | ops/s | mean (ms) | Speedup |
+|---|---:|---:|---|
+| **Operational event (drain skipped)** | 92 | 10.9 | — |
+| **Lifecycle event (full drain)** | 26 | 38.2 | — |
+| **Mixed burst (3 ops + 1 lifecycle)** | 16 | 64.5 | — |
+| **Operational vs lifecycle** | | | **3.51x faster** |
+
+The 27ms saved per non-reactive cycle corresponds to the 3 DB round-trips (claim + query + ack) that are eliminated. In production with network latency to a remote database, the savings would be proportionally larger.
 
 ### InMemoryStore benchmark (for comparison)
 
