@@ -184,7 +184,7 @@ app.on("settled", (drain) => {
 app.settle({
   debounceMs: 10,                      // debounce window (default: 10ms)
   correlate: { after: -1, limit: 100 }, // correlate query (default)
-  maxPasses: 5,                         // max correlate→drain loops (default: 5)
+  maxPasses: 1,                         // max correlate→drain loops (default: 1)
   streamLimit: 10,                      // passed to drain()
   eventLimit: 100,                      // passed to drain()
 });

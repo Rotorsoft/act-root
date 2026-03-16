@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, sleep, state, store, ZodEmpty } from "../src/index.js";
+import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
 
 describe("act", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -112,6 +112,49 @@ describe("act", () => {
     expect(drained.acked.length).toBe(0);
   });
 
+  it("should skip drain when committed events have no reactions", async () => {
+    // Warm up: drain reactive events until fully caught up
+    await app.do("add", { stream: "s2", actor }, {});
+    await app.correlate();
+    // Drain until nothing left (InMemoryStore may need multiple passes)
+    let d;
+    do {
+      d = await app.drain();
+    } while (d.acked.length || d.blocked.length);
+
+    // Now _needs_drain is false. Non-reactive event should NOT set it.
+    await app.do("ignore2", { stream: "s2", actor }, {});
+    const skipped = await app.drain();
+    expect(skipped.fetched.length).toBe(0);
+    expect(skipped.leased.length).toBe(0);
+
+    // Reactive event should set _needs_drain and drain normally
+    await app.do("add", { stream: "s2", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.length).toBeGreaterThan(0);
+  });
+
+  it("should drain when batch mixes non-reactive and reactive events", async () => {
+    // non-reactive event alone would skip, but a reactive event in the same batch forces drain
+    await app.do("ignore2", { stream: "s3", actor }, {});
+    await app.do("add", { stream: "s3", actor }, {});
+    await app.correlate();
+    const drained = await app.drain();
+    expect(drained.acked.length).toBeGreaterThan(0);
+  });
+
+  it("should emit settled even when drain is skipped", async () => {
+    const settled = vi.fn();
+    app.on("settled", settled);
+    // non-reactive event — drain will be skipped
+    await app.do("ignore2", { stream: "s4", actor }, {});
+    app.settle({ debounceMs: 1 });
+    await sleep(100);
+    expect(settled).toHaveBeenCalled();
+    app.off("settled", settled);
+  });
+
   it("should start and stop correlation worker, awaiting for interval to trigger correlations", async () => {
     const started = app.start_correlations({}, 10, vi.fn());
     expect(started).toBe(true);
@@ -210,11 +253,20 @@ describe("act", () => {
     expect(drained).toBeDefined();
   });
 
+  it("should handle zero leaseMillis without setting lease fields", async () => {
+    await app.do("increment", { stream: "lease-zero", actor }, {});
+    await app.correlate();
+    const d = await app.drain({ leaseMillis: 0 });
+    // With millis=0, lease fields aren't set — drain still runs but ack may not match
+    expect(d.leased.length).toBeGreaterThan(0);
+  });
+
   it("should exit drain loop on error", async () => {
     // mock store claim to throw
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
       throw new Error("test");
     });
+    (app as any)._needs_drain = true;
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedClaim.mockRestore();
@@ -427,5 +479,203 @@ describe("act", () => {
       // settle caught the error internally — no unhandled rejection
       spy.mockRestore();
     });
+  });
+
+  it("should query events with callback", async () => {
+    await app.do("increment", { stream: "query-cb", actor }, {});
+    const events: any[] = [];
+    const result = await app.query({ stream: "query-cb" }, (e) =>
+      events.push(e)
+    );
+    expect(result.count).toBeGreaterThan(0);
+    expect(result.first).toBeDefined();
+    expect(result.last).toBeDefined();
+    expect(events.length).toBe(result.count);
+  });
+
+  it("should load state by string name", async () => {
+    await app.do("increment", { stream: "load-by-name", actor }, {});
+    const snap = await app.load("Counter", "load-by-name");
+    expect(snap.state.count).toBe(1);
+  });
+
+  it("should throw when loading unknown state name", async () => {
+    await expect(app.load("NonExistent" as any, "x")).rejects.toThrow(
+      'State "NonExistent" not found'
+    );
+  });
+
+  it("should handle static resolver targets at build time", async () => {
+    const s = state({ Static: z.object({ v: z.number() }) })
+      .init(() => ({ v: 0 }))
+      .emits({ StaticEvt: ZodEmpty })
+      .patch({ StaticEvt: () => ({}) })
+      .on({ doStatic: ZodEmpty })
+      .emit(() => ["StaticEvt", {}])
+      .build();
+
+    const staticApp = act()
+      .withState(s)
+      .on("StaticEvt")
+      .do(() => Promise.resolve())
+      .to("my-static-target") // static resolver — covers constructor branch
+      .build();
+
+    // _static_targets and _subscribed_statics populated at build time
+    expect((staticApp as any)._static_targets.length).toBe(1);
+    expect((staticApp as any)._static_targets[0].stream).toBe(
+      "my-static-target"
+    );
+
+    // Correlate initializes subscriptions for static targets (covers _subscribed_statics.add)
+    await staticApp.correlate();
+    expect((staticApp as any)._subscribed_statics.has("my-static-target")).toBe(
+      true
+    );
+
+    // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
+    await staticApp.do("doStatic", { stream: "static-1", actor }, {});
+    await staticApp.correlate();
+    const d = await staticApp.drain();
+    expect(d.acked.length).toBeGreaterThan(0);
+  });
+
+  it("should clear _needs_drain when drain processes events with no results", async () => {
+    await app.do("increment", { stream: "clear-flag", actor }, {});
+    await app.correlate();
+    let d;
+    do {
+      d = await app.drain();
+    } while (d.acked.length || d.blocked.length);
+    expect((app as any)._needs_drain).toBe(false);
+  });
+
+  it("should clear _needs_drain via handler path when drain finds no matching reactions", async () => {
+    // Mock: drain enters locked section, claims streams, but all handlers produce empty payloads
+    // This covers line 672 (_needs_drain = false after 0 acked/blocked/errors)
+    const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
+      {
+        stream: "mock-stream",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: true,
+      },
+    ]);
+    const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
+    const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
+    // Set _needs_drain manually
+    (app as any)._needs_drain = true;
+    const d = await app.drain();
+    expect(d.acked.length).toBe(0);
+    expect(d.blocked.length).toBe(0);
+    expect((app as any)._needs_drain).toBe(false);
+    mockClaim.mockRestore();
+    mockQuery.mockRestore();
+    mockAck.mockRestore();
+  });
+
+  it("should cleanup on dispose", async () => {
+    const s = state({ Disp: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ DispEvt: ZodEmpty })
+      .patch({ DispEvt: () => ({}) })
+      .on({ doDisp: ZodEmpty })
+      .emit(() => ["DispEvt", {}])
+      .build();
+
+    const dispApp = act().withState(s).build();
+    // Start correlations to have a timer to clean up
+    dispApp.start_correlations({}, 100);
+    // dispose should not throw
+    await dispose()();
+    // Re-seed for other tests
+    await store().seed();
+  });
+
+  it("should evaluate dynamic resolvers in correlate and skip static ones", async () => {
+    // Build an app with BOTH dynamic and static resolvers on the same event
+    // This forces correlate to enter the inner loop (has dynamic resolvers)
+    // and encounter both function and non-function resolvers
+    const s = state({ Mix: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ MixEvt: ZodEmpty })
+      .patch({ MixEvt: () => ({}) })
+      .on({ doMix: ZodEmpty })
+      .emit(() => ["MixEvt", {}])
+      .build();
+
+    const mixApp = act()
+      .withState(s)
+      .on("MixEvt")
+      .do(() => Promise.resolve())
+      .to("static-target") // static resolver
+      .on("MixEvt")
+      .do(() => Promise.resolve())
+      .to((e) => ({ target: `dyn-${e.stream}` })) // dynamic resolver
+      .build();
+
+    await mixApp.do("doMix", { stream: "mix-1", actor }, {});
+    const r = await mixApp.correlate({ limit: 500 });
+    expect(r.subscribed).toBe(1); // dynamic target discovered
+  });
+
+  it("should handle app with zero reactions (no _needs_drain on init)", async () => {
+    // App with no reactions — _reactive_events is empty
+    const s = state({ NoRx: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ NoRxEvt: ZodEmpty })
+      .patch({ NoRxEvt: () => ({}) })
+      .on({ doNoRx: ZodEmpty })
+      .emit(() => ["NoRxEvt", {}])
+      .build();
+
+    const noRxApp = act().withState(s).build();
+    expect((noRxApp as any)._reactive_events.size).toBe(0);
+    // correlate inits but does NOT set _needs_drain (no reactive events)
+    await noRxApp.correlate();
+    expect((noRxApp as any)._needs_drain).toBe(false);
+    // drain skips immediately
+    const d = await noRxApp.drain();
+    expect(d.fetched.length).toBe(0);
+  });
+
+  it("should handle leased stream with no payloads in map", async () => {
+    // Claim returns two streams, but fetched only has events for one.
+    // The second stream won't have an entry in payloadsMap → `|| []` fallback.
+    const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
+      {
+        stream: "has-events",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: true,
+      },
+      {
+        stream: "no-events",
+        source: undefined,
+        at: 0,
+        by: "test",
+        retry: 0,
+        lagging: false,
+      },
+    ]);
+    // query_array returns events only for the first stream's source
+    const origQueryArray = app.query_array.bind(app);
+    const mockQueryArray = vi
+      .spyOn(app, "query_array")
+      .mockImplementation(async (q) => {
+        if (q.stream === undefined) return origQueryArray(q);
+        return []; // no events for any stream
+      });
+    const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
+    (app as any)._needs_drain = true;
+    const d = await app.drain();
+    expect(d.leased.length).toBe(2);
+    mockClaim.mockRestore();
+    mockQueryArray.mockRestore();
+    mockAck.mockRestore();
   });
 });

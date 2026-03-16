@@ -45,6 +45,7 @@ jobs:
           cache: "pnpm"
 
       - run: pnpm install
+      - run: pnpm typecheck
       - run: pnpm test
 
       - uses: coverallsapp/github-action@v2

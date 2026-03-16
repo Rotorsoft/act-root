@@ -55,22 +55,20 @@ class InMemoryStream {
    * @param millis - Lease duration in milliseconds.
    * @returns The granted lease or undefined if blocked.
    */
-  lease(lease: Lease, millis: number): Lease | undefined {
-    if (this.is_avaliable) {
-      if (millis > 0) {
-        this._leased_by = lease.by;
-        this._leased_until = new Date(Date.now() + millis);
-        this._retry = this._retry + 1;
-      }
-      return {
-        stream: this.stream,
-        source: this.source,
-        at: lease.at,
-        by: lease.by,
-        retry: this._retry,
-        lagging: lease.lagging,
-      };
+  lease(lease: Lease, millis: number): Lease {
+    if (millis > 0) {
+      this._leased_by = lease.by;
+      this._leased_until = new Date(Date.now() + millis);
     }
+    this._retry = this._retry + 1;
+    return {
+      stream: this.stream,
+      source: this.source,
+      at: lease.at,
+      by: lease.by,
+      retry: this._retry,
+      lagging: lease.lagging,
+    };
   }
 
   /**

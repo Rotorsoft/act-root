@@ -67,6 +67,10 @@ export class Act<
   private _subscribed_statics = new Set<string>();
   private _has_dynamic_resolvers = false;
   private _correlation_initialized = false;
+  /** Event names with at least one registered reaction (computed at build time) */
+  private readonly _reactive_events = new Set<string>();
+  /** Set in do() when a committed event has reactions — cleared by drain() */
+  private _needs_drain = false;
 
   /**
    * Emit a lifecycle event (internal use, but can be used for custom listeners).
@@ -140,17 +144,20 @@ export class Act<
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map()
   ) {
-    // Classify resolvers at build time
+    // Classify resolvers and reactive events at build time
     const statics: Array<{ stream: string; source?: string }> = [];
-    for (const register of Object.values(this.registry.events) as Array<{
-      reactions: Map<string, { resolver: unknown }>;
-    }>) {
+    for (const [name, register] of Object.entries(this.registry.events)) {
+      if (register.reactions.size > 0) {
+        this._reactive_events.add(name);
+      }
       for (const reaction of register.reactions.values()) {
         if (typeof reaction.resolver === "function") {
           this._has_dynamic_resolvers = true;
-        } else if (reaction.resolver) {
-          const r = reaction.resolver as { target: string; source?: string };
-          statics.push({ stream: r.target, source: r.source });
+        } else {
+          statics.push({
+            stream: reaction.resolver.target,
+            source: reaction.resolver.source,
+          });
         }
       }
     }
@@ -262,6 +269,16 @@ export class Act<
       reactingTo,
       skipValidation
     );
+    // Flag drain needed when any committed event has reactions
+    for (const snap of snapshots) {
+      if (
+        snap.event?.name &&
+        this._reactive_events.has(snap.event.name as string)
+      ) {
+        this._needs_drain = true;
+        break;
+      }
+    }
     this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
     return snapshots;
   }
@@ -539,6 +556,11 @@ export class Act<
     eventLimit = 10,
     leaseMillis = 10_000,
   }: DrainOptions = {}): Promise<Drain<TEvents>> {
+    // Skip drain when no committed events have registered reactions
+    if (!this._needs_drain) {
+      return { fetched: [], leased: [], acked: [], blocked: [] };
+    }
+
     if (!this._drain_locked) {
       try {
         this._drain_locked = true;
@@ -552,8 +574,10 @@ export class Act<
           randomUUID(),
           leaseMillis
         );
-        if (!leased.length)
+        if (!leased.length) {
+          this._needs_drain = false;
           return { fetched: [], leased: [], acked: [], blocked: [] };
+        }
 
         // Fetch events for each leased stream
         const fetched = await Promise.all(
@@ -602,7 +626,7 @@ export class Act<
             const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
             return this.handle(
               { ...lease, at },
-              payloadsMap.get(lease.stream) || []
+              payloadsMap.get(lease.stream)!
             );
           })
         );
@@ -641,7 +665,12 @@ export class Act<
           this.emit("blocked", blocked);
         }
 
-        return { fetched, leased, acked, blocked };
+        const result = { fetched, leased, acked, blocked };
+        // Clear flag when fully caught up (nothing processed, no pending errors)
+        const hasErrors = handled.some(({ error }) => error);
+        if (!acked.length && !blocked.length && !hasErrors)
+          this._needs_drain = false;
+        return result;
       } catch (error) {
         logger.error(error);
       } finally {
@@ -711,6 +740,8 @@ export class Act<
     // Subscribe static targets + read cold-start checkpoint from watermarks
     const { watermark } = await store().subscribe(this._static_targets);
     this._correlation_checkpoint = watermark;
+    // Cold start: assume drain is needed (historical events may need processing)
+    if (this._reactive_events.size > 0) this._needs_drain = true;
     for (const { stream } of this._static_targets) {
       this._subscribed_statics.add(stream);
     }
@@ -904,7 +935,7 @@ export class Act<
    * @param options - Settle configuration options
    * @param options.debounceMs - Debounce window in milliseconds (default: 10)
    * @param options.correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
-   * @param options.maxPasses - Maximum correlate→drain loops (default: 5)
+   * @param options.maxPasses - Maximum correlate→drain loops (default: 1)
    * @param options.streamLimit - Maximum streams per drain cycle (default: 10)
    * @param options.eventLimit - Maximum events per stream (default: 10)
    * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
@@ -926,7 +957,7 @@ export class Act<
     const {
       debounceMs = 10,
       correlate: correlateQuery = { after: -1, limit: 100 },
-      maxPasses = 5,
+      maxPasses = 1,
       ...drainOptions
     } = options;
 

@@ -1,4 +1,5 @@
-import { state, ZodEmpty, type Patch } from "@rotorsoft/act";
+import { state, ZodEmpty } from "@rotorsoft/act";
+import type { Patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 
 export const DIGITS = [

@@ -86,9 +86,7 @@ describe("tracer", () => {
         events: [],
       },
     ]);
-    tracer.correlated([
-      { stream: "A", source: "B", lagging: false, at: 1, by: "x", retry: 0 },
-    ]);
+    tracer.correlated([{ stream: "A", source: "B" }]);
     tracer.leased([
       { stream: "A", source: "B", lagging: false, at: 1, by: "x", retry: 0 },
     ]);
