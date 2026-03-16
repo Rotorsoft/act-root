@@ -395,33 +395,33 @@ async function bootstrap() {
 
 Only active entities replay events (typically few). Completed entities keep their DB summaries from the previous run.
 
-#### Projection Versioning — Rebuilding Stale Summaries
+#### Projection Versioning — Rebuilding Stale Projections
 
-When the summary shape changes (new fields, renamed fields, derived data), completed entities need their summaries rebuilt from the event log. SQL migrations can handle simple data transformations, but when the change requires replaying events through application logic (patches), use **projection versioning** — an application-level migration that runs once per version bump.
+When the projected read model shape changes (new fields, renamed fields, derived data), completed entities need their projections rebuilt from the event log. SQL migrations can handle simple data transformations, but when the change requires replaying events through application logic (patches), use **projection versioning** — an application-level migration that runs once per version bump.
 
-**Schema:** Add a `summary_version` integer column (default 0) to the projection table.
+**Schema:** Add a `projection_version` integer column (default 0) to the projection table.
 
 ```sql
 -- Drizzle migration
-ALTER TABLE projections ADD COLUMN IF NOT EXISTS summary_version INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE projections ADD COLUMN IF NOT EXISTS projection_version INTEGER NOT NULL DEFAULT 0;
 ```
 
-**Version constant:** Bump this when `toSummary()` shape changes.
+**Version constant:** Bump this when the projection shape changes.
 
 ```typescript
 // schema.ts
-export const SUMMARY_VERSION = 1; // bump to trigger rebuild on next deploy
+export const PROJECTION_VERSION = 1; // bump to trigger rebuild on next deploy
 ```
 
-**`writeSummary` stamps the version:**
+**`writeProjection` stamps the version:**
 
 ```typescript
-async function writeSummary(id: string, summary: Summary) {
+async function writeProjection(id: string, data: ProjectionData) {
   await db.insert(projections)
-    .values({ id, summary, summaryVersion: SUMMARY_VERSION })
+    .values({ id, data, projectionVersion: PROJECTION_VERSION })
     .onConflictDoUpdate({
       target: projections.id,
-      set: { summary, summaryVersion: SUMMARY_VERSION },
+      set: { data, projectionVersion: PROJECTION_VERSION },
     });
 }
 ```
@@ -432,7 +432,7 @@ async function writeSummary(id: string, summary: Summary) {
 async function getStaleIds(): Promise<string[]> {
   const rows = await db.select({ id: projections.id })
     .from(projections)
-    .where(lt(projections.summaryVersion, SUMMARY_VERSION));
+    .where(lt(projections.projectionVersion, PROJECTION_VERSION));
   return rows.map((r) => r.id);
 }
 
@@ -445,15 +445,15 @@ async function bootstrap() {
     broadcast.cache.set(id, { ...state, _v: 0 });
   }
 
-  // Rebuild stale completed summaries — runs once per SUMMARY_VERSION bump
+  // Rebuild stale projections — runs once per PROJECTION_VERSION bump
   const staleIds = (await getStaleIds()).filter((id) => !activeIds.includes(id));
   for (const id of staleIds) {
-    await rebuildFromEvents(id); // replays events, calls writeSummary (stamps version)
+    await rebuildFromEvents(id); // replays events, calls writeProjection (stamps version)
   }
   if (staleIds.length > 0) {
-    log.info("Bootstrap: rebuilt stale summaries", {
+    log.info("Bootstrap: rebuilt stale projections", {
       count: staleIds.length,
-      version: SUMMARY_VERSION,
+      version: PROJECTION_VERSION,
     });
   }
 }
@@ -461,8 +461,8 @@ async function bootstrap() {
 
 **Key properties:**
 - Active entities always rebuild into memory (broadcast cache doesn't survive restarts)
-- Completed entities rebuild only when `summary_version < SUMMARY_VERSION`
-- After rebuild, `writeSummary` stamps them — next restart skips them
+- Completed entities rebuild only when `projection_version < PROJECTION_VERSION`
+- After rebuild, `writeProjection` stamps them — next restart skips them
 - SQL migrations handle pure data transforms; projection versioning handles changes requiring event replay through application patches
 
 ### Aggregate Snapshots vs Projection State
