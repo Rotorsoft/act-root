@@ -56,11 +56,9 @@ class InMemoryStream {
    * @returns The granted lease or undefined if blocked.
    */
   lease(lease: Lease, millis: number): Lease {
-    if (millis > 0) {
-      this._leased_by = lease.by;
-      this._leased_until = new Date(Date.now() + millis);
-      this._retry = this._retry + 1;
-    }
+    this._leased_by = lease.by;
+    this._leased_until = new Date(Date.now() + millis);
+    this._retry = this._retry + 1;
     return {
       stream: this.stream,
       source: this.source,
