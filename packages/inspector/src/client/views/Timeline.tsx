@@ -55,6 +55,7 @@ export function Timeline() {
   const [filters] = useFilterStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [containerWidth, setContainerWidth] = useState(MIN_WIDTH);
 
   // View domain — null means "fit all data"
@@ -386,6 +387,11 @@ export function Timeline() {
                               });
                             }}
                             onMouseLeave={() => setTooltip(null)}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              setSelectedEvent(e);
+                              setTooltip(null);
+                            }}
                           />
                         );
                       })}
@@ -431,6 +437,91 @@ export function Timeline() {
             )}
           </div>
         )}
+        {/* Event detail dialog */}
+        {selectedEvent && (
+          <EventDetailDialog
+            event={selectedEvent}
+            onClose={() => setSelectedEvent(null)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EventDetailDialog({
+  event,
+  onClose,
+}: {
+  event: Event;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl border border-zinc-700 bg-zinc-900 p-5 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span
+              className="inline-block rounded px-2 py-0.5 text-xs font-medium"
+              style={{
+                backgroundColor: nameHue(event.name) + "22",
+                color: nameHue(event.name),
+              }}
+            >
+              {event.name}
+            </span>
+            <span className="font-mono text-xs text-zinc-500">
+              #{event.id} v{event.version}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-500 transition hover:text-zinc-300"
+          >
+            &times;
+          </button>
+        </div>
+
+        {/* Stream + time */}
+        <div className="mb-3 flex flex-col gap-1 text-xs">
+          <div>
+            <span className="text-zinc-500">Stream </span>
+            <span className="font-mono text-zinc-300">{event.stream}</span>
+          </div>
+          <div>
+            <span className="text-zinc-500">Created </span>
+            <span className="text-zinc-300">
+              {new Date(event.created).toLocaleString()}
+            </span>
+          </div>
+        </div>
+
+        {/* Data */}
+        <div className="mb-3">
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+            Data
+          </div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            <JsonViewer data={event.data} />
+          </div>
+        </div>
+
+        {/* Meta */}
+        <div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+            Meta
+          </div>
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+            <JsonViewer data={event.meta} />
+          </div>
+        </div>
       </div>
     </div>
   );
