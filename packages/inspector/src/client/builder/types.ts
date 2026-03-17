@@ -39,6 +39,7 @@ export type SliceNode = {
 
 export type ProjectionNode = {
   name: string;
+  varName: string;
   handles: string[]; // event names
   line?: number;
 };

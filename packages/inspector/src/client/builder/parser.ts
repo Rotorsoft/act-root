@@ -385,7 +385,7 @@ function parseProjections(code: string): ProjectionNode[] {
       }
     }
 
-    projections.push({ name, handles, line });
+    projections.push({ name, varName, handles, line });
   }
 
   return projections;

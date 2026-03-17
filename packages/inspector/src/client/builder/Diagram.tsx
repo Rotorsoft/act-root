@@ -338,7 +338,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     const projY = projRowY + 12;
     let projInstanceCount = 0;
 
-    // Place projections in each slice column that has matching events
+    // Place projections only in slice columns that reference them via .withProjection()
     for (const slice of model.slices) {
       const evts = sliceEvents.get(slice.name) ?? new Set();
       const sliceCol = sliceCols.find(
@@ -346,7 +346,15 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       );
       if (!sliceCol) continue;
 
+      // Only projections explicitly referenced by this slice via .withProjection()
+      const sliceProjVars = new Set(slice.projections);
       for (const proj of model.projections) {
+        if (
+          sliceProjVars.size > 0 &&
+          !sliceProjVars.has(proj.varName) &&
+          !sliceProjVars.has(proj.name)
+        )
+          continue;
         const matchingEvents = proj.handles.filter((h) => evts.has(h));
         if (matchingEvents.length === 0) continue;
 
