@@ -206,16 +206,16 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         }
       }
 
-      // Reactions in this slice
+      // Reactions in this slice — same Y as the event they react to
       for (const reaction of slice.reactions) {
         if (reaction.isVoid) continue;
-        // Place reaction in the row of the state that emits the triggering event
-        const triggeringState = model.states.find((s) =>
-          s.events.some((e) => e.name === reaction.event)
-        );
-        const rY =
-          swimlaneYMap.get(triggeringState?.name ?? stateNames[0]) ?? 0;
-        const rPos = { x: cursorX, y: rY + EVT_Y };
+        const triggerPos = eventPositions.get(reaction.event);
+        const rPos = {
+          x: cursorX,
+          y: triggerPos
+            ? triggerPos.y
+            : (swimlaneYMap.get(stateNames[0]) ?? 0) + EVT_Y,
+        };
         nodes.push({
           key: `reaction:${reaction.handlerName}`,
           pos: rPos,
@@ -225,10 +225,9 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         });
 
         // Event → Reaction
-        const ePos = eventPositions.get(reaction.event);
-        if (ePos) {
+        if (triggerPos) {
           edges.push({
-            from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+            from: { x: triggerPos.x + NODE_W, y: triggerPos.y + NODE_H / 2 },
             to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
             color: COLORS.reaction.border,
             dashed: true,
@@ -285,10 +284,11 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
     }
 
-    // 3. Inline reactions from act()
+    // 3. Inline reactions from act() — same Y as triggering event
     for (const reaction of model.reactions) {
       if (reaction.isVoid) continue;
-      const rPos = { x: cursorX, y: swimlaneY + 10 };
+      const trigEPos = eventPositions.get(reaction.event);
+      const rPos = { x: cursorX, y: trigEPos ? trigEPos.y : swimlaneY + EVT_Y };
       nodes.push({
         key: `reaction:${reaction.handlerName}`,
         pos: rPos,
@@ -296,11 +296,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         label: reaction.handlerName,
         line: reaction.line,
       });
-      const ePos = eventPositions.get(reaction.event);
-      if (ePos)
+      if (trigEPos)
         edges.push({
-          from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-          to: { x: rPos.x + NODE_W / 2, y: rPos.y },
+          from: { x: trigEPos.x + NODE_W, y: trigEPos.y + NODE_H / 2 },
+          to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
           color: COLORS.reaction.border,
           dashed: true,
         });
