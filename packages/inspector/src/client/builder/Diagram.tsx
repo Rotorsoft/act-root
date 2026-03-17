@@ -1,14 +1,14 @@
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { DomainModel, ValidationWarning } from "./types.js";
+import type { DomainModel, StateNode, ValidationWarning } from "./types.js";
 
 /**
  * Event Modeling blueprint:
- * - Horizontal timeline (left to right)
- * - Swimlanes per aggregate/state
- * - Per vertical slice: Action (blue, top) → Event(s) (orange, middle)
- * - Reactions shown as arrows from Event → Action in another swimlane
- * - Projections (green) below, consuming events
+ * - Horizontal swimlanes = states/aggregates
+ * - Vertical slices = feature groupings (dashed columns)
+ * - Actions (blue) top, Events (orange) middle, per swimlane
+ * - Reactions (purple) as boxes: Event → Reaction → Action
+ * - Projections (green) below
  */
 
 const COLORS = {
@@ -21,10 +21,10 @@ const COLORS = {
 
 const NODE_W = 130;
 const NODE_H = 28;
-const STACK_OFFSET = 6; // vertical offset for stacked events
+const STACK_OFFSET = 6;
 const H_GAP = 24;
 const MIN_SWIMLANE_H = 100;
-const LABEL_W = 110;
+const LABEL_W = 120;
 const CMD_Y = 8;
 const EVT_Y = 44;
 
@@ -37,14 +37,9 @@ type NodeData = {
   sublabel?: string;
   line?: number;
 };
-type Edge = {
-  from: Pos;
-  to: Pos;
-  color: string;
-  dashed?: boolean;
-  label?: string;
-};
+type Edge = { from: Pos; to: Pos; color: string; dashed?: boolean };
 type Swimlane = { label: string; y: number; h: number; line?: number };
+type SliceCol = { label: string; x: number; w: number };
 
 type Props = {
   model: DomainModel;
@@ -94,264 +89,257 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     setZoom(1);
   }, []);
 
-  const { nodes, edges, swimlanes, boxes, width, height } = useMemo(() => {
+  const { nodes, edges, swimlanes, sliceCols, width, height } = useMemo(() => {
     const nodes: NodeData[] = [];
     const edges: Edge[] = [];
     const swimlanes: Swimlane[] = [];
-    const actionPositions = new Map<string, Pos>(); // action name → position
-    const eventPositions = new Map<string, Pos>(); // event name → position
+    const sliceCols: SliceCol[] = [];
+    const actionPositions = new Map<string, Pos>();
+    const eventPositions = new Map<string, Pos>();
 
-    // Merge partial states
-    const stateByName = new Map<string, (typeof model.states)[0]>();
+    // Index states by varName
+    const stateByVar = new Map<string, StateNode>();
+    for (const s of model.states) stateByVar.set(s.varName, s);
+
+    // Merge partial states by domain name for swimlanes
+    const stateByName = new Map<
+      string,
+      { events: Set<string>; actions: Set<string> }
+    >();
     for (const s of model.states) {
-      const existing = stateByName.get(s.name);
-      if (existing) {
-        existing.events.push(
-          ...s.events.filter(
-            (e) => !existing.events.some((x) => x.name === e.name)
-          )
-        );
-        existing.actions.push(
-          ...s.actions.filter(
-            (a) => !existing.actions.some((x) => x.name === a.name)
-          )
-        );
-      } else {
-        stateByName.set(s.name, {
-          ...s,
-          events: [...s.events],
-          actions: [...s.actions],
-        });
-      }
+      const existing = stateByName.get(s.name) ?? {
+        events: new Set(),
+        actions: new Set(),
+      };
+      for (const e of s.events) existing.events.add(e.name);
+      for (const a of s.actions) existing.actions.add(a.name);
+      stateByName.set(s.name, existing);
     }
+    const stateNames = [...stateByName.keys()];
 
-    let swimlaneY = 0;
-
-    for (const state of [...stateByName.values()]) {
-      // Group events by which action emits them
-      const actionEventGroups = new Map<string, string[]>();
-      const ungroupedEvents = new Set(state.events.map((e) => e.name));
-
-      for (const action of state.actions) {
-        actionEventGroups.set(action.name, [...action.emits]);
-        for (const en of action.emits) ungroupedEvents.delete(en);
-      }
-
-      // Compute swimlane height based on max stacked events
-      let maxStack = 1;
-      for (const eventNames of actionEventGroups.values()) {
-        maxStack = Math.max(maxStack, eventNames.length);
-      }
-      const swimlaneH = Math.max(
+    // Compute swimlane heights (based on max stacked events per state)
+    const swimlaneHeights = new Map<string, number>();
+    for (const s of model.states) {
+      const maxStack = Math.max(1, ...s.actions.map((a) => a.emits.length));
+      const h = Math.max(
         MIN_SWIMLANE_H,
         EVT_Y + maxStack * (NODE_H + STACK_OFFSET) + 12
       );
+      swimlaneHeights.set(
+        s.name,
+        Math.max(swimlaneHeights.get(s.name) ?? 0, h)
+      );
+    }
 
+    // Build swimlane Y positions
+    let swimlaneY = 0;
+    const swimlaneYMap = new Map<string, number>();
+    for (const name of stateNames) {
+      const h = swimlaneHeights.get(name) ?? MIN_SWIMLANE_H;
+      swimlaneYMap.set(name, swimlaneY);
       swimlanes.push({
-        label: state.name,
+        label: name,
         y: swimlaneY,
-        h: swimlaneH,
-        line: state.line,
+        h,
+        line: model.states.find((s) => s.name === name)?.line,
       });
+      swimlaneY += h;
+    }
 
-      // Layout vertical slices: each action + its events as a column
-      let sliceX = LABEL_W + H_GAP;
+    // Layout columns: process slices as vertical groups, then standalone states
+    let cursorX = LABEL_W + H_GAP;
 
-      for (const action of state.actions) {
-        const eventNames = actionEventGroups.get(action.name) ?? [];
+    // Helper: place one action + its events in a specific state's swimlane
+    function placeAction(
+      action: (typeof model.states)[0]["actions"][0],
+      state: StateNode,
+      x: number
+    ) {
+      const sy = swimlaneYMap.get(state.name) ?? 0;
+      const aPos = { x, y: sy + CMD_Y };
+      nodes.push({
+        key: `action:${action.name}`,
+        pos: aPos,
+        type: "action",
+        label: action.name,
+        sublabel:
+          action.invariants.length > 0
+            ? `${action.invariants.length} guard(s)`
+            : undefined,
+        line: action.line,
+      });
+      actionPositions.set(action.name, aPos);
 
-        // Action node (top)
-        const aKey = `action:${action.name}`;
-        const aPos = { x: sliceX, y: swimlaneY + CMD_Y };
-        nodes.push({
-          key: aKey,
-          pos: aPos,
-          type: "action",
-          label: action.name,
-          sublabel:
-            action.invariants.length > 0
-              ? `${action.invariants.length} guard(s)`
-              : undefined,
-          line: action.line,
-        });
-        actionPositions.set(action.name, aPos);
-
-        // Events (stacked below action)
-        for (let ei = 0; ei < eventNames.length; ei++) {
-          const eName = eventNames[ei];
-          const eKey = `event:${eName}`;
-          if (!eventPositions.has(eName)) {
-            const ePos = {
-              x: sliceX,
-              y: swimlaneY + EVT_Y + ei * (NODE_H + STACK_OFFSET),
-            };
-            nodes.push({
-              key: eKey,
-              pos: ePos,
-              type: "event",
-              label: eName,
-              line: state.events.find((e) => e.name === eName)?.line,
-            });
-            eventPositions.set(eName, ePos);
-
-            // Action → Event edge
-            edges.push({
-              from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
-              to: { x: ePos.x + NODE_W / 2, y: ePos.y },
-              color: COLORS.action.border,
-            });
-          }
-        }
-
-        sliceX += NODE_W + H_GAP;
-      }
-
-      // Ungrouped events (emitted but not linked to a specific action)
-      for (const eName of ungroupedEvents) {
-        const eKey = `event:${eName}`;
+      for (let ei = 0; ei < action.emits.length; ei++) {
+        const eName = action.emits[ei];
         if (!eventPositions.has(eName)) {
-          const ePos = { x: sliceX, y: swimlaneY + EVT_Y };
+          const ePos = { x, y: sy + EVT_Y + ei * (NODE_H + STACK_OFFSET) };
           nodes.push({
-            key: eKey,
+            key: `event:${eName}`,
             pos: ePos,
             type: "event",
             label: eName,
             line: state.events.find((e) => e.name === eName)?.line,
           });
           eventPositions.set(eName, ePos);
-          sliceX += NODE_W + H_GAP;
+          edges.push({
+            from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+            to: { x: ePos.x + NODE_W / 2, y: ePos.y },
+            color: COLORS.action.border,
+          });
+        }
+      }
+    }
+
+    // 1. Slices as vertical columns
+    for (const slice of model.slices) {
+      const sliceStartX = cursorX;
+      const partials = slice.stateVars
+        .map((sv) => stateByVar.get(sv))
+        .filter(Boolean) as StateNode[];
+
+      // Place all actions from the slice's partial states
+      for (const st of partials) {
+        for (const action of st.actions) {
+          placeAction(action, st, cursorX);
+          cursorX += NODE_W + H_GAP;
         }
       }
 
-      swimlaneY += swimlaneH;
+      // Reactions in this slice
+      for (const reaction of slice.reactions) {
+        if (reaction.isVoid) continue;
+        // Place reaction in the row of the state that emits the triggering event
+        const triggeringState = model.states.find((s) =>
+          s.events.some((e) => e.name === reaction.event)
+        );
+        const rY =
+          swimlaneYMap.get(triggeringState?.name ?? stateNames[0]) ?? 0;
+        const rPos = { x: cursorX, y: rY + EVT_Y };
+        nodes.push({
+          key: `reaction:${reaction.handlerName}`,
+          pos: rPos,
+          type: "reaction",
+          label: reaction.handlerName,
+          line: reaction.line,
+        });
+
+        // Event → Reaction
+        const ePos = eventPositions.get(reaction.event);
+        if (ePos) {
+          edges.push({
+            from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+            to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
+            color: COLORS.reaction.border,
+            dashed: true,
+          });
+        }
+        // Reaction → Actions
+        for (const actionName of reaction.dispatches) {
+          const aPos = actionPositions.get(actionName);
+          if (aPos) {
+            edges.push({
+              from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
+              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+              color: COLORS.reaction.border,
+              dashed: true,
+            });
+          }
+        }
+        cursorX += NODE_W + H_GAP;
+      }
+
+      const sliceEndX = cursorX;
+      const sliceLabel = slice.name.replace(/Slice$/i, "");
+      sliceCols.push({
+        label: sliceLabel,
+        x: sliceStartX - 8,
+        w: sliceEndX - sliceStartX + 8,
+      });
+      cursorX += H_GAP / 2; // gap between slices
     }
 
-    // Reactions — each as a proper node: Event → [Reaction] → Action
-    const allReactions = [
-      ...model.slices.flatMap((s) => s.reactions),
-      ...model.reactions,
-    ];
-    let reactX = LABEL_W + H_GAP;
-    const reactY = swimlaneY + 10;
-    for (const reaction of allReactions) {
-      if (reaction.isVoid) continue;
-      const ePos = eventPositions.get(reaction.event);
+    // 2. Standalone states (not in any slice)
+    const claimedVars = new Set(model.slices.flatMap((sl) => sl.stateVars));
+    const standalone = model.states.filter((s) => !claimedVars.has(s.varName));
+    for (const st of standalone) {
+      for (const action of st.actions) {
+        placeAction(action, st, cursorX);
+        cursorX += NODE_W + H_GAP;
+      }
+      // Ungrouped events
+      for (const event of st.events) {
+        if (!eventPositions.has(event.name)) {
+          const sy = swimlaneYMap.get(st.name) ?? 0;
+          const ePos = { x: cursorX, y: sy + EVT_Y };
+          nodes.push({
+            key: `event:${event.name}`,
+            pos: ePos,
+            type: "event",
+            label: event.name,
+            line: event.line,
+          });
+          eventPositions.set(event.name, ePos);
+          cursorX += NODE_W + H_GAP;
+        }
+      }
+    }
 
-      const rKey = `reaction:${reaction.handlerName}`;
-      const rPos = { x: reactX, y: reactY };
+    // 3. Inline reactions from act()
+    for (const reaction of model.reactions) {
+      if (reaction.isVoid) continue;
+      const rPos = { x: cursorX, y: swimlaneY + 10 };
       nodes.push({
-        key: rKey,
+        key: `reaction:${reaction.handlerName}`,
         pos: rPos,
         type: "reaction",
         label: reaction.handlerName,
         line: reaction.line,
       });
-
-      // Event → Reaction edge
-      if (ePos) {
+      const ePos = eventPositions.get(reaction.event);
+      if (ePos)
         edges.push({
           from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
           to: { x: rPos.x + NODE_W / 2, y: rPos.y },
           color: COLORS.reaction.border,
           dashed: true,
         });
-      }
-
-      // Reaction → Action edges
-      for (const actionName of reaction.dispatches) {
-        const aPos = actionPositions.get(actionName);
-        if (aPos) {
+      for (const an of reaction.dispatches) {
+        const aPos = actionPositions.get(an);
+        if (aPos)
           edges.push({
             from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
             to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
             color: COLORS.reaction.border,
             dashed: true,
           });
-        }
       }
-
-      reactX += NODE_W + H_GAP;
+      cursorX += NODE_W + H_GAP;
     }
 
-    // Projections — below reactions
+    // 4. Projections
     let projX = LABEL_W + H_GAP;
-    const projY = allReactions.some((r) => !r.isVoid)
-      ? reactY + NODE_H + 20
-      : swimlaneY + 10;
+    const projY = swimlaneY + 10;
     for (const proj of model.projections) {
-      const pKey = `projection:${proj.name}`;
       const pPos = { x: projX, y: projY };
       nodes.push({
-        key: pKey,
+        key: `projection:${proj.name}`,
         pos: pPos,
         type: "projection",
         label: proj.name,
         line: proj.line,
       });
-      for (const ename of proj.handles) {
-        const ePos = eventPositions.get(ename);
-        if (ePos) {
+      for (const en of proj.handles) {
+        const ePos = eventPositions.get(en);
+        if (ePos)
           edges.push({
             from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
             to: { x: pPos.x + NODE_W / 2, y: pPos.y },
             color: COLORS.projection.border,
             dashed: true,
           });
-        }
       }
       projX += NODE_W + H_GAP;
-    }
-
-    // Slice boxes — group their members
-    const boxes: Array<{
-      label: string;
-      x: number;
-      y: number;
-      w: number;
-      h: number;
-    }> = [];
-    // Build varName → original unmerged state lookup
-    const varToOriginalState = new Map<string, (typeof model.states)[0]>();
-    for (const s of model.states) {
-      varToOriginalState.set(s.varName, s);
-    }
-
-    for (const slice of model.slices) {
-      const memberKeys: string[] = [];
-      // Use stateVars to get original partial states (not merged)
-      for (const sv of slice.stateVars) {
-        const st = varToOriginalState.get(sv);
-        if (st) {
-          for (const a of st.actions) memberKeys.push(`action:${a.name}`);
-          for (const e of st.events) memberKeys.push(`event:${e.name}`);
-        }
-      }
-      for (const r of slice.reactions)
-        memberKeys.push(`reaction:${r.handlerName}`);
-      for (const pn of slice.projections) memberKeys.push(`projection:${pn}`);
-
-      let minX = Infinity,
-        minY = Infinity,
-        maxX = 0,
-        maxY = 0;
-      for (const k of memberKeys) {
-        const n = nodes.find((nd) => nd.key === k);
-        if (n) {
-          minX = Math.min(minX, n.pos.x);
-          minY = Math.min(minY, n.pos.y);
-          maxX = Math.max(maxX, n.pos.x + NODE_W);
-          maxY = Math.max(maxY, n.pos.y + NODE_H);
-        }
-      }
-      if (minX < Infinity) {
-        boxes.push({
-          label: slice.name.replace(/Slice$/i, ""),
-          x: minX - 8,
-          y: minY - 18,
-          w: maxX - minX + 16,
-          h: maxY - minY + 26,
-        });
-      }
     }
 
     let maxW = LABEL_W,
@@ -364,7 +352,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       nodes,
       edges,
       swimlanes,
-      boxes,
+      sliceCols,
       width: maxW + 40,
       height: maxH + 40,
     };
@@ -380,6 +368,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
   const svgW = Math.max(width, 600);
   const svgH = Math.max(height, 300);
+  const totalH = swimlanes.reduce((sum, sl) => Math.max(sum, sl.y + sl.h), 0);
 
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
@@ -424,9 +413,9 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${svgW / zoom} ${svgH / zoom}`}
           className="select-none"
         >
-          {/* Swimlanes */}
+          {/* State swimlanes (horizontal rows) */}
           {swimlanes.map((sl, i) => (
-            <g key={sl.label}>
+            <g key={sl.label + i}>
               {i % 2 === 0 && (
                 <rect
                   x={0}
@@ -450,34 +439,35 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 y={sl.y + sl.h / 2}
                 dominantBaseline="middle"
                 fill={COLORS.state.text}
-                className="text-[11px] font-medium"
+                className="text-[11px] font-semibold"
               >
                 {sl.label}
               </text>
             </g>
           ))}
 
-          {/* Slice boxes */}
-          {boxes.map((box) => (
-            <g key={box.label}>
+          {/* Slice columns (vertical groupings) */}
+          {sliceCols.map((sc) => (
+            <g key={sc.label}>
               <rect
-                x={box.x}
-                y={box.y}
-                width={box.w}
-                height={box.h}
-                rx={6}
+                x={sc.x}
+                y={0}
+                width={sc.w}
+                height={totalH}
+                rx={0}
                 fill="none"
-                stroke="#52525b"
+                stroke="#3f3f46"
                 strokeWidth={1}
                 strokeDasharray="6,4"
               />
               <text
-                x={box.x + 6}
-                y={box.y + 11}
-                fill="#71717a"
-                className="text-[8px]"
+                x={sc.x + sc.w / 2}
+                y={totalH + 14}
+                textAnchor="middle"
+                fill="#52525b"
+                className="text-[9px] font-medium"
               >
-                {box.label}
+                {sc.label}
               </text>
             </g>
           ))}
@@ -485,11 +475,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           {/* Edges */}
           {edges.map((edge, i) => {
             const dx = edge.to.x - edge.from.x;
-            const dy = edge.to.y - edge.from.y;
             const isStraight = Math.abs(dx) < 5;
             const d = isStraight
               ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
-              : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.3} ${edge.from.y + dy * 0.1}, ${edge.to.x - dx * 0.3} ${edge.to.y - dy * 0.1}, ${edge.to.x} ${edge.to.y}`;
+              : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
             return (
               <path
                 key={i}
