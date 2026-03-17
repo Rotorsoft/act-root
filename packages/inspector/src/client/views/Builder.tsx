@@ -4,10 +4,11 @@ import {
   Clipboard,
   Download,
   Loader2,
+  Plus,
   Send,
   Sparkles,
 } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Diagram } from "../builder/Diagram.js";
 import { parseActCode } from "../builder/parser.js";
 import { emptyModel } from "../builder/types.js";
@@ -29,6 +30,168 @@ function parseGitUrl(url: string): {
   if (m) return { owner: m[1], repo: m[2], branch: m[3], entryPath: m[4] };
   return null;
 }
+
+const SNIPPETS: Record<string, string> = {
+  State: `import { state, type Invariant } from "@rotorsoft/act";
+import { z } from "zod";
+
+// --- Invariant (business rule) ---
+const mustBeActive: Invariant<{ status: string }> = {
+  description: "Must be active",
+  valid: (state) => state.status === "active",
+};
+
+// --- State ---
+const MyEntity = state({ MyEntity: z.object({
+  name: z.string(),
+  status: z.string(),
+})})
+  .init(() => ({ name: "", status: "active" }))
+  .emits({
+    EntityCreated: z.object({ name: z.string() }),
+    EntityUpdated: z.object({ name: z.string() }),
+  })
+  .patch({
+    EntityCreated: ({ data }) => ({ name: data.name, status: "active" }),
+    EntityUpdated: ({ data }) => ({ name: data.name }),
+  })
+  .on({ CreateEntity: z.object({ name: z.string() }) })
+    .emit("EntityCreated")
+  .on({ UpdateEntity: z.object({ name: z.string() }) })
+    .given([mustBeActive])
+    .emit("EntityUpdated")
+  .build();
+
+export { MyEntity };
+`,
+  Slice: `import { slice } from "@rotorsoft/act";
+import { MyEntity } from "./state.js";
+
+// --- Slice (vertical feature grouping) ---
+const MySlice = slice()
+  .withState(MyEntity)
+  // .withProjection(MyProjection)
+  .on("EntityCreated")
+    .do(async function onEntityCreated(event, _stream, app) {
+      // Dispatch another action in response
+      // await app.do("OtherAction", { stream: target, actor: { id: "system", name: "System" } }, payload, event);
+      console.log("Entity created:", event.stream);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+
+export { MySlice };
+`,
+  Projection: `import { projection } from "@rotorsoft/act";
+import { z } from "zod";
+
+// --- Projection (read model) ---
+const MyProjection = projection("my-view")
+  .on({ EntityCreated: z.object({ name: z.string() }) })
+    .do(async ({ stream, data }) => {
+      // Update read model (database, cache, etc.)
+      console.log("Projecting EntityCreated:", stream, data.name);
+    })
+  .build();
+
+export { MyProjection };
+`,
+  Act: `import { act } from "@rotorsoft/act";
+import { MySlice } from "./slice.js";
+import { MyProjection } from "./projection.js";
+
+// --- Orchestrator (wires everything together) ---
+const app = act()
+  // .withActor<AppActor>()
+  .withSlice(MySlice)
+  .withProjection(MyProjection)
+  .build();
+
+export { app };
+`,
+  All: `import { act, state, slice, projection, type Invariant } from "@rotorsoft/act";
+import { z } from "zod";
+
+// ============================================================
+// Invariants
+// ============================================================
+
+const mustBeActive: Invariant<{ status: string }> = {
+  description: "Must be active",
+  valid: (state) => state.status === "active",
+};
+
+// ============================================================
+// State
+// ============================================================
+
+const MyEntity = state({ MyEntity: z.object({
+  name: z.string(),
+  status: z.string(),
+})})
+  .init(() => ({ name: "", status: "active" }))
+  .emits({
+    EntityCreated: z.object({ name: z.string() }),
+    EntityUpdated: z.object({ name: z.string() }),
+    EntityDeactivated: z.object({ deactivatedBy: z.string() }),
+  })
+  .patch({
+    EntityCreated: ({ data }) => ({ name: data.name, status: "active" }),
+    EntityUpdated: ({ data }) => ({ name: data.name }),
+    EntityDeactivated: () => ({ status: "inactive" }),
+  })
+  .on({ CreateEntity: z.object({ name: z.string() }) })
+    .emit("EntityCreated")
+  .on({ UpdateEntity: z.object({ name: z.string() }) })
+    .given([mustBeActive])
+    .emit("EntityUpdated")
+  .on({ DeactivateEntity: z.object({}) })
+    .given([mustBeActive])
+    .emit((_, __, { actor }) => ["EntityDeactivated", { deactivatedBy: actor.id }])
+  .build();
+
+// ============================================================
+// Projection
+// ============================================================
+
+const MyProjection = projection("my-view")
+  .on({ EntityCreated: z.object({ name: z.string() }) })
+    .do(async ({ stream, data }) => {
+      console.log("Created:", stream, data.name);
+    })
+  .on({ EntityDeactivated: z.object({ deactivatedBy: z.string() }) })
+    .do(async ({ stream }) => {
+      console.log("Deactivated:", stream);
+    })
+  .build();
+
+// ============================================================
+// Slice
+// ============================================================
+
+const MySlice = slice()
+  .withState(MyEntity)
+  .withProjection(MyProjection)
+  .on("EntityCreated")
+    .do(async function onCreated(event, _stream, app) {
+      console.log("Reacting to creation:", event.stream);
+      // await app.do("OtherAction", target, payload, event);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+
+// ============================================================
+// Orchestrator
+// ============================================================
+
+const app = act()
+  .withSlice(MySlice)
+  .withProjection(MyProjection)
+  .build();
+
+export { app, MyEntity, MySlice, MyProjection };
+`,
+};
 
 const PROMPT_TEMPLATES = [
   {
@@ -94,6 +257,8 @@ export function Builder() {
   const [gitUrl, setGitUrl] = useState("");
   const [savedImports, setSavedImports] =
     useState<SavedImport[]>(loadSavedImports);
+  const [showNewMenu, setShowNewMenu] = useState(false);
+  const newMenuRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<any>(null);
   const [splitPct, setSplitPct] = useState(50);
   const isDragging = useRef(false);
@@ -242,10 +407,93 @@ export function Builder() {
     [activeFile]
   );
 
+  // Close "New" dropdown on outside click
+  useEffect(() => {
+    if (!showNewMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (newMenuRef.current && !newMenuRef.current.contains(e.target as Node))
+        setShowNewMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showNewMenu]);
+
+  const insertSnippet = useCallback((key: string) => {
+    const snippet = SNIPPETS[key];
+    if (!snippet) return;
+
+    // Determine files to add: main snippet + dependencies
+    const deps: Record<string, FileTab[]> = {
+      State: [{ path: "state.ts", content: SNIPPETS.State }],
+      Projection: [{ path: "projection.ts", content: SNIPPETS.Projection }],
+      Slice: [
+        { path: "state.ts", content: SNIPPETS.State },
+        { path: "slice.ts", content: SNIPPETS.Slice },
+      ],
+      Act: [
+        { path: "state.ts", content: SNIPPETS.State },
+        { path: "projection.ts", content: SNIPPETS.Projection },
+        { path: "slice.ts", content: SNIPPETS.Slice },
+        { path: "act.ts", content: SNIPPETS.Act },
+      ],
+      All: [{ path: "app.ts", content: SNIPPETS.All }],
+    };
+
+    const toAdd = deps[key] ?? [
+      { path: `${key.toLowerCase()}.ts`, content: snippet },
+    ];
+    setFiles((prev) => {
+      const result = [...prev];
+      let lastIdx = result.length;
+      for (const file of toAdd) {
+        const idx = result.findIndex((f) => f.path === file.path);
+        if (idx >= 0) {
+          result[idx] = file;
+          lastIdx = idx;
+        } else {
+          lastIdx = result.length;
+          result.push(file);
+        }
+      }
+      // Focus the last added/updated file
+      setActiveFile(lastIdx);
+      return result;
+    });
+    setShowNewMenu(false);
+  }, []);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-925 px-4 py-1.5">
+        {/* New snippet dropdown */}
+        <div className="relative" ref={newMenuRef}>
+          <button
+            onClick={() => setShowNewMenu(!showNewMenu)}
+            className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] transition ${
+              showNewMenu
+                ? "border-blue-600 bg-blue-950 text-blue-400"
+                : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-blue-700 hover:text-blue-400"
+            }`}
+          >
+            <Plus size={11} />
+            New
+          </button>
+          {showNewMenu && (
+            <div className="absolute left-0 top-full z-50 mt-1 min-w-[140px] rounded-md border border-zinc-700 bg-zinc-900 py-1 shadow-xl">
+              {Object.keys(SNIPPETS).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => insertSnippet(key)}
+                  className="flex w-full items-center px-3 py-1.5 text-left text-[10px] text-zinc-300 transition hover:bg-zinc-800 hover:text-white"
+                >
+                  {key === "All" ? "Full App (all)" : key}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button
           onClick={() => {
             setShowGitImport(!showGitImport);
@@ -451,18 +699,18 @@ export function Builder() {
           style={{ width: `${splitPct}%` }}
         >
           {/* File tabs */}
-          {files.length > 1 && (
-            <div className="flex overflow-x-auto border-b border-zinc-800 bg-zinc-925">
+          {files.length > 0 && (
+            <div className="flex shrink-0 overflow-x-auto border-b border-zinc-700 bg-zinc-800">
               {files.map((f, i) => {
                 const name = f.path.split("/").pop() ?? f.path;
                 return (
                   <button
                     key={f.path}
                     onClick={() => setActiveFile(i)}
-                    className={`shrink-0 border-r border-zinc-800 px-3 py-1 text-[10px] transition ${
+                    className={`shrink-0 border-r border-zinc-700 px-3 py-1.5 text-[11px] transition ${
                       i === activeFile
                         ? "bg-zinc-900 text-emerald-400"
-                        : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+                        : "bg-zinc-800 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
                     }`}
                     title={f.path}
                   >
@@ -472,27 +720,29 @@ export function Builder() {
               })}
             </div>
           )}
-          <MonacoEditor
-            height="100%"
-            language="typescript"
-            theme="vs-dark"
-            value={code}
-            onChange={handleFileChange}
-            onMount={handleEditorMount}
-            options={{
-              fontSize: 12,
-              fontFamily: "'JetBrains Mono', monospace",
-              minimap: { enabled: false },
-              lineNumbers: "on",
-              scrollBeyondLastLine: false,
-              wordWrap: "on",
-              tabSize: 2,
-              padding: { top: 8 },
-              renderLineHighlight: "line",
-              occurrencesHighlight: "off",
-              readOnly: false,
-            }}
-          />
+          <div className="min-h-0 flex-1">
+            <MonacoEditor
+              height="100%"
+              language="typescript"
+              theme="vs-dark"
+              value={code}
+              onChange={handleFileChange}
+              onMount={handleEditorMount}
+              options={{
+                fontSize: 12,
+                fontFamily: "'JetBrains Mono', monospace",
+                minimap: { enabled: false },
+                lineNumbers: "on",
+                scrollBeyondLastLine: false,
+                wordWrap: "on",
+                tabSize: 2,
+                padding: { top: 8 },
+                renderLineHighlight: "line",
+                occurrencesHighlight: "off",
+                readOnly: false,
+              }}
+            />
+          </div>
         </div>
 
         <div
