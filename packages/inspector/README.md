@@ -7,10 +7,22 @@ Event sourcing observatory for the Act framework. Connect to any Act PostgreSQL 
 ```bash
 # From the monorepo root
 pnpm install
+
+# Optional: set env vars for full functionality
+export GITHUB_TOKEN=$(gh auth token)   # Private repo imports in Builder
+export ANTHROPIC_API_KEY=sk-ant-...    # AI code generation in Builder
+
 pnpm dev:inspector
 ```
 
 This starts both the tRPC server (port 4001) and the Vite client (port 3001).
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GITHUB_TOKEN` or `GH_TOKEN` | Optional | GitHub API token for importing from private repos. Use `gh auth token` to get your CLI token. |
+| `ANTHROPIC_API_KEY` | Optional | Claude API key for AI code generation in the Builder tab. |
 
 Open [http://localhost:3001](http://localhost:3001) — the connection dialog appears on launch.
 
