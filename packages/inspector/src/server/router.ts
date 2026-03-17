@@ -648,18 +648,59 @@ export const inspectorRouter = t.router({
 
       const systemPrompt = `You are an expert Act framework developer. Generate TypeScript code using the @rotorsoft/act event sourcing framework.
 
-Rules:
-- Use \`state({ Name: schema })\` builder pattern
-- Use \`z\` from "zod" for all schemas
-- Use \`.init()\`, \`.emits()\`, optional \`.patch()\`, \`.on()\`, \`.emit()\`, \`.given()\`, \`.build()\`
-- Use \`slice()\` for grouping states with reactions
-- Use \`projection()\` for read models
-- Use \`act()\` to wire everything together
+## Architecture
+- **State**: Domain entity defined with \`state({ Name: schema })\`. Has \`.init()\`, \`.emits()\`, optional \`.patch()\` for custom reducers, \`.on()\` for actions, \`.emit()\` for event emission, \`.given()\` for invariants, \`.build()\`.
+- **Slice**: Vertical feature grouping with \`slice()\`. Groups partial states + reactions. Uses \`.withState(State)\`, \`.withProjection(Proj)\`, \`.on("EventName").do(handler).to(resolver)\`, \`.build()\`.
+- **Projection**: Read model with \`projection("name")\`. Uses \`.on({ Event: schema }).do(handler)\`, \`.build()\`.
+- **Act**: Orchestrator with \`act()\`. Uses \`.withSlice(Slice)\`, \`.withProjection(Proj)\`, \`.build()\`.
+
+## Builder Patterns
+\`\`\`typescript
+// State with partial state pattern (multiple states can share the same aggregate name)
+const MyState = state({ Aggregate: z.object({ field: z.string() }) })
+  .init(() => ({ field: "" }))
+  .emits({ EventHappened: z.object({ value: z.string() }) })
+  .patch({ EventHappened: ({ data }) => ({ field: data.value }) }) // optional — passthrough is default
+  .on({ DoSomething: z.object({ value: z.string() }) })
+    .given([{ description: "Must be valid", valid: (state) => state.field !== "" }])
+    .emit("EventHappened") // string passthrough when payload matches
+  .build();
+
+// Slice groups states + reactions
+const MySlice = slice()
+  .withState(MyState)
+  .withProjection(MyProjection)
+  .on("EventHappened")
+    .do(async function handleEvent(event, _stream, app) {
+      await app.do("OtherAction", { stream: target, actor: { id: "system", name: "System" } }, payload, event);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+
+// Projection for read models
+const MyProjection = projection("myview")
+  .on({ EventHappened: z.object({ value: z.string() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
+
+// Act orchestrator
+const app = act()
+  .withSlice(MySlice)
+  .withProjection(MyProjection)
+  .build();
+\`\`\`
+
+## Rules
 - Import from "@rotorsoft/act" and "zod"
-- Use passthrough reducers by default (no .patch() needed unless custom logic)
-- Use .emit("EventName") for string passthrough when action payload matches event data
-- Include invariants as .given([{ description, valid }]) for business rules
-- Return ONLY the TypeScript code, no markdown fences, no explanation
+- Use \`z\` for all schemas, \`ZodEmpty\` for empty payloads
+- Partial states: multiple \`state({ SameName: ... })\` merge automatically in slices
+- Each slice should own its partial states and reactions — separate concerns into slices
+- Reactions MUST call \`app.do("ActionName", target, payload, event)\` — pass event for causation tracking
+- Use \`.to(resolver)\` for reactions that need drain processing, \`.void()\` only for side effects
+- Use \`type Invariant\` for business rules: \`{ description: string; valid: (state) => boolean }\`
+- Name reaction handlers with \`async function name(...)\` for readability
+- Always include the \`act()\` orchestrator wiring slices and projections
+- Return ONLY TypeScript code, no markdown fences, no explanation
 
 ${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.currentCode}\n\`\`\`\n\nModify the existing code based on the user's request. Return the complete updated code.` : "Generate complete Act TypeScript code from scratch."}`;
 
