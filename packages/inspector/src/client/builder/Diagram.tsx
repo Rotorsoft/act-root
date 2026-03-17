@@ -348,12 +348,12 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
       // Only projections explicitly referenced by this slice via .withProjection()
       const sliceProjVars = new Set(slice.projections);
+      if (sliceProjVars.size === 0) {
+        projInstanceCount++;
+        continue;
+      }
       for (const proj of model.projections) {
-        if (
-          sliceProjVars.size > 0 &&
-          !sliceProjVars.has(proj.varName) &&
-          !sliceProjVars.has(proj.name)
-        )
+        if (!sliceProjVars.has(proj.varName) && !sliceProjVars.has(proj.name))
           continue;
         const matchingEvents = proj.handles.filter((h) => evts.has(h));
         if (matchingEvents.length === 0) continue;
