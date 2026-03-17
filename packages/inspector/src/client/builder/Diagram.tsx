@@ -492,9 +492,11 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {line}
                   </text>
                 ))}
-                {/* Guard icon (shield) */}
+                {/* Top-right icons */}
                 {n.guards && n.guards.length > 0 && (
-                  <g transform={`translate(${n.pos.x + 3},${n.pos.y + 2})`}>
+                  <g
+                    transform={`translate(${n.pos.x + W - 12},${n.pos.y + 2})`}
+                  >
                     <path
                       d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
                       fill="none"
@@ -503,22 +505,15 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     />
                   </g>
                 )}
-                {/* Projection icon (eye) */}
                 {n.projections && n.projections.length > 0 && (
                   <g
-                    transform={`translate(${n.pos.x + W - 13},${n.pos.y + 2})`}
+                    transform={`translate(${n.pos.x + W - 12},${n.pos.y + 2})`}
                   >
                     <path
-                      d="M5 2C2.5 2 .5 5 .5 5s2 3 4.5 3 4.5-3 4.5-3S7.5 2 5 2z"
-                      fill="none"
+                      d="M1 5h8M5 1v8"
                       stroke={COLORS.projection.text}
-                      strokeWidth="1"
-                    />
-                    <circle
-                      cx="5"
-                      cy="5"
-                      r="1.5"
-                      fill={COLORS.projection.text}
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
                     />
                   </g>
                 )}
