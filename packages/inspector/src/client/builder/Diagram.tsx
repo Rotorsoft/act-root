@@ -1,22 +1,32 @@
-import { useMemo, useState } from "react";
+import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { DomainModel, ValidationWarning } from "./types.js";
 
-// Event Storming colors
+/**
+ * Event Modeling diagram layout:
+ * - Horizontal timeline (left to right)
+ * - Swimlanes per aggregate (state)
+ * - Per swimlane: Commands (blue, top) → Events (orange, middle) → Projections (green, bottom)
+ * - Reactions (purple) connect events to commands in other swimlanes
+ */
+
 const COLORS = {
   action: { bg: "#1e3a5f", border: "#2563eb", text: "#60a5fa" },
   event: { bg: "#4a2c17", border: "#ea580c", text: "#fb923c" },
-  state: { bg: "#3d3510", border: "#ca8a04", text: "#facc15" },
+  state: { bg: "#27272a", border: "#52525b", text: "#a1a1aa" },
   reaction: { bg: "#2e1a47", border: "#7c3aed", text: "#a78bfa" },
   projection: { bg: "#0d3320", border: "#16a34a", text: "#4ade80" },
   invariant: { bg: "#3b1219", border: "#dc2626", text: "#f87171" },
-  slice: { bg: "transparent", border: "#52525b", text: "#71717a" },
 };
 
-const NODE_W = 150;
-const NODE_H = 34;
-const H_GAP = 60;
-const V_GAP = 12;
-const SECTION_GAP = 30;
+const NODE_W = 130;
+const NODE_H = 30;
+const H_GAP = 20;
+const SWIMLANE_H = 120;
+const SWIMLANE_LABEL_W = 120;
+const CMD_Y = 10; // commands offset within swimlane (top)
+const EVT_Y = 45; // events offset within swimlane (middle)
+// projections and reactions placed below all swimlanes
 
 type Pos = { x: number; y: number };
 type NodeData = {
@@ -27,8 +37,8 @@ type NodeData = {
   sublabel?: string;
   line?: number;
 };
-type Edge = { fromKey: string; toKey: string; label: string };
-type Box = { label: string; x: number; y: number; w: number; h: number };
+type Edge = { from: Pos; to: Pos; color: string; dashed?: boolean };
+type Swimlane = { label: string; y: number; line?: number };
 
 type Props = {
   model: DomainModel;
@@ -44,18 +54,55 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   } | null>(null);
   const warningSet = new Set(warnings.map((w) => w.element).filter(Boolean));
 
-  const { nodes, edges, boxes, width, height } = useMemo(() => {
+  // Pan & zoom
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const isPanning = useRef(false);
+  const panStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    setZoom((z) =>
+      Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+    );
+  }, []);
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      isPanning.current = true;
+      panStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+    },
+    [pan]
+  );
+
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (!isPanning.current) return;
+    setPan({
+      x: panStart.current.px + (e.clientX - panStart.current.x),
+      y: panStart.current.py + (e.clientY - panStart.current.y),
+    });
+  }, []);
+
+  const handleMouseUp = useCallback(() => {
+    isPanning.current = false;
+  }, []);
+  const handleReset = useCallback(() => {
+    setPan({ x: 0, y: 0 });
+    setZoom(1);
+  }, []);
+
+  const { nodes, edges, swimlanes, width, height } = useMemo(() => {
     const nodes: NodeData[] = [];
     const edges: Edge[] = [];
-    const boxes: Box[] = [];
-    const nodeMap = new Map<string, Pos>();
+    const swimlanes: Swimlane[] = [];
+    const eventPositions = new Map<string, Pos>();
 
-    // Deduplicate states by name (partial states merge)
+    // Merge partial states
     const stateByName = new Map<string, (typeof model.states)[0]>();
     for (const s of model.states) {
       const existing = stateByName.get(s.name);
       if (existing) {
-        // Merge events and actions
         existing.events.push(
           ...s.events.filter(
             (e) => !existing.events.some((x) => x.name === e.name)
@@ -76,28 +123,43 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     }
     const mergedStates = [...stateByName.values()];
 
-    // Layout per state: Action column → Event column → State column
-    let globalY = 20;
+    // Layout: one swimlane per state, events spread horizontally
+    let swimlaneY = 0;
 
     for (const state of mergedStates) {
-      const stateStartY = globalY;
+      swimlanes.push({ label: state.name, y: swimlaneY, line: state.line });
 
-      // Place state node (right column)
-      const stateKey = `state:${state.name}`;
-      const stateX = 2 * (NODE_W + H_GAP);
+      // Spread events horizontally
+      let eventX = SWIMLANE_LABEL_W + H_GAP;
+      for (const event of state.events) {
+        const eKey = `event:${event.name}`;
+        const ePos = { x: eventX, y: swimlaneY + EVT_Y };
+        nodes.push({
+          key: eKey,
+          pos: ePos,
+          type: "event",
+          label: event.name,
+          sublabel: event.hasCustomPatch ? "patch" : undefined,
+          line: event.line,
+        });
+        eventPositions.set(event.name, ePos);
+        eventX += NODE_W + H_GAP;
+      }
 
-      // Collect all events and actions for this state
-      const eventKeys: string[] = [];
-      const actionKeys: string[] = [];
-      let localY = stateStartY;
-
-      // Actions (left column)
+      // Place actions above their emitted events
       for (const action of state.actions) {
+        // Position above the first emitted event, or next available slot
+        let actionX = SWIMLANE_LABEL_W + H_GAP;
+        if (action.emits.length > 0) {
+          const firstEventPos = eventPositions.get(action.emits[0]);
+          if (firstEventPos) actionX = firstEventPos.x;
+        }
+
         const aKey = `action:${action.name}`;
-        const pos = { x: 0, y: localY };
+        const aPos = { x: actionX, y: swimlaneY + CMD_Y };
         nodes.push({
           key: aKey,
-          pos,
+          pos: aPos,
           type: "action",
           label: action.name,
           sublabel:
@@ -106,180 +168,95 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               : undefined,
           line: action.line,
         });
-        nodeMap.set(aKey, pos);
-        actionKeys.push(aKey);
 
-        // Action → Event edges
+        // Action → Event edges (vertical down)
         for (const ename of action.emits) {
-          edges.push({
-            fromKey: aKey,
-            toKey: `event:${ename}`,
-            label: "emits",
-          });
-        }
-
-        localY += NODE_H + V_GAP;
-      }
-
-      // Events (middle column)
-      let eventY = stateStartY;
-      for (const event of state.events) {
-        const eKey = `event:${event.name}`;
-        if (!nodeMap.has(eKey)) {
-          const pos = { x: NODE_W + H_GAP, y: eventY };
-          nodes.push({
-            key: eKey,
-            pos,
-            type: "event",
-            label: event.name,
-            sublabel: event.hasCustomPatch ? "custom patch" : "passthrough",
-            line: event.line,
-          });
-          nodeMap.set(eKey, pos);
-          eventKeys.push(eKey);
-
-          // Event → State edge
-          edges.push({ fromKey: eKey, toKey: stateKey, label: "patches" });
-
-          eventY += NODE_H + V_GAP;
+          const ePos = eventPositions.get(ename);
+          if (ePos) {
+            edges.push({
+              from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+              to: { x: ePos.x + NODE_W / 2, y: ePos.y },
+              color: COLORS.action.border,
+            });
+          }
         }
       }
 
-      // State node (right column, vertically centered)
-      const stateHeight = Math.max(localY, eventY) - stateStartY;
-      const stateCenterY =
-        stateStartY + Math.max(0, stateHeight / 2 - NODE_H / 2);
-      const statePos = { x: stateX, y: stateCenterY };
-      nodes.push({
-        key: stateKey,
-        pos: statePos,
-        type: "state",
-        label: state.name,
-        line: state.line,
-      });
-      nodeMap.set(stateKey, statePos);
-
-      globalY = Math.max(localY, eventY) + SECTION_GAP;
+      swimlaneY += SWIMLANE_H;
     }
 
-    // Reactions (below, middle column)
+    // Projections — placed below the events they handle
+    const projY = swimlaneY + 10;
+    let projX = SWIMLANE_LABEL_W + H_GAP;
+    for (const proj of model.projections) {
+      const pKey = `projection:${proj.name}`;
+      const pPos = { x: projX, y: projY };
+      nodes.push({
+        key: pKey,
+        pos: pPos,
+        type: "projection",
+        label: proj.name,
+        line: proj.line,
+      });
+
+      // Event → Projection edges
+      for (const ename of proj.handles) {
+        const ePos = eventPositions.get(ename);
+        if (ePos) {
+          edges.push({
+            from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+            to: { x: pPos.x + NODE_W / 2, y: pPos.y },
+            color: COLORS.projection.border,
+            dashed: true,
+          });
+        }
+      }
+
+      projX += NODE_W + H_GAP;
+    }
+
+    // Reactions — placed below events, connecting to other swimlanes
     const allReactions = [
       ...model.slices.flatMap((s) => s.reactions),
       ...model.reactions,
     ];
-    const reactionStartY = globalY;
-    for (const r of allReactions) {
-      const rKey = `reaction:${r.event}`;
-      if (!nodeMap.has(rKey)) {
-        const pos = { x: NODE_W + H_GAP, y: globalY };
-        nodes.push({
-          key: rKey,
-          pos,
-          type: "reaction",
-          label: `on ${r.event}`,
-          sublabel: r.isVoid ? "void" : "drain",
-          line: r.line,
-        });
-        nodeMap.set(rKey, pos);
+    let reactX = projX + H_GAP;
+    const reactY = projY;
+    for (const reaction of allReactions) {
+      const rKey = `reaction:${reaction.event}`;
+      const rPos = { x: reactX, y: reactY };
+      nodes.push({
+        key: rKey,
+        pos: rPos,
+        type: "reaction",
+        label: `on ${reaction.event}`,
+        sublabel: reaction.isVoid ? "void" : "drain",
+        line: reaction.line,
+      });
 
-        // Event → Reaction edge
+      // Event → Reaction edge
+      const ePos = eventPositions.get(reaction.event);
+      if (ePos) {
         edges.push({
-          fromKey: `event:${r.event}`,
-          toKey: rKey,
-          label: "triggers",
-        });
-
-        globalY += NODE_H + V_GAP;
-      }
-    }
-
-    // Projections (below reactions, middle column)
-    if (model.projections.length > 0 && globalY === reactionStartY) {
-      // No reactions, start projections at the same Y
-    } else if (model.projections.length > 0) {
-      globalY += V_GAP;
-    }
-
-    for (const p of model.projections) {
-      const pKey = `projection:${p.name}`;
-      if (!nodeMap.has(pKey)) {
-        const pos = { x: NODE_W + H_GAP, y: globalY };
-        nodes.push({
-          key: pKey,
-          pos,
-          type: "projection",
-          label: p.name,
-          line: p.line,
-        });
-        nodeMap.set(pKey, pos);
-
-        for (const ename of p.handles) {
-          edges.push({
-            fromKey: `event:${ename}`,
-            toKey: pKey,
-            label: "projects",
-          });
-        }
-
-        globalY += NODE_H + V_GAP;
-      }
-    }
-
-    // Slice boxes — contain their states, reactions, projections
-    for (const slice of model.slices) {
-      const memberKeys: string[] = [];
-      // Resolve state names
-      for (const sn of slice.states) {
-        memberKeys.push(`state:${sn}`);
-        // Also include events and actions of this state
-        const st = stateByName.get(sn);
-        if (st) {
-          for (const e of st.events) memberKeys.push(`event:${e.name}`);
-          for (const a of st.actions) memberKeys.push(`action:${a.name}`);
-        }
-      }
-      for (const r of slice.reactions) memberKeys.push(`reaction:${r.event}`);
-      for (const pn of slice.projections) memberKeys.push(`projection:${pn}`);
-
-      let minX = Infinity,
-        minY = Infinity,
-        maxX = 0,
-        maxY = 0;
-      for (const k of memberKeys) {
-        const pos = nodeMap.get(k);
-        if (pos) {
-          minX = Math.min(minX, pos.x);
-          minY = Math.min(minY, pos.y);
-          maxX = Math.max(maxX, pos.x + NODE_W);
-          maxY = Math.max(maxY, pos.y + NODE_H);
-        }
-      }
-      if (minX < Infinity) {
-        boxes.push({
-          label: slice.name,
-          x: minX - 10,
-          y: minY - 22,
-          w: maxX - minX + 20,
-          h: maxY - minY + 32,
+          from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+          to: { x: rPos.x + NODE_W / 2, y: rPos.y },
+          color: COLORS.reaction.border,
+          dashed: true,
         });
       }
+
+      reactX += NODE_W + H_GAP;
     }
 
     // Compute bounds
-    let maxW = 0,
-      maxH = 0;
+    let maxW = SWIMLANE_LABEL_W;
+    let maxH = 0;
     for (const n of nodes) {
       maxW = Math.max(maxW, n.pos.x + NODE_W);
       maxH = Math.max(maxH, n.pos.y + NODE_H);
     }
 
-    return {
-      nodes,
-      edges,
-      boxes,
-      width: maxW + 40,
-      height: maxH + 40,
-    };
+    return { nodes, edges, swimlanes, width: maxW + 40, height: maxH + 40 };
   }, [model]);
 
   if (model.states.length === 0 && model.projections.length === 0) {
@@ -290,143 +267,196 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     );
   }
 
+  const svgW = Math.max(width, 600);
+  const svgH = Math.max(height, 300);
+
   return (
-    <div className="relative h-full overflow-auto bg-zinc-950 p-4">
-      <svg width={width} height={height} className="select-none">
-        {/* Slice boxes */}
-        {boxes.map((box) => (
-          <g key={box.label}>
-            <rect
-              x={box.x}
-              y={box.y}
-              width={box.w}
-              height={box.h}
-              rx={8}
-              fill="none"
-              stroke={COLORS.slice.border}
-              strokeWidth={1}
-              strokeDasharray="6,4"
-            />
-            <text
-              x={box.x + 8}
-              y={box.y + 13}
-              fill={COLORS.slice.text}
-              className="text-[9px] font-medium"
-            >
-              slice: {box.label}
-            </text>
-          </g>
-        ))}
+    <div className="relative flex h-full flex-col bg-zinc-950">
+      {/* Zoom controls */}
+      <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-925 px-3 py-1">
+        <button
+          onClick={() => setZoom((z) => Math.min(3, z * 1.25))}
+          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          title="Zoom in"
+        >
+          <ZoomIn size={13} />
+        </button>
+        <button
+          onClick={() => setZoom((z) => Math.max(0.2, z / 1.25))}
+          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          title="Zoom out"
+        >
+          <ZoomOut size={13} />
+        </button>
+        <button
+          onClick={handleReset}
+          className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+          title="Fit"
+        >
+          <Maximize2 size={13} />
+        </button>
+        <span className="text-[9px] text-zinc-600">
+          {Math.round(zoom * 100)}% · scroll to zoom · drag to pan
+        </span>
+      </div>
 
-        {/* Edges */}
-        {edges.map((edge, i) => {
-          const from = nodes.find((n) => n.key === edge.fromKey);
-          const to = nodes.find((n) => n.key === edge.toKey);
-          if (!from || !to) return null;
-
-          const x1 = from.pos.x + NODE_W;
-          const y1 = from.pos.y + NODE_H / 2;
-          const x2 = to.pos.x;
-          const y2 = to.pos.y + NODE_H / 2;
-
-          // If same column, offset
-          const sameCol = Math.abs(x1 - NODE_W - x2) < 10;
-          if (sameCol) {
-            // Vertical edge (reaction/projection below event)
-            return (
-              <g key={i}>
-                <path
-                  d={`M ${from.pos.x + NODE_W / 2} ${from.pos.y + NODE_H} L ${to.pos.x + NODE_W / 2} ${to.pos.y}`}
-                  fill="none"
-                  stroke="#3f3f46"
-                  strokeWidth={1}
-                  markerEnd="url(#arrowhead)"
+      <div
+        className={`flex-1 overflow-hidden ${isPanning.current ? "cursor-grabbing" : "cursor-grab"}`}
+        onWheel={handleWheel}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={handleMouseUp}
+      >
+        <svg
+          width="100%"
+          height="100%"
+          viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${svgW / zoom} ${svgH / zoom}`}
+          className="select-none"
+        >
+          {/* Swimlane backgrounds and labels */}
+          {swimlanes.map((sl, i) => (
+            <g key={sl.label}>
+              {i % 2 === 0 && (
+                <rect
+                  x={0}
+                  y={sl.y}
+                  width={svgW}
+                  height={SWIMLANE_H}
+                  fill="#18181b"
+                  opacity={0.4}
                 />
-              </g>
-            );
-          }
-
-          const midX = (x1 + x2) / 2;
-          return (
-            <g key={i}>
-              <path
-                d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
-                fill="none"
-                stroke="#3f3f46"
+              )}
+              <line
+                x1={0}
+                y1={sl.y + SWIMLANE_H}
+                x2={svgW}
+                y2={sl.y + SWIMLANE_H}
+                stroke="#27272a"
                 strokeWidth={1}
-                markerEnd="url(#arrowhead)"
-              />
-            </g>
-          );
-        })}
-
-        <defs>
-          <marker
-            id="arrowhead"
-            viewBox="0 0 10 10"
-            refX="10"
-            refY="5"
-            markerWidth="6"
-            markerHeight="6"
-            orient="auto-start-reverse"
-          >
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#52525b" />
-          </marker>
-        </defs>
-
-        {/* Nodes */}
-        {nodes.map((node) => {
-          const color = COLORS[node.type];
-          const hasWarning = warningSet.has(node.label);
-
-          return (
-            <g
-              key={node.key}
-              className="cursor-pointer"
-              onClick={() => node.line && onClickLine?.(node.line)}
-              onMouseEnter={(e) =>
-                setTooltip({
-                  x: e.clientX,
-                  y: e.clientY,
-                  text: `${node.type}: ${node.label}${node.sublabel ? ` (${node.sublabel})` : ""}`,
-                })
-              }
-              onMouseLeave={() => setTooltip(null)}
-            >
-              <rect
-                x={node.pos.x}
-                y={node.pos.y}
-                width={NODE_W}
-                height={NODE_H}
-                rx={6}
-                fill={color.bg}
-                stroke={hasWarning ? "#ef4444" : color.border}
-                strokeWidth={hasWarning ? 2 : 1}
               />
               <text
-                x={node.pos.x + 8}
-                y={node.pos.y + (node.sublabel ? 13 : 17)}
-                fill={color.text}
-                className="text-[10px] font-medium"
+                x={8}
+                y={sl.y + SWIMLANE_H / 2}
+                dominantBaseline="middle"
+                fill={COLORS.state.text}
+                className="text-[11px] font-medium"
               >
-                {node.label.length > 18
-                  ? node.label.slice(0, 16) + "..."
-                  : node.label}
+                {sl.label}
               </text>
-              {node.sublabel && (
-                <text
-                  x={node.pos.x + 8}
-                  y={node.pos.y + 26}
-                  fill="#71717a"
-                  className="text-[8px]"
-                >
-                  {node.sublabel}
-                </text>
-              )}
             </g>
-          );
-        })}
-      </svg>
+          ))}
+
+          {/* Lane labels for rows below swimlanes */}
+          {(model.projections.length > 0 ||
+            model.slices.some((s) => s.reactions.length > 0) ||
+            model.reactions.length > 0) && (
+            <text
+              x={8}
+              y={swimlanes.length * SWIMLANE_H + 25}
+              dominantBaseline="middle"
+              fill="#52525b"
+              className="text-[9px]"
+            >
+              Projections & Reactions
+            </text>
+          )}
+
+          {/* Edges */}
+          {edges.map((edge, i) => {
+            const dx = edge.to.x - edge.from.x;
+            const dy = edge.to.y - edge.from.y;
+            const isStraight = Math.abs(dx) < 5;
+
+            return (
+              <path
+                key={i}
+                d={
+                  isStraight
+                    ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
+                    : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x} ${edge.from.y + dy * 0.5}, ${edge.to.x} ${edge.to.y - dy * 0.5}, ${edge.to.x} ${edge.to.y}`
+                }
+                fill="none"
+                stroke={edge.color}
+                strokeWidth={1.5}
+                strokeDasharray={edge.dashed ? "4,3" : undefined}
+                opacity={0.6}
+                markerEnd="url(#arrow)"
+              />
+            );
+          })}
+
+          <defs>
+            <marker
+              id="arrow"
+              viewBox="0 0 10 10"
+              refX="10"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#52525b" />
+            </marker>
+          </defs>
+
+          {/* Nodes */}
+          {nodes.map((node) => {
+            const color = COLORS[node.type];
+            const hasWarning = warningSet.has(node.label);
+
+            return (
+              <g
+                key={node.key}
+                className="cursor-pointer"
+                onClick={() => node.line && onClickLine?.(node.line)}
+                onMouseEnter={(e) =>
+                  setTooltip({
+                    x: e.clientX,
+                    y: e.clientY,
+                    text: `${node.type}: ${node.label}${node.sublabel ? ` (${node.sublabel})` : ""}`,
+                  })
+                }
+                onMouseLeave={() => setTooltip(null)}
+              >
+                <rect
+                  x={node.pos.x}
+                  y={node.pos.y}
+                  width={NODE_W}
+                  height={NODE_H}
+                  rx={4}
+                  fill={color.bg}
+                  stroke={hasWarning ? "#ef4444" : color.border}
+                  strokeWidth={hasWarning ? 2 : 1}
+                />
+                <text
+                  x={node.pos.x + NODE_W / 2}
+                  y={node.pos.y + (node.sublabel ? 12 : NODE_H / 2)}
+                  textAnchor="middle"
+                  dominantBaseline={node.sublabel ? "auto" : "central"}
+                  fill={color.text}
+                  className="text-[9px] font-medium"
+                >
+                  {node.label.length > 16
+                    ? node.label.slice(0, 14) + "..."
+                    : node.label}
+                </text>
+                {node.sublabel && (
+                  <text
+                    x={node.pos.x + NODE_W / 2}
+                    y={node.pos.y + 23}
+                    textAnchor="middle"
+                    fill="#71717a"
+                    className="text-[7px]"
+                  >
+                    {node.sublabel}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
 
       {tooltip && (
         <div
