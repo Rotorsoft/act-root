@@ -61,7 +61,16 @@ function loadSavedImports(): SavedImport[] {
 
 function saveImport(url: string) {
   const saved = loadSavedImports();
-  const label = url.split("/").slice(-2).join("/").replace(/\.ts$/, "");
+  // e.g. "owner/repo/.../file.ts" → "repo/path/to/file"
+  const parts = url.replace(/https?:\/\/github\.com\//, "").split("/");
+  const label =
+    parts.length > 4
+      ? parts
+          .slice(1)
+          .filter((p) => p !== "blob" && p !== "tree")
+          .join("/")
+          .replace(/\.ts$/, "")
+      : parts.slice(-2).join("/").replace(/\.ts$/, "");
   if (saved.some((s) => s.url === url)) return;
   const updated = [{ url, label }, ...saved].slice(0, 10);
   localStorage.setItem("inspector:git-imports", JSON.stringify(updated));
