@@ -115,103 +115,91 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       for (const st of partials) for (const e of st.events) evts.add(e.name);
       sliceEvents.set(slice.name, evts);
 
-      // Layout: Commands (left) → State (center) → Events (right)
-      // State appears once per partial state, commands stack above/below on the left, events on the right
-      let rowY = LANE_PAD;
-      for (const st of partials) {
-        // Collect all actions and events for this partial state
-        const cmdX = cursorX;
-        const stateX = cursorX + NODE_W + H_GAP;
-        const eventX = stateX + NODE_W + H_GAP;
+      // Layout: Commands (left) → ONE State (center) → Events (right)
+      const stateName = partials[0]?.name ?? "State";
+      const allActions = partials.flatMap((st) => st.actions);
+      const allEvtDefs = partials.flatMap((st) => st.events);
+      const rowY = LANE_PAD;
+      const cmdX = cursorX;
+      const stateX = cursorX + NODE_W + H_GAP;
+      const eventX = stateX + NODE_W + H_GAP;
 
-        // Place commands vertically on the left
-        let cmdY = rowY;
-        for (const action of st.actions) {
-          const aPos = { x: cmdX, y: cmdY };
-          nodes.push({
-            key: `action:${action.name}`,
-            pos: aPos,
-            type: "action",
-            label: action.name,
-            sublabel:
-              action.invariants.length > 0
-                ? `${action.invariants.length} guard(s)`
-                : undefined,
-            line: action.line,
-          });
-          actionPositions.set(action.name, aPos);
-          cmdY += NODE_H + 4;
-        }
-
-        // Place events vertically on the right
-        let evtY = rowY;
-        for (const action of st.actions) {
-          for (const eName of action.emits) {
-            if (!eventPositions.has(eName)) {
-              const ePos = { x: eventX, y: evtY };
-              nodes.push({
-                key: `event:${eName}`,
-                pos: ePos,
-                type: "event",
-                label: eName,
-                line: st.events.find((e) => e.name === eName)?.line,
-              });
-              eventPositions.set(eName, ePos);
-              evtY += NODE_H + 4;
-            }
-          }
-        }
-
-        // Place state (yellow) centered vertically between commands and events
-        const totalH = Math.max(cmdY, evtY) - rowY;
-        const sPos = {
-          x: stateX,
-          y: rowY + Math.max(0, totalH / 2 - NODE_H / 2),
-        };
+      // Commands (left, stacked)
+      let cmdY = rowY;
+      for (const action of allActions) {
+        const aPos = { x: cmdX, y: cmdY };
         nodes.push({
-          key: `state:${st.name}:${slice.name}`,
-          pos: sPos,
-          type: "state",
-          label: st.name,
-          line: st.line,
+          key: `action:${action.name}`,
+          pos: aPos,
+          type: "action",
+          label: action.name,
+          sublabel:
+            action.invariants.length > 0
+              ? `${action.invariants.length} guard(s)`
+              : undefined,
+          line: action.line,
         });
+        actionPositions.set(action.name, aPos);
+        cmdY += NODE_H + 4;
+      }
 
-        // Command → State arrows
-        for (const action of st.actions) {
-          const aPos = actionPositions.get(action.name);
-          if (aPos) {
-            edges.push({
-              from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
-              to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
-              color: COLORS.action.border,
+      // Events (right, stacked)
+      let evtY = rowY;
+      for (const action of allActions) {
+        for (const eName of action.emits) {
+          if (!eventPositions.has(eName)) {
+            const ePos = { x: eventX, y: evtY };
+            nodes.push({
+              key: `event:${eName}`,
+              pos: ePos,
+              type: "event",
+              label: eName,
+              line: allEvtDefs.find((e) => e.name === eName)?.line,
             });
+            eventPositions.set(eName, ePos);
+            evtY += NODE_H + 4;
           }
         }
+      }
 
-        // State → Event arrows
-        for (const action of st.actions) {
-          for (const eName of action.emits) {
-            const ePos = eventPositions.get(eName);
-            if (ePos) {
-              edges.push({
-                from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
-                to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
-                color: COLORS.event.border,
-              });
-            }
-          }
+      // Single state box (center, vertically centered)
+      const totalH = Math.max(cmdY, evtY) - rowY;
+      const sPos = {
+        x: stateX,
+        y: rowY + Math.max(0, totalH / 2 - NODE_H / 2),
+      };
+      nodes.push({
+        key: `state:${stateName}:${slice.name}`,
+        pos: sPos,
+        type: "state",
+        label: stateName,
+        line: partials[0]?.line,
+      });
+
+      // Command → State and State → Event arrows
+      for (const action of allActions) {
+        const aPos = actionPositions.get(action.name);
+        if (aPos)
+          edges.push({
+            from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
+            to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
+            color: COLORS.action.border,
+          });
+        for (const eName of action.emits) {
+          const ePos = eventPositions.get(eName);
+          if (ePos)
+            edges.push({
+              from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
+              to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
+              color: COLORS.event.border,
+            });
         }
-
-        maxY = Math.max(maxY, rowY + totalH);
-        rowY += totalH + V_GAP;
       }
 
-      // Update cursorX to after the widest element placed
-      let sliceMaxX = cursorX;
-      for (const n of nodes) {
-        if (n.pos.x + NODE_W > sliceMaxX) sliceMaxX = n.pos.x + NODE_W;
-      }
-      cursorX = sliceMaxX + H_GAP;
+      maxY = Math.max(maxY, rowY + totalH);
+
+      // Advance cursor past events column
+      cursorX = eventX + NODE_W + H_GAP;
 
       // 4. Reactions (purple) — after events in the flow
       for (const reaction of slice.reactions) {
@@ -478,11 +466,11 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               />
               {
                 {
-                  action: "Command",
-                  state: "Aggregate",
+                  action: "Action",
+                  state: "State",
                   event: "Event",
-                  reaction: "Policy",
-                  projection: "Read Model",
+                  reaction: "Reaction",
+                  projection: "Projection",
                 }[t]
               }
             </span>
