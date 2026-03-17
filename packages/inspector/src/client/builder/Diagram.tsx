@@ -258,13 +258,24 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
     }
 
-    // 3. Reactions — dedicated swimlane below aggregates
-    const allReactions = [
-      ...model.slices.flatMap((s) => s.reactions),
-      ...model.reactions,
-    ].filter((r) => !r.isVoid);
+    // 3. Reactions — dedicated swimlane, scoped to owning slice's events
+    const taggedReactions: Array<{
+      reaction: (typeof model.reactions)[0];
+      sliceEvents: Set<string>;
+    }> = [];
+    for (const slice of model.slices) {
+      const evts = sliceEvents.get(slice.name) ?? new Set();
+      for (const r of slice.reactions) {
+        if (!r.isVoid) taggedReactions.push({ reaction: r, sliceEvents: evts });
+      }
+    }
+    // Inline act() reactions — no slice scope, connect to any event
+    for (const r of model.reactions) {
+      if (!r.isVoid)
+        taggedReactions.push({ reaction: r, sliceEvents: new Set([r.event]) });
+    }
 
-    if (allReactions.length > 0) {
+    if (taggedReactions.length > 0) {
       const reactRowY = swimlaneY;
       swimlanes.push({
         label: "Reactions",
@@ -273,7 +284,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         line: undefined,
       });
       let reactX = LABEL_W + H_GAP;
-      for (const reaction of allReactions) {
+      for (const { reaction, sliceEvents: ownEvents } of taggedReactions) {
         const rPos = { x: reactX, y: reactRowY + 12 };
         nodes.push({
           key: `reaction:${reaction.handlerName}`,
@@ -283,17 +294,19 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           line: reaction.line,
         });
 
-        // Event → Reaction
-        const triggerPos = eventPositions.get(reaction.event);
-        if (triggerPos) {
-          edges.push({
-            from: { x: triggerPos.x + NODE_W / 2, y: triggerPos.y + NODE_H },
-            to: { x: rPos.x + NODE_W / 2, y: rPos.y },
-            color: COLORS.reaction.border,
-            dashed: true,
-          });
+        // Event → Reaction (only if event belongs to this reaction's slice)
+        if (ownEvents.has(reaction.event)) {
+          const triggerPos = eventPositions.get(reaction.event);
+          if (triggerPos) {
+            edges.push({
+              from: { x: triggerPos.x + NODE_W / 2, y: triggerPos.y + NODE_H },
+              to: { x: rPos.x + NODE_W / 2, y: rPos.y },
+              color: COLORS.reaction.border,
+              dashed: true,
+            });
+          }
         }
-        // Reaction → Actions (depart from right side, label with action name)
+        // Reaction → Actions
         for (const actionName of reaction.dispatches) {
           const aPos = actionPositions.get(actionName);
           if (aPos) {
