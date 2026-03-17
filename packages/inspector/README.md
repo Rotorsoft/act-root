@@ -54,7 +54,6 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
   - **Blocked streams**: expandable error details, retry count, watermark gap, copy error
   - **Active leases**: lease holder, countdown timer, expiration status
   - **Watermark histogram**: gap distribution across streams (0, 1-10, 11-50, 51-100, 100+)
-  - **Auto-refresh**: configurable polling (Off, 5s, 10s, 30s, 1m) with refresh indicator
   - **Tab badge**: red blocked count badge on Monitor tab
 
 ### Navigation
@@ -62,6 +61,12 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
 - **Cross-view linking**: stream names show Database icon, correlation IDs show GitBranch icon — click to navigate to their tab. Works in all views, dialogs, and sidebars.
 - **Back/Forward**: browser-like navigation history with chevron buttons and dropdown showing full history with meaningful captions
 - **Default time window**: last 1 hour on first load
+
+### Live Mode
+
+- **Global polling**: Off / 5s / 10s / 30s — pulsing radio icon in header when active
+- All views detect new events in real time — event log, timeline, streams, correlation, monitor
+- Automatic data reset on DB changes (handles `store().seed()` resets gracefully)
 
 ### Core
 
