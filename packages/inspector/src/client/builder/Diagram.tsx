@@ -139,10 +139,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           pos: ap,
           type: "action",
           label: action.name,
-          sub:
-            action.invariants.length > 0
-              ? `${action.invariants.length} guard(s)`
-              : undefined,
+          sub: action.invariants.length > 0 ? "guarded" : undefined,
           line: action.line,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
@@ -280,10 +277,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           pos: ap,
           type: "action",
           label: action.name,
-          sub:
-            action.invariants.length > 0
-              ? `${action.invariants.length} guard(s)`
-              : undefined,
+          sub: action.invariants.length > 0 ? "guarded" : undefined,
           line: action.line,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
