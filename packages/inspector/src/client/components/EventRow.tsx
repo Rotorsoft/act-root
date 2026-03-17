@@ -27,6 +27,7 @@ type EventRowProps = {
   event: Event;
   defaultExpanded?: boolean;
   compact?: boolean;
+  hideStream?: boolean;
 };
 
 /** Deterministic color from event name */
@@ -67,6 +68,7 @@ export function EventRow({
   event,
   defaultExpanded = false,
   compact = false,
+  hideStream = false,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
@@ -103,9 +105,11 @@ export function EventRow({
         </span>
 
         {/* Stream */}
-        <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
-          {event.stream}
-        </span>
+        {!hideStream && (
+          <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
+            {event.stream}
+          </span>
+        )}
 
         {/* Time */}
         <span
