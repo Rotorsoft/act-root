@@ -334,7 +334,7 @@ function StreamDetail({
         ) : (
           <div>
             {events.map((event: any) => (
-              <EventRow key={event.id} event={event} />
+              <EventRow key={event.id} event={event} defaultExpanded />
             ))}
           </div>
         )}

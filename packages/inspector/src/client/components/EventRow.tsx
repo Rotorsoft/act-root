@@ -25,6 +25,7 @@ type Event = {
 
 type EventRowProps = {
   event: Event;
+  defaultExpanded?: boolean;
 };
 
 /** Deterministic color from event name */
@@ -61,8 +62,8 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-export function EventRow({ event }: EventRowProps) {
-  const [expanded, setExpanded] = useState(false);
+export function EventRow({ event, defaultExpanded = false }: EventRowProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
 
   return (
