@@ -37,7 +37,7 @@ The complexity of modern software design often arises from over-engineering abst
 
 ### [@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)
 
-Event sourcing observatory — connect to any Act PostgreSQL store and inspect, query, and visualize events in real time. Features auto-discovery of Act stores, event log with filtering and pagination, SVG timeline with zoom/pan, stream inspector, correlation explorer (waterfall + DAG), drain processing monitor, and global live polling across all views. Cross-view navigation with clickable stream/correlation links and back/forward history. Dark theme with JetBrains Mono.
+Event sourcing observatory and visual builder for the Act framework. Features event log, SVG timeline, stream inspector, correlation explorer (waterfall + DAG), drain processing monitor, and a visual builder with Monaco editor + AI-powered code generation. Auto-discovers Act stores, global live polling, cross-view navigation with back/forward history. Dark theme with JetBrains Mono.
 
 ---
 

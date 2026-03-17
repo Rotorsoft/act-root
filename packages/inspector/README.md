@@ -7,10 +7,22 @@ Event sourcing observatory for the Act framework. Connect to any Act PostgreSQL 
 ```bash
 # From the monorepo root
 pnpm install
+
+# Optional: set env vars for full functionality
+export GITHUB_TOKEN=$(gh auth token)   # Private repo imports in Builder
+export ANTHROPIC_API_KEY=sk-ant-...    # AI code generation in Builder
+
 pnpm dev:inspector
 ```
 
 This starts both the tRPC server (port 4001) and the Vite client (port 3001).
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GITHUB_TOKEN` or `GH_TOKEN` | Optional | GitHub API token for importing from private repos. Use `gh auth token` to get your CLI token. |
+| `ANTHROPIC_API_KEY` | Optional | Claude API key for AI code generation in the Builder tab. |
 
 Open [http://localhost:3001](http://localhost:3001) — the connection dialog appears on launch.
 
@@ -40,7 +52,7 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
 
 ## Features
 
-### Views (tab navigation: Log | Timeline | Streams | Correlation | Monitor)
+### Views (tab navigation: Log | Timeline | Streams | Correlation | Monitor | Builder)
 
 - **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels. Stream and correlation columns with icon links to navigate to their respective tabs.
 - **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips with event data, zoom/pan (mouse wheel + drag), density heatmap for large datasets. Click event dot to open detail dialog with stream/correlation navigation links.
@@ -55,6 +67,26 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
   - **Active leases**: lease holder, countdown timer, expiration status
   - **Watermark histogram**: gap distribution across streams (0, 1-10, 11-50, 51-100, 100+)
   - **Tab badge**: red blocked count badge on Monitor tab
+- **Visual Builder** — code-to-diagram workbench with AI generation:
+  - **Monaco editor**: full TypeScript syntax highlighting with Act/Zod type stubs, line numbers, word wrap
+  - **Resizable split view**: drag divider between editor and diagram panels (20–80% range)
+  - **Event Storming diagram**: auto-generated from code with zoom/pan (mouse wheel + drag):
+    - Pure left-to-right DAG layout with wrapping at 800px
+    - Actions (blue), Events (orange), States (yellow slice boundaries), Reactions (purple), Projections (green)
+    - Icons on event nodes: lightning (reaction), screen (projection), shield (guard) — stacked horizontally
+    - Tooltips showing reaction names, projection names, and guard descriptions
+    - Reactions that dispatch actions duplicate the target (no backward arrows)
+    - Projections shown as single nodes below their slices
+    - Orchestrator (`act()`) builder reflected in diagram
+  - **Scaffold snippets**: "New" dropdown seeds editor with Act templates (State, Slice, Projection, Act, Full App) — each with proper imports, comments, and dependency files as separate tabs
+  - **GitHub import**: paste a GitHub URL to fetch files — supports private repos via `GITHUB_TOKEN`, resolves workspace package imports (`@scope/name` → `packages/name/src/index.ts`), saved imports with quick-load buttons
+  - **AI generation**: describe your domain in plain English → Claude generates complete Act code (requires `ANTHROPIC_API_KEY`)
+  - **Iterative refinement**: follow-up prompts modify existing code in context
+  - **Prompt templates**: e-commerce, content moderation, IoT fleet
+  - **Validation**: warnings for actions that don't emit events
+  - **Export**: copy code to clipboard or download as `.ts` file
+  - **Multi-file tabs**: imported repos and scaffolds open as tabbed files
+  - Click diagram element → highlights corresponding line in editor
 
 ### Navigation
 
@@ -90,7 +122,8 @@ packages/inspector/
 │       ├── trpc.ts      # tRPC client
 │       ├── stores/      # URL-synced filter state
 │       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, FilterBar, StatsBar, EventRow, JsonViewer, Logo
-│       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor
+│       ├── builder/     # Parser, Diagram, types, validate
+│       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor, Builder
 ├── public/              # favicon.svg
 ├── index.html
 ├── vite.config.ts
@@ -111,6 +144,8 @@ packages/inspector/
 | `streams` | query | Stream list with event counts and versions |
 | `streamMeta` | query | Stream processing metadata from `_streams` table |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram |
+| `generate` | mutation | AI code generation via Claude API — sends domain prompt with Act framework context |
+| `fetchFromGit` | mutation | Fetch files from GitHub — supports private repos, follows workspace package imports |
 
 - **Event data**: flows through Act's `Store.query()` interface
 - **Processing metadata**: direct PG access to the `_streams` table via `pg.Client`

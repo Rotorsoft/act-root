@@ -12,6 +12,7 @@ type Connection = {
   password: string;
   schema: string;
   table: string;
+  ssl: boolean;
 };
 
 const defaultConn: Connection = {
@@ -23,6 +24,7 @@ const defaultConn: Connection = {
   password: "postgres",
   schema: "public",
   table: "events",
+  ssl: false,
 };
 
 function loadSaved(): Connection[] {
@@ -35,7 +37,13 @@ function loadSaved(): Connection[] {
 }
 
 function saveConnections(conns: Connection[]) {
-  localStorage.setItem("inspector:connections", JSON.stringify(conns));
+  // Strip passwords before persisting — user re-enters on connect
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const safe = conns.map(({ password: _pw, ...rest }) => ({
+    ...rest,
+    password: "",
+  }));
+  localStorage.setItem("inspector:connections", JSON.stringify(safe));
 }
 
 type Props = {
@@ -49,6 +57,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
   const [showScan, setShowScan] = useState(false);
+  const [connString, setConnString] = useState("");
 
   const connectMutation = trpc.connect.useMutation({
     onSuccess: () => {
@@ -94,6 +103,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
       password: conn.password,
       schema: conn.schema,
       table: conn.table,
+      ssl: conn.ssl,
     });
   };
 
@@ -160,6 +170,45 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
           </div>
         )}
 
+        {/* Connection string */}
+        <div className="mb-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-zinc-400">Connection String</span>
+            <input
+              type="text"
+              value={connString}
+              onChange={(e) => {
+                setConnString(e.target.value);
+                // Parse: postgresql://user:pass@host:port/database?options
+                try {
+                  const url = new URL(e.target.value);
+                  const sslMode = url.searchParams.get("sslmode");
+                  setConn({
+                    ...conn,
+                    name: url.pathname.slice(1) || conn.name,
+                    host: url.hostname,
+                    port: Number(url.port) || 5432,
+                    database: url.pathname.slice(1) || "postgres",
+                    user: url.username || "postgres",
+                    password: decodeURIComponent(url.password || ""),
+                    schema: url.searchParams.get("schema") || "public",
+                    table: url.searchParams.get("table") || "events",
+                    ssl:
+                      sslMode === "require" ||
+                      sslMode === "prefer" ||
+                      url.hostname.includes("neon") ||
+                      url.hostname.includes("supabase"),
+                  });
+                } catch {
+                  // Not a valid URL yet, ignore
+                }
+              }}
+              placeholder="postgresql://user:pass@host:port/database"
+              className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+            />
+          </label>
+        </div>
+
         {/* Connection form */}
         <div className="grid grid-cols-2 gap-3">
           {(
@@ -193,6 +242,19 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
             </label>
           ))}
         </div>
+
+        {/* SSL toggle */}
+        <label className="mt-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={conn.ssl}
+            onChange={(e) => setConn({ ...conn, ssl: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600"
+          />
+          <span className="text-xs text-zinc-400">
+            SSL (required for Neon, Supabase, etc.)
+          </span>
+        </label>
 
         {error && (
           <div className="mt-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-400">

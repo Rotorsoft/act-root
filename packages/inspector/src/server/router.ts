@@ -292,6 +292,7 @@ export const inspectorRouter = t.router({
         password: z.string().default("postgres"),
         schema: z.string().default("public"),
         table: z.string().default("events"),
+        ssl: z.boolean().default(false),
       })
     )
     .mutation(async ({ input }) => {
@@ -300,7 +301,13 @@ export const inspectorRouter = t.router({
           await currentStore.dispose();
           currentStore = null;
         }
-        const newStore = new PostgresStore(input);
+        const { ssl, ...pgConfig } = input;
+        const storeConfig = ssl
+          ? { ...pgConfig, ssl: { rejectUnauthorized: false } }
+          : pgConfig;
+        const newStore = new PostgresStore(
+          storeConfig as Record<string, unknown>
+        );
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
@@ -625,6 +632,197 @@ export const inspectorRouter = t.router({
       if (pgClient) await pgClient.end();
     }
   }),
+
+  /** Generate Act code from natural language prompt using Claude API */
+  generate: t.procedure
+    .input(
+      z.object({
+        prompt: z.string().min(1),
+        currentCode: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error(
+          "ANTHROPIC_API_KEY not set. Export it before starting the inspector server.",
+          { cause: "missing_key" }
+        );
+      }
+
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey });
+
+      const systemPrompt = `You are an expert Act framework developer. Generate TypeScript code using the @rotorsoft/act event sourcing framework.
+
+## Architecture
+- **State**: Domain entity defined with \`state({ Name: schema })\`. Has \`.init()\`, \`.emits()\`, optional \`.patch()\` for custom reducers, \`.on()\` for actions, \`.emit()\` for event emission, \`.given()\` for invariants, \`.build()\`.
+- **Slice**: Vertical feature grouping with \`slice()\`. Groups partial states + reactions. Uses \`.withState(State)\`, \`.withProjection(Proj)\`, \`.on("EventName").do(handler).to(resolver)\`, \`.build()\`.
+- **Projection**: Read model with \`projection("name")\`. Uses \`.on({ Event: schema }).do(handler)\`, \`.build()\`.
+- **Act**: Orchestrator with \`act()\`. Uses \`.withSlice(Slice)\`, \`.withProjection(Proj)\`, \`.build()\`.
+
+## Builder Patterns
+\`\`\`typescript
+// State with partial state pattern (multiple states can share the same aggregate name)
+const MyState = state({ Aggregate: z.object({ field: z.string() }) })
+  .init(() => ({ field: "" }))
+  .emits({ EventHappened: z.object({ value: z.string() }) })
+  .patch({ EventHappened: ({ data }) => ({ field: data.value }) }) // optional — passthrough is default
+  .on({ DoSomething: z.object({ value: z.string() }) })
+    .given([{ description: "Must be valid", valid: (state) => state.field !== "" }])
+    .emit("EventHappened") // string passthrough when payload matches
+  .build();
+
+// Slice groups states + reactions
+const MySlice = slice()
+  .withState(MyState)
+  .withProjection(MyProjection)
+  .on("EventHappened")
+    .do(async function handleEvent(event, _stream, app) {
+      await app.do("OtherAction", { stream: target, actor: { id: "system", name: "System" } }, payload, event);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+
+// Projection for read models
+const MyProjection = projection("myview")
+  .on({ EventHappened: z.object({ value: z.string() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
+
+// Act orchestrator
+const app = act()
+  .withSlice(MySlice)
+  .withProjection(MyProjection)
+  .build();
+\`\`\`
+
+## Rules
+- Import from "@rotorsoft/act" and "zod"
+- Use \`z\` for all schemas, \`ZodEmpty\` for empty payloads
+- Partial states: multiple \`state({ SameName: ... })\` merge automatically in slices
+- Each slice should own its partial states and reactions — separate concerns into slices
+- Reactions MUST call \`app.do("ActionName", target, payload, event)\` — pass event for causation tracking
+- Use \`.to(resolver)\` for reactions that need drain processing, \`.void()\` only for side effects
+- Use \`type Invariant\` for business rules: \`{ description: string; valid: (state) => boolean }\`
+- Name reaction handlers with \`async function name(...)\` for readability
+- Always include the \`act()\` orchestrator wiring slices and projections
+- Return ONLY TypeScript code, no markdown fences, no explanation
+
+${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.currentCode}\n\`\`\`\n\nModify the existing code based on the user's request. Return the complete updated code.` : "Generate complete Act TypeScript code from scratch."}`;
+
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: "user", content: input.prompt }],
+      });
+
+      const textBlock = response.content.find((b) => b.type === "text");
+      let code = textBlock?.text ?? "";
+
+      // Strip markdown fences if present
+      code = code
+        .replace(/^```(?:typescript|ts)?\n?/m, "")
+        .replace(/\n?```$/m, "")
+        .trim();
+
+      return { code };
+    }),
+
+  /** Fetch source files from a GitHub repo, following local imports */
+  fetchFromGit: t.procedure
+    .input(
+      z.object({
+        owner: z.string(),
+        repo: z.string(),
+        branch: z.string().default("master"),
+        entryPath: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { owner, repo, branch, entryPath } = input;
+      const fetched = new Map<string, string>();
+      const queue = [entryPath];
+
+      while (queue.length > 0) {
+        const filePath = queue.shift()!;
+        if (fetched.has(filePath)) continue;
+
+        // Try GitHub API first (works with private repos if GITHUB_TOKEN is set)
+        const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+
+        const headers: Record<string, string> = {
+          "User-Agent": "act-inspector",
+        };
+        if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
+
+        let content: string;
+        const apiRes = await fetch(apiUrl, {
+          headers: { ...headers, Accept: "application/vnd.github.raw+json" },
+        });
+        if (apiRes.ok) {
+          content = await apiRes.text();
+        } else {
+          // Fallback to raw URL (public repos)
+          const rawRes = await fetch(rawUrl);
+          if (!rawRes.ok) {
+            if (fetched.size === 0) {
+              throw new Error(
+                `Failed to fetch ${filePath}: ${apiRes.status}${ghToken ? "" : " (set GITHUB_TOKEN for private repos)"}`,
+                { cause: "fetch_error" }
+              );
+            }
+            continue;
+          }
+          content = await rawRes.text();
+        }
+        fetched.set(filePath, content);
+
+        // Follow imports
+        const importRe = /from\s+["']([^"']+)["']/g;
+        let m: RegExpExecArray | null;
+        while ((m = importRe.exec(content)) !== null) {
+          const imp = m[1];
+
+          if (imp.startsWith(".")) {
+            // Relative import: ./foo.js or ../bar.js
+            const dir = filePath.includes("/")
+              ? filePath.slice(0, filePath.lastIndexOf("/"))
+              : "";
+            const parts = (dir ? dir + "/" + imp : imp).split("/");
+            const resolved: string[] = [];
+            for (const p of parts) {
+              if (p === "." || p === "") continue;
+              if (p === "..") resolved.pop();
+              else resolved.push(p);
+            }
+            let resolvedPath = resolved.join("/");
+            resolvedPath = resolvedPath.replace(/\.js$/, ".ts");
+            if (!resolvedPath.endsWith(".ts")) resolvedPath += ".ts";
+            queue.push(resolvedPath);
+          } else if (imp.startsWith("@") && !imp.startsWith("@rotorsoft/")) {
+            // Workspace package: @scope/name → packages/name/src/index.ts
+            const pkgName = imp.split("/")[1];
+            if (pkgName) queue.push(`packages/${pkgName}/src/index.ts`);
+          }
+        }
+      }
+
+      // Concatenate all files with headers
+      const files = [...fetched.entries()].map(([path, content]) => ({
+        path,
+        content,
+      }));
+
+      const code = files
+        .map((f) => `// === ${f.path} ===\n${f.content}`)
+        .join("\n\n");
+
+      return { files, code };
+    }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
