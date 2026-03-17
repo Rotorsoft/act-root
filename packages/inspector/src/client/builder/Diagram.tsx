@@ -541,8 +541,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             } else {
               d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
             }
-            const midX = (edge.from.x + edge.to.x) / 2;
-            const midY = (edge.from.y + edge.to.y) / 2;
             return (
               <g key={i}>
                 <path
@@ -556,9 +554,9 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 />
                 {edge.label && (
                   <text
-                    x={midX}
-                    y={midY - 4}
-                    textAnchor="middle"
+                    x={edge.from.x + 4}
+                    y={edge.from.y - 6}
+                    textAnchor="start"
                     fill="#71717a"
                     className="text-[7px]"
                   >
