@@ -494,25 +494,33 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 ))}
                 {/* Guard icon (shield) */}
                 {n.guards && n.guards.length > 0 && (
-                  <text
-                    x={n.pos.x + 6}
-                    y={n.pos.y + 8}
-                    fill="#ef4444"
-                    className="text-[9px]"
-                  >
-                    🛡
-                  </text>
+                  <g transform={`translate(${n.pos.x + 3},${n.pos.y + 2})`}>
+                    <path
+                      d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
+                      fill="none"
+                      stroke="#ef4444"
+                      strokeWidth="1.2"
+                    />
+                  </g>
                 )}
                 {/* Projection icon (eye) */}
                 {n.projections && n.projections.length > 0 && (
-                  <text
-                    x={n.pos.x + W - 14}
-                    y={n.pos.y + 8}
-                    fill={COLORS.projection.text}
-                    className="text-[8px]"
+                  <g
+                    transform={`translate(${n.pos.x + W - 13},${n.pos.y + 2})`}
                   >
-                    👁
-                  </text>
+                    <path
+                      d="M5 2C2.5 2 .5 5 .5 5s2 3 4.5 3 4.5-3 4.5-3S7.5 2 5 2z"
+                      fill="none"
+                      stroke={COLORS.projection.text}
+                      strokeWidth="1"
+                    />
+                    <circle
+                      cx="5"
+                      cy="5"
+                      r="1.5"
+                      fill={COLORS.projection.text}
+                    />
+                  </g>
                 )}
               </g>
             );
