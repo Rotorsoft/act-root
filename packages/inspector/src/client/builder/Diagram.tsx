@@ -2,45 +2,30 @@ import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { DomainModel, StateNode, ValidationWarning } from "./types.js";
 
-/**
- * Event Storming Diagram — left-to-right flow per slice:
- *   [Command (blue)] → [Aggregate (yellow)] → [Event (orange)] → [Policy (lilac)] → ...
- *
- * Projections (green) at the end or below
- * Vertical slices as dashed columns
- */
-
 const COLORS = {
-  action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" }, // Blue
-  event: { bg: "#c2410c", border: "#f97316", text: "#fed7aa" }, // Orange
-  state: { bg: "#a16207", border: "#eab308", text: "#fef08a" }, // Yellow
-  reaction: { bg: "#7e22ce", border: "#a855f7", text: "#d8b4fe" }, // Purple/Lilac
-  projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" }, // Green
+  action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" },
+  event: { bg: "#c2410c", border: "#f97316", text: "#fed7aa" },
+  state: { bg: "#a16207", border: "#eab308", text: "#fef08a" },
+  reaction: { bg: "#7e22ce", border: "#a855f7", text: "#d8b4fe" },
+  projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" },
 };
 
-const NODE_W = 120;
-const NODE_H = 32;
-const H_GAP = 12;
-const V_GAP = 14;
-const LANE_PAD = 10;
+const W = 120,
+  H = 30,
+  GAP = 14,
+  PAD = 10;
 
 type Pos = { x: number; y: number };
-type NodeData = {
+type N = {
   key: string;
   pos: Pos;
   type: keyof typeof COLORS;
   label: string;
-  sublabel?: string;
+  sub?: string;
   line?: number;
 };
-type Edge = {
-  from: Pos;
-  to: Pos;
-  color: string;
-  dashed?: boolean;
-  label?: string;
-};
-type SliceCol = { label: string; x: number; w: number };
+type E = { from: Pos; to: Pos; color: string; dash?: boolean; label?: string };
+type Box = { label: string; x: number; y: number; w: number; h: number };
 
 type Props = {
   model: DomainModel;
@@ -49,373 +34,248 @@ type Props = {
 };
 
 export function Diagram({ model, warnings, onClickLine }: Props) {
-  const [tooltip, setTooltip] = useState<{
-    x: number;
-    y: number;
-    text: string;
-  } | null>(null);
-  const warningSet = new Set(warnings.map((w) => w.element).filter(Boolean));
-
+  const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
+    null
+  );
+  const warn = new Set(warnings.map((w) => w.element).filter(Boolean));
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
-  const isPanning = useRef(false);
-  const panStart = useRef({ x: 0, y: 0, px: 0, py: 0 });
+  const drag = useRef(false);
+  const start = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const onWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
     setZoom((z) =>
       Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
     );
   }, []);
-  const handleMouseDown = useCallback(
+  const onDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
-      isPanning.current = true;
-      panStart.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
+      drag.current = true;
+      start.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y };
     },
     [pan]
   );
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isPanning.current) return;
+  const onMove = useCallback((e: React.MouseEvent) => {
+    if (!drag.current) return;
     setPan({
-      x: panStart.current.px + (e.clientX - panStart.current.x),
-      y: panStart.current.py + (e.clientY - panStart.current.y),
+      x: start.current.px + (e.clientX - start.current.x),
+      y: start.current.py + (e.clientY - start.current.y),
     });
   }, []);
-  const handleMouseUp = useCallback(() => {
-    isPanning.current = false;
+  const onUp = useCallback(() => {
+    drag.current = false;
   }, []);
-  const handleReset = useCallback(() => {
+  const reset = useCallback(() => {
     setPan({ x: 0, y: 0 });
     setZoom(1);
   }, []);
 
-  const { nodes, edges, sliceCols, width, height } = useMemo(() => {
-    const nodes: NodeData[] = [];
-    const edges: Edge[] = [];
-    const sliceCols: SliceCol[] = [];
-    const actionPositions = new Map<string, Pos>();
-    const eventPositions = new Map<string, Pos>();
+  const { ns, es, boxes, width, height } = useMemo(() => {
+    const ns: N[] = [];
+    const es: E[] = [];
+    const boxes: Box[] = [];
+    const aPos = new Map<string, Pos>();
+    const ePos = new Map<string, Pos>();
+    const sv = new Map<string, StateNode>();
+    for (const s of model.states) sv.set(s.varName, s);
 
-    const stateByVar = new Map<string, StateNode>();
-    for (const s of model.states) stateByVar.set(s.varName, s);
-
-    const sliceEvents = new Map<string, Set<string>>();
-    const statePositions = new Map<string, Pos>();
-
-    // 1. Place ONE state box per unique aggregate name (left column)
-    const uniqueStates = new Set<string>();
-    for (const s of model.states) uniqueStates.add(s.name);
-    let stateY = LANE_PAD;
-    const STATE_COL_X = LANE_PAD;
-    for (const name of uniqueStates) {
-      const sPos = { x: STATE_COL_X, y: stateY };
-      nodes.push({
-        key: `state:${name}`,
-        pos: sPos,
-        type: "state",
-        label: name,
-        line: model.states.find((s) => s.name === name)?.line,
-      });
-      statePositions.set(name, sPos);
-      stateY += NODE_H + V_GAP;
-    }
-
-    // 2. Lay out slices left-to-right, each slice is: actions → events → reactions
-    let cursorX = STATE_COL_X + NODE_W + H_GAP * 2;
-    let maxY = stateY;
+    const sliceEvts = new Map<string, Set<string>>();
+    let cx = PAD,
+      maxY = 0;
 
     for (const slice of model.slices) {
-      const sliceStartX = cursorX;
-      const partials = slice.stateVars
-        .map((sv) => stateByVar.get(sv))
+      const sx = cx;
+      const parts = slice.stateVars
+        .map((v) => sv.get(v))
         .filter(Boolean) as StateNode[];
-
       const evts = new Set<string>();
-      for (const st of partials) for (const e of st.events) evts.add(e.name);
-      sliceEvents.set(slice.name, evts);
+      for (const st of parts) for (const e of st.events) evts.add(e.name);
+      sliceEvts.set(slice.name, evts);
 
-      const allActions = partials.flatMap((st) => st.actions);
-      const allEvtDefs = partials.flatMap((st) => st.events);
+      const acts = parts.flatMap((st) => st.actions);
+      const eDefs = parts.flatMap((st) => st.events);
+      const stateName = parts[0]?.name ?? "";
 
-      // For each action: place action then its events horizontally
-      let localY = LANE_PAD;
-      for (const action of allActions) {
-        // Action
-        const aPos = { x: cursorX, y: localY };
-        nodes.push({
-          key: `action:${action.name}`,
-          pos: aPos,
+      // Each action on its own row: [Action] → [Event1] → [Event2]
+      let y = PAD + H + GAP; // leave room for slice title
+      let sliceRightX = cx;
+      for (const action of acts) {
+        const ap = { x: cx, y };
+        ns.push({
+          key: `a:${action.name}`,
+          pos: ap,
           type: "action",
           label: action.name,
-          sublabel:
+          sub:
             action.invariants.length > 0
               ? `${action.invariants.length} guard(s)`
               : undefined,
           line: action.line,
         });
-        actionPositions.set(action.name, aPos);
+        aPos.set(action.name, ap);
+        let evtX = cx + W + GAP;
 
-        // State → Action arrow (from left state column)
-        const stateName = partials.find((st) =>
-          st.actions.includes(action)
-        )?.name;
-        const sPos = stateName ? statePositions.get(stateName) : undefined;
-        if (sPos)
-          edges.push({
-            from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
-            to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
-            color: COLORS.state.border,
-            dashed: true,
-          });
-
-        // Events for this action (right of action)
-        let evtX = cursorX + NODE_W + H_GAP;
-        for (const eName of action.emits) {
-          if (!eventPositions.has(eName)) {
-            const ePos = { x: evtX, y: localY };
-            nodes.push({
-              key: `event:${eName}`,
-              pos: ePos,
+        for (const en of action.emits) {
+          if (!ePos.has(en)) {
+            const ep = { x: evtX, y };
+            ns.push({
+              key: `e:${en}`,
+              pos: ep,
               type: "event",
-              label: eName,
-              line: allEvtDefs.find((e) => e.name === eName)?.line,
+              label: en,
+              line: eDefs.find((e) => e.name === en)?.line,
             });
-            eventPositions.set(eName, ePos);
-            // Action → Event arrow
-            edges.push({
-              from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
-              to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
+            ePos.set(en, ep);
+            es.push({
+              from: { x: ap.x + W, y: ap.y + H / 2 },
+              to: { x: ep.x, y: ep.y + H / 2 },
               color: COLORS.action.border,
             });
-            evtX += NODE_W + H_GAP;
+            evtX += W + GAP;
           }
         }
-
-        localY += NODE_H + 4;
+        sliceRightX = Math.max(sliceRightX, evtX);
+        y += H + GAP / 2;
       }
 
-      maxY = Math.max(maxY, localY);
-
-      // Advance cursorX past the widest row in this slice
-      let sliceMaxX = cursorX;
-      for (const n of nodes) {
-        if (n.pos.x >= sliceStartX && n.pos.x + NODE_W > sliceMaxX)
-          sliceMaxX = n.pos.x + NODE_W;
-      }
-      cursorX = sliceMaxX + H_GAP;
-
-      // 4. Reactions (purple) — after events in the flow
-      for (const reaction of slice.reactions) {
-        if (reaction.isVoid) continue;
-        const ePos = eventPositions.get(reaction.event);
-        const rY = ePos ? ePos.y : LANE_PAD;
-        const rPos = { x: cursorX, y: rY };
-        nodes.push({
-          key: `reaction:${reaction.handlerName}`,
-          pos: rPos,
+      // Reactions after all actions
+      for (const r of slice.reactions) {
+        if (r.isVoid) continue;
+        const reactX =
+          Math.max(
+            sliceRightX,
+            ...ns.filter((n) => n.pos.x >= sx).map((n) => n.pos.x + W)
+          ) + GAP;
+        const ep = ePos.get(r.event);
+        const rp = { x: reactX, y: ep ? ep.y : y };
+        ns.push({
+          key: `r:${r.handlerName}`,
+          pos: rp,
           type: "reaction",
-          label: reaction.handlerName,
-          line: reaction.line,
+          label: r.handlerName,
+          line: r.line,
         });
 
-        // Event → Policy arrow
-        if (ePos) {
-          edges.push({
-            from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
-            to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
+        if (ep)
+          es.push({
+            from: { x: ep.x + W, y: ep.y + H / 2 },
+            to: { x: rp.x, y: rp.y + H / 2 },
             color: COLORS.reaction.border,
-            dashed: true,
+            dash: true,
           });
-        }
-        // Policy → Command arrows (dispatches)
-        for (const actionName of reaction.dispatches) {
-          const aPos = actionPositions.get(actionName);
-          if (aPos) {
-            edges.push({
-              from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+
+        for (const an of r.dispatches) {
+          const ap2 = aPos.get(an);
+          if (ap2) {
+            es.push({
+              from: { x: rp.x + W, y: rp.y + H / 2 },
+              to: { x: ap2.x + W * 0.3, y: ap2.y },
               color: COLORS.reaction.border,
-              dashed: true,
-              label: actionName,
+              dash: true,
+              label: an,
             });
           }
         }
-        cursorX += NODE_W + H_GAP;
-        maxY = Math.max(maxY, rY + NODE_H);
+        y = Math.max(y, rp.y + H + GAP / 2);
       }
 
-      const sliceEndX = cursorX;
-      sliceCols.push({
-        label: slice.name.replace(/Slice$/i, ""),
-        x: sliceStartX - 4,
-        w: sliceEndX - sliceStartX + 4,
+      maxY = Math.max(maxY, y);
+
+      // Slice boundary box
+      let bx2 = cx;
+      for (const n of ns) {
+        if (n.pos.x >= sx && n.pos.x + W > bx2) bx2 = n.pos.x + W;
+      }
+      boxes.push({
+        label: `${slice.name.replace(/Slice$/i, "")} (${stateName})`,
+        x: sx - 4,
+        y: PAD - 4,
+        w: bx2 - sx + 8,
+        h: maxY - PAD + 8,
       });
-      cursorX += H_GAP;
+
+      cx = bx2 + GAP * 2;
     }
 
-    // --- Standalone states (not in slices) ---
-    const claimedVars = new Set(model.slices.flatMap((sl) => sl.stateVars));
-    let rowY = LANE_PAD;
-    for (const st of model.states.filter((s) => !claimedVars.has(s.varName))) {
-      const cmdX = cursorX;
-      const stateX = cursorX + NODE_W + H_GAP;
-      const eventX = stateX + NODE_W + H_GAP;
-
-      let cmdY = rowY;
+    // Standalone states
+    const claimed = new Set(model.slices.flatMap((sl) => sl.stateVars));
+    for (const st of model.states.filter((s) => !claimed.has(s.varName))) {
+      let y = PAD;
       for (const action of st.actions) {
-        const aPos = { x: cmdX, y: cmdY };
-        nodes.push({
-          key: `action:${action.name}`,
-          pos: aPos,
+        const ap = { x: cx, y };
+        ns.push({
+          key: `a:${action.name}`,
+          pos: ap,
           type: "action",
           label: action.name,
-          sublabel:
+          sub:
             action.invariants.length > 0
               ? `${action.invariants.length} guard(s)`
               : undefined,
           line: action.line,
         });
-        actionPositions.set(action.name, aPos);
-        cmdY += NODE_H + 4;
-      }
-
-      let evtY = rowY;
-      for (const action of st.actions) {
-        for (const eName of action.emits) {
-          if (!eventPositions.has(eName)) {
-            const ePos = { x: eventX, y: evtY };
-            nodes.push({
-              key: `event:${eName}`,
-              pos: ePos,
+        aPos.set(action.name, ap);
+        let endX = cx + W + GAP;
+        for (const en of action.emits) {
+          if (!ePos.has(en)) {
+            const ep = { x: endX, y };
+            ns.push({
+              key: `e:${en}`,
+              pos: ep,
               type: "event",
-              label: eName,
-              line: st.events.find((e) => e.name === eName)?.line,
+              label: en,
+              line: st.events.find((e) => e.name === en)?.line,
             });
-            eventPositions.set(eName, ePos);
-            evtY += NODE_H + 4;
+            ePos.set(en, ep);
+            es.push({
+              from: { x: ap.x + W, y: ap.y + H / 2 },
+              to: { x: ep.x, y: ep.y + H / 2 },
+              color: COLORS.action.border,
+            });
+            endX += W + GAP;
           }
         }
+        cx = Math.max(cx, endX);
+        y += H + GAP / 2;
       }
-
-      const totalH = Math.max(cmdY, evtY) - rowY;
-      const sPos = {
-        x: stateX,
-        y: rowY + Math.max(0, totalH / 2 - NODE_H / 2),
-      };
-      nodes.push({
-        key: `state:${st.name}:standalone`,
-        pos: sPos,
-        type: "state",
-        label: st.name,
-        line: st.line,
-      });
-
-      for (const action of st.actions) {
-        const aPos = actionPositions.get(action.name);
-        if (aPos)
-          edges.push({
-            from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
-            to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
-            color: COLORS.action.border,
-          });
-        for (const eName of action.emits) {
-          const ePos = eventPositions.get(eName);
-          if (ePos)
-            edges.push({
-              from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
-              to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
-              color: COLORS.event.border,
-            });
-        }
-      }
-
-      cursorX = eventX + NODE_W + H_GAP;
-      rowY += totalH + V_GAP;
-      maxY = Math.max(maxY, rowY);
+      maxY = Math.max(maxY, y);
+      cx += GAP * 2;
     }
 
-    // --- Projections (green) ---
-    const projY = maxY + V_GAP * 2;
-    const placedProjs = new Set<string>();
-    for (const slice of model.slices) {
-      const sliceProjVars = new Set(slice.projections);
-      if (sliceProjVars.size === 0) continue;
-      const sEvts = sliceEvents.get(slice.name) ?? new Set();
-      const sliceCol = sliceCols.find(
-        (sc) => sc.label === slice.name.replace(/Slice$/i, "")
-      );
-      for (const proj of model.projections) {
-        if (!sliceProjVars.has(proj.varName) && !sliceProjVars.has(proj.name))
-          continue;
-        const matching = proj.handles.filter((h) => sEvts.has(h));
-        if (matching.length === 0) continue;
-        const pPos = {
-          x: sliceCol ? sliceCol.x + sliceCol.w / 2 - NODE_W / 2 : cursorX,
-          y: projY,
-        };
-        nodes.push({
-          key: `projection:${proj.name}:${slice.name}`,
-          pos: pPos,
-          type: "projection",
-          label: proj.name,
-          line: proj.line,
-        });
-        for (const en of matching) {
-          const ePos = eventPositions.get(en);
-          if (ePos)
-            edges.push({
-              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
-              color: COLORS.projection.border,
-              dashed: true,
-            });
-        }
-        placedProjs.add(proj.varName);
-      }
-    }
-    // Unclaimed projections
+    // Projections — one node per projection, connect to all handled events
+    const py = maxY + GAP * 2;
+    let px = PAD;
     for (const proj of model.projections) {
-      if (placedProjs.has(proj.varName)) continue;
-      for (const slice of model.slices) {
-        const sEvts = sliceEvents.get(slice.name) ?? new Set();
-        const matching = proj.handles.filter((h) => sEvts.has(h));
-        if (matching.length === 0) continue;
-        const sliceCol = sliceCols.find(
-          (sc) => sc.label === slice.name.replace(/Slice$/i, "")
-        );
-        if (!sliceCol) continue;
-        const pPos = {
-          x: Math.max(sliceCol.x + 4, sliceCol.x + sliceCol.w / 2 - NODE_W / 2),
-          y: projY,
-        };
-        nodes.push({
-          key: `projection:${proj.name}:${slice.name}`,
-          pos: pPos,
-          type: "projection",
-          label: proj.name,
-          line: proj.line,
-        });
-        for (const en of matching) {
-          const ePos = eventPositions.get(en);
-          if (ePos)
-            edges.push({
-              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
-              color: COLORS.projection.border,
-              dashed: true,
-            });
-        }
+      const pp = { x: px, y: py };
+      ns.push({
+        key: `p:${proj.name}`,
+        pos: pp,
+        type: "projection",
+        label: proj.name,
+        line: proj.line,
+      });
+      for (const en of proj.handles) {
+        const ep2 = ePos.get(en);
+        if (ep2)
+          es.push({
+            from: { x: ep2.x + W / 2, y: ep2.y + H },
+            to: { x: pp.x + W / 2, y: pp.y },
+            color: COLORS.projection.border,
+            dash: true,
+          });
       }
+      px += W + GAP;
     }
 
-    let maxW = 0,
-      maxH = 0;
-    for (const n of nodes) {
-      maxW = Math.max(maxW, n.pos.x + NODE_W);
-      maxH = Math.max(maxH, n.pos.y + NODE_H);
+    let mw = 0,
+      mh = 0;
+    for (const n of ns) {
+      mw = Math.max(mw, n.pos.x + W);
+      mh = Math.max(mh, n.pos.y + H);
     }
-    return { nodes, edges, sliceCols, width: maxW + 40, height: maxH + 30 };
+    return { ns, es, boxes, width: mw + 30, height: mh + 30 };
   }, [model]);
 
   if (model.states.length === 0 && model.projections.length === 0) {
@@ -426,8 +286,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     );
   }
 
-  const svgW = Math.max(width, 400);
-  const svgH = Math.max(height, 150);
+  const sw = Math.max(width, 400),
+    sh = Math.max(height, 150);
 
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
@@ -447,7 +307,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           <ZoomOut size={13} />
         </button>
         <button
-          onClick={handleReset}
+          onClick={reset}
           className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
           title="Fit"
         >
@@ -457,9 +317,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           {Math.round(zoom * 100)}%
         </span>
         <div className="ml-3 flex items-center gap-2.5 text-[8px] text-zinc-500">
-          {(
-            ["action", "state", "event", "reaction", "projection"] as const
-          ).map((t) => (
+          {(["action", "event", "reaction", "projection"] as const).map((t) => (
             <span key={t} className="flex items-center gap-1">
               <span
                 className="inline-block h-2.5 w-2.5 rounded"
@@ -471,7 +329,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               {
                 {
                   action: "Action",
-                  state: "State",
                   event: "Event",
                   reaction: "Reaction",
                   projection: "Projection",
@@ -483,91 +340,86 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       </div>
 
       <div
-        className={`flex-1 overflow-hidden ${isPanning.current ? "cursor-grabbing" : "cursor-grab"}`}
-        onWheel={handleWheel}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
+        className={`flex-1 overflow-hidden ${drag.current ? "cursor-grabbing" : "cursor-grab"}`}
+        onWheel={onWheel}
+        onMouseDown={onDown}
+        onMouseMove={onMove}
+        onMouseUp={onUp}
+        onMouseLeave={onUp}
       >
         <svg
           width="100%"
           height="100%"
-          viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${svgW / zoom} ${svgH / zoom}`}
+          viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${sw / zoom} ${sh / zoom}`}
           className="select-none"
         >
-          {/* Slice columns */}
-          {sliceCols.map((sc) => (
-            <g key={sc.label}>
+          {/* Slice boundaries */}
+          {boxes.map((b) => (
+            <g key={b.label}>
               <rect
-                x={sc.x}
-                y={0}
-                width={sc.w}
-                height={svgH}
-                fill="#18181b"
-                opacity={0.3}
-                rx={6}
-                stroke="#3f3f46"
-                strokeWidth={1}
-                strokeDasharray="6,4"
+                x={b.x}
+                y={b.y}
+                width={b.w}
+                height={b.h}
+                rx={8}
+                fill={COLORS.state.bg}
+                fillOpacity={0.1}
+                stroke={COLORS.state.border}
+                strokeWidth={1.5}
+                strokeOpacity={0.4}
               />
               <text
-                x={sc.x + sc.w / 2}
-                y={svgH - 6}
-                textAnchor="middle"
-                fill="#71717a"
-                className="text-[9px] font-medium"
+                x={b.x + 8}
+                y={b.y + 12}
+                fill={COLORS.state.text}
+                className="text-[10px] font-semibold"
               >
-                {sc.label}
+                {b.label}
               </text>
             </g>
           ))}
 
           {/* Edges */}
-          {edges.map((edge, i) => {
-            const dx = edge.to.x - edge.from.x;
-            const dy = edge.to.y - edge.from.y;
-            const isStraight = Math.abs(dy) < 5;
-            const goingBack = dx < -20;
+          {es.map((e, i) => {
+            const dx = e.to.x - e.from.x;
+            const dy = e.to.y - e.from.y;
+            const straight = Math.abs(dy) < 5 && dx > 0;
+            const back = dx < -20;
             let d: string;
-            if (isStraight) {
-              d = `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`;
-            } else if (goingBack) {
-              // S-curve for reaction→command (going backwards)
-              const midY = Math.min(edge.from.y, edge.to.y) - 30;
-              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + 30} ${midY}, ${edge.to.x - 30} ${midY}, ${edge.to.x} ${edge.to.y}`;
-            } else {
-              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.3} ${edge.from.y}, ${edge.to.x - dx * 0.3} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
-            }
+            if (straight) d = `M ${e.from.x} ${e.from.y} L ${e.to.x} ${e.to.y}`;
+            else if (back) {
+              const my = Math.min(e.from.y, e.to.y) - 25;
+              d = `M ${e.from.x} ${e.from.y} C ${e.from.x + 30} ${my}, ${e.to.x - 30} ${my}, ${e.to.x} ${e.to.y}`;
+            } else
+              d = `M ${e.from.x} ${e.from.y} C ${e.from.x + dx * 0.4} ${e.from.y}, ${e.to.x - dx * 0.4} ${e.to.y}, ${e.to.x} ${e.to.y}`;
             return (
               <g key={i}>
                 <path
                   d={d}
                   fill="none"
-                  stroke={edge.color}
+                  stroke={e.color}
                   strokeWidth={1.5}
-                  strokeDasharray={edge.dashed ? "4,3" : undefined}
+                  strokeDasharray={e.dash ? "4,3" : undefined}
                   opacity={0.7}
-                  markerEnd="url(#arrow)"
+                  markerEnd="url(#arr)"
                 />
-                {edge.label && (
+                {e.label && (
                   <text
-                    x={(edge.from.x + edge.to.x) / 2}
-                    y={Math.min(edge.from.y, edge.to.y) - 8}
+                    x={(e.from.x + e.to.x) / 2}
+                    y={Math.min(e.from.y, e.to.y) - 6}
                     textAnchor="middle"
                     fill="#a1a1aa"
                     className="text-[7px]"
                   >
-                    {edge.label}
+                    {e.label}
                   </text>
                 )}
               </g>
             );
           })}
-
           <defs>
             <marker
-              id="arrow"
+              id="arr"
               viewBox="0 0 10 10"
               refX="10"
               refY="5"
@@ -580,54 +432,52 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           </defs>
 
           {/* Nodes */}
-          {nodes.map((node) => {
-            const color = COLORS[node.type];
-            const hasWarning = warningSet.has(node.label);
+          {ns.map((n) => {
+            const c = COLORS[n.type];
+            const w = warn.has(n.label);
             return (
               <g
-                key={node.key}
+                key={n.key}
                 className="cursor-pointer"
-                onClick={() => node.line && onClickLine?.(node.line)}
-                onMouseEnter={(e) =>
-                  setTooltip({
-                    x: e.clientX,
-                    y: e.clientY,
-                    text: `${node.type}: ${node.label}${node.sublabel ? ` (${node.sublabel})` : ""}`,
+                onClick={() => n.line && onClickLine?.(n.line)}
+                onMouseEnter={(ev) =>
+                  setTip({
+                    x: ev.clientX,
+                    y: ev.clientY,
+                    t: `${n.type}: ${n.label}${n.sub ? ` (${n.sub})` : ""}`,
                   })
                 }
-                onMouseLeave={() => setTooltip(null)}
+                onMouseLeave={() => setTip(null)}
               >
                 <rect
-                  x={node.pos.x}
-                  y={node.pos.y}
-                  width={NODE_W}
-                  height={NODE_H}
+                  x={n.pos.x}
+                  y={n.pos.y}
+                  width={W}
+                  height={H}
                   rx={4}
-                  fill={color.bg}
-                  stroke={hasWarning ? "#ef4444" : color.border}
-                  strokeWidth={hasWarning ? 2 : 1.5}
+                  fill={c.bg}
+                  stroke={w ? "#ef4444" : c.border}
+                  strokeWidth={w ? 2 : 1.5}
                 />
                 <text
-                  x={node.pos.x + NODE_W / 2}
-                  y={node.pos.y + (node.sublabel ? 12 : NODE_H / 2)}
+                  x={n.pos.x + W / 2}
+                  y={n.pos.y + (n.sub ? 11 : H / 2)}
                   textAnchor="middle"
-                  dominantBaseline={node.sublabel ? "auto" : "central"}
-                  fill={color.text}
+                  dominantBaseline={n.sub ? "auto" : "central"}
+                  fill={c.text}
                   className="text-[9px] font-medium"
                 >
-                  {node.label.length > 14
-                    ? node.label.slice(0, 12) + "..."
-                    : node.label}
+                  {n.label.length > 14 ? n.label.slice(0, 12) + "..." : n.label}
                 </text>
-                {node.sublabel && (
+                {n.sub && (
                   <text
-                    x={node.pos.x + NODE_W / 2}
-                    y={node.pos.y + 24}
+                    x={n.pos.x + W / 2}
+                    y={n.pos.y + 23}
                     textAnchor="middle"
                     fill="#a1a1aa"
                     className="text-[7px]"
                   >
-                    {node.sublabel}
+                    {n.sub}
                   </text>
                 )}
               </g>
@@ -636,12 +486,12 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         </svg>
       </div>
 
-      {tooltip && (
+      {tip && (
         <div
           className="pointer-events-none fixed z-50 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-300 shadow-xl"
-          style={{ left: tooltip.x + 12, top: tooltip.y - 10 }}
+          style={{ left: tip.x + 12, top: tip.y - 10 }}
         >
-          {tooltip.text}
+          {tip.t}
         </div>
       )}
     </div>
