@@ -37,7 +37,13 @@ type NodeData = {
   sublabel?: string;
   line?: number;
 };
-type Edge = { from: Pos; to: Pos; color: string; dashed?: boolean };
+type Edge = {
+  from: Pos;
+  to: Pos;
+  color: string;
+  dashed?: boolean;
+  label?: string;
+};
 type Swimlane = { label: string; y: number; h: number; line?: number };
 type SliceCol = { label: string; x: number; w: number };
 
@@ -280,15 +286,16 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             dashed: true,
           });
         }
-        // Reaction → Actions (depart from right side)
+        // Reaction → Actions (depart from right side, label with action name)
         for (const actionName of reaction.dispatches) {
           const aPos = actionPositions.get(actionName);
           if (aPos) {
             edges.push({
               from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-              to: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
               color: COLORS.reaction.border,
               dashed: true,
+              label: actionName,
             });
           }
         }
@@ -468,17 +475,31 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             const d = isStraight
               ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
               : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
+            const midX = (edge.from.x + edge.to.x) / 2;
+            const midY = (edge.from.y + edge.to.y) / 2;
             return (
-              <path
-                key={i}
-                d={d}
-                fill="none"
-                stroke={edge.color}
-                strokeWidth={1.5}
-                strokeDasharray={edge.dashed ? "4,3" : undefined}
-                opacity={0.6}
-                markerEnd="url(#arrow)"
-              />
+              <g key={i}>
+                <path
+                  d={d}
+                  fill="none"
+                  stroke={edge.color}
+                  strokeWidth={1.5}
+                  strokeDasharray={edge.dashed ? "4,3" : undefined}
+                  opacity={0.6}
+                  markerEnd="url(#arrow)"
+                />
+                {edge.label && (
+                  <text
+                    x={midX}
+                    y={midY - 4}
+                    textAnchor="middle"
+                    fill="#71717a"
+                    className="text-[7px]"
+                  >
+                    {edge.label}
+                  </text>
+                )}
+              </g>
             );
           })}
 
