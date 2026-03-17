@@ -49,6 +49,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
   const [showScan, setShowScan] = useState(false);
+  const [connString, setConnString] = useState("");
 
   const connectMutation = trpc.connect.useMutation({
     onSuccess: () => {
@@ -159,6 +160,39 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
             </div>
           </div>
         )}
+
+        {/* Connection string */}
+        <div className="mb-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-zinc-400">Connection String</span>
+            <input
+              type="text"
+              value={connString}
+              onChange={(e) => {
+                setConnString(e.target.value);
+                // Parse: postgresql://user:pass@host:port/database?options
+                try {
+                  const url = new URL(e.target.value);
+                  setConn({
+                    ...conn,
+                    name: url.pathname.slice(1) || conn.name,
+                    host: url.hostname,
+                    port: Number(url.port) || 5432,
+                    database: url.pathname.slice(1) || "postgres",
+                    user: url.username || "postgres",
+                    password: url.password || "",
+                    schema: url.searchParams.get("schema") || "public",
+                    table: url.searchParams.get("table") || "events",
+                  });
+                } catch {
+                  // Not a valid URL yet, ignore
+                }
+              }}
+              placeholder="postgresql://user:pass@host:port/database"
+              className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+            />
+          </label>
+        </div>
 
         {/* Connection form */}
         <div className="grid grid-cols-2 gap-3">

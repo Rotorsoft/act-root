@@ -10,21 +10,36 @@ import {
 import { useCallback, useMemo, useRef, useState } from "react";
 import { Diagram } from "../builder/Diagram.js";
 import { parseActCode } from "../builder/parser.js";
-import { templates } from "../builder/templates.js";
 import { emptyModel } from "../builder/types.js";
 import { validate } from "../builder/validate.js";
 import { trpc } from "../trpc.js";
 
+type FileTab = { path: string; content: string };
+
+/** Parse GitHub URL → owner/repo/branch/path */
+function parseGitUrl(url: string): {
+  owner: string;
+  repo: string;
+  branch: string;
+  entryPath: string;
+} | null {
+  const m = url.match(
+    /github\.com\/([^/]+)\/([^/]+)\/(?:blob|tree)\/([^/]+)\/(.+)/
+  );
+  if (m) return { owner: m[1], repo: m[2], branch: m[3], entryPath: m[4] };
+  return null;
+}
+
 const PROMPT_TEMPLATES = [
   {
-    label: "E-commerce orders",
+    label: "E-commerce",
     prompt:
       "Build an e-commerce order management system with order creation, payment processing, shipping, and delivery tracking. Include invariants for valid state transitions.",
   },
   {
     label: "Content moderation",
     prompt:
-      "Build a content moderation pipeline where users submit content, moderators review it, and content can be approved, rejected, or escalated. Track moderator statistics.",
+      "Build a content moderation pipeline where users submit content, moderators review it, and content can be approved, rejected, or escalated.",
   },
   {
     label: "IoT fleet",
@@ -33,37 +48,69 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
+// GitHub SVG icon (lucide's Github is deprecated)
+function GithubIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" />
+    </svg>
+  );
+}
+
 export function Builder() {
-  const [code, setCode] = useState(templates[0].code);
+  const [files, setFiles] = useState<FileTab[]>([]);
+  const [activeFile, setActiveFile] = useState(0);
   const [promptInput, setPromptInput] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
+  const [showGitImport, setShowGitImport] = useState(false);
+  const [gitUrl, setGitUrl] = useState("");
   const editorRef = useRef<any>(null);
   const [splitPct, setSplitPct] = useState(50);
   const isDragging = useRef(false);
 
+  const code = files.length > 0 ? (files[activeFile]?.content ?? "") : "";
+  const allCode = files.map((f) => f.content).join("\n\n");
+
   const generateMutation = trpc.generate.useMutation({
     onSuccess: (result) => {
-      setCode(result.code);
+      setFiles([{ path: "generated.ts", content: result.code }]);
+      setActiveFile(0);
       setShowPrompt(false);
     },
   });
 
-  // Parse and validate
+  const fetchMutation = trpc.fetchFromGit.useMutation({
+    onSuccess: (result) => {
+      setFiles(result.files);
+      setActiveFile(0);
+      setShowGitImport(false);
+    },
+  });
+
   const model = useMemo(() => {
     try {
-      return parseActCode(code);
+      return parseActCode(allCode);
     } catch {
       return emptyModel();
     }
-  }, [code]);
+  }, [allCode]);
 
   const warnings = useMemo(() => validate(model), [model]);
+
+  const handleGitFetch = useCallback(() => {
+    const parsed = parseGitUrl(gitUrl.trim());
+    if (!parsed || !parsed.entryPath) return;
+    fetchMutation.mutate(parsed);
+  }, [gitUrl, fetchMutation]);
 
   const handleGenerate = useCallback(() => {
     const trimmed = promptInput.trim();
     if (!trimmed) return;
-    generateMutation.mutate({ prompt: trimmed, currentCode: code });
-  }, [promptInput, code, generateMutation]);
+    generateMutation.mutate({
+      prompt: trimmed,
+      currentCode: allCode || undefined,
+    });
+  }, [promptInput, allCode, generateMutation]);
 
   const handleEditorMount = useCallback((editor: any) => {
     editorRef.current = editor;
@@ -78,44 +125,41 @@ export function Builder() {
     }
   }, []);
 
-  const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(code);
-  }, [code]);
-
-  const handleDownload = useCallback(() => {
-    const blob = new Blob([code], { type: "text/typescript" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "act-app.ts";
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [code]);
+  const handleFileChange = useCallback(
+    (value: string | undefined) => {
+      setFiles((prev) =>
+        prev.map((f, i) =>
+          i === activeFile ? { ...f, content: value ?? "" } : f
+        )
+      );
+    },
+    [activeFile]
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-925 px-4 py-1.5">
-        {/* Templates */}
-        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-          Template
-        </span>
-        {templates.map((t) => (
-          <button
-            key={t.name}
-            onClick={() => setCode(t.code)}
-            className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-300"
-            title={t.description}
-          >
-            {t.name}
-          </button>
-        ))}
-
-        <div className="mx-2 h-4 w-px bg-zinc-800" />
-
-        {/* AI generate */}
         <button
-          onClick={() => setShowPrompt(!showPrompt)}
+          onClick={() => {
+            setShowGitImport(!showGitImport);
+            setShowPrompt(false);
+          }}
+          className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] transition ${
+            showGitImport
+              ? "border-emerald-600 bg-emerald-950 text-emerald-400"
+              : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-emerald-700 hover:text-emerald-400"
+          }`}
+        >
+          <GithubIcon size={11} />
+          Import
+        </button>
+
+        <button
+          onClick={() => {
+            setShowPrompt(!showPrompt);
+            setShowGitImport(false);
+          }}
           className={`flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] transition ${
             showPrompt
               ? "border-purple-600 bg-purple-950 text-purple-400"
@@ -127,33 +171,72 @@ export function Builder() {
         </button>
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Warnings */}
           {warnings.length > 0 && (
             <span className="flex items-center gap-1 text-[10px] text-amber-400">
               <AlertTriangle size={11} />
               {warnings.length}
             </span>
           )}
-
-          {/* Export */}
           <button
-            onClick={handleCopy}
+            onClick={() => void navigator.clipboard.writeText(allCode)}
             className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-            title="Copy code"
+            title="Copy all code"
           >
             <Clipboard size={13} />
           </button>
           <button
-            onClick={handleDownload}
+            onClick={() => {
+              const blob = new Blob([allCode], { type: "text/typescript" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = "act-app.ts";
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
             className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-            title="Download as .ts"
+            title="Download"
           >
             <Download size={13} />
           </button>
         </div>
       </div>
 
-      {/* AI prompt bar */}
+      {/* GitHub import panel */}
+      {showGitImport && (
+        <div className="border-b border-zinc-800 bg-emerald-950/20 px-4 py-2">
+          <div className="flex items-center gap-2">
+            <GithubIcon size={14} />
+            <input
+              type="text"
+              value={gitUrl}
+              onChange={(e) => setGitUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleGitFetch()}
+              placeholder="https://github.com/owner/repo/blob/branch/path/to/file.ts"
+              className="flex-1 rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-emerald-600"
+            />
+            <button
+              onClick={handleGitFetch}
+              disabled={fetchMutation.isPending || !gitUrl.trim()}
+              className="flex items-center gap-1 rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {fetchMutation.isPending ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <GithubIcon size={12} />
+              )}
+              Fetch
+            </button>
+          </div>
+          {fetchMutation.error && (
+            <div className="mt-1.5 text-[10px] text-red-400">
+              {fetchMutation.error.message}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* AI prompt panel */}
       {showPrompt && (
         <div className="border-b border-zinc-800 bg-purple-950/20 px-4 py-2">
           <div className="mb-2 flex gap-1.5">
@@ -177,9 +260,9 @@ export function Builder() {
                   handleGenerate();
                 }
               }}
-              placeholder="Describe your domain... (Enter to generate, Shift+Enter for newline)"
+              placeholder="Describe your domain..."
               rows={2}
-              className="min-h-0 flex-1 resize-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 outline-none transition placeholder:text-zinc-600 focus:border-purple-600"
+              className="min-h-0 flex-1 resize-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-purple-600"
             />
             <button
               onClick={handleGenerate}
@@ -202,14 +285,18 @@ export function Builder() {
         </div>
       )}
 
-      {/* Main split: Editor | Divider | Diagram */}
+      {/* Main split */}
       <div
         className="flex min-h-0 flex-1"
         onMouseMove={(e) => {
           if (!isDragging.current) return;
           const rect = e.currentTarget.getBoundingClientRect();
-          const pct = ((e.clientX - rect.left) / rect.width) * 100;
-          setSplitPct(Math.max(20, Math.min(80, pct)));
+          setSplitPct(
+            Math.max(
+              20,
+              Math.min(80, ((e.clientX - rect.left) / rect.width) * 100)
+            )
+          );
         }}
         onMouseUp={() => {
           isDragging.current = false;
@@ -218,17 +305,39 @@ export function Builder() {
           isDragging.current = false;
         }}
       >
-        {/* Code editor */}
+        {/* Editor with file tabs */}
         <div
           className="flex flex-col border-r border-zinc-800"
           style={{ width: `${splitPct}%` }}
         >
+          {/* File tabs */}
+          {files.length > 1 && (
+            <div className="flex overflow-x-auto border-b border-zinc-800 bg-zinc-925">
+              {files.map((f, i) => {
+                const name = f.path.split("/").pop() ?? f.path;
+                return (
+                  <button
+                    key={f.path}
+                    onClick={() => setActiveFile(i)}
+                    className={`shrink-0 border-r border-zinc-800 px-3 py-1 text-[10px] transition ${
+                      i === activeFile
+                        ? "bg-zinc-900 text-emerald-400"
+                        : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
+                    }`}
+                    title={f.path}
+                  >
+                    {name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <MonacoEditor
             height="100%"
             language="typescript"
             theme="vs-dark"
             value={code}
-            onChange={(v: string | undefined) => setCode(v ?? "")}
+            onChange={handleFileChange}
             onMount={handleEditorMount}
             options={{
               fontSize: 12,
@@ -241,11 +350,11 @@ export function Builder() {
               padding: { top: 8 },
               renderLineHighlight: "line",
               occurrencesHighlight: "off",
+              readOnly: false,
             }}
           />
         </div>
 
-        {/* Resize handle */}
         <div
           className="w-1 shrink-0 cursor-col-resize bg-zinc-800 transition hover:bg-emerald-600"
           onMouseDown={() => {
@@ -262,16 +371,12 @@ export function Builder() {
               onClickLine={handleClickLine}
             />
           </div>
-
-          {/* Warnings panel */}
           {warnings.length > 0 && (
             <div className="max-h-32 overflow-y-auto border-t border-zinc-800 bg-zinc-925">
               {warnings.map((w, i) => (
                 <div
                   key={i}
-                  className={`flex items-center gap-2 px-4 py-1 text-[10px] ${
-                    w.severity === "error" ? "text-red-400" : "text-amber-400"
-                  }`}
+                  className={`flex items-center gap-2 px-4 py-1 text-[10px] ${w.severity === "error" ? "text-red-400" : "text-amber-400"}`}
                 >
                   <AlertTriangle size={10} />
                   {w.message}

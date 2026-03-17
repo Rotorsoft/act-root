@@ -722,6 +722,76 @@ ${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.curren
 
       return { code };
     }),
+
+  /** Fetch source files from a GitHub repo, following local imports */
+  fetchFromGit: t.procedure
+    .input(
+      z.object({
+        owner: z.string(),
+        repo: z.string(),
+        branch: z.string().default("master"),
+        entryPath: z.string(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const { owner, repo, branch, entryPath } = input;
+      const fetched = new Map<string, string>();
+      const queue = [entryPath];
+
+      while (queue.length > 0) {
+        const filePath = queue.shift()!;
+        if (fetched.has(filePath)) continue;
+
+        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          if (fetched.size === 0) {
+            throw new Error(`Failed to fetch ${url}: ${res.status}`, {
+              cause: "fetch_error",
+            });
+          }
+          continue; // skip missing optional imports
+        }
+        const content = await res.text();
+        fetched.set(filePath, content);
+
+        // Follow local relative imports: import ... from "./foo.js" or "../bar.js"
+        const importRe = /from\s+["'](\.[^"']+)["']/g;
+        let m: RegExpExecArray | null;
+        while ((m = importRe.exec(content)) !== null) {
+          const importPath = m[1];
+          // Resolve relative to current file's directory
+          const dir = filePath.includes("/")
+            ? filePath.slice(0, filePath.lastIndexOf("/"))
+            : "";
+          // Normalize: ./foo.js or ../bar/baz.js
+          const parts = (dir ? dir + "/" + importPath : importPath).split("/");
+          const resolved: string[] = [];
+          for (const p of parts) {
+            if (p === "." || p === "") continue;
+            if (p === "..") resolved.pop();
+            else resolved.push(p);
+          }
+          let resolvedPath = resolved.join("/");
+          // Ensure .ts extension (raw files on GitHub are .ts, imports use .js)
+          resolvedPath = resolvedPath.replace(/\.js$/, ".ts");
+          if (!resolvedPath.endsWith(".ts")) resolvedPath += ".ts";
+          queue.push(resolvedPath);
+        }
+      }
+
+      // Concatenate all files with headers
+      const files = [...fetched.entries()].map(([path, content]) => ({
+        path,
+        content,
+      }));
+
+      const code = files
+        .map((f) => `// === ${f.path} ===\n${f.content}`)
+        .join("\n\n");
+
+      return { files, code };
+    }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
