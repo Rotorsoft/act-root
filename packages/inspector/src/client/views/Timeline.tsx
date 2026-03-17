@@ -150,13 +150,11 @@ export function Timeline() {
 
   const density = events.length > 500;
   const isZoomed = viewDomain !== null;
-  const zoomLevel = dataExtent
-    ? Math.round(
-        ((dataExtent[1] - dataExtent[0]) /
-          (activeDomain[1] - activeDomain[0])) *
-          100
-      )
-    : 100;
+  const domainSpan = activeDomain[1] - activeDomain[0];
+  const zoomLevel =
+    dataExtent && domainSpan > 0
+      ? Math.round(((dataExtent[1] - dataExtent[0]) / domainSpan) * 100)
+      : 100;
 
   // --- Interaction handlers ---
 
