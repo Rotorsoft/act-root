@@ -12,7 +12,13 @@ type StreamRow = {
 
 type SortKey = "stream" | "eventCount" | "currentVersion" | "lastEvent";
 
-export function Streams({ onNavigateToLog }: { onNavigateToLog: () => void }) {
+export function Streams({
+  onNavigateToLog,
+  onTrace,
+}: {
+  onNavigateToLog: () => void;
+  onTrace?: (id: string) => void;
+}) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("eventCount");
   const [sortAsc, setSortAsc] = useState(false);
@@ -140,6 +146,7 @@ export function Streams({ onNavigateToLog }: { onNavigateToLog: () => void }) {
               setFilters({ stream: selected });
               onNavigateToLog();
             }}
+            onTrace={onTrace}
             onClose={() => setSelected(null)}
           />
         )}
@@ -151,10 +158,12 @@ export function Streams({ onNavigateToLog }: { onNavigateToLog: () => void }) {
 function StreamDetail({
   stream,
   onOpenInLog,
+  onTrace,
   onClose,
 }: {
   stream: string;
   onOpenInLog: () => void;
+  onTrace?: (id: string) => void;
   onClose: () => void;
 }) {
   const eventsQuery = trpc.query.useQuery(
@@ -217,6 +226,7 @@ function StreamDetail({
                 defaultExpanded
                 compact
                 hideStream
+                onTrace={onTrace}
               />
             ))}
           </div>

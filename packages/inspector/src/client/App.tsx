@@ -60,7 +60,10 @@ export default function App() {
                 {activeTab === "log" && <EventLog onTrace={handleTrace} />}
                 {activeTab === "timeline" && <Timeline />}
                 {activeTab === "streams" && (
-                  <Streams onNavigateToLog={() => setActiveTab("log")} />
+                  <Streams
+                    onNavigateToLog={() => setActiveTab("log")}
+                    onTrace={handleTrace}
+                  />
                 )}
                 {activeTab === "correlation" && (
                   <Correlation initialCorrelation={traceCorrelation} />

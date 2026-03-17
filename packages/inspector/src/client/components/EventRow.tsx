@@ -1,3 +1,4 @@
+import { GitBranch } from "lucide-react";
 import { useState } from "react";
 import { JsonViewer } from "./JsonViewer.js";
 
@@ -120,6 +121,23 @@ export function EventRow({
         >
           {relativeTime(event.created)}
         </span>
+
+        {/* Trace button */}
+        {onTrace && event.meta?.correlation ? (
+          <span
+            role="button"
+            title="Trace correlation"
+            className="w-4 shrink-0 text-zinc-600 transition hover:text-emerald-400"
+            onClick={(e) => {
+              e.stopPropagation();
+              onTrace(event.meta.correlation!);
+            }}
+          >
+            <GitBranch size={12} />
+          </span>
+        ) : (
+          <span className="w-4 shrink-0" />
+        )}
 
         {/* Expand indicator */}
         <span className="w-4 shrink-0 text-zinc-600">
