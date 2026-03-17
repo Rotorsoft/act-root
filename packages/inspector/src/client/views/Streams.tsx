@@ -86,7 +86,7 @@ export function Streams({ onNavigateToLog }: { onNavigateToLog: () => void }) {
             </button>
             <button
               onClick={() => handleSort("lastEvent")}
-              className="w-36 shrink-0 truncate text-right hover:text-zinc-300"
+              className="w-40 shrink-0 whitespace-nowrap text-right hover:text-zinc-300"
             >
               Last Event{sortArrow("lastEvent")}
             </button>
@@ -121,7 +121,7 @@ export function Streams({ onNavigateToLog }: { onNavigateToLog: () => void }) {
                 <span className="w-14 shrink-0 text-right font-mono text-zinc-500">
                   v{s.currentVersion}
                 </span>
-                <span className="w-36 shrink-0 truncate text-right text-zinc-500">
+                <span className="w-40 shrink-0 whitespace-nowrap text-right text-zinc-500">
                   {s.lastEvent ? new Date(s.lastEvent).toLocaleString() : "—"}
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
