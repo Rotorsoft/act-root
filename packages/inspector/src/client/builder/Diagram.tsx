@@ -197,12 +197,22 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
     }
 
+    // Collect all events per slice (for projection matching)
+    const sliceEvents = new Map<string, Set<string>>();
+
     // 1. Slices as vertical columns
     for (const slice of model.slices) {
       const sliceStartX = cursorX;
       const partials = slice.stateVars
         .map((sv) => stateByVar.get(sv))
         .filter(Boolean) as StateNode[];
+
+      // Collect events emitted by this slice's states
+      const evts = new Set<string>();
+      for (const st of partials) {
+        for (const e of st.events) evts.add(e.name);
+      }
+      sliceEvents.set(slice.name, evts);
 
       // Place all actions from the slice's partial states
       for (const st of partials) {
@@ -211,9 +221,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           cursorX += NODE_W + H_GAP;
         }
       }
-
-      // Track slice reactions for placement later in the Reactions swimlane
-      // (don't place them here — they go in the dedicated row)
 
       const sliceEndX = cursorX;
       const sliceLabel = slice.name.replace(/Slice$/i, "");
@@ -304,9 +311,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       swimlaneY = reactRowY + NODE_H + 24;
     }
 
-    // 4. Projections — dedicated swimlane below reactions
+    // 4. Projections — dedicated swimlane, duplicated per slice column
     const projRowY = swimlaneY;
-    if (model.projections.length > 0) {
+    const hasProjections = model.projections.length > 0;
+    if (hasProjections) {
       swimlanes.push({
         label: "Views",
         y: projRowY,
@@ -314,28 +322,78 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         line: undefined,
       });
     }
-    let projX = LABEL_W + H_GAP;
     const projY = projRowY + 12;
+    let projInstanceCount = 0;
+
+    // Place projections in each slice column that has matching events
+    for (const slice of model.slices) {
+      const evts = sliceEvents.get(slice.name) ?? new Set();
+      const sliceCol = sliceCols.find(
+        (sc) => sc.label === slice.name.replace(/Slice$/i, "")
+      );
+      if (!sliceCol) continue;
+
+      for (const proj of model.projections) {
+        const matchingEvents = proj.handles.filter((h) => evts.has(h));
+        if (matchingEvents.length === 0) continue;
+
+        const pKey = `projection:${proj.name}:${slice.name}`;
+        const centerX = sliceCol.x + sliceCol.w / 2 - NODE_W / 2;
+        const pPosCentered = { x: Math.max(sliceCol.x + 8, centerX), y: projY };
+        nodes.push({
+          key: pKey,
+          pos: pPosCentered,
+          type: "projection",
+          label: proj.name,
+          line: proj.line,
+        });
+
+        for (const en of matchingEvents) {
+          const ePos = eventPositions.get(en);
+          if (ePos) {
+            edges.push({
+              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+              to: { x: pPosCentered.x + NODE_W / 2, y: pPosCentered.y },
+              color: COLORS.projection.border,
+              dashed: true,
+            });
+          }
+        }
+      }
+      projInstanceCount++;
+    }
+
+    // Standalone projections (events not in any slice)
+    const allSliceEvents = new Set<string>();
+    for (const evts of sliceEvents.values())
+      for (const e of evts) allSliceEvents.add(e);
     for (const proj of model.projections) {
-      const pPos = { x: projX, y: projY };
+      const unmatched = proj.handles.filter((h) => !allSliceEvents.has(h));
+      if (unmatched.length === 0) continue;
+      const pKey = `projection:${proj.name}:standalone`;
+      const pPos = {
+        x: LABEL_W + H_GAP + projInstanceCount * (NODE_W + H_GAP),
+        y: projY,
+      };
       nodes.push({
-        key: `projection:${proj.name}`,
+        key: pKey,
         pos: pPos,
         type: "projection",
         label: proj.name,
         line: proj.line,
       });
-      for (const en of proj.handles) {
+      for (const en of unmatched) {
         const ePos = eventPositions.get(en);
-        if (ePos)
+        if (ePos) {
           edges.push({
             from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
             to: { x: pPos.x + NODE_W / 2, y: pPos.y },
             color: COLORS.projection.border,
             dashed: true,
           });
+        }
       }
-      projX += NODE_W + H_GAP;
+      projInstanceCount++;
     }
 
     let maxW = LABEL_W,
