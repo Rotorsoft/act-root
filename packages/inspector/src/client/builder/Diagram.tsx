@@ -512,6 +512,17 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 {(() => {
                   let ix = n.pos.x + W - 13;
                   const icons: React.ReactNode[] = [];
+                  if (n.reactions?.length) {
+                    icons.push(
+                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
+                        <path
+                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
+                          fill={COLORS.reaction.text}
+                        />
+                      </g>
+                    );
+                    ix -= 12;
+                  }
                   if (n.guards?.length) {
                     icons.push(
                       <g key="g" transform={`translate(${ix},${n.pos.y + 2})`}>
@@ -520,17 +531,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                           fill="none"
                           stroke="#ef4444"
                           strokeWidth="1.2"
-                        />
-                      </g>
-                    );
-                    ix -= 12;
-                  }
-                  if (n.reactions?.length) {
-                    icons.push(
-                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
-                        <path
-                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
-                          fill={COLORS.reaction.text}
                         />
                       </g>
                     );
