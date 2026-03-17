@@ -333,17 +333,8 @@ function StreamDetail({
           </div>
         ) : (
           <div>
-            {events.map((event: any, i: number) => (
-              <div key={event.id}>
-                <EventRow event={event} />
-                {/* State diff between consecutive events */}
-                {i < events.length - 1 && (
-                  <StateDiff
-                    current={event.data}
-                    previous={events[i + 1]?.data}
-                  />
-                )}
-              </div>
+            {events.map((event: any) => (
+              <EventRow key={event.id} event={event} />
             ))}
           </div>
         )}
@@ -371,48 +362,6 @@ function MetaField({
       >
         {value}
       </span>
-    </div>
-  );
-}
-
-function StateDiff({
-  current,
-  previous,
-}: {
-  current: unknown;
-  previous: unknown;
-}) {
-  if (!current || !previous) return null;
-  if (typeof current !== "object" || typeof previous !== "object") return null;
-
-  const curObj = current as Record<string, unknown>;
-  const prevObj = previous as Record<string, unknown>;
-  const allKeys = [
-    ...new Set([...Object.keys(curObj), ...Object.keys(prevObj)]),
-  ];
-  const changes: { key: string; from: unknown; to: unknown }[] = [];
-
-  for (const key of allKeys) {
-    if (JSON.stringify(curObj[key]) !== JSON.stringify(prevObj[key])) {
-      changes.push({ key, from: prevObj[key], to: curObj[key] });
-    }
-  }
-
-  if (changes.length === 0) return null;
-
-  return (
-    <div className="border-b border-zinc-800/30 bg-zinc-950/30 px-4 py-1">
-      <div className="flex flex-wrap gap-3 text-[10px]">
-        <span className="text-zinc-600">delta</span>
-        {changes.map((c) => (
-          <span key={c.key} className="flex items-center gap-1">
-            <span className="text-zinc-500">{c.key}:</span>
-            <span className="text-zinc-600">{JSON.stringify(c.from)}</span>
-            <span className="text-zinc-600">→</span>
-            <span className="text-emerald-400/80">{JSON.stringify(c.to)}</span>
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
