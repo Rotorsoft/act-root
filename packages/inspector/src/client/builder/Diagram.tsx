@@ -492,27 +492,27 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {line}
                   </text>
                 ))}
-                {n.sub && (
+                {/* Guard icon (shield) */}
+                {n.guards && n.guards.length > 0 && (
                   <text
-                    x={n.pos.x + W / 2}
-                    y={n.pos.y + H - 4}
-                    textAnchor="middle"
-                    fill="#a1a1aa"
-                    className="text-[7px]"
+                    x={n.pos.x + 6}
+                    y={n.pos.y + 8}
+                    fill="#ef4444"
+                    className="text-[9px]"
                   >
-                    {n.sub}
+                    🛡
                   </text>
                 )}
-                {/* Projection marker */}
+                {/* Projection icon (eye) */}
                 {n.projections && n.projections.length > 0 && (
-                  <circle
-                    cx={n.pos.x + W - 5}
-                    cy={n.pos.y + 5}
-                    r={3}
-                    fill={COLORS.projection.bg}
-                    stroke={COLORS.projection.border}
-                    strokeWidth={1}
-                  />
+                  <text
+                    x={n.pos.x + W - 14}
+                    y={n.pos.y + 8}
+                    fill={COLORS.projection.text}
+                    className="text-[8px]"
+                  >
+                    👁
+                  </text>
                 )}
               </g>
             );

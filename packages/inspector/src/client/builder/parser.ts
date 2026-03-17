@@ -251,21 +251,22 @@ function parseActions(
     const givenRe = /\.given\(\s*\[/;
     const gm = givenRe.exec(scope);
     if (gm) {
-      const givenBody = scope.slice(gm.index);
+      // Extract only the content within .given([...])
+      const afterGiven = scope.slice(gm.index + gm[0].length);
+      const closeBracket = afterGiven.indexOf("]");
+      const givenContent =
+        closeBracket >= 0 ? afterGiven.slice(0, closeBracket) : afterGiven;
       // Inline descriptions
       const descRe = /description\s*:\s*"([^"]*)"/g;
       let dm: RegExpExecArray | null;
-      while ((dm = descRe.exec(givenBody)) !== null) {
+      while ((dm = descRe.exec(givenContent)) !== null) {
         invariants.push(dm[1]);
       }
-      // Variable references (mustBeOpen, mustBeX)
-      const varRefs = /\b(must\w+|is\w+|can\w+)\b/gi;
+      // Variable references (mustBeOpen, mustBeX) — only camelCase starting with lowercase
+      const varRefs = /\b(must\w+|is\w+)\b/g;
       let vr: RegExpExecArray | null;
-      while ((vr = varRefs.exec(givenBody)) !== null) {
-        if (
-          !invariants.includes(vr[1]) &&
-          vr[1] !== "mustBeOpen" // avoid duplicating if already found via description
-        ) {
+      while ((vr = varRefs.exec(givenContent)) !== null) {
+        if (!invariants.includes(vr[1])) {
           invariants.push(vr[1]);
         }
       }
