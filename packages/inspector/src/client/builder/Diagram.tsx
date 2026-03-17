@@ -10,9 +10,9 @@ const COLORS = {
   projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" },
 };
 
-const W = 120,
+const W = 100,
   H = 36,
-  GAP = 14,
+  GAP = 12,
   PAD = 10;
 
 function splitLabel(label: string): string[] {
