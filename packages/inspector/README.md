@@ -40,7 +40,7 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
 
 ## Features
 
-### Views (tab navigation: Log | Timeline | Streams | Correlation | Monitor)
+### Views (tab navigation: Log | Timeline | Streams | Correlation | Monitor | Builder)
 
 - **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels. Stream and correlation columns with icon links to navigate to their respective tabs.
 - **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips with event data, zoom/pan (mouse wheel + drag), density heatmap for large datasets. Click event dot to open detail dialog with stream/correlation navigation links.
@@ -55,6 +55,16 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
   - **Active leases**: lease holder, countdown timer, expiration status
   - **Watermark histogram**: gap distribution across streams (0, 1-10, 11-50, 51-100, 100+)
   - **Tab badge**: red blocked count badge on Monitor tab
+- **Visual Builder** — code-to-diagram workbench with AI generation:
+  - **Monaco editor**: full TypeScript syntax highlighting, line numbers, word wrap
+  - **Event Modeling diagram**: auto-generated from code — colored nodes for actions (blue), events (orange), states (yellow), reactions (purple), projections (green), invariants (red), slice grouping boxes
+  - **AI generation**: describe your domain in plain English → Claude generates complete Act code (requires `ANTHROPIC_API_KEY`)
+  - **Iterative refinement**: follow-up prompts modify existing code in context
+  - **Templates**: Counter, Todo List, Ticket System — click to load
+  - **Prompt templates**: e-commerce, content moderation, IoT fleet
+  - **Validation**: warnings for unhandled events, dangling reactions, missing emits
+  - **Export**: copy code to clipboard or download as `.ts` file
+  - Click diagram element → highlights corresponding line in editor
 
 ### Navigation
 

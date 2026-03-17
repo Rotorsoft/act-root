@@ -625,6 +625,62 @@ export const inspectorRouter = t.router({
       if (pgClient) await pgClient.end();
     }
   }),
+
+  /** Generate Act code from natural language prompt using Claude API */
+  generate: t.procedure
+    .input(
+      z.object({
+        prompt: z.string().min(1),
+        currentCode: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        throw new Error(
+          "ANTHROPIC_API_KEY not set. Export it before starting the inspector server.",
+          { cause: "missing_key" }
+        );
+      }
+
+      const { default: Anthropic } = await import("@anthropic-ai/sdk");
+      const client = new Anthropic({ apiKey });
+
+      const systemPrompt = `You are an expert Act framework developer. Generate TypeScript code using the @rotorsoft/act event sourcing framework.
+
+Rules:
+- Use \`state({ Name: schema })\` builder pattern
+- Use \`z\` from "zod" for all schemas
+- Use \`.init()\`, \`.emits()\`, optional \`.patch()\`, \`.on()\`, \`.emit()\`, \`.given()\`, \`.build()\`
+- Use \`slice()\` for grouping states with reactions
+- Use \`projection()\` for read models
+- Use \`act()\` to wire everything together
+- Import from "@rotorsoft/act" and "zod"
+- Use passthrough reducers by default (no .patch() needed unless custom logic)
+- Use .emit("EventName") for string passthrough when action payload matches event data
+- Include invariants as .given([{ description, valid }]) for business rules
+- Return ONLY the TypeScript code, no markdown fences, no explanation
+
+${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.currentCode}\n\`\`\`\n\nModify the existing code based on the user's request. Return the complete updated code.` : "Generate complete Act TypeScript code from scratch."}`;
+
+      const response = await client.messages.create({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 4096,
+        system: systemPrompt,
+        messages: [{ role: "user", content: input.prompt }],
+      });
+
+      const textBlock = response.content.find((b) => b.type === "text");
+      let code = textBlock?.text ?? "";
+
+      // Strip markdown fences if present
+      code = code
+        .replace(/^```(?:typescript|ts)?\n?/m, "")
+        .replace(/\n?```$/m, "")
+        .trim();
+
+      return { code };
+    }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
