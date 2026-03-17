@@ -781,28 +781,33 @@ ${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.curren
         }
         fetched.set(filePath, content);
 
-        // Follow local relative imports: import ... from "./foo.js" or "../bar.js"
-        const importRe = /from\s+["'](\.[^"']+)["']/g;
+        // Follow imports
+        const importRe = /from\s+["']([^"']+)["']/g;
         let m: RegExpExecArray | null;
         while ((m = importRe.exec(content)) !== null) {
-          const importPath = m[1];
-          // Resolve relative to current file's directory
-          const dir = filePath.includes("/")
-            ? filePath.slice(0, filePath.lastIndexOf("/"))
-            : "";
-          // Normalize: ./foo.js or ../bar/baz.js
-          const parts = (dir ? dir + "/" + importPath : importPath).split("/");
-          const resolved: string[] = [];
-          for (const p of parts) {
-            if (p === "." || p === "") continue;
-            if (p === "..") resolved.pop();
-            else resolved.push(p);
+          const imp = m[1];
+
+          if (imp.startsWith(".")) {
+            // Relative import: ./foo.js or ../bar.js
+            const dir = filePath.includes("/")
+              ? filePath.slice(0, filePath.lastIndexOf("/"))
+              : "";
+            const parts = (dir ? dir + "/" + imp : imp).split("/");
+            const resolved: string[] = [];
+            for (const p of parts) {
+              if (p === "." || p === "") continue;
+              if (p === "..") resolved.pop();
+              else resolved.push(p);
+            }
+            let resolvedPath = resolved.join("/");
+            resolvedPath = resolvedPath.replace(/\.js$/, ".ts");
+            if (!resolvedPath.endsWith(".ts")) resolvedPath += ".ts";
+            queue.push(resolvedPath);
+          } else if (imp.startsWith("@") && !imp.startsWith("@rotorsoft/")) {
+            // Workspace package: @scope/name → packages/name/src/index.ts
+            const pkgName = imp.split("/")[1];
+            if (pkgName) queue.push(`packages/${pkgName}/src/index.ts`);
           }
-          let resolvedPath = resolved.join("/");
-          // Ensure .ts extension (raw files on GitHub are .ts, imports use .js)
-          resolvedPath = resolvedPath.replace(/\.js$/, ".ts");
-          if (!resolvedPath.endsWith(".ts")) resolvedPath += ".ts";
-          queue.push(resolvedPath);
         }
       }
 
