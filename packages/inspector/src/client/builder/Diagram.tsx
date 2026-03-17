@@ -529,10 +529,19 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           {/* Edges */}
           {edges.map((edge, i) => {
             const dx = edge.to.x - edge.from.x;
+            const dy = edge.to.y - edge.from.y;
             const isStraight = Math.abs(dx) < 5;
-            const d = isStraight
-              ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
-              : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
+            const goingUp = dy < -20; // reaction → action (from below to above)
+            let d: string;
+            if (isStraight) {
+              d = `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`;
+            } else if (goingUp) {
+              // Arc up and over: go right first, then curve up to target top
+              const peakY = Math.min(edge.from.y, edge.to.y) - 30;
+              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + Math.abs(dx) * 0.5} ${peakY}, ${edge.to.x} ${peakY}, ${edge.to.x} ${edge.to.y}`;
+            } else {
+              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
+            }
             const midX = (edge.from.x + edge.to.x) / 2;
             const midY = (edge.from.y + edge.to.y) / 2;
             return (
