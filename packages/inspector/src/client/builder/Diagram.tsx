@@ -450,9 +450,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             const hasWarn = warnSet.has(n.label);
             const lines = splitLabel(n.label);
             const lineH = 11;
-            const startY = n.sub
-              ? n.pos.y + 4
-              : n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
+            const startY = n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
 
             return (
               <g
