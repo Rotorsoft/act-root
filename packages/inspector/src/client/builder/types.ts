@@ -30,7 +30,8 @@ export type ActionNode = {
 
 export type SliceNode = {
   name: string;
-  states: string[]; // state names
+  states: string[]; // resolved state domain names
+  stateVars: string[]; // original variable names from .withState()
   projections: string[];
   reactions: ReactionNode[];
   line?: number;

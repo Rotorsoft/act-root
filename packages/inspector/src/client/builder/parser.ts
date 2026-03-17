@@ -300,9 +300,11 @@ function parseSlices(code: string, states: StateNode[]): SliceNode[] {
 
     // .withState(VarName) → resolve to state domain names
     const stateNames: string[] = [];
+    const stateVars: string[] = [];
     const wsRe = /\.withState\(\s*(\w+)\s*\)/g;
     let wm: RegExpExecArray | null;
     while ((wm = wsRe.exec(chain)) !== null) {
+      stateVars.push(wm[1]);
       const resolved = varToState.get(wm[1]) ?? wm[1];
       if (!stateNames.includes(resolved)) stateNames.push(resolved);
     }
@@ -334,6 +336,7 @@ function parseSlices(code: string, states: StateNode[]): SliceNode[] {
     slices.push({
       name,
       states: stateNames,
+      stateVars,
       projections: projNames,
       reactions,
       line,

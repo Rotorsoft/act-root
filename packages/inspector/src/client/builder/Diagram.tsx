@@ -310,11 +310,17 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       w: number;
       h: number;
     }> = [];
+    // Build varName → original unmerged state lookup
+    const varToOriginalState = new Map<string, (typeof model.states)[0]>();
+    for (const s of model.states) {
+      varToOriginalState.set(s.varName, s);
+    }
+
     for (const slice of model.slices) {
       const memberKeys: string[] = [];
-      for (const sn of slice.states) {
-        // Include the swimlane's actions and events
-        const st = stateByName.get(sn);
+      // Use stateVars to get original partial states (not merged)
+      for (const sv of slice.stateVars) {
+        const st = varToOriginalState.get(sv);
         if (st) {
           for (const a of st.actions) memberKeys.push(`action:${a.name}`);
           for (const e of st.events) memberKeys.push(`event:${e.name}`);
@@ -339,7 +345,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
       if (minX < Infinity) {
         boxes.push({
-          label: slice.name,
+          label: slice.name.replace(/Slice$/i, ""),
           x: minX - 8,
           y: minY - 18,
           w: maxX - minX + 16,
