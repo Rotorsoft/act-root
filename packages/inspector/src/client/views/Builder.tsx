@@ -48,6 +48,25 @@ const PROMPT_TEMPLATES = [
   },
 ];
 
+type SavedImport = { url: string; label: string };
+
+function loadSavedImports(): SavedImport[] {
+  try {
+    const raw = localStorage.getItem("inspector:git-imports");
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveImport(url: string) {
+  const saved = loadSavedImports();
+  const label = url.split("/").slice(-2).join("/").replace(/\.ts$/, "");
+  if (saved.some((s) => s.url === url)) return;
+  const updated = [{ url, label }, ...saved].slice(0, 10);
+  localStorage.setItem("inspector:git-imports", JSON.stringify(updated));
+}
+
 // GitHub SVG icon (lucide's Github is deprecated)
 function GithubIcon({ size = 14 }: { size?: number }) {
   return (
@@ -64,6 +83,8 @@ export function Builder() {
   const [showPrompt, setShowPrompt] = useState(false);
   const [showGitImport, setShowGitImport] = useState(false);
   const [gitUrl, setGitUrl] = useState("");
+  const [savedImports, setSavedImports] =
+    useState<SavedImport[]>(loadSavedImports);
   const editorRef = useRef<any>(null);
   const [splitPct, setSplitPct] = useState(50);
   const isDragging = useRef(false);
@@ -84,6 +105,10 @@ export function Builder() {
       setFiles(result.files);
       setActiveFile(0);
       setShowGitImport(false);
+      if (gitUrl.trim()) {
+        saveImport(gitUrl.trim());
+        setSavedImports(loadSavedImports());
+      }
     },
   });
 
@@ -205,6 +230,23 @@ export function Builder() {
       {/* GitHub import panel */}
       {showGitImport && (
         <div className="border-b border-zinc-800 bg-emerald-950/20 px-4 py-2">
+          {savedImports.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {savedImports.map((s) => (
+                <button
+                  key={s.url}
+                  onClick={() => {
+                    setGitUrl(s.url);
+                    const parsed = parseGitUrl(s.url);
+                    if (parsed?.entryPath) fetchMutation.mutate(parsed);
+                  }}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-400 transition hover:border-emerald-700 hover:text-emerald-400"
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <GithubIcon size={14} />
             <input

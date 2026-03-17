@@ -69,15 +69,30 @@ function extractObjectKeys(objBody: string): string[] {
     if (ch === "{" || ch === "(" || ch === "[") depth++;
     else if (ch === "}" || ch === ")" || ch === "]") depth--;
     else if (depth === 0 && ch === ":") {
+      // key: value — capture key
       const key = current.trim();
       if (key && /^\w+$/.test(key)) keys.push(key);
       current = "";
       continue;
-    } else if (depth === 0 && ch === ",") {
+    } else if (depth === 0 && (ch === "," || ch === "\n")) {
+      // Shorthand: { Foo, Bar } — bare identifier without colon
+      const token = current.trim();
+      if (token && /^\w+$/.test(token) && token[0] === token[0].toUpperCase()) {
+        keys.push(token);
+      }
       current = "";
       continue;
     }
     if (depth === 0) current += ch;
+  }
+  // Handle last token (no trailing comma)
+  const lastToken = current.trim();
+  if (
+    lastToken &&
+    /^\w+$/.test(lastToken) &&
+    lastToken[0] === lastToken[0].toUpperCase()
+  ) {
+    keys.push(lastToken);
   }
   return keys;
 }
@@ -188,7 +203,7 @@ function parseActions(
 
   // Find all .on({ ... }) positions
   const onPositions: { name: string; index: number }[] = [];
-  const onRe = /\.on\(\s*\{\s*(\w+)\s*[,:]/g;
+  const onRe = /\.on\(\s*\{\s*(\w+)\s*[,:}]/g;
   let m: RegExpExecArray | null;
   while ((m = onRe.exec(chain)) !== null) {
     onPositions.push({ name: m[1], index: m.index });
