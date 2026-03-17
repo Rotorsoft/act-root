@@ -536,9 +536,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             if (isStraight) {
               d = `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`;
             } else if (goingUp) {
-              // Arc up and over: go right first, then curve up to target top
-              const peakY = Math.min(edge.from.y, edge.to.y) - 30;
-              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + Math.abs(dx) * 0.5} ${peakY}, ${edge.to.x} ${peakY}, ${edge.to.x} ${edge.to.y}`;
+              // S-curve: right from reaction, then sweep up into action top
+              d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + Math.abs(dx) * 0.6} ${edge.from.y}, ${edge.to.x - Math.abs(dx) * 0.1} ${edge.to.y - Math.abs(dy) * 0.8}, ${edge.to.x} ${edge.to.y}`;
             } else {
               d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
             }
