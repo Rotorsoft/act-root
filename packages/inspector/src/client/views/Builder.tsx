@@ -314,17 +314,34 @@ export function Builder() {
           {savedImports.length > 0 && (
             <div className="mb-2 flex flex-wrap gap-1.5">
               {savedImports.map((s) => (
-                <button
-                  key={s.url}
-                  onClick={() => {
-                    setGitUrl(s.url);
-                    const parsed = parseGitUrl(s.url);
-                    if (parsed?.entryPath) fetchMutation.mutate(parsed);
-                  }}
-                  className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-400 transition hover:border-emerald-700 hover:text-emerald-400"
-                >
-                  {s.label}
-                </button>
+                <div key={s.url} className="flex items-center gap-0.5">
+                  <button
+                    onClick={() => {
+                      setGitUrl(s.url);
+                      const parsed = parseGitUrl(s.url);
+                      if (parsed?.entryPath) fetchMutation.mutate(parsed);
+                    }}
+                    className="truncate rounded-md border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[9px] text-zinc-400 transition hover:border-emerald-700 hover:text-emerald-400"
+                    title={s.url}
+                  >
+                    {s.label}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const updated = loadSavedImports().filter(
+                        (x) => x.url !== s.url
+                      );
+                      localStorage.setItem(
+                        "inspector:git-imports",
+                        JSON.stringify(updated)
+                      );
+                      setSavedImports(updated);
+                    }}
+                    className="text-[9px] text-zinc-600 transition hover:text-red-400"
+                  >
+                    &times;
+                  </button>
+                </div>
               ))}
             </div>
           )}
