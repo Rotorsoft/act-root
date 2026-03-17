@@ -12,6 +12,7 @@ type Connection = {
   password: string;
   schema: string;
   table: string;
+  ssl: boolean;
 };
 
 const defaultConn: Connection = {
@@ -23,6 +24,7 @@ const defaultConn: Connection = {
   password: "postgres",
   schema: "public",
   table: "events",
+  ssl: false,
 };
 
 function loadSaved(): Connection[] {
@@ -95,6 +97,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
       password: conn.password,
       schema: conn.schema,
       table: conn.table,
+      ssl: conn.ssl,
     });
   };
 
@@ -173,6 +176,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                 // Parse: postgresql://user:pass@host:port/database?options
                 try {
                   const url = new URL(e.target.value);
+                  const sslMode = url.searchParams.get("sslmode");
                   setConn({
                     ...conn,
                     name: url.pathname.slice(1) || conn.name,
@@ -180,9 +184,14 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                     port: Number(url.port) || 5432,
                     database: url.pathname.slice(1) || "postgres",
                     user: url.username || "postgres",
-                    password: url.password || "",
+                    password: decodeURIComponent(url.password || ""),
                     schema: url.searchParams.get("schema") || "public",
                     table: url.searchParams.get("table") || "events",
+                    ssl:
+                      sslMode === "require" ||
+                      sslMode === "prefer" ||
+                      url.hostname.includes("neon") ||
+                      url.hostname.includes("supabase"),
                   });
                 } catch {
                   // Not a valid URL yet, ignore
@@ -227,6 +236,19 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
             </label>
           ))}
         </div>
+
+        {/* SSL toggle */}
+        <label className="mt-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={conn.ssl}
+            onChange={(e) => setConn({ ...conn, ssl: e.target.checked })}
+            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600"
+          />
+          <span className="text-xs text-zinc-400">
+            SSL (required for Neon, Supabase, etc.)
+          </span>
+        </label>
 
         {error && (
           <div className="mt-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-400">

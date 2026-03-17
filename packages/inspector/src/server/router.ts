@@ -292,6 +292,7 @@ export const inspectorRouter = t.router({
         password: z.string().default("postgres"),
         schema: z.string().default("public"),
         table: z.string().default("events"),
+        ssl: z.boolean().default(false),
       })
     )
     .mutation(async ({ input }) => {
@@ -300,7 +301,13 @@ export const inspectorRouter = t.router({
           await currentStore.dispose();
           currentStore = null;
         }
-        const newStore = new PostgresStore(input);
+        const { ssl, ...pgConfig } = input;
+        const storeConfig = ssl
+          ? { ...pgConfig, ssl: { rejectUnauthorized: false } }
+          : pgConfig;
+        const newStore = new PostgresStore(
+          storeConfig as Record<string, unknown>
+        );
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
