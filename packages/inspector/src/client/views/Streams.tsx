@@ -401,15 +401,15 @@ function StateDiff({
   if (changes.length === 0) return null;
 
   return (
-    <div className="border-b border-zinc-800/30 bg-zinc-950/50 px-4 py-1.5">
+    <div className="border-b border-zinc-800/30 bg-zinc-950/30 px-4 py-1">
       <div className="flex flex-wrap gap-3 text-[10px]">
+        <span className="text-zinc-600">delta</span>
         {changes.map((c) => (
           <span key={c.key} className="flex items-center gap-1">
             <span className="text-zinc-500">{c.key}:</span>
-            <span className="text-red-400/60 line-through">
-              {JSON.stringify(c.from)}
-            </span>
-            <span className="text-emerald-400">{JSON.stringify(c.to)}</span>
+            <span className="text-zinc-600">{JSON.stringify(c.from)}</span>
+            <span className="text-zinc-600">→</span>
+            <span className="text-emerald-400/80">{JSON.stringify(c.to)}</span>
           </span>
         ))}
       </div>
