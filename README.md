@@ -33,6 +33,12 @@ The complexity of modern software design often arises from over-engineering abst
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+## Tools
+
+### [@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)
+
+Event sourcing observatory — connect to any Act PostgreSQL store and inspect, query, and visualize events. Auto-discovers Act stores by scanning ports and detecting event table schemas. Dark-themed event log explorer with filtering, pagination, and JSON inspection.
+
 ---
 
 
