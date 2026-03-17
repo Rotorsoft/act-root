@@ -137,8 +137,80 @@ export function Builder() {
     });
   }, [promptInput, allCode, generateMutation]);
 
-  const handleEditorMount = useCallback((editor: any) => {
+  const handleEditorMount = useCallback((editor: any, monaco: any) => {
     editorRef.current = editor;
+
+    // Configure TypeScript to handle .js imports as .ts
+    monaco.languages.typescript.typescriptDefaults.setCompilerOptions({
+      target: monaco.languages.typescript.ScriptTarget.ES2022,
+      module: monaco.languages.typescript.ModuleKind.ESNext,
+      moduleResolution: monaco.languages.typescript.ModuleResolutionKind.NodeJs,
+      allowJs: true,
+      strict: true,
+      noEmit: true,
+      esModuleInterop: true,
+      jsx: monaco.languages.typescript.JsxEmit.ReactJSX,
+      allowImportingTsExtensions: true,
+    });
+
+    // Suppress "cannot find module" for framework imports
+    monaco.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
+      noSemanticValidation: false,
+      noSyntaxValidation: false,
+      diagnosticCodesToIgnore: [2307, 2792, 7016], // Cannot find module, moduleResolution, implicit any
+    });
+
+    // Add minimal type stubs for @rotorsoft/act
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      `declare module "@rotorsoft/act" {
+  export function state<T>(schema: Record<string, any>): any;
+  export function slice(): any;
+  export function projection(name?: string): any;
+  export function act(): any;
+  export function store(adapter?: any): any;
+  export const ZodEmpty: any;
+  export type Invariant<S, A = any> = { description: string; valid: (state: Readonly<S>, actor?: A) => boolean };
+  export type Actor = { id: string; name: string };
+  export type Target = { stream: string; actor: Actor };
+  export type Committed<E, K> = { id: number; name: K; data: E[K & keyof E]; stream: string; version: number; created: Date; meta: any };
+  export type InferEvents<T> = any;
+  export type InferActions<T> = any;
+  export function dispose(d?: any): any;
+}`,
+      "file:///node_modules/@rotorsoft/act/index.d.ts"
+    );
+
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      `declare module "@rotorsoft/act-patch" {
+  export type Patch<T> = Partial<T>;
+}`,
+      "file:///node_modules/@rotorsoft/act-patch/index.d.ts"
+    );
+
+    monaco.languages.typescript.typescriptDefaults.addExtraLib(
+      `declare module "zod" {
+  export function object(shape: any): any;
+  export function string(): any;
+  export function number(): any;
+  export function boolean(): any;
+  export function array(inner: any): any;
+  export function enum_(values: readonly string[]): any;
+  export { enum_ as enum };
+  export function uuid(): any;
+  export function optional(): any;
+  export const z: {
+    object: typeof object;
+    string: typeof string;
+    number: typeof number;
+    boolean: typeof boolean;
+    array: typeof array;
+    enum: typeof enum_;
+    uuid: typeof uuid;
+  };
+  export { z };
+}`,
+      "file:///node_modules/zod/index.d.ts"
+    );
   }, []);
 
   const handleClickLine = useCallback((line: number) => {
