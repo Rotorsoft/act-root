@@ -26,6 +26,7 @@ type Event = {
 type EventRowProps = {
   event: Event;
   defaultExpanded?: boolean;
+  compact?: boolean;
 };
 
 /** Deterministic color from event name */
@@ -62,7 +63,11 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-export function EventRow({ event, defaultExpanded = false }: EventRowProps) {
+export function EventRow({
+  event,
+  defaultExpanded = false,
+  compact = false,
+}: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
 
@@ -117,7 +122,12 @@ export function EventRow({ event, defaultExpanded = false }: EventRowProps) {
       </button>
 
       {/* Expanded detail */}
-      {expanded && (
+      {expanded && compact && (
+        <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5">
+          <JsonViewer data={event.data} />
+        </div>
+      )}
+      {expanded && !compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/80 px-4 py-3">
           <div className="grid grid-cols-2 gap-4">
             {/* Data */}

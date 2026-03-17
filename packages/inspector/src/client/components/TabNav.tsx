@@ -1,15 +1,20 @@
+import { Database, GanttChart, List } from "lucide-react";
+import type { ReactNode } from "react";
+
 export type Tab = "log" | "timeline" | "streams";
+
+type TabDef = { id: Tab; label: string; icon: ReactNode };
+
+const tabs: TabDef[] = [
+  { id: "log", label: "Log", icon: <List size={14} /> },
+  { id: "timeline", label: "Timeline", icon: <GanttChart size={14} /> },
+  { id: "streams", label: "Streams", icon: <Database size={14} /> },
+];
 
 type TabNavProps = {
   active: Tab;
   onChange: (tab: Tab) => void;
 };
-
-const tabs: { id: Tab; label: string }[] = [
-  { id: "log", label: "Log" },
-  { id: "timeline", label: "Timeline" },
-  { id: "streams", label: "Streams" },
-];
 
 export function TabNav({ active, onChange }: TabNavProps) {
   return (
@@ -18,12 +23,13 @@ export function TabNav({ active, onChange }: TabNavProps) {
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className={`px-4 py-2 text-xs font-medium transition ${
+          className={`flex items-center gap-1.5 px-4 py-2 text-xs font-medium transition ${
             active === tab.id
               ? "border-b-2 border-emerald-500 text-emerald-400"
               : "text-zinc-500 hover:text-zinc-300"
           }`}
         >
+          {tab.icon}
           {tab.label}
         </button>
       ))}
