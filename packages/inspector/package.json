@@ -1,0 +1,44 @@
+{
+  "name": "@rotorsoft/act-inspector",
+  "version": "0.0.1",
+  "description": "Act event sourcing observatory — inspect, query, and visualize events in Act stores",
+  "type": "module",
+  "author": {
+    "name": "rotorsoft",
+    "email": "rotorsoft@outlook.com"
+  },
+  "scripts": {
+    "dev:server": "tsx watch src/server/server.ts",
+    "dev:client": "vite",
+    "dev": "concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm run dev:server' 'pnpm run dev:client'"
+  },
+  "keywords": [],
+  "license": "ISC",
+  "dependencies": {
+    "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-pg": "workspace:^",
+    "@tanstack/react-query": "^5.90.21",
+    "@trpc/client": "11.12.1",
+    "@trpc/react-query": "11.12.1",
+    "@trpc/server": "11.12.1",
+    "cors": "^2.8.6",
+    "pg": "^8.20.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.8",
+    "@types/cors": "^2.8.19",
+    "@types/pg": "^8.18.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.2.0",
+    "autoprefixer": "^10.4.21",
+    "concurrently": "^9.1.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.8",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
+}
