@@ -418,8 +418,8 @@ export function Timeline() {
                   >
                     {String(tooltip.event.name)}
                   </span>
-                  <span className="text-zinc-500">
-                    v{tooltip.event.version}
+                  <span className="font-mono text-zinc-500">
+                    #{tooltip.event.id} v{tooltip.event.version}
                   </span>
                 </div>
                 <div className="mb-1 font-mono text-zinc-400">
