@@ -12,7 +12,7 @@ export function StatsBar() {
       created_before: filters.created_before,
       correlation: filters.correlation,
     },
-    { staleTime: 5_000 }
+    { staleTime: 3_000 }
   );
 
   const stats = statsQuery.data;

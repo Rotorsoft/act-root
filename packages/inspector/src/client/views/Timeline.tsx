@@ -101,7 +101,7 @@ export function Timeline({ onTrace, onStream }: TimelineProps) {
       backward: false,
       correlation: filters.correlation,
     },
-    { staleTime: 10_000 }
+    { staleTime: 3_000 }
   );
 
   const events = (eventsQuery.data?.events ?? []) as unknown as Event[];

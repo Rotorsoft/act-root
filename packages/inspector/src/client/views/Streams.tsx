@@ -29,7 +29,7 @@ export function Streams({
 
   const streamsQuery = trpc.streams.useQuery(
     { limit: 1000 },
-    { staleTime: 10_000 }
+    { staleTime: 3_000 }
   );
 
   const streams = (streamsQuery.data ?? []) as StreamRow[];
@@ -168,7 +168,7 @@ function StreamDetail({
 }) {
   const eventsQuery = trpc.query.useQuery(
     { stream, limit: 100, backward: true },
-    { staleTime: 10_000 }
+    { staleTime: 3_000 }
   );
 
   const events = (eventsQuery.data?.events ?? []) as any[];

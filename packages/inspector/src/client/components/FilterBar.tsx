@@ -17,7 +17,7 @@ export function FilterBar() {
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const eventNamesQuery = trpc.eventNames.useQuery(undefined, {
-    staleTime: 30_000,
+    staleTime: 10_000,
   });
   const allNames = eventNamesQuery.data ?? [];
 

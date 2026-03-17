@@ -57,12 +57,12 @@ export function EventLog({
       correlation: filters.correlation,
     },
     {
-      staleTime: 10_000,
+      staleTime: 3_000,
       placeholderData: (prev) => prev,
     }
   );
 
-  // Append new page when data arrives
+  // Append new page when data arrives, or reset if data changed
   useEffect(() => {
     if (!eventsQuery.data) return;
     const newEvents = eventsQuery.data.events as unknown as AnyEvent[];
@@ -72,6 +72,19 @@ export function EventLog({
     if (newEvents.length === 0) return;
 
     setPages((prev) => {
+      // First page (no cursor) — check if data changed (DB reset, new events)
+      if (cursor === undefined && prev.length > 0) {
+        const firstPage = prev[0];
+        if (
+          firstPage.length > 0 &&
+          newEvents.length > 0 &&
+          firstPage[0].id !== newEvents[0].id
+        ) {
+          // Data has changed — replace all pages
+          return [newEvents];
+        }
+      }
+
       // Avoid duplicates — check if this page is already appended
       const lastPage = prev[prev.length - 1];
       if (
