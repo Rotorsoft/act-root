@@ -45,6 +45,12 @@ function nameHue(name: string): string {
   return hues[Math.abs(hash) % hues.length];
 }
 
+/** Extract actor name from event meta */
+function actorName(event: Event): string | undefined {
+  const meta = event.meta as Record<string, any>;
+  return meta?.causation?.action?.actor?.name;
+}
+
 type TooltipData = {
   x: number;
   y: number;
@@ -425,8 +431,15 @@ export function Timeline() {
                 <div className="mb-1 font-mono text-zinc-400">
                   {tooltip.event.stream}
                 </div>
-                <div className="mb-1.5 text-zinc-500">
-                  {new Date(tooltip.event.created).toLocaleString()}
+                <div className="mb-1.5 flex items-center gap-2 text-zinc-500">
+                  <span>
+                    {new Date(tooltip.event.created).toLocaleString()}
+                  </span>
+                  {actorName(tooltip.event) && (
+                    <span className="text-zinc-400">
+                      {actorName(tooltip.event)}
+                    </span>
+                  )}
                 </div>
                 {tooltip.event.data != null && (
                   <div className="border-t border-zinc-800 pt-1.5 text-[9px]">
@@ -489,7 +502,7 @@ function EventDetailDialog({
           </button>
         </div>
 
-        {/* Stream + time */}
+        {/* Stream + time + actor */}
         <div className="mb-3 flex flex-col gap-1 text-xs">
           <div>
             <span className="text-zinc-500">Stream </span>
@@ -501,6 +514,12 @@ function EventDetailDialog({
               {new Date(event.created).toLocaleString()}
             </span>
           </div>
+          {actorName(event) && (
+            <div>
+              <span className="text-zinc-500">Actor </span>
+              <span className="text-zinc-300">{actorName(event)}</span>
+            </div>
+          )}
         </div>
 
         {/* Data */}
