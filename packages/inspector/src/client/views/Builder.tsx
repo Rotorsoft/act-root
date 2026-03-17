@@ -38,6 +38,8 @@ export function Builder() {
   const [promptInput, setPromptInput] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const editorRef = useRef<any>(null);
+  const [splitPct, setSplitPct] = useState(50);
+  const isDragging = useRef(false);
 
   const generateMutation = trpc.generate.useMutation({
     onSuccess: (result) => {
@@ -200,10 +202,27 @@ export function Builder() {
         </div>
       )}
 
-      {/* Main split: Editor | Diagram */}
-      <div className="flex min-h-0 flex-1">
+      {/* Main split: Editor | Divider | Diagram */}
+      <div
+        className="flex min-h-0 flex-1"
+        onMouseMove={(e) => {
+          if (!isDragging.current) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const pct = ((e.clientX - rect.left) / rect.width) * 100;
+          setSplitPct(Math.max(20, Math.min(80, pct)));
+        }}
+        onMouseUp={() => {
+          isDragging.current = false;
+        }}
+        onMouseLeave={() => {
+          isDragging.current = false;
+        }}
+      >
         {/* Code editor */}
-        <div className="flex w-1/2 flex-col border-r border-zinc-800">
+        <div
+          className="flex flex-col border-r border-zinc-800"
+          style={{ width: `${splitPct}%` }}
+        >
           <MonacoEditor
             height="100%"
             language="typescript"
@@ -226,8 +245,16 @@ export function Builder() {
           />
         </div>
 
+        {/* Resize handle */}
+        <div
+          className="w-1 shrink-0 cursor-col-resize bg-zinc-800 transition hover:bg-emerald-600"
+          onMouseDown={() => {
+            isDragging.current = true;
+          }}
+        />
+
         {/* Diagram + Warnings */}
-        <div className="flex w-1/2 flex-col">
+        <div className="flex flex-1 flex-col">
           <div className="flex-1 overflow-auto">
             <Diagram
               model={model}
