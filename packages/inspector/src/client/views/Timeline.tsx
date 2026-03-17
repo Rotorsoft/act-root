@@ -398,17 +398,45 @@ export function Timeline() {
             {/* Tooltip */}
             {tooltip && !isPanning && (
               <div
-                className="pointer-events-none fixed z-50 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs shadow-xl"
+                className="pointer-events-none fixed z-50 max-w-sm rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs shadow-xl"
                 style={{ left: tooltip.x + 12, top: tooltip.y - 10 }}
               >
-                <div className="font-medium text-zinc-200">
-                  {String(tooltip.event.name)}
+                <div className="mb-1 flex items-center gap-2">
+                  <span
+                    className="inline-block rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    style={{
+                      backgroundColor: nameHue(tooltip.event.name) + "22",
+                      color: nameHue(tooltip.event.name),
+                    }}
+                  >
+                    {String(tooltip.event.name)}
+                  </span>
+                  <span className="text-zinc-500">
+                    v{tooltip.event.version}
+                  </span>
                 </div>
-                <div className="text-zinc-400">{tooltip.event.stream}</div>
-                <div className="text-zinc-500">
-                  v{tooltip.event.version} &middot;{" "}
+                <div className="mb-1 font-mono text-zinc-400">
+                  {tooltip.event.stream}
+                </div>
+                <div className="mb-1.5 text-zinc-500">
                   {new Date(tooltip.event.created).toLocaleString()}
                 </div>
+                {tooltip.event.data &&
+                  typeof tooltip.event.data === "object" && (
+                    <div className="border-t border-zinc-800 pt-1.5 font-mono text-[10px] leading-relaxed text-zinc-400">
+                      {Object.entries(
+                        tooltip.event.data as Record<string, unknown>
+                      ).map(([k, v]) => (
+                        <div key={k}>
+                          <span className="text-sky-400">{k}</span>
+                          <span className="text-zinc-600">: </span>
+                          <span className="text-zinc-300">
+                            {JSON.stringify(v)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
               </div>
             )}
           </div>
