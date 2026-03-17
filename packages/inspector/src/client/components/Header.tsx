@@ -1,12 +1,25 @@
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Logo } from "./Logo.js";
 
 type HeaderProps = {
   connected: boolean;
   connectionName: string;
   onConnect: () => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  onBack?: () => void;
+  onForward?: () => void;
 };
 
-export function Header({ connected, connectionName, onConnect }: HeaderProps) {
+export function Header({
+  connected,
+  connectionName,
+  onConnect,
+  canGoBack,
+  canGoForward,
+  onBack,
+  onForward,
+}: HeaderProps) {
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-925 px-4">
       <div className="flex items-center gap-2.5">
@@ -14,6 +27,28 @@ export function Header({ connected, connectionName, onConnect }: HeaderProps) {
         <h1 className="text-sm font-semibold tracking-wide text-zinc-300">
           <span className="text-emerald-400">act</span> inspector
         </h1>
+
+        {/* Navigation */}
+        {connected && (
+          <div className="ml-2 flex items-center gap-0.5">
+            <button
+              onClick={onBack}
+              disabled={!canGoBack}
+              title="Back"
+              className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-zinc-500"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              onClick={onForward}
+              disabled={!canGoForward}
+              title="Forward"
+              className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-25 disabled:hover:bg-transparent disabled:hover:text-zinc-500"
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-3">
         {connected ? (

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ConnectDialog } from "./components/ConnectDialog.js";
 import { Header } from "./components/Header.js";
 import { TabNav, type Tab } from "./components/TabNav.js";
@@ -9,16 +9,54 @@ import { EventLog } from "./views/EventLog.js";
 import { Streams } from "./views/Streams.js";
 import { Timeline } from "./views/Timeline.js";
 
+type ViewState = {
+  tab: Tab;
+  correlation?: string;
+  stream?: string;
+};
+
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [showConnect, setShowConnect] = useState(true);
   const [connectionName, setConnectionName] = useState("");
   const [connectionKey, setConnectionKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<Tab>("log");
-  const [traceCorrelation, setTraceCorrelation] = useState<
-    string | undefined
-  >();
-  const [selectedStream, setSelectedStream] = useState<string | undefined>();
+
+  // Navigation history
+  const [view, setView] = useState<ViewState>({ tab: "log" });
+  const historyStack = useRef<ViewState[]>([{ tab: "log" }]);
+  const historyIndex = useRef(0);
+  const isNavigating = useRef(false);
+
+  const navigateTo = useCallback((next: ViewState) => {
+    if (isNavigating.current) return;
+    // Trim forward history and push
+    historyStack.current = historyStack.current.slice(
+      0,
+      historyIndex.current + 1
+    );
+    historyStack.current.push(next);
+    historyIndex.current = historyStack.current.length - 1;
+    setView(next);
+  }, []);
+
+  const canGoBack = historyIndex.current > 0;
+  const canGoForward = historyIndex.current < historyStack.current.length - 1;
+
+  const goBack = useCallback(() => {
+    if (historyIndex.current <= 0) return;
+    isNavigating.current = true;
+    historyIndex.current--;
+    setView(historyStack.current[historyIndex.current]);
+    isNavigating.current = false;
+  }, []);
+
+  const goForward = useCallback(() => {
+    if (historyIndex.current >= historyStack.current.length - 1) return;
+    isNavigating.current = true;
+    historyIndex.current++;
+    setView(historyStack.current[historyIndex.current]);
+    isNavigating.current = false;
+  }, []);
 
   const handleConnected = (name: string) => {
     queryClient.clear();
@@ -26,16 +64,21 @@ export default function App() {
     setConnectionName(name);
     setConnectionKey((k) => k + 1);
     setShowConnect(false);
+    historyStack.current = [{ tab: "log" }];
+    historyIndex.current = 0;
+    setView({ tab: "log" });
+  };
+
+  const handleTabChange = (tab: Tab) => {
+    navigateTo({ tab });
   };
 
   const handleTrace = (correlationId: string) => {
-    setTraceCorrelation(correlationId);
-    setActiveTab("correlation");
+    navigateTo({ tab: "correlation", correlation: correlationId });
   };
 
   const handleStream = (stream: string) => {
-    setSelectedStream(stream);
-    setActiveTab("streams");
+    navigateTo({ tab: "streams", stream });
   };
 
   return (
@@ -46,6 +89,10 @@ export default function App() {
             connected={connected}
             connectionName={connectionName}
             onConnect={() => setShowConnect(true)}
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
+            onBack={goBack}
+            onForward={goForward}
           />
           {showConnect && (
             <ConnectDialog
@@ -55,33 +102,25 @@ export default function App() {
           )}
           {connected && (
             <>
-              <TabNav
-                active={activeTab}
-                onChange={(tab) => {
-                  setActiveTab(tab);
-                  if (tab !== "correlation") setTraceCorrelation(undefined);
-                  if (tab !== "streams") setSelectedStream(undefined);
-                }}
-              />
+              <TabNav active={view.tab} onChange={handleTabChange} />
               <div key={connectionKey} className="flex min-h-0 flex-1 flex-col">
-                {activeTab === "log" && (
+                {view.tab === "log" && (
                   <EventLog onTrace={handleTrace} onStream={handleStream} />
                 )}
-                {activeTab === "timeline" && (
+                {view.tab === "timeline" && (
                   <Timeline onTrace={handleTrace} onStream={handleStream} />
                 )}
-                {activeTab === "streams" && (
+                {view.tab === "streams" && (
                   <Streams
-                    initialStream={selectedStream}
+                    initialStream={view.stream}
                     onTrace={handleTrace}
                     onStream={handleStream}
                   />
                 )}
-                {activeTab === "correlation" && (
+                {view.tab === "correlation" && (
                   <Correlation
-                    initialCorrelation={traceCorrelation}
+                    initialCorrelation={view.correlation}
                     onStream={handleStream}
-                    onTrace={handleTrace}
                   />
                 )}
               </div>
