@@ -1,3 +1,4 @@
+import { Database, GitBranch } from "lucide-react";
 import { useState } from "react";
 import { JsonViewer } from "./JsonViewer.js";
 
@@ -28,6 +29,8 @@ type EventRowProps = {
   defaultExpanded?: boolean;
   compact?: boolean;
   hideStream?: boolean;
+  onTrace?: (correlationId: string) => void;
+  onStream?: (stream: string) => void;
 };
 
 /** Deterministic color from event name */
@@ -64,14 +67,46 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
+/** Short ID: first 8 chars */
+function shortId(id: string): string {
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+/** Inline clickable link — small, subtle */
+function NavLink({
+  children,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={title}
+      className="text-emerald-400/70 transition hover:text-emerald-300"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function EventRow({
   event,
   defaultExpanded = false,
   compact = false,
   hideStream = false,
+  onTrace,
+  onStream,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
+  const correlation = event.meta?.correlation;
 
   return (
     <div className="border-b border-zinc-800/50 transition hover:bg-zinc-900/50">
@@ -108,8 +143,41 @@ export function EventRow({
         {!hideStream && (
           <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
             {event.stream}
+            {onStream && (
+              <>
+                {" "}
+                <NavLink
+                  title="Open in Streams"
+                  onClick={() => onStream(event.stream)}
+                >
+                  <Database size={10} className="inline" />
+                </NavLink>
+              </>
+            )}
           </span>
         )}
+
+        {/* Correlation */}
+        {correlation && (
+          <span
+            className="w-20 shrink-0 truncate font-mono text-zinc-500"
+            title={correlation}
+          >
+            {shortId(correlation)}
+            {onTrace && (
+              <>
+                {" "}
+                <NavLink
+                  title="Trace correlation"
+                  onClick={() => onTrace(correlation)}
+                >
+                  <GitBranch size={10} className="inline" />
+                </NavLink>
+              </>
+            )}
+          </span>
+        )}
+        {!correlation && <span className="w-20 shrink-0" />}
 
         {/* Time */}
         <span
@@ -125,12 +193,14 @@ export function EventRow({
         </span>
       </button>
 
-      {/* Expanded detail */}
+      {/* Expanded detail — compact */}
       {expanded && compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5 text-xs">
           <JsonViewer data={event.data} />
         </div>
       )}
+
+      {/* Expanded detail — full */}
       {expanded && !compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/80 px-4 py-3">
           <div className="grid grid-cols-2 gap-4">
@@ -173,36 +243,6 @@ export function EventRow({
                 <JsonViewer data={event.meta} />
               </div>
             </div>
-          </div>
-
-          {/* Quick info bar */}
-          <div className="mt-3 flex flex-wrap gap-4 text-[10px] text-zinc-500">
-            <span>
-              Stream:{" "}
-              <button
-                onClick={() => copyToClipboard(event.stream)}
-                className="text-zinc-300 hover:text-emerald-400"
-              >
-                {event.stream}
-              </button>
-            </span>
-            {event.meta?.correlation && (
-              <span>
-                Correlation:{" "}
-                <button
-                  onClick={() => copyToClipboard(event.meta.correlation!)}
-                  className="font-mono text-zinc-300 hover:text-emerald-400"
-                >
-                  {event.meta.correlation}
-                </button>
-              </span>
-            )}
-            <span>
-              Created:{" "}
-              <span className="text-zinc-300">
-                {new Date(event.created).toISOString()}
-              </span>
-            </span>
           </div>
         </div>
       )}

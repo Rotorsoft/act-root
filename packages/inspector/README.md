@@ -42,15 +42,17 @@ Fill in the connection fields directly:
 
 ## Features
 
-### Views (tab navigation: Log | Timeline | Streams)
+### Views (tab navigation: Log | Timeline | Streams | Correlation)
 
-- **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels
-- **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips, density heatmap mode for large datasets (>500 events)
-- **Stream Inspector** — sortable/filterable stream list with health badges (healthy/blocked/leased/retry), click to open detail panel with:
-  - Processing metadata from the `_streams` table (watermark, retry, blocked, lease info)
-  - Full event history for the stream
-  - State evolution diffs between consecutive events
-  - "Open in Log" quick action
+- **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels, "Trace" button to follow correlation chains
+- **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips, zoom/pan, density heatmap mode for large datasets (>500 events)
+- **Stream Inspector** — sortable/filterable stream list, click to open detail panel with compact expanded events and "Open in Log" action
+- **Correlation Explorer** — trace a correlation ID across its full event chain:
+  - **Waterfall view**: time-axis bars with causation indentation, color-coded by stream, gap detection for reaction latency (>1s highlighted)
+  - **DAG graph**: directed acyclic graph of event causation, nodes as colored rectangles with arrows showing cause→effect relationships
+  - **Metadata sidebar**: actor, total events, duration, streams touched, event type breakdown
+  - Toggle between waterfall and graph views
+  - Click any event for full detail in sidebar
 
 ### Core
 
