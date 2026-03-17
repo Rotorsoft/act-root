@@ -429,7 +429,7 @@ export function Timeline() {
                   {new Date(tooltip.event.created).toLocaleString()}
                 </div>
                 {tooltip.event.data != null && (
-                  <div className="border-t border-zinc-800 pt-1.5">
+                  <div className="border-t border-zinc-800 pt-1.5 text-[9px]">
                     <JsonViewer data={tooltip.event.data} />
                   </div>
                 )}
