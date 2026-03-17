@@ -115,8 +115,8 @@ export function EventLog({
         <span className="w-12 shrink-0 text-right">Version</span>
         <span className="w-36 shrink-0">Event</span>
         <span className="min-w-0 flex-1">Stream</span>
+        <span className="w-20 shrink-0">Correlation</span>
         <span className="w-20 shrink-0 text-right">Time</span>
-        <span className="w-4 shrink-0" />
         <span className="w-4 shrink-0" />
       </div>
 
