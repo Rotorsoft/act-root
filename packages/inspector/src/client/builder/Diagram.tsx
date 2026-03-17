@@ -39,6 +39,7 @@ type N = {
   line?: number;
   projections?: string[];
   guards?: string[];
+  reactions?: string[];
 };
 type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 type Box = { label: string; x: number; y: number; w: number; h: number };
@@ -97,6 +98,23 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
     // Build projection lookup: event name → projection names
     const eventProjections = new Map<string, string[]>();
+    const eventReactions = new Map<string, string[]>();
+
+    // Build reaction lookup: event name → reaction handler names
+    for (const slice of model.slices) {
+      for (const r of slice.reactions) {
+        if (r.isVoid) continue;
+        const list = eventReactions.get(r.event) ?? [];
+        list.push(r.handlerName);
+        eventReactions.set(r.event, list);
+      }
+    }
+    for (const r of model.reactions) {
+      if (r.isVoid) continue;
+      const list = eventReactions.get(r.event) ?? [];
+      list.push(r.handlerName);
+      eventReactions.set(r.event, list);
+    }
     for (const proj of model.projections) {
       for (const en of proj.handles) {
         const list = eventProjections.get(en) ?? [];
@@ -106,7 +124,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     }
 
     const sliceEvts = new Map<string, Set<string>>();
+    const MAX_ROW_W = 800;
     let cx = PAD,
+      rowBaseY = 0,
+      rowMaxH = 0,
       maxY = 0;
 
     /**
@@ -115,6 +136,13 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
      * Reactions that dispatch to actions DUPLICATE the target action (no backward arrows).
      */
     for (const slice of model.slices) {
+      // Wrap to next row if this slice would exceed max width
+      // (estimate: at least 3 columns worth of width needed)
+      if (cx > PAD && cx > MAX_ROW_W) {
+        rowBaseY += rowMaxH + GAP * 3;
+        cx = PAD;
+        rowMaxH = 0;
+      }
       const sx = cx;
       const parts = slice.stateVars
         .map((v) => sv.get(v))
@@ -127,7 +155,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       const eDefs = parts.flatMap((st) => st.events);
       const stateName = parts[0]?.name ?? "";
 
-      let y = PAD + H + GAP;
+      let y = rowBaseY + PAD + H + GAP;
       let sliceRightX = cx;
 
       // Each action → its events on one row
@@ -155,6 +183,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             label: en,
             line: eDefs.find((e) => e.name === en)?.line,
             projections: projs,
+            reactions: eventReactions.get(en),
           });
           es.push({
             from: { x: ap.x + W, y: ap.y + H / 2 },
@@ -237,6 +266,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 type: "event",
                 label: en,
                 projections: projs,
+                reactions: eventReactions.get(en),
               });
               es.push({
                 from: { x: dap.x + W, y: dap.y + H / 2 },
@@ -254,21 +284,27 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
       maxY = Math.max(maxY, y);
 
-      // Slice boundary
+      // Slice boundary with padding
+      const sliceH = maxY - rowBaseY - PAD + GAP * 2;
       boxes.push({
         label: `${slice.name.replace(/Slice$/i, "")} (${stateName})`,
-        x: sx - 4,
-        y: PAD - 4,
-        w: sliceRightX - sx + 4,
-        h: maxY - PAD + 8,
+        x: sx - GAP / 2,
+        y: rowBaseY + PAD - GAP / 2,
+        w: sliceRightX - sx + GAP,
+        h: sliceH,
       });
+      rowMaxH = Math.max(rowMaxH, sliceH + GAP);
       cx = sliceRightX + GAP * 2;
     }
 
     // Standalone states
+    if (cx > PAD && cx > MAX_ROW_W) {
+      rowBaseY += rowMaxH + GAP * 3;
+      cx = PAD;
+    }
     const claimed = new Set(model.slices.flatMap((sl) => sl.stateVars));
     for (const st of model.states.filter((s) => !claimed.has(s.varName))) {
-      let y = PAD;
+      let y = rowBaseY + PAD;
       for (const action of st.actions) {
         let x = cx;
         const ap = { x, y };
@@ -292,6 +328,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             label: en,
             line: st.events.find((e) => e.name === en)?.line,
             projections: projs,
+            reactions: eventReactions.get(en),
           });
           es.push({
             from: { x: ap.x + W, y: ap.y + H / 2 },
@@ -461,6 +498,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                   const parts = [n.label];
                   if (n.guards?.length)
                     parts.push(`Guards: ${n.guards.join(", ")}`);
+                  if (n.reactions?.length)
+                    parts.push(`Reactions: ${n.reactions.join(", ")}`);
                   if (n.projections?.length)
                     parts.push(`Projections: ${n.projections.join(", ")}`);
                   setTip({ x: ev.clientX, y: ev.clientY, t: parts.join("\n") });
@@ -503,15 +542,45 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     />
                   </g>
                 )}
-                {n.projections && n.projections.length > 0 && (
+                {n.reactions && n.reactions.length > 0 && (
                   <g
-                    transform={`translate(${n.pos.x + W - 12},${n.pos.y + 2})`}
+                    transform={`translate(${n.pos.x + W - 11},${n.pos.y + 2})`}
                   >
                     <path
-                      d="M1 5h8M5 1v8"
+                      d="M6 0L2 5h3L4 10L8 5H5L6 0z"
+                      fill={COLORS.reaction.text}
+                    />
+                  </g>
+                )}
+                {n.projections && n.projections.length > 0 && (
+                  <g
+                    transform={`translate(${n.pos.x + W - 13},${n.pos.y + 2})`}
+                  >
+                    <rect
+                      x="1"
+                      y="1"
+                      width="8"
+                      height="6"
+                      rx="1"
+                      fill="none"
                       stroke={COLORS.projection.text}
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
+                      strokeWidth="1"
+                    />
+                    <line
+                      x1="3"
+                      y1="7"
+                      x2="7"
+                      y2="7"
+                      stroke={COLORS.projection.text}
+                      strokeWidth="1"
+                    />
+                    <line
+                      x1="5"
+                      y1="7"
+                      x2="5"
+                      y2="9"
+                      stroke={COLORS.projection.text}
+                      strokeWidth="1"
                     />
                   </g>
                 )}
