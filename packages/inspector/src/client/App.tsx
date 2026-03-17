@@ -1,11 +1,12 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ConnectDialog } from "./components/ConnectDialog.js";
 import { Header } from "./components/Header.js";
 import { TabNav, type Tab } from "./components/TabNav.js";
 import { queryClient, trpc, trpcClient } from "./trpc.js";
 import { Correlation } from "./views/Correlation.js";
 import { EventLog } from "./views/EventLog.js";
+import { Monitor } from "./views/Monitor.js";
 import { Streams } from "./views/Streams.js";
 import { Timeline } from "./views/Timeline.js";
 
@@ -29,6 +30,7 @@ export function viewCaption(v: ViewState): string {
     timeline: "Timeline",
     streams: "Streams",
     correlation: "Correlation",
+    monitor: "Monitor",
   };
   return labels[v.tab];
 }
@@ -38,6 +40,17 @@ export default function App() {
   const [showConnect, setShowConnect] = useState(true);
   const [connectionName, setConnectionName] = useState("");
   const [connectionKey, setConnectionKey] = useState(0);
+  const [blockedCount, setBlockedCount] = useState(0);
+  const [pollInterval, setPollInterval] = useState(0);
+
+  // Global live polling — invalidate all queries on interval
+  useEffect(() => {
+    if (pollInterval <= 0) return;
+    const id = setInterval(() => {
+      void queryClient.invalidateQueries();
+    }, pollInterval);
+    return () => clearInterval(id);
+  }, [pollInterval]);
 
   // Navigation history
   const [view, setView] = useState<ViewState>({ tab: "log" });
@@ -107,6 +120,8 @@ export default function App() {
             history={historyStack.current}
             historyIndex={historyIndex.current}
             onGoTo={goTo}
+            pollInterval={pollInterval}
+            onPollChange={setPollInterval}
           />
           {showConnect && (
             <ConnectDialog
@@ -116,7 +131,11 @@ export default function App() {
           )}
           {connected && (
             <>
-              <TabNav active={view.tab} onChange={handleTabChange} />
+              <TabNav
+                active={view.tab}
+                onChange={handleTabChange}
+                blockedCount={blockedCount}
+              />
               <div key={connectionKey} className="flex min-h-0 flex-1 flex-col">
                 {view.tab === "log" && (
                   <EventLog onTrace={handleTrace} onStream={handleStream} />
@@ -135,6 +154,12 @@ export default function App() {
                   <Correlation
                     initialCorrelation={view.correlation}
                     onStream={handleStream}
+                  />
+                )}
+                {view.tab === "monitor" && (
+                  <Monitor
+                    onStream={handleStream}
+                    onBlockedCount={setBlockedCount}
                   />
                 )}
               </div>

@@ -116,7 +116,7 @@ export function Correlation({ initialCorrelation, onStream }: Props) {
 
   const eventsQuery = trpc.query.useQuery(
     { correlation: correlationId, limit: 500, backward: false },
-    { enabled: correlationId.length > 0, staleTime: 10_000 }
+    { enabled: correlationId.length > 0, staleTime: 3_000 }
   );
 
   const events = (eventsQuery.data?.events ?? []) as unknown as Event[];

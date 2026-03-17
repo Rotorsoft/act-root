@@ -487,6 +487,144 @@ export const inspectorRouter = t.router({
       if (pgClient) await pgClient.end();
     }
   }),
+
+  /** Get drain status: aggregate health + blocked streams + leases + watermark histogram */
+  drainStatus: t.procedure.query(async () => {
+    const s = getStore();
+    let pgClient: pg.Client | undefined;
+    try {
+      const { client, fqs } = await getStreamsClient();
+      pgClient = client;
+
+      // Get max event ID
+      const events: AnyEvent[] = [];
+      await s.query<Schemas>(collect(events), {
+        limit: 1,
+        backward: true,
+        with_snaps: true,
+      });
+      const maxEventId = events.length > 0 ? events[0].id : 0;
+
+      // Get all stream rows
+      const result = await client.query<{
+        stream: string;
+        source: string | null;
+        at: number;
+        retry: number;
+        blocked: boolean;
+        error: string | null;
+        leased_at: number | null;
+        leased_by: string | null;
+        leased_until: string | null;
+      }>(
+        `SELECT stream, source, at, retry, blocked, error, leased_at, leased_by, leased_until FROM ${fqs} ORDER BY stream`
+      );
+
+      const rows = result.rows;
+      const now = new Date();
+
+      // Aggregates
+      let healthy = 0;
+      let blocked = 0;
+      let leased = 0;
+      let lagging = 0;
+      const blockedStreams: Array<{
+        stream: string;
+        source: string | null;
+        error: string | null;
+        retry: number;
+        at: number;
+        gap: number;
+      }> = [];
+      const activeLeases: Array<{
+        stream: string;
+        source: string | null;
+        leased_by: string;
+        leased_at: number;
+        leased_until: string;
+      }> = [];
+      const gaps: number[] = [];
+
+      for (const r of rows) {
+        const gap = Math.max(0, maxEventId - r.at);
+        gaps.push(gap);
+
+        if (r.blocked) {
+          blocked++;
+          blockedStreams.push({
+            stream: r.stream,
+            source: r.source,
+            error: r.error,
+            retry: r.retry,
+            at: r.at,
+            gap,
+          });
+        } else if (
+          r.leased_by &&
+          r.leased_until &&
+          new Date(r.leased_until) > now
+        ) {
+          leased++;
+          activeLeases.push({
+            stream: r.stream,
+            source: r.source,
+            leased_by: r.leased_by,
+            leased_at: r.leased_at ?? 0,
+            leased_until: r.leased_until,
+          });
+        } else if (gap > 10) {
+          lagging++;
+        } else {
+          healthy++;
+        }
+      }
+
+      // Watermark histogram
+      const buckets = [
+        { label: "0", min: 0, max: 0, count: 0 },
+        { label: "1-10", min: 1, max: 10, count: 0 },
+        { label: "11-50", min: 11, max: 50, count: 0 },
+        { label: "51-100", min: 51, max: 100, count: 0 },
+        { label: "100+", min: 101, max: Infinity, count: 0 },
+      ];
+      for (const gap of gaps) {
+        for (const b of buckets) {
+          if (gap >= b.min && gap <= b.max) {
+            b.count++;
+            break;
+          }
+        }
+      }
+
+      return {
+        total: rows.length,
+        healthy,
+        blocked,
+        leased,
+        lagging,
+        maxEventId,
+        blockedStreams: blockedStreams.sort((a, b) => b.gap - a.gap),
+        activeLeases,
+        histogram: buckets,
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      return {
+        total: 0,
+        healthy: 0,
+        blocked: 0,
+        leased: 0,
+        lagging: 0,
+        maxEventId: 0,
+        blockedStreams: [],
+        activeLeases: [],
+        histogram: [],
+        timestamp: new Date().toISOString(),
+      };
+    } finally {
+      if (pgClient) await pgClient.end();
+    }
+  }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
