@@ -749,17 +749,36 @@ ${input.currentCode ? `Current code to refine:\n\`\`\`typescript\n${input.curren
         const filePath = queue.shift()!;
         if (fetched.has(filePath)) continue;
 
-        const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
-        const res = await fetch(url);
-        if (!res.ok) {
-          if (fetched.size === 0) {
-            throw new Error(`Failed to fetch ${url}: ${res.status}`, {
-              cause: "fetch_error",
-            });
+        // Try GitHub API first (works with private repos if GITHUB_TOKEN is set)
+        const ghToken = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+        const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}?ref=${branch}`;
+        const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${filePath}`;
+
+        const headers: Record<string, string> = {
+          "User-Agent": "act-inspector",
+        };
+        if (ghToken) headers.Authorization = `Bearer ${ghToken}`;
+
+        let content: string;
+        const apiRes = await fetch(apiUrl, {
+          headers: { ...headers, Accept: "application/vnd.github.raw+json" },
+        });
+        if (apiRes.ok) {
+          content = await apiRes.text();
+        } else {
+          // Fallback to raw URL (public repos)
+          const rawRes = await fetch(rawUrl);
+          if (!rawRes.ok) {
+            if (fetched.size === 0) {
+              throw new Error(
+                `Failed to fetch ${filePath}: ${apiRes.status}${ghToken ? "" : " (set GITHUB_TOKEN for private repos)"}`,
+                { cause: "fetch_error" }
+              );
+            }
+            continue;
           }
-          continue; // skip missing optional imports
+          content = await rawRes.text();
         }
-        const content = await res.text();
         fetched.set(filePath, content);
 
         // Follow local relative imports: import ... from "./foo.js" or "../bar.js"
