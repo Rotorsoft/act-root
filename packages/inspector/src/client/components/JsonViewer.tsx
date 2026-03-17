@@ -12,7 +12,7 @@ export function JsonViewer({
   label,
 }: JsonViewerProps) {
   return (
-    <div className="font-mono text-xs leading-relaxed">
+    <div className="font-mono leading-relaxed">
       {label && <span className="mr-2 text-zinc-500">{label}:</span>}
       <JsonNode data={data} depth={0} defaultCollapsed={collapsed} />
     </div>

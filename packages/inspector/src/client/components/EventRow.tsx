@@ -127,7 +127,7 @@ export function EventRow({
 
       {/* Expanded detail */}
       {expanded && compact && (
-        <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5">
+        <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5 text-xs">
           <JsonViewer data={event.data} />
         </div>
       )}
@@ -149,7 +149,7 @@ export function EventRow({
                   Copy
                 </button>
               </div>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
                 <JsonViewer data={event.data} />
               </div>
             </div>
@@ -169,7 +169,7 @@ export function EventRow({
                   Copy
                 </button>
               </div>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
                 <JsonViewer data={event.meta} />
               </div>
             </div>

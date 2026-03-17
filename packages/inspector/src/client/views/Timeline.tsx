@@ -132,7 +132,7 @@ export function Timeline() {
 
   // Ticks
   const ticks = useMemo(() => {
-    const tickCount = Math.max(2, Math.floor((chartRight - LEFT_GUTTER) / 120));
+    const tickCount = Math.max(2, Math.floor((chartRight - LEFT_GUTTER) / 160));
     return xScale.ticks(tickCount).map((d) => ({
       x: xScale(d),
       label: formatTick(d),
@@ -508,7 +508,7 @@ function EventDetailDialog({
           <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
             Data
           </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[10px]">
             <JsonViewer data={event.data} />
           </div>
         </div>
@@ -518,7 +518,7 @@ function EventDetailDialog({
           <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
             Meta
           </div>
-          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+          <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-[10px]">
             <JsonViewer data={event.meta} />
           </div>
         </div>
