@@ -115,14 +115,19 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       for (const st of partials) for (const e of st.events) evts.add(e.name);
       sliceEvents.set(slice.name, evts);
 
-      // For each action in the slice: Command → State → Event(s) → Policy
+      // Layout: Commands (left) → State (center) → Events (right)
+      // State appears once per partial state, commands stack above/below on the left, events on the right
       let rowY = LANE_PAD;
       for (const st of partials) {
-        for (const action of st.actions) {
-          let x = cursorX;
+        // Collect all actions and events for this partial state
+        const cmdX = cursorX;
+        const stateX = cursorX + NODE_W + H_GAP;
+        const eventX = stateX + NODE_W + H_GAP;
 
-          // 1. Command (blue)
-          const aPos = { x, y: rowY };
+        // Place commands vertically on the left
+        let cmdY = rowY;
+        for (const action of st.actions) {
+          const aPos = { x: cmdX, y: cmdY };
           nodes.push({
             key: `action:${action.name}`,
             pos: aPos,
@@ -135,30 +140,15 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             line: action.line,
           });
           actionPositions.set(action.name, aPos);
-          x += NODE_W + H_GAP;
+          cmdY += NODE_H + 4;
+        }
 
-          // 2. Aggregate (yellow) — the state this action belongs to
-          const sPos = { x, y: rowY };
-          nodes.push({
-            key: `state:${st.name}:${action.name}`,
-            pos: sPos,
-            type: "state",
-            label: st.name,
-            line: st.line,
-          });
-          // Command → State arrow
-          edges.push({
-            from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
-            to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
-            color: COLORS.action.border,
-          });
-          x += NODE_W + H_GAP;
-
-          // 3. Event(s) (orange) — stacked vertically if multiple
-          for (let ei = 0; ei < action.emits.length; ei++) {
-            const eName = action.emits[ei];
+        // Place events vertically on the right
+        let evtY = rowY;
+        for (const action of st.actions) {
+          for (const eName of action.emits) {
             if (!eventPositions.has(eName)) {
-              const ePos = { x, y: rowY + ei * (NODE_H + 4) };
+              const ePos = { x: eventX, y: evtY };
               nodes.push({
                 key: `event:${eName}`,
                 pos: ePos,
@@ -167,7 +157,42 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 line: st.events.find((e) => e.name === eName)?.line,
               });
               eventPositions.set(eName, ePos);
-              // State → Event arrow
+              evtY += NODE_H + 4;
+            }
+          }
+        }
+
+        // Place state (yellow) centered vertically between commands and events
+        const totalH = Math.max(cmdY, evtY) - rowY;
+        const sPos = {
+          x: stateX,
+          y: rowY + Math.max(0, totalH / 2 - NODE_H / 2),
+        };
+        nodes.push({
+          key: `state:${st.name}:${slice.name}`,
+          pos: sPos,
+          type: "state",
+          label: st.name,
+          line: st.line,
+        });
+
+        // Command → State arrows
+        for (const action of st.actions) {
+          const aPos = actionPositions.get(action.name);
+          if (aPos) {
+            edges.push({
+              from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
+              to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
+              color: COLORS.action.border,
+            });
+          }
+        }
+
+        // State → Event arrows
+        for (const action of st.actions) {
+          for (const eName of action.emits) {
+            const ePos = eventPositions.get(eName);
+            if (ePos) {
               edges.push({
                 from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
                 to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
@@ -175,11 +200,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               });
             }
           }
-
-          const evtHeight = Math.max(1, action.emits.length) * (NODE_H + 4);
-          maxY = Math.max(maxY, rowY + evtHeight);
-          rowY += evtHeight + V_GAP;
         }
+
+        maxY = Math.max(maxY, rowY + totalH);
+        rowY += totalH + V_GAP;
       }
 
       // Update cursorX to after the widest element placed
@@ -242,9 +266,13 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     const claimedVars = new Set(model.slices.flatMap((sl) => sl.stateVars));
     let rowY = LANE_PAD;
     for (const st of model.states.filter((s) => !claimedVars.has(s.varName))) {
+      const cmdX = cursorX;
+      const stateX = cursorX + NODE_W + H_GAP;
+      const eventX = stateX + NODE_W + H_GAP;
+
+      let cmdY = rowY;
       for (const action of st.actions) {
-        let x = cursorX;
-        const aPos = { x, y: rowY };
+        const aPos = { x: cmdX, y: cmdY };
         nodes.push({
           key: `action:${action.name}`,
           pos: aPos,
@@ -257,27 +285,14 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           line: action.line,
         });
         actionPositions.set(action.name, aPos);
-        x += NODE_W + H_GAP;
+        cmdY += NODE_H + 4;
+      }
 
-        const sPos = { x, y: rowY };
-        nodes.push({
-          key: `state:${st.name}:${action.name}`,
-          pos: sPos,
-          type: "state",
-          label: st.name,
-          line: st.line,
-        });
-        edges.push({
-          from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
-          to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
-          color: COLORS.action.border,
-        });
-        x += NODE_W + H_GAP;
-
-        for (let ei = 0; ei < action.emits.length; ei++) {
-          const eName = action.emits[ei];
+      let evtY = rowY;
+      for (const action of st.actions) {
+        for (const eName of action.emits) {
           if (!eventPositions.has(eName)) {
-            const ePos = { x, y: rowY + ei * (NODE_H + 4) };
+            const ePos = { x: eventX, y: evtY };
             nodes.push({
               key: `event:${eName}`,
               pos: ePos,
@@ -286,16 +301,46 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               line: st.events.find((e) => e.name === eName)?.line,
             });
             eventPositions.set(eName, ePos);
+            evtY += NODE_H + 4;
+          }
+        }
+      }
+
+      const totalH = Math.max(cmdY, evtY) - rowY;
+      const sPos = {
+        x: stateX,
+        y: rowY + Math.max(0, totalH / 2 - NODE_H / 2),
+      };
+      nodes.push({
+        key: `state:${st.name}:standalone`,
+        pos: sPos,
+        type: "state",
+        label: st.name,
+        line: st.line,
+      });
+
+      for (const action of st.actions) {
+        const aPos = actionPositions.get(action.name);
+        if (aPos)
+          edges.push({
+            from: { x: aPos.x + NODE_W, y: aPos.y + NODE_H / 2 },
+            to: { x: sPos.x, y: sPos.y + NODE_H / 2 },
+            color: COLORS.action.border,
+          });
+        for (const eName of action.emits) {
+          const ePos = eventPositions.get(eName);
+          if (ePos)
             edges.push({
               from: { x: sPos.x + NODE_W, y: sPos.y + NODE_H / 2 },
               to: { x: ePos.x, y: ePos.y + NODE_H / 2 },
               color: COLORS.event.border,
             });
-          }
         }
-        rowY += Math.max(1, action.emits.length) * (NODE_H + 4) + V_GAP;
-        maxY = Math.max(maxY, rowY);
       }
+
+      cursorX = eventX + NODE_W + H_GAP;
+      rowY += totalH + V_GAP;
+      maxY = Math.max(maxY, rowY);
     }
 
     // --- Projections (green) ---
