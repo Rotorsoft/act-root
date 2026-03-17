@@ -508,23 +508,12 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {line}
                   </text>
                 ))}
-                {/* Top-right icons — stacked horizontally */}
+                {/* Top-right icons — left to right: reaction, projection, guard */}
                 {(() => {
                   let ix = n.pos.x + W - 13;
                   const icons: React.ReactNode[] = [];
-                  if (n.reactions?.length) {
-                    icons.push(
-                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
-                        <path
-                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
-                          fill={COLORS.reaction.text}
-                        />
-                      </g>
-                    );
-                    ix -= 12;
-                  }
                   if (n.guards?.length) {
-                    icons.push(
+                    icons.unshift(
                       <g key="g" transform={`translate(${ix},${n.pos.y + 2})`}>
                         <path
                           d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
@@ -537,7 +526,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     ix -= 12;
                   }
                   if (n.projections?.length) {
-                    icons.push(
+                    icons.unshift(
                       <g key="p" transform={`translate(${ix},${n.pos.y + 2})`}>
                         <rect
                           x="1"
@@ -564,6 +553,17 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                           y2="9"
                           stroke={COLORS.projection.text}
                           strokeWidth="1"
+                        />
+                      </g>
+                    );
+                    ix -= 12;
+                  }
+                  if (n.reactions?.length) {
+                    icons.unshift(
+                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
+                        <path
+                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
+                          fill={COLORS.reaction.text}
                         />
                       </g>
                     );
