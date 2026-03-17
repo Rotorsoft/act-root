@@ -1,14 +1,6 @@
-import { Database, RefreshCw } from "lucide-react";
+import { Database } from "lucide-react";
 import { useEffect, useState } from "react";
 import { trpc } from "../trpc.js";
-
-const POLL_OPTIONS = [
-  { label: "Off", ms: 0 },
-  { label: "5s", ms: 5_000 },
-  { label: "10s", ms: 10_000 },
-  { label: "30s", ms: 30_000 },
-  { label: "1m", ms: 60_000 },
-];
 
 type MonitorProps = {
   onStream?: (stream: string) => void;
@@ -16,12 +8,8 @@ type MonitorProps = {
 };
 
 export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
-  const [pollInterval, setPollInterval] = useState(0);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-
   const statusQuery = trpc.drainStatus.useQuery(undefined, {
     staleTime: 2_000,
-    refetchInterval: pollInterval || false,
   });
 
   const data = statusQuery.data;
@@ -30,13 +18,6 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
   useEffect(() => {
     onBlockedCount?.(data?.blocked ?? 0);
   }, [data?.blocked, onBlockedCount]);
-
-  // Track last refresh
-  useEffect(() => {
-    if (statusQuery.dataUpdatedAt) {
-      setLastRefresh(new Date(statusQuery.dataUpdatedAt));
-    }
-  }, [statusQuery.dataUpdatedAt]);
 
   if (!data) {
     return (
@@ -48,41 +29,6 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      {/* Controls bar */}
-      <div className="flex items-center gap-4 border-b border-zinc-800 bg-zinc-925 px-4 py-2">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-            Refresh
-          </span>
-          {POLL_OPTIONS.map((opt) => (
-            <button
-              key={opt.label}
-              onClick={() => setPollInterval(opt.ms)}
-              className={`rounded-md border px-2 py-1 text-[10px] transition ${
-                pollInterval === opt.ms
-                  ? "border-emerald-600 bg-emerald-950 text-emerald-400"
-                  : "border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={() => void statusQuery.refetch()}
-          className="rounded p-1 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
-          title="Refresh now"
-        >
-          <RefreshCw
-            size={13}
-            className={statusQuery.isFetching ? "animate-spin" : ""}
-          />
-        </button>
-        <span className="ml-auto text-[10px] text-zinc-600">
-          {lastRefresh.toLocaleTimeString()}
-        </span>
-      </div>
-
       {/* Overview cards */}
       <div className="grid grid-cols-5 gap-3 border-b border-zinc-800 bg-zinc-925 px-4 py-3">
         <Card label="Total" value={data.total} color="text-zinc-200" />

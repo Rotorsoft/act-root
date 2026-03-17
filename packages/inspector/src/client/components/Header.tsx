@@ -1,7 +1,14 @@
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Radio } from "lucide-react";
 import { useState } from "react";
 import { viewCaption, type ViewState } from "../App.js";
 import { Logo } from "./Logo.js";
+
+const POLL_OPTIONS = [
+  { label: "Off", ms: 0 },
+  { label: "5s", ms: 5_000 },
+  { label: "10s", ms: 10_000 },
+  { label: "30s", ms: 30_000 },
+];
 
 type HeaderProps = {
   connected: boolean;
@@ -14,6 +21,8 @@ type HeaderProps = {
   history?: ViewState[];
   historyIndex?: number;
   onGoTo?: (index: number) => void;
+  pollInterval?: number;
+  onPollChange?: (ms: number) => void;
 };
 
 export function Header({
@@ -27,9 +36,12 @@ export function Header({
   history,
   historyIndex,
   onGoTo,
+  pollInterval = 0,
+  onPollChange,
 }: HeaderProps) {
   const [showHistory, setShowHistory] = useState(false);
   const hasHistory = history && history.length > 1;
+  const isLive = pollInterval > 0;
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800 bg-zinc-925 px-4">
@@ -116,6 +128,33 @@ export function Header({
         )}
       </div>
       <div className="flex items-center gap-3">
+        {/* Live polling */}
+        {connected && onPollChange && (
+          <div className="flex items-center gap-1.5">
+            <Radio
+              size={12}
+              className={
+                isLive ? "animate-pulse text-emerald-400" : "text-zinc-600"
+              }
+            />
+            {POLL_OPTIONS.map((opt) => (
+              <button
+                key={opt.label}
+                onClick={() => onPollChange(opt.ms)}
+                className={`rounded px-1.5 py-0.5 text-[10px] transition ${
+                  pollInterval === opt.ms
+                    ? isLive
+                      ? "bg-emerald-950 text-emerald-400"
+                      : "bg-zinc-800 text-zinc-300"
+                    : "text-zinc-600 hover:text-zinc-400"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         {connected ? (
           <button
             onClick={onConnect}
