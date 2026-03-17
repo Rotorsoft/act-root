@@ -44,6 +44,7 @@ export type ProjectionNode = {
 
 export type ReactionNode = {
   event: string;
+  dispatches: string[]; // action names this reaction calls via app.do()
   isVoid: boolean;
   line?: number;
 };

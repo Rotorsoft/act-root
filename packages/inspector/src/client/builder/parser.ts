@@ -260,6 +260,17 @@ function parseActions(
   return actions;
 }
 
+/** Extract app.do("ActionName", ...) calls from a reaction handler scope */
+function extractDispatches(scope: string): string[] {
+  const dispatches: string[] = [];
+  const doRe = /app\.do\(\s*"(\w+)"/g;
+  let m: RegExpExecArray | null;
+  while ((m = doRe.exec(scope)) !== null) {
+    if (!dispatches.includes(m[1])) dispatches.push(m[1]);
+  }
+  return dispatches;
+}
+
 /** Extract slice() builder chains, resolving state variable names */
 function parseSlices(code: string, states: StateNode[]): SliceNode[] {
   const slices: SliceNode[] = [];
@@ -303,6 +314,7 @@ function parseSlices(code: string, states: StateNode[]): SliceNode[] {
       const isVoid = scope.includes(".void()");
       reactions.push({
         event: wm[1],
+        dispatches: extractDispatches(scope),
         isVoid,
         line: lineOf(code, match.index + wm.index),
       });
@@ -362,9 +374,12 @@ function parseReactions(code: string): ReactionNode[] {
     let om: RegExpExecArray | null;
     while ((om = onRe.exec(chain)) !== null) {
       const afterOn = chain.slice(om.index);
-      const isVoid = afterOn.slice(0, 100).includes(".void()");
+      const nextOn = afterOn.indexOf('.on("', 5);
+      const scope = nextOn > 0 ? afterOn.slice(0, nextOn) : afterOn;
+      const isVoid = scope.includes(".void()");
       reactions.push({
         event: om[1],
+        dispatches: extractDispatches(scope),
         isVoid,
         line: lineOf(code, match.index + om.index),
       });

@@ -3,11 +3,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { DomainModel, ValidationWarning } from "./types.js";
 
 /**
- * Event Modeling diagram layout:
+ * Event Modeling blueprint:
  * - Horizontal timeline (left to right)
- * - Swimlanes per aggregate (state)
- * - Per swimlane: Commands (blue, top) → Events (orange, middle) → Projections (green, bottom)
- * - Reactions (purple) connect events to commands in other swimlanes
+ * - Swimlanes per aggregate/state
+ * - Per vertical slice: Action (blue, top) → Event(s) (orange, middle)
+ * - Reactions shown as arrows from Event → Action in another swimlane
+ * - Projections (green) below, consuming events
  */
 
 const COLORS = {
@@ -16,17 +17,16 @@ const COLORS = {
   state: { bg: "#27272a", border: "#52525b", text: "#a1a1aa" },
   reaction: { bg: "#2e1a47", border: "#7c3aed", text: "#a78bfa" },
   projection: { bg: "#0d3320", border: "#16a34a", text: "#4ade80" },
-  invariant: { bg: "#3b1219", border: "#dc2626", text: "#f87171" },
 };
 
 const NODE_W = 130;
-const NODE_H = 30;
-const H_GAP = 20;
-const SWIMLANE_H = 120;
-const SWIMLANE_LABEL_W = 120;
-const CMD_Y = 10; // commands offset within swimlane (top)
-const EVT_Y = 45; // events offset within swimlane (middle)
-// projections and reactions placed below all swimlanes
+const NODE_H = 28;
+const STACK_OFFSET = 6; // vertical offset for stacked events
+const H_GAP = 24;
+const SWIMLANE_H = 100;
+const LABEL_W = 110;
+const CMD_Y = 8;
+const EVT_Y = 44;
 
 type Pos = { x: number; y: number };
 type NodeData = {
@@ -37,7 +37,13 @@ type NodeData = {
   sublabel?: string;
   line?: number;
 };
-type Edge = { from: Pos; to: Pos; color: string; dashed?: boolean };
+type Edge = {
+  from: Pos;
+  to: Pos;
+  color: string;
+  dashed?: boolean;
+  label?: string;
+};
 type Swimlane = { label: string; y: number; line?: number };
 
 type Props = {
@@ -54,7 +60,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   } | null>(null);
   const warningSet = new Set(warnings.map((w) => w.element).filter(Boolean));
 
-  // Pan & zoom
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const isPanning = useRef(false);
@@ -66,7 +71,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
     );
   }, []);
-
   const handleMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
@@ -75,7 +79,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     },
     [pan]
   );
-
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (!isPanning.current) return;
     setPan({
@@ -83,7 +86,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       y: panStart.current.py + (e.clientY - panStart.current.y),
     });
   }, []);
-
   const handleMouseUp = useCallback(() => {
     isPanning.current = false;
   }, []);
@@ -96,7 +98,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     const nodes: NodeData[] = [];
     const edges: Edge[] = [];
     const swimlanes: Swimlane[] = [];
-    const eventPositions = new Map<string, Pos>();
+    const actionPositions = new Map<string, Pos>(); // action name → position
+    const eventPositions = new Map<string, Pos>(); // event name → position
 
     // Merge partial states
     const stateByName = new Map<string, (typeof model.states)[0]>();
@@ -121,42 +124,30 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         });
       }
     }
-    const mergedStates = [...stateByName.values()];
 
-    // Layout: one swimlane per state, events spread horizontally
     let swimlaneY = 0;
 
-    for (const state of mergedStates) {
+    for (const state of [...stateByName.values()]) {
       swimlanes.push({ label: state.name, y: swimlaneY, line: state.line });
 
-      // Spread events horizontally
-      let eventX = SWIMLANE_LABEL_W + H_GAP;
-      for (const event of state.events) {
-        const eKey = `event:${event.name}`;
-        const ePos = { x: eventX, y: swimlaneY + EVT_Y };
-        nodes.push({
-          key: eKey,
-          pos: ePos,
-          type: "event",
-          label: event.name,
-          sublabel: event.hasCustomPatch ? "patch" : undefined,
-          line: event.line,
-        });
-        eventPositions.set(event.name, ePos);
-        eventX += NODE_W + H_GAP;
+      // Group events by which action emits them
+      const actionEventGroups = new Map<string, string[]>();
+      const ungroupedEvents = new Set(state.events.map((e) => e.name));
+
+      for (const action of state.actions) {
+        actionEventGroups.set(action.name, [...action.emits]);
+        for (const en of action.emits) ungroupedEvents.delete(en);
       }
 
-      // Place actions above their emitted events
-      for (const action of state.actions) {
-        // Position above the first emitted event, or next available slot
-        let actionX = SWIMLANE_LABEL_W + H_GAP;
-        if (action.emits.length > 0) {
-          const firstEventPos = eventPositions.get(action.emits[0]);
-          if (firstEventPos) actionX = firstEventPos.x;
-        }
+      // Layout vertical slices: each action + its events as a column
+      let sliceX = LABEL_W + H_GAP;
 
+      for (const action of state.actions) {
+        const eventNames = actionEventGroups.get(action.name) ?? [];
+
+        // Action node (top)
         const aKey = `action:${action.name}`;
-        const aPos = { x: actionX, y: swimlaneY + CMD_Y };
+        const aPos = { x: sliceX, y: swimlaneY + CMD_Y };
         nodes.push({
           key: aKey,
           pos: aPos,
@@ -168,11 +159,27 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               : undefined,
           line: action.line,
         });
+        actionPositions.set(action.name, aPos);
 
-        // Action → Event edges (vertical down)
-        for (const ename of action.emits) {
-          const ePos = eventPositions.get(ename);
-          if (ePos) {
+        // Events (stacked below action)
+        for (let ei = 0; ei < eventNames.length; ei++) {
+          const eName = eventNames[ei];
+          const eKey = `event:${eName}`;
+          if (!eventPositions.has(eName)) {
+            const ePos = {
+              x: sliceX,
+              y: swimlaneY + EVT_Y + ei * (NODE_H + STACK_OFFSET),
+            };
+            nodes.push({
+              key: eKey,
+              pos: ePos,
+              type: "event",
+              label: eName,
+              line: state.events.find((e) => e.name === eName)?.line,
+            });
+            eventPositions.set(eName, ePos);
+
+            // Action → Event edge
             edges.push({
               from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
               to: { x: ePos.x + NODE_W / 2, y: ePos.y },
@@ -180,14 +187,77 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             });
           }
         }
+
+        sliceX += NODE_W + H_GAP;
+      }
+
+      // Ungrouped events (emitted but not linked to a specific action)
+      for (const eName of ungroupedEvents) {
+        const eKey = `event:${eName}`;
+        if (!eventPositions.has(eName)) {
+          const ePos = { x: sliceX, y: swimlaneY + EVT_Y };
+          nodes.push({
+            key: eKey,
+            pos: ePos,
+            type: "event",
+            label: eName,
+            line: state.events.find((e) => e.name === eName)?.line,
+          });
+          eventPositions.set(eName, ePos);
+          sliceX += NODE_W + H_GAP;
+        }
       }
 
       swimlaneY += SWIMLANE_H;
     }
 
-    // Projections — placed below the events they handle
+    // Reactions — draw as curved arrows from Event → dispatched Action
+    const allReactions = [
+      ...model.slices.flatMap((s) => s.reactions),
+      ...model.reactions,
+    ];
+    for (const reaction of allReactions) {
+      const ePos = eventPositions.get(reaction.event);
+      if (!ePos) continue;
+
+      if (reaction.dispatches.length > 0) {
+        // Show reaction as Event → Action connection
+        for (const actionName of reaction.dispatches) {
+          const aPos = actionPositions.get(actionName);
+          if (aPos) {
+            edges.push({
+              from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+              color: COLORS.reaction.border,
+              dashed: true,
+              label: reaction.event,
+            });
+          }
+        }
+      } else if (!reaction.isVoid) {
+        // Reaction with no known dispatch — show as a small node
+        const rKey = `reaction:${reaction.event}`;
+        const rPos = { x: ePos.x, y: swimlaneY + 10 };
+        nodes.push({
+          key: rKey,
+          pos: rPos,
+          type: "reaction",
+          label: `on ${reaction.event}`,
+          sublabel: "drain",
+          line: reaction.line,
+        });
+        edges.push({
+          from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+          to: { x: rPos.x + NODE_W / 2, y: rPos.y },
+          color: COLORS.reaction.border,
+          dashed: true,
+        });
+      }
+    }
+
+    // Projections — below swimlanes
+    let projX = LABEL_W + H_GAP;
     const projY = swimlaneY + 10;
-    let projX = SWIMLANE_LABEL_W + H_GAP;
     for (const proj of model.projections) {
       const pKey = `projection:${proj.name}`;
       const pPos = { x: projX, y: projY };
@@ -198,8 +268,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         label: proj.name,
         line: proj.line,
       });
-
-      // Event → Projection edges
       for (const ename of proj.handles) {
         const ePos = eventPositions.get(ename);
         if (ePos) {
@@ -211,51 +279,15 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           });
         }
       }
-
       projX += NODE_W + H_GAP;
     }
 
-    // Reactions — placed below events, connecting to other swimlanes
-    const allReactions = [
-      ...model.slices.flatMap((s) => s.reactions),
-      ...model.reactions,
-    ];
-    let reactX = projX + H_GAP;
-    const reactY = projY;
-    for (const reaction of allReactions) {
-      const rKey = `reaction:${reaction.event}`;
-      const rPos = { x: reactX, y: reactY };
-      nodes.push({
-        key: rKey,
-        pos: rPos,
-        type: "reaction",
-        label: `on ${reaction.event}`,
-        sublabel: reaction.isVoid ? "void" : "drain",
-        line: reaction.line,
-      });
-
-      // Event → Reaction edge
-      const ePos = eventPositions.get(reaction.event);
-      if (ePos) {
-        edges.push({
-          from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-          to: { x: rPos.x + NODE_W / 2, y: rPos.y },
-          color: COLORS.reaction.border,
-          dashed: true,
-        });
-      }
-
-      reactX += NODE_W + H_GAP;
-    }
-
-    // Compute bounds
-    let maxW = SWIMLANE_LABEL_W;
-    let maxH = 0;
+    let maxW = LABEL_W,
+      maxH = 0;
     for (const n of nodes) {
       maxW = Math.max(maxW, n.pos.x + NODE_W);
       maxH = Math.max(maxH, n.pos.y + NODE_H);
     }
-
     return { nodes, edges, swimlanes, width: maxW + 40, height: maxH + 40 };
   }, [model]);
 
@@ -272,7 +304,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
-      {/* Zoom controls */}
       <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-925 px-3 py-1">
         <button
           onClick={() => setZoom((z) => Math.min(3, z * 1.25))}
@@ -296,7 +327,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           <Maximize2 size={13} />
         </button>
         <span className="text-[9px] text-zinc-600">
-          {Math.round(zoom * 100)}% · scroll to zoom · drag to pan
+          {Math.round(zoom * 100)}%
         </span>
       </div>
 
@@ -314,7 +345,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${svgW / zoom} ${svgH / zoom}`}
           className="select-none"
         >
-          {/* Swimlane backgrounds and labels */}
+          {/* Swimlanes */}
           {swimlanes.map((sl, i) => (
             <g key={sl.label}>
               {i % 2 === 0 && (
@@ -347,35 +378,18 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             </g>
           ))}
 
-          {/* Lane labels for rows below swimlanes */}
-          {(model.projections.length > 0 ||
-            model.slices.some((s) => s.reactions.length > 0) ||
-            model.reactions.length > 0) && (
-            <text
-              x={8}
-              y={swimlanes.length * SWIMLANE_H + 25}
-              dominantBaseline="middle"
-              fill="#52525b"
-              className="text-[9px]"
-            >
-              Projections & Reactions
-            </text>
-          )}
-
           {/* Edges */}
           {edges.map((edge, i) => {
             const dx = edge.to.x - edge.from.x;
             const dy = edge.to.y - edge.from.y;
             const isStraight = Math.abs(dx) < 5;
-
+            const d = isStraight
+              ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
+              : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.3} ${edge.from.y + dy * 0.1}, ${edge.to.x - dx * 0.3} ${edge.to.y - dy * 0.1}, ${edge.to.x} ${edge.to.y}`;
             return (
               <path
                 key={i}
-                d={
-                  isStraight
-                    ? `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`
-                    : `M ${edge.from.x} ${edge.from.y} C ${edge.from.x} ${edge.from.y + dy * 0.5}, ${edge.to.x} ${edge.to.y - dy * 0.5}, ${edge.to.x} ${edge.to.y}`
-                }
+                d={d}
                 fill="none"
                 stroke={edge.color}
                 strokeWidth={1.5}
@@ -404,7 +418,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           {nodes.map((node) => {
             const color = COLORS[node.type];
             const hasWarning = warningSet.has(node.label);
-
             return (
               <g
                 key={node.key}
@@ -431,7 +444,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 />
                 <text
                   x={node.pos.x + NODE_W / 2}
-                  y={node.pos.y + (node.sublabel ? 12 : NODE_H / 2)}
+                  y={node.pos.y + (node.sublabel ? 11 : NODE_H / 2)}
                   textAnchor="middle"
                   dominantBaseline={node.sublabel ? "auto" : "central"}
                   fill={color.text}
@@ -444,7 +457,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 {node.sublabel && (
                   <text
                     x={node.pos.x + NODE_W / 2}
-                    y={node.pos.y + 23}
+                    y={node.pos.y + 22}
                     textAnchor="middle"
                     fill="#71717a"
                     className="text-[7px]"
