@@ -94,7 +94,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     setZoom(1);
   }, []);
 
-  const { nodes, edges, swimlanes, width, height } = useMemo(() => {
+  const { nodes, edges, swimlanes, boxes, width, height } = useMemo(() => {
     const nodes: NodeData[] = [];
     const edges: Edge[] = [];
     const swimlanes: Swimlane[] = [];
@@ -226,41 +226,29 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       swimlaneY += swimlaneH;
     }
 
-    // Reactions — draw as curved arrows from Event → dispatched Action
+    // Reactions — each as a proper node: Event → [Reaction] → Action
     const allReactions = [
       ...model.slices.flatMap((s) => s.reactions),
       ...model.reactions,
     ];
+    let reactX = LABEL_W + H_GAP;
+    const reactY = swimlaneY + 10;
     for (const reaction of allReactions) {
+      if (reaction.isVoid) continue;
       const ePos = eventPositions.get(reaction.event);
-      if (!ePos) continue;
 
-      if (reaction.dispatches.length > 0) {
-        // Show reaction as Event → Action connection
-        for (const actionName of reaction.dispatches) {
-          const aPos = actionPositions.get(actionName);
-          if (aPos) {
-            edges.push({
-              from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
-              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
-              color: COLORS.reaction.border,
-              dashed: true,
-              label: reaction.event,
-            });
-          }
-        }
-      } else if (!reaction.isVoid) {
-        // Reaction with no known dispatch — show as a small node
-        const rKey = `reaction:${reaction.event}`;
-        const rPos = { x: ePos.x, y: swimlaneY + 10 };
-        nodes.push({
-          key: rKey,
-          pos: rPos,
-          type: "reaction",
-          label: `on ${reaction.event}`,
-          sublabel: "drain",
-          line: reaction.line,
-        });
+      const rKey = `reaction:${reaction.handlerName}`;
+      const rPos = { x: reactX, y: reactY };
+      nodes.push({
+        key: rKey,
+        pos: rPos,
+        type: "reaction",
+        label: reaction.handlerName,
+        line: reaction.line,
+      });
+
+      // Event → Reaction edge
+      if (ePos) {
         edges.push({
           from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
           to: { x: rPos.x + NODE_W / 2, y: rPos.y },
@@ -268,11 +256,28 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           dashed: true,
         });
       }
+
+      // Reaction → Action edges
+      for (const actionName of reaction.dispatches) {
+        const aPos = actionPositions.get(actionName);
+        if (aPos) {
+          edges.push({
+            from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
+            to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+            color: COLORS.reaction.border,
+            dashed: true,
+          });
+        }
+      }
+
+      reactX += NODE_W + H_GAP;
     }
 
-    // Projections — below swimlanes
+    // Projections — below reactions
     let projX = LABEL_W + H_GAP;
-    const projY = swimlaneY + 10;
+    const projY = allReactions.some((r) => !r.isVoid)
+      ? reactY + NODE_H + 20
+      : swimlaneY + 10;
     for (const proj of model.projections) {
       const pKey = `projection:${proj.name}`;
       const pPos = { x: projX, y: projY };
@@ -297,13 +302,66 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       projX += NODE_W + H_GAP;
     }
 
+    // Slice boxes — group their members
+    const boxes: Array<{
+      label: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }> = [];
+    for (const slice of model.slices) {
+      const memberKeys: string[] = [];
+      for (const sn of slice.states) {
+        // Include the swimlane's actions and events
+        const st = stateByName.get(sn);
+        if (st) {
+          for (const a of st.actions) memberKeys.push(`action:${a.name}`);
+          for (const e of st.events) memberKeys.push(`event:${e.name}`);
+        }
+      }
+      for (const r of slice.reactions)
+        memberKeys.push(`reaction:${r.handlerName}`);
+      for (const pn of slice.projections) memberKeys.push(`projection:${pn}`);
+
+      let minX = Infinity,
+        minY = Infinity,
+        maxX = 0,
+        maxY = 0;
+      for (const k of memberKeys) {
+        const n = nodes.find((nd) => nd.key === k);
+        if (n) {
+          minX = Math.min(minX, n.pos.x);
+          minY = Math.min(minY, n.pos.y);
+          maxX = Math.max(maxX, n.pos.x + NODE_W);
+          maxY = Math.max(maxY, n.pos.y + NODE_H);
+        }
+      }
+      if (minX < Infinity) {
+        boxes.push({
+          label: slice.name,
+          x: minX - 8,
+          y: minY - 18,
+          w: maxX - minX + 16,
+          h: maxY - minY + 26,
+        });
+      }
+    }
+
     let maxW = LABEL_W,
       maxH = 0;
     for (const n of nodes) {
       maxW = Math.max(maxW, n.pos.x + NODE_W);
       maxH = Math.max(maxH, n.pos.y + NODE_H);
     }
-    return { nodes, edges, swimlanes, width: maxW + 40, height: maxH + 40 };
+    return {
+      nodes,
+      edges,
+      swimlanes,
+      boxes,
+      width: maxW + 40,
+      height: maxH + 40,
+    };
   }, [model]);
 
   if (model.states.length === 0 && model.projections.length === 0) {
@@ -389,6 +447,31 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 className="text-[11px] font-medium"
               >
                 {sl.label}
+              </text>
+            </g>
+          ))}
+
+          {/* Slice boxes */}
+          {boxes.map((box) => (
+            <g key={box.label}>
+              <rect
+                x={box.x}
+                y={box.y}
+                width={box.w}
+                height={box.h}
+                rx={6}
+                fill="none"
+                stroke="#52525b"
+                strokeWidth={1}
+                strokeDasharray="6,4"
+              />
+              <text
+                x={box.x + 6}
+                y={box.y + 11}
+                fill="#71717a"
+                className="text-[8px]"
+              >
+                {box.label}
               </text>
             </g>
           ))}

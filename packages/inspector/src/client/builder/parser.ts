@@ -260,6 +260,16 @@ function parseActions(
   return actions;
 }
 
+/** Extract handler function name from .do(async function NAME(...)) or .do(async (event...) => ...) */
+function extractHandlerName(scope: string, eventName: string): string {
+  // Named function: .do(async function name(
+  const namedFn = /\.do\(\s*async\s+function\s+(\w+)/;
+  const m = namedFn.exec(scope);
+  if (m) return m[1];
+  // Fallback: use event name
+  return `on${eventName}`;
+}
+
 /** Extract app.do("ActionName", ...) calls from a reaction handler scope */
 function extractDispatches(scope: string): string[] {
   const dispatches: string[] = [];
@@ -314,6 +324,7 @@ function parseSlices(code: string, states: StateNode[]): SliceNode[] {
       const isVoid = scope.includes(".void()");
       reactions.push({
         event: wm[1],
+        handlerName: extractHandlerName(scope, wm[1]),
         dispatches: extractDispatches(scope),
         isVoid,
         line: lineOf(code, match.index + wm.index),
@@ -379,6 +390,7 @@ function parseReactions(code: string): ReactionNode[] {
       const isVoid = scope.includes(".void()");
       reactions.push({
         event: om[1],
+        handlerName: extractHandlerName(scope, om[1]),
         dispatches: extractDispatches(scope),
         isVoid,
         line: lineOf(code, match.index + om.index),
