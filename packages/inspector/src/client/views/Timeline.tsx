@@ -399,7 +399,7 @@ export function Timeline() {
             {/* Tooltip */}
             {tooltip && !isPanning && (
               <div
-                className="pointer-events-none fixed z-50 max-w-sm rounded-md border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs shadow-xl"
+                className="pointer-events-none fixed z-50 max-w-sm rounded-md border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-[10px] shadow-xl"
                 style={{ left: tooltip.x + 12, top: tooltip.y - 10 }}
               >
                 <div className="mb-1 flex items-center gap-2">
