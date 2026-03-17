@@ -280,12 +280,12 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             dashed: true,
           });
         }
-        // Reaction → Actions
+        // Reaction → Actions (depart from right side)
         for (const actionName of reaction.dispatches) {
           const aPos = actionPositions.get(actionName);
           if (aPos) {
             edges.push({
-              from: { x: rPos.x + NODE_W / 2, y: rPos.y },
+              from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
               to: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
               color: COLORS.reaction.border,
               dashed: true,
