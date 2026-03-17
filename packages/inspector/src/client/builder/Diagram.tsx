@@ -11,9 +11,26 @@ const COLORS = {
 };
 
 const W = 120,
-  H = 30,
+  H = 36,
   GAP = 14,
   PAD = 10;
+
+/** Split PascalCase into wrapped lines */
+function splitLabel(label: string): string[] {
+  const words = label.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+  const lines: string[] = [];
+  let current = "";
+  for (const w of words) {
+    if (current && (current + " " + w).length > 16) {
+      lines.push(current);
+      current = w;
+    } else {
+      current = current ? current + " " + w : w;
+    }
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [label];
+}
 
 type Pos = { x: number; y: number };
 type N = {
@@ -459,20 +476,30 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                   stroke={w ? "#ef4444" : c.border}
                   strokeWidth={w ? 2 : 1.5}
                 />
-                <text
-                  x={n.pos.x + W / 2}
-                  y={n.pos.y + (n.sub ? 11 : H / 2)}
-                  textAnchor="middle"
-                  dominantBaseline={n.sub ? "auto" : "central"}
-                  fill={c.text}
-                  className="text-[9px] font-medium"
-                >
-                  {n.label.length > 14 ? n.label.slice(0, 12) + "..." : n.label}
-                </text>
+                {(() => {
+                  const lines = splitLabel(n.label);
+                  const lineH = 11;
+                  const startY = n.sub
+                    ? n.pos.y + 6
+                    : n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
+                  return lines.map((line, li) => (
+                    <text
+                      key={li}
+                      x={n.pos.x + W / 2}
+                      y={startY + li * lineH}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill={c.text}
+                      className="text-[8px] font-medium"
+                    >
+                      {line}
+                    </text>
+                  ));
+                })()}
                 {n.sub && (
                   <text
                     x={n.pos.x + W / 2}
-                    y={n.pos.y + 23}
+                    y={n.pos.y + H - 5}
                     textAnchor="middle"
                     fill="#a1a1aa"
                     className="text-[7px]"
