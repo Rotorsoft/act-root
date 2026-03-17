@@ -104,9 +104,11 @@ function formatDuration(ms: number): string {
 
 type Props = {
   initialCorrelation?: string;
+  onStream?: (stream: string) => void;
+  onTrace?: (id: string) => void;
 };
 
-export function Correlation({ initialCorrelation }: Props) {
+export function Correlation({ initialCorrelation, onStream }: Props) {
   const [correlationId, setCorrelationId] = useState(initialCorrelation ?? "");
   const [searchInput, setSearchInput] = useState(initialCorrelation ?? "");
   const [viewMode, setViewMode] = useState<"waterfall" | "graph">("waterfall");
@@ -299,9 +301,19 @@ export function Correlation({ initialCorrelation }: Props) {
                         className="h-2 w-2 shrink-0 rounded-full"
                         style={{ backgroundColor: streamColor(s) }}
                       />
-                      <span className="truncate font-mono text-zinc-300">
-                        {s}
-                      </span>
+                      {onStream ? (
+                        <button
+                          onClick={() => onStream(s)}
+                          title="Open in Streams"
+                          className="truncate font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+                        >
+                          {s}
+                        </button>
+                      ) : (
+                        <span className="truncate font-mono text-zinc-300">
+                          {s}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

@@ -1,4 +1,3 @@
-import { GitBranch } from "lucide-react";
 import { useState } from "react";
 import { JsonViewer } from "./JsonViewer.js";
 
@@ -30,6 +29,7 @@ type EventRowProps = {
   compact?: boolean;
   hideStream?: boolean;
   onTrace?: (correlationId: string) => void;
+  onStream?: (stream: string) => void;
 };
 
 /** Deterministic color from event name */
@@ -66,12 +66,37 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
+/** Clickable link styled text */
+function Link({
+  children,
+  title,
+  onClick,
+}: {
+  children: React.ReactNode;
+  title: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      title={title}
+      className="text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 transition hover:text-emerald-300 hover:decoration-emerald-300/50"
+    >
+      {children}
+    </button>
+  );
+}
+
 export function EventRow({
   event,
   defaultExpanded = false,
   compact = false,
   hideStream = false,
   onTrace,
+  onStream,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
@@ -107,10 +132,19 @@ export function EventRow({
           </span>
         </span>
 
-        {/* Stream */}
+        {/* Stream — clickable link */}
         {!hideStream && (
           <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
-            {event.stream}
+            {onStream ? (
+              <Link
+                title="Open in Streams"
+                onClick={() => onStream(event.stream)}
+              >
+                {event.stream}
+              </Link>
+            ) : (
+              event.stream
+            )}
           </span>
         )}
 
@@ -122,35 +156,20 @@ export function EventRow({
           {relativeTime(event.created)}
         </span>
 
-        {/* Trace button */}
-        {onTrace && event.meta?.correlation ? (
-          <span
-            role="button"
-            title="Trace correlation"
-            className="w-4 shrink-0 text-zinc-600 transition hover:text-emerald-400"
-            onClick={(e) => {
-              e.stopPropagation();
-              onTrace(event.meta.correlation!);
-            }}
-          >
-            <GitBranch size={12} />
-          </span>
-        ) : (
-          <span className="w-4 shrink-0" />
-        )}
-
         {/* Expand indicator */}
         <span className="w-4 shrink-0 text-zinc-600">
           {expanded ? "▾" : "▸"}
         </span>
       </button>
 
-      {/* Expanded detail */}
+      {/* Expanded detail — compact */}
       {expanded && compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5 text-xs">
           <JsonViewer data={event.data} />
         </div>
       )}
+
+      {/* Expanded detail — full */}
       {expanded && !compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/80 px-4 py-3">
           <div className="grid grid-cols-2 gap-4">
@@ -199,28 +218,38 @@ export function EventRow({
           <div className="mt-3 flex flex-wrap gap-4 text-[10px] text-zinc-500">
             <span>
               Stream:{" "}
-              <button
-                onClick={() => copyToClipboard(event.stream)}
-                className="text-zinc-300 hover:text-emerald-400"
-              >
-                {event.stream}
-              </button>
+              {onStream ? (
+                <Link
+                  title="Open in Streams"
+                  onClick={() => onStream(event.stream)}
+                >
+                  {event.stream}
+                </Link>
+              ) : (
+                <button
+                  onClick={() => copyToClipboard(event.stream)}
+                  className="text-zinc-300 hover:text-emerald-400"
+                >
+                  {event.stream}
+                </button>
+              )}
             </span>
             {event.meta?.correlation && (
-              <span className="flex items-center gap-1.5">
+              <span>
                 Correlation:{" "}
-                <button
-                  onClick={() => copyToClipboard(event.meta.correlation!)}
-                  className="font-mono text-zinc-300 hover:text-emerald-400"
-                >
-                  {event.meta.correlation}
-                </button>
-                {onTrace && (
-                  <button
+                {onTrace ? (
+                  <Link
+                    title="Trace correlation chain"
                     onClick={() => onTrace(event.meta.correlation!)}
-                    className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-zinc-400 transition hover:border-emerald-700 hover:text-emerald-400"
                   >
-                    Trace
+                    {event.meta.correlation}
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => copyToClipboard(event.meta.correlation!)}
+                    className="font-mono text-zinc-300 hover:text-emerald-400"
+                  >
+                    {event.meta.correlation}
                   </button>
                 )}
               </span>

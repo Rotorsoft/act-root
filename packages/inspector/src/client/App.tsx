@@ -18,6 +18,7 @@ export default function App() {
   const [traceCorrelation, setTraceCorrelation] = useState<
     string | undefined
   >();
+  const [selectedStream, setSelectedStream] = useState<string | undefined>();
 
   const handleConnected = (name: string) => {
     queryClient.clear();
@@ -30,6 +31,11 @@ export default function App() {
   const handleTrace = (correlationId: string) => {
     setTraceCorrelation(correlationId);
     setActiveTab("correlation");
+  };
+
+  const handleStream = (stream: string) => {
+    setSelectedStream(stream);
+    setActiveTab("streams");
   };
 
   return (
@@ -54,19 +60,29 @@ export default function App() {
                 onChange={(tab) => {
                   setActiveTab(tab);
                   if (tab !== "correlation") setTraceCorrelation(undefined);
+                  if (tab !== "streams") setSelectedStream(undefined);
                 }}
               />
               <div key={connectionKey} className="flex min-h-0 flex-1 flex-col">
-                {activeTab === "log" && <EventLog onTrace={handleTrace} />}
-                {activeTab === "timeline" && <Timeline />}
+                {activeTab === "log" && (
+                  <EventLog onTrace={handleTrace} onStream={handleStream} />
+                )}
+                {activeTab === "timeline" && (
+                  <Timeline onTrace={handleTrace} onStream={handleStream} />
+                )}
                 {activeTab === "streams" && (
                   <Streams
-                    onNavigateToLog={() => setActiveTab("log")}
+                    initialStream={selectedStream}
                     onTrace={handleTrace}
+                    onStream={handleStream}
                   />
                 )}
                 {activeTab === "correlation" && (
-                  <Correlation initialCorrelation={traceCorrelation} />
+                  <Correlation
+                    initialCorrelation={traceCorrelation}
+                    onStream={handleStream}
+                    onTrace={handleTrace}
+                  />
                 )}
               </div>
             </>

@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { EventRow } from "../components/EventRow.js";
-import { setFilters } from "../stores/filters.js";
 import { trpc } from "../trpc.js";
 
 type StreamRow = {
@@ -13,16 +12,20 @@ type StreamRow = {
 type SortKey = "stream" | "eventCount" | "currentVersion" | "lastEvent";
 
 export function Streams({
-  onNavigateToLog,
+  initialStream,
   onTrace,
+  onStream,
 }: {
-  onNavigateToLog: () => void;
+  initialStream?: string;
   onTrace?: (id: string) => void;
+  onStream?: (stream: string) => void;
 }) {
   const [filter, setFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("eventCount");
   const [sortAsc, setSortAsc] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(
+    initialStream ?? null
+  );
 
   const streamsQuery = trpc.streams.useQuery(
     { limit: 1000 },
@@ -142,11 +145,8 @@ export function Streams({
         {selected && (
           <StreamDetail
             stream={selected}
-            onOpenInLog={() => {
-              setFilters({ stream: selected });
-              onNavigateToLog();
-            }}
             onTrace={onTrace}
+            onStream={onStream}
             onClose={() => setSelected(null)}
           />
         )}
@@ -157,13 +157,13 @@ export function Streams({
 
 function StreamDetail({
   stream,
-  onOpenInLog,
   onTrace,
+  onStream,
   onClose,
 }: {
   stream: string;
-  onOpenInLog: () => void;
   onTrace?: (id: string) => void;
+  onStream?: (stream: string) => void;
   onClose: () => void;
 }) {
   const eventsQuery = trpc.query.useQuery(
@@ -189,12 +189,6 @@ function StreamDetail({
           </button>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={onOpenInLog}
-            className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 hover:text-emerald-400"
-          >
-            Open in Log
-          </button>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-300"
@@ -227,6 +221,7 @@ function StreamDetail({
                 compact
                 hideStream
                 onTrace={onTrace}
+                onStream={onStream}
               />
             ))}
           </div>

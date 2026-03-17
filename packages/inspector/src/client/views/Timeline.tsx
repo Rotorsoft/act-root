@@ -57,7 +57,12 @@ type TooltipData = {
   event: Event;
 };
 
-export function Timeline() {
+type TimelineProps = {
+  onTrace?: (id: string) => void;
+  onStream?: (stream: string) => void;
+};
+
+export function Timeline({ onTrace, onStream }: TimelineProps) {
   const [filters] = useFilterStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
@@ -455,6 +460,8 @@ export function Timeline() {
           <EventDetailDialog
             event={selectedEvent}
             onClose={() => setSelectedEvent(null)}
+            onTrace={onTrace}
+            onStream={onStream}
           />
         )}
       </div>
@@ -465,10 +472,17 @@ export function Timeline() {
 function EventDetailDialog({
   event,
   onClose,
+  onTrace,
+  onStream,
 }: {
   event: Event;
   onClose: () => void;
+  onTrace?: (id: string) => void;
+  onStream?: (stream: string) => void;
 }) {
+  const meta = event.meta as Record<string, any>;
+  const correlation = meta?.correlation as string | undefined;
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50"
@@ -502,12 +516,44 @@ function EventDetailDialog({
           </button>
         </div>
 
-        {/* Stream + time + actor */}
+        {/* Stream + correlation + time + actor */}
         <div className="mb-3 flex flex-col gap-1 text-xs">
           <div>
             <span className="text-zinc-500">Stream </span>
-            <span className="font-mono text-zinc-300">{event.stream}</span>
+            {onStream ? (
+              <button
+                onClick={() => {
+                  onStream(event.stream);
+                  onClose();
+                }}
+                title="Open in Streams"
+                className="font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+              >
+                {event.stream}
+              </button>
+            ) : (
+              <span className="font-mono text-zinc-300">{event.stream}</span>
+            )}
           </div>
+          {correlation && (
+            <div>
+              <span className="text-zinc-500">Correlation </span>
+              {onTrace ? (
+                <button
+                  onClick={() => {
+                    onTrace(correlation);
+                    onClose();
+                  }}
+                  title="Trace correlation chain"
+                  className="font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+                >
+                  {correlation}
+                </button>
+              ) : (
+                <span className="font-mono text-zinc-300">{correlation}</span>
+              )}
+            </div>
+          )}
           <div>
             <span className="text-zinc-500">Created </span>
             <span className="text-zinc-300">
