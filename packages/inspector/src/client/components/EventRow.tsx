@@ -28,6 +28,7 @@ type EventRowProps = {
   defaultExpanded?: boolean;
   compact?: boolean;
   hideStream?: boolean;
+  onTrace?: (correlationId: string) => void;
 };
 
 /** Deterministic color from event name */
@@ -69,6 +70,7 @@ export function EventRow({
   defaultExpanded = false,
   compact = false,
   hideStream = false,
+  onTrace,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
@@ -187,7 +189,7 @@ export function EventRow({
               </button>
             </span>
             {event.meta?.correlation && (
-              <span>
+              <span className="flex items-center gap-1.5">
                 Correlation:{" "}
                 <button
                   onClick={() => copyToClipboard(event.meta.correlation!)}
@@ -195,6 +197,14 @@ export function EventRow({
                 >
                   {event.meta.correlation}
                 </button>
+                {onTrace && (
+                  <button
+                    onClick={() => onTrace(event.meta.correlation!)}
+                    className="rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 text-zinc-400 transition hover:border-emerald-700 hover:text-emerald-400"
+                  >
+                    Trace
+                  </button>
+                )}
               </span>
             )}
             <span>

@@ -4,6 +4,7 @@ import { ConnectDialog } from "./components/ConnectDialog.js";
 import { Header } from "./components/Header.js";
 import { TabNav, type Tab } from "./components/TabNav.js";
 import { queryClient, trpc, trpcClient } from "./trpc.js";
+import { Correlation } from "./views/Correlation.js";
 import { EventLog } from "./views/EventLog.js";
 import { Streams } from "./views/Streams.js";
 import { Timeline } from "./views/Timeline.js";
@@ -14,6 +15,9 @@ export default function App() {
   const [connectionName, setConnectionName] = useState("");
   const [connectionKey, setConnectionKey] = useState(0);
   const [activeTab, setActiveTab] = useState<Tab>("log");
+  const [traceCorrelation, setTraceCorrelation] = useState<
+    string | undefined
+  >();
 
   const handleConnected = (name: string) => {
     queryClient.clear();
@@ -21,6 +25,11 @@ export default function App() {
     setConnectionName(name);
     setConnectionKey((k) => k + 1);
     setShowConnect(false);
+  };
+
+  const handleTrace = (correlationId: string) => {
+    setTraceCorrelation(correlationId);
+    setActiveTab("correlation");
   };
 
   return (
@@ -40,12 +49,21 @@ export default function App() {
           )}
           {connected && (
             <>
-              <TabNav active={activeTab} onChange={setActiveTab} />
+              <TabNav
+                active={activeTab}
+                onChange={(tab) => {
+                  setActiveTab(tab);
+                  if (tab !== "correlation") setTraceCorrelation(undefined);
+                }}
+              />
               <div key={connectionKey} className="flex min-h-0 flex-1 flex-col">
-                {activeTab === "log" && <EventLog />}
+                {activeTab === "log" && <EventLog onTrace={handleTrace} />}
                 {activeTab === "timeline" && <Timeline />}
                 {activeTab === "streams" && (
                   <Streams onNavigateToLog={() => setActiveTab("log")} />
+                )}
+                {activeTab === "correlation" && (
+                  <Correlation initialCorrelation={traceCorrelation} />
                 )}
               </div>
             </>

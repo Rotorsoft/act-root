@@ -15,7 +15,11 @@ type AnyEvent = {
   meta: Record<string, unknown>;
 };
 
-export function EventLog() {
+export function EventLog({
+  onTrace,
+}: {
+  onTrace?: (correlationId: string) => void;
+}) {
   const [filters] = useFilterStore();
   const scrollRef = useRef<HTMLDivElement>(null);
   const [pages, setPages] = useState<AnyEvent[][]>([]);
@@ -130,7 +134,7 @@ export function EventLog() {
         ) : (
           <>
             {allEvents.map((event) => (
-              <EventRow key={event.id} event={event as any} />
+              <EventRow key={event.id} event={event as any} onTrace={onTrace} />
             ))}
             {eventsQuery.isFetching && (
               <div className="py-4 text-center text-xs text-zinc-600">
