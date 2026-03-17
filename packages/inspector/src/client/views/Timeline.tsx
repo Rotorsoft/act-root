@@ -1,5 +1,5 @@
 import { scaleLinear, scaleTime } from "d3-scale";
-import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import { Database, GitBranch, Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { FilterBar } from "../components/FilterBar.js";
 import { JsonViewer } from "../components/JsonViewer.js";
@@ -518,39 +518,37 @@ function EventDetailDialog({
 
         {/* Stream + correlation + time + actor */}
         <div className="mb-3 flex flex-col gap-1 text-xs">
-          <div>
-            <span className="text-zinc-500">Stream </span>
-            {onStream ? (
+          <div className="flex items-center gap-1">
+            <span className="text-zinc-500">Stream</span>
+            <span className="font-mono text-zinc-300">{event.stream}</span>
+            {onStream && (
               <button
                 onClick={() => {
                   onStream(event.stream);
                   onClose();
                 }}
                 title="Open in Streams"
-                className="font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+                className="text-emerald-400/70 transition hover:text-emerald-300"
               >
-                {event.stream}
+                <Database size={11} />
               </button>
-            ) : (
-              <span className="font-mono text-zinc-300">{event.stream}</span>
             )}
           </div>
           {correlation && (
-            <div>
-              <span className="text-zinc-500">Correlation </span>
-              {onTrace ? (
+            <div className="flex items-center gap-1">
+              <span className="text-zinc-500">Correlation</span>
+              <span className="font-mono text-zinc-300">{correlation}</span>
+              {onTrace && (
                 <button
                   onClick={() => {
                     onTrace(correlation);
                     onClose();
                   }}
-                  title="Trace correlation chain"
-                  className="font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+                  title="Trace correlation"
+                  className="text-emerald-400/70 transition hover:text-emerald-300"
                 >
-                  {correlation}
+                  <GitBranch size={11} />
                 </button>
-              ) : (
-                <span className="font-mono text-zinc-300">{correlation}</span>
               )}
             </div>
           )}

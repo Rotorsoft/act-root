@@ -1,5 +1,5 @@
 import { scaleTime } from "d3-scale";
-import { GitBranch, Network } from "lucide-react";
+import { Database, GitBranch, Network } from "lucide-react";
 import { useMemo, useState } from "react";
 import { JsonViewer } from "../components/JsonViewer.js";
 import { trpc } from "../trpc.js";
@@ -354,12 +354,21 @@ export function Correlation({ initialCorrelation, onStream }: Props) {
                     &times;
                   </button>
                 </div>
-                <div className="mb-2 text-xs">
+                <div className="mb-2 flex flex-col gap-1 text-xs">
                   <div className="font-medium text-zinc-200">
                     {selectedEvent.name}
                   </div>
-                  <div className="font-mono text-zinc-400">
+                  <div className="flex items-center gap-1 font-mono text-zinc-400">
                     {selectedEvent.stream}
+                    {onStream && (
+                      <button
+                        onClick={() => onStream(selectedEvent.stream)}
+                        title="Open in Streams"
+                        className="text-emerald-400/70 transition hover:text-emerald-300"
+                      >
+                        <Database size={11} />
+                      </button>
+                    )}
                   </div>
                   <div className="text-zinc-500">
                     v{selectedEvent.version} &middot;{" "}
