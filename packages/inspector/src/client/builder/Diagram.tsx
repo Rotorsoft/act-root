@@ -38,6 +38,7 @@ type N = {
   sub?: string;
   line?: number;
   projections?: string[];
+  guards?: string[];
 };
 type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 type Box = { label: string; x: number; y: number; w: number; h: number };
@@ -143,6 +144,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               ? `${action.invariants.length} guard(s)`
               : undefined,
           line: action.line,
+          guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
         x += W + GAP;
 
@@ -283,6 +285,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               ? `${action.invariants.length} guard(s)`
               : undefined,
           line: action.line,
+          guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
         x += W + GAP;
         for (const en of action.emits) {
@@ -462,13 +465,14 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 key={n.key}
                 className="cursor-pointer"
                 onClick={() => n.line && onClickLine?.(n.line)}
-                onMouseEnter={(ev) =>
-                  setTip({
-                    x: ev.clientX,
-                    y: ev.clientY,
-                    t: `${n.type}: ${n.label}${n.sub ? ` (${n.sub})` : ""}${n.projections ? `\nProjections: ${n.projections.join(", ")}` : ""}`,
-                  })
-                }
+                onMouseEnter={(ev) => {
+                  const parts = [n.label];
+                  if (n.guards?.length)
+                    parts.push(`Guards: ${n.guards.join(", ")}`);
+                  if (n.projections?.length)
+                    parts.push(`Projections: ${n.projections.join(", ")}`);
+                  setTip({ x: ev.clientX, y: ev.clientY, t: parts.join("\n") });
+                }}
                 onMouseLeave={() => setTip(null)}
               >
                 <rect
@@ -505,32 +509,17 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {n.sub}
                   </text>
                 )}
-                {/* Projection pills below event */}
-                {n.projections &&
-                  n.projections.map((pn, pi) => (
-                    <g key={pi}>
-                      <rect
-                        x={n.pos.x + pi * 60}
-                        y={n.pos.y + H + 2}
-                        width={58}
-                        height={14}
-                        rx={3}
-                        fill={COLORS.projection.bg}
-                        stroke={COLORS.projection.border}
-                        strokeWidth={1}
-                      />
-                      <text
-                        x={n.pos.x + pi * 60 + 29}
-                        y={n.pos.y + H + 10}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fill={COLORS.projection.text}
-                        className="text-[7px]"
-                      >
-                        {pn}
-                      </text>
-                    </g>
-                  ))}
+                {/* Projection marker */}
+                {n.projections && n.projections.length > 0 && (
+                  <circle
+                    cx={n.pos.x + W - 5}
+                    cy={n.pos.y + 5}
+                    r={3}
+                    fill={COLORS.projection.bg}
+                    stroke={COLORS.projection.border}
+                    strokeWidth={1}
+                  />
+                )}
               </g>
             );
           })}
@@ -539,10 +528,30 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
       {tip && (
         <div
-          className="pointer-events-none fixed z-50 max-w-xs whitespace-pre-wrap rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-300 shadow-xl"
-          style={{ left: tip.x + 12, top: tip.y - 10 }}
+          className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 shadow-2xl"
+          style={{ left: tip.x + 14, top: tip.y - 12 }}
         >
-          {tip.t}
+          {tip.t.split("\n").map((line, i) => (
+            <div
+              key={i}
+              className={
+                i === 0
+                  ? "text-[11px] font-medium text-zinc-200"
+                  : "mt-0.5 text-[9px] text-zinc-400"
+              }
+            >
+              {i > 0 && line.includes(":") ? (
+                <>
+                  <span className="text-zinc-500">{line.split(":")[0]}:</span>
+                  <span className="text-zinc-300">
+                    {line.slice(line.indexOf(":") + 1)}
+                  </span>
+                </>
+              ) : (
+                line
+              )}
+            </div>
+          ))}
         </div>
       )}
     </div>
