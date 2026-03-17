@@ -6,158 +6,252 @@ export type Template = {
 
 export const templates: Template[] = [
   {
-    name: "Counter",
-    description: "Simple counter with increment/decrement",
-    code: `import { state } from "@rotorsoft/act";
+    name: "Calculator",
+    description:
+      "Real calculator from packages/calculator — state machine with events, patches, and invariants",
+    code: `import { state, ZodEmpty } from "@rotorsoft/act";
+import type { Patch } from "@rotorsoft/act-patch";
 import { z } from "zod";
 
-const Counter = state({ Counter: z.object({ count: z.number() }) })
-  .init(() => ({ count: 0 }))
-  .emits({
-    Incremented: z.object({ amount: z.number() }),
-    Decremented: z.object({ amount: z.number() }),
-  })
-  .patch({
-    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
-    Decremented: ({ data }, state) => ({ count: state.count - data.amount }),
-  })
-  .on({ Increment: z.object({ by: z.number() }) })
-    .emit((data) => ["Incremented", { amount: data.by }])
-  .on({ Decrement: z.object({ by: z.number() }) })
-    .emit((data) => ["Decremented", { amount: data.by }])
-  .build();
+export const DIGITS = [
+  "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+] as const;
+export const OPERATORS = ["+", "-", "*", "/"] as const;
+export const SYMBOLS = [".", "="] as const;
+export const KEYS = [...DIGITS, ...OPERATORS, ...SYMBOLS] as const;
 
-export { Counter };
-`,
-  },
-  {
-    name: "Todo List",
-    description: "CRUD pattern with invariants",
-    code: `import { state, type Invariant } from "@rotorsoft/act";
-import { z } from "zod";
+export type Digits = (typeof DIGITS)[number];
+export type Operators = (typeof OPERATORS)[number];
+export type Keys = (typeof KEYS)[number];
 
-const mustBeOpen: Invariant<{ status: string }> = {
-  description: "Todo must be open",
-  valid: (state) => state.status === "open",
+const Events = {
+  DigitPressed: z.object({ digit: z.enum(DIGITS) }),
+  OperatorPressed: z.object({ operator: z.enum(OPERATORS) }),
+  DotPressed: ZodEmpty,
+  EqualsPressed: ZodEmpty,
+  Cleared: ZodEmpty,
 };
 
-const Todo = state({ Todo: z.object({
-  title: z.string(),
-  status: z.string(),
-  createdBy: z.string(),
-})})
-  .init(() => ({ title: "", status: "open", createdBy: "" }))
-  .emits({
-    TodoCreated: z.object({ title: z.string(), createdBy: z.string() }),
-    TodoCompleted: z.object({ completedBy: z.string() }),
-    TodoReopened: z.object({ reopenedBy: z.string() }),
-  })
+const Actions = {
+  PressKey: z.object({ key: z.enum(KEYS) }),
+  Clear: ZodEmpty,
+};
+
+const State = z.object({
+  left: z.string().optional(),
+  right: z.string().optional(),
+  operator: z.enum(OPERATORS).optional(),
+  result: z.number(),
+});
+
+const round = (n: number): number => Math.round(n * 100) / 100;
+const Operations = {
+  ["+"]: (l: number, r: number): number => round(l + r),
+  ["-"]: (l: number, r: number): number => round(l - r),
+  ["*"]: (l: number, r: number): number => round(l * r),
+  ["/"]: (l: number, r: number): number => round(l / r),
+};
+
+const append = (
+  { operator, left, right }: Readonly<Patch<z.infer<typeof State>>>,
+  key: Digits | "."
+) =>
+  operator
+    ? { right: (right || "").concat(key) }
+    : { left: (left || "").concat(key) };
+
+const compute = (
+  { operator, left, right }: Readonly<Patch<z.infer<typeof State>>>,
+  new_op?: Operators
+) => {
+  if (operator && left && right) {
+    const result = Operations[operator](
+      Number.parseFloat(left),
+      Number.parseFloat(right)
+    );
+    return {
+      result,
+      left: result.toString(),
+      operator: new_op,
+      right: undefined,
+    };
+  }
+  return new_op === "-" && !left ? { left: "-" } : { operator: new_op };
+};
+
+const Calculator = state({ Calculator: State })
+  .init(() => ({ result: 0 }))
+  .emits(Events)
   .patch({
-    TodoCreated: ({ data }) => ({ title: data.title, status: "open", createdBy: data.createdBy }),
-    TodoCompleted: () => ({ status: "completed" }),
-    TodoReopened: () => ({ status: "open" }),
+    DigitPressed: ({ data }, state) => append(state, data.digit),
+    OperatorPressed: ({ data }, state) => compute(state, data.operator),
+    DotPressed: (_, state) => {
+      const current = state.operator ? state.right || "" : state.left || "";
+      if (current.includes(".")) return {};
+      return append(state, ".");
+    },
+    EqualsPressed: (_, state) => compute(state),
+    Cleared: () => ({
+      result: 0,
+      left: undefined,
+      right: undefined,
+      operator: undefined,
+    }),
   })
-  .on({ CreateTodo: z.object({ title: z.string() }) })
-    .emit((data, _, { actor }) => ["TodoCreated", { title: data.title, createdBy: actor.id }])
-  .on({ CompleteTodo: z.object({}) })
-    .given([mustBeOpen])
-    .emit((_, __, { actor }) => ["TodoCompleted", { completedBy: actor.id }])
-  .on({ ReopenTodo: z.object({}) })
-    .emit((_, __, { actor }) => ["TodoReopened", { reopenedBy: actor.id }])
+  .on({ PressKey: Actions.PressKey })
+  .emit(({ key }, { state }) => {
+    if (key === ".") return ["DotPressed", {}];
+    if (key === "=") {
+      if (!state.operator) throw Error("no operator");
+      return [["EqualsPressed", {}]];
+    }
+    return DIGITS.includes(key as Digits)
+      ? ["DigitPressed", { digit: key as Digits }]
+      : ["OperatorPressed", { operator: key as Operators }];
+  })
+  .on({ Clear: Actions.Clear })
+  .given([
+    {
+      description: "Must be dirty",
+      valid: (state) =>
+        !!state.left || !!state.right || !!state.result || !!state.operator,
+    },
+  ])
+  .emit(() => ["Cleared", {}])
+  .snap((s) => s.patches > 12)
   .build();
 
-export { Todo };
+export { Calculator };
 `,
   },
   {
     name: "Ticket System",
-    description: "Multi-state with slices, reactions, and projections",
-    code: `import { state, slice, projection } from "@rotorsoft/act";
+    description:
+      "Simplified WolfDesk — ticket lifecycle with slices, reactions, projections, and invariants",
+    code: `import { state, slice, projection, type Invariant } from "@rotorsoft/act";
 import { z } from "zod";
 
-// --- States ---
+// --- Invariants ---
 
-const Ticket = state({ Ticket: z.object({
+const mustBeOpen: Invariant<{ status: string }> = {
+  description: "Ticket must be open",
+  valid: (state) => state.status === "open",
+};
+
+// --- Ticket State (creation) ---
+
+const TicketCreation = state({ Ticket: z.object({
   title: z.string(),
+  userId: z.string(),
   status: z.string(),
-  assignee: z.string(),
   priority: z.string(),
 })})
-  .init(() => ({ title: "", status: "open", assignee: "", priority: "medium" }))
+  .init(() => ({ title: "", userId: "", status: "new", priority: "low" }))
   .emits({
-    TicketOpened: z.object({ title: z.string(), priority: z.string() }),
-    TicketAssigned: z.object({ assignee: z.string() }),
-    TicketClosed: z.object({ reason: z.string() }),
-    TicketEscalated: z.object({ to: z.string() }),
+    TicketOpened: z.object({
+      title: z.string(),
+      userId: z.string(),
+      priority: z.string(),
+    }),
+    TicketClosed: z.object({ closedById: z.string() }),
+    TicketResolved: z.object({ resolvedById: z.string() }),
   })
   .patch({
-    TicketOpened: ({ data }) => ({ title: data.title, status: "open", priority: data.priority }),
-    TicketAssigned: ({ data }) => ({ assignee: data.assignee }),
+    TicketOpened: ({ data }) => ({
+      title: data.title,
+      userId: data.userId,
+      status: "open",
+      priority: data.priority,
+    }),
     TicketClosed: () => ({ status: "closed" }),
-    TicketEscalated: ({ data }) => ({ assignee: data.to, priority: "high" }),
+    TicketResolved: () => ({ status: "resolved" }),
   })
   .on({ OpenTicket: z.object({ title: z.string(), priority: z.string() }) })
-    .emit("TicketOpened")
-  .on({ AssignTicket: z.object({ assignee: z.string() }) })
-    .emit("TicketAssigned")
-  .on({ CloseTicket: z.object({ reason: z.string() }) })
-    .given([{ description: "Ticket must be open", valid: (s) => s.status === "open" }])
-    .emit("TicketClosed")
-  .on({ EscalateTicket: z.object({ to: z.string() }) })
-    .emit("TicketEscalated")
+    .emit((data, _, { actor }) => ["TicketOpened", { ...data, userId: actor.id }])
+  .on({ CloseTicket: z.object({}) })
+    .given([mustBeOpen])
+    .emit((_, __, { actor }) => ["TicketClosed", { closedById: actor.id }])
+  .on({ ResolveTicket: z.object({}) })
+    .given([mustBeOpen])
+    .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
   .build();
 
-const AgentStats = state({ AgentStats: z.object({
-  assigned: z.number(),
-  closed: z.number(),
+// --- Ticket State (operations) ---
+
+const TicketOperations = state({ Ticket: z.object({
+  assignedTo: z.string(),
+  escalatedTo: z.string(),
 })})
-  .init(() => ({ assigned: 0, closed: 0 }))
+  .init(() => ({ assignedTo: "", escalatedTo: "" }))
   .emits({
-    AgentAssigned: z.object({ ticketId: z.string() }),
-    AgentResolved: z.object({ ticketId: z.string() }),
+    TicketAssigned: z.object({ agentId: z.string() }),
+    TicketEscalated: z.object({ to: z.string(), reason: z.string() }),
   })
   .patch({
-    AgentAssigned: (_, state) => ({ assigned: state.assigned + 1 }),
-    AgentResolved: (_, state) => ({ closed: state.closed + 1 }),
+    TicketAssigned: ({ data }) => ({ assignedTo: data.agentId }),
+    TicketEscalated: ({ data }) => ({ escalatedTo: data.to }),
   })
-  .on({ TrackAssignment: z.object({ ticketId: z.string() }) })
-    .emit("AgentAssigned")
-  .on({ TrackResolution: z.object({ ticketId: z.string() }) })
-    .emit("AgentResolved")
+  .on({ AssignTicket: z.object({ agentId: z.string() }) })
+    .emit("TicketAssigned")
+  .on({ EscalateTicket: z.object({ to: z.string(), reason: z.string() }) })
+    .emit("TicketEscalated")
   .build();
 
 // --- Projection ---
 
 const TicketProjection = projection("tickets")
-  .on({ TicketOpened: z.object({ title: z.string(), priority: z.string() }) })
+  .on({ TicketOpened: z.object({ title: z.string(), userId: z.string(), priority: z.string() }) })
     .do(async ({ stream, data }) => {
-      console.log("Ticket opened:", stream, data);
+      console.log("Ticket opened:", stream, data.title);
     })
-  .on({ TicketClosed: z.object({ reason: z.string() }) })
-    .do(async ({ stream, data }) => {
-      console.log("Ticket closed:", stream, data);
+  .on({ TicketClosed: z.object({ closedById: z.string() }) })
+    .do(async ({ stream }) => {
+      console.log("Ticket closed:", stream);
     })
   .build();
 
 // --- Slice ---
 
-const TicketSlice = slice()
-  .withState(Ticket)
-  .withState(AgentStats)
+const TicketCreationSlice = slice()
+  .withState(TicketCreation)
+  .withState(TicketOperations)
   .withProjection(TicketProjection)
-  .on("TicketAssigned")
-    .do(async (event, stream, app) => {
-      await app.do("TrackAssignment", { stream: event.data.assignee, actor: { id: "system", name: "System" } }, { ticketId: stream });
+  .on("TicketOpened")
+    .do(async function assign(event, _stream, app) {
+      await app.do(
+        "AssignTicket",
+        { stream: event.stream, actor: { id: "system", name: "assign reaction" } },
+        { agentId: "agent-1" },
+        event
+      );
     })
-    .to((event) => ({ target: event.data.assignee }))
-  .on("TicketClosed")
-    .do(async (event, stream, app) => {
-      await app.do("TrackResolution", { stream: event.meta.causation.action?.actor?.id ?? "", actor: { id: "system", name: "System" } }, { ticketId: stream });
-    })
-    .to((event) => ({ target: event.meta.causation.action?.actor?.id ?? "" }))
+    .to((event) => ({ target: event.stream }))
   .build();
 
-export { Ticket, AgentStats, TicketProjection, TicketSlice };
+export { TicketCreation, TicketOperations, TicketProjection, TicketCreationSlice };
+`,
+  },
+  {
+    name: "Blank",
+    description: "Empty starter template",
+    code: `import { state } from "@rotorsoft/act";
+import { z } from "zod";
+
+// Define your state
+const MyState = state({ MyState: z.object({
+  // add fields here
+})})
+  .init(() => ({
+    // initial values
+  }))
+  .emits({
+    // MyEvent: z.object({ ... }),
+  })
+  .on({ /* MyAction: z.object({ ... }) */ })
+    .emit("MyEvent")
+  .build();
+
+export { MyState };
 `,
   },
 ];
