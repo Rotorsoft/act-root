@@ -15,20 +15,17 @@ const W = 120,
   GAP = 14,
   PAD = 10;
 
-/** Split PascalCase into wrapped lines */
 function splitLabel(label: string): string[] {
   const words = label.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
   const lines: string[] = [];
-  let current = "";
+  let cur = "";
   for (const w of words) {
-    if (current && (current + " " + w).length > 16) {
-      lines.push(current);
-      current = w;
-    } else {
-      current = current ? current + " " + w : w;
-    }
+    if (cur && (cur + " " + w).length > 16) {
+      lines.push(cur);
+      cur = w;
+    } else cur = cur ? cur + " " + w : w;
   }
-  if (current) lines.push(current);
+  if (cur) lines.push(cur);
   return lines.length > 0 ? lines : [label];
 }
 
@@ -40,8 +37,9 @@ type N = {
   label: string;
   sub?: string;
   line?: number;
+  projections?: string[];
 };
-type E = { from: Pos; to: Pos; color: string; dash?: boolean; label?: string };
+type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 type Box = { label: string; x: number; y: number; w: number; h: number };
 
 type Props = {
@@ -54,7 +52,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
     null
   );
-  const warn = new Set(warnings.map((w) => w.element).filter(Boolean));
+  const warnSet = new Set(warnings.map((w) => w.element).filter(Boolean));
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const drag = useRef(false);
@@ -93,15 +91,28 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     const ns: N[] = [];
     const es: E[] = [];
     const boxes: Box[] = [];
-    const aPos = new Map<string, Pos>();
-    const ePos = new Map<string, Pos>();
     const sv = new Map<string, StateNode>();
     for (const s of model.states) sv.set(s.varName, s);
+
+    // Build projection lookup: event name → projection names
+    const eventProjections = new Map<string, string[]>();
+    for (const proj of model.projections) {
+      for (const en of proj.handles) {
+        const list = eventProjections.get(en) ?? [];
+        list.push(proj.name);
+        eventProjections.set(en, list);
+      }
+    }
 
     const sliceEvts = new Map<string, Set<string>>();
     let cx = PAD,
       maxY = 0;
 
+    /**
+     * Pure left-to-right DAG per slice:
+     * For each action row: [Action] → [Event] → [Event] → [Reaction] → [Action'] → [Event'] → ...
+     * Reactions that dispatch to actions DUPLICATE the target action (no backward arrows).
+     */
     for (const slice of model.slices) {
       const sx = cx;
       const parts = slice.stateVars
@@ -115,13 +126,15 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       const eDefs = parts.flatMap((st) => st.events);
       const stateName = parts[0]?.name ?? "";
 
-      // Each action on its own row: [Action] → [Event1] → [Event2]
-      let y = PAD + H + GAP; // leave room for slice title
+      let y = PAD + H + GAP;
       let sliceRightX = cx;
+
+      // Each action → its events on one row
       for (const action of acts) {
-        const ap = { x: cx, y };
+        let x = cx;
+        const ap = { x, y };
         ns.push({
-          key: `a:${action.name}`,
+          key: `a:${action.name}:${slice.name}`,
           pos: ap,
           type: "action",
           label: action.name,
@@ -131,89 +144,126 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               : undefined,
           line: action.line,
         });
-        aPos.set(action.name, ap);
-        let evtX = cx + W + GAP;
+        x += W + GAP;
 
         for (const en of action.emits) {
-          if (!ePos.has(en)) {
-            const ep = { x: evtX, y };
-            ns.push({
-              key: `e:${en}`,
-              pos: ep,
-              type: "event",
-              label: en,
-              line: eDefs.find((e) => e.name === en)?.line,
-            });
-            ePos.set(en, ep);
-            es.push({
-              from: { x: ap.x + W, y: ap.y + H / 2 },
-              to: { x: ep.x, y: ep.y + H / 2 },
-              color: COLORS.action.border,
-            });
-            evtX += W + GAP;
-          }
+          const ep = { x, y };
+          const projs = eventProjections.get(en);
+          ns.push({
+            key: `e:${en}:${slice.name}:${action.name}`,
+            pos: ep,
+            type: "event",
+            label: en,
+            line: eDefs.find((e) => e.name === en)?.line,
+            projections: projs,
+          });
+          es.push({
+            from: { x: ap.x + W, y: ap.y + H / 2 },
+            to: { x: ep.x, y: ep.y + H / 2 },
+            color: COLORS.action.border,
+          });
+          x += W + GAP;
         }
-        sliceRightX = Math.max(sliceRightX, evtX);
+
+        sliceRightX = Math.max(sliceRightX, x);
         y += H + GAP / 2;
       }
 
-      // Reactions after all actions
+      // Reactions — continue the flow to the right
       for (const r of slice.reactions) {
         if (r.isVoid) continue;
-        const reactX =
-          Math.max(
-            sliceRightX,
-            ...ns.filter((n) => n.pos.x >= sx).map((n) => n.pos.x + W)
-          ) + GAP;
-        const ep = ePos.get(r.event);
-        const rp = { x: reactX, y: ep ? ep.y : y };
+
+        // Find which row the triggering event is on
+        const trigNode = ns.find(
+          (n) =>
+            n.type === "event" &&
+            n.label === r.event &&
+            n.key.includes(slice.name)
+        );
+        const rY = trigNode ? trigNode.pos.y : y;
+        const rX = sliceRightX;
+
+        // Reaction box
+        const rp = { x: rX, y: rY };
         ns.push({
-          key: `r:${r.handlerName}`,
+          key: `r:${r.handlerName}:${slice.name}`,
           pos: rp,
           type: "reaction",
           label: r.handlerName,
           line: r.line,
         });
 
-        if (ep)
+        // Event → Reaction arrow
+        if (trigNode) {
           es.push({
-            from: { x: ep.x + W, y: ep.y + H / 2 },
+            from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
             to: { x: rp.x, y: rp.y + H / 2 },
             color: COLORS.reaction.border,
             dash: true,
           });
+        }
 
+        let nextX = rX + W + GAP;
+
+        // Dispatched actions — DUPLICATE as new nodes (forward flow, no backward arrows)
         for (const an of r.dispatches) {
-          const ap2 = aPos.get(an);
-          if (ap2) {
+          const targetAction =
+            acts.find((a) => a.name === an) ??
+            model.states.flatMap((s) => s.actions).find((a) => a.name === an);
+
+          if (targetAction) {
+            const dap = { x: nextX, y: rY };
+            ns.push({
+              key: `a:${an}:dispatched:${r.handlerName}`,
+              pos: dap,
+              type: "action",
+              label: an,
+              line: targetAction.line,
+            });
             es.push({
               from: { x: rp.x + W, y: rp.y + H / 2 },
-              to: { x: ap2.x + W * 0.3, y: ap2.y },
+              to: { x: dap.x, y: dap.y + H / 2 },
               color: COLORS.reaction.border,
               dash: true,
-              label: an,
             });
+            nextX += W + GAP;
+
+            // And its events
+            for (const en of targetAction.emits) {
+              const dep = { x: nextX, y: rY };
+              const projs = eventProjections.get(en);
+              ns.push({
+                key: `e:${en}:dispatched:${r.handlerName}`,
+                pos: dep,
+                type: "event",
+                label: en,
+                projections: projs,
+              });
+              es.push({
+                from: { x: dap.x + W, y: dap.y + H / 2 },
+                to: { x: dep.x, y: dep.y + H / 2 },
+                color: COLORS.action.border,
+              });
+              nextX += W + GAP;
+            }
           }
         }
-        y = Math.max(y, rp.y + H + GAP / 2);
+
+        sliceRightX = Math.max(sliceRightX, nextX);
+        y = Math.max(y, rY + H + GAP / 2);
       }
 
       maxY = Math.max(maxY, y);
 
-      // Slice boundary box
-      let bx2 = cx;
-      for (const n of ns) {
-        if (n.pos.x >= sx && n.pos.x + W > bx2) bx2 = n.pos.x + W;
-      }
+      // Slice boundary
       boxes.push({
         label: `${slice.name.replace(/Slice$/i, "")} (${stateName})`,
         x: sx - 4,
         y: PAD - 4,
-        w: bx2 - sx + 8,
+        w: sliceRightX - sx + 4,
         h: maxY - PAD + 8,
       });
-
-      cx = bx2 + GAP * 2;
+      cx = sliceRightX + GAP * 2;
     }
 
     // Standalone states
@@ -221,9 +271,10 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     for (const st of model.states.filter((s) => !claimed.has(s.varName))) {
       let y = PAD;
       for (const action of st.actions) {
-        const ap = { x: cx, y };
+        let x = cx;
+        const ap = { x, y };
         ns.push({
-          key: `a:${action.name}`,
+          key: `a:${action.name}:standalone`,
           pos: ap,
           type: "action",
           label: action.name,
@@ -233,57 +284,30 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               : undefined,
           line: action.line,
         });
-        aPos.set(action.name, ap);
-        let endX = cx + W + GAP;
+        x += W + GAP;
         for (const en of action.emits) {
-          if (!ePos.has(en)) {
-            const ep = { x: endX, y };
-            ns.push({
-              key: `e:${en}`,
-              pos: ep,
-              type: "event",
-              label: en,
-              line: st.events.find((e) => e.name === en)?.line,
-            });
-            ePos.set(en, ep);
-            es.push({
-              from: { x: ap.x + W, y: ap.y + H / 2 },
-              to: { x: ep.x, y: ep.y + H / 2 },
-              color: COLORS.action.border,
-            });
-            endX += W + GAP;
-          }
+          const ep = { x, y };
+          const projs = eventProjections.get(en);
+          ns.push({
+            key: `e:${en}:standalone`,
+            pos: ep,
+            type: "event",
+            label: en,
+            line: st.events.find((e) => e.name === en)?.line,
+            projections: projs,
+          });
+          es.push({
+            from: { x: ap.x + W, y: ap.y + H / 2 },
+            to: { x: ep.x, y: ep.y + H / 2 },
+            color: COLORS.action.border,
+          });
+          x += W + GAP;
         }
-        cx = Math.max(cx, endX);
+        cx = Math.max(cx, x);
         y += H + GAP / 2;
       }
       maxY = Math.max(maxY, y);
-      cx += GAP * 2;
-    }
-
-    // Projections — one node per projection, connect to all handled events
-    const py = maxY + GAP * 2;
-    let px = PAD;
-    for (const proj of model.projections) {
-      const pp = { x: px, y: py };
-      ns.push({
-        key: `p:${proj.name}`,
-        pos: pp,
-        type: "projection",
-        label: proj.name,
-        line: proj.line,
-      });
-      for (const en of proj.handles) {
-        const ep2 = ePos.get(en);
-        if (ep2)
-          es.push({
-            from: { x: ep2.x + W / 2, y: ep2.y + H },
-            to: { x: pp.x + W / 2, y: pp.y },
-            color: COLORS.projection.border,
-            dash: true,
-          });
-      }
-      px += W + GAP;
+      cx += GAP;
     }
 
     let mw = 0,
@@ -396,44 +420,19 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             </g>
           ))}
 
-          {/* Edges */}
-          {es.map((e, i) => {
-            const dx = e.to.x - e.from.x;
-            const dy = e.to.y - e.from.y;
-            const straight = Math.abs(dy) < 5 && dx > 0;
-            const back = dx < -20;
-            let d: string;
-            if (straight) d = `M ${e.from.x} ${e.from.y} L ${e.to.x} ${e.to.y}`;
-            else if (back) {
-              const my = Math.min(e.from.y, e.to.y) - 25;
-              d = `M ${e.from.x} ${e.from.y} C ${e.from.x + 30} ${my}, ${e.to.x - 30} ${my}, ${e.to.x} ${e.to.y}`;
-            } else
-              d = `M ${e.from.x} ${e.from.y} C ${e.from.x + dx * 0.4} ${e.from.y}, ${e.to.x - dx * 0.4} ${e.to.y}, ${e.to.x} ${e.to.y}`;
-            return (
-              <g key={i}>
-                <path
-                  d={d}
-                  fill="none"
-                  stroke={e.color}
-                  strokeWidth={1.5}
-                  strokeDasharray={e.dash ? "4,3" : undefined}
-                  opacity={0.7}
-                  markerEnd="url(#arr)"
-                />
-                {e.label && (
-                  <text
-                    x={(e.from.x + e.to.x) / 2}
-                    y={Math.min(e.from.y, e.to.y) - 6}
-                    textAnchor="middle"
-                    fill="#a1a1aa"
-                    className="text-[7px]"
-                  >
-                    {e.label}
-                  </text>
-                )}
-              </g>
-            );
-          })}
+          {/* Edges — all forward, no labels */}
+          {es.map((e, i) => (
+            <path
+              key={i}
+              d={`M ${e.from.x} ${e.from.y} L ${e.to.x} ${e.to.y}`}
+              fill="none"
+              stroke={e.color}
+              strokeWidth={1.5}
+              strokeDasharray={e.dash ? "4,3" : undefined}
+              opacity={0.7}
+              markerEnd="url(#arr)"
+            />
+          ))}
           <defs>
             <marker
               id="arr"
@@ -451,7 +450,13 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           {/* Nodes */}
           {ns.map((n) => {
             const c = COLORS[n.type];
-            const w = warn.has(n.label);
+            const hasWarn = warnSet.has(n.label);
+            const lines = splitLabel(n.label);
+            const lineH = 11;
+            const startY = n.sub
+              ? n.pos.y + 4
+              : n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
+
             return (
               <g
                 key={n.key}
@@ -461,7 +466,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                   setTip({
                     x: ev.clientX,
                     y: ev.clientY,
-                    t: `${n.type}: ${n.label}${n.sub ? ` (${n.sub})` : ""}`,
+                    t: `${n.type}: ${n.label}${n.sub ? ` (${n.sub})` : ""}${n.projections ? `\nProjections: ${n.projections.join(", ")}` : ""}`,
                   })
                 }
                 onMouseLeave={() => setTip(null)}
@@ -473,39 +478,43 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                   height={H}
                   rx={4}
                   fill={c.bg}
-                  stroke={w ? "#ef4444" : c.border}
-                  strokeWidth={w ? 2 : 1.5}
+                  stroke={hasWarn ? "#ef4444" : c.border}
+                  strokeWidth={hasWarn ? 2 : 1.5}
                 />
-                {(() => {
-                  const lines = splitLabel(n.label);
-                  const lineH = 11;
-                  const startY = n.sub
-                    ? n.pos.y + 6
-                    : n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
-                  return lines.map((line, li) => (
-                    <text
-                      key={li}
-                      x={n.pos.x + W / 2}
-                      y={startY + li * lineH}
-                      textAnchor="middle"
-                      dominantBaseline="central"
-                      fill={c.text}
-                      className="text-[8px] font-medium"
-                    >
-                      {line}
-                    </text>
-                  ));
-                })()}
+                {lines.map((line, li) => (
+                  <text
+                    key={li}
+                    x={n.pos.x + W / 2}
+                    y={startY + li * lineH}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fill={c.text}
+                    className="text-[8px] font-medium"
+                  >
+                    {line}
+                  </text>
+                ))}
                 {n.sub && (
                   <text
                     x={n.pos.x + W / 2}
-                    y={n.pos.y + H - 5}
+                    y={n.pos.y + H - 4}
                     textAnchor="middle"
                     fill="#a1a1aa"
                     className="text-[7px]"
                   >
                     {n.sub}
                   </text>
+                )}
+                {/* Projection indicator — small green dot */}
+                {n.projections && n.projections.length > 0 && (
+                  <circle
+                    cx={n.pos.x + W - 6}
+                    cy={n.pos.y + 6}
+                    r={4}
+                    fill={COLORS.projection.bg}
+                    stroke={COLORS.projection.border}
+                    strokeWidth={1}
+                  />
                 )}
               </g>
             );
@@ -515,7 +524,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
       {tip && (
         <div
-          className="pointer-events-none fixed z-50 rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-300 shadow-xl"
+          className="pointer-events-none fixed z-50 max-w-xs whitespace-pre-wrap rounded-md border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] text-zinc-300 shadow-xl"
           style={{ left: tip.x + 12, top: tip.y - 10 }}
         >
           {tip.t}
