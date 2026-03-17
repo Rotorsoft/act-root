@@ -127,8 +127,8 @@ export { Calculator };
   {
     name: "Ticket System",
     description:
-      "Simplified WolfDesk — ticket lifecycle with slices, reactions, projections, and invariants",
-    code: `import { state, slice, projection, type Invariant } from "@rotorsoft/act";
+      "WolfDesk pattern — two slices, projection, reactions, invariants, and act() orchestrator",
+    code: `import { act, state, slice, projection, type Invariant } from "@rotorsoft/act";
 import { z } from "zod";
 
 // --- Invariants ---
@@ -138,7 +138,9 @@ const mustBeOpen: Invariant<{ status: string }> = {
   valid: (state) => state.status === "open",
 };
 
-// --- Ticket State (creation) ---
+// ============================================================
+// Ticket Creation (partial state + slice)
+// ============================================================
 
 const TicketCreation = state({ Ticket: z.object({
   title: z.string(),
@@ -148,21 +150,12 @@ const TicketCreation = state({ Ticket: z.object({
 })})
   .init(() => ({ title: "", userId: "", status: "new", priority: "low" }))
   .emits({
-    TicketOpened: z.object({
-      title: z.string(),
-      userId: z.string(),
-      priority: z.string(),
-    }),
+    TicketOpened: z.object({ title: z.string(), userId: z.string(), priority: z.string() }),
     TicketClosed: z.object({ closedById: z.string() }),
     TicketResolved: z.object({ resolvedById: z.string() }),
   })
   .patch({
-    TicketOpened: ({ data }) => ({
-      title: data.title,
-      userId: data.userId,
-      status: "open",
-      priority: data.priority,
-    }),
+    TicketOpened: ({ data }) => ({ title: data.title, userId: data.userId, status: "open", priority: data.priority }),
     TicketClosed: () => ({ status: "closed" }),
     TicketResolved: () => ({ status: "resolved" }),
   })
@@ -176,7 +169,18 @@ const TicketCreation = state({ Ticket: z.object({
     .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
   .build();
 
-// --- Ticket State (operations) ---
+const TicketCreationSlice = slice()
+  .withState(TicketCreation)
+  .on("TicketOpened")
+    .do(async function assign(event, _stream, app) {
+      await app.do("AssignTicket", { stream: event.stream, actor: { id: "system", name: "System" } }, { agentId: "agent-1" }, event);
+    })
+    .to((event) => ({ target: event.stream }))
+  .build();
+
+// ============================================================
+// Ticket Operations (partial state + slice)
+// ============================================================
 
 const TicketOperations = state({ Ticket: z.object({
   assignedTo: z.string(),
@@ -197,7 +201,18 @@ const TicketOperations = state({ Ticket: z.object({
     .emit("TicketEscalated")
   .build();
 
-// --- Projection ---
+const TicketOperationsSlice = slice()
+  .withState(TicketOperations)
+  .on("TicketEscalated")
+    .do(async function notify(event, _stream, app) {
+      console.log("Escalation notification:", event.data.to, event.data.reason);
+    })
+    .void()
+  .build();
+
+// ============================================================
+// Projection (read model)
+// ============================================================
 
 const TicketProjection = projection("tickets")
   .on({ TicketOpened: z.object({ title: z.string(), userId: z.string(), priority: z.string() }) })
@@ -208,27 +223,23 @@ const TicketProjection = projection("tickets")
     .do(async ({ stream }) => {
       console.log("Ticket closed:", stream);
     })
-  .build();
-
-// --- Slice ---
-
-const TicketCreationSlice = slice()
-  .withState(TicketCreation)
-  .withState(TicketOperations)
-  .withProjection(TicketProjection)
-  .on("TicketOpened")
-    .do(async function assign(event, _stream, app) {
-      await app.do(
-        "AssignTicket",
-        { stream: event.stream, actor: { id: "system", name: "assign reaction" } },
-        { agentId: "agent-1" },
-        event
-      );
+  .on({ TicketAssigned: z.object({ agentId: z.string() }) })
+    .do(async ({ stream, data }) => {
+      console.log("Ticket assigned:", stream, data.agentId);
     })
-    .to((event) => ({ target: event.stream }))
   .build();
 
-export { TicketCreation, TicketOperations, TicketProjection, TicketCreationSlice };
+// ============================================================
+// Act Orchestrator — wires everything together
+// ============================================================
+
+const app = act()
+  .withSlice(TicketCreationSlice)
+  .withSlice(TicketOperationsSlice)
+  .withProjection(TicketProjection)
+  .build();
+
+export { app, TicketCreation, TicketOperations, TicketProjection };
 `,
   },
   {
