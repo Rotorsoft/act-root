@@ -23,7 +23,7 @@ const NODE_W = 130;
 const NODE_H = 28;
 const STACK_OFFSET = 6; // vertical offset for stacked events
 const H_GAP = 24;
-const SWIMLANE_H = 100;
+const MIN_SWIMLANE_H = 100;
 const LABEL_W = 110;
 const CMD_Y = 8;
 const EVT_Y = 44;
@@ -44,7 +44,7 @@ type Edge = {
   dashed?: boolean;
   label?: string;
 };
-type Swimlane = { label: string; y: number; line?: number };
+type Swimlane = { label: string; y: number; h: number; line?: number };
 
 type Props = {
   model: DomainModel;
@@ -128,8 +128,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     let swimlaneY = 0;
 
     for (const state of [...stateByName.values()]) {
-      swimlanes.push({ label: state.name, y: swimlaneY, line: state.line });
-
       // Group events by which action emits them
       const actionEventGroups = new Map<string, string[]>();
       const ungroupedEvents = new Set(state.events.map((e) => e.name));
@@ -138,6 +136,23 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         actionEventGroups.set(action.name, [...action.emits]);
         for (const en of action.emits) ungroupedEvents.delete(en);
       }
+
+      // Compute swimlane height based on max stacked events
+      let maxStack = 1;
+      for (const eventNames of actionEventGroups.values()) {
+        maxStack = Math.max(maxStack, eventNames.length);
+      }
+      const swimlaneH = Math.max(
+        MIN_SWIMLANE_H,
+        EVT_Y + maxStack * (NODE_H + STACK_OFFSET) + 12
+      );
+
+      swimlanes.push({
+        label: state.name,
+        y: swimlaneY,
+        h: swimlaneH,
+        line: state.line,
+      });
 
       // Layout vertical slices: each action + its events as a column
       let sliceX = LABEL_W + H_GAP;
@@ -208,7 +223,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         }
       }
 
-      swimlaneY += SWIMLANE_H;
+      swimlaneY += swimlaneH;
     }
 
     // Reactions — draw as curved arrows from Event → dispatched Action
@@ -353,22 +368,22 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                   x={0}
                   y={sl.y}
                   width={svgW}
-                  height={SWIMLANE_H}
+                  height={sl.h}
                   fill="#18181b"
                   opacity={0.4}
                 />
               )}
               <line
                 x1={0}
-                y1={sl.y + SWIMLANE_H}
+                y1={sl.y + sl.h}
                 x2={svgW}
-                y2={sl.y + SWIMLANE_H}
+                y2={sl.y + sl.h}
                 stroke="#27272a"
                 strokeWidth={1}
               />
               <text
                 x={8}
-                y={sl.y + SWIMLANE_H / 2}
+                y={sl.y + sl.h / 2}
                 dominantBaseline="middle"
                 fill={COLORS.state.text}
                 className="text-[11px] font-medium"
