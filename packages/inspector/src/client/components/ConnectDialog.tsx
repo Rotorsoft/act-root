@@ -37,7 +37,13 @@ function loadSaved(): Connection[] {
 }
 
 function saveConnections(conns: Connection[]) {
-  localStorage.setItem("inspector:connections", JSON.stringify(conns));
+  // Strip passwords before persisting — user re-enters on connect
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const safe = conns.map(({ password: _pw, ...rest }) => ({
+    ...rest,
+    password: "",
+  }));
+  localStorage.setItem("inspector:connections", JSON.stringify(safe));
 }
 
 type Props = {
