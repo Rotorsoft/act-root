@@ -206,47 +206,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         }
       }
 
-      // Reactions in this slice — same Y as the event they react to
-      for (const reaction of slice.reactions) {
-        if (reaction.isVoid) continue;
-        const triggerPos = eventPositions.get(reaction.event);
-        const rPos = {
-          x: cursorX,
-          y: triggerPos
-            ? triggerPos.y
-            : (swimlaneYMap.get(stateNames[0]) ?? 0) + EVT_Y,
-        };
-        nodes.push({
-          key: `reaction:${reaction.handlerName}`,
-          pos: rPos,
-          type: "reaction",
-          label: reaction.handlerName,
-          line: reaction.line,
-        });
-
-        // Event → Reaction
-        if (triggerPos) {
-          edges.push({
-            from: { x: triggerPos.x + NODE_W, y: triggerPos.y + NODE_H / 2 },
-            to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
-            color: COLORS.reaction.border,
-            dashed: true,
-          });
-        }
-        // Reaction → Actions
-        for (const actionName of reaction.dispatches) {
-          const aPos = actionPositions.get(actionName);
-          if (aPos) {
-            edges.push({
-              from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
-              color: COLORS.reaction.border,
-              dashed: true,
-            });
-          }
-        }
-        cursorX += NODE_W + H_GAP;
-      }
+      // Track slice reactions for placement later in the Reactions swimlane
+      // (don't place them here — they go in the dedicated row)
 
       const sliceEndX = cursorX;
       const sliceLabel = slice.name.replace(/Slice$/i, "");
@@ -284,39 +245,59 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
     }
 
-    // 3. Inline reactions from act() — same Y as triggering event
-    for (const reaction of model.reactions) {
-      if (reaction.isVoid) continue;
-      const trigEPos = eventPositions.get(reaction.event);
-      const rPos = { x: cursorX, y: trigEPos ? trigEPos.y : swimlaneY + EVT_Y };
-      nodes.push({
-        key: `reaction:${reaction.handlerName}`,
-        pos: rPos,
-        type: "reaction",
-        label: reaction.handlerName,
-        line: reaction.line,
+    // 3. Reactions — dedicated swimlane below aggregates
+    const allReactions = [
+      ...model.slices.flatMap((s) => s.reactions),
+      ...model.reactions,
+    ].filter((r) => !r.isVoid);
+
+    if (allReactions.length > 0) {
+      const reactRowY = swimlaneY;
+      swimlanes.push({
+        label: "Reactions",
+        y: reactRowY,
+        h: NODE_H + 24,
+        line: undefined,
       });
-      if (trigEPos)
-        edges.push({
-          from: { x: trigEPos.x + NODE_W, y: trigEPos.y + NODE_H / 2 },
-          to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
-          color: COLORS.reaction.border,
-          dashed: true,
+      let reactX = LABEL_W + H_GAP;
+      for (const reaction of allReactions) {
+        const rPos = { x: reactX, y: reactRowY + 12 };
+        nodes.push({
+          key: `reaction:${reaction.handlerName}`,
+          pos: rPos,
+          type: "reaction",
+          label: reaction.handlerName,
+          line: reaction.line,
         });
-      for (const an of reaction.dispatches) {
-        const aPos = actionPositions.get(an);
-        if (aPos)
+
+        // Event → Reaction
+        const triggerPos = eventPositions.get(reaction.event);
+        if (triggerPos) {
           edges.push({
-            from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-            to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+            from: { x: triggerPos.x + NODE_W / 2, y: triggerPos.y + NODE_H },
+            to: { x: rPos.x + NODE_W / 2, y: rPos.y },
             color: COLORS.reaction.border,
             dashed: true,
           });
+        }
+        // Reaction → Actions
+        for (const actionName of reaction.dispatches) {
+          const aPos = actionPositions.get(actionName);
+          if (aPos) {
+            edges.push({
+              from: { x: rPos.x + NODE_W / 2, y: rPos.y },
+              to: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+              color: COLORS.reaction.border,
+              dashed: true,
+            });
+          }
+        }
+        reactX += NODE_W + H_GAP;
       }
-      cursorX += NODE_W + H_GAP;
+      swimlaneY = reactRowY + NODE_H + 24;
     }
 
-    // 4. Projections — own row below aggregate swimlanes (green, read models)
+    // 4. Projections — dedicated swimlane below reactions
     const projRowY = swimlaneY;
     if (model.projections.length > 0) {
       swimlanes.push({
