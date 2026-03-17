@@ -42,17 +42,22 @@ Fill in the connection fields directly:
 
 ## Features
 
+### Views (tab navigation: Log | Timeline | Streams)
+
+- **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels
+- **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips, density heatmap mode for large datasets (>500 events)
+- **Stream Inspector** — sortable/filterable stream list with health badges (healthy/blocked/leased/retry), click to open detail panel with:
+  - Processing metadata from the `_streams` table (watermark, retry, blocked, lease info)
+  - Full event history for the stream
+  - State evolution diffs between consecutive events
+  - "Open in Log" quick action
+
+### Core
+
 - **Auto-Discovery** — scan a host for PG servers and Act stores across ports and schemas
 - **Connection Manager** — save/switch between multiple named connections
-- **Event Log Explorer** — reverse-chronological event list with filters:
-  - Stream name (regex)
-  - Event type (multi-select pills)
-  - Time range (presets: 5m, 15m, 1h, 24h, 7d)
-  - Correlation ID
 - **Snapshot visibility** — `__snapshot__` events included in all queries
-- **Event Detail** — expandable rows with syntax-highlighted, collapsible JSON for `data` and `meta`
 - **Stats Bar** — total events, unique streams, event types, time span
-- **Infinite Scroll** — cursor-based pagination, accumulates pages as you scroll
 - **URL-Synced Filters** — shareable filtered views via URL parameters
 - **Dark Theme** — JetBrains Mono font, zinc/emerald color palette
 
@@ -63,18 +68,18 @@ packages/inspector/
 ├── src/
 │   ├── server/
 │   │   ├── server.ts    # Express + tRPC standalone server
-│   │   └── router.ts    # tRPC procedures (discover, connect, query, stats, eventNames, streams)
+│   │   └── router.ts    # tRPC procedures (discover, connect, query, stats, eventNames, streams, streamMeta)
 │   └── client/
 │       ├── App.tsx
 │       ├── trpc.ts
 │       ├── stores/      # URL-synced filter state
-│       ├── components/  # Header, ConnectDialog, ScanDialog, FilterBar, StatsBar, EventRow, JsonViewer, Logo
-│       └── views/       # EventLog
+│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, FilterBar, StatsBar, EventRow, JsonViewer, Logo
+│       └── views/       # EventLog, Timeline, Streams
 ├── index.html
 ├── vite.config.ts
 └── tsconfig.json
 ```
 
-- **Server**: manages its own `PostgresStore` instance directly (not the Act singleton) — enables reconnecting to different stores
-- **Client**: React 19 + Vite + Tailwind CSS v4 + tRPC React Query
+- **Server**: manages its own `PostgresStore` instance directly (not the Act singleton) — enables reconnecting to different stores. Event data via Act's `Store.query()`, stream processing metadata via direct PG access to the `_streams` table.
+- **Client**: React 19 + Vite + Tailwind CSS v4 + tRPC React Query + D3 scales for timeline
 - **Read-only**: no mutations, no replays — pure inspection
