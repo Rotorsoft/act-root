@@ -316,9 +316,18 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       cursorX += NODE_W + H_GAP;
     }
 
-    // 4. Projections
+    // 4. Projections — own row below aggregate swimlanes (green, read models)
+    const projRowY = swimlaneY;
+    if (model.projections.length > 0) {
+      swimlanes.push({
+        label: "Views",
+        y: projRowY,
+        h: NODE_H + 24,
+        line: undefined,
+      });
+    }
     let projX = LABEL_W + H_GAP;
-    const projY = swimlaneY + 10;
+    const projY = projRowY + 12;
     for (const proj of model.projections) {
       const pPos = { x: projX, y: projY };
       nodes.push({
