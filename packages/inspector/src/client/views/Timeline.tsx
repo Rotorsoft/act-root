@@ -2,6 +2,7 @@ import { scaleLinear, scaleTime } from "d3-scale";
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { FilterBar } from "../components/FilterBar.js";
+import { JsonViewer } from "../components/JsonViewer.js";
 import { StatsBar } from "../components/StatsBar.js";
 import { useFilterStore } from "../stores/filters.js";
 import { trpc } from "../trpc.js";
@@ -421,22 +422,11 @@ export function Timeline() {
                 <div className="mb-1.5 text-zinc-500">
                   {new Date(tooltip.event.created).toLocaleString()}
                 </div>
-                {tooltip.event.data &&
-                  typeof tooltip.event.data === "object" && (
-                    <div className="border-t border-zinc-800 pt-1.5 font-mono text-[10px] leading-relaxed text-zinc-400">
-                      {Object.entries(
-                        tooltip.event.data as Record<string, unknown>
-                      ).map(([k, v]) => (
-                        <div key={k}>
-                          <span className="text-sky-400">{k}</span>
-                          <span className="text-zinc-600">: </span>
-                          <span className="text-zinc-300">
-                            {JSON.stringify(v)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                {tooltip.event.data != null && (
+                  <div className="border-t border-zinc-800 pt-1.5">
+                    <JsonViewer data={tooltip.event.data} />
+                  </div>
+                )}
               </div>
             )}
           </div>
