@@ -1,10 +1,18 @@
 /** Domain model extracted from Act builder code */
 
+export type ActNode = {
+  slices: string[]; // slice variable names
+  projections: string[]; // projection variable names
+  states: string[]; // standalone state variable names
+  line?: number;
+};
+
 export type DomainModel = {
   states: StateNode[];
   slices: SliceNode[];
   projections: ProjectionNode[];
   reactions: ReactionNode[];
+  orchestrator?: ActNode;
 };
 
 export type StateNode = {
@@ -59,5 +67,11 @@ export type ValidationWarning = {
 };
 
 export function emptyModel(): DomainModel {
-  return { states: [], slices: [], projections: [], reactions: [] };
+  return {
+    states: [],
+    slices: [],
+    projections: [],
+    reactions: [],
+    orchestrator: undefined,
+  };
 }

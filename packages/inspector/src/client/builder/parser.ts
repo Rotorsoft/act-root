@@ -4,6 +4,7 @@
  */
 
 import type {
+  ActNode,
   DomainModel,
   EventNode,
   ProjectionNode,
@@ -18,7 +19,8 @@ export function parseActCode(code: string): DomainModel {
   const slices = parseSlices(code, states);
   const projections = parseProjections(code);
   const reactions = parseReactions(code);
-  return { states, slices, projections, reactions };
+  const orchestrator = parseOrchestrator(code);
+  return { states, slices, projections, reactions, orchestrator };
 }
 
 function lineOf(code: string, index: number): number {
@@ -417,4 +419,29 @@ function parseReactions(code: string): ReactionNode[] {
   }
 
   return reactions;
+}
+
+/** Extract act() orchestrator */
+function parseOrchestrator(code: string): ActNode | undefined {
+  const actRe = /act\(\)/g;
+  const match = actRe.exec(code);
+  if (!match) return undefined;
+
+  const chain = findChain(code, match.index);
+  const line = lineOf(code, match.index);
+
+  const slices: string[] = [];
+  const wsRe = /\.withSlice\(\s*(\w+)\s*\)/g;
+  let m: RegExpExecArray | null;
+  while ((m = wsRe.exec(chain)) !== null) slices.push(m[1]);
+
+  const projections: string[] = [];
+  const wpRe = /\.withProjection\(\s*(\w+)\s*\)/g;
+  while ((m = wpRe.exec(chain)) !== null) projections.push(m[1]);
+
+  const states: string[] = [];
+  const wstRe = /\.withState\(\s*(\w+)\s*\)/g;
+  while ((m = wstRe.exec(chain)) !== null) states.push(m[1]);
+
+  return { slices, projections, states, line };
 }
