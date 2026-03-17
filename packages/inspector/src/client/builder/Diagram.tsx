@@ -505,17 +505,32 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {n.sub}
                   </text>
                 )}
-                {/* Projection indicator — small green dot */}
-                {n.projections && n.projections.length > 0 && (
-                  <circle
-                    cx={n.pos.x + W - 6}
-                    cy={n.pos.y + 6}
-                    r={4}
-                    fill={COLORS.projection.bg}
-                    stroke={COLORS.projection.border}
-                    strokeWidth={1}
-                  />
-                )}
+                {/* Projection pills below event */}
+                {n.projections &&
+                  n.projections.map((pn, pi) => (
+                    <g key={pi}>
+                      <rect
+                        x={n.pos.x + pi * 60}
+                        y={n.pos.y + H + 2}
+                        width={58}
+                        height={14}
+                        rx={3}
+                        fill={COLORS.projection.bg}
+                        stroke={COLORS.projection.border}
+                        strokeWidth={1}
+                      />
+                      <text
+                        x={n.pos.x + pi * 60 + 29}
+                        y={n.pos.y + H + 10}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fill={COLORS.projection.text}
+                        className="text-[7px]"
+                      >
+                        {pn}
+                      </text>
+                    </g>
+                  ))}
               </g>
             );
           })}
