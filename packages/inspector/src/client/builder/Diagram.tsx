@@ -391,27 +391,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         <span className="text-[9px] text-zinc-600">
           {Math.round(zoom * 100)}%
         </span>
-        <div className="ml-3 flex items-center gap-2.5 text-[8px] text-zinc-500">
-          {(["action", "event", "reaction", "projection"] as const).map((t) => (
-            <span key={t} className="flex items-center gap-1">
-              <span
-                className="inline-block h-2.5 w-2.5 rounded"
-                style={{
-                  background: COLORS[t].bg,
-                  border: `1px solid ${COLORS[t].border}`,
-                }}
-              />
-              {
-                {
-                  action: "Action",
-                  event: "Event",
-                  reaction: "Reaction",
-                  projection: "Projection",
-                }[t]
-              }
-            </span>
-          ))}
-        </div>
       </div>
 
       <div
@@ -529,61 +508,68 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {line}
                   </text>
                 ))}
-                {/* Top-right icons */}
-                {n.guards && n.guards.length > 0 && (
-                  <g
-                    transform={`translate(${n.pos.x + W - 12},${n.pos.y + 2})`}
-                  >
-                    <path
-                      d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
-                      fill="none"
-                      stroke="#ef4444"
-                      strokeWidth="1.2"
-                    />
-                  </g>
-                )}
-                {n.reactions && n.reactions.length > 0 && (
-                  <g
-                    transform={`translate(${n.pos.x + W - 11},${n.pos.y + 2})`}
-                  >
-                    <path
-                      d="M6 0L2 5h3L4 10L8 5H5L6 0z"
-                      fill={COLORS.reaction.text}
-                    />
-                  </g>
-                )}
-                {n.projections && n.projections.length > 0 && (
-                  <g
-                    transform={`translate(${n.pos.x + W - 13},${n.pos.y + 2})`}
-                  >
-                    <rect
-                      x="1"
-                      y="1"
-                      width="8"
-                      height="6"
-                      rx="1"
-                      fill="none"
-                      stroke={COLORS.projection.text}
-                      strokeWidth="1"
-                    />
-                    <line
-                      x1="3"
-                      y1="7"
-                      x2="7"
-                      y2="7"
-                      stroke={COLORS.projection.text}
-                      strokeWidth="1"
-                    />
-                    <line
-                      x1="5"
-                      y1="7"
-                      x2="5"
-                      y2="9"
-                      stroke={COLORS.projection.text}
-                      strokeWidth="1"
-                    />
-                  </g>
-                )}
+                {/* Top-right icons — stacked horizontally */}
+                {(() => {
+                  let ix = n.pos.x + W - 13;
+                  const icons: React.ReactNode[] = [];
+                  if (n.guards?.length) {
+                    icons.push(
+                      <g key="g" transform={`translate(${ix},${n.pos.y + 2})`}>
+                        <path
+                          d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
+                          fill="none"
+                          stroke="#ef4444"
+                          strokeWidth="1.2"
+                        />
+                      </g>
+                    );
+                    ix -= 12;
+                  }
+                  if (n.reactions?.length) {
+                    icons.push(
+                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
+                        <path
+                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
+                          fill={COLORS.reaction.text}
+                        />
+                      </g>
+                    );
+                    ix -= 12;
+                  }
+                  if (n.projections?.length) {
+                    icons.push(
+                      <g key="p" transform={`translate(${ix},${n.pos.y + 2})`}>
+                        <rect
+                          x="1"
+                          y="1"
+                          width="8"
+                          height="6"
+                          rx="1"
+                          fill="none"
+                          stroke={COLORS.projection.text}
+                          strokeWidth="1"
+                        />
+                        <line
+                          x1="3"
+                          y1="7"
+                          x2="7"
+                          y2="7"
+                          stroke={COLORS.projection.text}
+                          strokeWidth="1"
+                        />
+                        <line
+                          x1="5"
+                          y1="7"
+                          x2="5"
+                          y2="9"
+                          stroke={COLORS.projection.text}
+                          strokeWidth="1"
+                        />
+                      </g>
+                    );
+                  }
+                  return icons;
+                })()}
               </g>
             );
           })}
