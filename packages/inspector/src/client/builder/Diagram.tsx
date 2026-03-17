@@ -3,12 +3,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { DomainModel, StateNode, ValidationWarning } from "./types.js";
 
 /**
- * Event Modeling blueprint:
- * - Horizontal swimlanes = states/aggregates
- * - Vertical slices = feature groupings (dashed columns)
- * - Actions (blue) top, Events (orange) middle, per swimlane
- * - Reactions (purple) as boxes: Event → Reaction → Action
- * - Projections (green) below
+ * Event Modeling Standard Layout (top to bottom):
+ * 1. Commands (blue) — above events
+ * 2. Events (orange) — central timeline, swimlanes per aggregate
+ * 3. Views/Projections (green) — below events
+ * Reactions connect events → commands (arrows from event up to command)
+ * Vertical slices group related commands/events/views
  */
 
 const COLORS = {
@@ -21,12 +21,13 @@ const COLORS = {
 
 const NODE_W = 130;
 const NODE_H = 28;
-const STACK_OFFSET = 6;
 const H_GAP = 24;
-const MIN_SWIMLANE_H = 100;
-const LABEL_W = 120;
-const CMD_Y = 8;
-const EVT_Y = 44;
+const LABEL_W = 110;
+
+// Vertical layout positions (top to bottom)
+const CMD_ROW_Y = 10; // Commands row
+const EVENT_ROW_Y = 60; // Events row (the timeline)
+const VIEW_ROW_Y = 110; // Views/Projections row
 
 type Pos = { x: number; y: number };
 type NodeData = {
@@ -44,7 +45,6 @@ type Edge = {
   dashed?: boolean;
   label?: string;
 };
-type Swimlane = { label: string; y: number; h: number; line?: number };
 type SliceCol = { label: string; x: number; w: number };
 
 type Props = {
@@ -95,388 +95,300 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     setZoom(1);
   }, []);
 
-  const { nodes, edges, swimlanes, sliceCols, width, height } = useMemo(() => {
+  const { nodes, edges, sliceCols, rowLabels, width, height } = useMemo(() => {
     const nodes: NodeData[] = [];
     const edges: Edge[] = [];
-    const swimlanes: Swimlane[] = [];
     const sliceCols: SliceCol[] = [];
     const actionPositions = new Map<string, Pos>();
     const eventPositions = new Map<string, Pos>();
 
-    // Index states by varName
     const stateByVar = new Map<string, StateNode>();
     for (const s of model.states) stateByVar.set(s.varName, s);
 
-    // Merge partial states by domain name for swimlanes
-    const stateByName = new Map<
-      string,
-      { events: Set<string>; actions: Set<string> }
-    >();
-    for (const s of model.states) {
-      const existing = stateByName.get(s.name) ?? {
-        events: new Set(),
-        actions: new Set(),
-      };
-      for (const e of s.events) existing.events.add(e.name);
-      for (const a of s.actions) existing.actions.add(a.name);
-      stateByName.set(s.name, existing);
-    }
-    const stateNames = [...stateByName.keys()];
-
-    // Compute swimlane heights (based on max stacked events per state)
-    const swimlaneHeights = new Map<string, number>();
-    for (const s of model.states) {
-      const maxStack = Math.max(1, ...s.actions.map((a) => a.emits.length));
-      const h = Math.max(
-        MIN_SWIMLANE_H,
-        EVT_Y + maxStack * (NODE_H + STACK_OFFSET) + 12
-      );
-      swimlaneHeights.set(
-        s.name,
-        Math.max(swimlaneHeights.get(s.name) ?? 0, h)
-      );
-    }
-
-    // Build swimlane Y positions
-    let swimlaneY = 0;
-    const swimlaneYMap = new Map<string, number>();
-    for (const name of stateNames) {
-      const h = swimlaneHeights.get(name) ?? MIN_SWIMLANE_H;
-      swimlaneYMap.set(name, swimlaneY);
-      swimlanes.push({
-        label: name,
-        y: swimlaneY,
-        h,
-        line: model.states.find((s) => s.name === name)?.line,
-      });
-      swimlaneY += h;
-    }
-
-    // Layout columns: process slices as vertical groups, then standalone states
-    let cursorX = LABEL_W + H_GAP;
-
-    // Helper: place one action + its events in a specific state's swimlane
-    function placeAction(
-      action: (typeof model.states)[0]["actions"][0],
-      state: StateNode,
-      x: number
-    ) {
-      const sy = swimlaneYMap.get(state.name) ?? 0;
-      const aPos = { x, y: sy + CMD_Y };
-      nodes.push({
-        key: `action:${action.name}`,
-        pos: aPos,
-        type: "action",
-        label: action.name,
-        sublabel:
-          action.invariants.length > 0
-            ? `${action.invariants.length} guard(s)`
-            : undefined,
-        line: action.line,
-      });
-      actionPositions.set(action.name, aPos);
-
-      for (let ei = 0; ei < action.emits.length; ei++) {
-        const eName = action.emits[ei];
-        if (!eventPositions.has(eName)) {
-          const ePos = { x, y: sy + EVT_Y + ei * (NODE_H + STACK_OFFSET) };
-          nodes.push({
-            key: `event:${eName}`,
-            pos: ePos,
-            type: "event",
-            label: eName,
-            line: state.events.find((e) => e.name === eName)?.line,
-          });
-          eventPositions.set(eName, ePos);
-          edges.push({
-            from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
-            to: { x: ePos.x + NODE_W / 2, y: ePos.y },
-            color: COLORS.action.border,
-          });
-        }
-      }
-    }
-
-    // Collect all events per slice (for projection matching)
+    // Collect events per slice
     const sliceEvents = new Map<string, Set<string>>();
 
-    // 1. Slices as vertical columns
+    let cursorX = LABEL_W + H_GAP;
+
+    // --- Layout slices as vertical columns ---
     for (const slice of model.slices) {
       const sliceStartX = cursorX;
       const partials = slice.stateVars
         .map((sv) => stateByVar.get(sv))
         .filter(Boolean) as StateNode[];
 
-      // Collect events emitted by this slice's states
       const evts = new Set<string>();
-      for (const st of partials) {
-        for (const e of st.events) evts.add(e.name);
-      }
+      for (const st of partials) for (const e of st.events) evts.add(e.name);
       sliceEvents.set(slice.name, evts);
 
-      // Place all actions from the slice's partial states
       for (const st of partials) {
         for (const action of st.actions) {
-          placeAction(action, st, cursorX);
+          // Command (above)
+          const aPos = { x: cursorX, y: CMD_ROW_Y };
+          nodes.push({
+            key: `action:${action.name}`,
+            pos: aPos,
+            type: "action",
+            label: action.name,
+            sublabel:
+              action.invariants.length > 0
+                ? `${action.invariants.length} guard(s)`
+                : undefined,
+            line: action.line,
+          });
+          actionPositions.set(action.name, aPos);
+
+          // Events (on the timeline row) — stacked if multiple
+          for (let ei = 0; ei < action.emits.length; ei++) {
+            const eName = action.emits[ei];
+            if (!eventPositions.has(eName)) {
+              const ePos = { x: cursorX, y: EVENT_ROW_Y + ei * (NODE_H + 4) };
+              nodes.push({
+                key: `event:${eName}`,
+                pos: ePos,
+                type: "event",
+                label: eName,
+                line: st.events.find((e) => e.name === eName)?.line,
+              });
+              eventPositions.set(eName, ePos);
+
+              // Command → Event (vertical down)
+              edges.push({
+                from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+                to: { x: ePos.x + NODE_W / 2, y: ePos.y },
+                color: COLORS.action.border,
+              });
+            }
+          }
+
           cursorX += NODE_W + H_GAP;
+        }
+
+        // Ungrouped events
+        for (const event of st.events) {
+          if (!eventPositions.has(event.name)) {
+            const ePos = { x: cursorX, y: EVENT_ROW_Y };
+            nodes.push({
+              key: `event:${event.name}`,
+              pos: ePos,
+              type: "event",
+              label: event.name,
+              line: event.line,
+            });
+            eventPositions.set(event.name, ePos);
+            cursorX += NODE_W + H_GAP;
+          }
+        }
+      }
+
+      // Reactions in this slice — placed above the command they dispatch to
+      for (const reaction of slice.reactions) {
+        if (reaction.isVoid) continue;
+        if (reaction.dispatches.length > 0) {
+          // Reaction is shown as a label on the Event→Command connection
+          for (const actionName of reaction.dispatches) {
+            const ePos = eventPositions.get(reaction.event);
+            const aPos = actionPositions.get(actionName);
+            if (ePos && aPos) {
+              // Event → Command (reaction arrow, going from event up to command)
+              edges.push({
+                from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+                to: { x: aPos.x + NODE_W * 0.3, y: aPos.y },
+                color: COLORS.reaction.border,
+                dashed: true,
+                label: `${reaction.handlerName} → ${actionName}`,
+              });
+            }
+          }
+        } else {
+          // Reaction with no dispatch — show as node on the event row
+          const ePos = eventPositions.get(reaction.event);
+          if (ePos) {
+            const rPos = { x: cursorX, y: EVENT_ROW_Y };
+            nodes.push({
+              key: `reaction:${reaction.handlerName}`,
+              pos: rPos,
+              type: "reaction",
+              label: reaction.handlerName,
+              line: reaction.line,
+            });
+            edges.push({
+              from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+              to: { x: rPos.x, y: rPos.y + NODE_H / 2 },
+              color: COLORS.reaction.border,
+              dashed: true,
+            });
+            cursorX += NODE_W + H_GAP;
+          }
         }
       }
 
       const sliceEndX = cursorX;
-      const sliceLabel = slice.name.replace(/Slice$/i, "");
       sliceCols.push({
-        label: sliceLabel,
+        label: slice.name.replace(/Slice$/i, ""),
         x: sliceStartX - 8,
         w: sliceEndX - sliceStartX + 8,
       });
-      cursorX += H_GAP / 2; // gap between slices
+      cursorX += H_GAP / 2;
     }
 
-    // 2. Standalone states (not in any slice)
+    // --- Standalone states (not in slices) ---
     const claimedVars = new Set(model.slices.flatMap((sl) => sl.stateVars));
-    const standalone = model.states.filter((s) => !claimedVars.has(s.varName));
-    for (const st of standalone) {
+    for (const st of model.states.filter((s) => !claimedVars.has(s.varName))) {
       for (const action of st.actions) {
-        placeAction(action, st, cursorX);
+        const aPos = { x: cursorX, y: CMD_ROW_Y };
+        nodes.push({
+          key: `action:${action.name}`,
+          pos: aPos,
+          type: "action",
+          label: action.name,
+          sublabel:
+            action.invariants.length > 0
+              ? `${action.invariants.length} guard(s)`
+              : undefined,
+          line: action.line,
+        });
+        actionPositions.set(action.name, aPos);
+
+        for (let ei = 0; ei < action.emits.length; ei++) {
+          const eName = action.emits[ei];
+          if (!eventPositions.has(eName)) {
+            const ePos = { x: cursorX, y: EVENT_ROW_Y + ei * (NODE_H + 4) };
+            nodes.push({
+              key: `event:${eName}`,
+              pos: ePos,
+              type: "event",
+              label: eName,
+              line: st.events.find((e) => e.name === eName)?.line,
+            });
+            eventPositions.set(eName, ePos);
+            edges.push({
+              from: { x: aPos.x + NODE_W / 2, y: aPos.y + NODE_H },
+              to: { x: ePos.x + NODE_W / 2, y: ePos.y },
+              color: COLORS.action.border,
+            });
+          }
+        }
         cursorX += NODE_W + H_GAP;
       }
-      // Ungrouped events
-      for (const event of st.events) {
-        if (!eventPositions.has(event.name)) {
-          const sy = swimlaneYMap.get(st.name) ?? 0;
-          const ePos = { x: cursorX, y: sy + EVT_Y };
-          nodes.push({
-            key: `event:${event.name}`,
-            pos: ePos,
-            type: "event",
-            label: event.name,
-            line: event.line,
+    }
+
+    // --- Inline act() reactions ---
+    for (const reaction of model.reactions) {
+      if (reaction.isVoid) continue;
+      for (const actionName of reaction.dispatches) {
+        const ePos = eventPositions.get(reaction.event);
+        const aPos = actionPositions.get(actionName);
+        if (ePos && aPos) {
+          edges.push({
+            from: { x: ePos.x + NODE_W, y: ePos.y + NODE_H / 2 },
+            to: { x: aPos.x + NODE_W * 0.3, y: aPos.y },
+            color: COLORS.reaction.border,
+            dashed: true,
+            label: `${reaction.handlerName} → ${actionName}`,
           });
-          eventPositions.set(event.name, ePos);
-          cursorX += NODE_W + H_GAP;
         }
       }
     }
 
-    // 3. Reactions — dedicated swimlane, scoped to owning slice's events
-    const taggedReactions: Array<{
-      reaction: (typeof model.reactions)[0];
-      sliceEvents: Set<string>;
-    }> = [];
+    // --- Projections (Views row, below events) ---
+    // Owned by slices
+    const placedProjs = new Set<string>();
     for (const slice of model.slices) {
-      const evts = sliceEvents.get(slice.name) ?? new Set();
-      for (const r of slice.reactions) {
-        if (!r.isVoid) taggedReactions.push({ reaction: r, sliceEvents: evts });
-      }
-    }
-    // Inline act() reactions — no slice scope, connect to any event
-    for (const r of model.reactions) {
-      if (!r.isVoid)
-        taggedReactions.push({ reaction: r, sliceEvents: new Set([r.event]) });
-    }
-
-    if (taggedReactions.length > 0) {
-      const reactRowY = swimlaneY;
-      swimlanes.push({
-        label: "Reactions",
-        y: reactRowY,
-        h: NODE_H + 24,
-        line: undefined,
-      });
-      let reactX = LABEL_W + H_GAP;
-      for (const { reaction, sliceEvents: ownEvents } of taggedReactions) {
-        const rPos = { x: reactX, y: reactRowY + 12 };
-        nodes.push({
-          key: `reaction:${reaction.handlerName}`,
-          pos: rPos,
-          type: "reaction",
-          label: reaction.handlerName,
-          line: reaction.line,
-        });
-
-        // Event → Reaction (only if event belongs to this reaction's slice)
-        if (ownEvents.has(reaction.event)) {
-          const triggerPos = eventPositions.get(reaction.event);
-          if (triggerPos) {
-            edges.push({
-              from: { x: triggerPos.x + NODE_W / 2, y: triggerPos.y + NODE_H },
-              to: { x: rPos.x + NODE_W / 2, y: rPos.y },
-              color: COLORS.reaction.border,
-              dashed: true,
-            });
-          }
-        }
-        // Reaction → Actions
-        for (const actionName of reaction.dispatches) {
-          const aPos = actionPositions.get(actionName);
-          if (aPos) {
-            edges.push({
-              from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-              to: { x: aPos.x + NODE_W * 0.3, y: aPos.y },
-              color: COLORS.reaction.border,
-              dashed: true,
-              label: actionName,
-            });
-          }
-        }
-        reactX += NODE_W + H_GAP;
-      }
-      swimlaneY = reactRowY + NODE_H + 24;
-    }
-
-    // 4. Projections — dedicated swimlane, duplicated per slice column
-    const projRowY = swimlaneY;
-    const hasProjections = model.projections.length > 0;
-    if (hasProjections) {
-      swimlanes.push({
-        label: "Views",
-        y: projRowY,
-        h: NODE_H + 24,
-        line: undefined,
-      });
-    }
-    const projY = projRowY + 12;
-    let projInstanceCount = 0;
-
-    // Place projections only in slice columns that reference them via .withProjection()
-    for (const slice of model.slices) {
+      const sliceProjVars = new Set(slice.projections);
+      if (sliceProjVars.size === 0) continue;
       const evts = sliceEvents.get(slice.name) ?? new Set();
       const sliceCol = sliceCols.find(
         (sc) => sc.label === slice.name.replace(/Slice$/i, "")
       );
-      if (!sliceCol) continue;
 
-      // Only projections explicitly referenced by this slice via .withProjection()
-      const sliceProjVars = new Set(slice.projections);
-      if (sliceProjVars.size === 0) {
-        projInstanceCount++;
-        continue;
-      }
       for (const proj of model.projections) {
         if (!sliceProjVars.has(proj.varName) && !sliceProjVars.has(proj.name))
           continue;
-        const matchingEvents = proj.handles.filter((h) => evts.has(h));
-        if (matchingEvents.length === 0) continue;
+        const matching = proj.handles.filter((h) => evts.has(h));
+        if (matching.length === 0) continue;
 
-        const pKey = `projection:${proj.name}:${slice.name}`;
-        const centerX = sliceCol.x + sliceCol.w / 2 - NODE_W / 2;
-        const pPosCentered = { x: Math.max(sliceCol.x + 8, centerX), y: projY };
+        const pPos = {
+          x: sliceCol ? sliceCol.x + sliceCol.w / 2 - NODE_W / 2 : cursorX,
+          y: VIEW_ROW_Y,
+        };
         nodes.push({
-          key: pKey,
-          pos: pPosCentered,
+          key: `projection:${proj.name}:${slice.name}`,
+          pos: pPos,
           type: "projection",
           label: proj.name,
           line: proj.line,
         });
-
-        for (const en of matchingEvents) {
+        for (const en of matching) {
           const ePos = eventPositions.get(en);
-          if (ePos) {
+          if (ePos)
             edges.push({
               from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-              to: { x: pPosCentered.x + NODE_W / 2, y: pPosCentered.y },
+              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
               color: COLORS.projection.border,
               dashed: true,
             });
-          }
         }
+        placedProjs.add(proj.varName);
       }
-      projInstanceCount++;
     }
 
-    // Track which projections were placed by slices
-    const placedProjections = new Set<string>();
-    for (const slice of model.slices) {
-      for (const pv of slice.projections) placedProjections.add(pv);
-    }
-
-    // Remaining projections — duplicate per slice that has matching events
+    // Unclaimed projections — duplicate per slice with matching events
     for (const proj of model.projections) {
-      if (
-        placedProjections.has(proj.varName) ||
-        placedProjections.has(proj.name)
-      )
-        continue;
-
-      let anyPlaced = false;
+      if (placedProjs.has(proj.varName)) continue;
       for (const slice of model.slices) {
         const evts = sliceEvents.get(slice.name) ?? new Set();
         const matching = proj.handles.filter((h) => evts.has(h));
         if (matching.length === 0) continue;
-
         const sliceCol = sliceCols.find(
           (sc) => sc.label === slice.name.replace(/Slice$/i, "")
         );
         if (!sliceCol) continue;
 
-        const pKey = `projection:${proj.name}:${slice.name}`;
-        const centerX = sliceCol.x + sliceCol.w / 2 - NODE_W / 2;
-        const pPos = { x: Math.max(sliceCol.x + 8, centerX), y: projY };
-        nodes.push({
-          key: pKey,
-          pos: pPos,
-          type: "projection",
-          label: proj.name,
-          line: proj.line,
-        });
-
-        // Only connect to events IN THIS SLICE
-        for (const en of matching) {
-          const ePos = eventPositions.get(en);
-          if (ePos) {
-            edges.push({
-              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
-              color: COLORS.projection.border,
-              dashed: true,
-            });
-          }
-        }
-        anyPlaced = true;
-      }
-
-      // Fallback: no slice had matching events
-      if (!anyPlaced) {
-        const pKey = `projection:${proj.name}:standalone`;
         const pPos = {
-          x: LABEL_W + H_GAP + projInstanceCount * (NODE_W + H_GAP),
-          y: projY,
+          x: Math.max(sliceCol.x + 8, sliceCol.x + sliceCol.w / 2 - NODE_W / 2),
+          y: VIEW_ROW_Y,
         };
         nodes.push({
-          key: pKey,
+          key: `projection:${proj.name}:${slice.name}`,
           pos: pPos,
           type: "projection",
           label: proj.name,
           line: proj.line,
         });
-        for (const en of proj.handles) {
+        for (const en of matching) {
           const ePos = eventPositions.get(en);
-          if (ePos) {
+          if (ePos)
             edges.push({
               from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
               to: { x: pPos.x + NODE_W / 2, y: pPos.y },
               color: COLORS.projection.border,
               dashed: true,
             });
-          }
         }
       }
-      projInstanceCount++;
     }
 
+    // Row labels
+    const rowLabels = [
+      { label: "Commands", y: CMD_ROW_Y + NODE_H / 2 },
+      { label: "Events", y: EVENT_ROW_Y + NODE_H / 2 },
+      { label: "Views", y: VIEW_ROW_Y + NODE_H / 2 },
+    ];
+
     let maxW = LABEL_W,
-      maxH = 0;
+      maxH = VIEW_ROW_Y + NODE_H + 20;
     for (const n of nodes) {
       maxW = Math.max(maxW, n.pos.x + NODE_W);
-      maxH = Math.max(maxH, n.pos.y + NODE_H);
+      maxH = Math.max(maxH, n.pos.y + NODE_H + 20);
     }
     return {
       nodes,
       edges,
-      swimlanes,
       sliceCols,
+      rowLabels,
       width: maxW + 40,
-      height: maxH + 40,
+      height: maxH,
     };
   }, [model]);
 
@@ -489,8 +401,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   }
 
   const svgW = Math.max(width, 600);
-  const svgH = Math.max(height, 300);
-  const totalH = swimlanes.reduce((sum, sl) => Math.max(sum, sl.y + sl.h), 0);
+  const svgH = Math.max(height, 200);
 
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
@@ -535,47 +446,46 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${svgW / zoom} ${svgH / zoom}`}
           className="select-none"
         >
-          {/* State swimlanes (horizontal rows) */}
-          {swimlanes.map((sl, i) => (
-            <g key={sl.label + i}>
-              {i % 2 === 0 && (
-                <rect
-                  x={0}
-                  y={sl.y}
-                  width={svgW}
-                  height={sl.h}
-                  fill="#18181b"
-                  opacity={0.4}
-                />
-              )}
-              <line
-                x1={0}
-                y1={sl.y + sl.h}
-                x2={svgW}
-                y2={sl.y + sl.h}
-                stroke="#27272a"
-                strokeWidth={1}
-              />
-              <text
-                x={8}
-                y={sl.y + sl.h / 2}
-                dominantBaseline="middle"
-                fill={COLORS.state.text}
-                className="text-[11px] font-semibold"
-              >
-                {sl.label}
-              </text>
-            </g>
+          {/* Row labels */}
+          {rowLabels.map((rl) => (
+            <text
+              key={rl.label}
+              x={8}
+              y={rl.y}
+              dominantBaseline="middle"
+              fill="#52525b"
+              className="text-[9px] font-medium"
+            >
+              {rl.label}
+            </text>
           ))}
 
-          {/* Slice columns (vertical groupings) */}
+          {/* Row separators */}
+          <line
+            x1={LABEL_W}
+            y1={EVENT_ROW_Y - 8}
+            x2={svgW}
+            y2={EVENT_ROW_Y - 8}
+            stroke="#1f1f23"
+            strokeWidth={1}
+          />
+          <line
+            x1={LABEL_W}
+            y1={VIEW_ROW_Y - 8}
+            x2={svgW}
+            y2={VIEW_ROW_Y - 8}
+            stroke="#1f1f23"
+            strokeWidth={1}
+          />
+
+          {/* Slice columns */}
           {sliceCols.map((sc) => (
             <g key={sc.label}>
               <rect
                 x={sc.x}
                 y={0}
                 width={sc.w}
-                height={totalH}
+                height={svgH}
                 rx={0}
                 fill="none"
                 stroke="#3f3f46"
@@ -584,7 +494,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
               />
               <text
                 x={sc.x + sc.w / 2}
-                y={totalH + 14}
+                y={svgH - 4}
                 textAnchor="middle"
                 fill="#52525b"
                 className="text-[9px] font-medium"
@@ -599,12 +509,12 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             const dx = edge.to.x - edge.from.x;
             const dy = edge.to.y - edge.from.y;
             const isStraight = Math.abs(dx) < 5;
-            const goingUp = dy < -20; // reaction → action (from below to above)
+            const goingUp = dy < -20;
             let d: string;
             if (isStraight) {
               d = `M ${edge.from.x} ${edge.from.y} L ${edge.to.x} ${edge.to.y}`;
             } else if (goingUp) {
-              // S-curve: right from reaction, then sweep up into action top
+              // S-curve for reaction arrows (event → command)
               d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + Math.abs(dx) * 0.6} ${edge.from.y}, ${edge.to.x - Math.abs(dx) * 0.1} ${edge.to.y - Math.abs(dy) * 0.8}, ${edge.to.x} ${edge.to.y}`;
             } else {
               d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x + dx * 0.4} ${edge.from.y}, ${edge.to.x - dx * 0.4} ${edge.to.y}, ${edge.to.x} ${edge.to.y}`;
