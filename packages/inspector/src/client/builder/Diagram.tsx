@@ -292,7 +292,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           if (aPos) {
             edges.push({
               from: { x: rPos.x + NODE_W, y: rPos.y + NODE_H / 2 },
-              to: { x: aPos.x, y: aPos.y + NODE_H / 2 },
+              to: { x: aPos.x + NODE_W / 2, y: aPos.y },
               color: COLORS.reaction.border,
               dashed: true,
               label: actionName,
