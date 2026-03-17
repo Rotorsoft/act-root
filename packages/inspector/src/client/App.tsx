@@ -2,17 +2,20 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import { ConnectDialog } from "./components/ConnectDialog.js";
 import { Header } from "./components/Header.js";
+import { TabNav, type Tab } from "./components/TabNav.js";
 import { queryClient, trpc, trpcClient } from "./trpc.js";
 import { EventLog } from "./views/EventLog.js";
+import { Streams } from "./views/Streams.js";
+import { Timeline } from "./views/Timeline.js";
 
 export default function App() {
   const [connected, setConnected] = useState(false);
   const [showConnect, setShowConnect] = useState(true);
   const [connectionName, setConnectionName] = useState("");
   const [connectionKey, setConnectionKey] = useState(0);
+  const [activeTab, setActiveTab] = useState<Tab>("log");
 
   const handleConnected = (name: string) => {
-    // Clear all cached queries from previous connection
     queryClient.clear();
     setConnected(true);
     setConnectionName(name);
@@ -35,7 +38,18 @@ export default function App() {
               onClose={connected ? () => setShowConnect(false) : undefined}
             />
           )}
-          {connected && <EventLog key={connectionKey} />}
+          {connected && (
+            <>
+              <TabNav active={activeTab} onChange={setActiveTab} />
+              <div key={connectionKey} className="flex min-h-0 flex-1 flex-col">
+                {activeTab === "log" && <EventLog />}
+                {activeTab === "timeline" && <Timeline />}
+                {activeTab === "streams" && (
+                  <Streams onNavigateToLog={() => setActiveTab("log")} />
+                )}
+              </div>
+            </>
+          )}
         </div>
       </QueryClientProvider>
     </trpc.Provider>

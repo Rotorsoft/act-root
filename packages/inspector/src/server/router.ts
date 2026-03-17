@@ -23,10 +23,35 @@ const toDate = (iso: string | undefined): Date | undefined =>
 
 /** Managed store instance — not the singleton, so we can reconnect */
 let currentStore: Store | null = null;
+let currentConfig: {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+  schema: string;
+  table: string;
+} | null = null;
 
 function getStore(): Store {
   if (!currentStore) throw new Error("Not connected to a store");
   return currentStore;
+}
+
+/** Get a raw pg client for streams table queries */
+async function getStreamsClient(): Promise<{ client: pg.Client; fqs: string }> {
+  if (!currentConfig) throw new Error("Not connected to a store");
+  const client = new pg.Client({
+    host: currentConfig.host,
+    port: currentConfig.port,
+    database: currentConfig.database,
+    user: currentConfig.user,
+    password: currentConfig.password,
+    connectionTimeoutMillis: 5000,
+  });
+  await client.connect();
+  const fqs = `"${currentConfig.schema}"."${currentConfig.table}_streams"`;
+  return { client, fqs };
 }
 
 // --- Discovery ---
@@ -279,9 +304,11 @@ export const inspectorRouter = t.router({
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
+        currentConfig = input;
         return { ok: true as const, config: { ...input, password: "***" } };
       } catch (err) {
         currentStore = null;
+        currentConfig = null;
         throw new Error(
           `Connection failed: ${err instanceof Error ? err.message : String(err)}`,
           { cause: err }
@@ -294,6 +321,7 @@ export const inspectorRouter = t.router({
     if (currentStore) {
       await currentStore.dispose();
       currentStore = null;
+      currentConfig = null;
     }
     return { ok: true as const };
   }),
@@ -432,6 +460,33 @@ export const inspectorRouter = t.router({
         .sort((a, b) => b.eventCount - a.eventCount)
         .slice(0, input?.limit ?? 100);
     }),
+
+  /** Get stream processing metadata from the streams table (PG-specific) */
+  streamMeta: t.procedure.query(async () => {
+    let pgClient: pg.Client | undefined;
+    try {
+      const { client, fqs } = await getStreamsClient();
+      pgClient = client;
+      const result = await client.query<{
+        stream: string;
+        source: string | null;
+        at: number;
+        retry: number;
+        blocked: boolean;
+        error: string | null;
+        leased_at: number | null;
+        leased_by: string | null;
+        leased_until: string | null;
+      }>(
+        `SELECT stream, source, at, retry, blocked, error, leased_at, leased_by, leased_until FROM ${fqs} ORDER BY stream`
+      );
+      return result.rows;
+    } catch {
+      return [];
+    } finally {
+      if (pgClient) await pgClient.end();
+    }
+  }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;

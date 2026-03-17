@@ -25,6 +25,9 @@ type Event = {
 
 type EventRowProps = {
   event: Event;
+  defaultExpanded?: boolean;
+  compact?: boolean;
+  hideStream?: boolean;
 };
 
 /** Deterministic color from event name */
@@ -61,8 +64,13 @@ function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
 }
 
-export function EventRow({ event }: EventRowProps) {
-  const [expanded, setExpanded] = useState(false);
+export function EventRow({
+  event,
+  defaultExpanded = false,
+  compact = false,
+  hideStream = false,
+}: EventRowProps) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const actor = event.meta?.causation?.action?.actor;
 
   return (
@@ -97,9 +105,11 @@ export function EventRow({ event }: EventRowProps) {
         </span>
 
         {/* Stream */}
-        <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
-          {event.stream}
-        </span>
+        {!hideStream && (
+          <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
+            {event.stream}
+          </span>
+        )}
 
         {/* Time */}
         <span
@@ -116,7 +126,12 @@ export function EventRow({ event }: EventRowProps) {
       </button>
 
       {/* Expanded detail */}
-      {expanded && (
+      {expanded && compact && (
+        <div className="border-t border-zinc-800/30 bg-zinc-900/60 px-4 py-1.5 text-xs">
+          <JsonViewer data={event.data} />
+        </div>
+      )}
+      {expanded && !compact && (
         <div className="border-t border-zinc-800/30 bg-zinc-900/80 px-4 py-3">
           <div className="grid grid-cols-2 gap-4">
             {/* Data */}
@@ -134,7 +149,7 @@ export function EventRow({ event }: EventRowProps) {
                   Copy
                 </button>
               </div>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
                 <JsonViewer data={event.data} />
               </div>
             </div>
@@ -154,7 +169,7 @@ export function EventRow({ event }: EventRowProps) {
                   Copy
                 </button>
               </div>
-              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3">
+              <div className="rounded-md border border-zinc-800 bg-zinc-950 p-3 text-xs">
                 <JsonViewer data={event.meta} />
               </div>
             </div>

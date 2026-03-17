@@ -11,10 +11,13 @@ export type Filters = {
   before?: number;
 };
 
-const defaultFilters: Filters = {
-  backward: true,
-  limit: 50,
-};
+function makeDefaults(): Filters {
+  return {
+    created_after: new Date(Date.now() - 60 * 60_000).toISOString(),
+    backward: true,
+    limit: 50,
+  };
+}
 
 let filters: Filters = loadFromUrl();
 let listeners: Array<() => void> = [];
@@ -24,12 +27,12 @@ function notify() {
 }
 
 function loadFromUrl(): Filters {
-  if (typeof window === "undefined") return { ...defaultFilters };
+  if (typeof window === "undefined") return makeDefaults();
   const params = new URLSearchParams(window.location.search);
   return {
     stream: params.get("stream") || undefined,
     names: params.get("names")?.split(",").filter(Boolean) || undefined,
-    created_after: params.get("created_after") || undefined,
+    created_after: params.get("created_after") || makeDefaults().created_after,
     created_before: params.get("created_before") || undefined,
     correlation: params.get("correlation") || undefined,
     backward: params.get("backward") !== "false",
@@ -65,7 +68,7 @@ export function setFilters(update: Partial<Filters>) {
 }
 
 export function clearFilters() {
-  filters = { ...defaultFilters };
+  filters = makeDefaults();
   syncToUrl(filters);
   notify();
 }
