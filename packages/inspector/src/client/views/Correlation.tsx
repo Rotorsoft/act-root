@@ -301,18 +301,17 @@ export function Correlation({ initialCorrelation, onStream }: Props) {
                         className="h-2 w-2 shrink-0 rounded-full"
                         style={{ backgroundColor: streamColor(s) }}
                       />
-                      {onStream ? (
+                      <span className="truncate font-mono text-zinc-300">
+                        {s}
+                      </span>
+                      {onStream && (
                         <button
                           onClick={() => onStream(s)}
                           title="Open in Streams"
-                          className="truncate font-mono text-emerald-400/80 underline decoration-emerald-400/30 underline-offset-2 hover:text-emerald-300"
+                          className="shrink-0 text-emerald-400/70 transition hover:text-emerald-300"
                         >
-                          {s}
+                          <Database size={11} />
                         </button>
-                      ) : (
-                        <span className="truncate font-mono text-zinc-300">
-                          {s}
-                        </span>
                       )}
                     </div>
                   ))}

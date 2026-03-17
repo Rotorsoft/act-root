@@ -89,7 +89,7 @@ function NavLink({
         onClick();
       }}
       title={title}
-      className="text-emerald-400/70 underline decoration-emerald-400/20 underline-offset-2 transition hover:text-emerald-300 hover:decoration-emerald-300/40"
+      className="text-emerald-400/70 transition hover:text-emerald-300"
     >
       {children}
     </button>
