@@ -390,35 +390,75 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       for (const pv of slice.projections) placedProjections.add(pv);
     }
 
-    // Remaining projections — standalone, connect only to their handled events
+    // Remaining projections — duplicate per slice that has matching events
     for (const proj of model.projections) {
       if (
         placedProjections.has(proj.varName) ||
         placedProjections.has(proj.name)
       )
         continue;
-      const pKey = `projection:${proj.name}:standalone`;
-      const pPos = {
-        x: LABEL_W + H_GAP + projInstanceCount * (NODE_W + H_GAP),
-        y: projY,
-      };
-      nodes.push({
-        key: pKey,
-        pos: pPos,
-        type: "projection",
-        label: proj.name,
-        line: proj.line,
-      });
-      // Connect to ALL handled events (regardless of slice)
-      for (const en of proj.handles) {
-        const ePos = eventPositions.get(en);
-        if (ePos) {
-          edges.push({
-            from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
-            to: { x: pPos.x + NODE_W / 2, y: pPos.y },
-            color: COLORS.projection.border,
-            dashed: true,
-          });
+
+      let anyPlaced = false;
+      for (const slice of model.slices) {
+        const evts = sliceEvents.get(slice.name) ?? new Set();
+        const matching = proj.handles.filter((h) => evts.has(h));
+        if (matching.length === 0) continue;
+
+        const sliceCol = sliceCols.find(
+          (sc) => sc.label === slice.name.replace(/Slice$/i, "")
+        );
+        if (!sliceCol) continue;
+
+        const pKey = `projection:${proj.name}:${slice.name}`;
+        const centerX = sliceCol.x + sliceCol.w / 2 - NODE_W / 2;
+        const pPos = { x: Math.max(sliceCol.x + 8, centerX), y: projY };
+        nodes.push({
+          key: pKey,
+          pos: pPos,
+          type: "projection",
+          label: proj.name,
+          line: proj.line,
+        });
+
+        // Only connect to events IN THIS SLICE
+        for (const en of matching) {
+          const ePos = eventPositions.get(en);
+          if (ePos) {
+            edges.push({
+              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
+              color: COLORS.projection.border,
+              dashed: true,
+            });
+          }
+        }
+        anyPlaced = true;
+      }
+
+      // Fallback: no slice had matching events
+      if (!anyPlaced) {
+        const pKey = `projection:${proj.name}:standalone`;
+        const pPos = {
+          x: LABEL_W + H_GAP + projInstanceCount * (NODE_W + H_GAP),
+          y: projY,
+        };
+        nodes.push({
+          key: pKey,
+          pos: pPos,
+          type: "projection",
+          label: proj.name,
+          line: proj.line,
+        });
+        for (const en of proj.handles) {
+          const ePos = eventPositions.get(en);
+          if (ePos) {
+            edges.push({
+              from: { x: ePos.x + NODE_W / 2, y: ePos.y + NODE_H },
+              to: { x: pPos.x + NODE_W / 2, y: pPos.y },
+              color: COLORS.projection.border,
+              dashed: true,
+            });
+          }
         }
       }
       projInstanceCount++;
