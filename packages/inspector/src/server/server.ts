@@ -2,7 +2,7 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
 import { inspectorRouter } from "./router.js";
 
-const PORT = 4001;
+const PORT = parseInt(process.env.PORT || "4001", 10);
 
 const server = createHTTPServer({
   middleware: cors(),

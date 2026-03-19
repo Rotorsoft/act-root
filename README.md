@@ -37,7 +37,11 @@ The complexity of modern software design often arises from over-engineering abst
 
 ### [@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)
 
-Event sourcing observatory and visual builder for the Act framework. Features event log, SVG timeline, stream inspector, correlation explorer (waterfall + DAG), drain processing monitor, and a visual builder with Monaco editor + AI-powered code generation. Auto-discovers Act stores, global live polling, cross-view navigation with back/forward history. Dark theme with JetBrains Mono.
+Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, and drain processing monitor with live polling.
+
+### [@rotorsoft/act-builder](https://github.com/rotorsoft/act-root/tree/master/packages/builder)
+
+Domain model designer — full VS Code workbench in the browser with file explorer, TypeScript IntelliSense, and live domain diagram. Open projects from local folders, GitHub repos, AI generation, or the built-in sample. Refine code with AI, collect errors into prompts, and export as zip.
 
 ---
 

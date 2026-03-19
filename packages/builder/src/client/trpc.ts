@@ -4,10 +4,10 @@ import {
   createTRPCReact,
   httpLink,
 } from "@trpc/react-query";
-import { type InspectorRouter } from "../server/router.js";
+import { type BuilderRouter } from "../server/router.js";
 
-export const trpc: CreateTRPCReact<InspectorRouter, unknown> =
-  createTRPCReact<InspectorRouter>();
+export const trpc: CreateTRPCReact<BuilderRouter, unknown> =
+  createTRPCReact<BuilderRouter>();
 
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -21,7 +21,7 @@ export const queryClient = new QueryClient({
 export const trpcClient = trpc.createClient({
   links: [
     httpLink({
-      url: (import.meta.env.VITE_API_URL as string) || "http://localhost:4001",
+      url: (import.meta.env.VITE_API_URL as string) || "http://localhost:4002",
     }),
   ],
 });

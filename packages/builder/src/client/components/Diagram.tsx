@@ -1,6 +1,10 @@
 import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
-import type { DomainModel, StateNode, ValidationWarning } from "./types.js";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  DomainModel,
+  StateNode,
+  ValidationWarning,
+} from "../types/index.js";
 
 const COLORS = {
   action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" },
@@ -13,7 +17,8 @@ const COLORS = {
 const W = 100,
   H = 36,
   GAP = 12,
-  PAD = 10;
+  PAD = 10,
+  SLICE_PAD = 24; // left padding inside slice for vertical label
 
 function splitLabel(label: string): string[] {
   const words = label.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
@@ -47,10 +52,10 @@ type Box = { label: string; x: number; y: number; w: number; h: number };
 type Props = {
   model: DomainModel;
   warnings: ValidationWarning[];
-  onClickLine?: (line: number) => void;
+  onClickElement?: (name: string, type?: string) => void;
 };
 
-export function Diagram({ model, warnings, onClickLine }: Props) {
+export function Diagram({ model, warnings, onClickElement }: Props) {
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
     null
   );
@@ -60,12 +65,19 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   const drag = useRef(false);
   const start = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
-  const onWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setZoom((z) =>
-      Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
-    );
-  }, []);
+  const svgContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = svgContainerRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((z) =>
+        Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+      );
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [model]);
   const onDown = useCallback(
     (e: React.MouseEvent) => {
       if (e.button !== 0) return;
@@ -100,7 +112,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
     const eventProjections = new Map<string, string[]>();
     const eventReactions = new Map<string, string[]>();
 
-    // Build reaction lookup: event name → reaction handler names
     for (const slice of model.slices) {
       for (const r of slice.reactions) {
         if (r.isVoid) continue;
@@ -123,7 +134,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       }
     }
 
-    const sliceEvts = new Map<string, Set<string>>();
     const MAX_ROW_W = 800;
     let cx = PAD,
       rowBaseY = 0,
@@ -131,77 +141,81 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       maxY = 0;
 
     /**
-     * Pure left-to-right DAG per slice:
-     * For each action row: [Action] → [Event] → [Event] → [Reaction] → [Action'] → [Event'] → ...
-     * Reactions that dispatch to actions DUPLICATE the target action (no backward arrows).
+     * Layout per slice: [Action] → [State] → [Event] per action row
+     * State node placed between actions and events (one per slice).
+     * Reactions extend the flow to the right of events.
      */
     for (const slice of model.slices) {
-      // Wrap to next row if this slice would exceed max width
-      // (estimate: at least 3 columns worth of width needed)
       if (cx > PAD && cx > MAX_ROW_W) {
         rowBaseY += rowMaxH + GAP * 3;
         cx = PAD;
         rowMaxH = 0;
       }
       const sx = cx;
+      cx += SLICE_PAD + GAP; // offset content right for vertical label strip + gap
       const parts = slice.stateVars
         .map((v) => sv.get(v))
         .filter(Boolean) as StateNode[];
-      const evts = new Set<string>();
-      for (const st of parts) for (const e of st.events) evts.add(e.name);
-      sliceEvts.set(slice.name, evts);
-
-      const acts = parts.flatMap((st) => st.actions);
       const eDefs = parts.flatMap((st) => st.events);
-      const stateName = parts[0]?.name ?? "";
 
       let y = rowBaseY + PAD + H + GAP;
       let sliceRightX = cx;
+      const stateX = cx + W + GAP; // state column between actions and events
 
-      // Each action → its events on one row
-      for (const action of acts) {
-        let x = cx;
-        const ap = { x, y };
-        ns.push({
-          key: `a:${action.name}:${slice.name}`,
-          pos: ap,
-          type: "action",
-          label: action.name,
-          sub: action.invariants.length > 0 ? "guarded" : undefined,
-          line: action.line,
-          guards: action.invariants.length > 0 ? action.invariants : undefined,
-        });
-        x += W + GAP;
+      // Layout per state: [Action] → [State] → [Event]
+      // One state box per state, centered across that state's action rows
+      for (const st of parts) {
+        const stateYStart = y;
 
-        for (const en of action.emits) {
-          const ep = { x, y };
-          const projs = eventProjections.get(en);
+        for (const action of st.actions) {
+          let x = cx;
+          const ap = { x, y };
           ns.push({
-            key: `e:${en}:${slice.name}:${action.name}`,
-            pos: ep,
-            type: "event",
-            label: en,
-            line: eDefs.find((e) => e.name === en)?.line,
-            projections: projs,
-            reactions: eventReactions.get(en),
+            key: `a:${action.name}:${slice.name}`,
+            pos: ap,
+            type: "action",
+            label: action.name,
+            sub: action.invariants.length > 0 ? "guarded" : undefined,
+            line: action.line,
+            guards:
+              action.invariants.length > 0 ? action.invariants : undefined,
           });
-          es.push({
-            from: { x: ap.x + W, y: ap.y + H / 2 },
-            to: { x: ep.x, y: ep.y + H / 2 },
-            color: COLORS.action.border,
-          });
-          x += W + GAP;
+          x = stateX + W + GAP; // events start after state column
+          for (const en of action.emits) {
+            const ep = { x, y };
+            const projs = eventProjections.get(en);
+            ns.push({
+              key: `e:${en}:${slice.name}:${action.name}`,
+              pos: ep,
+              type: "event",
+              label: en,
+              line: eDefs.find((e) => e.name === en)?.line,
+              projections: projs,
+              reactions: eventReactions.get(en),
+            });
+            x += W + GAP;
+          }
+
+          sliceRightX = Math.max(sliceRightX, x);
+          y += H + GAP / 2;
         }
 
-        sliceRightX = Math.max(sliceRightX, x);
-        y += H + GAP / 2;
+        // State node centered vertically across this state's action rows
+        const centerY = (stateYStart + y - GAP / 2) / 2 - H / 2;
+        ns.push({
+          key: `s:${st.name}:${slice.name}`,
+          pos: { x: stateX, y: centerY },
+          type: "state",
+          label: st.name,
+        });
+
+        y += GAP / 2; // gap between states within the same slice
       }
 
       // Reactions — continue the flow to the right
       for (const r of slice.reactions) {
         if (r.isVoid) continue;
 
-        // Find which row the triggering event is on
         const trigNode = ns.find(
           (n) =>
             n.type === "event" &&
@@ -211,7 +225,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
         const rY = trigNode ? trigNode.pos.y : y;
         const rX = sliceRightX;
 
-        // Reaction box
         const rp = { x: rX, y: rY };
         ns.push({
           key: `r:${r.handlerName}:${slice.name}`,
@@ -221,7 +234,6 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           line: r.line,
         });
 
-        // Event → Reaction arrow
         if (trigNode) {
           es.push({
             from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
@@ -233,32 +245,52 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
         let nextX = rX + W + GAP;
 
-        // Dispatched actions — DUPLICATE as new nodes (forward flow, no backward arrows)
+        // Group dispatched actions by target state
+        const dispatchedByState = new Map<string, string[]>();
         for (const an of r.dispatches) {
-          const targetAction =
-            acts.find((a) => a.name === an) ??
-            model.states.flatMap((s) => s.actions).find((a) => a.name === an);
+          const ownerState = model.states.find((s) =>
+            s.actions.some((a) => a.name === an)
+          );
+          const sn = ownerState?.name ?? "?";
+          const list = dispatchedByState.get(sn) ?? [];
+          list.push(an);
+          dispatchedByState.set(sn, list);
+        }
 
-          if (targetAction) {
-            const dap = { x: nextX, y: rY };
+        // Render: [Reaction] → [Action] [State] [Event] per dispatched state
+        for (const [stateName, actionNames] of dispatchedByState) {
+          const actX = nextX;
+          const stX = nextX + W + GAP;
+          const evX = stX + W + GAP;
+          let dispY = rY;
+
+          for (const an of actionNames) {
+            const targetAction = model.states
+              .flatMap((s) => s.actions)
+              .find((a) => a.name === an);
+
+            const dap = { x: actX, y: dispY };
             ns.push({
               key: `a:${an}:dispatched:${r.handlerName}`,
               pos: dap,
               type: "action",
               label: an,
-              line: targetAction.line,
+              line: targetAction?.line,
             });
-            es.push({
-              from: { x: rp.x + W, y: rp.y + H / 2 },
-              to: { x: dap.x, y: dap.y + H / 2 },
-              color: COLORS.reaction.border,
-              dash: true,
-            });
-            nextX += W + GAP;
+            // Reaction → dispatched action arrow
+            if (dispY === rY) {
+              es.push({
+                from: { x: rp.x + W, y: rp.y + H / 2 },
+                to: { x: dap.x, y: dap.y + H / 2 },
+                color: COLORS.reaction.border,
+                dash: true,
+              });
+            }
 
-            // And its events
-            for (const en of targetAction.emits) {
-              const dep = { x: nextX, y: rY };
+            let ex = evX;
+            const emits = targetAction?.emits ?? [];
+            for (const en of emits) {
+              const dep = { x: ex, y: dispY };
               const projs = eventProjections.get(en);
               ns.push({
                 key: `e:${en}:dispatched:${r.handlerName}`,
@@ -268,14 +300,22 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 projections: projs,
                 reactions: eventReactions.get(en),
               });
-              es.push({
-                from: { x: dap.x + W, y: dap.y + H / 2 },
-                to: { x: dep.x, y: dep.y + H / 2 },
-                color: COLORS.action.border,
-              });
-              nextX += W + GAP;
+              ex += W + GAP;
             }
+            nextX = Math.max(nextX, ex);
+            dispY += H + GAP / 2;
           }
+
+          // State node centered across its dispatched action rows
+          const centerY = (rY + dispY - GAP / 2) / 2 - H / 2;
+          ns.push({
+            key: `s:${stateName}:dispatched:${r.handlerName}`,
+            pos: { x: stX, y: centerY },
+            type: "state",
+            label: stateName,
+          });
+
+          y = Math.max(y, dispY);
         }
 
         sliceRightX = Math.max(sliceRightX, nextX);
@@ -284,10 +324,9 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
       maxY = Math.max(maxY, y);
 
-      // Slice boundary with padding
       const sliceH = maxY - rowBaseY - PAD + GAP * 2;
       boxes.push({
-        label: `${slice.name.replace(/Slice$/i, "")} (${stateName})`,
+        label: slice.name,
         x: sx - GAP / 2,
         y: rowBaseY + PAD - GAP / 2,
         w: sliceRightX - sx + GAP,
@@ -297,14 +336,16 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       cx = sliceRightX + GAP * 2;
     }
 
-    // Standalone states
+    // Standalone states (not in slices)
     if (cx > PAD && cx > MAX_ROW_W) {
       rowBaseY += rowMaxH + GAP * 3;
       cx = PAD;
     }
     const claimed = new Set(model.slices.flatMap((sl) => sl.stateVars));
     for (const st of model.states.filter((s) => !claimed.has(s.varName))) {
+      const stX = cx + W + GAP;
       let y = rowBaseY + PAD;
+      const yS = y;
       for (const action of st.actions) {
         let x = cx;
         const ap = { x, y };
@@ -317,7 +358,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           line: action.line,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
-        x += W + GAP;
+        x = stX + W + GAP;
         for (const en of action.emits) {
           const ep = { x, y };
           const projs = eventProjections.get(en);
@@ -330,16 +371,18 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
             projections: projs,
             reactions: eventReactions.get(en),
           });
-          es.push({
-            from: { x: ap.x + W, y: ap.y + H / 2 },
-            to: { x: ep.x, y: ep.y + H / 2 },
-            color: COLORS.action.border,
-          });
           x += W + GAP;
         }
         cx = Math.max(cx, x);
         y += H + GAP / 2;
       }
+      const cY = (yS + y - GAP / 2) / 2 - H / 2;
+      ns.push({
+        key: `s:${st.name}:standalone`,
+        pos: { x: stX, y: cY },
+        type: "state",
+        label: st.name,
+      });
       maxY = Math.max(maxY, y);
       cx += GAP;
     }
@@ -356,7 +399,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
   if (model.states.length === 0 && model.projections.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-zinc-600">
-        Import from GitHub or generate with AI
+        Nothing to diagram here
       </div>
     );
   }
@@ -394,8 +437,8 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
       </div>
 
       <div
+        ref={svgContainerRef}
         className={`flex-1 overflow-hidden ${drag.current ? "cursor-grabbing" : "cursor-grab"}`}
-        onWheel={onWheel}
         onMouseDown={onDown}
         onMouseMove={onMove}
         onMouseUp={onUp}
@@ -422,18 +465,37 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                 strokeWidth={1.5}
                 strokeOpacity={0.4}
               />
+              {/* Vertical label strip on left — rounded left, flat right */}
+              <clipPath id={`clip-${b.label}`}>
+                <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
+              </clipPath>
+              <rect
+                x={b.x}
+                y={b.y}
+                width={SLICE_PAD + 8}
+                height={b.h}
+                rx={8}
+                fill="#a16207"
+                fillOpacity={0.25}
+                clipPath={`url(#clip-${b.label})`}
+              />
+              {/* Vertical text — clickable to navigate to slice definition */}
               <text
-                x={b.x + 8}
-                y={b.y + 12}
+                x={b.x + SLICE_PAD / 2}
+                y={b.y + b.h / 2}
                 fill={COLORS.state.text}
-                className="text-[10px] font-semibold"
+                className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
+                textAnchor="middle"
+                dominantBaseline="central"
+                transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
+                onClick={() => onClickElement?.(b.label)}
               >
                 {b.label}
               </text>
             </g>
           ))}
 
-          {/* Edges — all forward, no labels */}
+          {/* Edges */}
           {es.map((e, i) => (
             <path
               key={i}
@@ -461,7 +523,7 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
           </defs>
 
           {/* Nodes */}
-          {ns.map((n) => {
+          {ns.map((n, ni) => {
             const c = COLORS[n.type];
             const hasWarn = warnSet.has(n.label);
             const lines = splitLabel(n.label);
@@ -470,9 +532,9 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
 
             return (
               <g
-                key={n.key}
+                key={`${n.key}:${ni}`}
                 className="cursor-pointer"
-                onClick={() => n.line && onClickLine?.(n.line)}
+                onClick={() => onClickElement?.(n.label, n.type)}
                 onMouseEnter={(ev) => {
                   const parts = [n.label];
                   if (n.guards?.length)
@@ -508,29 +570,86 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                     {line}
                   </text>
                 ))}
-                {/* Top-right icons — left to right: reaction, projection, guard */}
+                {/* Top-right icons */}
                 {(() => {
                   let ix = n.pos.x + W - 13;
                   const icons: React.ReactNode[] = [];
                   if (n.guards?.length) {
                     icons.unshift(
-                      <g key="g" transform={`translate(${ix},${n.pos.y + 2})`}>
+                      <g
+                        key="g"
+                        transform={`translate(${ix - 2},${n.pos.y})`}
+                        className="cursor-pointer"
+                        pointerEvents="all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClickElement?.(n.guards![0], "guard");
+                        }}
+                        onMouseEnter={(ev) => {
+                          ev.stopPropagation();
+                          setTip({
+                            x: ev.clientX,
+                            y: ev.clientY,
+                            t: `Guards: ${n.guards!.join(", ")}`,
+                          });
+                        }}
+                        onMouseLeave={(ev) => {
+                          ev.stopPropagation();
+                          setTip(null);
+                        }}
+                      >
+                        <rect
+                          x="-1"
+                          y="-1"
+                          width="14"
+                          height="14"
+                          fill="transparent"
+                        />
                         <path
-                          d="M5 1L1 3v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V3L5 1z"
+                          d="M5 3L1 5v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V5L5 3z"
                           fill="none"
                           stroke="#ef4444"
                           strokeWidth="1.2"
                         />
                       </g>
                     );
-                    ix -= 12;
+                    ix -= 14;
                   }
                   if (n.projections?.length) {
                     icons.unshift(
-                      <g key="p" transform={`translate(${ix},${n.pos.y + 2})`}>
+                      <g
+                        key="p"
+                        transform={`translate(${ix - 2},${n.pos.y})`}
+                        className="cursor-pointer"
+                        pointerEvents="all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClickElement?.(n.projections![0], "projection");
+                        }}
+                        onMouseEnter={(ev) => {
+                          ev.stopPropagation();
+                          setTip({
+                            x: ev.clientX,
+                            y: ev.clientY,
+                            t: `Projection: ${n.projections!.join(", ")}`,
+                          });
+                        }}
+                        onMouseLeave={(ev) => {
+                          ev.stopPropagation();
+                          setTip(null);
+                        }}
+                      >
+                        {/* Invisible hit area */}
+                        <rect
+                          x="-1"
+                          y="-1"
+                          width="14"
+                          height="14"
+                          fill="transparent"
+                        />
                         <rect
                           x="1"
-                          y="1"
+                          y="3"
                           width="8"
                           height="6"
                           rx="1"
@@ -540,29 +659,57 @@ export function Diagram({ model, warnings, onClickLine }: Props) {
                         />
                         <line
                           x1="3"
-                          y1="7"
+                          y1="9"
                           x2="7"
-                          y2="7"
+                          y2="9"
                           stroke={COLORS.projection.text}
                           strokeWidth="1"
                         />
                         <line
                           x1="5"
-                          y1="7"
+                          y1="9"
                           x2="5"
-                          y2="9"
+                          y2="11"
                           stroke={COLORS.projection.text}
                           strokeWidth="1"
                         />
                       </g>
                     );
-                    ix -= 12;
+                    ix -= 14;
                   }
                   if (n.reactions?.length) {
                     icons.unshift(
-                      <g key="r" transform={`translate(${ix},${n.pos.y + 2})`}>
+                      <g
+                        key="r"
+                        transform={`translate(${ix - 2},${n.pos.y})`}
+                        className="cursor-pointer"
+                        pointerEvents="all"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onClickElement?.(n.reactions![0], "reaction");
+                        }}
+                        onMouseEnter={(ev) => {
+                          ev.stopPropagation();
+                          setTip({
+                            x: ev.clientX,
+                            y: ev.clientY,
+                            t: `Reactions: ${n.reactions!.join(", ")}`,
+                          });
+                        }}
+                        onMouseLeave={(ev) => {
+                          ev.stopPropagation();
+                          setTip(null);
+                        }}
+                      >
+                        <rect
+                          x="-1"
+                          y="-1"
+                          width="14"
+                          height="14"
+                          fill="transparent"
+                        />
                         <path
-                          d="M6 0L2 5h3L4 10L8 5H5L6 0z"
+                          d="M6 2L2 7h3L4 12L8 7H5L6 2z"
                           fill={COLORS.reaction.text}
                         />
                       </g>

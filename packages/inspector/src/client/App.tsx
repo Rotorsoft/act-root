@@ -4,7 +4,6 @@ import { ConnectDialog } from "./components/ConnectDialog.js";
 import { Header } from "./components/Header.js";
 import { TabNav, type Tab } from "./components/TabNav.js";
 import { queryClient, trpc, trpcClient } from "./trpc.js";
-import { Builder } from "./views/Builder.js";
 import { Correlation } from "./views/Correlation.js";
 import { EventLog } from "./views/EventLog.js";
 import { Monitor } from "./views/Monitor.js";
@@ -32,7 +31,6 @@ export function viewCaption(v: ViewState): string {
     streams: "Streams",
     correlation: "Correlation",
     monitor: "Monitor",
-    builder: "Builder",
   };
   return labels[v.tab];
 }
@@ -164,7 +162,6 @@ export default function App() {
                     onBlockedCount={setBlockedCount}
                   />
                 )}
-                {view.tab === "builder" && <Builder />}
               </div>
             </>
           )}

@@ -10,13 +10,12 @@
   "scripts": {
     "dev:server": "tsx watch --env-file=.env src/server/server.ts",
     "dev:client": "vite",
-    "dev": "concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm run dev:server' 'pnpm run dev:client'"
+    "dev": "concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm run dev:server' 'pnpm run dev:client'",
+    "build": "vite build"
   },
   "keywords": [],
   "license": "ISC",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.79.0",
-    "@monaco-editor/react": "^4.7.0",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@tanstack/react-query": "^5.90.21",
