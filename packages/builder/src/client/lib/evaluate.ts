@@ -128,8 +128,9 @@ function execute(files: FileTab[]): {
     const sorted = topoSort(
       files.filter(
         (f) =>
-          (f.path.endsWith(".ts") || f.path.endsWith(".tsx")) &&
+          f.path.endsWith(".ts") &&
           !f.path.endsWith(".d.ts") &&
+          !f.path.endsWith(".tsx") &&
           !f.path.includes("node_modules/")
       )
     );
@@ -152,21 +153,25 @@ function execute(files: FileTab[]): {
       const fileRequire = (mod: string) => resolveModule(mod, key);
 
       try {
+        // Strip __dirname/__filename declarations that would conflict with our injected vars
+        const cleanJs = js
+          .replace(/\bconst\s+__dirname\b/g, "var __dirname")
+          .replace(/\bconst\s+__filename\b/g, "var __filename");
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const fn = new Function(
           "require",
           "exports",
           "module",
-          "__filename",
-          "__dirname",
           `
           "use strict";
-          var process = { env: {}, cwd: function() { return "/"; }, exit: function() {} };
+          var __filename = "${file.path}";
+          var __dirname = ".";
+          var process = { env: {}, cwd: function() { return "/"; }, exit: function() {}, on: function() {}, off: function() {} };
           var Buffer = { from: function() { return ""; } };
-          ${js}
+          ${cleanJs}
         `
         );
-        fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
+        fn(fileRequire, fileExp, { exports: fileExp });
       } catch (evalErr) {
         // Eval failed — try regex-based extraction as fallback
         // Only warn for app files, not framework internals
@@ -408,7 +413,13 @@ export function extractModel(files: FileTab[]): {
   model: DomainModel;
   error?: string;
 } {
-  const { states, slices, projections, acts, error } = execute(files);
+  const result = execute(files);
+  const error = result.error;
+  // Filter out null/undefined entries that can occur from failed evals
+  const states = result.states.filter((s: any) => s && s._tag);
+  const slices = result.slices.filter((s: any) => s && s._tag);
+  const projections = result.projections.filter((p: any) => p && p._tag);
+  const acts = result.acts.filter((a: any) => a && a._tag);
 
   const model: DomainModel = {
     entries: [],
@@ -423,7 +434,7 @@ export function extractModel(files: FileTab[]): {
   const statesInSlices = new Set<string>();
 
   for (const s of slices) {
-    if (s._tag !== "Slice") continue;
+    if (!s || s._tag !== "Slice") continue;
 
     const sliceStates: any[] = [];
     const sliceStateNames: string[] = [];
@@ -473,7 +484,7 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const p of projections) {
-    if (p._tag !== "Projection") continue;
+    if (!p || p._tag !== "Projection") continue;
     model.projections.push({
       name: (p.target as string) || "projection",
       varName: (p.target as string) || "projection",
@@ -482,6 +493,7 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const s of states) {
+    if (!s) continue;
     const key = (s._modelKey as string) || (s.name as string);
     if (s._tag === "State" && !statesInSlices.has(key)) {
       addState(model, s);
@@ -489,7 +501,7 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const a of acts) {
-    if (a._tag !== "Act") continue;
+    if (!a || a._tag !== "Act") continue;
     for (const st of (a.states as Array<{
       _tag: string;
       name: string;

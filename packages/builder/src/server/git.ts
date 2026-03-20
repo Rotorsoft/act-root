@@ -148,19 +148,25 @@ export async function cloneAndCollect(
         }
       }
     }
+    // ── Follow imports ──────────────────────────────────────────────
+    const collected = new Map<string, string>();
+
     if (entryPaths.length === 0) {
-      throw new Error("No act() builder entry found in repository");
-    }
-    progress(
-      `Found ${entryPaths.length} entry point${entryPaths.length > 1 ? "s" : ""}`
-    );
-    for (const ep of entryPaths) {
-      progress(`  ✓ ${ep}`);
+      // No act() entry points — include all source files as-is
+      progress("No act() entry points found — loading all source files");
+      for (const [path, content] of tsFiles) {
+        if (!skipPaths.test(path)) collected.set(path, content);
+      }
+    } else {
+      progress(
+        `Found ${entryPaths.length} entry point${entryPaths.length > 1 ? "s" : ""}`
+      );
+      for (const ep of entryPaths) {
+        progress(`  ✓ ${ep}`);
+      }
     }
 
-    // ── Follow imports ──────────────────────────────────────────────
     progress("Resolving import graph...");
-    const collected = new Map<string, string>();
     const queue = [...entryPaths];
 
     while (queue.length > 0) {

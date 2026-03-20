@@ -264,11 +264,9 @@ export function Diagram({
       }
     }
 
-    const MAX_ROW_W = 800;
-    let cx = PAD,
-      rowBaseY = 0,
-      rowMaxH = 0,
-      maxY = 0;
+    // eslint-disable-next-line no-useless-assignment
+    let cx = PAD;
+    let globalY = 0;
 
     /**
      * Layout per slice: [Action] → [State] → [Event] per action row
@@ -276,20 +274,19 @@ export function Diagram({
      * Reactions extend the flow to the right of events.
      */
     for (const slice of viewModel.slices) {
-      if (cx > PAD && cx > MAX_ROW_W) {
-        rowBaseY += rowMaxH + GAP * 3;
-        cx = PAD;
-        rowMaxH = 0;
-      }
+      // Stack slices vertically — each slice starts at globalY
+      cx = PAD;
       const sx = cx;
-      cx += SLICE_PAD + GAP; // offset content right for vertical label strip + gap
+      const sliceTopY = globalY;
+      cx += SLICE_PAD + GAP;
       // Each partial state rendered separately (no merging)
       const parts = slice.stateVars
         .map((v) => sv.get(v))
         .filter(Boolean) as StateNode[];
 
-      let y = rowBaseY + PAD + H + GAP;
+      let y = sliceTopY + PAD + H + GAP;
       let sliceRightX = cx;
+      const sliceNodeStart = ns.length; // track where this slice's nodes begin
 
       // Build event→reaction lookup within this slice
       const sliceReactionByEvent = new Map<
@@ -537,29 +534,39 @@ export function Diagram({
         y = Math.max(y, rY + H + GAP / 2);
       }
 
-      maxY = Math.max(maxY, y);
-
-      const sliceH = maxY - rowBaseY - PAD + GAP * 2;
+      // Compute bounding box from ALL nodes placed for this slice
+      const bbox = {
+        minX: sx,
+        minY: sliceTopY + PAD,
+        maxX: sliceRightX,
+        maxY: y,
+      };
+      for (let ni = sliceNodeStart; ni < ns.length; ni++) {
+        const n = ns[ni];
+        const nw = n.type === "state" ? STATE_W : W;
+        const nh = n.type === "state" ? STATE_H : H;
+        bbox.minX = Math.min(bbox.minX, n.pos.x);
+        bbox.minY = Math.min(bbox.minY, n.pos.y);
+        bbox.maxX = Math.max(bbox.maxX, n.pos.x + nw);
+        bbox.maxY = Math.max(bbox.maxY, n.pos.y + nh);
+      }
+      const boxPad = GAP;
       boxes.push({
         label: slice.name,
         x: sx - GAP / 2,
-        y: rowBaseY + PAD - GAP / 2,
-        w: sliceRightX - sx + GAP,
-        h: sliceH,
+        y: bbox.minY - boxPad,
+        w: bbox.maxX - sx + GAP + boxPad,
+        h: bbox.maxY - bbox.minY + boxPad * 2,
       });
-      rowMaxH = Math.max(rowMaxH, sliceH + GAP);
-      cx = sliceRightX + GAP * 2;
+      globalY = bbox.maxY + GAP * 2;
     }
 
     // Standalone states (not in slices)
-    if (cx > PAD && cx > MAX_ROW_W) {
-      rowBaseY += rowMaxH + GAP * 3;
-      cx = PAD;
-    }
+    cx = PAD;
     const claimed = new Set(viewModel.slices.flatMap((sl) => sl.stateVars));
     for (const st of viewModel.states.filter((s) => !claimed.has(s.varName))) {
       const stX = cx + W + GAP;
-      let y = rowBaseY + PAD;
+      let y = globalY + PAD;
       const yS = y;
       // First: lay out all events vertically
       const evX = stX + W + GAP;
@@ -632,7 +639,7 @@ export function Diagram({
         aIdx++;
       }
 
-      maxY = Math.max(maxY, y);
+      globalY = Math.max(globalY, y);
       cx += GAP;
     }
 

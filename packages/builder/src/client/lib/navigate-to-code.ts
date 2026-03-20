@@ -6,6 +6,65 @@
 import type { FileTab } from "../types/index.js";
 import { openFileInEditor, revealWord } from "./vscode-init.js";
 
+/** Check if a position in source text falls inside a comment */
+function isInsideComment(content: string, matchIndex: number): boolean {
+  const before = content.slice(0, matchIndex);
+  const lastNl = before.lastIndexOf("\n");
+  const lineStart = lastNl >= 0 ? lastNl + 1 : 0;
+  const lineEnd = content.indexOf("\n", matchIndex);
+  const lineText = content
+    .slice(lineStart, lineEnd >= 0 ? lineEnd : content.length)
+    .trimStart();
+
+  // Line comment or JSDoc continuation
+  if (
+    lineText.startsWith("//") ||
+    lineText.startsWith("*") ||
+    lineText.startsWith("/*")
+  ) {
+    return true;
+  }
+
+  // Check if inside a block comment that started on a previous line
+  const lastBlockOpen = before.lastIndexOf("/*");
+  if (lastBlockOpen >= 0) {
+    const lastBlockClose = before.lastIndexOf("*/");
+    if (lastBlockClose < lastBlockOpen) return true; // unclosed block comment
+  }
+
+  return false;
+}
+
+/** Find the first non-comment match of a regex in content, return its index or -1 */
+function findNonCommentMatch(
+  content: string,
+  re: RegExp,
+  startFrom = 0
+): number {
+  const globalRe = new RegExp(
+    re.source,
+    re.flags.includes("g") ? re.flags : re.flags + "g"
+  );
+  globalRe.lastIndex = startFrom;
+  let match: RegExpExecArray | null;
+  while ((match = globalRe.exec(content)) !== null) {
+    if (!isInsideComment(content, match.index)) return match.index;
+  }
+  return -1;
+}
+
+/** Compute line/col for a character index in content */
+function positionAt(
+  content: string,
+  index: number
+): { line: number; col: number } {
+  const before = content.slice(0, index);
+  const line = before.split("\n").length;
+  const lastNl = before.lastIndexOf("\n");
+  const col = index - (lastNl >= 0 ? lastNl : 0);
+  return { line, col };
+}
+
 function buildPatterns(esc: string, type?: string): RegExp[] {
   const statePatterns = [new RegExp(`state\\(\\s*\\{\\s*(${esc})\\s*[}:,]`)];
   const actionPatterns = [new RegExp(`\\.on\\(\\s*\\{\\s*(${esc})\\s*[},:]`)];
@@ -79,10 +138,7 @@ export function navigateToCode(
       const actMatch = /\bact\s*\(\s*\)/.exec(file.content);
       void openFileInEditor(file.path).then(() => {
         if (actMatch) {
-          const before = file.content.slice(0, actMatch.index);
-          const line = before.split("\n").length;
-          const lastNl = before.lastIndexOf("\n");
-          const col = actMatch.index - (lastNl >= 0 ? lastNl : 0);
+          const { line, col } = positionAt(file.content, actMatch.index);
           setTimeout(() => revealWord(line, col, 3), 100);
         }
       });
@@ -96,10 +152,9 @@ export function navigateToCode(
     if (file) {
       const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       void openFileInEditor(file.path).then(() => {
-        // For events: find name inside .patch() block first, then .emits()
-        // For actions: find name inside .on() block
-        // Uses block search to handle nested braces
         const nameRe = new RegExp(`\\b${esc}\\b`, "g");
+        // For events: search inside .patch() block first, then .emits()
+        // For actions: search inside .on() block
         const blockOrder =
           type === "event"
             ? [".patch(", ".emits("]
@@ -110,29 +165,18 @@ export function navigateToCode(
         for (const block of blockOrder) {
           const blockStart = file.content.indexOf(block);
           if (blockStart < 0) continue;
-          // Search for the name after the block start
-          nameRe.lastIndex = blockStart;
-          const match = nameRe.exec(file.content);
-          if (match) {
-            const idx = match.index;
-            const before = file.content.slice(0, idx);
-            const line = before.split("\n").length;
-            const col =
-              idx -
-              (before.lastIndexOf("\n") >= 0 ? before.lastIndexOf("\n") : 0);
+          const idx = findNonCommentMatch(file.content, nameRe, blockStart);
+          if (idx >= 0) {
+            const { line, col } = positionAt(file.content, idx);
             setTimeout(() => revealWord(line, col, name.length), 100);
             return;
           }
         }
-        // Fallback: first occurrence of name in file
-        nameRe.lastIndex = 0;
-        const fallback = nameRe.exec(file.content);
-        if (fallback) {
-          const before = file.content.slice(0, fallback.index);
-          const line = before.split("\n").length;
-          const col =
-            fallback.index -
-            (before.lastIndexOf("\n") >= 0 ? before.lastIndexOf("\n") : 0);
+
+        // Fallback: first non-comment occurrence of name in file
+        const idx = findNonCommentMatch(file.content, nameRe);
+        if (idx >= 0) {
+          const { line, col } = positionAt(file.content, idx);
           setTimeout(() => revealWord(line, col, name.length), 100);
         }
       });
@@ -146,7 +190,6 @@ export function navigateToCode(
   for (const re of patterns) {
     for (let i = 0; i < files.length; i++) {
       if (!/\.tsx?$/.test(files[i].path)) continue;
-      // Search all matches, skipping those inside comments
       const content = files[i].content;
       const globalRe = new RegExp(
         re.source,
@@ -154,23 +197,7 @@ export function navigateToCode(
       );
       let match: RegExpExecArray | null;
       while ((match = globalRe.exec(content)) !== null) {
-        // Check if match is inside a line comment or block comment
-        const before = content.slice(0, match.index);
-        const lastNl = before.lastIndexOf("\n");
-        const lineText = content.slice(
-          lastNl >= 0 ? lastNl + 1 : 0,
-          content.indexOf("\n", match.index) >= 0
-            ? content.indexOf("\n", match.index)
-            : content.length
-        );
-        const trimmed = lineText.trimStart();
-        if (
-          trimmed.startsWith("//") ||
-          trimmed.startsWith("*") ||
-          trimmed.startsWith("/*")
-        ) {
-          continue; // skip comment lines
-        }
+        if (isInsideComment(content, match.index)) continue;
 
         const matchText = match[0];
         const nameOffsetInMatch = matchText.lastIndexOf(name);
@@ -178,10 +205,7 @@ export function navigateToCode(
           nameOffsetInMatch >= 0
             ? match.index + nameOffsetInMatch
             : match.index;
-        const beforeName = content.slice(0, nameStart);
-        const lastNlName = beforeName.lastIndexOf("\n");
-        const line = beforeName.split("\n").length;
-        const col = nameStart - (lastNlName >= 0 ? lastNlName : 0);
+        const { line, col } = positionAt(content, nameStart);
         void openFileInEditor(files[i].path).then(() => {
           setTimeout(() => revealWord(line, col, name.length), 100);
         });
