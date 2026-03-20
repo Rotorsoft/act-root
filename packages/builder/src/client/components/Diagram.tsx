@@ -1,4 +1,10 @@
-import { Maximize2, ZoomIn, ZoomOut } from "lucide-react";
+import {
+  Maximize2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DomainModel,
@@ -53,9 +59,17 @@ type Props = {
   model: DomainModel;
   warnings: ValidationWarning[];
   onClickElement?: (name: string, type?: string) => void;
+  editorCollapsed?: boolean;
+  onToggleEditor?: () => void;
 };
 
-export function Diagram({ model, warnings, onClickElement }: Props) {
+export function Diagram({
+  model,
+  warnings,
+  onClickElement,
+  editorCollapsed,
+  onToggleEditor,
+}: Props) {
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
     null
   );
@@ -446,6 +460,22 @@ export function Diagram({ model, warnings, onClickElement }: Props) {
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
       <div className="flex items-center gap-1.5 border-b border-zinc-800 bg-zinc-925 px-3 py-1">
+        {onToggleEditor && (
+          <>
+            <button
+              onClick={onToggleEditor}
+              className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              title={editorCollapsed ? "Show editor" : "Hide editor"}
+            >
+              {editorCollapsed ? (
+                <PanelLeftOpen size={13} />
+              ) : (
+                <PanelLeftClose size={13} />
+              )}
+            </button>
+            <div className="h-4 w-px bg-zinc-800" />
+          </>
+        )}
         <button
           onClick={() => setZoom((z) => Math.min(3, z * 1.25))}
           className="rounded p-1 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"

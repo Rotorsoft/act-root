@@ -337,11 +337,6 @@ export function Builder() {
         editorErrorCount={editorErrorCount}
         appendErrors={appendErrors}
         onDownload={() => downloadProject(files, projectName)}
-        editorCollapsed={editorCollapsed}
-        onToggleEditor={() => {
-          setEditorCollapsed((v) => !v);
-          setTimeout(triggerResize, 50);
-        }}
       />
 
       {showDialog && (
@@ -469,6 +464,11 @@ export function Builder() {
               model={model}
               warnings={warnings}
               onClickElement={handleClickElement}
+              editorCollapsed={editorCollapsed}
+              onToggleEditor={() => {
+                setEditorCollapsed((v) => !v);
+                setTimeout(triggerResize, 50);
+              }}
             />
           </div>
           {warnings.length > 0 && (
