@@ -15,6 +15,7 @@ function attachEmit(
   if (typeof handler === "string") {
     emits.push(handler);
   } else if (typeof handler === "function") {
+    // Strategy 1: string search for event names in handler source
     const src = String(handler);
     for (const eventName of Object.keys(info.events)) {
       if (
@@ -23,6 +24,40 @@ function attachEmit(
         src.includes(`\`${eventName}\``)
       ) {
         emits.push(eventName);
+      }
+    }
+
+    // Strategy 2: if string search found nothing, try safe-executing
+    // the handler with Proxy-based dummy args to capture event name
+    if (emits.length === 0) {
+      try {
+        const deepProxy: any = new Proxy(
+          {},
+          {
+            get: () => deepProxy,
+            apply: () => deepProxy,
+            has: () => true,
+          }
+        );
+        const proxyFn = new Proxy(function () {}, {
+          get: () => deepProxy,
+          apply: () => deepProxy,
+        });
+        const dummyArg = new Proxy(
+          {},
+          {
+            get: (_t, prop) => {
+              if (typeof prop === "string") return proxyFn;
+              return undefined;
+            },
+          }
+        );
+        const result = handler(dummyArg, dummyArg, dummyArg);
+        if (Array.isArray(result) && typeof result[0] === "string") {
+          emits.push(result[0]);
+        }
+      } catch {
+        // Proxy execution failed — keep emits empty
       }
     }
   }
@@ -223,6 +258,15 @@ export function mockAct() {
   return builder;
 }
 
+class InvariantError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = "InvariantError";
+  }
+}
+
+const cryptoMock = { randomUUID: () => "mock-uuid" };
+
 /** Module map for the evaluator's require() */
 export const MODULES: Record<string, Record<string, unknown>> = {
   "@rotorsoft/act": {
@@ -233,6 +277,34 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     store: () => ({}),
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
+    InvariantError,
   },
   zod: { z, ...z },
+  crypto: cryptoMock,
+  "node:crypto": cryptoMock,
 };
+
+/**
+ * Returns a deep Proxy for unknown modules — any property access
+ * returns a no-op function that also acts as a Proxy.
+ */
+export function unknownModuleProxy(): Record<string, unknown> {
+  const handler: ProxyHandler<any> = {
+    get(_target, prop) {
+      if (prop === Symbol.toPrimitive) return () => "";
+      if (prop === "default") return proxy;
+      return proxy;
+    },
+    apply() {
+      return proxy;
+    },
+    construct() {
+      return proxy;
+    },
+    has() {
+      return true;
+    },
+  };
+  const proxy: any = new Proxy(function () {}, handler);
+  return proxy;
+}
