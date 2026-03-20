@@ -59,27 +59,23 @@ function execute(files: FileTab[]): {
     };
 
     let _currentFile = "";
-    function wrapBuild(builder: any, type: string) {
-      const orig = builder.build;
-      builder.build = function (...args: any[]) {
-        const r = orig.apply(builder, args);
-        r._sourceFile = _currentFile;
-        __built__[type + "s"].push(r);
-        return r;
-      };
-      return builder;
-    }
+    const capture = (type: string) => (info: any) => {
+      info._sourceFile = _currentFile;
+      __built__[type + "s"].push(info);
+    };
 
     const actModule = { ...MODULES["@rotorsoft/act"] };
-    const origState = actModule.state as any;
-    const origSlice = actModule.slice as any;
-    const origProjection = actModule.projection as any;
-    const origAct = actModule.act as any;
-    actModule.state = (entry: any) => wrapBuild(origState(entry), "state");
-    actModule.slice = () => wrapBuild(origSlice(), "slice");
+    actModule.state = (entry: any) =>
+      (MODULES["@rotorsoft/act"].state as any)(entry, capture("state"));
+    actModule.slice = () =>
+      (MODULES["@rotorsoft/act"].slice as any)(capture("slice"));
     actModule.projection = (target: any) =>
-      wrapBuild(origProjection(target), "projection");
-    actModule.act = () => wrapBuild(origAct(), "act");
+      (MODULES["@rotorsoft/act"].projection as any)(
+        target,
+        capture("projection")
+      );
+    actModule.act = () =>
+      (MODULES["@rotorsoft/act"].act as any)(capture("act"));
 
     const pkgModules: Record<string, any> = {
       ...MODULES,
@@ -172,6 +168,12 @@ function execute(files: FileTab[]): {
         `
         );
         fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
+        // Log states/slices captured from this file
+        if (__built__.states.length > 0 || __built__.slices.length > 0) {
+          console.log(
+            `[act-builder] eval ok: ${file.path} (${__built__.states.length} states, ${__built__.slices.length} slices)`
+          );
+        }
       } catch (evalErr) {
         // Eval failed — try regex-based extraction as fallback
         console.warn(`[act-builder] eval failed: ${file.path}`, evalErr);

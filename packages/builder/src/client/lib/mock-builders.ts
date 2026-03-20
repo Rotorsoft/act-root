@@ -64,7 +64,10 @@ function attachEmit(
   (info.actions as any)[`__emits_${actionName}`] = emits;
 }
 
-export function mockState(entry: Record<string, any>) {
+export function mockState(
+  entry: Record<string, any>,
+  onBuild?: (info: any) => void
+) {
   const name = Object.keys(entry)[0];
   const info = {
     name,
@@ -96,7 +99,10 @@ export function mockState(entry: Record<string, any>) {
       };
     },
     snap: () => actionBuilder(_currentAction),
-    build: () => info,
+    build: () => {
+      onBuild?.(info);
+      return info;
+    },
   });
 
   return {
@@ -117,7 +123,7 @@ export function mockState(entry: Record<string, any>) {
   };
 }
 
-export function mockSlice() {
+export function mockSlice(onBuild?: (info: any) => void) {
   const info = {
     _tag: "Slice" as const,
     states: [] as any[],
@@ -158,12 +164,15 @@ export function mockSlice() {
         },
       };
     },
-    build: () => info,
+    build: () => {
+      onBuild?.(info);
+      return info;
+    },
   };
   return builder;
 }
 
-export function mockProjection(target?: string) {
+export function mockProjection(target?: string, onBuild?: (info: any) => void) {
   const info = {
     _tag: "Projection" as const,
     target: target || "projection",
@@ -187,12 +196,15 @@ export function mockProjection(target?: string) {
         },
       };
     },
-    build: () => info,
+    build: () => {
+      onBuild?.(info);
+      return info;
+    },
   };
   return builder;
 }
 
-export function mockAct() {
+export function mockAct(onBuild?: (info: any) => void) {
   const info = {
     _tag: "Act" as const,
     states: [] as any[],
@@ -252,6 +264,7 @@ export function mockAct() {
         start_correlations: noop,
         query_array: () => Promise.resolve([]),
       };
+      onBuild?.(actStub);
       return actStub;
     },
   };
