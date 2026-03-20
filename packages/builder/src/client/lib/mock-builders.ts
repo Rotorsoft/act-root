@@ -143,10 +143,38 @@ export function mockSlice(onBuild?: (info: any) => void) {
     on(eventName: string) {
       return {
         do(handler: any) {
+          // Capture dispatched action names by executing handler with mock app
+          const dispatches: string[] = [];
+          if (typeof handler === "function") {
+            try {
+              const mockApp = {
+                do: (actionName: string) => {
+                  if (
+                    typeof actionName === "string" &&
+                    !dispatches.includes(actionName)
+                  )
+                    dispatches.push(actionName);
+                  return Promise.resolve([]);
+                },
+              };
+              const mockEvent = new Proxy({} as Record<string, unknown>, {
+                get: (_, prop) =>
+                  prop === "stream"
+                    ? "mock"
+                    : prop === "data"
+                      ? new Proxy({}, { get: () => "" })
+                      : "",
+              });
+              handler(mockEvent, "mock", mockApp);
+            } catch (err) {
+              // handler threw — dispatches stays as captured so far
+              console.warn(`[act-builder] reaction handler failed:`, err);
+            }
+          }
           const reaction: ReactionNode = {
             event: eventName,
             handlerName: (handler?.name as string) || `on ${eventName}`,
-            dispatches: [],
+            dispatches,
             isVoid: false,
           };
           info.reactions.push(reaction);

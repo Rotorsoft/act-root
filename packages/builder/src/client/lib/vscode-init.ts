@@ -325,12 +325,41 @@ export function getWorkspaceErrors(): string[] {
     });
 }
 
-/** Reveal and position cursor at a word in the active editor */
-export function revealWord(line: number, col: number) {
+/** Reveal and highlight a single word in the active editor */
+let _prevDecorations: string[] = [];
+let _clearListener: { dispose(): void } | null = null;
+export function revealWord(line: number, col: number, len: number) {
   const editor = monaco.editor.getEditors()[0];
   if (editor) {
     editor.revealLineInCenter(line);
     editor.setPosition({ lineNumber: line, column: col });
+    // Clear any previous highlight + listener
+    if (_clearListener) {
+      _clearListener.dispose();
+      _clearListener = null;
+    }
+    _prevDecorations = editor.deltaDecorations(_prevDecorations, [
+      {
+        range: {
+          startLineNumber: line,
+          startColumn: col,
+          endLineNumber: line,
+          endColumn: col + len,
+        },
+        options: {
+          className: "act-builder-highlight",
+          inlineClassName: "act-builder-highlight-inline",
+        },
+      },
+    ]);
+    // Clear highlight on next click or keystroke
+    _clearListener = editor.onDidChangeCursorPosition(() => {
+      _prevDecorations = editor.deltaDecorations(_prevDecorations, []);
+      if (_clearListener) {
+        _clearListener.dispose();
+        _clearListener = null;
+      }
+    });
     editor.focus();
   }
 }

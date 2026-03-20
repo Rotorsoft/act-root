@@ -143,7 +143,7 @@ function execute(files: FileTab[]): {
 
       // Capture slice names from .withSlice(VAR) calls in act() chains
       const sliceNamesInAct: string[] = [];
-      const wsRe = /\.withSlice\(\s*(\w+)\s*\)/g;
+      const wsRe = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
       let wsm;
       while ((wsm = wsRe.exec(js)) !== null) {
         if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
@@ -169,7 +169,9 @@ function execute(files: FileTab[]): {
         fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
       } catch (evalErr) {
         // Eval failed — try regex-based extraction as fallback
-        console.warn(`[act-builder] eval failed: ${file.path}`, evalErr);
+        // Only warn for app files, not framework internals
+        if (!file.path.startsWith("libs/act/src/"))
+          console.warn(`[act-builder] eval failed: ${file.path}`, evalErr);
         const fallback = extractFromSource(file.content);
         for (const s of fallback.states) __built__.states.push(s);
         for (const s of fallback.slices) __built__.slices.push(s);
@@ -177,12 +179,16 @@ function execute(files: FileTab[]): {
         for (const a of fallback.acts) __built__.acts.push(a);
       }
 
-      // Tag slices with names from .withSlice(VAR) in act() chains
-      for (let ai = 0; ai < sliceNamesInAct.length; ai++) {
-        // Find the slice in __built__ that matches position in the act's slices
+      // Tag slices with names from .withSlice(VAR) — only for acts built in THIS file
+      if (sliceNamesInAct.length > 0) {
         for (const actObj of __built__.acts) {
+          if ((actObj._sourceFile as string) !== file.path) continue;
           const actSlices = (actObj.slices as any[]) || [];
-          if (ai < actSlices.length && !actSlices[ai]._varName) {
+          for (
+            let ai = 0;
+            ai < Math.min(sliceNamesInAct.length, actSlices.length);
+            ai++
+          ) {
             actSlices[ai]._varName = sliceNamesInAct[ai];
           }
         }
@@ -425,13 +431,14 @@ export function extractModel(files: FileTab[]): {
     for (const st of (s.states as Array<{
       _tag: string;
       name: string;
-      _varName?: string;
+      _modelKey?: string;
     }>) || []) {
       if (st._tag === "State") {
         sliceStates.push(st);
-        sliceStateNames.push(st.name);
-        statesInSlices.add(st.name);
         addState(model, st);
+        const key = (st._modelKey as string) || st.name;
+        sliceStateNames.push(key);
+        statesInSlices.add(key);
       }
     }
 
@@ -444,20 +451,9 @@ export function extractModel(files: FileTab[]): {
       }
     }
 
-    const sliceReactions: ReactionNode[] = [];
-    for (const r of (s.reactions as ReactionNode[]) || []) {
-      // Collect all actions from all states in the slice — reactions can
-      // dispatch to any state, including the one that emitted the event
-      const dispatches: string[] = [];
-      for (const st of sliceStates) {
-        for (const actionName of Object.keys(
-          (st.actions as Record<string, unknown>) || {}
-        )) {
-          if (!actionName.startsWith("__emits_")) dispatches.push(actionName);
-        }
-      }
-      sliceReactions.push({ ...r, dispatches });
-    }
+    // Reactions already have dispatches from mock handler execution
+    const sliceReactions: ReactionNode[] =
+      (s.reactions as ReactionNode[]) || [];
 
     const projNames: string[] = [];
     for (const p of (s.projections as Array<{
@@ -486,7 +482,8 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const s of states) {
-    if (s._tag === "State" && !statesInSlices.has(s.name as string)) {
+    const key = (s._modelKey as string) || (s.name as string);
+    if (s._tag === "State" && !statesInSlices.has(key)) {
       addState(model, s);
     }
   }
@@ -496,9 +493,10 @@ export function extractModel(files: FileTab[]): {
     for (const st of (a.states as Array<{
       _tag: string;
       name: string;
-      _varName?: string;
+      _modelKey?: string;
     }>) || []) {
-      if (st._tag === "State" && !statesInSlices.has(st.name))
+      const stKey = st._modelKey || st.name;
+      if (st._tag === "State" && !statesInSlices.has(stKey))
         addState(model, st);
     }
     model.orchestrator = {
@@ -524,7 +522,7 @@ export function extractModel(files: FileTab[]): {
     const actStateNames = new Set(
       ((a.states as any[]) || [])
         .filter((s: any) => s._tag === "State")
-        .map((s: any) => s.name as string)
+        .map((s: any) => (s._modelKey as string) || (s.name as string))
     );
     const actProjNames = new Set(
       ((a.projections as any[]) || [])
@@ -540,7 +538,7 @@ export function extractModel(files: FileTab[]): {
 
     model.entries.push({
       path: entryPath,
-      states: model.states.filter((s) => allStateNames.has(s.name)),
+      states: model.states.filter((s) => allStateNames.has(s.varName)),
       slices: entrySlices,
       projections: model.projections.filter((p) => actProjNames.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) || [],
@@ -561,13 +559,59 @@ export function extractModel(files: FileTab[]): {
     });
   }
 
+  // Structured model dump
+  for (const entry of model.entries) {
+    console.group(`[act-builder] Entry: ${entry.path}`);
+    for (const sl of entry.slices) {
+      console.group(`Slice: ${sl.name}`);
+      console.log("States:", sl.states);
+      for (const stKey of sl.stateVars) {
+        const st = entry.states.find((s) => s.varName === stKey);
+        if (st) {
+          console.group(`State: ${st.name} (${st.varName})`);
+          for (const a of st.actions) {
+            console.log(
+              `Action: ${a.name} → emits: [${a.emits.join(", ")}]${a.invariants.length ? ` guards: [${a.invariants.join(", ")}]` : ""}`
+            );
+          }
+          console.log(
+            "Events:",
+            st.events.map((e) => e.name)
+          );
+          console.groupEnd();
+        }
+      }
+      for (const r of sl.reactions) {
+        console.log(
+          `Reaction: ${r.handlerName} on ${r.event} → dispatches: [${r.dispatches.join(", ")}]${r.isVoid ? " (void)" : ""}`
+        );
+      }
+      console.groupEnd();
+    }
+    for (const p of entry.projections) {
+      console.log(`Projection: ${p.name} handles: [${p.handles.join(", ")}]`);
+    }
+    for (const st of entry.states.filter(
+      (s) => !entry.slices.some((sl) => sl.stateVars.includes(s.varName))
+    )) {
+      console.group(`Standalone State: ${st.name}`);
+      for (const a of st.actions) {
+        console.log(`Action: ${a.name} → emits: [${a.emits.join(", ")}]`);
+      }
+      console.groupEnd();
+    }
+    console.groupEnd();
+  }
+
   return { model };
 }
 
+let _stateIdx = 0;
 function addState(model: DomainModel, st: any): void {
-  // Merge builders with the same domain name (e.g. TicketCreation and
-  // TicketOperations both use state({ Ticket: ... })) into ONE entry.
+  // Each builder is a separate entry — NOT merged.
+  // Display name is the domain name, varName is unique for identity.
   const domainName = st.name as string;
+  const uniqueKey = `${domainName}:${_stateIdx++}`;
 
   const events: EventNode[] = [];
   for (const eventName of Object.keys(
@@ -591,23 +635,13 @@ function addState(model: DomainModel, st: any): void {
     actions.push({ name: actionName, emits, invariants });
   }
 
-  const existing = model.states.find((s) => s.name === domainName);
-  if (existing) {
-    // Merge actions and events into the existing entry (deduplicate by name)
-    const existingEventNames = new Set(existing.events.map((e) => e.name));
-    for (const ev of events) {
-      if (!existingEventNames.has(ev.name)) existing.events.push(ev);
-    }
-    const existingActionNames = new Set(existing.actions.map((a) => a.name));
-    for (const act of actions) {
-      if (!existingActionNames.has(act.name)) existing.actions.push(act);
-    }
-  } else {
-    model.states.push({
-      name: domainName,
-      varName: domainName,
-      events,
-      actions,
-    });
-  }
+  model.states.push({
+    name: domainName,
+    varName: uniqueKey,
+    events,
+    actions,
+    file: st._sourceFile as string | undefined,
+  });
+  // Tag the raw mock object so slice stateVars can reference it
+  st._modelKey = uniqueKey;
 }

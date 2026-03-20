@@ -256,7 +256,8 @@ export function Builder() {
 
   // ── Click element in diagram -> navigate to code ─────────────────────
   const handleClickElement = useCallback(
-    (name: string, type?: string) => navigateToCode(files, name, type),
+    (name: string, type?: string, file?: string) =>
+      navigateToCode(files, name, type, file),
     [files]
   );
 

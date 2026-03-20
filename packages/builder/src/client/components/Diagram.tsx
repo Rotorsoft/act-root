@@ -59,6 +59,7 @@ type N = {
   type: keyof typeof COLORS;
   label: string;
   sub?: string;
+  file?: string;
   projections?: string[];
   guards?: string[];
   reactions?: string[];
@@ -69,7 +70,7 @@ type Box = { label: string; x: number; y: number; w: number; h: number };
 type Props = {
   model: DomainModel;
   warnings: ValidationWarning[];
-  onClickElement?: (name: string, type?: string) => void;
+  onClickElement?: (name: string, type?: string, file?: string) => void;
   editorCollapsed?: boolean;
   onToggleEditor?: () => void;
 };
@@ -235,28 +236,10 @@ export function Diagram({
       }
       const sx = cx;
       cx += SLICE_PAD + GAP; // offset content right for vertical label strip + gap
-      // Merge states with the same domain name within the slice
-      const mergedMap = new Map<string, StateNode>();
-      for (const v of slice.stateVars) {
-        const found = sv.get(v);
-        if (!found) continue;
-        const existing = mergedMap.get(found.name);
-        if (existing) {
-          const existEvts = new Set(existing.events.map((e) => e.name));
-          const existActs = new Set(existing.actions.map((a) => a.name));
-          for (const ev of found.events)
-            if (!existEvts.has(ev.name)) existing.events.push(ev);
-          for (const ac of found.actions)
-            if (!existActs.has(ac.name)) existing.actions.push(ac);
-        } else {
-          mergedMap.set(found.name, {
-            ...found,
-            events: [...found.events],
-            actions: [...found.actions],
-          });
-        }
-      }
-      const parts = [...mergedMap.values()];
+      // Each partial state rendered separately (no merging)
+      const parts = slice.stateVars
+        .map((v) => sv.get(v))
+        .filter(Boolean) as StateNode[];
 
       let y = rowBaseY + PAD + H + GAP;
       let sliceRightX = cx;
@@ -280,7 +263,10 @@ export function Diagram({
        * at the state column (after actions).
        * If an event triggers a reaction IN THIS SLICE, continue the chain.
        */
+      let partIdx = 0;
       for (const st of parts) {
+        // Extra vertical separation between states within a slice
+        if (partIdx > 0) y += GAP * 2;
         const stateColX = cx + W + GAP;
         const eventColX = stateColX + STATE_W + GAP;
         const stateYStart = y;
@@ -295,6 +281,7 @@ export function Diagram({
             sub: action.invariants.length > 0 ? "guarded" : undefined,
             guards:
               action.invariants.length > 0 ? action.invariants : undefined,
+            file: st.file,
           });
 
           // Events after state column
@@ -305,6 +292,7 @@ export function Diagram({
               pos: { x: ex, y },
               type: "event",
               label: en,
+              file: st.file,
               projections: eventProjections.get(en),
               reactions: eventReactions.get(en),
             });
@@ -351,6 +339,7 @@ export function Diagram({
                   pos: dap,
                   type: "action",
                   label: an,
+                  file: targetState?.file,
                 });
                 // Reaction → dispatched action arrow
                 es.push({
@@ -369,6 +358,7 @@ export function Diagram({
                     pos: { x: nextX, y: y - (STATE_H - H) / 2 },
                     type: "state",
                     label: targetState.name,
+                    file: targetState.file,
                   });
                   nextX += STATE_W + GAP;
                 }
@@ -381,6 +371,7 @@ export function Diagram({
                     pos: { x: nextX, y },
                     type: "event",
                     label: den,
+                    file: targetState?.file,
                     projections: eventProjections.get(den),
                     reactions: eventReactions.get(den),
                   });
@@ -404,9 +395,11 @@ export function Diagram({
           pos: { x: stateColX, y: stateCY },
           type: "state",
           label: st.name,
+          file: st.file,
         });
 
         y += GAP / 2;
+        partIdx++;
       }
 
       // Remaining reactions not already placed inline
@@ -706,7 +699,7 @@ export function Diagram({
               <g
                 key={`${n.key}:${ni}`}
                 className="cursor-pointer"
-                onClick={() => onClickElement?.(n.label, n.type)}
+                onClick={() => onClickElement?.(n.label, n.type, n.file)}
                 onMouseEnter={(ev) => {
                   const parts = [n.label];
                   if (n.guards?.length)

@@ -66,7 +66,12 @@ function buildPatterns(esc: string, type?: string): RegExp[] {
   }
 }
 
-export function navigateToCode(files: FileTab[], name: string, type?: string) {
+export function navigateToCode(
+  files: FileTab[],
+  name: string,
+  type?: string,
+  targetFile?: string
+) {
   // Direct file navigation — open by path and highlight act()
   if (type === "file") {
     const file = files.find((f) => f.path === name || f.path.endsWith(name));
@@ -78,11 +83,61 @@ export function navigateToCode(files: FileTab[], name: string, type?: string) {
           const line = before.split("\n").length;
           const lastNl = before.lastIndexOf("\n");
           const col = actMatch.index - (lastNl >= 0 ? lastNl : 0);
-          setTimeout(() => revealWord(line, col), 100);
+          setTimeout(() => revealWord(line, col, 3), 100);
         }
       });
     }
     return;
+  }
+
+  // If targetFile provided, open that file and find the name with type-aware priority
+  if (targetFile) {
+    const file = files.find((f) => f.path === targetFile);
+    if (file) {
+      const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      void openFileInEditor(file.path).then(() => {
+        // For events: find name inside .patch() block first, then .emits()
+        // For actions: find name inside .on() block
+        // Uses block search to handle nested braces
+        const nameRe = new RegExp(`\\b${esc}\\b`, "g");
+        const blockOrder =
+          type === "event"
+            ? [".patch(", ".emits("]
+            : type === "action"
+              ? [".on("]
+              : [];
+
+        for (const block of blockOrder) {
+          const blockStart = file.content.indexOf(block);
+          if (blockStart < 0) continue;
+          // Search for the name after the block start
+          nameRe.lastIndex = blockStart;
+          const match = nameRe.exec(file.content);
+          if (match) {
+            const idx = match.index;
+            const before = file.content.slice(0, idx);
+            const line = before.split("\n").length;
+            const col =
+              idx -
+              (before.lastIndexOf("\n") >= 0 ? before.lastIndexOf("\n") : 0);
+            setTimeout(() => revealWord(line, col, name.length), 100);
+            return;
+          }
+        }
+        // Fallback: first occurrence of name in file
+        nameRe.lastIndex = 0;
+        const fallback = nameRe.exec(file.content);
+        if (fallback) {
+          const before = file.content.slice(0, fallback.index);
+          const line = before.split("\n").length;
+          const col =
+            fallback.index -
+            (before.lastIndexOf("\n") >= 0 ? before.lastIndexOf("\n") : 0);
+          setTimeout(() => revealWord(line, col, name.length), 100);
+        }
+      });
+      return;
+    }
   }
 
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -128,7 +183,7 @@ export function navigateToCode(files: FileTab[], name: string, type?: string) {
         const line = beforeName.split("\n").length;
         const col = nameStart - (lastNlName >= 0 ? lastNlName : 0);
         void openFileInEditor(files[i].path).then(() => {
-          setTimeout(() => revealWord(line, col), 100);
+          setTimeout(() => revealWord(line, col, name.length), 100);
         });
         return;
       }

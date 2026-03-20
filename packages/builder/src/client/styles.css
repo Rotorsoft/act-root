@@ -19,3 +19,10 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* Act Builder code navigation highlight */
+.act-builder-highlight {
+  background-color: rgba(255, 213, 79, 0.3) !important;
+  border: 1px solid rgba(255, 213, 79, 0.6);
+  border-radius: 2px;
+}

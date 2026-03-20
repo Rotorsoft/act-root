@@ -27,9 +27,10 @@ export type DomainModel = {
 
 export type StateNode = {
   name: string;
-  varName: string; // variable name holding this state (e.g., TicketCreation)
+  varName: string;
   events: EventNode[];
   actions: ActionNode[];
+  file?: string;
   line?: number;
 };
 
