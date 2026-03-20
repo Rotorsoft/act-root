@@ -7,7 +7,17 @@ export type ActNode = {
   line?: number;
 };
 
+export type EntryPoint = {
+  path: string; // source file path (e.g. "packages/calculator/src/calculator.ts")
+  states: StateNode[];
+  slices: SliceNode[];
+  projections: ProjectionNode[];
+  reactions: ReactionNode[];
+};
+
 export type DomainModel = {
+  entries: EntryPoint[];
+  // Flat views for backward compat (union of all entries)
   states: StateNode[];
   slices: SliceNode[];
   projections: ProjectionNode[];
@@ -68,6 +78,7 @@ export type ValidationWarning = {
 
 export function emptyModel(): DomainModel {
   return {
+    entries: [],
     states: [],
     slices: [],
     projections: [],

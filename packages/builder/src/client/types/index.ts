@@ -3,6 +3,7 @@ export type {
   ActNode,
   ActionNode,
   DomainModel,
+  EntryPoint,
   EventNode,
   ProjectionNode,
   ReactionNode,

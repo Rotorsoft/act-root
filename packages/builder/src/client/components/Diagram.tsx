@@ -8,6 +8,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DomainModel,
+  EntryPoint,
   StateNode,
   ValidationWarning,
 } from "../types/index.js";
@@ -20,8 +21,19 @@ const COLORS = {
   projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" },
 };
 
+/** Semi-transparent version of a hex color for box fills */
+const alpha = (hex: string, a: number) => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${a})`;
+};
+
 const W = 100,
   H = 36,
+  STATE_W = 80,
+  STATE_H = 80,
+  STATE_FONT = 10,
   GAP = 12,
   PAD = 10,
   SLICE_PAD = 24; // left padding inside slice for vertical label
@@ -73,9 +85,27 @@ export function Diagram({
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
     null
   );
+  const [activeTab, setActiveTab] = useState(0);
   const warnSet = new Set(warnings.map((w) => w.element).filter(Boolean));
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+
+  // Use the selected entry point's data, or fall back to flat model
+  const entry: EntryPoint | undefined = model.entries[activeTab];
+  const viewModel: DomainModel = entry
+    ? {
+        ...model,
+        states: entry.states,
+        slices: entry.slices,
+        projections: entry.projections,
+        reactions: entry.reactions,
+      }
+    : model;
+
+  // Reset tab when model changes
+  useEffect(() => {
+    if (activeTab >= model.entries.length) setActiveTab(0);
+  }, [model.entries.length, activeTab]);
   const drag = useRef(false);
   const start = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
@@ -156,13 +186,13 @@ export function Diagram({
     const es: E[] = [];
     const boxes: Box[] = [];
     const sv = new Map<string, StateNode>();
-    for (const s of model.states) sv.set(s.varName, s);
+    for (const s of viewModel.states) sv.set(s.varName, s);
 
     // Build projection lookup: event name → projection names
     const eventProjections = new Map<string, string[]>();
     const eventReactions = new Map<string, string[]>();
 
-    for (const slice of model.slices) {
+    for (const slice of viewModel.slices) {
       for (const r of slice.reactions) {
         if (r.isVoid) continue;
         const list = eventReactions.get(r.event) ?? [];
@@ -170,13 +200,13 @@ export function Diagram({
         eventReactions.set(r.event, list);
       }
     }
-    for (const r of model.reactions) {
+    for (const r of viewModel.reactions) {
       if (r.isVoid) continue;
       const list = eventReactions.get(r.event) ?? [];
       list.push(r.handlerName);
       eventReactions.set(r.event, list);
     }
-    for (const proj of model.projections) {
+    for (const proj of viewModel.projections) {
       for (const en of proj.handles) {
         const list = eventProjections.get(en) ?? [];
         list.push(proj.name);
@@ -195,7 +225,7 @@ export function Diagram({
      * State node placed between actions and events (one per slice).
      * Reactions extend the flow to the right of events.
      */
-    for (const slice of model.slices) {
+    for (const slice of viewModel.slices) {
       if (cx > PAD && cx > MAX_ROW_W) {
         rowBaseY += rowMaxH + GAP * 3;
         cx = PAD;
@@ -251,10 +281,10 @@ export function Diagram({
         }
 
         // State node centered vertically across this state's action rows
-        const centerY = (stateYStart + y - GAP / 2) / 2 - H / 2;
+        const centerY = (stateYStart + y - GAP / 2) / 2 - STATE_H / 2;
         ns.push({
           key: `s:${st.name}:${slice.name}`,
-          pos: { x: stateX, y: centerY },
+          pos: { x: stateX + (W - STATE_W) / 2, y: centerY },
           type: "state",
           label: st.name,
         });
@@ -298,7 +328,7 @@ export function Diagram({
         // Group dispatched actions by target state
         const dispatchedByState = new Map<string, string[]>();
         for (const an of r.dispatches) {
-          const ownerState = model.states.find((s) =>
+          const ownerState = viewModel.states.find((s) =>
             s.actions.some((a) => a.name === an)
           );
           const sn = ownerState?.name ?? "?";
@@ -357,10 +387,10 @@ export function Diagram({
           }
 
           // State node centered across its dispatched action rows
-          const centerY = (rY + dispY - GAP / 2) / 2 - H / 2;
+          const centerY = (rY + dispY - GAP / 2) / 2 - STATE_H / 2;
           ns.push({
             key: `s:${stateName}:dispatched:${r.handlerName}`,
-            pos: { x: stX, y: centerY },
+            pos: { x: stX + (W - STATE_W) / 2, y: centerY },
             type: "state",
             label: stateName,
           });
@@ -391,8 +421,8 @@ export function Diagram({
       rowBaseY += rowMaxH + GAP * 3;
       cx = PAD;
     }
-    const claimed = new Set(model.slices.flatMap((sl) => sl.stateVars));
-    for (const st of model.states.filter((s) => !claimed.has(s.varName))) {
+    const claimed = new Set(viewModel.slices.flatMap((sl) => sl.stateVars));
+    for (const st of viewModel.states.filter((s) => !claimed.has(s.varName))) {
       const stX = cx + W + GAP;
       let y = rowBaseY + PAD;
       const yS = y;
@@ -426,10 +456,10 @@ export function Diagram({
         cx = Math.max(cx, x);
         y += H + GAP / 2;
       }
-      const cY = (yS + y - GAP / 2) / 2 - H / 2;
+      const cY = (yS + y - GAP / 2) / 2 - STATE_H / 2;
       ns.push({
         key: `s:${st.name}:standalone`,
-        pos: { x: stX, y: cY },
+        pos: { x: stX + (W - STATE_W) / 2, y: cY },
         type: "state",
         label: st.name,
       });
@@ -440,13 +470,15 @@ export function Diagram({
     let mw = 0,
       mh = 0;
     for (const n of ns) {
-      mw = Math.max(mw, n.pos.x + W);
-      mh = Math.max(mh, n.pos.y + H);
+      const nw = n.type === "state" ? STATE_W : W;
+      const nh = n.type === "state" ? STATE_H : H;
+      mw = Math.max(mw, n.pos.x + nw);
+      mh = Math.max(mh, n.pos.y + nh);
     }
     return { ns, es, boxes, width: mw + 30, height: mh + 30 };
-  }, [model]);
+  }, [viewModel]);
 
-  if (model.states.length === 0 && model.projections.length === 0) {
+  if (viewModel.states.length === 0 && viewModel.projections.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-zinc-600">
         Nothing to diagram here
@@ -501,6 +533,27 @@ export function Diagram({
           {Math.round(zoom * 100)}%
         </span>
       </div>
+
+      {model.entries.length > 1 && (
+        <div className="flex gap-px border-b border-zinc-800 bg-zinc-900">
+          {model.entries.map((e, i) => (
+            <button
+              key={e.path}
+              onClick={() => {
+                setActiveTab(i);
+                setPan({ x: 0, y: 0 });
+              }}
+              className={`px-3 py-1 text-[10px] transition ${
+                i === activeTab
+                  ? "border-b-2 border-cyan-500 bg-zinc-950 text-cyan-400"
+                  : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              }`}
+            >
+              {e.path}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div
         ref={svgContainerRef}
@@ -599,9 +652,12 @@ export function Diagram({
           {ns.map((n, ni) => {
             const c = COLORS[n.type];
             const hasWarn = warnSet.has(n.label);
+            const isState = n.type === "state";
+            const nw = isState ? STATE_W : W;
+            const nh = isState ? STATE_H : H;
             const lines = splitLabel(n.label);
-            const lineH = 11;
-            const startY = n.pos.y + H / 2 - ((lines.length - 1) * lineH) / 2;
+            const lineH = isState ? STATE_FONT + 2 : 11;
+            const startY = n.pos.y + nh / 2 - ((lines.length - 1) * lineH) / 2;
 
             return (
               <g
@@ -623,29 +679,33 @@ export function Diagram({
                 <rect
                   x={n.pos.x}
                   y={n.pos.y}
-                  width={W}
-                  height={H}
-                  rx={4}
-                  fill={c.bg}
+                  width={nw}
+                  height={nh}
+                  rx={isState ? 6 : 4}
+                  fill={alpha(c.bg, 0.75)}
                   stroke={hasWarn ? "#ef4444" : c.border}
                   strokeWidth={hasWarn ? 2 : 1.5}
                 />
                 {lines.map((line, li) => (
                   <text
                     key={li}
-                    x={n.pos.x + W / 2}
+                    x={n.pos.x + nw / 2}
                     y={startY + li * lineH}
                     textAnchor="middle"
                     dominantBaseline="central"
                     fill={c.text}
-                    className="text-[8px] font-medium"
+                    className={
+                      isState
+                        ? "text-[10px] font-semibold"
+                        : "text-[8px] font-medium"
+                    }
                   >
                     {line}
                   </text>
                 ))}
                 {/* Top-right icons */}
                 {(() => {
-                  let ix = n.pos.x + W - 13;
+                  let ix = n.pos.x + nw - 13;
                   const icons: React.ReactNode[] = [];
                   if (n.guards?.length) {
                     icons.unshift(

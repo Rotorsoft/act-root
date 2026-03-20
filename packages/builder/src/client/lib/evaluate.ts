@@ -57,10 +57,12 @@ function execute(files: FileTab[]): {
       acts: [],
     };
 
+    let _currentFile = "";
     function wrapBuild(builder: any, type: string) {
       const orig = builder.build;
       builder.build = function (...args: any[]) {
         const r = orig.apply(builder, args);
+        r._sourceFile = _currentFile;
         __built__[type + "s"].push(r);
         return r;
       };
@@ -131,6 +133,7 @@ function execute(files: FileTab[]): {
     );
 
     for (const file of sorted) {
+      _currentFile = file.path;
       const js = transpile(file.content);
       const key = strip(file.path);
       const fileExp: Record<string, any> = {};
@@ -161,8 +164,9 @@ function execute(files: FileTab[]): {
         `
         );
         fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
-      } catch {
+      } catch (evalErr) {
         // Eval failed — try regex-based extraction as fallback
+        console.warn(`[act-builder] eval failed: ${file.path}`, evalErr);
         const fallback = extractFromSource(file.content);
         for (const s of fallback.states) __built__.states.push(s);
         for (const s of fallback.slices) __built__.slices.push(s);
@@ -186,6 +190,28 @@ function execute(files: FileTab[]): {
   } catch (e: unknown) {
     result.error = e instanceof Error ? e.message : String(e);
   }
+
+  // Diagnostic: log what was captured
+  console.log(
+    `[act-builder] extracted: ${result.states.length} states, ${result.slices.length} slices, ${result.projections.length} projections`,
+    result.states.map((s: Record<string, unknown>) => {
+      const events = s.events as Record<string, unknown> | undefined;
+      const actions = s.actions as Record<string, unknown> | undefined;
+      return {
+        name: s.name,
+        events: Object.keys(events ?? {}),
+        actions: Object.keys(actions ?? {}).filter(
+          (k) => !k.startsWith("__emits_")
+        ),
+        emits: Object.keys(actions ?? {})
+          .filter((k) => k.startsWith("__emits_"))
+          .map(
+            (k) =>
+              `${k.replace("__emits_", "")}→${JSON.stringify((actions ?? {})[k])}`
+          ),
+      };
+    })
+  );
 
   return result;
 }
@@ -395,6 +421,7 @@ export function extractModel(files: FileTab[]): {
   const { states, slices, projections, acts, error } = execute(files);
 
   const model: DomainModel = {
+    entries: [],
     states: [],
     slices: [],
     projections: [],
@@ -492,6 +519,50 @@ export function extractModel(files: FileTab[]): {
     for (const r of (a.reactions as ReactionNode[]) || []) {
       model.reactions.push(r);
     }
+
+    // Build per-entry-point view
+    const entryPath = (a._sourceFile as string) || "app.ts";
+    // Collect state/slice/projection names referenced by this act()
+    const actSliceNames = new Set(
+      ((a.slices as any[]) || []).map(
+        (s: any) =>
+          (s._varName as string) ||
+          (s.states as any[])?.map((st: any) => st.name).join(", ") ||
+          ""
+      )
+    );
+    const actStateNames = new Set(
+      ((a.states as any[]) || [])
+        .filter((s: any) => s._tag === "State")
+        .map((s: any) => s.name as string)
+    );
+    const actProjNames = new Set(
+      ((a.projections as any[]) || [])
+        .filter((p: any) => p._tag === "Projection")
+        .map((p: any) => (p.target as string) || "projection")
+    );
+
+    model.entries.push({
+      path: entryPath,
+      states: model.states.filter((s) => actStateNames.has(s.name)),
+      slices: model.slices.filter((s) => actSliceNames.has(s.name)),
+      projections: model.projections.filter((p) => actProjNames.has(p.name)),
+      reactions: (a.reactions as ReactionNode[]) || [],
+    });
+  }
+
+  // If no act() entries found but we have states/slices, create a single entry
+  if (
+    model.entries.length === 0 &&
+    (model.states.length > 0 || model.slices.length > 0)
+  ) {
+    model.entries.push({
+      path: "app",
+      states: model.states,
+      slices: model.slices,
+      projections: model.projections,
+      reactions: model.reactions,
+    });
   }
 
   return { model };
