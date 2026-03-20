@@ -483,7 +483,14 @@ export function Diagram({ model, warnings, onClickElement }: Props) {
         <svg
           width="100%"
           height="100%"
-          viewBox={`${-pan.x / zoom} ${-pan.y / zoom} ${sw / zoom} ${sh / zoom}`}
+          viewBox={(() => {
+            const el = svgContainerRef.current;
+            const cw = el?.clientWidth || sw;
+            const ch = el?.clientHeight || sh;
+            const vw = sw / zoom;
+            const vh = sh / zoom;
+            return `${-pan.x * (vw / cw)} ${-pan.y * (vh / ch)} ${vw} ${vh}`;
+          })()}
           className="select-none"
         >
           {/* Slice boundaries */}

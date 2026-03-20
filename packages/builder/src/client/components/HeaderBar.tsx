@@ -83,23 +83,6 @@ export function HeaderBar({
           closeTooltip="Close project"
         />
       )}
-      {filesExist && (
-        <Tooltip
-          title={editorCollapsed ? "Show editor" : "Hide editor"}
-          align="left"
-        >
-          <button
-            onClick={onToggleEditor}
-            className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-300"
-          >
-            {editorCollapsed ? (
-              <PanelLeftOpen size={13} />
-            ) : (
-              <PanelLeftClose size={13} />
-            )}
-          </button>
-        </Tooltip>
-      )}
       <div className="ml-auto flex items-center gap-2">
         {showNpmTerminal && (
           <button
@@ -140,6 +123,21 @@ export function HeaderBar({
         )}
         {filesExist && (
           <>
+            <Tooltip
+              title={editorCollapsed ? "Show editor" : "Hide editor"}
+              align="right"
+            >
+              <button
+                onClick={onToggleEditor}
+                className="flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] text-zinc-400 transition hover:border-zinc-600 hover:text-zinc-300"
+              >
+                {editorCollapsed ? (
+                  <PanelLeftOpen size={13} />
+                ) : (
+                  <PanelLeftClose size={13} />
+                )}
+              </button>
+            </Tooltip>
             <Tooltip
               title="Refine with AI"
               description="Send a prompt to modify the current code"
