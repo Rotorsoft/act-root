@@ -246,8 +246,8 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
           "explorer.openEditors.visible": 0,
           "typescript.tsserver.web.projectWideIntellisense.enabled": true,
           "typescript.tsserver.web.projectWideIntellisense.suppressSemanticErrors": false,
-          "typescript.disableAutomaticTypeAcquisition": true,
-          "typescript.tsserver.web.typeAcquisition.enabled": false,
+          "typescript.disableAutomaticTypeAcquisition": false,
+          "typescript.tsserver.web.typeAcquisition.enabled": true,
         }),
       },
       workspaceConfig: {

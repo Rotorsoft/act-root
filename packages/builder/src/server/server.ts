@@ -18,6 +18,7 @@ const server = createHTTPServer({
             const input = JSON.parse(body) as {
               prompt: string;
               currentCode?: string;
+              currentFiles?: { path: string; content: string }[];
               maxTokens?: number;
               model?: string;
               refine?: boolean;

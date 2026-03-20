@@ -6,7 +6,6 @@
 import * as monaco from "@codingame/monaco-vscode-editor-api";
 import type { InMemoryFileSystemProvider } from "@codingame/monaco-vscode-files-service-override";
 import { useEffect, useRef, useState } from "react";
-import { fetchNpmTypes } from "../lib/npm-types.js";
 import {
   closeAllEditors,
   initVscodeWorkbench,
@@ -133,11 +132,6 @@ export function CodeEditor({ files, onFileChange }: Props) {
 
         // Update tsconfig with workspace package path mappings
         await updateWorkspacePaths(fsRef.current!, files);
-
-        // Fetch .d.ts for npm dependencies not already provided
-        console.time("[act-builder] fetch npm types");
-        await fetchNpmTypes(fsRef.current!, files);
-        console.timeEnd("[act-builder] fetch npm types");
 
         triggerResize();
 

@@ -46,7 +46,11 @@ export const builderRouter = t.router({
       const response = await client.messages.create({
         model: DEFAULT_MODELS[0].id,
         max_tokens: 16384,
-        system: buildSystemPrompt(input.currentCode),
+        system: buildSystemPrompt(
+          input.currentCode
+            ? [{ path: "src/app.ts", content: input.currentCode }]
+            : undefined
+        ),
         messages: [{ role: "user", content: input.prompt }],
       });
 

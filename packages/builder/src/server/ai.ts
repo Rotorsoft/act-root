@@ -49,33 +49,55 @@ const API_CONTENT = loadSkillFile(SKILLS_DIR, "act-api.md");
 const SYSTEM_PROMPT = `You are an expert Act framework developer generating TypeScript code using @rotorsoft/act.
 
 ${SKILL_CONTENT ? `${SKILL_CONTENT}\n\n` : ""}${API_CONTENT ? `${API_CONTENT}\n\n` : ""}## Builder Output Rules
-- Generate a SINGLE file with all states, slices, projections, and orchestrator
+- Generate a MULTI-FILE project with proper folder structure
+- Each file is wrapped in a path-annotated fenced block: \`\`\`typescript:src/filename.ts
+- Typical structure:
+  - src/states.ts — state definitions with events, actions, patches
+  - src/slices.ts — slices wiring states with reactions
+  - src/projection.ts — projections for read-model updates (if needed)
+  - src/app.ts — orchestrator: act().withSlice(...).build()
 - Import from "@rotorsoft/act" and "zod" only
 - Add JSDoc comments explaining the domain model and key design decisions
-- Name reaction handlers with \`async function descriptiveName(...)\`
-- Return ONLY TypeScript code — no markdown fences, no explanation`;
+- Name reaction handlers with \`async function descriptiveName(...)\``;
 
 const CODE_ONLY_RULE = `
 
-CRITICAL OUTPUT RULE: Your response must contain ONLY valid TypeScript code. No English text, no explanations, no markdown fences, no comments about what you changed, no preamble, no postamble. Start your response with an import statement or a comment that is part of the code. If you include ANY natural language text outside of code comments, the system will break.`;
+CRITICAL OUTPUT RULE: Your response must contain ONLY path-annotated fenced code blocks. No English text outside of code blocks. Example format:
 
-export function buildSystemPrompt(
-  currentCode?: string,
-  refine?: boolean
-): string {
-  if (currentCode) {
-    return `${SYSTEM_PROMPT}${CODE_ONLY_RULE}
-
-Current code:
-\`\`\`typescript
-${currentCode}
+\`\`\`typescript:src/states.ts
+import { state } from "@rotorsoft/act";
+// ... state definitions
 \`\`\`
 
-${refine ? "Apply the user's requested changes. Return the COMPLETE updated file." : "Modify the existing code based on the user's request. Return the complete updated code."}`;
+\`\`\`typescript:src/app.ts
+import { act } from "@rotorsoft/act";
+// ... orchestrator
+\`\`\`
+
+If you include ANY natural language text outside of code blocks, the system will break.`;
+
+export function buildSystemPrompt(
+  currentFiles?: { path: string; content: string }[],
+  refine?: boolean
+): string {
+  if (currentFiles && currentFiles.length > 0) {
+    const fileBlocks = currentFiles
+      .filter(
+        (f) => !f.path.startsWith("node_modules/") && f.path.endsWith(".ts")
+      )
+      .map((f) => `\`\`\`typescript:${f.path}\n${f.content}\n\`\`\``)
+      .join("\n\n");
+
+    return `${SYSTEM_PROMPT}${CODE_ONLY_RULE}
+
+Current project files:
+${fileBlocks}
+
+${refine ? "Apply the user's requested changes. Return ALL project files (even unchanged ones) as path-annotated blocks." : "Modify the project based on the user's request. Return ALL files as path-annotated blocks."}`;
   }
   return `${SYSTEM_PROMPT}${CODE_ONLY_RULE}
 
-Generate complete Act TypeScript code from scratch.`;
+Generate a complete Act TypeScript project from scratch with proper multi-file structure.`;
 }
 
 // ─── Model configuration ─────────────────────────────────────────────
@@ -138,6 +160,7 @@ export function streamGenerate(
   input: {
     prompt: string;
     currentCode?: string;
+    currentFiles?: { path: string; content: string }[];
     maxTokens?: number;
     model?: string;
     refine?: boolean;
@@ -161,7 +184,7 @@ export function streamGenerate(
   const stream = client.messages.stream({
     model: input.model || DEFAULT_MODELS[0].id,
     max_tokens: input.maxTokens || 16384,
-    system: buildSystemPrompt(input.currentCode, input.refine),
+    system: buildSystemPrompt(input.currentFiles, input.refine),
     messages: [{ role: "user", content: input.prompt }],
   });
 

@@ -3,8 +3,6 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join, relative } from "path";
 import { promisify } from "util";
-import { extractTypesFromTarball } from "./tarball.js";
-
 const execAsync = promisify(exec);
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -235,81 +233,8 @@ export async function cloneAndCollect(
     }
     progress(`Collected ${collected.size} source + config files`);
 
-    // ── Fetch .d.ts files from npm for direct dependencies ────────
-    progress("Fetching type definitions...");
-    const depMap = new Map<string, { ver: string; dirs: string[] }>();
-    for (const [path, content] of allRepoFiles) {
-      if (!path.endsWith("package.json")) continue;
-      try {
-        const pkg = JSON.parse(content);
-        const dir =
-          path === "package.json" ? "" : path.replace(/\/package\.json$/, "");
-        const deps: Record<string, string> = { ...pkg.dependencies };
-        if (pkg.devDependencies) {
-          for (const [k, v] of Object.entries(
-            pkg.devDependencies as Record<string, string>
-          )) {
-            if (k.startsWith("@types/")) deps[k] = v;
-          }
-        }
-        if (!deps["@types/node"]) deps["@types/node"] = "latest";
-
-        for (const [name, ver] of Object.entries(deps)) {
-          if (typeof ver === "string" && ver.startsWith("workspace:")) continue;
-          if (
-            tsFiles.has(`libs/${name.replace(/^@[^/]+\//, "")}/src/index.ts`) ||
-            tsFiles.has(
-              `packages/${name.replace(/^@[^/]+\//, "")}/src/index.ts`
-            )
-          )
-            continue;
-          const existing = depMap.get(name);
-          if (existing) {
-            if (!existing.dirs.includes(dir)) existing.dirs.push(dir);
-          } else {
-            depMap.set(name, { ver, dirs: [dir] });
-          }
-        }
-      } catch {
-        // skip malformed
-      }
-    }
-
-    let typesCount = 0;
-    for (const [name] of depMap) {
-      try {
-        const { stdout: tarballUrl } = await execAsync(
-          `npm view ${name} dist.tarball 2>/dev/null`,
-          { timeout: 10000 }
-        );
-        const url = tarballUrl.trim();
-        if (!url) continue;
-
-        const { stdout: tarGzBuf } = await execAsync(`curl -sL "${url}"`, {
-          maxBuffer: 50 * 1024 * 1024,
-          timeout: 30000,
-          encoding: "buffer",
-        });
-        const typeFiles = extractTypesFromTarball(
-          tarGzBuf as unknown as Buffer
-        );
-        if (typeFiles.size === 0) continue;
-        const dirs = depMap.get(name)!.dirs;
-        for (const dir of dirs) {
-          const nmBase = dir
-            ? `${dir}/node_modules/${name}`
-            : `node_modules/${name}`;
-          for (const [filePath, content] of typeFiles) {
-            collected.set(`${nmBase}/${filePath}`, content);
-          }
-        }
-        typesCount++;
-        progress(`Types: ${name} (${typeFiles.size} files)`);
-      } catch {
-        // skip — client-side fetchNpmTypes will handle it
-      }
-    }
-    progress(`Fetched types for ${typesCount} packages`);
+    // Type definitions are handled by VS Code's built-in Automatic Type
+    // Acquisition (ATA) on the client side — no server-side fetching needed.
 
     // ── Build result ──────────────────────────────────────────────
     const files = [...collected.entries()].map(([path, content]) => ({

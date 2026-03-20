@@ -65,42 +65,14 @@ export async function clearWorkspace(fs: InMemoryFileSystemProvider) {
     // workspace dir might not exist yet
   }
   createdDirs = new Set<string>();
-  skippedDevDeps.length = 0;
 }
 
-/** Strip pnpm workspace protocol from package.json dependencies */
-/** DevDependencies skipped from ATA — exposed for the NpmTerminal UI */
-export const skippedDevDeps: string[] = [];
-
-/** Sanitize files for the virtual filesystem only (doesn't affect exports) */
+/** Sanitize package.json for the virtual filesystem (doesn't affect exports) */
 function sanitizeContent(path: string, content: string): string {
-  // Sanitize tsconfig files: force types to ["node"] and skipLibCheck.
-  // Trailing commas (valid JSONC) are stripped before JSON.parse.
-  if (
-    path.endsWith(".json") &&
-    !path.startsWith("node_modules/") &&
-    /tsconfig[^/]*\.json$/.test(path)
-  ) {
-    try {
-      const cleaned = content
-        .replace(/\/\/[^\n]*/g, "")
-        .replace(/,\s*([\]}])/g, "$1");
-      const tsconfig = JSON.parse(cleaned);
-      if (!tsconfig.compilerOptions) tsconfig.compilerOptions = {};
-      const co = tsconfig.compilerOptions;
-      co.types = ["node"];
-      co.skipLibCheck = true;
-      return JSON.stringify(tsconfig, null, 2);
-    } catch {
-      return content;
-    }
-  }
   if (path.endsWith("package.json") && !path.startsWith("node_modules/")) {
     try {
       const pkg = JSON.parse(content);
-      // Remove workspace: dependencies entirely — nassun would try to resolve
-      // them from npm and fail for private packages, breaking project init.
-      // Workspace packages are wired via node_modules shims in writeWorkspaceFile.
+      // Remove workspace: dependencies — nassun can't resolve private packages
       for (const field of ["dependencies", "devDependencies"]) {
         const deps = pkg[field];
         if (deps) {
@@ -111,10 +83,8 @@ function sanitizeContent(path: string, content: string): string {
           }
         }
       }
-      // Strip devDependencies except @types/* packages (which are type-only
-      // and essential for IntelliSense). This prevents ATA from resolving
-      // vitest → vite → rollup → 20 platform packages (saves 400+ npm fetches).
-      // The original files array is preserved for zip export.
+      // Strip devDependencies except @types/* — prevents ATA from resolving
+      // vitest → vite → rollup → 20+ platform packages (hundreds of npm fetches)
       if (pkg.devDependencies) {
         const kept: Record<string, string> = {};
         for (const [name, ver] of Object.entries(
@@ -122,8 +92,6 @@ function sanitizeContent(path: string, content: string): string {
         )) {
           if (name.startsWith("@types/")) {
             kept[name] = ver;
-          } else {
-            if (!skippedDevDeps.includes(name)) skippedDevDeps.push(name);
           }
         }
         if (Object.keys(kept).length > 0) {
@@ -150,7 +118,6 @@ export async function writeWorkspaceFile(
   await writeFile(fs, `${WORKSPACE}/${path}`, sanitized);
 
   // Auto-create node_modules entry for workspace sub-packages
-  // (skip if path is already under node_modules — server provided real types)
   if (
     !path.startsWith("node_modules/") &&
     path !== "package.json" &&
@@ -180,8 +147,7 @@ export async function writeWorkspaceFile(
 
 /**
  * Update the workspace tsconfig.json with paths mappings for all workspace
- * sub-packages. This avoids tsserver project boundary errors when one package
- * imports another through node_modules shims.
+ * sub-packages.
  */
 export async function updateWorkspacePaths(
   fs: InMemoryFileSystemProvider,

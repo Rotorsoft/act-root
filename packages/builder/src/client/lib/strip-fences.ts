@@ -1,3 +1,31 @@
+import type { FileTab } from "../types/index.js";
+
+/**
+ * Parse a multi-file AI response with path-annotated fenced blocks.
+ * Format: ```typescript:src/states.ts\n...code...\n```
+ * Falls back to a single src/app.ts file if no path annotations found.
+ */
+export function parseMultiFileResponse(raw: string): FileTab[] {
+  const files: FileTab[] = [];
+  const re = /```(?:typescript|ts):([^\n]+)\n([\s\S]*?)```/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw)) !== null) {
+    const path = m[1].trim();
+    const content = m[2].trim();
+    if (path && content) {
+      files.push({ path, content });
+    }
+  }
+  // Fallback: no path-annotated blocks — treat entire response as single file
+  if (files.length === 0) {
+    const code = stripFences(raw);
+    if (code.trim()) {
+      files.push({ path: "src/app.ts", content: code });
+    }
+  }
+  return files;
+}
+
 export function stripFences(code: string): string {
   let result = code.replace(/```(?:typescript|ts)?\s*\n/g, "");
   result = result.replace(/\n?```\s*$/g, "");

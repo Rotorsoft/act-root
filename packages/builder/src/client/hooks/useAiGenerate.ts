@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { stripFences } from "../lib/strip-fences.js";
+import { parseMultiFileResponse } from "../lib/strip-fences.js";
 import { trpc } from "../trpc.js";
 import type { FileTab } from "../types/index.js";
 
@@ -13,11 +13,7 @@ export interface AiGenerateContext {
 export interface AiGenerateCallbacks {
   onFreshStart: (projectName: string) => void;
   onCodeStreaming: (code: string) => void;
-  onComplete: (
-    finalCode: string,
-    isRefine: boolean,
-    truncated: boolean
-  ) => void;
+  onComplete: (files: FileTab[], isRefine: boolean, truncated: boolean) => void;
   onClearPrompt: () => void;
 }
 
@@ -106,7 +102,7 @@ export function useAiGenerate(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: trimmed,
-          currentCode: tsFiles.map((f) => f.content).join("\n\n") || undefined,
+          currentFiles: tsFiles.length > 0 ? tsFiles : undefined,
           maxTokens: effectiveMaxTokens,
           model: effectiveModel,
           refine: isRefine,
@@ -161,8 +157,8 @@ export function useAiGenerate(
         if (!isRefine) callbacks.onCodeStreaming(pendingCodeRef.current);
         pendingCodeRef.current = null;
       }
-      const finalCode = stripFences(code);
-      callbacks.onComplete(finalCode, isRefine, truncated);
+      const generatedFiles = parseMultiFileResponse(code);
+      callbacks.onComplete(generatedFiles, isRefine, truncated);
       setStreamingCode("");
       callbacks.onClearPrompt();
       if (truncated) {

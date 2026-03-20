@@ -16,8 +16,6 @@ export type HeaderBarProps = {
   projectName: string;
   projectSource: "sample" | "local" | "github" | "ai" | "";
   clearProject: () => void;
-  showNpmTerminal: boolean;
-  onShowNpmTerminal: () => void;
   generating: boolean;
   streamingCode: string;
   tokenUsage: { input: number; output: number } | null;
@@ -35,8 +33,6 @@ export function HeaderBar({
   projectName,
   projectSource,
   clearProject,
-  showNpmTerminal,
-  onShowNpmTerminal,
   generating,
   streamingCode,
   tokenUsage,
@@ -78,15 +74,6 @@ export function HeaderBar({
         />
       )}
       <div className="ml-auto flex items-center gap-2">
-        {showNpmTerminal && (
-          <button
-            onClick={onShowNpmTerminal}
-            className="flex items-center gap-1.5 text-[10px] text-cyan-400 transition hover:text-cyan-300"
-          >
-            <Loader2 size={11} className="animate-spin" />
-            Types
-          </button>
-        )}
         {generating && (
           <span className="flex items-center gap-1.5 text-[10px] text-purple-400">
             <Loader2 size={11} className="animate-spin" />

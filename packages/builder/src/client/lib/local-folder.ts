@@ -140,6 +140,100 @@ async function walkDirectory(
   }
 }
 
+// ─── Read type definitions from local node_modules ──────────────────
+
+const MAX_TYPE_BYTES = 20 * 1024 * 1024; // 20MB safety limit
+
+/**
+ * Selectively read .d.ts + package.json from node_modules for dependencies
+ * listed in the project's package.json files. This gives the built-in ATA
+ * pre-populated types so it doesn't need to fetch everything from npm.
+ */
+async function collectLocalTypes(
+  rootDir: FileSystemDirectoryHandle,
+  allFiles: Map<string, string>
+): Promise<Map<string, string>> {
+  const typeFiles = new Map<string, string>();
+
+  // Gather dependency names from all package.json files
+  const depNames = new Set<string>();
+  for (const [path, content] of allFiles) {
+    if (!path.endsWith("package.json")) continue;
+    try {
+      const pkg = JSON.parse(content);
+      for (const field of ["dependencies", "devDependencies"]) {
+        if (pkg[field] && typeof pkg[field] === "object") {
+          for (const name of Object.keys(
+            pkg[field] as Record<string, unknown>
+          )) {
+            depNames.add(name);
+            // Also add @types/ counterpart for non-scoped packages
+            if (!name.startsWith("@")) depNames.add(`@types/${name}`);
+          }
+        }
+      }
+    } catch {
+      // skip
+    }
+  }
+  // Always include @types/node
+  depNames.add("@types/node");
+
+  // Try to open node_modules
+  let nmDir: FileSystemDirectoryHandle;
+  try {
+    nmDir = await rootDir.getDirectoryHandle("node_modules");
+  } catch {
+    return typeFiles; // no node_modules — ATA will handle it
+  }
+
+  let totalBytes = 0;
+
+  async function walkTypePkg(dir: FileSystemDirectoryHandle, prefix: string) {
+    for await (const [name, handle] of (dir as any).entries() as AsyncIterable<
+      [string, FileSystemHandle]
+    >) {
+      if (totalBytes > MAX_TYPE_BYTES) return;
+      const path = `${prefix}/${name}`;
+      if (handle.kind === "directory") {
+        await walkTypePkg(handle as FileSystemDirectoryHandle, path);
+      } else if (
+        handle.kind === "file" &&
+        (name.endsWith(".d.ts") ||
+          name.endsWith(".d.cts") ||
+          name.endsWith(".d.mts") ||
+          name === "package.json")
+      ) {
+        const file = await (handle as FileSystemFileHandle).getFile();
+        if (totalBytes + file.size > MAX_TYPE_BYTES) return;
+        const text = await file.text();
+        totalBytes += text.length;
+        typeFiles.set(`node_modules${path}`, text);
+      }
+    }
+  }
+
+  for (const dep of depNames) {
+    if (totalBytes > MAX_TYPE_BYTES) break;
+    try {
+      if (dep.startsWith("@")) {
+        // Scoped package: @scope/name → node_modules/@scope/name
+        const [scope, name] = dep.split("/");
+        const scopeDir = await nmDir.getDirectoryHandle(scope);
+        const pkgDir = await scopeDir.getDirectoryHandle(name);
+        await walkTypePkg(pkgDir, `/${dep}`);
+      } else {
+        const pkgDir = await nmDir.getDirectoryHandle(dep);
+        await walkTypePkg(pkgDir, `/${dep}`);
+      }
+    } catch {
+      // package not installed locally — ATA will fetch it
+    }
+  }
+
+  return typeFiles;
+}
+
 // ─── Domain file filtering ──────────────────────────────────────────
 
 /** Domain file heuristic — mirrors router.ts isDomainFile */
@@ -188,9 +282,16 @@ async function extractFiles(
     throw new Error("No TypeScript files found in this folder");
   }
 
-  // Find act() entry points
+  // Read .d.ts from local node_modules so the editor has types immediately
+  const localTypes = await collectLocalTypes(dirHandle, tsFiles);
+  for (const [path, content] of localTypes) {
+    tsFiles.set(path, content);
+  }
+
+  // Find act() entry points (skip node_modules and .d.ts)
   const entryPaths: string[] = [];
   for (const [path, content] of tsFiles) {
+    if (path.startsWith("node_modules/") || path.endsWith(".d.ts")) continue;
     if (/\bact\s*\(\s*\)/.test(content) && /\.build\s*\(\s*\)/.test(content)) {
       entryPaths.push(path);
     }
@@ -262,6 +363,11 @@ async function extractFiles(
         }
       }
     }
+  }
+
+  // Include type files from node_modules alongside collected source files
+  for (const [path, content] of localTypes) {
+    if (!collected.has(path)) collected.set(path, content);
   }
 
   return [...collected.entries()].map(([path, content]) => ({ path, content }));

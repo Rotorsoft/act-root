@@ -4,7 +4,6 @@ import { CodeEditor } from "./components/CodeEditor.js";
 import { Diagram } from "./components/Diagram.js";
 import { HeaderBar } from "./components/HeaderBar.js";
 import { InlinePromptBar } from "./components/InlinePromptBar.js";
-import { NpmTerminal } from "./components/NpmTerminal.js";
 import { ProjectDialog } from "./components/ProjectDialog.js";
 import { PROMPT_TEMPLATES } from "./data/prompts.js";
 import { projectFiles, SAMPLE_APP } from "./data/sample-app.js";
@@ -61,17 +60,6 @@ export function Builder() {
   >("");
   const [showInlinePrompt, setShowInlinePrompt] = useState(false);
   const [editorCollapsed, setEditorCollapsed] = useState(false);
-
-  // NpmTerminal visibility — show when type downloads start
-  const [showNpmTerminal, setShowNpmTerminal] = useState(false);
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const { type } = (event as CustomEvent).detail as { type: string };
-      if (type === "start") setShowNpmTerminal(true);
-    };
-    window.addEventListener("npm-type-fetch", handler);
-    return () => window.removeEventListener("npm-type-fetch", handler);
-  }, []);
 
   const tsFiles = useMemo(
     () =>
@@ -170,22 +158,26 @@ export function Builder() {
           return prev.map((f, i) => (i === idx ? { ...f, content: code } : f));
         });
       },
-      onComplete: (finalCode: string, isRefine: boolean) => {
-        setFiles((prev) => {
-          if (isRefine) {
-            const idx = prev.findIndex((f) => f.path.endsWith(".ts"));
-            if (idx >= 0)
-              return prev.map((f, i) =>
-                i === idx ? { ...f, content: finalCode } : f
-              );
-          }
-          return [
-            { path: "src/app.ts", content: finalCode },
-            ...projectFiles(projectName),
-          ];
-        });
-        if (!isRefine) {
-          setProjectName((prev) => deriveProjectName(prev, finalCode));
+      onComplete: (generatedFiles: FileTab[], isRefine: boolean) => {
+        if (isRefine) {
+          // Merge generated files into existing project
+          setFiles((prev) => {
+            const updated = [...prev];
+            for (const gf of generatedFiles) {
+              const idx = updated.findIndex((f) => f.path === gf.path);
+              if (idx >= 0) {
+                updated[idx] = gf;
+              } else {
+                updated.push(gf);
+              }
+            }
+            return updated;
+          });
+        } else {
+          // Fresh generation — replace all files
+          setFiles([...generatedFiles, ...projectFiles(projectName)]);
+          const firstContent = generatedFiles[0]?.content ?? "";
+          setProjectName((prev) => deriveProjectName(prev, firstContent));
         }
       },
       onClearPrompt: () => {
@@ -332,8 +324,6 @@ export function Builder() {
         projectName={projectName}
         projectSource={projectSource}
         clearProject={clearProject}
-        showNpmTerminal={showNpmTerminal}
-        onShowNpmTerminal={() => setShowNpmTerminal(true)}
         generating={generating}
         streamingCode={streamingCode}
         tokenUsage={tokenUsage}
@@ -396,12 +386,6 @@ export function Builder() {
           models={aiModels}
         />
       )}
-
-      <NpmTerminal
-        show={showNpmTerminal}
-        onClose={() => setShowNpmTerminal(false)}
-        projectKey={projectName}
-      />
 
       {/* Main split */}
       <div
