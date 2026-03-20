@@ -1,7 +1,9 @@
 import {
+  ListTree,
   Maximize2,
   PanelLeftClose,
   PanelLeftOpen,
+  X,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -52,6 +54,49 @@ function splitLabel(label: string): string[] {
   return lines.length > 0 ? lines : [label];
 }
 
+function formatModelTree(model: DomainModel): string {
+  const lines: string[] = [];
+  for (const entry of model.entries) {
+    for (const sl of entry.slices) {
+      lines.push(`Slice: ${sl.name}`);
+      for (const stKey of sl.stateVars) {
+        const st = entry.states.find((s) => s.varName === stKey);
+        if (!st) continue;
+        lines.push(`  State: ${st.name}`);
+        for (const a of st.actions) {
+          let line = `    ${a.name} → [${a.emits.join(", ")}]`;
+          if (a.invariants.length)
+            line += ` guards: [${a.invariants.join(", ")}]`;
+          lines.push(line);
+        }
+      }
+      for (const r of sl.reactions) {
+        lines.push(
+          `  ⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
+        );
+      }
+    }
+    for (const p of entry.projections) {
+      lines.push(`Projection: ${p.name} [${p.handles.join(", ")}]`);
+    }
+    const sliceStateKeys = new Set(entry.slices.flatMap((sl) => sl.stateVars));
+    for (const st of entry.states.filter(
+      (s) => !sliceStateKeys.has(s.varName)
+    )) {
+      lines.push(`State: ${st.name}`);
+      for (const a of st.actions) {
+        lines.push(`  ${a.name} → [${a.emits.join(", ")}]`);
+      }
+    }
+    for (const r of entry.reactions) {
+      lines.push(
+        `⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
+      );
+    }
+  }
+  return lines.join("\n");
+}
+
 type Pos = { x: number; y: number };
 type N = {
   key: string;
@@ -86,6 +131,7 @@ export function Diagram({
     null
   );
   const [activeTab, setActiveTab] = useState(0);
+  const [showTree, setShowTree] = useState(false);
   const warnSet = new Set(warnings.map((w) => w.element).filter(Boolean));
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -95,6 +141,7 @@ export function Diagram({
   const viewModel: DomainModel = entry
     ? {
         ...model,
+        entries: [entry],
         states: entry.states,
         slices: entry.slices,
         projections: entry.projections,
@@ -272,24 +319,11 @@ export function Diagram({
         const stateYStart = y;
 
         for (const action of st.actions) {
-          // Action box
-          ns.push({
-            key: `a:${action.name}:${slice.name}`,
-            pos: { x: cx, y },
-            type: "action",
-            label: action.name,
-            sub: action.invariants.length > 0 ? "guarded" : undefined,
-            guards:
-              action.invariants.length > 0 ? action.invariants : undefined,
-            file: st.file,
-          });
-
-          // Events after state column
-          let ex = eventColX;
+          // Events stacked vertically after state column
           for (const en of action.emits) {
             ns.push({
               key: `e:${en}:${slice.name}:${action.name}`,
-              pos: { x: ex, y },
+              pos: { x: eventColX, y },
               type: "event",
               label: en,
               file: st.file,
@@ -307,7 +341,7 @@ export function Diagram({
               visitedEvents.add(en);
               visitedReactions.add(rDef.handlerName);
 
-              const rX = ex + W + GAP;
+              const rX = eventColX + W + GAP;
               const rp = { x: rX, y };
               ns.push({
                 key: `r:${rDef.handlerName}:${slice.name}`,
@@ -317,7 +351,7 @@ export function Diagram({
               });
               // Event → Reaction arrow
               es.push({
-                from: { x: ex + W, y: y + H / 2 },
+                from: { x: eventColX + W, y: y + H / 2 },
                 to: { x: rp.x, y: rp.y + H / 2 },
                 color: COLORS.reaction.border,
                 dash: true,
@@ -381,22 +415,72 @@ export function Diagram({
               sliceRightX = Math.max(sliceRightX, nextX);
             }
 
-            ex += W + GAP;
+            y += H + GAP / 2;
           }
-          sliceRightX = Math.max(sliceRightX, ex);
-          y += H + GAP / 2;
+          // If action had no events, still advance y
+          if (action.emits.length === 0) y += H + GAP / 2;
         }
 
-        // Place state box centered vertically across its action rows
+        // Center actions and state vertically across all event rows
         const stateYEnd = y - GAP / 2;
-        const stateCY = (stateYStart + stateYEnd) / 2 - STATE_H / 2;
+        const stCenterY = (stateYStart + stateYEnd) / 2;
+
+        // State box
         ns.push({
           key: `s:${st.name}:${slice.name}`,
-          pos: { x: stateColX, y: stateCY },
+          pos: { x: stateColX, y: stCenterY - STATE_H / 2 },
           type: "state",
           label: st.name,
           file: st.file,
         });
+
+        // Actions grouped and centered relative to state
+        const nActs = st.actions.length;
+        const actH = nActs * H + (nActs - 1) * (GAP / 2);
+        let actY = stCenterY - actH / 2;
+        const actionColors = [
+          "#60a5fa",
+          "#f97316",
+          "#a78bfa",
+          "#34d399",
+          "#fb7185",
+          "#fbbf24",
+        ];
+        let actionIdx = 0;
+        for (const action of st.actions) {
+          const color = actionColors[actionIdx % actionColors.length];
+          ns.push({
+            key: `a:${action.name}:${slice.name}`,
+            pos: { x: cx, y: actY },
+            type: "action",
+            label: action.name,
+            sub: action.invariants.length > 0 ? "guarded" : undefined,
+            guards:
+              action.invariants.length > 0 ? action.invariants : undefined,
+            file: st.file,
+          });
+          // Thin colored arrows from action to its events (first group only)
+          if (partIdx === 0) {
+            for (const en of action.emits) {
+              const evNode = ns.find(
+                (n) =>
+                  n.type === "event" &&
+                  n.label === en &&
+                  n.key.includes(slice.name)
+              );
+              if (evNode) {
+                es.push({
+                  from: { x: cx + W, y: actY + H / 2 },
+                  to: { x: eventColX, y: evNode.pos.y + H / 2 },
+                  color,
+                  dash: false,
+                });
+              }
+            }
+          }
+          actY += H + GAP / 2;
+          actionIdx++;
+        }
 
         y += GAP / 2;
         partIdx++;
@@ -460,41 +544,49 @@ export function Diagram({
       const stX = cx + W + GAP;
       let y = rowBaseY + PAD;
       const yS = y;
+      // First: lay out all events vertically
+      const evX = stX + W + GAP;
       for (const action of st.actions) {
-        let x = cx;
-        const ap = { x, y };
+        for (const en of action.emits) {
+          ns.push({
+            key: `e:${en}:standalone`,
+            pos: { x: evX, y },
+            type: "event",
+            label: en,
+            projections: eventProjections.get(en),
+            reactions: eventReactions.get(en),
+          });
+          y += H + GAP / 2;
+        }
+      }
+      if (y === yS) y += H + GAP / 2;
+      const totalEnd = y - GAP / 2;
+      const centerY = (yS + totalEnd) / 2;
+
+      // State centered
+      ns.push({
+        key: `s:${st.name}:standalone`,
+        pos: { x: stX + (W - STATE_W) / 2, y: centerY - STATE_H / 2 },
+        type: "state",
+        label: st.name,
+      });
+
+      // Actions grouped and centered vertically relative to state
+      const nActions = st.actions.length;
+      const actBlockH = nActions * H + (nActions - 1) * (GAP / 2);
+      let aY = centerY - actBlockH / 2;
+      for (const action of st.actions) {
         ns.push({
           key: `a:${action.name}:standalone`,
-          pos: ap,
+          pos: { x: cx, y: aY },
           type: "action",
           label: action.name,
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
-        x = stX + W + GAP;
-        for (const en of action.emits) {
-          const ep = { x, y };
-          const projs = eventProjections.get(en);
-          ns.push({
-            key: `e:${en}:standalone`,
-            pos: ep,
-            type: "event",
-            label: en,
-            projections: projs,
-            reactions: eventReactions.get(en),
-          });
-          x += W + GAP;
-        }
-        cx = Math.max(cx, x);
-        y += H + GAP / 2;
+        aY += H + GAP / 2;
       }
-      const cY = (yS + y - GAP / 2) / 2 - STATE_H / 2;
-      ns.push({
-        key: `s:${st.name}:standalone`,
-        pos: { x: stX + (W - STATE_W) / 2, y: cY },
-        type: "state",
-        label: st.name,
-      });
+
       maxY = Math.max(maxY, y);
       cx += GAP;
     }
@@ -564,6 +656,14 @@ export function Diagram({
         <span className="text-[9px] text-zinc-600">
           {Math.round(zoom * 100)}%
         </span>
+        <div className="h-4 w-px bg-zinc-800" />
+        <button
+          onClick={() => setShowTree((v) => !v)}
+          className={`rounded p-1 transition ${showTree ? "bg-zinc-700 text-cyan-400" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"}`}
+          title="Model tree"
+        >
+          <ListTree size={13} />
+        </button>
       </div>
 
       {model.entries.length > 1 && (
@@ -585,6 +685,25 @@ export function Diagram({
               {e.path}
             </button>
           ))}
+        </div>
+      )}
+
+      {showTree && (
+        <div className="flex max-h-[40%] flex-col border-b border-zinc-800 bg-zinc-950">
+          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1">
+            <span className="text-[10px] font-medium text-zinc-400">
+              Model Tree
+            </span>
+            <button
+              onClick={() => setShowTree(false)}
+              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            >
+              <X size={12} />
+            </button>
+          </div>
+          <pre className="flex-1 overflow-auto whitespace-pre px-3 py-2 font-mono text-[10px] leading-relaxed text-zinc-400 select-all">
+            {formatModelTree(viewModel)}
+          </pre>
         </div>
       )}
 

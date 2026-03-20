@@ -447,7 +447,7 @@ export function ProjectDialog({
                   {pt.label}
                 </button>
               ))}
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ml-auto flex flex-col items-end gap-1">
                 <select
                   value={effectiveModel}
                   onChange={(e) => onModelChange(e.target.value)}

@@ -559,50 +559,6 @@ export function extractModel(files: FileTab[]): {
     });
   }
 
-  // Structured model dump
-  for (const entry of model.entries) {
-    console.group(`[act-builder] Entry: ${entry.path}`);
-    for (const sl of entry.slices) {
-      console.group(`Slice: ${sl.name}`);
-      console.log("States:", sl.states);
-      for (const stKey of sl.stateVars) {
-        const st = entry.states.find((s) => s.varName === stKey);
-        if (st) {
-          console.group(`State: ${st.name} (${st.varName})`);
-          for (const a of st.actions) {
-            console.log(
-              `Action: ${a.name} → emits: [${a.emits.join(", ")}]${a.invariants.length ? ` guards: [${a.invariants.join(", ")}]` : ""}`
-            );
-          }
-          console.log(
-            "Events:",
-            st.events.map((e) => e.name)
-          );
-          console.groupEnd();
-        }
-      }
-      for (const r of sl.reactions) {
-        console.log(
-          `Reaction: ${r.handlerName} on ${r.event} → dispatches: [${r.dispatches.join(", ")}]${r.isVoid ? " (void)" : ""}`
-        );
-      }
-      console.groupEnd();
-    }
-    for (const p of entry.projections) {
-      console.log(`Projection: ${p.name} handles: [${p.handles.join(", ")}]`);
-    }
-    for (const st of entry.states.filter(
-      (s) => !entry.slices.some((sl) => sl.stateVars.includes(s.varName))
-    )) {
-      console.group(`Standalone State: ${st.name}`);
-      for (const a of st.actions) {
-        console.log(`Action: ${a.name} → emits: [${a.emits.join(", ")}]`);
-      }
-      console.groupEnd();
-    }
-    console.groupEnd();
-  }
-
   return { model };
 }
 
