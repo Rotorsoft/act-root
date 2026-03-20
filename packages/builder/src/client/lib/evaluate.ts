@@ -141,14 +141,12 @@ function execute(files: FileTab[]): {
       const fileExp: Record<string, any> = {};
       fileExports.set(key, fileExp);
 
-      // Capture slice variable names (slices have no registry name — only exception)
-      const sliceCountBefore = __built__.slices.length;
-      const sliceVarNames: string[] = [];
-      const sliceRe =
-        /(?:(?:var|let|const)\s+|exports\.)(\w+)\s*=\s*(?:\w+\.)?slice\s*\(/g;
-      let sm;
-      while ((sm = sliceRe.exec(js)) !== null) {
-        if (!sliceVarNames.includes(sm[1])) sliceVarNames.push(sm[1]);
+      // Capture slice names from .withSlice(VAR) calls in act() chains
+      const sliceNamesInAct: string[] = [];
+      const wsRe = /\.withSlice\(\s*(\w+)\s*\)/g;
+      let wsm;
+      while ((wsm = wsRe.exec(js)) !== null) {
+        if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
       }
 
       const fileRequire = (mod: string) => resolveModule(mod, key);
@@ -179,11 +177,14 @@ function execute(files: FileTab[]): {
         for (const a of fallback.acts) __built__.acts.push(a);
       }
 
-      // Tag newly built slices with their variable names (only exception)
-      for (let i = sliceCountBefore; i < __built__.slices.length; i++) {
-        const varIdx = i - sliceCountBefore;
-        if (varIdx < sliceVarNames.length) {
-          __built__.slices[i]._varName = sliceVarNames[varIdx];
+      // Tag slices with names from .withSlice(VAR) in act() chains
+      for (let ai = 0; ai < sliceNamesInAct.length; ai++) {
+        // Find the slice in __built__ that matches position in the act's slices
+        for (const actObj of __built__.acts) {
+          const actSlices = (actObj.slices as any[]) || [];
+          if (ai < actSlices.length && !actSlices[ai]._varName) {
+            actSlices[ai]._varName = sliceNamesInAct[ai];
+          }
         }
       }
     }
