@@ -34,7 +34,17 @@ async function extractTypesFromTarball(
     const header = tar.subarray(offset, offset + 512);
     if (header[0] === 0) break;
 
-    const fullName = decoder.decode(header.subarray(0, 100)).replace(/\0/g, "");
+    // UStar format: long paths split between prefix (345-500) and name (0-100)
+    // Only use prefix if UStar magic "ustar" is at bytes 257-262
+    const name = decoder.decode(header.subarray(0, 100)).replace(/\0/g, "");
+    const magic = decoder.decode(header.subarray(257, 263)).replace(/\0/g, "");
+    let fullName = name;
+    if (magic === "ustar") {
+      const prefix = decoder
+        .decode(header.subarray(345, 500))
+        .replace(/\0/g, "");
+      if (prefix) fullName = `${prefix}/${name}`;
+    }
 
     const sizeOctal = decoder
       .decode(header.subarray(124, 136))
@@ -50,6 +60,8 @@ async function extractTypesFromTarball(
       const path = fullName.replace(/^[^/]+\//, "");
       if (
         path.endsWith(".d.ts") ||
+        path.endsWith(".d.cts") ||
+        path.endsWith(".d.mts") ||
         path.endsWith(".d.ts.map") ||
         path === "package.json"
       ) {

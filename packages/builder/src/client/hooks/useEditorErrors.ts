@@ -14,15 +14,21 @@ export function useEditorErrors(files: FileTab[]): UseEditorErrorsReturn {
   filesRef.current = files;
 
   useEffect(() => {
-    if (files.length === 0) {
-      setEditorErrorCount(0);
-      return;
-    }
+    // Reset immediately on project change to clear stale errors
+    setEditorErrorCount(0);
+    if (files.length === 0) return;
+    // Delay first poll to let tsserver settle after project load
+    const timeout = setTimeout(() => {
+      setEditorErrorCount(getWorkspaceErrors().length);
+    }, 5000);
     const interval = setInterval(() => {
       if (filesRef.current.length === 0) return;
       setEditorErrorCount(getWorkspaceErrors().length);
     }, 2000);
-    return () => clearInterval(interval);
+    return () => {
+      clearTimeout(timeout);
+      clearInterval(interval);
+    };
   }, [files]);
 
   return { editorErrorCount, setEditorErrorCount };

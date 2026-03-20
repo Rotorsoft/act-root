@@ -123,6 +123,56 @@ export function mockState(
   };
 }
 
+/**
+ * Extract dispatched action names from a reaction handler.
+ * First tries runtime execution with a mock app; if the handler has
+ * conditional branches that prevent reaching app.do(), falls back to
+ * parsing the handler source for `.do("ActionName")` calls.
+ */
+function captureDispatches(handler: any): string[] {
+  const dispatches: string[] = [];
+  if (typeof handler !== "function") return dispatches;
+
+  // Strategy 1: execute handler with mock app to capture app.do() calls
+  try {
+    const mockApp = {
+      do: (actionName: string) => {
+        if (typeof actionName === "string" && !dispatches.includes(actionName))
+          dispatches.push(actionName);
+        return Promise.resolve([]);
+      },
+    };
+    const mockEvent = new Proxy({} as Record<string, unknown>, {
+      get: (_, prop) =>
+        prop === "stream"
+          ? "mock"
+          : prop === "data"
+            ? new Proxy({}, { get: () => "" })
+            : "",
+    });
+    const result = handler(mockEvent, "mock", mockApp);
+    // Swallow async rejections (handlers that access db, etc.)
+    if (result && typeof result.catch === "function") {
+      result.catch(() => {});
+    }
+  } catch {
+    // handler threw — dispatches stays as captured so far
+  }
+
+  // Strategy 2: if runtime missed dispatches (e.g. conditional branches),
+  // parse the handler source for .do("ActionName") calls as fallback
+  if (dispatches.length === 0) {
+    const src = String(handler);
+    const re = /\.do\(\s*["'](\w+)["']/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src)) !== null) {
+      if (!dispatches.includes(m[1])) dispatches.push(m[1]);
+    }
+  }
+
+  return dispatches;
+}
+
 export function mockSlice(onBuild?: (info: any) => void) {
   const info = {
     _tag: "Slice" as const,
@@ -143,34 +193,7 @@ export function mockSlice(onBuild?: (info: any) => void) {
     on(eventName: string) {
       return {
         do(handler: any) {
-          // Capture dispatched action names by executing handler with mock app
-          const dispatches: string[] = [];
-          if (typeof handler === "function") {
-            try {
-              const mockApp = {
-                do: (actionName: string) => {
-                  if (
-                    typeof actionName === "string" &&
-                    !dispatches.includes(actionName)
-                  )
-                    dispatches.push(actionName);
-                  return Promise.resolve([]);
-                },
-              };
-              const mockEvent = new Proxy({} as Record<string, unknown>, {
-                get: (_, prop) =>
-                  prop === "stream"
-                    ? "mock"
-                    : prop === "data"
-                      ? new Proxy({}, { get: () => "" })
-                      : "",
-              });
-              handler(mockEvent, "mock", mockApp);
-            } catch (err) {
-              // handler threw — dispatches stays as captured so far
-              console.warn(`[act-builder] reaction handler failed:`, err);
-            }
-          }
+          const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
             event: eventName,
             handlerName: (handler?.name as string) || `on ${eventName}`,
@@ -258,10 +281,11 @@ export function mockAct(onBuild?: (info: any) => void) {
     on(eventName: string) {
       return {
         do(handler: any) {
+          const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
             event: eventName,
             handlerName: (handler?.name as string) || `on ${eventName}`,
-            dispatches: [],
+            dispatches,
             isVoid: false,
           };
           info.reactions.push(reaction);
@@ -315,7 +339,13 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     slice: mockSlice,
     projection: mockProjection,
     act: mockAct,
-    store: () => ({}),
+    store: () => ({
+      seed: () => Promise.resolve(),
+      drop: () => Promise.resolve(),
+      commit: () => Promise.resolve([]),
+      query: () => Promise.resolve(0),
+      dispose: () => Promise.resolve(),
+    }),
     dispose: () => () => Promise.resolve(),
     ZodEmpty: z.record(z.string(), z.never()),
     InvariantError,

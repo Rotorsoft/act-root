@@ -316,116 +316,23 @@ export function Diagram({
         if (partIdx > 0) y += GAP * 2;
         const stateColX = cx + W + GAP;
         const eventColX = stateColX + STATE_W + GAP;
-        const stateYStart = y;
 
+        // ── Pre-calculate sizes for centering ──────────────────────
+        // Flatten all events across actions
+        const eventRows: { eventName: string; actionName: string }[] = [];
         for (const action of st.actions) {
-          // Events stacked vertically after state column
           for (const en of action.emits) {
-            ns.push({
-              key: `e:${en}:${slice.name}:${action.name}`,
-              pos: { x: eventColX, y },
-              type: "event",
-              label: en,
-              file: st.file,
-              projections: eventProjections.get(en),
-              reactions: eventReactions.get(en),
-            });
-
-            // If this event triggers a reaction IN THIS SLICE, continue chain
-            const rDef = sliceReactionByEvent.get(en);
-            if (
-              rDef &&
-              !visitedEvents.has(en) &&
-              !visitedReactions.has(rDef.handlerName)
-            ) {
-              visitedEvents.add(en);
-              visitedReactions.add(rDef.handlerName);
-
-              const rX = eventColX + W + GAP;
-              const rp = { x: rX, y };
-              ns.push({
-                key: `r:${rDef.handlerName}:${slice.name}`,
-                pos: rp,
-                type: "reaction",
-                label: rDef.handlerName,
-              });
-              // Event → Reaction arrow
-              es.push({
-                from: { x: eventColX + W, y: y + H / 2 },
-                to: { x: rp.x, y: rp.y + H / 2 },
-                color: COLORS.reaction.border,
-                dash: true,
-              });
-
-              // Dispatched actions → state → events continuing right
-              let nextX = rX + W + GAP;
-              for (const an of rDef.dispatches) {
-                const targetAction = viewModel.states
-                  .flatMap((s) => s.actions)
-                  .find((a) => a.name === an);
-                const targetState = viewModel.states.find((s) =>
-                  s.actions.some((a) => a.name === an)
-                );
-
-                const dap = { x: nextX, y };
-                ns.push({
-                  key: `a:${an}:dispatched:${rDef.handlerName}`,
-                  pos: dap,
-                  type: "action",
-                  label: an,
-                  file: targetState?.file,
-                });
-                // Reaction → dispatched action arrow
-                es.push({
-                  from: { x: rp.x + W, y: rp.y + H / 2 },
-                  to: { x: dap.x, y: dap.y + H / 2 },
-                  color: COLORS.reaction.border,
-                  dash: true,
-                });
-
-                nextX += W + GAP;
-
-                // Dispatched state box
-                if (targetState) {
-                  ns.push({
-                    key: `s:${targetState.name}:dispatched:${rDef.handlerName}`,
-                    pos: { x: nextX, y: y - (STATE_H - H) / 2 },
-                    type: "state",
-                    label: targetState.name,
-                    file: targetState.file,
-                  });
-                  nextX += STATE_W + GAP;
-                }
-
-                // Dispatched events
-                const emits = targetAction?.emits ?? [];
-                for (const den of emits) {
-                  ns.push({
-                    key: `e:${den}:dispatched:${rDef.handlerName}`,
-                    pos: { x: nextX, y },
-                    type: "event",
-                    label: den,
-                    file: targetState?.file,
-                    projections: eventProjections.get(den),
-                    reactions: eventReactions.get(den),
-                  });
-                  nextX += W + GAP;
-                }
-              }
-              sliceRightX = Math.max(sliceRightX, nextX);
-            }
-
-            y += H + GAP / 2;
+            eventRows.push({ eventName: en, actionName: action.name });
           }
-          // If action had no events, still advance y
-          if (action.emits.length === 0) y += H + GAP / 2;
         }
+        const nEvents = Math.max(eventRows.length, 1);
+        const evtBlockH = nEvents * H + (nEvents - 1) * (GAP / 2);
+        const nActs = st.actions.length;
+        const actBlockH = nActs * H + (nActs - 1) * (GAP / 2);
+        const blockH = Math.max(evtBlockH, actBlockH, STATE_H);
+        const stCenterY = y + blockH / 2;
 
-        // Center actions and state vertically across all event rows
-        const stateYEnd = y - GAP / 2;
-        const stCenterY = (stateYStart + stateYEnd) / 2;
-
-        // State box
+        // ── State box centered ─────────────────────────────────────
         ns.push({
           key: `s:${st.name}:${slice.name}`,
           pos: { x: stateColX, y: stCenterY - STATE_H / 2 },
@@ -434,10 +341,125 @@ export function Diagram({
           file: st.file,
         });
 
-        // Actions grouped and centered relative to state
-        const nActs = st.actions.length;
-        const actH = nActs * H + (nActs - 1) * (GAP / 2);
-        let actY = stCenterY - actH / 2;
+        // ── Events centered relative to state ──────────────────────
+        let evtY = stCenterY - evtBlockH / 2;
+        // Separate Y tracker for reaction continuations
+        let reactionY = evtY;
+        // Map event name → Y for arrow drawing
+        const eventYMap = new Map<string, number>();
+
+        for (const { eventName: en, actionName } of eventRows) {
+          ns.push({
+            key: `e:${en}:${slice.name}:${actionName}`,
+            pos: { x: eventColX, y: evtY },
+            type: "event",
+            label: en,
+            file: st.file,
+            projections: eventProjections.get(en),
+            reactions: eventReactions.get(en),
+          });
+          eventYMap.set(en, evtY);
+
+          // If this event triggers a reaction IN THIS SLICE, continue chain
+          const rDef = sliceReactionByEvent.get(en);
+          if (
+            rDef &&
+            !visitedEvents.has(en) &&
+            !visitedReactions.has(rDef.handlerName)
+          ) {
+            visitedEvents.add(en);
+            visitedReactions.add(rDef.handlerName);
+
+            // Align reaction with event when possible, else use reactionY
+            const rX = eventColX + W + GAP * 3;
+            const ry = Math.max(evtY, reactionY);
+            const rp = { x: rX, y: ry };
+            ns.push({
+              key: `r:${rDef.handlerName}:${slice.name}`,
+              pos: rp,
+              type: "reaction",
+              label: rDef.handlerName,
+            });
+            // Event → Reaction arrow
+            es.push({
+              from: { x: eventColX + W, y: evtY + H / 2 },
+              to: { x: rp.x, y: rp.y + H / 2 },
+              color: COLORS.reaction.border,
+              dash: true,
+            });
+
+            // Dispatched actions → state → events, one row per dispatch
+            const dispatchBaseX = rX + W + GAP;
+            let dispatchY = ry;
+            for (const an of rDef.dispatches) {
+              const targetAction = viewModel.states
+                .flatMap((s) => s.actions)
+                .find((a) => a.name === an);
+              const targetState = viewModel.states.find((s) =>
+                s.actions.some((a) => a.name === an)
+              );
+
+              let nextX = dispatchBaseX;
+              const dap = { x: nextX, y: dispatchY };
+              ns.push({
+                key: `a:${an}:dispatched:${rDef.handlerName}`,
+                pos: dap,
+                type: "action",
+                label: an,
+                file: targetState?.file,
+              });
+              // Reaction → dispatched action arrow
+              es.push({
+                from: { x: rp.x + W, y: rp.y + H / 2 },
+                to: { x: dap.x, y: dap.y + H / 2 },
+                color: COLORS.reaction.border,
+                dash: true,
+              });
+
+              nextX += W + GAP;
+
+              // Dispatched state box
+              let rowH = H;
+              if (targetState) {
+                ns.push({
+                  key: `s:${targetState.name}:dispatched:${rDef.handlerName}:${an}`,
+                  pos: { x: nextX, y: dispatchY - (STATE_H - H) / 2 },
+                  type: "state",
+                  label: targetState.name,
+                  file: targetState.file,
+                });
+                nextX += STATE_W + GAP;
+                rowH = STATE_H;
+              }
+
+              // Dispatched events
+              const emits = targetAction?.emits ?? [];
+              for (const den of emits) {
+                ns.push({
+                  key: `e:${den}:dispatched:${rDef.handlerName}:${an}`,
+                  pos: { x: nextX, y: dispatchY },
+                  type: "event",
+                  label: den,
+                  file: targetState?.file,
+                  projections: eventProjections.get(den),
+                  reactions: eventReactions.get(den),
+                });
+                nextX += W + GAP;
+              }
+              sliceRightX = Math.max(sliceRightX, nextX);
+              dispatchY += rowH + GAP / 2;
+            }
+            reactionY = Math.max(reactionY, dispatchY);
+            if (rDef.dispatches.length === 0) {
+              reactionY = ry + H + GAP / 2;
+            }
+          }
+
+          evtY += H + GAP / 2;
+        }
+
+        // ── Actions centered relative to state ─────────────────────
+        let actY = stCenterY - actBlockH / 2;
         const actionColors = [
           "#60a5fa",
           "#f97316",
@@ -461,16 +483,11 @@ export function Diagram({
           });
           // Subtle colored arrows from action to its events
           for (const en of action.emits) {
-            const evNode = ns.find(
-              (n) =>
-                n.type === "event" &&
-                n.label === en &&
-                n.key.includes(slice.name)
-            );
-            if (evNode) {
+            const ey = eventYMap.get(en);
+            if (ey !== undefined) {
               es.push({
                 from: { x: cx + W, y: actY + H / 2 },
-                to: { x: eventColX, y: evNode.pos.y + H / 2 },
+                to: { x: eventColX, y: ey + H / 2 },
                 color,
                 dash: false,
               });
@@ -480,7 +497,9 @@ export function Diagram({
           actionIdx++;
         }
 
-        y += GAP / 2;
+        // Advance y past this state block and any reaction rows
+        y += blockH + GAP / 2;
+        y = Math.max(y, reactionY);
         partIdx++;
       }
 
@@ -495,7 +514,7 @@ export function Diagram({
             n.key.includes(slice.name)
         );
         const rY = trigNode ? trigNode.pos.y : y;
-        const rX = sliceRightX;
+        const rX = sliceRightX + GAP * 2;
 
         const rp = { x: rX, y: rY };
         ns.push({

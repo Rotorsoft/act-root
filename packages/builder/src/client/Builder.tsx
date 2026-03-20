@@ -89,6 +89,8 @@ export function Builder() {
       setShowGitImport(false);
       setShowPrompt(false);
       setShowDialog(false);
+      setPromptInput("");
+      setShowInlinePrompt(false);
       setEditorErrorCount(0);
       const url = gitUrlRef.current.trim();
       if (url) {
@@ -112,6 +114,8 @@ export function Builder() {
       setShowDialog(false);
       setProjectName(result.name);
       setProjectSource("local");
+      setPromptInput("");
+      setShowInlinePrompt(false);
       setEditorErrorCount(0);
     },
     [setEditorErrorCount]
@@ -269,7 +273,10 @@ export function Builder() {
     setShowGitImport(false);
     setShowPrompt(false);
     setShowDialog(false);
-  }, []);
+    setPromptInput("");
+    setShowInlinePrompt(false);
+    setEditorErrorCount(0);
+  }, [setEditorErrorCount]);
 
   // ── Clear project ───────────────────────────────────────────────────
   const clearProject = useCallback(() => {

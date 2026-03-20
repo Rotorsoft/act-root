@@ -11,10 +11,12 @@ import {
   closeAllEditors,
   initVscodeWorkbench,
   openFileInEditor,
+  resetForNewProject,
   triggerResize,
   WORKSPACE,
 } from "../lib/vscode-init.js";
 import {
+  clearWorkspace,
   updateWorkspacePaths,
   writeWorkspaceFile,
 } from "../lib/workspace-fs.js";
@@ -101,6 +103,11 @@ export function CodeEditor({ files, onFileChange }: Props) {
         await closeAllEditors();
         console.timeEnd("[act-builder] close editors");
 
+        // Clear old project files from virtual filesystem
+        console.time("[act-builder] clear workspace");
+        await clearWorkspace(fsRef.current!);
+        console.timeEnd("[act-builder] clear workspace");
+
         console.time("[act-builder] write files");
         const sorted = [...files].sort((a, b) => {
           const rank = (p: string) =>
@@ -114,6 +121,10 @@ export function CodeEditor({ files, onFileChange }: Props) {
         for (const f of sorted) {
           await writeWorkspaceFile(fsRef.current!, f.path, f.content);
         }
+
+        // Dispose stale models and restart tsserver for the new project
+        const newPaths = new Set(files.map((f) => f.path));
+        await resetForNewProject(newPaths);
 
         console.timeEnd("[act-builder] write files");
         console.log(

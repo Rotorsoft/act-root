@@ -161,7 +161,7 @@ function execute(files: FileTab[]): {
           "__dirname",
           `
           "use strict";
-          var process = { env: {}, cwd: function() { return "/"; } };
+          var process = { env: {}, cwd: function() { return "/"; }, exit: function() {} };
           var Buffer = { from: function() { return ""; } };
           ${js}
         `

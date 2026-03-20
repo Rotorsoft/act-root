@@ -310,6 +310,30 @@ export async function closeAllEditors() {
   await vscode.commands.executeCommand("workbench.action.closeAllEditors");
 }
 
+/**
+ * Dispose Monaco models for workspace files that are NOT in the new project,
+ * then restart tsserver so it drops all stale project state.
+ */
+export async function resetForNewProject(newFilePaths: Set<string>) {
+  const wsPrefix = `file://${WORKSPACE}/`;
+  for (const model of monaco.editor.getModels()) {
+    const uri = model.uri.toString();
+    if (!uri.startsWith(wsPrefix)) continue;
+    const relPath = uri.slice(wsPrefix.length);
+    if (!newFilePaths.has(relPath)) {
+      model.dispose();
+    } else {
+      monaco.editor.setModelMarkers(model, "typescript", []);
+    }
+  }
+  // Restart tsserver to drop all cached project state from the old project
+  try {
+    await vscode.commands.executeCommand("typescript.restartTsServer");
+  } catch {
+    // command may not be available
+  }
+}
+
 /** Get all Monaco editor markers (errors) for workspace files */
 export function getWorkspaceErrors(): string[] {
   const markers = monaco.editor.getModelMarkers({});

@@ -19,7 +19,7 @@ const writeOpts: IFileWriteOptions = {
   overwrite: true,
 };
 
-const createdDirs = new Set<string>();
+let createdDirs = new Set<string>();
 
 /** Ensure parent directories exist, then write file */
 export async function writeFile(
@@ -45,12 +45,56 @@ export async function writeFile(
   );
 }
 
+/** Remove all files from the workspace to prepare for a new project */
+export async function clearWorkspace(fs: InMemoryFileSystemProvider) {
+  const wsUri = vscode.Uri.file(WORKSPACE);
+  try {
+    const entries = await fs.readdir(wsUri);
+    for (const [name] of entries) {
+      try {
+        await fs.delete(vscode.Uri.file(`${WORKSPACE}/${name}`), {
+          recursive: true,
+          useTrash: false,
+          atomic: false,
+        });
+      } catch {
+        // best effort
+      }
+    }
+  } catch {
+    // workspace dir might not exist yet
+  }
+  createdDirs = new Set<string>();
+  skippedDevDeps.length = 0;
+}
+
 /** Strip pnpm workspace protocol from package.json dependencies */
 /** DevDependencies skipped from ATA — exposed for the NpmTerminal UI */
 export const skippedDevDeps: string[] = [];
 
-/** Sanitize package.json for the virtual filesystem only (doesn't affect exports) */
+/** Sanitize files for the virtual filesystem only (doesn't affect exports) */
 function sanitizeContent(path: string, content: string): string {
+  // Sanitize tsconfig files: force types to ["node"] and skipLibCheck.
+  // Trailing commas (valid JSONC) are stripped before JSON.parse.
+  if (
+    path.endsWith(".json") &&
+    !path.startsWith("node_modules/") &&
+    /tsconfig[^/]*\.json$/.test(path)
+  ) {
+    try {
+      const cleaned = content
+        .replace(/\/\/[^\n]*/g, "")
+        .replace(/,\s*([\]}])/g, "$1");
+      const tsconfig = JSON.parse(cleaned);
+      if (!tsconfig.compilerOptions) tsconfig.compilerOptions = {};
+      const co = tsconfig.compilerOptions;
+      co.types = ["node"];
+      co.skipLibCheck = true;
+      return JSON.stringify(tsconfig, null, 2);
+    } catch {
+      return content;
+    }
+  }
   if (path.endsWith("package.json") && !path.startsWith("node_modules/")) {
     try {
       const pkg = JSON.parse(content);

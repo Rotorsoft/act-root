@@ -134,15 +134,17 @@ export async function cloneAndCollect(
     progress("Finding act() entry points...");
     const entryPaths: string[] = [];
     const skipPaths =
-      /(?:__tests__|\/test\/|\.test\.|\.spec\.|\.bench\.|node_modules|dist\/|\.d\.ts$|\/inspector\/|\/builder\/|libs\/act[^/]*\/src\/|\/main\.ts$)/;
+      /(?:__tests__|\/test\/|\.test\.|\.spec\.|\.bench\.|node_modules|dist\/|\.d\.ts$|\/inspector\/|\/builder\/)/;
     if (input.entryPath) {
       entryPaths.push(input.entryPath);
     } else {
       for (const [path, content] of tsFiles) {
         if (skipPaths.test(path)) continue;
         if (
-          /\bact\s*\(\s*\)/.test(content) &&
-          /\.build\s*\(\s*\)/.test(content)
+          /act\s*\(\s*\)\s*\n?\s*\.with(?:Slice|State|Projection)\s*\(/.test(
+            // Strip comments before matching
+            content.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*/g, "")
+          )
         ) {
           entryPaths.push(path);
         }
