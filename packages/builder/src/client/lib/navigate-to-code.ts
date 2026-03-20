@@ -78,7 +78,7 @@ export function navigateToCode(files: FileTab[], name: string, type?: string) {
           const line = before.split("\n").length;
           const lastNl = before.lastIndexOf("\n");
           const col = actMatch.index - (lastNl >= 0 ? lastNl : 0);
-          setTimeout(() => revealWord(line, col, 3), 100);
+          setTimeout(() => revealWord(line, col), 100);
         }
       });
     }
@@ -91,20 +91,44 @@ export function navigateToCode(files: FileTab[], name: string, type?: string) {
   for (const re of patterns) {
     for (let i = 0; i < files.length; i++) {
       if (!/\.tsx?$/.test(files[i].path)) continue;
-      const match = re.exec(files[i].content);
-      if (match) {
+      // Search all matches, skipping those inside comments
+      const content = files[i].content;
+      const globalRe = new RegExp(
+        re.source,
+        re.flags.includes("g") ? re.flags : re.flags + "g"
+      );
+      let match: RegExpExecArray | null;
+      while ((match = globalRe.exec(content)) !== null) {
+        // Check if match is inside a line comment or block comment
+        const before = content.slice(0, match.index);
+        const lastNl = before.lastIndexOf("\n");
+        const lineText = content.slice(
+          lastNl >= 0 ? lastNl + 1 : 0,
+          content.indexOf("\n", match.index) >= 0
+            ? content.indexOf("\n", match.index)
+            : content.length
+        );
+        const trimmed = lineText.trimStart();
+        if (
+          trimmed.startsWith("//") ||
+          trimmed.startsWith("*") ||
+          trimmed.startsWith("/*")
+        ) {
+          continue; // skip comment lines
+        }
+
         const matchText = match[0];
         const nameOffsetInMatch = matchText.lastIndexOf(name);
         const nameStart =
           nameOffsetInMatch >= 0
             ? match.index + nameOffsetInMatch
             : match.index;
-        const before = files[i].content.slice(0, nameStart);
-        const lastNl = before.lastIndexOf("\n");
-        const line = before.split("\n").length;
-        const col = nameStart - (lastNl >= 0 ? lastNl : 0);
+        const beforeName = content.slice(0, nameStart);
+        const lastNlName = beforeName.lastIndexOf("\n");
+        const line = beforeName.split("\n").length;
+        const col = nameStart - (lastNlName >= 0 ? lastNlName : 0);
         void openFileInEditor(files[i].path).then(() => {
-          setTimeout(() => revealWord(line, col, name.length), 100);
+          setTimeout(() => revealWord(line, col), 100);
         });
         return;
       }

@@ -325,17 +325,12 @@ export function getWorkspaceErrors(): string[] {
     });
 }
 
-/** Reveal and select a word in the active editor */
-export function revealWord(line: number, col: number, len: number) {
+/** Reveal and position cursor at a word in the active editor */
+export function revealWord(line: number, col: number) {
   const editor = monaco.editor.getEditors()[0];
   if (editor) {
     editor.revealLineInCenter(line);
-    editor.setSelection({
-      startLineNumber: line,
-      startColumn: col,
-      endLineNumber: line,
-      endColumn: col + len,
-    });
+    editor.setPosition({ lineNumber: line, column: col });
     editor.focus();
   }
 }

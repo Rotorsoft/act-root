@@ -4,6 +4,7 @@
  */
 import { transform } from "sucrase";
 import type {
+  ActionNode,
   ActNode,
   DomainModel,
   EventNode,
@@ -129,7 +130,12 @@ function execute(files: FileTab[]): {
 
     // Evaluate each file in topo order, each in its own scope
     const sorted = topoSort(
-      files.filter((f) => f.path.endsWith(".ts") || f.path.endsWith(".tsx"))
+      files.filter(
+        (f) =>
+          (f.path.endsWith(".ts") || f.path.endsWith(".tsx")) &&
+          !f.path.endsWith(".d.ts") &&
+          !f.path.includes("node_modules/")
+      )
     );
 
     for (const file of sorted) {
@@ -139,18 +145,14 @@ function execute(files: FileTab[]): {
       const fileExp: Record<string, any> = {};
       fileExports.set(key, fileExp);
 
-      // Capture variable names from CJS output
-      const stateCountBefore = __built__.states.length;
-      const stateVarNames: string[] = [];
-      const stateRe = /(?:var|let|const)\s+(\w+)\s*=\s*\w+\.state\b/g;
-      let stm;
-      while ((stm = stateRe.exec(js)) !== null) stateVarNames.push(stm[1]);
-
+      // Capture slice variable names (slices have no registry name — only exception)
       const sliceCountBefore = __built__.slices.length;
       const sliceVarNames: string[] = [];
-      const sliceRe = /(?:var|let|const)\s+(\w+)\s*=\s*\w+\.slice\b/g;
+      const sliceRe = /(?:var|let|const)\s+(\w+)\s*=\s*(?:\w+\.)?slice\s*\(/g;
       let sm;
-      while ((sm = sliceRe.exec(js)) !== null) sliceVarNames.push(sm[1]);
+      while ((sm = sliceRe.exec(js)) !== null) {
+        if (!sliceVarNames.includes(sm[1])) sliceVarNames.push(sm[1]);
+      }
 
       const fileRequire = (mod: string) => resolveModule(mod, key);
 
@@ -180,15 +182,7 @@ function execute(files: FileTab[]): {
         for (const a of fallback.acts) __built__.acts.push(a);
       }
 
-      // Tag newly built states with their variable names
-      for (let i = stateCountBefore; i < __built__.states.length; i++) {
-        const varIdx = i - stateCountBefore;
-        if (varIdx < stateVarNames.length) {
-          __built__.states[i]._varName = stateVarNames[varIdx];
-        }
-      }
-
-      // Tag newly built slices with their variable names
+      // Tag newly built slices with their variable names (only exception)
       for (let i = sliceCountBefore; i < __built__.slices.length; i++) {
         const varIdx = i - sliceCountBefore;
         if (varIdx < sliceVarNames.length) {
@@ -459,9 +453,8 @@ export function extractModel(files: FileTab[]): {
     }>) || []) {
       if (st._tag === "State") {
         sliceStates.push(st);
-        const vn = st._varName || st.name;
-        sliceStateNames.push(vn);
-        statesInSlices.add(vn);
+        sliceStateNames.push(st.name);
+        statesInSlices.add(st.name);
         addState(model, st);
       }
     }
@@ -499,7 +492,7 @@ export function extractModel(files: FileTab[]): {
     }
 
     model.slices.push({
-      name: (s._varName as string) || sliceStateNames.join(", "),
+      name: (s._varName as string) || "slice",
       states: sliceStateNames,
       stateVars: sliceStateNames,
       projections: projNames,
@@ -517,8 +510,7 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const s of states) {
-    const vn = (s._varName as string) || (s.name as string);
-    if (s._tag === "State" && !statesInSlices.has(vn)) {
+    if (s._tag === "State" && !statesInSlices.has(s.name as string)) {
       addState(model, s);
     }
   }
@@ -530,8 +522,8 @@ export function extractModel(files: FileTab[]): {
       name: string;
       _varName?: string;
     }>) || []) {
-      const vn = st._varName || st.name;
-      if (st._tag === "State" && !statesInSlices.has(vn)) addState(model, st);
+      if (st._tag === "State" && !statesInSlices.has(st.name))
+        addState(model, st);
     }
     model.orchestrator = {
       slices: model.slices.map((s) => s.name),
@@ -556,7 +548,7 @@ export function extractModel(files: FileTab[]): {
     const actStateNames = new Set(
       ((a.states as any[]) || [])
         .filter((s: any) => s._tag === "State")
-        .map((s: any) => (s._varName as string) || (s.name as string))
+        .map((s: any) => s.name as string)
     );
     const actProjNames = new Set(
       ((a.projections as any[]) || [])
@@ -572,7 +564,7 @@ export function extractModel(files: FileTab[]): {
 
     model.entries.push({
       path: entryPath,
-      states: model.states.filter((s) => allStateNames.has(s.varName)),
+      states: model.states.filter((s) => allStateNames.has(s.name)),
       slices: entrySlices,
       projections: model.projections.filter((p) => actProjNames.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) || [],
@@ -597,11 +589,9 @@ export function extractModel(files: FileTab[]): {
 }
 
 function addState(model: DomainModel, st: any): void {
-  // Each state builder is unique — even if multiple share the same domain
-  // name (e.g. TicketCreation and TicketOperations both use state({ Ticket: ... })).
-  // Use varName for identity, domain name for display.
-  const varName = (st._varName as string) || (st.name as string);
-  if (model.states.some((s) => s.varName === varName)) return;
+  // Merge builders with the same domain name (e.g. TicketCreation and
+  // TicketOperations both use state({ Ticket: ... })) into ONE entry.
+  const domainName = st.name as string;
 
   const events: EventNode[] = [];
   for (const eventName of Object.keys(
@@ -613,7 +603,7 @@ function addState(model: DomainModel, st: any): void {
     });
   }
 
-  const actions: any[] = [];
+  const actions: ActionNode[] = [];
   for (const actionName of Object.keys(
     (st.actions || {}) as Record<string, unknown>
   )) {
@@ -625,5 +615,23 @@ function addState(model: DomainModel, st: any): void {
     actions.push({ name: actionName, emits, invariants });
   }
 
-  model.states.push({ name: st.name as string, varName, events, actions });
+  const existing = model.states.find((s) => s.name === domainName);
+  if (existing) {
+    // Merge actions and events into the existing entry (deduplicate by name)
+    const existingEventNames = new Set(existing.events.map((e) => e.name));
+    for (const ev of events) {
+      if (!existingEventNames.has(ev.name)) existing.events.push(ev);
+    }
+    const existingActionNames = new Set(existing.actions.map((a) => a.name));
+    for (const act of actions) {
+      if (!existingActionNames.has(act.name)) existing.actions.push(act);
+    }
+  } else {
+    model.states.push({
+      name: domainName,
+      varName: domainName,
+      events,
+      actions,
+    });
+  }
 }

@@ -59,7 +59,6 @@ type N = {
   type: keyof typeof COLORS;
   label: string;
   sub?: string;
-  line?: number;
   projections?: string[];
   guards?: string[];
   reactions?: string[];
@@ -186,7 +185,10 @@ export function Diagram({
     const es: E[] = [];
     const boxes: Box[] = [];
     const sv = new Map<string, StateNode>();
-    for (const s of viewModel.states) sv.set(s.varName, s);
+    for (const s of viewModel.states) {
+      sv.set(s.varName, s);
+      sv.set(s.name, s);
+    }
 
     // Build projection lookup: event name → projection names
     const eventProjections = new Map<string, string[]>();
@@ -233,50 +235,183 @@ export function Diagram({
       }
       const sx = cx;
       cx += SLICE_PAD + GAP; // offset content right for vertical label strip + gap
-      const parts = slice.stateVars
-        .map((v) => sv.get(v))
-        .filter(Boolean) as StateNode[];
-      const eDefs = parts.flatMap((st) => st.events);
+      // Merge states with the same domain name within the slice
+      const mergedMap = new Map<string, StateNode>();
+      for (const v of slice.stateVars) {
+        const found = sv.get(v);
+        if (!found) continue;
+        const existing = mergedMap.get(found.name);
+        if (existing) {
+          const existEvts = new Set(existing.events.map((e) => e.name));
+          const existActs = new Set(existing.actions.map((a) => a.name));
+          for (const ev of found.events)
+            if (!existEvts.has(ev.name)) existing.events.push(ev);
+          for (const ac of found.actions)
+            if (!existActs.has(ac.name)) existing.actions.push(ac);
+        } else {
+          mergedMap.set(found.name, {
+            ...found,
+            events: [...found.events],
+            actions: [...found.actions],
+          });
+        }
+      }
+      const parts = [...mergedMap.values()];
 
       let y = rowBaseY + PAD + H + GAP;
       let sliceRightX = cx;
 
-      // Layout per state: [Action] → [Event] (no state box in slices)
+      // Build event→reaction lookup within this slice
+      const sliceReactionByEvent = new Map<
+        string,
+        (typeof slice.reactions)[0]
+      >();
+      for (const r of slice.reactions) {
+        if (!r.isVoid) sliceReactionByEvent.set(r.event, r);
+      }
+
+      // Track visited events/reactions to prevent cycles
+      const visitedEvents = new Set<string>();
+      const visitedReactions = new Set<string>();
+
+      /**
+       * Layout per merged state: [Action] → [State] → [Event]
+       * State box centered vertically across its action rows, placed
+       * at the state column (after actions).
+       * If an event triggers a reaction IN THIS SLICE, continue the chain.
+       */
       for (const st of parts) {
+        const stateColX = cx + W + GAP;
+        const eventColX = stateColX + STATE_W + GAP;
+        const stateYStart = y;
+
         for (const action of st.actions) {
-          let x = cx;
+          // Action box
           ns.push({
             key: `a:${action.name}:${slice.name}`,
-            pos: { x, y },
+            pos: { x: cx, y },
             type: "action",
             label: action.name,
             sub: action.invariants.length > 0 ? "guarded" : undefined,
-            line: action.line,
             guards:
               action.invariants.length > 0 ? action.invariants : undefined,
           });
-          x += W + GAP;
+
+          // Events after state column
+          let ex = eventColX;
           for (const en of action.emits) {
             ns.push({
               key: `e:${en}:${slice.name}:${action.name}`,
-              pos: { x, y },
+              pos: { x: ex, y },
               type: "event",
               label: en,
-              line: eDefs.find((e) => e.name === en)?.line,
               projections: eventProjections.get(en),
               reactions: eventReactions.get(en),
             });
-            x += W + GAP;
+
+            // If this event triggers a reaction IN THIS SLICE, continue chain
+            const rDef = sliceReactionByEvent.get(en);
+            if (
+              rDef &&
+              !visitedEvents.has(en) &&
+              !visitedReactions.has(rDef.handlerName)
+            ) {
+              visitedEvents.add(en);
+              visitedReactions.add(rDef.handlerName);
+
+              const rX = ex + W + GAP;
+              const rp = { x: rX, y };
+              ns.push({
+                key: `r:${rDef.handlerName}:${slice.name}`,
+                pos: rp,
+                type: "reaction",
+                label: rDef.handlerName,
+              });
+              // Event → Reaction arrow
+              es.push({
+                from: { x: ex + W, y: y + H / 2 },
+                to: { x: rp.x, y: rp.y + H / 2 },
+                color: COLORS.reaction.border,
+                dash: true,
+              });
+
+              // Dispatched actions → state → events continuing right
+              let nextX = rX + W + GAP;
+              for (const an of rDef.dispatches) {
+                const targetAction = viewModel.states
+                  .flatMap((s) => s.actions)
+                  .find((a) => a.name === an);
+                const targetState = viewModel.states.find((s) =>
+                  s.actions.some((a) => a.name === an)
+                );
+
+                const dap = { x: nextX, y };
+                ns.push({
+                  key: `a:${an}:dispatched:${rDef.handlerName}`,
+                  pos: dap,
+                  type: "action",
+                  label: an,
+                });
+                // Reaction → dispatched action arrow
+                es.push({
+                  from: { x: rp.x + W, y: rp.y + H / 2 },
+                  to: { x: dap.x, y: dap.y + H / 2 },
+                  color: COLORS.reaction.border,
+                  dash: true,
+                });
+
+                nextX += W + GAP;
+
+                // Dispatched state box
+                if (targetState) {
+                  ns.push({
+                    key: `s:${targetState.name}:dispatched:${rDef.handlerName}`,
+                    pos: { x: nextX, y: y - (STATE_H - H) / 2 },
+                    type: "state",
+                    label: targetState.name,
+                  });
+                  nextX += STATE_W + GAP;
+                }
+
+                // Dispatched events
+                const emits = targetAction?.emits ?? [];
+                for (const den of emits) {
+                  ns.push({
+                    key: `e:${den}:dispatched:${rDef.handlerName}`,
+                    pos: { x: nextX, y },
+                    type: "event",
+                    label: den,
+                    projections: eventProjections.get(den),
+                    reactions: eventReactions.get(den),
+                  });
+                  nextX += W + GAP;
+                }
+              }
+              sliceRightX = Math.max(sliceRightX, nextX);
+            }
+
+            ex += W + GAP;
           }
-          sliceRightX = Math.max(sliceRightX, x);
+          sliceRightX = Math.max(sliceRightX, ex);
           y += H + GAP / 2;
         }
+
+        // Place state box centered vertically across its action rows
+        const stateYEnd = y - GAP / 2;
+        const stateCY = (stateYStart + stateYEnd) / 2 - STATE_H / 2;
+        ns.push({
+          key: `s:${st.name}:${slice.name}`,
+          pos: { x: stateColX, y: stateCY },
+          type: "state",
+          label: st.name,
+        });
+
         y += GAP / 2;
       }
 
-      // Reactions — continue the flow to the right
+      // Remaining reactions not already placed inline
       for (const r of slice.reactions) {
-        if (r.isVoid) continue;
+        if (r.isVoid || visitedReactions.has(r.handlerName)) continue;
 
         const trigNode = ns.find(
           (n) =>
@@ -293,7 +428,6 @@ export function Diagram({
           pos: rp,
           type: "reaction",
           label: r.handlerName,
-          line: r.line,
         });
 
         if (trigNode) {
@@ -305,69 +439,7 @@ export function Diagram({
           });
         }
 
-        let nextX = rX + W + GAP;
-
-        // Group dispatched actions by target state
-        const dispatchedByState = new Map<string, string[]>();
-        for (const an of r.dispatches) {
-          const ownerState = viewModel.states.find((s) =>
-            s.actions.some((a) => a.name === an)
-          );
-          const sn = ownerState?.name ?? "?";
-          const list = dispatchedByState.get(sn) ?? [];
-          list.push(an);
-          dispatchedByState.set(sn, list);
-        }
-
-        // Render: [Reaction] → [Action] → [Event] (topological flow only)
-        for (const [, actionNames] of dispatchedByState) {
-          const actX = nextX;
-          let dispY = rY;
-
-          for (const an of actionNames) {
-            const targetAction = viewModel.states
-              .flatMap((s) => s.actions)
-              .find((a) => a.name === an);
-
-            const dap = { x: actX, y: dispY };
-            ns.push({
-              key: `a:${an}:dispatched:${r.handlerName}`,
-              pos: dap,
-              type: "action",
-              label: an,
-              line: targetAction?.line,
-            });
-            // Reaction → dispatched action arrow
-            if (dispY === rY) {
-              es.push({
-                from: { x: rp.x + W, y: rp.y + H / 2 },
-                to: { x: dap.x, y: dap.y + H / 2 },
-                color: COLORS.reaction.border,
-                dash: true,
-              });
-            }
-
-            let ex = actX + W + GAP;
-            const emits = targetAction?.emits ?? [];
-            for (const en of emits) {
-              ns.push({
-                key: `e:${en}:dispatched:${r.handlerName}`,
-                pos: { x: ex, y: dispY },
-                type: "event",
-                label: en,
-                projections: eventProjections.get(en),
-                reactions: eventReactions.get(en),
-              });
-              ex += W + GAP;
-            }
-            nextX = Math.max(nextX, ex);
-            dispY += H + GAP / 2;
-          }
-
-          y = Math.max(y, dispY);
-        }
-
-        sliceRightX = Math.max(sliceRightX, nextX);
+        sliceRightX = Math.max(sliceRightX, rX + W + GAP);
         y = Math.max(y, rY + H + GAP / 2);
       }
 
@@ -404,7 +476,6 @@ export function Diagram({
           type: "action",
           label: action.name,
           sub: action.invariants.length > 0 ? "guarded" : undefined,
-          line: action.line,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
         x = stX + W + GAP;
@@ -416,7 +487,6 @@ export function Diagram({
             pos: ep,
             type: "event",
             label: en,
-            line: st.events.find((e) => e.name === en)?.line,
             projections: projs,
             reactions: eventReactions.get(en),
           });
