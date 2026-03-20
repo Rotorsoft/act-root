@@ -459,23 +459,21 @@ export function Diagram({
               action.invariants.length > 0 ? action.invariants : undefined,
             file: st.file,
           });
-          // Thin colored arrows from action to its events (first group only)
-          if (partIdx === 0) {
-            for (const en of action.emits) {
-              const evNode = ns.find(
-                (n) =>
-                  n.type === "event" &&
-                  n.label === en &&
-                  n.key.includes(slice.name)
-              );
-              if (evNode) {
-                es.push({
-                  from: { x: cx + W, y: actY + H / 2 },
-                  to: { x: eventColX, y: evNode.pos.y + H / 2 },
-                  color,
-                  dash: false,
-                });
-              }
+          // Subtle colored arrows from action to its events
+          for (const en of action.emits) {
+            const evNode = ns.find(
+              (n) =>
+                n.type === "event" &&
+                n.label === en &&
+                n.key.includes(slice.name)
+            );
+            if (evNode) {
+              es.push({
+                from: { x: cx + W, y: actY + H / 2 },
+                to: { x: eventColX, y: evNode.pos.y + H / 2 },
+                color,
+                dash: false,
+              });
             }
           }
           actY += H + GAP / 2;
@@ -572,10 +570,20 @@ export function Diagram({
       });
 
       // Actions grouped and centered vertically relative to state
+      const standaloneColors = [
+        "#60a5fa",
+        "#f97316",
+        "#a78bfa",
+        "#34d399",
+        "#fb7185",
+        "#fbbf24",
+      ];
       const nActions = st.actions.length;
       const actBlockH = nActions * H + (nActions - 1) * (GAP / 2);
       let aY = centerY - actBlockH / 2;
+      let aIdx = 0;
       for (const action of st.actions) {
+        const aColor = standaloneColors[aIdx % standaloneColors.length];
         ns.push({
           key: `a:${action.name}:standalone`,
           pos: { x: cx, y: aY },
@@ -584,7 +592,25 @@ export function Diagram({
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
         });
+        // Colored arrows from action to its events
+        for (const en of action.emits) {
+          const evNode = ns.find(
+            (n) =>
+              n.type === "event" &&
+              n.label === en &&
+              n.key.includes("standalone")
+          );
+          if (evNode) {
+            es.push({
+              from: { x: cx + W, y: aY + H / 2 },
+              to: { x: evX, y: evNode.pos.y + H / 2 },
+              color: aColor,
+              dash: false,
+            });
+          }
+        }
         aY += H + GAP / 2;
+        aIdx++;
       }
 
       maxY = Math.max(maxY, y);
@@ -777,18 +803,23 @@ export function Diagram({
           ))}
 
           {/* Edges */}
-          {es.map((e, i) => (
-            <path
-              key={i}
-              d={`M ${e.from.x} ${e.from.y} L ${e.to.x} ${e.to.y}`}
-              fill="none"
-              stroke={e.color}
-              strokeWidth={1.5}
-              strokeDasharray={e.dash ? "4,3" : undefined}
-              opacity={0.7}
-              markerEnd="url(#arr)"
-            />
-          ))}
+          {es.map((e, i) => {
+            const dx = e.to.x - e.from.x;
+            const isHint = !e.dash;
+            const d = `M ${e.from.x} ${e.from.y} C ${e.from.x + dx * 0.4} ${e.from.y}, ${e.to.x - dx * 0.4} ${e.to.y}, ${e.to.x} ${e.to.y}`;
+            return (
+              <path
+                key={i}
+                d={d}
+                fill="none"
+                stroke={e.color}
+                strokeWidth={isHint ? 0.75 : 1.5}
+                strokeDasharray={e.dash ? "4,3" : undefined}
+                opacity={isHint ? 0.35 : 0.7}
+                markerEnd="url(#arr)"
+              />
+            );
+          })}
           <defs>
             <marker
               id="arr"
@@ -799,7 +830,12 @@ export function Diagram({
               markerHeight="6"
               orient="auto-start-reverse"
             >
-              <path d="M 0 0 L 10 5 L 0 10 z" fill="#71717a" />
+              <path
+                d="M 0 1 L 8 5 L 0 9"
+                fill="none"
+                stroke="#71717a"
+                strokeWidth="1.5"
+              />
             </marker>
           </defs>
 

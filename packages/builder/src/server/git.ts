@@ -134,7 +134,7 @@ export async function cloneAndCollect(
     progress("Finding act() entry points...");
     const entryPaths: string[] = [];
     const skipPaths =
-      /(?:__tests__|\/test\/|\.test\.|\.spec\.|\.bench\.|node_modules|dist\/|\.d\.ts$|\/inspector\/|\/builder\/)/;
+      /(?:__tests__|\/test\/|\.test\.|\.spec\.|\.bench\.|node_modules|dist\/|\.d\.ts$|\/inspector\/|\/builder\/|libs\/act[^/]*\/src\/|\/main\.ts$)/;
     if (input.entryPath) {
       entryPaths.push(input.entryPath);
     } else {
@@ -152,8 +152,11 @@ export async function cloneAndCollect(
       throw new Error("No act() builder entry found in repository");
     }
     progress(
-      `Found ${entryPaths.length} entry point${entryPaths.length > 1 ? "s" : ""}: ${entryPaths.join(", ")}`
+      `Found ${entryPaths.length} entry point${entryPaths.length > 1 ? "s" : ""}`
     );
+    for (const ep of entryPaths) {
+      progress(`  ✓ ${ep}`);
+    }
 
     // ── Follow imports ──────────────────────────────────────────────
     progress("Resolving import graph...");
