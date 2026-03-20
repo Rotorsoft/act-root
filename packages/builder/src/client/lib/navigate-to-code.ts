@@ -67,6 +67,24 @@ function buildPatterns(esc: string, type?: string): RegExp[] {
 }
 
 export function navigateToCode(files: FileTab[], name: string, type?: string) {
+  // Direct file navigation — open by path and highlight act()
+  if (type === "file") {
+    const file = files.find((f) => f.path === name || f.path.endsWith(name));
+    if (file) {
+      const actMatch = /\bact\s*\(\s*\)/.exec(file.content);
+      void openFileInEditor(file.path).then(() => {
+        if (actMatch) {
+          const before = file.content.slice(0, actMatch.index);
+          const line = before.split("\n").length;
+          const lastNl = before.lastIndexOf("\n");
+          const col = actMatch.index - (lastNl >= 0 ? lastNl : 0);
+          setTimeout(() => revealWord(line, col, 3), 100);
+        }
+      });
+    }
+    return;
+  }
+
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const patterns = buildPatterns(esc, type);
 

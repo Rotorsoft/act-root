@@ -240,19 +240,14 @@ export function Diagram({
 
       let y = rowBaseY + PAD + H + GAP;
       let sliceRightX = cx;
-      const stateX = cx + W + GAP; // state column between actions and events
 
-      // Layout per state: [Action] → [State] → [Event]
-      // One state box per state, centered across that state's action rows
+      // Layout per state: [Action] → [Event] (no state box in slices)
       for (const st of parts) {
-        const stateYStart = y;
-
         for (const action of st.actions) {
           let x = cx;
-          const ap = { x, y };
           ns.push({
             key: `a:${action.name}:${slice.name}`,
-            pos: ap,
+            pos: { x, y },
             type: "action",
             label: action.name,
             sub: action.invariants.length > 0 ? "guarded" : undefined,
@@ -260,36 +255,23 @@ export function Diagram({
             guards:
               action.invariants.length > 0 ? action.invariants : undefined,
           });
-          x = stateX + W + GAP; // events start after state column
+          x += W + GAP;
           for (const en of action.emits) {
-            const ep = { x, y };
-            const projs = eventProjections.get(en);
             ns.push({
               key: `e:${en}:${slice.name}:${action.name}`,
-              pos: ep,
+              pos: { x, y },
               type: "event",
               label: en,
               line: eDefs.find((e) => e.name === en)?.line,
-              projections: projs,
+              projections: eventProjections.get(en),
               reactions: eventReactions.get(en),
             });
             x += W + GAP;
           }
-
           sliceRightX = Math.max(sliceRightX, x);
           y += H + GAP / 2;
         }
-
-        // State node centered vertically across this state's action rows
-        const centerY = (stateYStart + y - GAP / 2) / 2 - STATE_H / 2;
-        ns.push({
-          key: `s:${st.name}:${slice.name}`,
-          pos: { x: stateX + (W - STATE_W) / 2, y: centerY },
-          type: "state",
-          label: st.name,
-        });
-
-        y += GAP / 2; // gap between states within the same slice
+        y += GAP / 2;
       }
 
       // Reactions — continue the flow to the right
@@ -337,15 +319,13 @@ export function Diagram({
           dispatchedByState.set(sn, list);
         }
 
-        // Render: [Reaction] → [Action] [State] [Event] per dispatched state
-        for (const [stateName, actionNames] of dispatchedByState) {
+        // Render: [Reaction] → [Action] → [Event] (topological flow only)
+        for (const [, actionNames] of dispatchedByState) {
           const actX = nextX;
-          const stX = nextX + W + GAP;
-          const evX = stX + W + GAP;
           let dispY = rY;
 
           for (const an of actionNames) {
-            const targetAction = model.states
+            const targetAction = viewModel.states
               .flatMap((s) => s.actions)
               .find((a) => a.name === an);
 
@@ -367,17 +347,15 @@ export function Diagram({
               });
             }
 
-            let ex = evX;
+            let ex = actX + W + GAP;
             const emits = targetAction?.emits ?? [];
             for (const en of emits) {
-              const dep = { x: ex, y: dispY };
-              const projs = eventProjections.get(en);
               ns.push({
                 key: `e:${en}:dispatched:${r.handlerName}`,
-                pos: dep,
+                pos: { x: ex, y: dispY },
                 type: "event",
                 label: en,
-                projections: projs,
+                projections: eventProjections.get(en),
                 reactions: eventReactions.get(en),
               });
               ex += W + GAP;
@@ -385,15 +363,6 @@ export function Diagram({
             nextX = Math.max(nextX, ex);
             dispY += H + GAP / 2;
           }
-
-          // State node centered across its dispatched action rows
-          const centerY = (rY + dispY - GAP / 2) / 2 - STATE_H / 2;
-          ns.push({
-            key: `s:${stateName}:dispatched:${r.handlerName}`,
-            pos: { x: stX + (W - STATE_W) / 2, y: centerY },
-            type: "state",
-            label: stateName,
-          });
 
           y = Math.max(y, dispY);
         }
@@ -542,6 +511,7 @@ export function Diagram({
               onClick={() => {
                 setActiveTab(i);
                 setPan({ x: 0, y: 0 });
+                onClickElement?.(e.path, "file");
               }}
               className={`px-3 py-1 text-[10px] transition ${
                 i === activeTab
@@ -572,7 +542,10 @@ export function Diagram({
             const ch = el?.clientHeight || sh;
             const vw = sw / zoom;
             const vh = sh / zoom;
-            return `${-pan.x * (vw / cw)} ${-pan.y * (vh / ch)} ${vw} ${vh}`;
+            // preserveAspectRatio uses min(scaleX, scaleY) — use same
+            // uniform scale for both axes so pan feels 1:1 at any zoom
+            const scale = zoom * Math.min(cw / sw, ch / sh);
+            return `${-pan.x / scale} ${-pan.y / scale} ${vw} ${vh}`;
           })()}
           className="select-none"
         >

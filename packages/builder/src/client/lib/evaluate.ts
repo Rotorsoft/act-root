@@ -139,7 +139,13 @@ function execute(files: FileTab[]): {
       const fileExp: Record<string, any> = {};
       fileExports.set(key, fileExp);
 
-      // Capture slice variable names from CJS output
+      // Capture variable names from CJS output
+      const stateCountBefore = __built__.states.length;
+      const stateVarNames: string[] = [];
+      const stateRe = /(?:var|let|const)\s+(\w+)\s*=\s*\w+\.state\b/g;
+      let stm;
+      while ((stm = stateRe.exec(js)) !== null) stateVarNames.push(stm[1]);
+
       const sliceCountBefore = __built__.slices.length;
       const sliceVarNames: string[] = [];
       const sliceRe = /(?:var|let|const)\s+(\w+)\s*=\s*\w+\.slice\b/g;
@@ -172,6 +178,14 @@ function execute(files: FileTab[]): {
         for (const s of fallback.slices) __built__.slices.push(s);
         for (const p of fallback.projections) __built__.projections.push(p);
         for (const a of fallback.acts) __built__.acts.push(a);
+      }
+
+      // Tag newly built states with their variable names
+      for (let i = stateCountBefore; i < __built__.states.length; i++) {
+        const varIdx = i - stateCountBefore;
+        if (varIdx < stateVarNames.length) {
+          __built__.states[i]._varName = stateVarNames[varIdx];
+        }
       }
 
       // Tag newly built slices with their variable names
@@ -438,12 +452,16 @@ export function extractModel(files: FileTab[]): {
     const sliceStates: any[] = [];
     const sliceStateNames: string[] = [];
 
-    for (const st of (s.states as Array<{ _tag: string; name: string }>) ||
-      []) {
+    for (const st of (s.states as Array<{
+      _tag: string;
+      name: string;
+      _varName?: string;
+    }>) || []) {
       if (st._tag === "State") {
         sliceStates.push(st);
-        sliceStateNames.push(st.name);
-        statesInSlices.add(st.name);
+        const vn = st._varName || st.name;
+        sliceStateNames.push(vn);
+        statesInSlices.add(vn);
         addState(model, st);
       }
     }
@@ -499,17 +517,21 @@ export function extractModel(files: FileTab[]): {
   }
 
   for (const s of states) {
-    if (s._tag === "State" && !statesInSlices.has(s.name as string)) {
+    const vn = (s._varName as string) || (s.name as string);
+    if (s._tag === "State" && !statesInSlices.has(vn)) {
       addState(model, s);
     }
   }
 
   for (const a of acts) {
     if (a._tag !== "Act") continue;
-    for (const st of (a.states as Array<{ _tag: string; name: string }>) ||
-      []) {
-      if (st._tag === "State" && !statesInSlices.has(st.name))
-        addState(model, st);
+    for (const st of (a.states as Array<{
+      _tag: string;
+      name: string;
+      _varName?: string;
+    }>) || []) {
+      const vn = st._varName || st.name;
+      if (st._tag === "State" && !statesInSlices.has(vn)) addState(model, st);
     }
     model.orchestrator = {
       slices: model.slices.map((s) => s.name),
@@ -534,7 +556,7 @@ export function extractModel(files: FileTab[]): {
     const actStateNames = new Set(
       ((a.states as any[]) || [])
         .filter((s: any) => s._tag === "State")
-        .map((s: any) => s.name as string)
+        .map((s: any) => (s._varName as string) || (s.name as string))
     );
     const actProjNames = new Set(
       ((a.projections as any[]) || [])
@@ -542,10 +564,16 @@ export function extractModel(files: FileTab[]): {
         .map((p: any) => (p.target as string) || "projection")
     );
 
+    // Collect all state names referenced by slices in this act()
+    const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
+    const sliceStateNames = new Set(entrySlices.flatMap((s) => s.states));
+    // Include both standalone states and states from slices
+    const allStateNames = new Set([...actStateNames, ...sliceStateNames]);
+
     model.entries.push({
       path: entryPath,
-      states: model.states.filter((s) => actStateNames.has(s.name)),
-      slices: model.slices.filter((s) => actSliceNames.has(s.name)),
+      states: model.states.filter((s) => allStateNames.has(s.varName)),
+      slices: entrySlices,
       projections: model.projections.filter((p) => actProjNames.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) || [],
     });
@@ -569,7 +597,11 @@ export function extractModel(files: FileTab[]): {
 }
 
 function addState(model: DomainModel, st: any): void {
-  if (model.states.some((s) => s.name === st.name)) return;
+  // Each state builder is unique — even if multiple share the same domain
+  // name (e.g. TicketCreation and TicketOperations both use state({ Ticket: ... })).
+  // Use varName for identity, domain name for display.
+  const varName = (st._varName as string) || (st.name as string);
+  if (model.states.some((s) => s.varName === varName)) return;
 
   const events: EventNode[] = [];
   for (const eventName of Object.keys(
@@ -593,5 +625,5 @@ function addState(model: DomainModel, st: any): void {
     actions.push({ name: actionName, emits, invariants });
   }
 
-  model.states.push({ name: st.name, varName: st.name, events, actions });
+  model.states.push({ name: st.name as string, varName, events, actions });
 }
