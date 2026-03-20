@@ -5,7 +5,7 @@ import {
   Terminal,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { skippedDevDeps } from "../lib/workspace-fs.js";
 
 type Props = {
@@ -37,81 +37,109 @@ export function NpmTerminal({ show, onClose, projectKey }: Props) {
   const [showSkipped, setShowSkipped] = useState(false);
   const startTimeRef = useRef<number>(0);
 
+  // ── Batched log updates to avoid per-message re-renders ────────────
+  const pendingRef = useRef<
+    {
+      type: "start" | "done";
+      pkg: string;
+      version?: string;
+      time: number;
+      elapsedMs?: number;
+    }[]
+  >([]);
+  const rafRef = useRef(0);
+
+  const flushPending = useCallback(() => {
+    rafRef.current = 0;
+    const batch = pendingRef.current.splice(0);
+    if (batch.length === 0) return;
+
+    setActive(true);
+    if (!startTimeRef.current) startTimeRef.current = batch[0].time;
+
+    setLog((prev) => {
+      const next = [...prev];
+      for (const msg of batch) {
+        const idx = next.findIndex(
+          (e) => e.kind === "pkg" && e.pkg === msg.pkg
+        );
+        if (msg.type === "start") {
+          if (idx < 0) {
+            next.push({
+              kind: "pkg",
+              pkg: msg.pkg,
+              status: "downloading",
+              downloadStartedAt: msg.time,
+            });
+          }
+        } else {
+          // done
+          if (idx >= 0) {
+            const entry = next[idx] as PkgEntry;
+            next[idx] = {
+              ...entry,
+              status: "downloaded",
+              version: msg.version,
+              elapsedMs:
+                msg.elapsedMs ??
+                (entry.downloadStartedAt
+                  ? msg.time - entry.downloadStartedAt
+                  : undefined),
+            };
+          } else {
+            next.push({
+              kind: "pkg",
+              pkg: msg.pkg,
+              status: "downloaded",
+              version: msg.version,
+              elapsedMs: msg.elapsedMs,
+            });
+          }
+        }
+      }
+      return next;
+    });
+  }, []);
+
   // Clear log when project changes
   useEffect(() => {
     setLog([]);
     setActive(false);
     startTimeRef.current = 0;
+    pendingRef.current = [];
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = 0;
   }, [projectKey]);
 
-  // Subscribe to service worker messages
+  // Subscribe to custom events from fetchNpmTypes (no SW dependency)
   useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const data = event.data as {
-        type: string;
+    const handler = (event: Event) => {
+      const { type, pkg, version, elapsedMs } = (event as CustomEvent)
+        .detail as {
+        type: "start" | "done";
         pkg: string;
-        isTarball: boolean;
         version?: string;
-        status?: number;
+        elapsedMs?: number;
       };
 
-      // Only track tarball downloads — metadata-only fetches are noise from ATA
-      if (data.type === "npm-fetch-start" && data.isTarball) {
-        setActive(true);
-        if (!startTimeRef.current) startTimeRef.current = Date.now();
-        setLog((prev) => {
-          if (prev.some((e) => e.kind === "pkg" && e.pkg === data.pkg))
-            return prev;
-          return [
-            ...prev,
-            {
-              kind: "pkg",
-              pkg: data.pkg,
-              status: "downloading",
-              downloadStartedAt: Date.now(),
-            } as PkgEntry,
-          ];
-        });
-      } else if (data.type === "npm-fetch-done" && data.isTarball) {
-        setActive(true);
-        if (!startTimeRef.current) startTimeRef.current = Date.now();
-        setLog((prev) => {
-          // Update existing entry or create new one (for cached responses
-          // where start event was missed)
-          const exists = prev.some(
-            (e) => e.kind === "pkg" && e.pkg === data.pkg
-          );
-          if (exists) {
-            return prev.map(
-              (e): LogEntry =>
-                e.kind === "pkg" && e.pkg === data.pkg
-                  ? {
-                      ...e,
-                      status: "downloaded" as const,
-                      version: data.version,
-                      elapsedMs: e.downloadStartedAt
-                        ? Date.now() - e.downloadStartedAt
-                        : undefined,
-                    }
-                  : e
-            );
-          }
-          return [
-            ...prev,
-            {
-              kind: "pkg",
-              pkg: data.pkg,
-              status: "downloaded",
-              version: data.version,
-            } as PkgEntry,
-          ];
-        });
+      pendingRef.current.push({
+        type,
+        pkg,
+        version,
+        time: type === "start" ? Date.now() : Date.now(),
+        ...(type === "done" && elapsedMs != null ? { elapsedMs } : {}),
+      });
+
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(flushPending);
       }
     };
-    navigator.serviceWorker?.addEventListener("message", handler);
-    return () =>
-      navigator.serviceWorker?.removeEventListener("message", handler);
-  }, []);
+    window.addEventListener("npm-type-fetch", handler);
+    return () => {
+      window.removeEventListener("npm-type-fetch", handler);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [flushPending]);
 
   // Mark complete after inactivity
   useEffect(() => {
@@ -122,7 +150,6 @@ export function NpmTerminal({ show, onClose, projectKey }: Props) {
         const totalMs = startTimeRef.current
           ? Date.now() - startTimeRef.current
           : 0;
-        // Reset for next wave
         startTimeRef.current = 0;
         setLog((prev) => [
           ...prev.map(
@@ -147,9 +174,9 @@ export function NpmTerminal({ show, onClose, projectKey }: Props) {
     scrollRef.current?.scrollTo(0, scrollRef.current.scrollHeight);
   }, [log]);
 
-  if (!show) return null;
-
   const pkgCount = log.filter((l) => l.kind === "pkg").length;
+
+  if (!show) return null;
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50">

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { stripFences } from "../lib/strip-fences.js";
 import { trpc } from "../trpc.js";
 import type { FileTab } from "../types/index.js";
@@ -61,6 +61,24 @@ export function useAiGenerate(
   const effectiveModel = aiModel ?? config?.defaultModel ?? "claude-sonnet-4-6";
   const effectiveMaxTokens = aiMaxTokens ?? config?.defaultMaxTokens ?? 16384;
 
+  // ── Batched streaming updates via RAF (same pattern as NpmTerminal) ──
+  const pendingCodeRef = useRef<string | null>(null);
+  const rafRef = useRef(0);
+
+  const flushStreaming = useCallback(
+    (isRefine: boolean) => {
+      rafRef.current = 0;
+      const code = pendingCodeRef.current;
+      if (code === null) return;
+      pendingCodeRef.current = null;
+      setStreamingCode(code);
+      if (!isRefine) {
+        callbacks.onCodeStreaming(code);
+      }
+    },
+    [callbacks]
+  );
+
   const handleGenerate = useCallback(async () => {
     const { promptInput, tsFiles, files, showDialog } = context();
     const trimmed = promptInput.trim();
@@ -69,6 +87,11 @@ export function useAiGenerate(
     setGenerateError(null);
     setStreamingCode("");
     setTokenUsage(null);
+    pendingCodeRef.current = null;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = 0;
+    }
 
     const isRefine = files.length > 0 && !showDialog;
     if (!isRefine) {
@@ -108,9 +131,12 @@ export function useAiGenerate(
           const event = JSON.parse(line.slice(6));
           if (event.type === "text") {
             code += event.text;
-            setStreamingCode(code);
-            if (!isRefine) {
-              callbacks.onCodeStreaming(code);
+            // Batch: store pending code and schedule a single RAF flush
+            pendingCodeRef.current = code;
+            if (!rafRef.current) {
+              rafRef.current = requestAnimationFrame(() =>
+                flushStreaming(isRefine)
+              );
             }
           } else if (event.type === "done") {
             truncated = event.truncated ?? false;
@@ -125,6 +151,16 @@ export function useAiGenerate(
           }
         }
       }
+      // Flush any remaining pending code before completion
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
+      if (pendingCodeRef.current !== null) {
+        setStreamingCode(pendingCodeRef.current);
+        if (!isRefine) callbacks.onCodeStreaming(pendingCodeRef.current);
+        pendingCodeRef.current = null;
+      }
       const finalCode = stripFences(code);
       callbacks.onComplete(finalCode, isRefine, truncated);
       setStreamingCode("");
@@ -138,8 +174,12 @@ export function useAiGenerate(
       setGenerateError(err instanceof Error ? err.message : String(err));
     } finally {
       setGenerating(false);
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = 0;
+      }
     }
-  }, [context, callbacks, effectiveMaxTokens, effectiveModel]);
+  }, [context, callbacks, effectiveMaxTokens, effectiveModel, flushStreaming]);
 
   return {
     generating,

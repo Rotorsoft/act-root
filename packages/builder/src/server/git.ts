@@ -1,8 +1,11 @@
-import { execSync } from "child_process";
+import { exec } from "child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "fs";
 import { tmpdir } from "os";
 import { join, relative } from "path";
+import { promisify } from "util";
 import { extractTypesFromTarball } from "./tarball.js";
+
+const execAsync = promisify(exec);
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -29,14 +32,12 @@ export const repoCache = new Map<
  * Clone a GitHub repo, scan source files, resolve the import graph,
  * and fetch npm type definitions for dependencies.
  *
- * @param input - Repository coordinates
- * @param onProgress - Optional callback for streaming progress updates (SSE)
- * @returns Collected files array
+ * Async to allow the event loop to flush SSE responses between steps.
  */
-export function cloneAndCollect(
+export async function cloneAndCollect(
   input: CloneInput,
   onProgress?: (text: string) => void
-): { files: CollectedFile[]; remoteSha: string } {
+): Promise<{ files: CollectedFile[]; remoteSha: string }> {
   const { owner, repo, branch = "master" } = input;
   const progress = onProgress ?? (() => {});
 
@@ -49,13 +50,11 @@ export function cloneAndCollect(
   progress(`Checking ${owner}/${repo}...`);
   let remoteSha = "";
   try {
-    remoteSha = execSync(`git ls-remote ${cloneUrl} refs/heads/${branch}`, {
-      encoding: "utf-8",
-      stdio: "pipe",
-      timeout: 10000,
-    })
-      .split("\t")[0]
-      .trim();
+    const { stdout } = await execAsync(
+      `git ls-remote ${cloneUrl} refs/heads/${branch}`,
+      { timeout: 10000 }
+    );
+    remoteSha = stdout.split("\t")[0].trim();
   } catch {
     // ls-remote failed — skip cache, proceed with clone
   }
@@ -73,9 +72,9 @@ export function cloneAndCollect(
   const tmpDir = mkdtempSync(join(tmpdir(), "act-builder-"));
   try {
     try {
-      execSync(
+      await execAsync(
         `git clone --depth 1 --branch ${branch} ${cloneUrl} ${tmpDir}/repo`,
-        { stdio: "pipe", timeout: 30000 }
+        { timeout: 30000 }
       );
     } catch (cloneErr) {
       const msg =
@@ -100,7 +99,7 @@ export function cloneAndCollect(
     }
     const repoDir = join(tmpDir, "repo");
 
-    // ── Scan files ────────────────────────────────────────────────
+    // ── Scan files (sync — fast, no child processes) ────────────────
     progress("Scanning source files...");
     const COLLECT_RE = /\.(ts|tsx|json|md|yaml|yml)$/;
     const tsFiles = new Map<string, string>();
@@ -131,7 +130,7 @@ export function cloneAndCollect(
     walk(repoDir);
     progress(`Found ${allRepoFiles.size} files (${tsFiles.size} TypeScript)`);
 
-    // ── Find entry points ─────────────────────────────────────────
+    // ── Find entry points ───────────────────────────────────────────
     progress("Finding act() entry points...");
     const entryPaths: string[] = [];
     const skipPaths =
@@ -156,7 +155,7 @@ export function cloneAndCollect(
       `Found ${entryPaths.length} entry point${entryPaths.length > 1 ? "s" : ""}: ${entryPaths.join(", ")}`
     );
 
-    // ── Follow imports ────────────────────────────────────────────
+    // ── Follow imports ──────────────────────────────────────────────
     progress("Resolving import graph...");
     const collected = new Map<string, string>();
     const queue = [...entryPaths];
@@ -168,16 +167,13 @@ export function cloneAndCollect(
       if (!content) continue;
       collected.set(filePath, content);
 
-      // Follow imports and re-exports
       const importRe =
         /(?:import|export)\s+(?:type\s+)?(?:[\s\S]*?\s+)?from\s+["']([^"']+)["']/g;
       let m: RegExpExecArray | null;
       while ((m = importRe.exec(content)) !== null) {
         if (/^import\s+type\s/.test(m[0])) continue;
         const imp = m[1];
-
         if (imp.startsWith(".")) {
-          // Relative import
           const dir = filePath.includes("/")
             ? filePath.slice(0, filePath.lastIndexOf("/"))
             : "";
@@ -193,7 +189,6 @@ export function cloneAndCollect(
             .replace(/\.jsx$/, ".tsx")
             .replace(/\.js$/, ".ts");
           if (!rp.endsWith(".ts") && !rp.endsWith(".tsx")) {
-            // Try file.ts then file/index.ts
             if (tsFiles.has(rp + ".ts")) queue.push(rp + ".ts");
             else if (tsFiles.has(rp + "/index.ts"))
               queue.push(rp + "/index.ts");
@@ -201,7 +196,6 @@ export function cloneAndCollect(
             queue.push(rp);
           }
         } else if (imp.startsWith("@")) {
-          // Workspace/monorepo package: try packages/ and libs/ dirs
           const parts = imp.split("/");
           const pkgName = parts[1];
           if (pkgName) {
@@ -226,7 +220,7 @@ export function cloneAndCollect(
       }
     }
 
-    // Merge config files (package.json, tsconfig, yaml) from repo
+    // Merge config files
     const CONFIG_RE =
       /(?:package\.json|tsconfig[^/]*\.json|pnpm-workspace\.yaml|\.npmrc)$/;
     for (const [path, content] of allRepoFiles) {
@@ -257,7 +251,6 @@ export function cloneAndCollect(
 
         for (const [name, ver] of Object.entries(deps)) {
           if (typeof ver === "string" && ver.startsWith("workspace:")) continue;
-          // Skip if already provided as source
           if (
             tsFiles.has(`libs/${name.replace(/^@[^/]+\//, "")}/src/index.ts`) ||
             tsFiles.has(
@@ -269,7 +262,7 @@ export function cloneAndCollect(
           if (existing) {
             if (!existing.dirs.includes(dir)) existing.dirs.push(dir);
           } else {
-            depMap.set(name, { ver: ver, dirs: [dir] });
+            depMap.set(name, { ver, dirs: [dir] });
           }
         }
       } catch {
@@ -280,17 +273,21 @@ export function cloneAndCollect(
     let typesCount = 0;
     for (const [name] of depMap) {
       try {
-        const tarballUrl = execSync(
+        const { stdout: tarballUrl } = await execAsync(
           `npm view ${name} dist.tarball 2>/dev/null`,
-          { encoding: "utf-8", timeout: 10000 }
-        ).trim();
-        if (!tarballUrl) continue;
+          { timeout: 10000 }
+        );
+        const url = tarballUrl.trim();
+        if (!url) continue;
 
-        const tarGz = execSync(`curl -sL "${tarballUrl}"`, {
+        const { stdout: tarGzBuf } = await execAsync(`curl -sL "${url}"`, {
           maxBuffer: 50 * 1024 * 1024,
           timeout: 30000,
+          encoding: "buffer",
         });
-        const typeFiles = extractTypesFromTarball(tarGz);
+        const typeFiles = extractTypesFromTarball(
+          tarGzBuf as unknown as Buffer
+        );
         if (typeFiles.size === 0) continue;
         const dirs = depMap.get(name)!.dirs;
         for (const dir of dirs) {
@@ -304,7 +301,7 @@ export function cloneAndCollect(
         typesCount++;
         progress(`Types: ${name} (${typeFiles.size} files)`);
       } catch {
-        // skip — ATA may still handle it
+        // skip — client-side fetchNpmTypes will handle it
       }
     }
     progress(`Fetched types for ${typesCount} packages`);
@@ -315,14 +312,12 @@ export function cloneAndCollect(
       content,
     }));
 
-    // Cache the result keyed by commit SHA (auto-invalidates on push)
     if (remoteSha) {
       repoCache.set(cacheKey, { files, sha: remoteSha });
     }
 
     return { files, remoteSha };
   } finally {
-    // Clean up temp directory
     try {
       rmSync(tmpDir, { recursive: true, force: true });
     } catch {
@@ -346,15 +341,18 @@ export function streamFetchFromGit(
   const send = (type: string, data: Record<string, unknown> = {}) =>
     res.write(`data: ${JSON.stringify({ type, ...data })}\n\n`);
 
-  try {
-    const { files } = cloneAndCollect(input, (text) => {
-      send("status", { text });
+  void cloneAndCollect(input, (text) => {
+    send("status", { text });
+  })
+    .then(({ files }) => {
+      send("done", { files });
+    })
+    .catch((err: unknown) => {
+      send("error", {
+        message: err instanceof Error ? err.message : String(err),
+      });
+    })
+    .finally(() => {
+      res.end();
     });
-    send("done", { files });
-  } catch (err) {
-    send("error", {
-      message: err instanceof Error ? err.message : String(err),
-    });
-  }
-  res.end();
 }

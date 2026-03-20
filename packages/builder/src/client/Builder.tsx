@@ -26,7 +26,7 @@ import { hasFileSystemAccess } from "./lib/local-folder.js";
 import { navigateToCode } from "./lib/navigate-to-code.js";
 import { deriveProjectName } from "./lib/strip-fences.js";
 import { validate } from "./lib/validate.js";
-import { getWorkspaceErrors } from "./lib/vscode-init.js";
+import { getWorkspaceErrors, triggerResize } from "./lib/vscode-init.js";
 import type { FileTab } from "./types/index.js";
 import { emptyModel } from "./types/index.js";
 
@@ -35,34 +35,48 @@ export function Builder() {
   const [promptInput, setPromptInput] = useState("");
   const [showPrompt, setShowPrompt] = useState(false);
   const [showGitImport, setShowGitImport] = useState(false);
-  const [gitUrl, setGitUrl] = useState("");
+  const [gitUrl, _setGitUrl] = useState("");
+  const gitUrlRef = useRef("");
+  const setGitUrl = useCallback((url: string) => {
+    gitUrlRef.current = url;
+    _setGitUrl(url);
+  }, []);
   const [savedImports, setSavedImports] =
     useState<SavedImport[]>(loadSavedImports);
   const [splitPct, setSplitPct] = useState(50);
   const isDragging = useRef(false);
+  const splitRafRef = useRef(0);
+  const pendingSplitRef = useRef<number | null>(null);
+
+  // Clean up split RAF on unmount
+  useEffect(() => {
+    return () => {
+      if (splitRafRef.current) cancelAnimationFrame(splitRafRef.current);
+    };
+  }, []);
   const [projectName, setProjectName] = useState("");
   const [showDialog, setShowDialog] = useState(true);
   const [projectSource, setProjectSource] = useState<
     "sample" | "local" | "github" | "ai" | ""
   >("");
   const [showInlinePrompt, setShowInlinePrompt] = useState(false);
+  const [editorCollapsed, setEditorCollapsed] = useState(false);
 
-  // NpmTerminal visibility
+  // NpmTerminal visibility — show when type downloads start
   const [showNpmTerminal, setShowNpmTerminal] = useState(false);
   useEffect(() => {
-    const handler = (event: MessageEvent) => {
-      const data = event.data as { type: string; isTarball: boolean };
-      if (data.type === "npm-fetch-start" && !data.isTarball) {
-        setShowNpmTerminal(true);
-      }
+    const handler = (event: Event) => {
+      const { type } = (event as CustomEvent).detail as { type: string };
+      if (type === "start") setShowNpmTerminal(true);
     };
-    navigator.serviceWorker?.addEventListener("message", handler);
-    return () =>
-      navigator.serviceWorker?.removeEventListener("message", handler);
+    window.addEventListener("npm-type-fetch", handler);
+    return () => window.removeEventListener("npm-type-fetch", handler);
   }, []);
 
-  const tsFiles = files.filter(
-    (f) => f.path.endsWith(".ts") || f.path.endsWith(".tsx")
+  const tsFiles = useMemo(
+    () =>
+      files.filter((f) => f.path.endsWith(".ts") || f.path.endsWith(".tsx")),
+    [files]
   );
 
   // ── Editor errors hook ──────────────────────────────────────────────
@@ -76,14 +90,15 @@ export function Builder() {
       setShowPrompt(false);
       setShowDialog(false);
       setEditorErrorCount(0);
-      if (gitUrl.trim()) {
-        saveImport(gitUrl.trim());
+      const url = gitUrlRef.current.trim();
+      if (url) {
+        saveImport(url);
         setSavedImports(loadSavedImports());
-        setProjectName(repoLabel(gitUrl.trim()));
+        setProjectName(repoLabel(url));
         setProjectSource("github");
       }
     },
-    [gitUrl, setEditorErrorCount]
+    [setEditorErrorCount]
   );
 
   const { clonePending, cloneLog, cloneError, startClone } = useClone({
@@ -189,28 +204,30 @@ export function Builder() {
     config,
   } = useAiGenerate(aiContext, aiCallbacks);
 
-  // ── Model extraction and validation ─────────────────────────────────
-  const prevModelRef = useRef(emptyModel());
-  const { model, evalError } = useMemo(() => {
+  // ── Model extraction and validation (debounced to avoid blocking UI) ──
+  const [model, setModel] = useState(emptyModel());
+  const [evalError, setEvalError] = useState<string | undefined>();
+  useEffect(() => {
     if (tsFiles.length === 0) {
-      prevModelRef.current = emptyModel();
-      return { model: emptyModel(), evalError: undefined };
+      setModel(emptyModel());
+      setEvalError(undefined);
+      return;
     }
-    let model: ReturnType<typeof extractModel>["model"];
-    let error: ReturnType<typeof extractModel>["error"];
-    try {
-      ({ model, error } = extractModel(tsFiles));
-    } catch (e) {
-      return {
-        model: prevModelRef.current,
-        evalError: e instanceof Error ? e.message : String(e),
-      };
-    }
-    if (error) {
-      return { model: prevModelRef.current, evalError: error };
-    }
-    prevModelRef.current = model;
-    return { model, evalError: undefined };
+    // Defer extraction to avoid blocking the initial render
+    const timer = setTimeout(() => {
+      try {
+        const { model: m, error } = extractModel(tsFiles);
+        if (error) {
+          setEvalError(error);
+        } else {
+          setModel(m);
+          setEvalError(undefined);
+        }
+      } catch (e) {
+        setEvalError(e instanceof Error ? e.message : String(e));
+      }
+    }, 100);
+    return () => clearTimeout(timer);
   }, [tsFiles]);
 
   const warnings = useMemo(() => {
@@ -320,6 +337,11 @@ export function Builder() {
         editorErrorCount={editorErrorCount}
         appendErrors={appendErrors}
         onDownload={() => downloadProject(files, projectName)}
+        editorCollapsed={editorCollapsed}
+        onToggleEditor={() => {
+          setEditorCollapsed((v) => !v);
+          setTimeout(triggerResize, 50);
+        }}
       />
 
       {showDialog && (
@@ -388,26 +410,38 @@ export function Builder() {
         onMouseMove={(e) => {
           if (!isDragging.current) return;
           const rect = e.currentTarget.getBoundingClientRect();
-          setSplitPct(
-            Math.max(
-              20,
-              Math.min(80, ((e.clientX - rect.left) / rect.width) * 100)
-            )
+          pendingSplitRef.current = Math.max(
+            20,
+            Math.min(80, ((e.clientX - rect.left) / rect.width) * 100)
           );
+          if (!splitRafRef.current) {
+            splitRafRef.current = requestAnimationFrame(() => {
+              splitRafRef.current = 0;
+              if (pendingSplitRef.current !== null) {
+                setSplitPct(pendingSplitRef.current);
+                pendingSplitRef.current = null;
+              }
+            });
+          }
         }}
         onMouseUp={() => {
           isDragging.current = false;
+          triggerResize();
         }}
         onMouseLeave={() => {
           isDragging.current = false;
+          triggerResize();
         }}
       >
         <div
           className="flex flex-col border-r border-zinc-800"
-          style={{ width: `${splitPct}%` }}
+          style={{
+            width: editorCollapsed ? 0 : `${splitPct}%`,
+            overflow: "hidden",
+          }}
         >
           <CodeEditor files={files} onFileChange={handleFileChange} />
-          {generating && streamingCode && !showDialog && (
+          {generating && streamingCode && !showDialog && !editorCollapsed && (
             <div className="flex shrink-0 items-center gap-2 border-t border-purple-900/50 bg-zinc-950 px-4 py-1.5">
               <Loader2 size={10} className="animate-spin text-purple-400" />
               <span className="text-[10px] text-purple-400">
@@ -420,12 +454,14 @@ export function Builder() {
           )}
         </div>
 
-        <div
-          className="w-1 shrink-0 cursor-col-resize bg-zinc-800 transition hover:bg-emerald-600"
-          onMouseDown={() => {
-            isDragging.current = true;
-          }}
-        />
+        {!editorCollapsed && (
+          <div
+            className="w-1 shrink-0 cursor-col-resize bg-zinc-800 transition hover:bg-emerald-600"
+            onMouseDown={() => {
+              isDragging.current = true;
+            }}
+          />
+        )}
 
         <div className="flex flex-1 flex-col">
           <div className="flex-1 overflow-auto">

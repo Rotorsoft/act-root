@@ -6,6 +6,17 @@ import type { InMemoryFileSystemProvider } from "@codingame/monaco-vscode-files-
 import { WORKSPACE } from "./vscode-init.js";
 import { writeFile } from "./workspace-fs.js";
 
+/** Dispatch a custom event for NpmTerminal to pick up */
+function emitTypeEvent(
+  type: "start" | "done",
+  pkg: string,
+  extra?: { version?: string; elapsedMs?: number }
+) {
+  window.dispatchEvent(
+    new CustomEvent("npm-type-fetch", { detail: { type, pkg, ...extra } })
+  );
+}
+
 /**
  * Parse a gzipped npm tarball and extract .d.ts + package.json files.
  * Uses fflate for gunzip and a minimal tar header parser.
@@ -190,6 +201,8 @@ export async function fetchNpmTypes(
             /https?:\/\/registry\.npmjs\.org\//,
             "/npm-registry/"
           );
+          emitTypeEvent("start", name);
+          const startMs = Date.now();
           const tarRes = await fetch(proxyUrl);
           if (!tarRes.ok) return;
 
@@ -198,10 +211,16 @@ export async function fetchNpmTypes(
           if (typeFiles.size === 0) return;
 
           typeCache.set(name, typeFiles);
+          const version = (meta.version as string) ?? undefined;
+          emitTypeEvent("done", name, {
+            version,
+            elapsedMs: Date.now() - startMs,
+          });
           console.log(
-            `[act-builder] types: ${name}@${meta.version} (${typeFiles.size} files → ${dirs.length} locations)`
+            `[act-builder] types: ${name}@${version} (${typeFiles.size} files → ${dirs.length} locations)`
           );
         } else {
+          emitTypeEvent("done", name, { elapsedMs: 0 });
           console.log(
             `[act-builder] types: ${name} (cached → ${dirs.length} locations)`
           );

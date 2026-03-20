@@ -64,8 +64,8 @@ export const builderRouter = t.router({
         entryPath: z.string().optional(),
       })
     )
-    .mutation(({ input }) => {
-      const { files } = cloneAndCollect(input);
+    .mutation(async ({ input }) => {
+      const { files } = await cloneAndCollect(input);
       return { files };
     }),
 });

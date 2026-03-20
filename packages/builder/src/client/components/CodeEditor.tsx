@@ -149,14 +149,6 @@ export function CodeEditor({ files, onFileChange }: Props) {
         }
         console.timeEnd("[act-builder] open editors");
 
-        console.time("[act-builder] show explorer");
-        try {
-          const vscode = await import("vscode");
-          await vscode.commands.executeCommand("workbench.view.explorer");
-        } catch {
-          // best effort
-        }
-        console.timeEnd("[act-builder] show explorer");
         console.timeEnd("[act-builder] project load total");
       })();
     } else if (!isNewProject) {
@@ -172,8 +164,8 @@ export function CodeEditor({ files, onFileChange }: Props) {
     if (!ready) return;
 
     const wsPrefix = `file://${WORKSPACE}/`;
-
     const disposables: { dispose(): void }[] = [];
+    const debounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
     function attachListener(model: monaco.editor.ITextModel) {
       const uriStr = model.uri.toString();
@@ -181,12 +173,22 @@ export function CodeEditor({ files, onFileChange }: Props) {
       disposables.push(
         model.onDidChangeContent(() => {
           const path = uriStr.slice(wsPrefix.length);
-          const idx = filesRef.current.findIndex(
-            (f: FileTab) => f.path === path
+          // Clear any pending debounce for this file
+          const prev = debounceTimers.get(path);
+          if (prev) clearTimeout(prev);
+          // Debounce 300ms to avoid firing on every keystroke
+          debounceTimers.set(
+            path,
+            setTimeout(() => {
+              debounceTimers.delete(path);
+              const idx = filesRef.current.findIndex(
+                (f: FileTab) => f.path === path
+              );
+              if (idx >= 0) {
+                onFileChangeRef.current(idx, model.getValue());
+              }
+            }, 300)
           );
-          if (idx >= 0) {
-            onFileChangeRef.current(idx, model.getValue());
-          }
         })
       );
     }
@@ -196,6 +198,8 @@ export function CodeEditor({ files, onFileChange }: Props) {
 
     return () => {
       for (const d of disposables) d.dispose();
+      for (const t of debounceTimers.values()) clearTimeout(t);
+      debounceTimers.clear();
     };
   }, [ready]);
 

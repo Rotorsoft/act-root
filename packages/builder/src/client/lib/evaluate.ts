@@ -21,7 +21,12 @@ function transpile(code: string): string {
     const { code: js } = transform(safe, {
       transforms: ["typescript", "imports"],
     });
-    return js;
+    // Strip top-level runtime invocations — we only need builder definitions.
+    // Patterns: main(), main().catch(...), void main(), await main()
+    return js.replace(
+      /^(?:void\s+|await\s+)?(?:main|run|start|bootstrap)\s*\([^)]*\)(?:\s*\.catch\([^)]*\))?;?\s*$/gm,
+      "/* stripped runtime call */"
+    );
   } catch {
     return code;
   }
@@ -155,21 +160,7 @@ function execute(files: FileTab[]): {
           ${js}
         `
         );
-        const result = fn(
-          fileRequire,
-          fileExp,
-          { exports: fileExp },
-          file.path,
-          "."
-        );
-        // Swallow async errors from top-level calls (e.g. async main())
-        if (
-          result &&
-          typeof result === "object" &&
-          typeof result.catch === "function"
-        ) {
-          result.catch(() => {});
-        }
+        fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
       } catch {
         // Skip files that fail (infrastructure code)
       }
@@ -240,15 +231,14 @@ export function extractModel(files: FileTab[]): {
 
     const sliceReactions: ReactionNode[] = [];
     for (const r of (s.reactions as ReactionNode[]) || []) {
-      const sourceState = eventOwner.get(r.event);
+      // Collect all actions from all states in the slice — reactions can
+      // dispatch to any state, including the one that emitted the event
       const dispatches: string[] = [];
       for (const st of sliceStates) {
-        if (st.name !== sourceState) {
-          for (const actionName of Object.keys(
-            (st.actions as Record<string, unknown>) || {}
-          )) {
-            if (!actionName.startsWith("__emits_")) dispatches.push(actionName);
-          }
+        for (const actionName of Object.keys(
+          (st.actions as Record<string, unknown>) || {}
+        )) {
+          if (!actionName.startsWith("__emits_")) dispatches.push(actionName);
         }
       }
       sliceReactions.push({ ...r, dispatches });

@@ -241,8 +241,8 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
           "editor.wordBasedSuggestions": "off",
           "editor.minimap.enabled": false,
           "editor.renderLineHighlight": "none",
-          "explorer.compactFolders": true,
-          "explorer.autoReveal": true,
+          "explorer.compactFolders": false,
+          "explorer.autoReveal": false,
           "explorer.openEditors.visible": 0,
           "typescript.tsserver.web.projectWideIntellisense.enabled": true,
           "typescript.tsserver.web.projectWideIntellisense.suppressSemanticErrors": false,
@@ -282,13 +282,12 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
     ).setAsDefaultApi();
     console.timeEnd("[act-builder] registerExtension");
 
-    console.time("[act-builder] open explorer");
+    // Hide the sidebar by default — user can toggle with Ctrl+B
     try {
-      await vscode.commands.executeCommand("workbench.view.explorer");
+      await vscode.commands.executeCommand("workbench.action.closeSidebar");
     } catch {
       // command may not be available yet
     }
-    console.timeEnd("[act-builder] open explorer");
 
     console.timeEnd("[act-builder] total init");
     return { wrapper, fs: fileSystemProvider };

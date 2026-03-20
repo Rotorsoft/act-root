@@ -66,14 +66,41 @@ export function Diagram({ model, warnings, onClickElement }: Props) {
   const start = useRef({ x: 0, y: 0, px: 0, py: 0 });
 
   const svgContainerRef = useRef<HTMLDivElement>(null);
+  const panRafRef = useRef(0);
+  const pendingPanRef = useRef<{ x: number; y: number } | null>(null);
+  const zoomRafRef = useRef(0);
+  const pendingZoomRef = useRef<number | null>(null);
+
+  // Clean up RAF handles on unmount
+  useEffect(() => {
+    return () => {
+      if (panRafRef.current) cancelAnimationFrame(panRafRef.current);
+      if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     const el = svgContainerRef.current;
     if (!el) return;
     const handler = (e: WheelEvent) => {
       e.preventDefault();
-      setZoom((z) =>
-        Math.max(0.2, Math.min(3, z * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
-      );
+      // Store the pending zoom factor and schedule a single RAF flush
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      if (pendingZoomRef.current !== null) {
+        pendingZoomRef.current *= factor;
+      } else {
+        pendingZoomRef.current = factor;
+      }
+      if (!zoomRafRef.current) {
+        zoomRafRef.current = requestAnimationFrame(() => {
+          zoomRafRef.current = 0;
+          const f = pendingZoomRef.current;
+          pendingZoomRef.current = null;
+          if (f !== null) {
+            setZoom((z) => Math.max(0.2, Math.min(3, z * f)));
+          }
+        });
+      }
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
@@ -88,10 +115,19 @@ export function Diagram({ model, warnings, onClickElement }: Props) {
   );
   const onMove = useCallback((e: React.MouseEvent) => {
     if (!drag.current) return;
-    setPan({
+    pendingPanRef.current = {
       x: start.current.px + (e.clientX - start.current.x),
       y: start.current.py + (e.clientY - start.current.y),
-    });
+    };
+    if (!panRafRef.current) {
+      panRafRef.current = requestAnimationFrame(() => {
+        panRafRef.current = 0;
+        if (pendingPanRef.current !== null) {
+          setPan(pendingPanRef.current);
+          pendingPanRef.current = null;
+        }
+      });
+    }
   }, []);
   const onUp = useCallback(() => {
     drag.current = false;
