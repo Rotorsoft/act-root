@@ -43,7 +43,7 @@ Open a project from four sources:
 
 - **Todo App** — Built-in sample with states, slices, projections, and orchestrator
 - **Open Local** — Browse a local folder using the File System Access API (Chrome/Edge). Recently opened folders are remembered for quick reopen
-- **GitHub Import** — Shallow-clone a repo, find `act()` entry points, and follow all imports to collect the domain model files. Supports workspace packages (`@scope/name` → `packages/name/src/`), private repos via `GITHUB_TOKEN`, and preserves the original folder structure
+- **GitHub Import** — Shallow-clone a repo with streaming progress log, find `act()` entry points, and follow all imports to collect the domain model files. Supports monorepo workspace packages (`@scope/name` resolves from `packages/` and `libs/` dirs), private repos via `GITHUB_TOKEN`, and preserves the original folder structure. Clones are cached by commit SHA and auto-invalidate when the remote changes
 - **AI Generate** — Describe your domain in plain English. Configurable model (Sonnet/Opus/Haiku) and token limit. Streams the response in real time
 
 Recently opened folders and imported repos are shown as quick-access chips in the project dialog.
@@ -56,11 +56,25 @@ Full VS Code experience in the browser:
 
 - **File explorer** — tree view of all project files with folder structure
 - **Editor tabs** — open, close, split, and rearrange tabs natively
-- **TypeScript IntelliSense** — powered by real `@rotorsoft/act` type definitions
+- **TypeScript IntelliSense** — powered by real type definitions fetched from npm
 - **Problems panel** — TypeScript errors with click-to-navigate (Ctrl+Shift+M)
 - **Search** — find across all project files (Ctrl+Shift+F)
 - **Cross-file navigation** — F12 go-to-definition, F2 rename across files
 - Click any diagram element to open the file and highlight the definition
+
+### Type Acquisition
+
+Types are fetched directly from npm (not via ATA) for reliable IntelliSense and F12 navigation:
+
+- Reads all `package.json` files in the project (monorepo-aware)
+- Fetches `.d.ts` files from npm tarballs for each dependency
+- Places types in the correct `node_modules/` directory per sub-package (not hoisted)
+- Respects exact versions from `package.json`; uses latest for semver ranges
+- Reads tsconfig `types` fields (e.g. `vitest/globals`) and fetches those packages too
+- Session-level cache — tarballs downloaded once, reused across project loads
+- Workspace packages (pnpm `workspace:*`) resolved from local source via `paths` mappings
+- Terminal-style progress modal shows download status with package versions and timing
+- Skipped devDependencies listed in a collapsible disclosure
 
 ### Live Domain Model Diagram
 
@@ -89,9 +103,9 @@ Full VS Code experience in the browser:
 
 ## Known Limitations
 
-- **Type acquisition timing** — TypeScript types are loaded via ATA (Automatic Type Acquisition) through an npm registry proxy. First load of a project may take 10-20 seconds for the web tsserver to initialize and fetch types. Subsequent interactions are fast.
 - **Workspace packages need `package.json`** — For monorepo workspace imports (`@scope/name`), the builder creates `node_modules` entries automatically from sub-package `package.json` files. If a workspace package doesn't have a `package.json` with a `name` field, its types won't resolve.
-- **Private npm packages** — ATA can only fetch types for packages published on the public npm registry. Private/workspace packages (`@risk/domain`) get types through the workspace `node_modules` wiring instead.
+- **Private npm packages** — Type acquisition can only fetch types for packages published on the public npm registry. Private/workspace packages get types through the workspace `paths` mapping and `node_modules` shims instead.
+- **tsconfig project boundaries** — In monorepos with per-package tsconfigs, cross-package imports may trigger "not listed within file list" warnings. The builder generates `paths` mappings to minimize this, but TypeScript composite project references are not fully replicated.
 
 ## Architecture
 
@@ -99,30 +113,45 @@ Full VS Code experience in the browser:
 packages/builder/
 ├── src/
 │   ├── server/
-│   │   ├── server.ts           # tRPC server + SSE streaming endpoint
-│   │   └── router.ts           # generate, fetchFromGit, config procedures
+│   │   ├── server.ts           # HTTP server + SSE streaming endpoints
+│   │   ├── router.ts           # tRPC router (config, generate, fetchFromGit)
+│   │   ├── ai.ts               # AI generation: skills, prompts, streaming
+│   │   ├── git.ts              # Clone logic: cache, cloneAndCollect, SSE progress
+│   │   └── tarball.ts          # npm tarball extraction (pure Node.js tar parser)
 │   └── client/
 │       ├── App.tsx              # Root with tRPC providers
-│       ├── Builder.tsx          # Main layout: header, dialog, editor, diagram
+│       ├── Builder.tsx          # Orchestrator: composes hooks and sub-components
 │       ├── main.tsx             # Entry point
 │       ├── trpc.ts              # tRPC client
+│       ├── hooks/
+│       │   ├── useClone.ts      # Git clone SSE streaming state
+│       │   ├── useAiGenerate.ts # AI generation streaming state
+│       │   ├── useLocalFolder.ts # File System Access API + IndexedDB
+│       │   └── useEditorErrors.ts # Monaco marker polling
 │       ├── components/
+│       │   ├── HeaderBar.tsx    # Top toolbar: project chip, errors, AI, download
+│       │   ├── ProjectDialog.tsx # Project open modal (4 sources + history)
+│       │   ├── InlinePromptBar.tsx # AI refinement prompt bar
+│       │   ├── CodeEditor.tsx   # VS Code workbench container
+│       │   ├── NpmTerminal.tsx  # Type acquisition progress modal
+│       │   ├── Diagram.tsx      # SVG domain model diagram
 │       │   ├── Chip.tsx         # Reusable pill with close button
 │       │   ├── Tooltip.tsx      # Portal-based tooltip
-│       │   ├── CodeEditor.tsx   # Monaco multi-model editor
-│       │   ├── Diagram.tsx      # SVG domain model diagram
 │       │   ├── GithubIcon.tsx   # GitHub SVG icon
 │       │   └── Logo.tsx         # Builder logo
 │       ├── lib/
+│       │   ├── vscode-init.ts   # VS Code workbench initialization
+│       │   ├── workspace-fs.ts  # Virtual filesystem helpers
+│       │   ├── npm-types.ts     # Client-side npm type fetching + tar extraction
+│       │   ├── navigate-to-code.ts # Diagram-to-editor navigation
 │       │   ├── evaluate.ts      # Mock builder evaluation + model extraction
 │       │   ├── mock-builders.ts # Mock Act framework builders
 │       │   ├── sort.ts          # Topological sort for file eval order
 │       │   ├── validate.ts      # Model validation
 │       │   ├── strip-fences.ts  # AI response cleanup utilities
-│       │   ├── download.ts      # Shell script project export
+│       │   ├── download.ts      # Zip archive project export
 │       │   ├── github.ts        # GitHub URL parsing + localStorage history
-│       │   ├── local-folder.ts  # File System Access API + IndexedDB history
-│       │   └── vscode-init.ts   # VSCode API initialization
+│       │   └── local-folder.ts  # File System Access API + IndexedDB history
 │       ├── data/
 │       │   ├── prompts.ts       # AI prompt templates
 │       │   └── sample-app.ts    # Built-in Todo App sample
@@ -130,6 +159,8 @@ packages/builder/
 │           ├── index.ts         # Barrel re-exports
 │           ├── domain-model.ts  # DomainModel, StateNode, etc.
 │           └── file-tab.ts      # FileTab type
-├── vite.config.ts               # Vite + workbench + npm registry proxy
+├── public/
+│   └── npm-proxy-sw.js          # Service worker for npm registry monitoring
+├── vite.config.ts               # Vite + workbench + COOP/COEP + npm proxy
 └── tsconfig.json
 ```

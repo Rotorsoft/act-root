@@ -1,6 +1,6 @@
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
-import { builderRouter, streamGenerate } from "./router.js";
+import { builderRouter, streamFetchFromGit, streamGenerate } from "./router.js";
 
 const corsMiddleware = cors();
 
@@ -23,6 +23,28 @@ const server = createHTTPServer({
               refine?: boolean;
             };
             void streamGenerate(input, res);
+          } catch {
+            res.writeHead(400);
+            res.end("Invalid JSON");
+          }
+        });
+        return;
+      }
+      // SSE streaming endpoint for git clone progress
+      if (req.url === "/clone-stream" && req.method === "POST") {
+        let body = "";
+        req.on("data", (chunk: Buffer) => {
+          body += chunk.toString();
+        });
+        req.on("end", () => {
+          try {
+            const input = JSON.parse(body) as {
+              owner: string;
+              repo: string;
+              branch?: string;
+              entryPath?: string;
+            };
+            void streamFetchFromGit(input, res);
           } catch {
             res.writeHead(400);
             res.end("Invalid JSON");

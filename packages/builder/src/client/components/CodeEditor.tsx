@@ -6,14 +6,18 @@
 import * as monaco from "@codingame/monaco-vscode-editor-api";
 import type { InMemoryFileSystemProvider } from "@codingame/monaco-vscode-files-service-override";
 import { useEffect, useRef, useState } from "react";
+import { fetchNpmTypes } from "../lib/npm-types.js";
 import {
   closeAllEditors,
   initVscodeWorkbench,
   openFileInEditor,
   triggerResize,
   WORKSPACE,
-  writeWorkspaceFile,
 } from "../lib/vscode-init.js";
+import {
+  updateWorkspacePaths,
+  writeWorkspaceFile,
+} from "../lib/workspace-fs.js";
 import type { FileTab } from "../types/index.js";
 
 /** Pattern to identify Act-relevant files worth auto-opening */
@@ -82,17 +86,22 @@ export function CodeEditor({ files, onFileChange }: Props) {
     if (!fsRef.current || !ready) return;
 
     // Compute a fingerprint to detect project changes (not just content edits)
-    const fingerprint = files.map((f) => f.path).join("\n");
+    const fingerprint = files
+      .filter((f) => !f.path.startsWith("node_modules/"))
+      .map((f) => f.path)
+      .join("\n");
     const isNewProject = fingerprint !== prevFilesRef.current;
     prevFilesRef.current = fingerprint;
 
     // On project load, write files and open relevant ones
     if (isNewProject && files.length > 0) {
       void (async () => {
+        console.time("[act-builder] project load total");
+        console.time("[act-builder] close editors");
         await closeAllEditors();
+        console.timeEnd("[act-builder] close editors");
 
-        // Write files: package.json first (creates node_modules entries for
-        // workspace packages), then config, then TS sources
+        console.time("[act-builder] write files");
         const sorted = [...files].sort((a, b) => {
           const rank = (p: string) =>
             p.endsWith("package.json")
@@ -106,10 +115,27 @@ export function CodeEditor({ files, onFileChange }: Props) {
           await writeWorkspaceFile(fsRef.current!, f.path, f.content);
         }
 
+        console.timeEnd("[act-builder] write files");
+        console.log(
+          `[act-builder] wrote ${files.length} files (${files.filter((f) => f.path.endsWith(".ts")).length} .ts)`
+        );
+
+        // Update tsconfig with workspace package path mappings
+        await updateWorkspacePaths(fsRef.current!, files);
+
+        // Fetch .d.ts for npm dependencies not already provided
+        console.time("[act-builder] fetch npm types");
+        await fetchNpmTypes(fsRef.current!, files);
+        console.timeEnd("[act-builder] fetch npm types");
+
         triggerResize();
 
-        // Open Act-relevant files
-        const actFiles = files.filter(
+        console.time("[act-builder] open editors");
+        const srcFiles = files.filter(
+          (f) =>
+            !f.path.startsWith("node_modules/") && !f.path.endsWith(".d.ts")
+        );
+        const actFiles = srcFiles.filter(
           (f) => f.path.endsWith(".ts") && ACT_FILE_RE.test(f.content)
         );
         if (actFiles.length > 0) {
@@ -117,17 +143,21 @@ export function CodeEditor({ files, onFileChange }: Props) {
             await openFileInEditor(actFiles[j].path, j > 0);
           }
         } else {
-          const first = files.find((f) => f.path.endsWith(".ts")) ?? files[0];
+          const first =
+            srcFiles.find((f) => f.path.endsWith(".ts")) ?? srcFiles[0];
           if (first) await openFileInEditor(first.path);
         }
+        console.timeEnd("[act-builder] open editors");
 
-        // Show explorer
+        console.time("[act-builder] show explorer");
         try {
           const vscode = await import("vscode");
           await vscode.commands.executeCommand("workbench.view.explorer");
         } catch {
           // best effort
         }
+        console.timeEnd("[act-builder] show explorer");
+        console.timeEnd("[act-builder] project load total");
       })();
     } else if (!isNewProject) {
       // Content edit — just update the changed file

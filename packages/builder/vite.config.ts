@@ -181,8 +181,13 @@ function npmRegistryProxy(): Plugin {
         const url = req.url ?? "";
         if (!url.startsWith("/npm-registry/")) return next();
         const npmPath = url.slice("/npm-registry/".length);
+        const start = Date.now();
+        // Forward Accept header so npm returns abbreviated metadata when requested
+        const fwdHeaders: Record<string, string> = {};
+        if (req.headers.accept) fwdHeaders.accept = req.headers.accept;
         const proxyReq = httpsGet(
           `https://registry.npmjs.org/${npmPath}`,
+          { headers: fwdHeaders },
           (proxyRes) => {
             // Forward all headers, add CORP for COEP compatibility
             const headers: Record<string, string | string[]> = {};
@@ -193,6 +198,11 @@ function npmRegistryProxy(): Plugin {
             headers["access-control-allow-origin"] = "*";
             res.writeHead(proxyRes.statusCode ?? 200, headers);
             proxyRes.pipe(res);
+            res.on("finish", () => {
+              console.log(
+                `[npm-proxy] ${proxyRes.statusCode} ${npmPath} (${Date.now() - start}ms)`
+              );
+            });
           }
         );
         proxyReq.on("error", () => {

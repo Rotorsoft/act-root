@@ -41,7 +41,7 @@ Event sourcing observatory — connect to any Act PostgreSQL store and inspect e
 
 ### [@rotorsoft/act-builder](https://github.com/rotorsoft/act-root/tree/master/packages/builder)
 
-Domain model designer — full VS Code workbench in the browser with file explorer, TypeScript IntelliSense, and live domain diagram. Open projects from local folders, GitHub repos, AI generation, or the built-in sample. Refine code with AI, collect errors into prompts, and export as zip.
+Domain model designer — full VS Code workbench in the browser with file explorer, TypeScript IntelliSense (types fetched directly from npm), and live domain diagram. Open projects from local folders, GitHub repos (with streaming clone progress), AI generation, or the built-in sample. Monorepo-aware type acquisition places `.d.ts` files at the correct package level. Refine code with AI, collect errors into prompts, and export as zip.
 
 ---
 

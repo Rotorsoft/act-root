@@ -20,6 +20,7 @@ import {
   type IFileWriteOptions,
 } from "@codingame/monaco-vscode-files-service-override";
 import "@codingame/monaco-vscode-javascript-default-extension";
+import "@codingame/monaco-vscode-json-default-extension";
 import getKeybindingsServiceOverride from "@codingame/monaco-vscode-keybindings-service-override";
 import getLanguagesServiceOverride from "@codingame/monaco-vscode-languages-service-override";
 import getMarkersServiceOverride from "@codingame/monaco-vscode-markers-service-override";
@@ -41,9 +42,20 @@ import * as vscode from "vscode";
 configureDefaultWorkerFactory();
 
 /**
- * Proxy npm registry requests through our server.
- * COEP (Cross-Origin-Embedder-Policy) blocks registry.npmjs.org responses
- * because npm doesn't set Cross-Origin-Resource-Policy. Our proxy adds it.
+ * Register service worker to intercept npm registry requests from ALL contexts
+ * (main thread, workers, iframes). The extension host iframe can't be patched
+ * from the main thread, so the service worker is the only way to proxy its fetch.
+ */
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("/npm-proxy-sw.js").catch(() => {
+    /* SW registration may fail in some contexts */
+  });
+}
+
+/**
+ * Proxy npm registry requests through our server (main thread fallback).
+ * COEP blocks registry.npmjs.org responses because npm doesn't set
+ * Cross-Origin-Resource-Policy. Our proxy adds it.
  */
 function rewriteNpmUrl(url: string): string {
   if (url.includes("registry.npmjs.org")) {
@@ -131,7 +143,7 @@ globalThis.Worker = new Proxy(OriginalWorker, {
   },
 });
 
-const WORKSPACE = "/workspace";
+export const WORKSPACE = "/workspace";
 
 const textEncoder = new TextEncoder();
 const writeOpts: IFileWriteOptions = {
@@ -140,32 +152,6 @@ const writeOpts: IFileWriteOptions = {
   create: true,
   overwrite: true,
 };
-
-const createdDirs = new Set<string>();
-
-/** Ensure parent directories exist, then write file */
-async function writeFile(
-  fs: InMemoryFileSystemProvider,
-  path: string,
-  content: string
-) {
-  const parts = path.split("/").filter(Boolean);
-  for (let i = 1; i < parts.length; i++) {
-    const dir = "/" + parts.slice(0, i).join("/");
-    if (createdDirs.has(dir)) continue;
-    try {
-      await fs.mkdir(vscode.Uri.file(dir));
-    } catch {
-      // already exists
-    }
-    createdDirs.add(dir);
-  }
-  await fs.writeFile(
-    vscode.Uri.file(path),
-    textEncoder.encode(content),
-    writeOpts
-  );
-}
 
 function createWorkspaceContent() {
   return JSON.stringify({ folders: [{ path: WORKSPACE }] }, null, 2);
@@ -180,7 +166,8 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
   if (initPromise) return initPromise;
 
   initPromise = (async () => {
-    // Set up filesystem and write ALL types BEFORE initializing services
+    console.time("[act-builder] total init");
+    console.time("[act-builder] filesystem setup");
     const fileSystemProvider = new InMemoryFileSystemProvider();
     await fileSystemProvider.mkdir(vscode.Uri.file(WORKSPACE));
     await fileSystemProvider.writeFile(
@@ -189,31 +176,35 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
       writeOpts
     );
 
-    // Write a fallback tsconfig — will be overwritten if project has its own
-    await writeFile(
-      fileSystemProvider,
-      `${WORKSPACE}/tsconfig.json`,
-      JSON.stringify(
-        {
-          compilerOptions: {
-            target: "ES2022",
-            module: "ESNext",
-            moduleResolution: "node",
-            strict: true,
-            esModuleInterop: true,
-            skipLibCheck: true,
-            jsx: "react-jsx",
-            allowImportingTsExtensions: true,
-            noEmit: true,
+    await fileSystemProvider.mkdir(vscode.Uri.file(`${WORKSPACE}/src`));
+    await fileSystemProvider.writeFile(
+      vscode.Uri.file(`${WORKSPACE}/tsconfig.json`),
+      textEncoder.encode(
+        JSON.stringify(
+          {
+            compilerOptions: {
+              target: "ES2022",
+              module: "ESNext",
+              moduleResolution: "node",
+              strict: true,
+              esModuleInterop: true,
+              skipLibCheck: true,
+              jsx: "react-jsx",
+              allowImportingTsExtensions: true,
+              noEmit: true,
+            },
+            include: ["src/**/*", "packages/*/src/**/*", "libs/*/src/**/*"],
           },
-          include: ["src/**/*", "packages/*/src/**/*", "libs/*/src/**/*"],
-        },
-        null,
-        2
-      )
+          null,
+          2
+        )
+      ),
+      writeOpts
     );
     registerFileSystemOverlay(1, fileSystemProvider);
+    console.timeEnd("[act-builder] filesystem setup");
 
+    console.time("[act-builder] workbench config");
     const vscodeApiConfig: MonacoVscodeApiConfig = {
       $type: "extended",
       viewsConfig: {
@@ -255,7 +246,8 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
           "explorer.openEditors.visible": 0,
           "typescript.tsserver.web.projectWideIntellisense.enabled": true,
           "typescript.tsserver.web.projectWideIntellisense.suppressSemanticErrors": false,
-          "typescript.disableAutomaticTypeAcquisition": false,
+          "typescript.disableAutomaticTypeAcquisition": true,
+          "typescript.tsserver.web.typeAcquisition.enabled": false,
         }),
       },
       workspaceConfig: {
@@ -271,10 +263,14 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
       monacoWorkerFactory: configureDefaultWorkerFactory,
     };
 
+    console.timeEnd("[act-builder] workbench config");
+
+    console.time("[act-builder] wrapper.start()");
     const wrapper = new MonacoVscodeApiWrapper(vscodeApiConfig);
     await wrapper.start();
+    console.timeEnd("[act-builder] wrapper.start()");
 
-    // Register as default API provider — required for extensions to work with the workbench
+    console.time("[act-builder] registerExtension");
     await registerExtension(
       {
         name: "act-builder",
@@ -284,60 +280,21 @@ export function initVscodeWorkbench(htmlContainer: HTMLElement) {
       },
       ExtensionHostKind.LocalProcess
     ).setAsDefaultApi();
+    console.timeEnd("[act-builder] registerExtension");
 
-    // Open the explorer sidebar by default
+    console.time("[act-builder] open explorer");
     try {
       await vscode.commands.executeCommand("workbench.view.explorer");
     } catch {
       // command may not be available yet
     }
+    console.timeEnd("[act-builder] open explorer");
 
+    console.timeEnd("[act-builder] total init");
     return { wrapper, fs: fileSystemProvider };
   })();
 
   return initPromise;
-}
-
-/** Strip pnpm workspace protocol from package.json dependencies */
-function sanitizeContent(path: string, content: string): string {
-  if (path.endsWith("package.json")) {
-    return content.replace(/"workspace:[*^~]"/g, '"*"');
-  }
-  return content;
-}
-
-/** Write a user file to the workspace. Auto-creates node_modules entries for workspace packages. */
-export async function writeWorkspaceFile(
-  fs: InMemoryFileSystemProvider,
-  path: string,
-  content: string
-) {
-  const sanitized = sanitizeContent(path, content);
-  await writeFile(fs, `${WORKSPACE}/${path}`, sanitized);
-
-  // Auto-create node_modules entry for any workspace sub-package
-  // Matches: packages/*/package.json, libs/*/package.json, or any nested dir
-  if (path !== "package.json" && path.endsWith("/package.json")) {
-    try {
-      const pkg = JSON.parse(sanitized) as { name?: string };
-      if (pkg.name) {
-        const pkgDir = path.replace(/\/package\.json$/, "");
-        const nmSegments = `node_modules/${pkg.name}`.split("/").length;
-        const rel = "../".repeat(nmSegments) + pkgDir;
-        await writeFile(
-          fs,
-          `${WORKSPACE}/node_modules/${pkg.name}/package.json`,
-          JSON.stringify({
-            name: pkg.name,
-            version: "0.0.0",
-            types: `${rel}/src/index.ts`,
-          })
-        );
-      }
-    } catch {
-      // skip malformed package.json
-    }
-  }
 }
 
 /** Open a file in the workbench editor */
@@ -389,4 +346,4 @@ export function triggerResize() {
   window.dispatchEvent(new Event("resize"));
 }
 
-export { monaco, WORKSPACE };
+export { monaco };

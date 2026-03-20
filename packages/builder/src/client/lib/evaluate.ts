@@ -155,7 +155,21 @@ function execute(files: FileTab[]): {
           ${js}
         `
         );
-        fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
+        const result = fn(
+          fileRequire,
+          fileExp,
+          { exports: fileExp },
+          file.path,
+          "."
+        );
+        // Swallow async errors from top-level calls (e.g. async main())
+        if (
+          result &&
+          typeof result === "object" &&
+          typeof result.catch === "function"
+        ) {
+          result.catch(() => {});
+        }
       } catch {
         // Skip files that fail (infrastructure code)
       }
