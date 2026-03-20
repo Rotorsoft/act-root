@@ -144,7 +144,8 @@ function execute(files: FileTab[]): {
       // Capture slice variable names (slices have no registry name — only exception)
       const sliceCountBefore = __built__.slices.length;
       const sliceVarNames: string[] = [];
-      const sliceRe = /(?:var|let|const)\s+(\w+)\s*=\s*(?:\w+\.)?slice\s*\(/g;
+      const sliceRe =
+        /(?:(?:var|let|const)\s+|exports\.)(\w+)\s*=\s*(?:\w+\.)?slice\s*\(/g;
       let sm;
       while ((sm = sliceRe.exec(js)) !== null) {
         if (!sliceVarNames.includes(sm[1])) sliceVarNames.push(sm[1]);
@@ -168,12 +169,6 @@ function execute(files: FileTab[]): {
         `
         );
         fn(fileRequire, fileExp, { exports: fileExp }, file.path, ".");
-        // Log states/slices captured from this file
-        if (__built__.states.length > 0 || __built__.slices.length > 0) {
-          console.log(
-            `[act-builder] eval ok: ${file.path} (${__built__.states.length} states, ${__built__.slices.length} slices)`
-          );
-        }
       } catch (evalErr) {
         // Eval failed — try regex-based extraction as fallback
         console.warn(`[act-builder] eval failed: ${file.path}`, evalErr);
@@ -200,28 +195,6 @@ function execute(files: FileTab[]): {
   } catch (e: unknown) {
     result.error = e instanceof Error ? e.message : String(e);
   }
-
-  // Diagnostic: log what was captured
-  console.log(
-    `[act-builder] extracted: ${result.states.length} states, ${result.slices.length} slices, ${result.projections.length} projections`,
-    result.states.map((s: Record<string, unknown>) => {
-      const events = s.events as Record<string, unknown> | undefined;
-      const actions = s.actions as Record<string, unknown> | undefined;
-      return {
-        name: s.name,
-        events: Object.keys(events ?? {}),
-        actions: Object.keys(actions ?? {}).filter(
-          (k) => !k.startsWith("__emits_")
-        ),
-        emits: Object.keys(actions ?? {})
-          .filter((k) => k.startsWith("__emits_"))
-          .map(
-            (k) =>
-              `${k.replace("__emits_", "")}→${JSON.stringify((actions ?? {})[k])}`
-          ),
-      };
-    })
-  );
 
   return result;
 }

@@ -216,14 +216,8 @@ export async function fetchNpmTypes(
             version,
             elapsedMs: Date.now() - startMs,
           });
-          console.log(
-            `[act-builder] types: ${name}@${version} (${typeFiles.size} files → ${dirs.length} locations)`
-          );
         } else {
           emitTypeEvent("done", name, { elapsedMs: 0 });
-          console.log(
-            `[act-builder] types: ${name} (cached → ${dirs.length} locations)`
-          );
         }
 
         // Write to each package directory's node_modules
