@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ListTree,
   Maximize2,
+  Sparkles,
   X,
   ZoomIn,
   ZoomOut,
@@ -101,6 +102,7 @@ type Props = {
   model: DomainModel;
   warnings: ValidationWarning[];
   onClickElement?: (name: string, type?: string, file?: string) => void;
+  onFixWithAi?: (prompt: string) => void;
   toolbarExtra?: React.ReactNode;
 };
 
@@ -108,6 +110,7 @@ export function Diagram({
   model,
   warnings,
   onClickElement,
+  onFixWithAi,
   toolbarExtra,
 }: Props) {
   const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
@@ -347,12 +350,30 @@ export function Diagram({
             <span className="text-[10px] font-medium text-amber-400">
               Warnings ({warnings.length})
             </span>
-            <button
-              onClick={() => setShowWarnings(false)}
-              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
-            >
-              <X size={12} />
-            </button>
+            <div className="flex items-center gap-1">
+              {onFixWithAi && (
+                <button
+                  onClick={() => {
+                    const prompt = warnings
+                      .map((w) => `- ${w.message}`)
+                      .join("\n");
+                    onFixWithAi(`Fix these issues:\n${prompt}`);
+                    setShowWarnings(false);
+                  }}
+                  className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-purple-400 hover:bg-zinc-800"
+                  title="Fix all with AI"
+                >
+                  <Sparkles size={10} />
+                  Fix all
+                </button>
+              )}
+              <button
+                onClick={() => setShowWarnings(false)}
+                className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+              >
+                <X size={12} />
+              </button>
+            </div>
           </div>
           <div className="flex-1 overflow-auto px-3 py-2">
             {warnings.map((w, i) => (
@@ -368,14 +389,28 @@ export function Diagram({
                   {w.severity === "error" ? "●" : "▲"}
                 </span>
                 <span className="text-zinc-300">{w.message}</span>
-                {w.element && (
-                  <button
-                    onClick={() => onClickElement?.(w.element!)}
-                    className="ml-auto shrink-0 text-zinc-500 hover:text-zinc-300"
-                  >
-                    {w.element}
-                  </button>
-                )}
+                <div className="ml-auto flex shrink-0 items-center gap-1">
+                  {onFixWithAi && (
+                    <button
+                      onClick={() => {
+                        onFixWithAi(`Fix: ${w.message}`);
+                        setShowWarnings(false);
+                      }}
+                      className="text-purple-500 hover:text-purple-300"
+                      title="Fix with AI"
+                    >
+                      <Sparkles size={10} />
+                    </button>
+                  )}
+                  {w.element && (
+                    <button
+                      onClick={() => onClickElement?.(w.element!)}
+                      className="text-zinc-500 hover:text-zinc-300"
+                    >
+                      {w.element}
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>

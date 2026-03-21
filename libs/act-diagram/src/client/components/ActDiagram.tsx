@@ -8,7 +8,7 @@ import type {
   HostMessage,
   ValidationWarning,
 } from "../types/index.js";
-import { AiBar } from "./AiBar.js";
+import { AiBar, type AiOptions } from "./AiBar.js";
 import { Diagram } from "./Diagram.js";
 
 type Props = {
@@ -19,7 +19,7 @@ type Props = {
   /** Listen to postMessage for HostMessage updates */
   usePostMessage?: boolean;
   /** Optional AI callback */
-  onAiRequest?: (prompt: string, files: FileTab[]) => void;
+  onAiRequest?: (prompt: string, files: FileTab[], options: AiOptions) => void;
   /** Whether AI is generating */
   generating?: boolean;
 };
@@ -98,11 +98,24 @@ export function ActDiagram({
     <div className="flex h-full flex-col">
       {onAiRequest && (
         <AiBar
-          onSubmit={(prompt) => onAiRequest(prompt, files)}
+          onSubmit={(prompt, options) => onAiRequest(prompt, files, options)}
           generating={generating}
         />
       )}
-      <Diagram model={model} warnings={warnings} onClickElement={handleClick} />
+      <Diagram
+        model={model}
+        warnings={warnings}
+        onClickElement={handleClick}
+        onFixWithAi={
+          onAiRequest
+            ? (prompt) =>
+                onAiRequest(prompt, files, {
+                  model: "claude-sonnet-4-6",
+                  maxTokens: 16384,
+                })
+            : undefined
+        }
+      />
     </div>
   );
 }

@@ -71,7 +71,7 @@ function buildPatterns(esc: string, type?: string): RegExp[] {
   const statePatterns = [new RegExp(`state\\(\\s*\\{\\s*(${esc})\\s*[}:,]`)];
   const actionPatterns = [new RegExp(`\\.on\\(\\s*\\{\\s*(${esc})\\s*[},:]`)];
   const eventPatterns = [
-    // Match event name inside .emits({ EventName: ... }) — multiline-safe
+    // Match event name inside .emits({ EventName: ... }) — inline declaration
     new RegExp(`\\.emits\\([\\s\\S]*?(${esc})\\s*:`),
     // Match event name as key in a schema object: EventName: z.object(...)
     new RegExp(`(${esc})\\s*:\\s*z\\.object\\(`),
@@ -163,27 +163,44 @@ export function navigateToCode(
     const file = files.find((f) => f.path === targetFile);
     if (file) {
       const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const nameRe = new RegExp(`\\b${esc}\\b`, "g");
-      // For events: search inside .patch() block first, then .emits()
-      // For actions: search inside .on() block
-      const blockOrder =
-        type === "event"
-          ? [".patch(", ".emits("]
-          : type === "action"
-            ? [".on("]
-            : [];
 
-      for (const block of blockOrder) {
-        const blockStart = file.content.indexOf(block);
-        if (blockStart < 0) continue;
-        const idx = findNonCommentMatch(file.content, nameRe, blockStart);
-        if (idx >= 0) {
-          const { line, col } = positionAt(file.content, idx);
+      // For events: navigate to .emits() in the state builder
+      if (type === "event") {
+        // Try to find event name inside .emits({ EventName: ... })
+        const emitsInlineRe = new RegExp(`\\.emits\\([\\s\\S]*?(${esc})\\s*:`);
+        const inlineMatch = emitsInlineRe.exec(file.content);
+        if (inlineMatch) {
+          const nameIdx = inlineMatch.index + inlineMatch[0].lastIndexOf(name);
+          const { line, col } = positionAt(file.content, nameIdx);
           return { file: file.path, line, col };
+        }
+        // Fallback: navigate to .emits( line itself (e.g. .emits(variable))
+        // Only if the event name appears somewhere in the file
+        const nameRe = new RegExp(`\\b${esc}\\b`, "g");
+        if (findNonCommentMatch(file.content, nameRe) >= 0) {
+          const emitsIdx = findNonCommentMatch(file.content, /\.emits\s*\(/);
+          if (emitsIdx >= 0) {
+            const { line, col } = positionAt(file.content, emitsIdx + 1);
+            return { file: file.path, line, col };
+          }
+        }
+      }
+
+      // For actions: search inside .on() block
+      if (type === "action") {
+        const nameRe = new RegExp(`\\b${esc}\\b`, "g");
+        const blockStart = file.content.indexOf(".on(");
+        if (blockStart >= 0) {
+          const idx = findNonCommentMatch(file.content, nameRe, blockStart);
+          if (idx >= 0) {
+            const { line, col } = positionAt(file.content, idx);
+            return { file: file.path, line, col };
+          }
         }
       }
 
       // Fallback: first non-comment occurrence of name in file
+      const nameRe = new RegExp(`\\b${esc}\\b`, "g");
       const idx = findNonCommentMatch(file.content, nameRe);
       if (idx >= 0) {
         const { line, col } = positionAt(file.content, idx);

@@ -121,8 +121,8 @@ const result = navigateToCode(files, "OpenTicket", "action");
 | Component | Props | Description |
 |-----------|-------|-------------|
 | `ActDiagram` | `files?`, `onNavigate?`, `usePostMessage?`, `onAiRequest?`, `generating?` | Standalone wrapper: pipeline + diagram + optional AI bar |
-| `Diagram` | `model`, `warnings`, `onClickElement?`, `toolbarExtra?` | Raw SVG diagram with pan/zoom/model tree |
-| `AiBar` | `onSubmit`, `generating?` | Prompt input for AI code generation |
+| `Diagram` | `model`, `warnings`, `onClickElement?`, `onFixWithAi?`, `toolbarExtra?` | Raw SVG diagram with pan/zoom/model tree/warnings |
+| `AiBar` | `onSubmit`, `generating?` | Resizable prompt input with model and token controls |
 | `Logo` | `size?` | Act logo SVG |
 | `Tooltip` | `title`, `description?`, `details?`, `children`, `position?`, `align?` | Hover tooltip |
 
@@ -229,7 +229,18 @@ pnpm -F @rotorsoft/act-diagram test
 pnpm -F @rotorsoft/act-diagram build
 ```
 
-**Folder picker (dev mode):** The dev server includes a folder picker using the browser File System Access API. Open a local Act project directory and the diagram updates live, polling for file changes every 2 seconds.
+**Dev mode features:**
+
+- **Folder picker** — open a local Act project via the browser File System Access API; diagram updates live, polling for file changes every 2 seconds
+- **Code preview** — click any diagram element to see its source with the target line highlighted in the element's color (blue for actions, orange for events, etc.)
+- **AI integration** — resizable prompt bar with model selector (Sonnet/Opus/Haiku) and token limit (4k–32k); streams AI output in real-time with save/discard workflow for generated files
+- **Fix with AI** — clickable warnings panel with per-warning and bulk "fix all" buttons that send issues to the AI for resolution
+- **Navigation** — events navigate to `.emits()` declaration; guards to `.given()` usage; reactions to `.do()` handler registration
+
+```sh
+# Start the AI server (requires ANTHROPIC_API_KEY in libs/act-diagram/.env)
+pnpm -F @rotorsoft/act-diagram dev:server
+```
 
 ## Related
 

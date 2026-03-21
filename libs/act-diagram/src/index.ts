@@ -1,5 +1,5 @@
 export { ActDiagram } from "./client/components/ActDiagram.js";
-export { AiBar } from "./client/components/AiBar.js";
+export { AiBar, type AiOptions } from "./client/components/AiBar.js";
 export { Diagram } from "./client/components/Diagram.js";
 export { Logo } from "./client/components/Logo.js";
 export { Tooltip } from "./client/components/Tooltip.js";

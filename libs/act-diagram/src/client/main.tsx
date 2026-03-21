@@ -2,6 +2,7 @@ import { FolderOpen, RefreshCw, Save, Undo2 } from "lucide-react";
 import { StrictMode, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ActDiagram } from "./components/ActDiagram.js";
+import type { AiOptions } from "./components/AiBar.js";
 import { CodePreview } from "./components/CodePreview.js";
 import { parseMultiFileResponse } from "./lib/strip-fences.js";
 import "./styles.css";
@@ -117,7 +118,7 @@ function DevApp() {
   }, [folderName, refresh, unsaved]);
 
   const handleAiRequest = useCallback(
-    async (prompt: string, currentFiles: FileTab[]) => {
+    async (prompt: string, currentFiles: FileTab[], options?: AiOptions) => {
       setGenerating(true);
       setAiStream("");
       try {
@@ -128,6 +129,8 @@ function DevApp() {
             prompt,
             currentFiles,
             refine: currentFiles.length > 0,
+            model: options?.model,
+            maxTokens: options?.maxTokens,
           }),
         });
         if (!res.ok) throw new Error(await res.text());
@@ -281,8 +284,8 @@ function DevApp() {
             onNavigate={(file, line, col, type) => {
               setPreview({ file, line, col, type });
             }}
-            onAiRequest={(prompt, currentFiles) =>
-              void handleAiRequest(prompt, currentFiles)
+            onAiRequest={(prompt, currentFiles, options) =>
+              void handleAiRequest(prompt, currentFiles, options)
             }
             generating={generating}
           />
