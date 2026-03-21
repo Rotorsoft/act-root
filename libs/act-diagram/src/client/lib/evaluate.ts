@@ -24,7 +24,7 @@ function transpile(code: string): string {
     });
     // Strip top-level runtime invocations — we only need builder definitions.
     return js.replace(
-      /^(?:void\s+|await\s+)?(?:main|run|start|bootstrap)\s*\([^)]*\)(?:\s*\.catch\([^)]*\))?;?\s*$/gm,
+      /^(?:void\s+|await\s+)?(?:main|run|start|bootstrap|seed)\s*\([^)]*\)(?:\s*\.catch\([^)]*\))?;?\s*$/gm,
       "/* stripped runtime call */"
     );
   } catch {
@@ -157,6 +157,10 @@ function execute(files: FileTab[]): {
         const cleanJs = js
           .replace(/\bconst\s+__dirname\b/g, "var __dirname")
           .replace(/\bconst\s+__filename\b/g, "var __filename");
+        // Security: new Function() is intentional — this executes the user's own
+        // local project files (selected via folder picker or passed as props) to
+        // extract Act builder structure. Same trust model as VS Code, Jupyter, or
+        // any tool that runs user code. No HTTP input or untrusted data is evaluated.
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const fn = new Function(
           "require",
@@ -168,6 +172,7 @@ function execute(files: FileTab[]): {
           var __dirname = ".";
           var process = { env: {}, cwd: function() { return "/"; }, exit: function() {}, on: function() {}, off: function() {} };
           var Buffer = { from: function() { return ""; } };
+          var console = { log: function() {}, error: function() {}, warn: function() {}, info: function() {}, debug: function() {} };
           ${cleanJs}
         `
         );
