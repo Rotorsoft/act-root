@@ -439,8 +439,8 @@ importers:
         specifier: ^0.23.2
         version: 0.23.2
       '@rotorsoft/act-pg':
-        specifier: ^0.8.4
-        version: 0.8.4
+        specifier: ^0.13.1
+        version: 0.13.1
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -2737,12 +2737,8 @@ packages:
     resolution: {integrity: sha512-lWAZt/WUyQmO5XOXtV4y5Np4+H4oEPXxQ40yWlg/AiXxmyH16/zq0/lWgTHkNuRYQS2MvyaTEOI78cAC8GAqgw==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act-pg@0.8.4':
-    resolution: {integrity: sha512-OQxlyYmTs5L0eZ+bfrxFWj3obsCpxM80bODZoTPG5mV7ew4D2dj1Ucr4KV8BvPLKZDBDLRwIqO9DS71C6IPdsg==}
-    engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act@0.19.1':
-    resolution: {integrity: sha512-KKaH2v5YrghNz2MnMDtq3m9vGm86MPeYVeECq41xeCLG5YPaDWZqjk6EHxtP2Gonfkl/INihfeLj1ray/e0IQg==}
+  '@rotorsoft/act-pg@0.13.1':
+    resolution: {integrity: sha512-xeld/u5OcGJqDqrtyUT0oITRrZKF0//1nZFp20fqtevLQc77eiGd65f0YKVop/QcTTJi+RRj7yj43r2V32FK7A==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.23.2':
@@ -12085,20 +12081,13 @@ snapshots:
 
   '@rotorsoft/act-patch@1.0.2': {}
 
-  '@rotorsoft/act-pg@0.8.4':
+  '@rotorsoft/act-pg@0.13.1':
     dependencies:
-      '@rotorsoft/act': 0.19.1
+      '@rotorsoft/act': 0.23.2
       pg: 8.20.0
       zod: 4.3.6
     transitivePeerDependencies:
       - pg-native
-
-  '@rotorsoft/act@0.19.1':
-    dependencies:
-      '@rotorsoft/act-patch': 1.0.2
-      pino: 10.3.1
-      pino-pretty: 13.1.3
-      zod: 4.3.6
 
   '@rotorsoft/act@0.23.2':
     dependencies:
