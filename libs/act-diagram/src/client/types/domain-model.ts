@@ -7,7 +7,17 @@ export type ActNode = {
   line?: number;
 };
 
+export type EntryPoint = {
+  path: string; // source file path (e.g. "packages/calculator/src/calculator.ts")
+  states: StateNode[];
+  slices: SliceNode[];
+  projections: ProjectionNode[];
+  reactions: ReactionNode[];
+};
+
 export type DomainModel = {
+  entries: EntryPoint[];
+  // Flat views for backward compat (union of all entries)
   states: StateNode[];
   slices: SliceNode[];
   projections: ProjectionNode[];
@@ -17,9 +27,10 @@ export type DomainModel = {
 
 export type StateNode = {
   name: string;
-  varName: string; // variable name holding this state (e.g., TicketCreation)
+  varName: string;
   events: EventNode[];
   actions: ActionNode[];
+  file?: string;
   line?: number;
 };
 
@@ -68,6 +79,7 @@ export type ValidationWarning = {
 
 export function emptyModel(): DomainModel {
   return {
+    entries: [],
     states: [],
     slices: [],
     projections: [],

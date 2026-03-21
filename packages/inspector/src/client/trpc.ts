@@ -19,5 +19,9 @@ export const queryClient = new QueryClient({
 });
 
 export const trpcClient = trpc.createClient({
-  links: [httpLink({ url: "http://localhost:4001" })],
+  links: [
+    httpLink({
+      url: (import.meta.env.VITE_API_URL as string) || "http://localhost:4001",
+    }),
+  ],
 });

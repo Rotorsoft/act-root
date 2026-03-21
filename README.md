@@ -32,12 +32,18 @@ The complexity of modern software design often arises from over-engineering abst
 [![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+### [@rotorsoft/act-diagram](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
+[![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Tools
 
 ### [@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)
 
-Event sourcing observatory and visual builder for the Act framework. Features event log, SVG timeline, stream inspector, correlation explorer (waterfall + DAG), drain processing monitor, and a visual builder with Monaco editor + AI-powered code generation. Auto-discovers Act stores, global live polling, cross-view navigation with back/forward history. Dark theme with JetBrains Mono.
+Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, and drain processing monitor with live polling.
+
 
 ---
 

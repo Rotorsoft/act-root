@@ -1,4 +1,4 @@
-import type { DomainModel, ValidationWarning } from "./types.js";
+import type { DomainModel, ValidationWarning } from "../types/index.js";
 
 /** Validate domain model — only critical issues */
 export function validate(model: DomainModel): ValidationWarning[] {
