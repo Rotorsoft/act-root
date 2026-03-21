@@ -32,6 +32,11 @@ The complexity of modern software design often arises from over-engineering abst
 [![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+### [@rotorsoft/act-diagram](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
+[![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Tools
 
@@ -39,9 +44,6 @@ The complexity of modern software design often arises from over-engineering abst
 
 Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, and drain processing monitor with live polling.
 
-### [@rotorsoft/act-builder](https://github.com/rotorsoft/act-root/tree/master/packages/builder)
-
-Domain model designer — full VS Code workbench in the browser with file explorer, TypeScript IntelliSense (types fetched directly from npm), and live domain diagram. Open projects from local folders, GitHub repos (with streaming clone progress), AI generation, or the built-in sample. Monorepo-aware type acquisition places `.d.ts` files at the correct package level. Refine code with AI, collect errors into prompts, and export as zip.
 
 ---
 

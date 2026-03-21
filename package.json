@@ -43,7 +43,7 @@
     "dev:wolfdesk": "pnpm -F wolfdesk dev",
     "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
     "dev:inspector": "pnpm -F @rotorsoft/act-inspector dev",
-    "dev:builder": "pnpm -F @rotorsoft/act-builder dev",
+    "dev:diagram": "pnpm -F @rotorsoft/act-diagram dev",
     "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
   "dependencies": {
