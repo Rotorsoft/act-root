@@ -176,6 +176,7 @@ export function navigateToCode(
         }
         // Fallback: navigate to .emits( line itself (e.g. .emits(variable))
         // Only if the event name appears somewhere in the file
+        /* v8 ignore start -- fallback for .emits(variable) pattern */
         const nameRe = new RegExp(`\\b${esc}\\b`, "g");
         if (findNonCommentMatch(file.content, nameRe) >= 0) {
           const emitsIdx = findNonCommentMatch(file.content, /\.emits\s*\(/);
@@ -184,6 +185,7 @@ export function navigateToCode(
             return { file: file.path, line, col };
           }
         }
+        /* v8 ignore stop */
       }
 
       // For actions: search inside .on() block

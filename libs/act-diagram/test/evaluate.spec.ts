@@ -908,6 +908,190 @@ export const S = state({ S: z.object({}) })
     }
   });
 
+  it("fixes up reaction handler names from source when mock yields 'on EventName'", () => {
+    // When the handler module can't be resolved (circular dep or missing),
+    // handler.name isn't a real string and falls back to "on EventName".
+    // The fixup scans the source for .on("Event").do(module.handler) to recover.
+    const files: FileTab[] = [
+      {
+        path: "domain/src/index.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const S = state({ S: z.object({}) })
+  .init(() => ({}))
+  .emits({ Created: z.object({}) })
+  .on({ create: z.object({}) }).emit("Created")
+  .build();
+`,
+      },
+      {
+        path: "app/src/app.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+import { S } from "@org/domain";
+import { onCreated } from "unresolvable-external-package";
+export const app = act()
+  .withState(S)
+  .on("Created").do(onCreated).to("items")
+  .build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model.reactions).toHaveLength(1);
+    // handler.name on proxy isn't a string → falls back to "on Created"
+    // fixupReactions recovers "onCreated" from source
+    expect(model.reactions[0].handlerName).toBe("onCreated");
+  });
+
+  it("projection fallback scan finds projections not captured by mock eval", () => {
+    // The projection is in a .tsx file (skipped by eval) but the fallback
+    // scans all .ts files. Use a .ts file that evals but whose projection()
+    // call doesn't fire because it uses a non-@rotorsoft import for projection
+    const files: FileTab[] = [
+      {
+        path: "src/proj.ts",
+        content: `
+import { projection } from "@rotorsoft/act";
+import { z } from "zod";
+const x = ({{ broken syntax }});
+export const P = projection("uncaptured")
+  .on({ A: z.object({}) }).do()
+  .on({ B: z.object({}) }).do()
+  .build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // Regex fallback in extractFromSource captures it
+    expect(model.projections).toHaveLength(1);
+    expect(model.projections[0].name).toBe("uncaptured");
+    expect(model.projections[0].handles).toContain("A");
+    expect(model.projections[0].handles).toContain("B");
+  });
+
+  it("projection fallback scan skips already-captured projections", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/proj.ts",
+        content: `
+import { projection } from "@rotorsoft/act";
+import { z } from "zod";
+export const P = projection("items")
+  .on({ ItemCreated: z.object({}) }).do()
+  .build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // Mock eval captures it, fallback scan should not duplicate
+    expect(model.projections).toHaveLength(1);
+  });
+
+  it("withProjection fallback includes projections when act.projections are empty", () => {
+    // Simulates circular dependency where GameProjection resolves to undefined
+    // but the source has .withProjection(GameProjection)
+    const files: FileTab[] = [
+      {
+        path: "src/proj.ts",
+        content: `
+import { projection } from "@rotorsoft/act";
+import { z } from "zod";
+const x = ({{ broken }});
+export const GameProjection = projection("games")
+  .on({ GameCreated: z.object({}) }).do()
+  .build();
+`,
+      },
+      {
+        path: "src/states.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const Game = state({ Game: z.object({}) })
+  .init(() => ({}))
+  .emits({ GameCreated: z.object({}) })
+  .on({ CreateGame: z.object({}) }).emit("GameCreated")
+  .build();
+`,
+      },
+      {
+        path: "src/app.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+import { Game } from "./states.js";
+import { GameProjection } from "./proj.js";
+export const app = act()
+  .withState(Game)
+  .withProjection(GameProjection)
+  .build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // Projection should appear in entry despite circular dep
+    expect(model.entries).toHaveLength(1);
+    expect(model.entries[0].projections).toHaveLength(1);
+    expect(model.entries[0].projections[0].name).toBe("games");
+  });
+
+  it("null guards handle act with undefined projections/states/slices/reactions", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+export const app = act().build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model.entries).toHaveLength(1);
+  });
+
+  it("skips test and spec files during extraction", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const S = state({ S: z.object({}) })
+  .init(() => ({}))
+  .emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+      {
+        path: "src/app.spec.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const TestState = state({ TestState: z.object({}) })
+  .init(() => ({}))
+  .emits({ TestEvt: z.object({}) })
+  .on({ test: z.object({}) }).emit("TestEvt").build();
+`,
+      },
+      {
+        path: "src/__tests__/helper.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const Helper = state({ Helper: z.object({}) })
+  .init(() => ({}))
+  .emits({ H: z.object({}) })
+  .on({ h: z.object({}) }).emit("H").build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // Only the non-test state should be extracted
+    expect(model.states).toHaveLength(1);
+    expect(model.states[0].name).toBe("S");
+  });
+
   it("handles act() with anonymous inline reaction", () => {
     const files: FileTab[] = [
       {
