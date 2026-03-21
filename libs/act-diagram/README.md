@@ -40,13 +40,18 @@ pnpm add @rotorsoft/act-diagram
   validate()           ← check for missing emits, orphan reactions, etc.
         |
         v
-  <Diagram />          ← SVG layout: slices, states, actions, events, reactions
+  computeLayout()      ← pure layout: positions nodes, edges, slice boxes
+        |
+        v
+  <Diagram />          ← SVG rendering with pan/zoom/model tree
         |
         v
   navigateToCode()     ← click element → { file, line, col }
 ```
 
 The extraction pipeline uses mock versions of `state()`, `slice()`, `projection()`, and `act()` that capture the builder structure without needing the real framework runtime. Code is transpiled with [Sucrase](https://github.com/alangpierce/sucrase) and evaluated in an isolated scope with `new Function()`.
+
+**Security hardening:** Runtime calls (`seed()`, `main()`, `run()`, etc.) are stripped before evaluation, and `console` is silenced inside the eval scope to prevent side effects from user code.
 
 ## Usage
 
@@ -133,6 +138,7 @@ const result = navigateToCode(files, "OpenTicket", "action");
 | `stripFences` | `(code: string) => string` | Remove markdown fences from code |
 | `deriveProjectName` | `(prompt, code?) => string` | Derive a project name from prompt or code |
 | `emptyModel` | `() => DomainModel` | Create an empty domain model |
+| `computeLayout` | `(model: DomainModel) => Layout` | Pure layout computation — positions all nodes, edges, and slice boxes |
 
 ### Types
 
@@ -155,6 +161,13 @@ type SliceNode = { name, states: string[], stateVars: string[], projections: str
 type ProjectionNode = { name, varName, handles: string[], line? };
 type ReactionNode = { event, handlerName, dispatches: string[], isVoid: boolean, line? };
 type ValidationWarning = { message, severity: "warning" | "error", element? };
+
+// Layout types (from computeLayout)
+type Pos = { x: number; y: number };
+type N = { key, pos: Pos, type, label, sub?, file?, projections?, guards?, reactions? };
+type E = { from: Pos, to: Pos, color: string, dash?: string };
+type Box = { x, y, w, h, label, color, border };
+type Layout = { ns: N[], es: E[], boxes: Box[], minX, minY, width, height };
 ```
 
 ### IDE Plugin Protocol
@@ -194,6 +207,15 @@ Single endpoint: `POST /api/generate` with SSE response.
 { type: "error", message: "..." }
 ```
 
+## Architecture
+
+The diagram pipeline is split into testable layers:
+
+- **Extraction** (`extractModel`) — transpile + eval with mock builders to produce a `DomainModel`
+- **Validation** (`validate`) — check for missing emits, orphan reactions, dangling references
+- **Layout** (`computeLayout`) — pure function that maps a `DomainModel` to absolute positions for nodes, edges, and slice boxes. No React or DOM dependencies, fully unit-testable
+- **Rendering** (`<Diagram />`) — SVG component that renders the `Layout` with pan, zoom, and click-to-navigate
+
 ## Development
 
 ```sh
@@ -206,6 +228,8 @@ pnpm -F @rotorsoft/act-diagram test
 # Build library
 pnpm -F @rotorsoft/act-diagram build
 ```
+
+**Folder picker (dev mode):** The dev server includes a folder picker using the browser File System Access API. Open a local Act project directory and the diagram updates live, polling for file changes every 2 seconds.
 
 ## Related
 

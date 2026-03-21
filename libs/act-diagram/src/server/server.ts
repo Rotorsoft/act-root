@@ -1,5 +1,17 @@
+import { existsSync, readFileSync } from "fs";
 import { createServer } from "http";
 import { streamGenerate } from "./ai.js";
+
+// Load .env file if present (tsx doesn't always forward --env-file to Node)
+for (const envPath of [".env", "libs/act-diagram/.env"]) {
+  if (existsSync(envPath)) {
+    for (const line of readFileSync(envPath, "utf-8").split("\n")) {
+      const match = line.match(/^(\w+)=(.*)$/);
+      if (match && !process.env[match[1]]) process.env[match[1]] = match[2];
+    }
+    break;
+  }
+}
 
 function parseBody(req: import("http").IncomingMessage): Promise<string> {
   return new Promise((resolve) => {

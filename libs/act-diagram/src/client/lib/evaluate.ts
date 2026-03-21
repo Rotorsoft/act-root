@@ -110,8 +110,14 @@ function execute(files: FileTab[]): {
 
       if (mod.startsWith("@") && !mod.startsWith("@rotorsoft/")) {
         const pkgName = mod.split("/")[1];
+        const subPath = mod.split("/").slice(2).join("/");
         if (pkgName) {
+          const suffix = subPath
+            ? `/${subPath.replace(/\.js$/, "")}`
+            : "/src/index";
           return (
+            fileExports.get(`packages/${pkgName}${suffix}`) ??
+            fileExports.get(`${pkgName}${suffix}`) ??
             fileExports.get(`packages/${pkgName}/src/index`) ??
             fileExports.get(`${pkgName}/src/index`) ??
             fileExports.get(`${pkgName}/index`) ??
@@ -131,7 +137,11 @@ function execute(files: FileTab[]): {
           f.path.endsWith(".ts") &&
           !f.path.endsWith(".d.ts") &&
           !f.path.endsWith(".tsx") &&
-          !f.path.includes("node_modules/")
+          !f.path.endsWith(".spec.ts") &&
+          !f.path.endsWith(".test.ts") &&
+          !f.path.includes("node_modules/") &&
+          !f.path.includes("__tests__/") &&
+          !f.path.includes("/test/")
       )
     );
 
@@ -353,7 +363,7 @@ function extractFromSource(content: string): {
     }
 
     const onDoRe =
-      /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(\w+))?/g;
+      /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(?:\w+\.)?(\w+))?/g;
     let odm;
     while ((odm = onDoRe.exec(chain)) !== null) {
       sliceReactions.push({
@@ -412,6 +422,39 @@ export function extractModel(files: FileTab[]): {
   const projections = result.projections.filter((p: any) => p && p._tag);
   const acts = result.acts.filter((a: any) => a && a._tag);
 
+  // Fix up reaction handler names that fell back to "on EventName" —
+  // scan source for .on("event").do(module.handler) to recover real names
+  const fixupReactions = (reactions: ReactionNode[], sourceFile?: string) => {
+    const fallbacks = reactions.filter((r) => r.handlerName.startsWith("on "));
+    if (fallbacks.length === 0) return;
+    const src = sourceFile
+      ? files.find((f) => f.path === sourceFile)?.content
+      : files.map((f) => f.content).join("\n");
+    if (!src) return;
+    const doRe =
+      /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(?:\w+\.)?(\w+))?/g;
+    let dm;
+    while ((dm = doRe.exec(src)) !== null) {
+      const eventName = dm[1];
+      const handlerName = dm[2] || dm[3];
+      if (!handlerName) continue;
+      const r = fallbacks.find(
+        (r) => r.event === eventName && r.handlerName === `on ${eventName}`
+      );
+      if (r) r.handlerName = handlerName;
+    }
+  };
+  for (const a of acts) {
+    if (a.reactions)
+      fixupReactions(
+        a.reactions as ReactionNode[],
+        a._sourceFile as string | undefined
+      );
+  }
+  for (const s of slices) {
+    fixupReactions(s.reactions as ReactionNode[]);
+  }
+
   const model: DomainModel = {
     entries: [],
     states: [],
@@ -459,6 +502,25 @@ export function extractModel(files: FileTab[]): {
     });
   }
 
+  // Fallback: scan source files for projection() calls not captured by mock eval
+  const capturedProjNames = new Set(model.projections.map((p) => p.name));
+  for (const file of files) {
+    if (!file.path.endsWith(".ts") || file.path.endsWith(".d.ts")) continue;
+    const projRe = /\bprojection\(\s*["'`](\w+)["'`]\s*\)/g;
+    let pm;
+    while ((pm = projRe.exec(file.content)) !== null) {
+      const projName = pm[1];
+      if (capturedProjNames.has(projName)) continue;
+      const chain = file.content.slice(pm.index);
+      const handles: string[] = [];
+      const ponRe = /\.on\(\s*\{\s*(\w+)\s*(?:[:,}])/g;
+      let hm;
+      while ((hm = ponRe.exec(chain)) !== null) handles.push(hm[1]);
+      model.projections.push({ name: projName, varName: projName, handles });
+      capturedProjNames.add(projName);
+    }
+  }
+
   for (const s of states) {
     const key = s._modelKey ?? s.name;
     if (s._tag === "State" && !statesInSlices.has(key as string)) {
@@ -478,7 +540,7 @@ export function extractModel(files: FileTab[]): {
       projections: model.projections.map((p) => p.name),
       states: model.states.map((s) => s.name),
     } as ActNode;
-    for (const r of a.reactions as ReactionNode[]) {
+    for (const r of (a.reactions as ReactionNode[]) ?? []) {
       model.reactions.push(r);
     }
 
@@ -486,22 +548,36 @@ export function extractModel(files: FileTab[]): {
     const entryPath = a._sourceFile ?? "app.ts";
     const actSliceNames = new Set<string>(
       /* v8 ignore next 5 -- _varName always set by slice tagging */
-      (a.slices as any[]).map(
+      ((a.slices as any[]) ?? []).map(
         (s: any) =>
           s._varName ?? s.states?.map((st: any) => st.name).join(", ") ?? ""
       )
     );
     const actStateNames = new Set<string>(
-      (a.states as any[])
-        .filter((s: any) => s._tag === "State")
+      ((a.states as any[]) ?? [])
+        .filter((s: any) => s?._tag === "State")
         /* v8 ignore next -- _modelKey set by addState */
         .map((s: any) => s._modelKey ?? s.name)
     );
     const actProjNames = new Set<string>(
-      (a.projections as any[])
-        .filter((p: any) => p._tag === "Projection")
+      ((a.projections as any[]) ?? [])
+        .filter((p: any) => p?._tag === "Projection")
         .map((p: any) => p.target)
     );
+
+    // Fallback: if act projections are empty (circular deps), scan source for .withProjection(Var)
+    if (actProjNames.size === 0 && model.projections.length > 0) {
+      const src = files.find((f) => f.path === entryPath)?.content ?? "";
+      const wpRe = /\.withProjection\(\s*(?:\w+\.)*(\w+)\s*\)/g;
+      while (wpRe.exec(src) !== null) {
+        // Match variable name to captured projection targets
+        for (const p of model.projections) {
+          // The variable name (e.g. GameProjection) won't match the target (e.g. "games"),
+          // so include all projections when .withProjection() is present
+          actProjNames.add(p.name);
+        }
+      }
+    }
 
     const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
     const sliceStateNames = new Set(entrySlices.flatMap((s) => s.states));
@@ -512,7 +588,7 @@ export function extractModel(files: FileTab[]): {
       states: model.states.filter((s) => allStateNames.has(s.varName)),
       slices: entrySlices,
       projections: model.projections.filter((p) => actProjNames.has(p.name)),
-      reactions: a.reactions,
+      reactions: a.reactions ?? [],
     });
   }
 

@@ -202,7 +202,9 @@ export function mockSlice(onBuild?: (info: any) => void) {
           const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
             event: eventName,
-            handlerName: (handler?.name as string) || `on ${eventName}`,
+            handlerName:
+              (typeof handler?.name === "string" && handler.name) ||
+              `on ${eventName}`,
             dispatches,
             isVoid: false,
           };
@@ -290,7 +292,9 @@ export function mockAct(onBuild?: (info: any) => void) {
           const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
             event: eventName,
-            handlerName: (handler?.name as string) || `on ${eventName}`,
+            handlerName:
+              (typeof handler?.name === "string" && handler.name) ||
+              `on ${eventName}`,
             dispatches,
             isVoid: false,
           };

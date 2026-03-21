@@ -289,7 +289,12 @@ export function computeLayout(viewModel: DomainModel): Layout {
    * State node placed between actions and events (one per slice).
    * Reactions extend the flow to the right of events.
    */
-  for (const slice of viewModel.slices) {
+  // Sort slices by name for stable layout across re-extractions
+  const sortedSlices = [...viewModel.slices].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+
+  for (const slice of sortedSlices) {
     // Phase 1: layout slice content at y=0, then translate to globalY
     cx = PAD;
     const sx = cx;
@@ -327,10 +332,18 @@ export function computeLayout(viewModel: DomainModel): Layout {
     const sliceNodeStart = ns.length;
     const sliceEdgeStart = es.length;
 
-    // Build event→reaction lookup within this slice
-    const sliceReactionByEvent = new Map<string, (typeof slice.reactions)[0]>();
+    // Build event→reactions lookup within this slice (supports multiple per event)
+    const sliceReactionsByEvent = new Map<string, typeof slice.reactions>();
     for (const r of slice.reactions) {
-      if (!r.isVoid) sliceReactionByEvent.set(r.event, r);
+      if (r.isVoid) continue;
+      const list = sliceReactionsByEvent.get(r.event) ?? [];
+      list.push(r);
+      sliceReactionsByEvent.set(r.event, list);
+    }
+    // Single-reaction lookup for chain measurement (uses first reaction)
+    const sliceReactionByEvent = new Map<string, (typeof slice.reactions)[0]>();
+    for (const [event, reactions] of sliceReactionsByEvent) {
+      sliceReactionByEvent.set(event, reactions[0]);
     }
 
     // Track visited events/reactions to prevent cycles
@@ -346,9 +359,17 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
       // ── Pre-calculate sizes ────────────────────────────────────
       const eventRows: { eventName: string; actionName: string }[] = [];
+      const actionEmitted = new Set<string>();
       for (const action of st.actions) {
         for (const en of action.emits) {
           eventRows.push({ eventName: en, actionName: action.name });
+          actionEmitted.add(en);
+        }
+      }
+      // Events declared in .emits() but not produced by any action
+      for (const ev of st.events) {
+        if (!actionEmitted.has(ev.name)) {
+          eventRows.push({ eventName: ev.name, actionName: "" });
         }
       }
       // ── Measure per-event heights (including sub-chains) ─────
@@ -516,7 +537,8 @@ export function computeLayout(viewModel: DomainModel): Layout {
       partIdx++;
     }
 
-    // Remaining reactions not already placed inline
+    // Remaining reactions not already placed inline — stack vertically per event
+    const remainingYByEvent = new Map<string, number>();
     for (const r of slice.reactions) {
       if (r.isVoid || visitedReactions.has(r.handlerName)) continue;
 
@@ -526,7 +548,8 @@ export function computeLayout(viewModel: DomainModel): Layout {
           n.label === r.event &&
           n.key.includes(slice.name)
       );
-      const rY = trigNode ? trigNode.pos.y : y;
+      const baseY = trigNode ? trigNode.pos.y : y;
+      const rY = remainingYByEvent.get(r.event) ?? baseY;
       const rX = sliceRightX + GAP * 2;
 
       const rp = { x: rX, y: rY };
@@ -546,6 +569,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
         });
       }
 
+      remainingYByEvent.set(r.event, rY + H + GAP / 2);
       sliceRightX = Math.max(sliceRightX, rX + W + GAP);
       y = Math.max(y, rY + H + GAP / 2);
     }
@@ -597,17 +621,23 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
   // Standalone states (not in slices) — stacked vertically like a virtual slice
   cx = PAD;
-  const claimed = new Set(viewModel.slices.flatMap((sl) => sl.stateVars));
-  const standaloneStates = viewModel.states.filter(
-    (s) => !claimed.has(s.varName)
-  );
+  const claimed = new Set(sortedSlices.flatMap((sl) => sl.stateVars));
+  const standaloneStates = [...viewModel.states]
+    .filter((s) => !claimed.has(s.varName))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   for (const st of standaloneStates) {
     const stateColX = cx + W + GAP;
     const eventColX = stateColX + STATE_W + GAP;
 
+    // Collect all events: from actions + declared in .emits() but not emitted by any action
+    const actionEmittedEvents = new Set(st.actions.flatMap((a) => a.emits));
+    const orphanEvents = st.events
+      .map((e) => e.name)
+      .filter((en) => !actionEmittedEvents.has(en));
+
     // Compute block sizes
-    const nEvents = st.actions.reduce((sum, a) => sum + a.emits.length, 0);
+    const nEvents = actionEmittedEvents.size + orphanEvents.length;
     const evtBlockH =
       Math.max(nEvents, 1) * H + (Math.max(nEvents, 1) - 1) * (GAP / 2);
     const nActs = st.actions.length;
@@ -639,6 +669,19 @@ export function computeLayout(viewModel: DomainModel): Layout {
         eventYMap.set(en, evtY);
         evtY += H + GAP / 2;
       }
+    }
+    // Orphan events — declared in .emits() but not produced by any action
+    for (const en of orphanEvents) {
+      ns.push({
+        key: `e:${en}:standalone`,
+        pos: { x: eventColX, y: evtY },
+        type: "event",
+        label: en,
+        projections: eventProjections.get(en),
+        reactions: eventReactions.get(en),
+      });
+      eventYMap.set(en, evtY);
+      evtY += H + GAP / 2;
     }
 
     // Actions centered relative to state
@@ -678,6 +721,41 @@ export function computeLayout(viewModel: DomainModel): Layout {
     }
 
     globalY += blockH + GAP * 2;
+  }
+
+  // Standalone reactions (from act() builder, not in slices) — placed to the right of their events
+  if (viewModel.reactions.length > 0) {
+    const reactionYByEvent = new Map<string, number>();
+    for (const r of viewModel.reactions) {
+      if (r.isVoid) continue;
+      // Find the event node this reaction listens to
+      const trigNode = ns.find(
+        (n) => n.type === "event" && n.label === r.event
+      );
+      const baseY = trigNode ? trigNode.pos.y : globalY;
+      const rY = reactionYByEvent.get(r.event) ?? baseY;
+      const rX = trigNode ? trigNode.pos.x + W + GAP * 3 : cx + W * 3 + GAP * 4;
+
+      const rp = { x: rX, y: rY };
+      ns.push({
+        key: `r:${r.handlerName}:standalone`,
+        pos: rp,
+        type: "reaction",
+        label: r.handlerName,
+      });
+
+      if (trigNode) {
+        es.push({
+          from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
+          to: { x: rp.x, y: rp.y + H / 2 },
+          color: COLORS.reaction.border,
+          dash: true,
+        });
+      }
+
+      reactionYByEvent.set(r.event, rY + H + GAP / 2);
+      globalY = Math.max(globalY, rY + H + GAP);
+    }
   }
 
   let minX = 0,

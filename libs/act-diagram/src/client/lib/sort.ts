@@ -23,7 +23,7 @@ export function topoSort(tsFiles: FileTab[]): FileTab[] {
     let m;
     while ((m = fromRe.exec(f.content)) !== null) {
       const imp = m[1];
-      const resolved = resolve(imp, key);
+      const resolved = resolve(imp, key, byKey);
       if (resolved && byKey.has(resolved)) fileDeps.add(resolved);
     }
   }
@@ -67,7 +67,11 @@ export function topoSort(tsFiles: FileTab[]): FileTab[] {
   return order.map((k) => byKey.get(k)!).filter(Boolean);
 }
 
-function resolve(imp: string, fromPath: string): string | undefined {
+function resolve(
+  imp: string,
+  fromPath: string,
+  byKey?: Map<string, any>
+): string | undefined {
   if (imp.startsWith(".")) {
     const dir = fromPath.includes("/")
       ? fromPath.slice(0, fromPath.lastIndexOf("/"))
@@ -85,6 +89,15 @@ function resolve(imp: string, fromPath: string): string | undefined {
     const pkgName = imp.split("/")[1];
     if (pkgName) {
       // Try multiple patterns for monorepo workspace packages
+      // Folder may be opened at project root (packages/pkg/src/index)
+      // or at packages/ level (pkg/src/index)
+      for (const candidate of [
+        `packages/${pkgName}/src/index`,
+        `${pkgName}/src/index`,
+        `${pkgName}/index`,
+      ]) {
+        if (byKey?.has(candidate)) return candidate;
+      }
       return `packages/${pkgName}/src/index`;
     }
   }

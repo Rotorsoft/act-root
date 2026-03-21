@@ -14,8 +14,8 @@ import { Diagram } from "./Diagram.js";
 type Props = {
   /** Direct file injection */
   files?: FileTab[];
-  /** Called when a diagram element is clicked — provides file:line:col */
-  onNavigate?: (file: string, line: number, col: number) => void;
+  /** Called when a diagram element is clicked — provides file:line:col and element type */
+  onNavigate?: (file: string, line: number, col: number, type?: string) => void;
   /** Listen to postMessage for HostMessage updates */
   usePostMessage?: boolean;
   /** Optional AI callback */
@@ -89,7 +89,7 @@ export function ActDiagram({
     (name: string, type?: string, file?: string) => {
       if (!onNavigate) return;
       const result = navigateToCode(files, name, type, file);
-      if (result) onNavigate(result.file, result.line, result.col);
+      if (result) onNavigate(result.file, result.line, result.col, type);
     },
     [files, onNavigate]
   );

@@ -71,23 +71,32 @@ function buildPatterns(esc: string, type?: string): RegExp[] {
   const statePatterns = [new RegExp(`state\\(\\s*\\{\\s*(${esc})\\s*[}:,]`)];
   const actionPatterns = [new RegExp(`\\.on\\(\\s*\\{\\s*(${esc})\\s*[},:]`)];
   const eventPatterns = [
-    new RegExp(`\\.emits\\(\\s*\\{[^}]*(${esc})\\s*:`),
-    new RegExp(`\\.patch\\(\\s*\\{[^}]*(${esc})\\s*:`),
+    // Match event name inside .emits({ EventName: ... }) — multiline-safe
+    new RegExp(`\\.emits\\([\\s\\S]*?(${esc})\\s*:`),
+    // Match event name as key in a schema object: EventName: z.object(...)
+    new RegExp(`(${esc})\\s*:\\s*z\\.object\\(`),
   ];
   const reactionPatterns = [
-    new RegExp(`async\\s+function\\s+(${esc})\\s*\\(`),
+    // .do(handlerName) or .do(module.handlerName) — handler declaration in builder
+    new RegExp(`\\.do\\(\\s*(?:\\w+\\.)?(${esc})\\b`),
+    // inline function in .do()
     new RegExp(
       `\\.on\\(\\s*["'\`][^"'\`]+["'\`]\\s*\\)\\s*\\.do\\(\\s*(?:async\\s+)?function\\s+(${esc})\\b`
     ),
+    // Fallback: function definition
+    new RegExp(`(?:export\\s+)?async\\s+function\\s+(${esc})\\s*\\(`),
   ];
   const projectionPatterns = [
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*=\\s*projection\\s*\\(`),
     new RegExp(`projection\\(\\s*["'\`](${esc})["'\`]`),
   ];
   const guardPatterns = [
+    // .given() usage in the state builder — where the guard is applied
+    new RegExp(`\\.given\\([\\s\\S]*?(${esc})`),
+    // Fallback: guard definition
+    new RegExp(`rule\\(\\s*["'\`](${esc})["'\`]`),
     new RegExp(`description:\\s*["'\`](${esc})["'\`]`),
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*(?::\\s*Invariant)?\\s*=`),
-    new RegExp(`\\.given\\(\\s*\\[[^\\]]*["'\`](${esc})["'\`]`),
   ];
   const slicePatterns = [
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*=\\s*slice\\s*\\(`),
@@ -187,10 +196,17 @@ export function navigateToCode(
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const patterns = buildPatterns(esc, type);
 
+  // Search source files before test/spec files so definitions win over references
+  const isTestFile = (p: string) =>
+    /(?:\.spec\.|\.test\.|__tests__)/.test(p) || /\/test\//.test(p);
+  const sortedFiles = [...files].sort(
+    (a, b) => (isTestFile(a.path) ? 1 : 0) - (isTestFile(b.path) ? 1 : 0)
+  );
+
   for (const re of patterns) {
-    for (let i = 0; i < files.length; i++) {
-      if (!/\.tsx?$/.test(files[i].path)) continue;
-      const content = files[i].content;
+    for (let i = 0; i < sortedFiles.length; i++) {
+      if (!/\.tsx?$/.test(sortedFiles[i].path)) continue;
+      const content = sortedFiles[i].content;
       /* v8 ignore next -- buildPatterns never includes "g" flag */
       const globalRe = new RegExp(
         re.source,
@@ -208,7 +224,7 @@ export function navigateToCode(
             ? match.index + nameOffsetInMatch
             : match.index;
         const { line, col } = positionAt(content, nameStart);
-        return { file: files[i].path, line, col };
+        return { file: sortedFiles[i].path, line, col };
       }
     }
   }

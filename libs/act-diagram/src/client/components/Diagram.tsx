@@ -115,6 +115,7 @@ export function Diagram({
   );
   const [activeTab, setActiveTab] = useState(0);
   const [showTree, setShowTree] = useState(false);
+  const [showWarnings, setShowWarnings] = useState(false);
   const warnSet = new Set(warnings.map((w) => w.element).filter(Boolean));
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -287,10 +288,14 @@ export function Diagram({
         {/* Right side */}
         <div className="ml-auto flex items-center gap-1.5">
           {warnings.length > 0 && (
-            <span className="flex items-center gap-1 text-[10px] text-amber-400">
+            <button
+              onClick={() => setShowWarnings((v) => !v)}
+              className={`flex items-center gap-1 rounded p-1 text-[10px] transition ${showWarnings ? "bg-amber-900/40 text-amber-300" : "text-amber-400 hover:bg-zinc-800"}`}
+              title="Toggle warnings"
+            >
               <AlertTriangle size={11} />
               {warnings.length}
-            </span>
+            </button>
           )}
           {toolbarExtra}
         </div>
@@ -333,6 +338,47 @@ export function Diagram({
           <pre className="flex-1 overflow-auto whitespace-pre px-3 py-2 font-mono text-[10px] leading-relaxed text-zinc-400 select-all">
             {formatModelTree(viewModel)}
           </pre>
+        </div>
+      )}
+
+      {showWarnings && warnings.length > 0 && (
+        <div className="flex max-h-[30%] flex-col border-b border-zinc-800 bg-zinc-950">
+          <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1">
+            <span className="text-[10px] font-medium text-amber-400">
+              Warnings ({warnings.length})
+            </span>
+            <button
+              onClick={() => setShowWarnings(false)}
+              className="rounded p-0.5 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+            >
+              <X size={12} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-auto px-3 py-2">
+            {warnings.map((w, i) => (
+              <div
+                key={i}
+                className="flex items-start gap-2 py-0.5 text-[10px]"
+              >
+                <span
+                  className={
+                    w.severity === "error" ? "text-red-400" : "text-amber-400"
+                  }
+                >
+                  {w.severity === "error" ? "●" : "▲"}
+                </span>
+                <span className="text-zinc-300">{w.message}</span>
+                {w.element && (
+                  <button
+                    onClick={() => onClickElement?.(w.element!)}
+                    className="ml-auto shrink-0 text-zinc-500 hover:text-zinc-300"
+                  >
+                    {w.element}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
