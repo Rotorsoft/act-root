@@ -37,7 +37,7 @@
     "@types/cors": "^2.8.19",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-time": "^3.0.4",
-    "@types/pg": "^8.18.0",
+    "@types/pg": "^8.20.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
