@@ -186,6 +186,44 @@ describe("mockState", () => {
     // Should not crash, emits stays empty
     expect(built[0].actions.__emits_doIt).toEqual([]);
   });
+
+  it("handles emit with non-string non-function handler", () => {
+    const built: any[] = [];
+    mockState({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits({ E: {} })
+      .on({ doIt: {} })
+      .emit(42 as any)
+      .build();
+
+    expect(built[0].actions.__emits_doIt).toEqual([]);
+  });
+
+  it("handles .given() without arguments", () => {
+    const built: any[] = [];
+    mockState({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits({ E: {} })
+      .on({ doIt: {} })
+      .given(undefined)
+      .emit("E")
+      .build();
+
+    expect(built[0].given.doIt).toBeUndefined();
+  });
+
+  it("handles .patch() without arguments", () => {
+    const built: any[] = [];
+    mockState({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits({ E: {} })
+      .patch(undefined as any)
+      .on({ doIt: {} })
+      .emit("E")
+      .build();
+
+    expect(built[0].patches.size).toBe(0);
+  });
 });
 
 describe("mockSlice", () => {
@@ -264,6 +302,36 @@ describe("mockSlice", () => {
       .build();
 
     expect(built[0].reactions[0].dispatches).toEqual([]);
+  });
+
+  it("captureDispatches deduplicates action names from app.do()", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .on("Evt")
+      .do(async function dupHandler(_event: any, _stream: any, app: any) {
+        await app.do("SameAction", "s1", {});
+        await app.do("SameAction", "s2", {});
+      })
+      .to(() => "x")
+      .build();
+
+    expect(built[0].reactions[0].dispatches).toEqual(["SameAction"]);
+  });
+
+  it("captureDispatches deduplicates regex-found action names", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .on("Evt")
+      .do(function multiRef(_event: any, _stream: any, app: any) {
+        if (Math.random() > 2) {
+          app.do("RepeatAction", "s1", {});
+          app.do("RepeatAction", "s2", {});
+        }
+      })
+      .to(() => "x")
+      .build();
+
+    expect(built[0].reactions[0].dispatches).toEqual(["RepeatAction"]);
   });
 
   it("captureDispatches exercises event.data proxy path", () => {

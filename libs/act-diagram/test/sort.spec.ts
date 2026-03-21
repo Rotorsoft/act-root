@@ -101,6 +101,15 @@ describe("topoSort", () => {
     expect(topoSort(files)).toHaveLength(2);
   });
 
+  it("handles scoped import with no package name", () => {
+    const files: FileTab[] = [
+      { path: "src/app.ts", content: `import { x } from "@org/";` },
+      { path: "src/types.ts", content: `export const x = 1;` },
+    ];
+    const sorted = topoSort(files);
+    expect(sorted).toHaveLength(2);
+  });
+
   it("handles multiple files with shared dependency (in-degree > 1)", () => {
     const files: FileTab[] = [
       { path: "src/shared.ts", content: `export const x = 1;` },

@@ -10,9 +10,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   DomainModel,
   EntryPoint,
-  StateNode,
   ValidationWarning,
 } from "../types/index.js";
+
+import {
+  computeLayout,
+  H,
+  SLICE_PAD,
+  STATE_H,
+  STATE_W,
+  W,
+} from "../lib/layout.js";
 
 const COLORS = {
   action: { bg: "#1e40af", border: "#3b82f6", text: "#93c5fd" },
@@ -30,16 +38,7 @@ const alpha = (hex: string, a: number) => {
   return `rgba(${r},${g},${b},${a})`;
 };
 
-const W = 100,
-  H = 36,
-  STATE_W = 80,
-  STATE_H = 80,
-  STATE_FONT = 10,
-  GAP = 12,
-  PAD = 10,
-  SLICE_PAD = 24, // left padding inside slice for vertical label
-  SLICE_INNER = 16, // padding between slice border and first/last node
-  SLICE_GAP = 20; // gap between slice boxes
+const STATE_FONT = 10;
 
 function splitLabel(label: string, maxChars = 16): string[] {
   const words = label.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
@@ -97,21 +96,6 @@ function formatModelTree(model: DomainModel): string {
   }
   return lines.join("\n");
 }
-
-type Pos = { x: number; y: number };
-type N = {
-  key: string;
-  pos: Pos;
-  type: keyof typeof COLORS;
-  label: string;
-  sub?: string;
-  file?: string;
-  projections?: string[];
-  guards?: string[];
-  reactions?: string[];
-};
-type E = { from: Pos; to: Pos; color: string; dash?: boolean };
-type Box = { label: string; x: number; y: number; w: number; h: number };
 
 type Props = {
   model: DomainModel;
@@ -222,451 +206,39 @@ export function Diagram({
   const onUp = useCallback(() => {
     drag.current = false;
   }, []);
+  const { ns, es, boxes, minX, minY, width, height } = useMemo(
+    () => computeLayout(viewModel),
+    [viewModel]
+  );
+
+  /** Compute the zoom + pan that fits the diagram in the container */
+  const fitTransform = useCallback(() => {
+    const el = svgContainerRef.current;
+    const cw = el?.clientWidth || 800;
+    const ch = el?.clientHeight || 600;
+    // Avoid division by zero for empty diagrams
+    const dw = Math.max(width, 1);
+    const dh = Math.max(height, 1);
+    const fitZoom = Math.min(cw / dw, ch / dh);
+    const z = Math.max(0.1, Math.min(3, fitZoom));
+    // Center the content in the container
+    const px = (cw - dw * z) / 2 - minX * z;
+    const py = (ch - dh * z) / 2 - minY * z;
+    return { z, px, py };
+  }, [width, height, minX, minY]);
+
   const reset = useCallback(() => {
-    setPan({ x: 0, y: 0 });
-    setZoom(1);
-  }, []);
+    const { z, px, py } = fitTransform();
+    setZoom(z);
+    setPan({ x: px, y: py });
+  }, [fitTransform]);
 
-  const { ns, es, boxes, width, height } = useMemo(() => {
-    const ns: N[] = [];
-    const es: E[] = [];
-    const boxes: Box[] = [];
-    const sv = new Map<string, StateNode>();
-    for (const s of viewModel.states) {
-      sv.set(s.varName, s);
-      sv.set(s.name, s);
-    }
-
-    // Build projection lookup: event name → projection names
-    const eventProjections = new Map<string, string[]>();
-    const eventReactions = new Map<string, string[]>();
-
-    for (const slice of viewModel.slices) {
-      for (const r of slice.reactions) {
-        if (r.isVoid) continue;
-        const list = eventReactions.get(r.event) ?? [];
-        list.push(r.handlerName);
-        eventReactions.set(r.event, list);
-      }
-    }
-    for (const r of viewModel.reactions) {
-      if (r.isVoid) continue;
-      const list = eventReactions.get(r.event) ?? [];
-      list.push(r.handlerName);
-      eventReactions.set(r.event, list);
-    }
-    for (const proj of viewModel.projections) {
-      for (const en of proj.handles) {
-        const list = eventProjections.get(en) ?? [];
-        list.push(proj.name);
-        eventProjections.set(en, list);
-      }
-    }
-
-    // eslint-disable-next-line no-useless-assignment
-    let cx = PAD;
-    let globalY = 0;
-
-    /**
-     * Layout per slice: [Action] → [State] → [Event] per action row
-     * State node placed between actions and events (one per slice).
-     * Reactions extend the flow to the right of events.
-     */
-    for (const slice of viewModel.slices) {
-      // Stack slices vertically — each slice starts at globalY
-      cx = PAD;
-      const sx = cx;
-      const sliceTopY = globalY;
-      cx += SLICE_PAD + GAP;
-      // Each partial state rendered separately (no merging)
-      const parts = slice.stateVars
-        .map((v) => sv.get(v))
-        .filter(Boolean) as StateNode[];
-
-      let y = sliceTopY + SLICE_INNER;
-      let sliceRightX = cx;
-      const sliceNodeStart = ns.length; // track where this slice's nodes begin
-
-      // Build event→reaction lookup within this slice
-      const sliceReactionByEvent = new Map<
-        string,
-        (typeof slice.reactions)[0]
-      >();
-      for (const r of slice.reactions) {
-        if (!r.isVoid) sliceReactionByEvent.set(r.event, r);
-      }
-
-      // Track visited events/reactions to prevent cycles
-      const visitedEvents = new Set<string>();
-      const visitedReactions = new Set<string>();
-
-      /**
-       * Layout per merged state: [Action] → [State] → [Event]
-       * State box centered vertically across its action rows, placed
-       * at the state column (after actions).
-       * If an event triggers a reaction IN THIS SLICE, continue the chain.
-       */
-      let partIdx = 0;
-      for (const st of parts) {
-        // Extra vertical separation between states within a slice
-        if (partIdx > 0) y += GAP * 2;
-        const stateColX = cx + W + GAP;
-        const eventColX = stateColX + STATE_W + GAP;
-
-        // ── Pre-calculate sizes for centering ──────────────────────
-        // Flatten all events across actions
-        const eventRows: { eventName: string; actionName: string }[] = [];
-        for (const action of st.actions) {
-          for (const en of action.emits) {
-            eventRows.push({ eventName: en, actionName: action.name });
-          }
-        }
-        const nEvents = Math.max(eventRows.length, 1);
-        const evtBlockH = nEvents * H + (nEvents - 1) * (GAP / 2);
-        const nActs = st.actions.length;
-        const actBlockH = nActs * H + (nActs - 1) * (GAP / 2);
-        const blockH = Math.max(evtBlockH, actBlockH, STATE_H);
-        const stCenterY = y + blockH / 2;
-
-        // ── State box centered ─────────────────────────────────────
-        ns.push({
-          key: `s:${st.name}:${slice.name}`,
-          pos: { x: stateColX, y: stCenterY - STATE_H / 2 },
-          type: "state",
-          label: st.name,
-          file: st.file,
-        });
-
-        // ── Events centered relative to state ──────────────────────
-        let evtY = stCenterY - evtBlockH / 2;
-        // Separate Y tracker for reaction continuations
-        let reactionY = evtY;
-        // Map event name → Y for arrow drawing
-        const eventYMap = new Map<string, number>();
-
-        for (const { eventName: en, actionName } of eventRows) {
-          ns.push({
-            key: `e:${en}:${slice.name}:${actionName}`,
-            pos: { x: eventColX, y: evtY },
-            type: "event",
-            label: en,
-            file: st.file,
-            projections: eventProjections.get(en),
-            reactions: eventReactions.get(en),
-          });
-          eventYMap.set(en, evtY);
-
-          // If this event triggers a reaction IN THIS SLICE, continue chain
-          const rDef = sliceReactionByEvent.get(en);
-          if (
-            rDef &&
-            !visitedEvents.has(en) &&
-            !visitedReactions.has(rDef.handlerName)
-          ) {
-            visitedEvents.add(en);
-            visitedReactions.add(rDef.handlerName);
-
-            // Align reaction with event when possible, else use reactionY
-            const rX = eventColX + W + GAP * 3;
-            const ry = Math.max(evtY, reactionY);
-            const rp = { x: rX, y: ry };
-            ns.push({
-              key: `r:${rDef.handlerName}:${slice.name}`,
-              pos: rp,
-              type: "reaction",
-              label: rDef.handlerName,
-            });
-            // Event → Reaction arrow
-            es.push({
-              from: { x: eventColX + W, y: evtY + H / 2 },
-              to: { x: rp.x, y: rp.y + H / 2 },
-              color: COLORS.reaction.border,
-              dash: true,
-            });
-
-            // Dispatched actions → state → events, one row per dispatch
-            const dispatchBaseX = rX + W + GAP;
-            let dispatchY = ry;
-            for (const an of rDef.dispatches) {
-              const targetAction = viewModel.states
-                .flatMap((s) => s.actions)
-                .find((a) => a.name === an);
-              const targetState = viewModel.states.find((s) =>
-                s.actions.some((a) => a.name === an)
-              );
-
-              let nextX = dispatchBaseX;
-              const dap = { x: nextX, y: dispatchY };
-              ns.push({
-                key: `a:${an}:dispatched:${rDef.handlerName}`,
-                pos: dap,
-                type: "action",
-                label: an,
-                file: targetState?.file,
-              });
-              // Reaction → dispatched action arrow
-              es.push({
-                from: { x: rp.x + W, y: rp.y + H / 2 },
-                to: { x: dap.x, y: dap.y + H / 2 },
-                color: COLORS.reaction.border,
-                dash: true,
-              });
-
-              nextX += W + GAP;
-
-              // Dispatched state box — aligned top with the action row
-              let rowH = H;
-              if (targetState) {
-                ns.push({
-                  key: `s:${targetState.name}:dispatched:${rDef.handlerName}:${an}`,
-                  pos: { x: nextX, y: dispatchY },
-                  type: "state",
-                  label: targetState.name,
-                  file: targetState.file,
-                });
-                nextX += STATE_W + GAP;
-                rowH = STATE_H;
-              }
-
-              // Dispatched events
-              const emits = targetAction?.emits ?? [];
-              for (const den of emits) {
-                ns.push({
-                  key: `e:${den}:dispatched:${rDef.handlerName}:${an}`,
-                  pos: { x: nextX, y: dispatchY },
-                  type: "event",
-                  label: den,
-                  file: targetState?.file,
-                  projections: eventProjections.get(den),
-                  reactions: eventReactions.get(den),
-                });
-                nextX += W + GAP;
-              }
-              sliceRightX = Math.max(sliceRightX, nextX);
-              dispatchY += rowH + GAP / 2;
-            }
-            reactionY = Math.max(reactionY, dispatchY);
-            if (rDef.dispatches.length === 0) {
-              reactionY = ry + H + GAP / 2;
-            }
-          }
-
-          evtY += H + GAP / 2;
-        }
-
-        // ── Actions centered relative to state ─────────────────────
-        let actY = stCenterY - actBlockH / 2;
-        const actionColors = [
-          "#60a5fa",
-          "#f97316",
-          "#a78bfa",
-          "#34d399",
-          "#fb7185",
-          "#fbbf24",
-        ];
-        let actionIdx = 0;
-        for (const action of st.actions) {
-          const color = actionColors[actionIdx % actionColors.length];
-          ns.push({
-            key: `a:${action.name}:${slice.name}`,
-            pos: { x: cx, y: actY },
-            type: "action",
-            label: action.name,
-            sub: action.invariants.length > 0 ? "guarded" : undefined,
-            guards:
-              action.invariants.length > 0 ? action.invariants : undefined,
-            file: st.file,
-          });
-          // Subtle colored arrows from action to its events
-          for (const en of action.emits) {
-            const ey = eventYMap.get(en);
-            if (ey !== undefined) {
-              es.push({
-                from: { x: cx + W, y: actY + H / 2 },
-                to: { x: eventColX, y: ey + H / 2 },
-                color,
-                dash: false,
-              });
-            }
-          }
-          actY += H + GAP / 2;
-          actionIdx++;
-        }
-
-        // Advance y past this state block and any reaction rows
-        y += blockH + GAP / 2;
-        y = Math.max(y, reactionY);
-        partIdx++;
-      }
-
-      // Remaining reactions not already placed inline
-      for (const r of slice.reactions) {
-        if (r.isVoid || visitedReactions.has(r.handlerName)) continue;
-
-        const trigNode = ns.find(
-          (n) =>
-            n.type === "event" &&
-            n.label === r.event &&
-            n.key.includes(slice.name)
-        );
-        const rY = trigNode ? trigNode.pos.y : y;
-        const rX = sliceRightX + GAP * 2;
-
-        const rp = { x: rX, y: rY };
-        ns.push({
-          key: `r:${r.handlerName}:${slice.name}`,
-          pos: rp,
-          type: "reaction",
-          label: r.handlerName,
-        });
-
-        if (trigNode) {
-          es.push({
-            from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
-            to: { x: rp.x, y: rp.y + H / 2 },
-            color: COLORS.reaction.border,
-            dash: true,
-          });
-        }
-
-        sliceRightX = Math.max(sliceRightX, rX + W + GAP);
-        y = Math.max(y, rY + H + GAP / 2);
-      }
-
-      // Compute bounding box from ALL nodes placed for this slice
-      const bbox = {
-        minX: Infinity,
-        minY: Infinity,
-        maxX: -Infinity,
-        maxY: -Infinity,
-      };
-      for (let ni = sliceNodeStart; ni < ns.length; ni++) {
-        const n = ns[ni];
-        const nw = n.type === "state" ? STATE_W : W;
-        const nh = n.type === "state" ? STATE_H : H;
-        bbox.minX = Math.min(bbox.minX, n.pos.x);
-        bbox.minY = Math.min(bbox.minY, n.pos.y);
-        bbox.maxX = Math.max(bbox.maxX, n.pos.x + nw);
-        bbox.maxY = Math.max(bbox.maxY, n.pos.y + nh);
-      }
-      // Fallback if no nodes were placed
-      if (!isFinite(bbox.minY)) {
-        bbox.minX = sx;
-        bbox.minY = sliceTopY;
-        bbox.maxX = sx + W;
-        bbox.maxY = sliceTopY + H;
-      }
-      const boxY = bbox.minY - SLICE_INNER;
-      const boxBottom = bbox.maxY + SLICE_INNER;
-      boxes.push({
-        label: slice.name,
-        x: sx - GAP / 2,
-        y: boxY,
-        w: bbox.maxX - sx + GAP + SLICE_INNER,
-        h: boxBottom - boxY,
-      });
-      globalY = boxBottom + SLICE_GAP;
-    }
-
-    // Standalone states (not in slices)
-    cx = PAD;
-    const claimed = new Set(viewModel.slices.flatMap((sl) => sl.stateVars));
-    for (const st of viewModel.states.filter((s) => !claimed.has(s.varName))) {
-      const stX = cx + W + GAP;
-      let y = globalY + PAD;
-      const yS = y;
-      // First: lay out all events vertically
-      const evX = stX + W + GAP;
-      for (const action of st.actions) {
-        for (const en of action.emits) {
-          ns.push({
-            key: `e:${en}:standalone`,
-            pos: { x: evX, y },
-            type: "event",
-            label: en,
-            projections: eventProjections.get(en),
-            reactions: eventReactions.get(en),
-          });
-          y += H + GAP / 2;
-        }
-      }
-      if (y === yS) y += H + GAP / 2;
-      const totalEnd = y - GAP / 2;
-      const centerY = (yS + totalEnd) / 2;
-
-      // State centered
-      ns.push({
-        key: `s:${st.name}:standalone`,
-        pos: { x: stX + (W - STATE_W) / 2, y: centerY - STATE_H / 2 },
-        type: "state",
-        label: st.name,
-      });
-
-      // Actions grouped and centered vertically relative to state
-      const standaloneColors = [
-        "#60a5fa",
-        "#f97316",
-        "#a78bfa",
-        "#34d399",
-        "#fb7185",
-        "#fbbf24",
-      ];
-      const nActions = st.actions.length;
-      const actBlockH = nActions * H + (nActions - 1) * (GAP / 2);
-      let aY = centerY - actBlockH / 2;
-      let aIdx = 0;
-      for (const action of st.actions) {
-        const aColor = standaloneColors[aIdx % standaloneColors.length];
-        ns.push({
-          key: `a:${action.name}:standalone`,
-          pos: { x: cx, y: aY },
-          type: "action",
-          label: action.name,
-          sub: action.invariants.length > 0 ? "guarded" : undefined,
-          guards: action.invariants.length > 0 ? action.invariants : undefined,
-        });
-        // Colored arrows from action to its events
-        for (const en of action.emits) {
-          const evNode = ns.find(
-            (n) =>
-              n.type === "event" &&
-              n.label === en &&
-              n.key.includes("standalone")
-          );
-          if (evNode) {
-            es.push({
-              from: { x: cx + W, y: aY + H / 2 },
-              to: { x: evX, y: evNode.pos.y + H / 2 },
-              color: aColor,
-              dash: false,
-            });
-          }
-        }
-        aY += H + GAP / 2;
-        aIdx++;
-      }
-
-      globalY = Math.max(globalY, y);
-      cx += GAP;
-    }
-
-    let mw = 0,
-      mh = 0;
-    for (const n of ns) {
-      const nw = n.type === "state" ? STATE_W : W;
-      const nh = n.type === "state" ? STATE_H : H;
-      mw = Math.max(mw, n.pos.x + nw);
-      mh = Math.max(mh, n.pos.y + nh);
-    }
-    const MARGIN = 30;
-    return {
-      ns,
-      es,
-      boxes,
-      width: mw + MARGIN * 2,
-      height: mh + MARGIN * 2,
-    };
-  }, [viewModel]);
+  // Auto-fit when viewModel changes (new tab, new model)
+  useEffect(() => {
+    // Delay one frame so container has been laid out
+    const id = requestAnimationFrame(() => reset());
+    return () => cancelAnimationFrame(id);
+  }, [reset]);
 
   if (viewModel.states.length === 0 && viewModel.projections.length === 0) {
     return (
@@ -675,9 +247,6 @@ export function Diagram({
       </div>
     );
   }
-
-  const sw = Math.max(width, 400),
-    sh = Math.max(height, 150);
 
   return (
     <div className="relative flex h-full flex-col bg-zinc-950">
@@ -734,7 +303,6 @@ export function Diagram({
               key={e.path}
               onClick={() => {
                 setActiveTab(i);
-                setPan({ x: 0, y: 0 });
                 onClickElement?.(e.path, "file");
               }}
               className={`px-3 py-1 text-[10px] transition ${
@@ -776,310 +344,301 @@ export function Diagram({
         onMouseUp={onUp}
         onMouseLeave={onUp}
       >
-        <svg
-          width="100%"
-          height="100%"
-          viewBox={(() => {
-            const el = svgContainerRef.current;
-            const cw = el?.clientWidth || sw;
-            const ch = el?.clientHeight || sh;
-            const vw = sw / zoom;
-            const vh = sh / zoom;
-            // preserveAspectRatio uses min(scaleX, scaleY) — use same
-            // uniform scale for both axes so pan feels 1:1 at any zoom
-            const scale = zoom * Math.min(cw / sw, ch / sh);
-            const MARGIN = 20;
-            return `${-MARGIN - pan.x / scale} ${-MARGIN - pan.y / scale} ${vw} ${vh}`;
-          })()}
-          className="select-none"
-        >
-          {/* Slice boundaries */}
-          {boxes.map((b) => (
-            <g key={b.label}>
-              <rect
-                x={b.x}
-                y={b.y}
-                width={b.w}
-                height={b.h}
-                rx={8}
-                fill={COLORS.state.bg}
-                fillOpacity={0.1}
-                stroke={COLORS.state.border}
-                strokeWidth={1.5}
-                strokeOpacity={0.4}
-              />
-              {/* Vertical label strip on left — rounded left, flat right */}
-              <clipPath id={`clip-${b.label}`}>
-                <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
-              </clipPath>
-              <rect
-                x={b.x}
-                y={b.y}
-                width={SLICE_PAD + 8}
-                height={b.h}
-                rx={8}
-                fill="#a16207"
-                fillOpacity={0.25}
-                clipPath={`url(#clip-${b.label})`}
-              />
-              {/* Vertical text — clickable to navigate to slice definition */}
-              <text
-                x={b.x + SLICE_PAD / 2}
-                y={b.y + b.h / 2}
-                fill={COLORS.state.text}
-                className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
-                textAnchor="middle"
-                dominantBaseline="central"
-                transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
-                onClick={() => onClickElement?.(b.label)}
-              >
-                {b.label}
-              </text>
-            </g>
-          ))}
-
-          {/* Edges */}
-          {es.map((e, i) => {
-            const dx = e.to.x - e.from.x;
-            const isHint = !e.dash;
-            const d = `M ${e.from.x} ${e.from.y} C ${e.from.x + dx * 0.4} ${e.from.y}, ${e.to.x - dx * 0.4} ${e.to.y}, ${e.to.x} ${e.to.y}`;
-            return (
-              <path
-                key={i}
-                d={d}
-                fill="none"
-                stroke={e.color}
-                strokeWidth={isHint ? 0.75 : 1.5}
-                strokeDasharray={e.dash ? "4,3" : undefined}
-                opacity={isHint ? 0.35 : 0.7}
-                markerEnd="url(#arr)"
-              />
-            );
-          })}
-          <defs>
-            <marker
-              id="arr"
-              viewBox="0 0 10 10"
-              refX="10"
-              refY="5"
-              markerWidth="6"
-              markerHeight="6"
-              orient="auto-start-reverse"
-            >
-              <path
-                d="M 0 1 L 8 5 L 0 9"
-                fill="none"
-                stroke="#71717a"
-                strokeWidth="1.5"
-              />
-            </marker>
-          </defs>
-
-          {/* Nodes */}
-          {ns.map((n, ni) => {
-            const c = COLORS[n.type];
-            const hasWarn = warnSet.has(n.label);
-            const isState = n.type === "state";
-            const nw = isState ? STATE_W : W;
-            const nh = isState ? STATE_H : H;
-            const lines = splitLabel(n.label, isState ? 10 : 16);
-            const lineH = isState ? STATE_FONT + 2 : 11;
-            const startY = n.pos.y + nh / 2 - ((lines.length - 1) * lineH) / 2;
-
-            return (
-              <g
-                key={`${n.key}:${ni}`}
-                className="cursor-pointer"
-                onClick={() => onClickElement?.(n.label, n.type, n.file)}
-                onMouseEnter={(ev) => {
-                  const parts = [n.label];
-                  if (n.guards?.length)
-                    parts.push(`Guards: ${n.guards.join(", ")}`);
-                  if (n.reactions?.length)
-                    parts.push(`Reactions: ${n.reactions.join(", ")}`);
-                  if (n.projections?.length)
-                    parts.push(`Projections: ${n.projections.join(", ")}`);
-                  setTip({ x: ev.clientX, y: ev.clientY, t: parts.join("\n") });
-                }}
-                onMouseLeave={() => setTip(null)}
-              >
+        <svg width="100%" height="100%" className="select-none">
+          <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+            {/* Slice boundaries */}
+            {boxes.map((b) => (
+              <g key={b.label}>
                 <rect
-                  x={n.pos.x}
-                  y={n.pos.y}
-                  width={nw}
-                  height={nh}
-                  rx={isState ? 6 : 4}
-                  fill={alpha(c.bg, 0.75)}
-                  stroke={hasWarn ? "#ef4444" : c.border}
-                  strokeWidth={hasWarn ? 2 : 1.5}
+                  x={b.x}
+                  y={b.y}
+                  width={b.w}
+                  height={b.h}
+                  rx={8}
+                  fill={COLORS.state.bg}
+                  fillOpacity={0.1}
+                  stroke={COLORS.state.border}
+                  strokeWidth={1.5}
+                  strokeOpacity={0.4}
                 />
-                {lines.map((line, li) => (
-                  <text
-                    key={li}
-                    x={n.pos.x + nw / 2}
-                    y={startY + li * lineH}
-                    textAnchor="middle"
-                    dominantBaseline="central"
-                    fill={c.text}
-                    className={
-                      isState
-                        ? "text-[10px] font-semibold"
-                        : "text-[8px] font-medium"
-                    }
-                  >
-                    {line}
-                  </text>
-                ))}
-                {/* Top-right icons */}
-                {(() => {
-                  let ix = n.pos.x + nw - 13;
-                  const icons: React.ReactNode[] = [];
-                  if (n.guards?.length) {
-                    icons.unshift(
-                      <g
-                        key="g"
-                        transform={`translate(${ix - 2},${n.pos.y})`}
-                        className="cursor-pointer"
-                        pointerEvents="all"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClickElement?.(n.guards![0], "guard");
-                        }}
-                        onMouseEnter={(ev) => {
-                          ev.stopPropagation();
-                          setTip({
-                            x: ev.clientX,
-                            y: ev.clientY,
-                            t: `Guards: ${n.guards!.join(", ")}`,
-                          });
-                        }}
-                        onMouseLeave={(ev) => {
-                          ev.stopPropagation();
-                          setTip(null);
-                        }}
-                      >
-                        <rect
-                          x="-1"
-                          y="-1"
-                          width="14"
-                          height="14"
-                          fill="transparent"
-                        />
-                        <path
-                          d="M5 3L1 5v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V5L5 3z"
-                          fill="none"
-                          stroke="#ef4444"
-                          strokeWidth="1.2"
-                        />
-                      </g>
-                    );
-                    ix -= 14;
-                  }
-                  if (n.projections?.length) {
-                    icons.unshift(
-                      <g
-                        key="p"
-                        transform={`translate(${ix - 2},${n.pos.y})`}
-                        className="cursor-pointer"
-                        pointerEvents="all"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClickElement?.(n.projections![0], "projection");
-                        }}
-                        onMouseEnter={(ev) => {
-                          ev.stopPropagation();
-                          setTip({
-                            x: ev.clientX,
-                            y: ev.clientY,
-                            t: `Projection: ${n.projections!.join(", ")}`,
-                          });
-                        }}
-                        onMouseLeave={(ev) => {
-                          ev.stopPropagation();
-                          setTip(null);
-                        }}
-                      >
-                        {/* Invisible hit area */}
-                        <rect
-                          x="-1"
-                          y="-1"
-                          width="14"
-                          height="14"
-                          fill="transparent"
-                        />
-                        <rect
-                          x="1"
-                          y="3"
-                          width="8"
-                          height="6"
-                          rx="1"
-                          fill="none"
-                          stroke={COLORS.projection.text}
-                          strokeWidth="1"
-                        />
-                        <line
-                          x1="3"
-                          y1="9"
-                          x2="7"
-                          y2="9"
-                          stroke={COLORS.projection.text}
-                          strokeWidth="1"
-                        />
-                        <line
-                          x1="5"
-                          y1="9"
-                          x2="5"
-                          y2="11"
-                          stroke={COLORS.projection.text}
-                          strokeWidth="1"
-                        />
-                      </g>
-                    );
-                    ix -= 14;
-                  }
-                  if (n.reactions?.length) {
-                    icons.unshift(
-                      <g
-                        key="r"
-                        transform={`translate(${ix - 2},${n.pos.y})`}
-                        className="cursor-pointer"
-                        pointerEvents="all"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onClickElement?.(n.reactions![0], "reaction");
-                        }}
-                        onMouseEnter={(ev) => {
-                          ev.stopPropagation();
-                          setTip({
-                            x: ev.clientX,
-                            y: ev.clientY,
-                            t: `Reactions: ${n.reactions!.join(", ")}`,
-                          });
-                        }}
-                        onMouseLeave={(ev) => {
-                          ev.stopPropagation();
-                          setTip(null);
-                        }}
-                      >
-                        <rect
-                          x="-1"
-                          y="-1"
-                          width="14"
-                          height="14"
-                          fill="transparent"
-                        />
-                        <path
-                          d="M6 2L2 7h3L4 12L8 7H5L6 2z"
-                          fill={COLORS.reaction.text}
-                        />
-                      </g>
-                    );
-                  }
-                  return icons;
-                })()}
+                {/* Vertical label strip on left — rounded left, flat right */}
+                <clipPath id={`clip-${b.label}`}>
+                  <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
+                </clipPath>
+                <rect
+                  x={b.x}
+                  y={b.y}
+                  width={SLICE_PAD + 8}
+                  height={b.h}
+                  rx={8}
+                  fill="#a16207"
+                  fillOpacity={0.25}
+                  clipPath={`url(#clip-${b.label})`}
+                />
+                {/* Vertical text — clickable to navigate to slice definition */}
+                <text
+                  x={b.x + SLICE_PAD / 2}
+                  y={b.y + b.h / 2}
+                  fill={COLORS.state.text}
+                  className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
+                  onClick={() => onClickElement?.(b.label)}
+                >
+                  {b.label}
+                </text>
               </g>
-            );
-          })}
+            ))}
+
+            {/* Edges */}
+            {es.map((e, i) => {
+              const dx = e.to.x - e.from.x;
+              const isHint = !e.dash;
+              const d = `M ${e.from.x} ${e.from.y} C ${e.from.x + dx * 0.4} ${e.from.y}, ${e.to.x - dx * 0.4} ${e.to.y}, ${e.to.x} ${e.to.y}`;
+              return (
+                <path
+                  key={i}
+                  d={d}
+                  fill="none"
+                  stroke={e.color}
+                  strokeWidth={isHint ? 0.75 : 1.5}
+                  strokeDasharray={e.dash ? "4,3" : undefined}
+                  opacity={isHint ? 0.35 : 0.7}
+                  markerEnd="url(#arr)"
+                />
+              );
+            })}
+            <defs>
+              <marker
+                id="arr"
+                viewBox="0 0 10 10"
+                refX="10"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path
+                  d="M 0 1 L 8 5 L 0 9"
+                  fill="none"
+                  stroke="#71717a"
+                  strokeWidth="1.5"
+                />
+              </marker>
+            </defs>
+
+            {/* Nodes */}
+            {ns.map((n, ni) => {
+              const c = COLORS[n.type];
+              const hasWarn = warnSet.has(n.label);
+              const isState = n.type === "state";
+              const nw = isState ? STATE_W : W;
+              const nh = isState ? STATE_H : H;
+              const lines = splitLabel(n.label, isState ? 10 : 16);
+              const lineH = isState ? STATE_FONT + 2 : 11;
+              const startY =
+                n.pos.y + nh / 2 - ((lines.length - 1) * lineH) / 2;
+
+              return (
+                <g
+                  key={`${n.key}:${ni}`}
+                  className="cursor-pointer"
+                  onClick={() => onClickElement?.(n.label, n.type, n.file)}
+                  onMouseEnter={(ev) => {
+                    const parts = [n.label];
+                    if (n.guards?.length)
+                      parts.push(`Guards: ${n.guards.join(", ")}`);
+                    if (n.reactions?.length)
+                      parts.push(`Reactions: ${n.reactions.join(", ")}`);
+                    if (n.projections?.length)
+                      parts.push(`Projections: ${n.projections.join(", ")}`);
+                    setTip({
+                      x: ev.clientX,
+                      y: ev.clientY,
+                      t: parts.join("\n"),
+                    });
+                  }}
+                  onMouseLeave={() => setTip(null)}
+                >
+                  <rect
+                    x={n.pos.x}
+                    y={n.pos.y}
+                    width={nw}
+                    height={nh}
+                    rx={isState ? 6 : 4}
+                    fill={alpha(c.bg, 0.75)}
+                    stroke={hasWarn ? "#ef4444" : c.border}
+                    strokeWidth={hasWarn ? 2 : 1.5}
+                  />
+                  {lines.map((line, li) => (
+                    <text
+                      key={li}
+                      x={n.pos.x + nw / 2}
+                      y={startY + li * lineH}
+                      textAnchor="middle"
+                      dominantBaseline="central"
+                      fill={c.text}
+                      className={
+                        isState
+                          ? "text-[10px] font-semibold"
+                          : "text-[8px] font-medium"
+                      }
+                    >
+                      {line}
+                    </text>
+                  ))}
+                  {/* Top-right icons */}
+                  {(() => {
+                    let ix = n.pos.x + nw - 13;
+                    const icons: React.ReactNode[] = [];
+                    if (n.guards?.length) {
+                      icons.unshift(
+                        <g
+                          key="g"
+                          transform={`translate(${ix - 2},${n.pos.y})`}
+                          className="cursor-pointer"
+                          pointerEvents="all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClickElement?.(n.guards![0], "guard");
+                          }}
+                          onMouseEnter={(ev) => {
+                            ev.stopPropagation();
+                            setTip({
+                              x: ev.clientX,
+                              y: ev.clientY,
+                              t: `Guards: ${n.guards!.join(", ")}`,
+                            });
+                          }}
+                          onMouseLeave={(ev) => {
+                            ev.stopPropagation();
+                            setTip(null);
+                          }}
+                        >
+                          <rect
+                            x="-1"
+                            y="-1"
+                            width="14"
+                            height="14"
+                            fill="transparent"
+                          />
+                          <path
+                            d="M5 3L1 5v3c0 2.5 1.7 4.8 4 5.5 2.3-.7 4-3 4-5.5V5L5 3z"
+                            fill="none"
+                            stroke="#ef4444"
+                            strokeWidth="1.2"
+                          />
+                        </g>
+                      );
+                      ix -= 14;
+                    }
+                    if (n.projections?.length) {
+                      icons.unshift(
+                        <g
+                          key="p"
+                          transform={`translate(${ix - 2},${n.pos.y})`}
+                          className="cursor-pointer"
+                          pointerEvents="all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClickElement?.(n.projections![0], "projection");
+                          }}
+                          onMouseEnter={(ev) => {
+                            ev.stopPropagation();
+                            setTip({
+                              x: ev.clientX,
+                              y: ev.clientY,
+                              t: `Projection: ${n.projections!.join(", ")}`,
+                            });
+                          }}
+                          onMouseLeave={(ev) => {
+                            ev.stopPropagation();
+                            setTip(null);
+                          }}
+                        >
+                          {/* Invisible hit area */}
+                          <rect
+                            x="-1"
+                            y="-1"
+                            width="14"
+                            height="14"
+                            fill="transparent"
+                          />
+                          <rect
+                            x="1"
+                            y="3"
+                            width="8"
+                            height="6"
+                            rx="1"
+                            fill="none"
+                            stroke={COLORS.projection.text}
+                            strokeWidth="1"
+                          />
+                          <line
+                            x1="3"
+                            y1="9"
+                            x2="7"
+                            y2="9"
+                            stroke={COLORS.projection.text}
+                            strokeWidth="1"
+                          />
+                          <line
+                            x1="5"
+                            y1="9"
+                            x2="5"
+                            y2="11"
+                            stroke={COLORS.projection.text}
+                            strokeWidth="1"
+                          />
+                        </g>
+                      );
+                      ix -= 14;
+                    }
+                    if (n.reactions?.length) {
+                      icons.unshift(
+                        <g
+                          key="r"
+                          transform={`translate(${ix - 2},${n.pos.y})`}
+                          className="cursor-pointer"
+                          pointerEvents="all"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onClickElement?.(n.reactions![0], "reaction");
+                          }}
+                          onMouseEnter={(ev) => {
+                            ev.stopPropagation();
+                            setTip({
+                              x: ev.clientX,
+                              y: ev.clientY,
+                              t: `Reactions: ${n.reactions!.join(", ")}`,
+                            });
+                          }}
+                          onMouseLeave={(ev) => {
+                            ev.stopPropagation();
+                            setTip(null);
+                          }}
+                        >
+                          <rect
+                            x="-1"
+                            y="-1"
+                            width="14"
+                            height="14"
+                            fill="transparent"
+                          />
+                          <path
+                            d="M6 2L2 7h3L4 12L8 7H5L6 2z"
+                            fill={COLORS.reaction.text}
+                          />
+                        </g>
+                      );
+                    }
+                    return icons;
+                  })()}
+                </g>
+              );
+            })}
+          </g>
         </svg>
       </div>
 

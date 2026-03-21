@@ -45,6 +45,23 @@ import { state } from "@rotorsoft/act";
     expect(files[0].path).toBe("src/app.ts");
   });
 
+  it("skips blocks with empty path or empty content", () => {
+    const raw = `\`\`\`typescript:
+empty path above
+\`\`\`
+
+\`\`\`typescript:src/real.ts
+import { z } from "zod";
+\`\`\`
+
+\`\`\`typescript:src/empty.ts
+\`\`\``;
+
+    const files = parseMultiFileResponse(raw);
+    expect(files).toHaveLength(1);
+    expect(files[0].path).toBe("src/real.ts");
+  });
+
   it("returns empty for empty input", () => {
     expect(parseMultiFileResponse("")).toEqual([]);
   });

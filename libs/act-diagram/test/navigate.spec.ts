@@ -274,6 +274,22 @@ export const R = state({ R: z.object({}) }).init(() => ({})).emits({}).build();`
     expect(navigateToCode(files, "Hidden", "state")).toBeUndefined();
   });
 
+  it("finds match after a closed block comment (not inside comment)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `/* this is a comment */
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const Found = state({ Found: z.object({}) }).init(() => ({})).emits({}).build();`,
+      },
+    ];
+    const result = navigateToCode(files, "Found", "state");
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/t.ts");
+    expect(result!.line).toBe(4);
+  });
+
   it("handles match on the last line of file (no trailing newline)", () => {
     const files: FileTab[] = [
       {
