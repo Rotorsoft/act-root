@@ -44,15 +44,19 @@ export function ActDiagram({
         case "files":
           setMsgFiles(msg.files);
           break;
+        case "fileAdded":
+          setMsgFiles((prev) => [
+            ...prev,
+            { path: msg.path, content: msg.content },
+          ]);
+          break;
         case "fileChanged":
           setMsgFiles((prev) => {
             const idx = prev.findIndex((f) => f.path === msg.path);
-            if (idx >= 0) {
-              const next = [...prev];
-              next[idx] = { path: msg.path, content: msg.content };
-              return next;
-            }
-            return [...prev, { path: msg.path, content: msg.content }];
+            if (idx < 0) return prev;
+            const next = [...prev];
+            next[idx] = { path: msg.path, content: msg.content };
+            return next;
           });
           break;
         case "fileDeleted":

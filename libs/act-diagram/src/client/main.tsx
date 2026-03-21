@@ -54,7 +54,17 @@ function DevApp() {
   const refresh = useCallback(async () => {
     if (!dirRef.current) return;
     const scanned = await readDirectory(dirRef.current);
-    setFiles(scanned);
+    setFiles((prev) => {
+      if (prev.length !== scanned.length) return scanned;
+      for (let i = 0; i < prev.length; i++) {
+        if (
+          prev[i].path !== scanned[i].path ||
+          prev[i].content !== scanned[i].content
+        )
+          return scanned;
+      }
+      return prev;
+    });
   }, []);
 
   // Poll for changes every 2s when a folder is open

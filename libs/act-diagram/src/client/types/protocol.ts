@@ -3,6 +3,7 @@ import type { FileTab } from "./file-tab.js";
 /** Messages from the host environment to the diagram */
 export type HostMessage =
   | { type: "files"; files: FileTab[] }
+  | { type: "fileAdded"; path: string; content: string }
   | { type: "fileChanged"; path: string; content: string }
   | { type: "fileDeleted"; path: string };
 

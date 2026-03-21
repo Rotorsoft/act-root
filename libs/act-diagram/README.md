@@ -79,6 +79,7 @@ function App() {
 
 // From the IDE extension host
 webview.postMessage({ type: "files", files: [...] });
+webview.postMessage({ type: "fileAdded", path: "src/new.ts", content: "..." });
 webview.postMessage({ type: "fileChanged", path: "src/app.ts", content: "..." });
 webview.postMessage({ type: "fileDeleted", path: "src/old.ts" });
 ```
@@ -162,6 +163,7 @@ type ValidationWarning = { message, severity: "warning" | "error", element? };
 // Host → Diagram (via postMessage or props)
 type HostMessage =
   | { type: "files"; files: FileTab[] }
+  | { type: "fileAdded"; path: string; content: string }
   | { type: "fileChanged"; path: string; content: string }
   | { type: "fileDeleted"; path: string };
 
