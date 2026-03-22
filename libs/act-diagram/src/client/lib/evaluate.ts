@@ -467,35 +467,45 @@ export function extractModel(files: FileTab[]): {
     reactions: [],
   };
 
-  if (error) return { model, error };
-
+  // Process each slice independently — one failure doesn't affect others
   const statesInSlices = new Set<string>();
 
   for (const s of slices) {
-    const sliceStateNames: string[] = [];
-
-    for (const st of s.states) {
-      if (st._tag === "State") {
+    const sliceName = (s._varName ?? "slice") as string;
+    try {
+      const sliceStateNames: string[] = [];
+      for (const st of s.states) {
+        if (!st || typeof st !== "object" || st._tag !== "State") continue;
         addState(model, st);
-        /* v8 ignore next -- _modelKey set by addState */
-        const key = st._modelKey ?? st.name;
-        sliceStateNames.push(key as string);
-        statesInSlices.add(key as string);
+        const key = (st._modelKey ?? st.name) as string;
+        sliceStateNames.push(key);
+        statesInSlices.add(key);
       }
-    }
 
-    const projNames: string[] = [];
-    for (const p of s.projections) {
-      if (p._tag === "Projection") projNames.push(p.target as string);
-    }
+      const projNames: string[] = [];
+      for (const p of s.projections) {
+        if (!p || typeof p !== "object" || p._tag !== "Projection") continue;
+        projNames.push(p.target as string);
+      }
 
-    model.slices.push({
-      name: s._varName ?? "slice",
-      states: sliceStateNames,
-      stateVars: sliceStateNames,
-      projections: projNames,
-      reactions: s.reactions,
-    });
+      model.slices.push({
+        name: sliceName,
+        states: sliceStateNames,
+        stateVars: sliceStateNames,
+        projections: projNames,
+        reactions: s.reactions ?? [],
+      });
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      model.slices.push({
+        name: sliceName,
+        states: [],
+        stateVars: [],
+        projections: [],
+        reactions: [],
+        error: msg,
+      });
+    }
   }
 
   for (const p of projections) {
@@ -535,75 +545,90 @@ export function extractModel(files: FileTab[]): {
   const globalStateNames: string[] = [];
 
   for (const s of states) {
+    if (!s || typeof s !== "object") continue;
     const key = s._modelKey ?? s.name;
     if (s._tag === "State" && !statesInSlices.has(key as string)) {
-      addState(model, s);
-      globalStateNames.push((s._modelKey ?? s.name) as string);
+      try {
+        addState(model, s);
+        globalStateNames.push((s._modelKey ?? s.name) as string);
+      } catch {
+        /* skip corrupted standalone state */
+      }
     }
   }
 
   for (const a of acts) {
-    for (const st of a.states) {
+    if (!a || typeof a !== "object") continue;
+    for (const st of a.states ?? []) {
+      if (!st || typeof st !== "object") continue;
       /* v8 ignore next -- _modelKey set by addState */
       const stKey = st._modelKey ?? st.name;
       if (st._tag === "State" && !statesInSlices.has(stKey as string)) {
-        addState(model, st);
-        globalStateNames.push((st._modelKey ?? st.name) as string);
-      }
-    }
-    model.orchestrator = {
-      slices: model.slices.map((s) => s.name),
-      projections: model.projections.map((p) => p.name),
-      states: model.states.map((s) => s.name),
-    } as ActNode;
-    for (const r of (a.reactions as ReactionNode[]) ?? []) {
-      model.reactions.push(r);
-    }
-
-    /* v8 ignore next -- _sourceFile always set by capture callback */
-    const entryPath = a._sourceFile ?? "app.ts";
-    const actSliceNames = new Set<string>(
-      /* v8 ignore next 5 -- _varName always set by slice tagging */
-      ((a.slices as any[]) ?? []).map(
-        (s: any) =>
-          s._varName ?? s.states?.map((st: any) => st.name).join(", ") ?? ""
-      )
-    );
-    const actStateNames = new Set<string>(
-      ((a.states as any[]) ?? [])
-        .filter((s: any) => s?._tag === "State")
-        /* v8 ignore next -- _modelKey set by addState */
-        .map((s: any) => s._modelKey ?? s.name)
-    );
-    const actProjNames = new Set<string>(
-      ((a.projections as any[]) ?? [])
-        .filter((p: any) => p?._tag === "Projection")
-        .map((p: any) => p.target)
-    );
-
-    // Fallback: if act projections are empty (circular deps), scan source for .withProjection(Var)
-    /* v8 ignore next 9 -- resilience path for circular deps */
-    if (actProjNames.size === 0 && model.projections.length > 0) {
-      const src = files.find((f) => f.path === entryPath)?.content ?? "";
-      const wpRe = /\.withProjection\(\s*(?:\w+\.)*(\w+)\s*\)/g;
-      while (wpRe.exec(src) !== null) {
-        for (const p of model.projections) {
-          actProjNames.add(p.name);
+        try {
+          addState(model, st);
+          globalStateNames.push((st._modelKey ?? st.name) as string);
+        } catch {
+          /* skip corrupted act state */
         }
       }
     }
+    try {
+      model.orchestrator = {
+        slices: model.slices.map((s) => s.name),
+        projections: model.projections.map((p) => p.name),
+        states: model.states.map((s) => s.name),
+      } as ActNode;
+      for (const r of (a.reactions as ReactionNode[]) ?? []) {
+        model.reactions.push(r);
+      }
 
-    const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
-    const sliceStateNames = new Set(entrySlices.flatMap((s) => s.states));
-    const allStateNames = new Set([...actStateNames, ...sliceStateNames]);
+      /* v8 ignore next -- _sourceFile always set by capture callback */
+      const entryPath = a._sourceFile ?? "app.ts";
+      const actSliceNames = new Set<string>(
+        /* v8 ignore next 5 -- _varName always set by slice tagging */
+        ((a.slices as any[]) ?? []).map(
+          (s: any) =>
+            s._varName ?? s.states?.map((st: any) => st.name).join(", ") ?? ""
+        )
+      );
+      const actStateNames = new Set<string>(
+        ((a.states as any[]) ?? [])
+          .filter((s: any) => s?._tag === "State")
+          /* v8 ignore next -- _modelKey set by addState */
+          .map((s: any) => s._modelKey ?? s.name)
+      );
+      const actProjNames = new Set<string>(
+        ((a.projections as any[]) ?? [])
+          .filter((p: any) => p?._tag === "Projection")
+          .map((p: any) => p.target)
+      );
 
-    model.entries.push({
-      path: entryPath,
-      states: model.states.filter((s) => allStateNames.has(s.varName)),
-      slices: entrySlices,
-      projections: model.projections.filter((p) => actProjNames.has(p.name)),
-      reactions: a.reactions ?? [],
-    });
+      // Fallback: if act projections are empty (circular deps), scan source for .withProjection(Var)
+      /* v8 ignore next 9 -- resilience path for circular deps */
+      if (actProjNames.size === 0 && model.projections.length > 0) {
+        const src = files.find((f) => f.path === entryPath)?.content ?? "";
+        const wpRe = /\.withProjection\(\s*(?:\w+\.)*(\w+)\s*\)/g;
+        while (wpRe.exec(src) !== null) {
+          for (const p of model.projections) {
+            actProjNames.add(p.name);
+          }
+        }
+      }
+
+      const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
+      const sliceStateNames = new Set(entrySlices.flatMap((s) => s.states));
+      const allStateNames = new Set([...actStateNames, ...sliceStateNames]);
+
+      model.entries.push({
+        path: entryPath,
+        states: model.states.filter((s) => allStateNames.has(s.varName)),
+        slices: entrySlices,
+        projections: model.projections.filter((p) => actProjNames.has(p.name)),
+        reactions: a.reactions ?? [],
+      });
+    } catch {
+      /* skip corrupted act entry */
+    }
   }
 
   // Put standalone states/reactions into a "global" slice
@@ -631,6 +656,10 @@ export function extractModel(files: FileTab[]): {
     });
   }
 
+  // Return global error only if nothing was extracted at all
+  if (error && model.states.length === 0 && model.slices.length === 0) {
+    return { model, error };
+  }
   return { model };
 }
 
