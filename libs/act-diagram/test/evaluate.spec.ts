@@ -105,10 +105,13 @@ export const app = act()
 
     const { model, error } = extractModel(files);
     expect(error).toBeUndefined();
-    expect(model.slices).toHaveLength(1);
-    expect(model.slices[0].reactions).toHaveLength(1);
-    expect(model.slices[0].reactions[0].dispatches).toContain("AssignTicket");
-    expect(model.slices[0].projections).toContain("tickets");
+    expect(model.slices).toHaveLength(2);
+    const ticketSlice = model.slices.find((s) => s.name === "TicketSlice")!;
+    expect(ticketSlice.reactions).toHaveLength(1);
+    expect(ticketSlice.reactions[0].dispatches).toContain("AssignTicket");
+    expect(ticketSlice.projections).toContain("tickets");
+    const globalSlice = model.slices.find((s) => s.name === "global")!;
+    expect(globalSlice).toBeDefined();
     expect(model.entries).toHaveLength(1);
     expect(model.entries[0].path).toBe("src/app.ts");
     expect(model.entries[0].projections).toHaveLength(1);

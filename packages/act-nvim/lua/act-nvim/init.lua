@@ -32,10 +32,10 @@ local function open_browser(url)
   if browser_opened then return end
   browser_opened = true
 
-  -- Non-blocking browser open
+  -- Non-blocking browser open (only called once per session)
   local cmd
   if vim.fn.has("mac") == 1 then
-    cmd = { "open", "-g", url }
+    cmd = { "open", url }
   elseif vim.fn.has("unix") == 1 then
     cmd = { "xdg-open", url }
   else
@@ -57,9 +57,10 @@ local function on_message(msg)
   if msg.type == "status" then
     if msg.browserConnected then
       browser_opened = true
+      vim.notify("[act-nvim] browser tab already open", vim.log.levels.DEBUG)
     else
-      -- no browser tab open yet — open one
       open_browser("http://localhost:" .. config.http_port)
+      vim.notify("[act-nvim] opened browser tab", vim.log.levels.DEBUG)
     end
     return
   end
@@ -280,11 +281,14 @@ function M.setup(opts)
     desc = "Close Act diagram",
   })
 
-  -- Clean up when Neovim exits
+  -- Disconnect TCP when Neovim exits (but leave the relay running for tab reuse)
   vim.api.nvim_create_autocmd("VimLeavePre", {
     callback = function()
-      if server_job or connected then
-        stop()
+      tcp.disconnect()
+      connected = false
+      if augroup then
+        vim.api.nvim_del_augroup_by_id(augroup)
+        augroup = nil
       end
     end,
   })

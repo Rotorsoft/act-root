@@ -5,7 +5,7 @@ import {
   navigateToCode,
   validate,
 } from "@rotorsoft/act-diagram";
-import {
+import React, {
   StrictMode,
   useCallback,
   useEffect,
@@ -15,6 +15,38 @@ import {
 } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  state = { error: null as string | null };
+  static getDerivedStateFromError(e: Error) {
+    return { error: e.message };
+  }
+  componentDidUpdate(
+    _prev: { children: React.ReactNode },
+    prevState: { error: string | null }
+  ) {
+    // Auto-recover on next render (new props from parent)
+    if (prevState.error && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-full items-center justify-center bg-[#0a0a0a] p-8">
+          <div className="max-w-lg rounded border border-red-900/50 bg-red-950/30 p-4 text-xs text-red-300">
+            <div className="font-semibold text-red-400 mb-2">Render error</div>
+            <div className="font-mono">{this.state.error}</div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const WS_URL = `ws://${window.location.host}/ws`;
 const RECONNECT_MS = 1000;
@@ -39,7 +71,12 @@ function App() {
       ws.onmessage = (e) => {
         if (!active) return;
         try {
-          const msg: HostMessage = JSON.parse(e.data as string);
+          const raw = JSON.parse(e.data as string) as Record<string, unknown>;
+          if (raw.type === "projectName") {
+            document.title = `Act — ${raw.name as string}`;
+            return;
+          }
+          const msg = raw as unknown as HostMessage;
           switch (msg.type) {
             case "files":
               setFiles(msg.files);
@@ -101,9 +138,25 @@ function App() {
         warnings: [],
         error: undefined,
       };
-    const { model, error } = extractModel(files);
-    const warnings = validate(model);
-    return { model, warnings, error };
+    try {
+      const { model, error } = extractModel(files);
+      const warnings = validate(model);
+      return { model, warnings, error };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error("[act-nvim] extractModel failed:", msg);
+      return {
+        model: {
+          entries: [],
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+        warnings: [],
+        error: msg,
+      };
+    }
   }, [files]);
 
   const handleClick = useCallback(
@@ -146,11 +199,13 @@ function App() {
         </div>
       ) : (
         <div className="flex-1 min-h-0">
-          <Diagram
-            model={model}
-            warnings={warnings}
-            onClickElement={handleClick}
-          />
+          <ErrorBoundary>
+            <Diagram
+              model={model}
+              warnings={warnings}
+              onClickElement={handleClick}
+            />
+          </ErrorBoundary>
         </div>
       )}
     </div>

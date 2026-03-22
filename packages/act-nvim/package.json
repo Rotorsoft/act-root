@@ -12,7 +12,7 @@
     "build:client": "vite build",
     "build": "pnpm build:server && pnpm build:client",
     "dev": "tsx watch src/server/relay.ts",
-    "start": "pnpm build && node dist/server/relay.js",
+    "start": "node dist/server/relay.js",
     "nvim": "node scripts/nvim.mjs"
   },
   "dependencies": {

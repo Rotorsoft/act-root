@@ -3,7 +3,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer, type Socket } from "node:net";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { WebSocketServer, type WebSocket } from "ws";
+import { WebSocketServer } from "ws";
 import { scanDir, watchDir, type WatchEvent } from "./watcher.js";
 
 const HTTP_PORT = parseInt(process.env.ACT_NVIM_HTTP_PORT ?? "4010", 10);
@@ -25,11 +25,11 @@ const MIME: Record<string, string> = {
 };
 
 // --- State ---
-let browserWs: WebSocket | null = null;
 let nvimSocket: Socket | null = null;
 let nvimBuffer = "";
 let fsWatcher: ReturnType<typeof watchDir> | null = null;
 let lastFiles: object | null = null; // cache last "files" message for new browser connections
+let browserEverConnected = false; // true once any browser has connected to this relay instance
 
 /** Send NDJSON message to Neovim */
 function sendToNvim(msg: object) {
@@ -38,10 +38,13 @@ function sendToNvim(msg: object) {
   }
 }
 
-/** Send JSON message to browser via WebSocket */
+/** Broadcast JSON message to all connected browsers */
 function sendToBrowser(msg: object) {
-  if (browserWs?.readyState === 1) {
-    browserWs.send(JSON.stringify(msg));
+  const data = JSON.stringify(msg);
+  for (const client of wss.clients) {
+    if (client.readyState === 1) {
+      client.send(data);
+    }
   }
 }
 
@@ -69,7 +72,7 @@ const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
 wss.on("connection", (ws) => {
   console.log("[relay] browser connected");
-  browserWs = ws;
+  browserEverConnected = true;
 
   // replay last files to the new connection
   if (lastFiles) {
@@ -82,7 +85,6 @@ wss.on("connection", (ws) => {
   ws.on("message", (raw: Buffer) => {
     try {
       const msg = JSON.parse(raw.toString()) as Record<string, unknown>;
-      // DiagramMessage → forward to Neovim
       if (msg.type === "navigate") {
         sendToNvim(msg);
       }
@@ -93,7 +95,6 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     console.log("[relay] browser disconnected");
-    if (browserWs === ws) browserWs = null;
   });
 });
 
@@ -103,8 +104,8 @@ const tcpServer = createTcpServer((socket) => {
   nvimSocket = socket;
   nvimBuffer = "";
 
-  // Tell Neovim if a browser is already connected
-  const hasBrowser = browserWs !== null && browserWs.readyState === 1;
+  // Tell Neovim if a browser is or was connected (to prevent duplicate tabs)
+  const hasBrowser = browserEverConnected || wss.clients.size > 0;
   socket.write(
     JSON.stringify({ type: "status", browserConnected: hasBrowser }) + "\n"
   );
@@ -157,8 +158,10 @@ async function handleNvimMessage(msg: {
         // scan and send all files to browser
         const files = await scanDir(root);
         console.log(`[relay] found ${files.length} TypeScript files`);
+        const projectName = root.split("/").pop() ?? "project";
         lastFiles = { type: "files", files };
         sendToBrowser(lastFiles);
+        sendToBrowser({ type: "projectName", name: projectName });
 
         // watch for changes
         fsWatcher = watchDir(root, (event: WatchEvent) => {

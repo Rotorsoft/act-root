@@ -40,7 +40,14 @@ export type N = {
   reactions?: string[];
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
-export type Box = { label: string; x: number; y: number; w: number; h: number };
+export type Box = {
+  label: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  error?: string;
+};
 export type Layout = {
   ns: N[];
   es: E[];
@@ -174,11 +181,22 @@ function placeChain(
 
     // Dispatched action — centered in row
     const dap = { x: nextX, y: rowCenterY - H / 2 };
+    const dispatchedAction = row.targetState?.actions.find(
+      (a) => a.name === row.an
+    );
     ns.push({
       key: `a:${row.an}:dispatched:${rDef.handlerName}`,
       pos: dap,
       type: "action",
       label: row.an,
+      sub:
+        dispatchedAction && dispatchedAction.invariants.length > 0
+          ? "guarded"
+          : undefined,
+      guards:
+        dispatchedAction && dispatchedAction.invariants.length > 0
+          ? dispatchedAction.invariants
+          : undefined,
       file: row.targetState?.file,
     });
     es.push({
@@ -295,16 +313,43 @@ export function computeLayout(viewModel: DomainModel): Layout {
   );
 
   for (const slice of sortedSlices) {
+    // Error slices get a minimum-sized box with the error message
+    if (slice.error) {
+      const sx = PAD;
+      const errorW = Math.max(300, slice.error.length * 5);
+      const errorH = H * 2 + GAP;
+      boxes.push({
+        label: slice.name,
+        x: sx - GAP / 2,
+        y: globalY,
+        w: errorW,
+        h: errorH,
+        error: slice.error,
+      });
+      globalY += errorH + SLICE_GAP;
+      continue;
+    }
+
     // Phase 1: layout slice content at y=0, then translate to globalY
     cx = PAD;
     const sx = cx;
     cx += SLICE_PAD + GAP;
     // Merge partial states with the same domain name within a slice
+    // Track which source file each event/action came from
+    const eventFileMap = new Map<string, string>();
+    const actionFileMap = new Map<string, string>();
     const rawParts = slice.stateVars
       .map((v) => sv.get(v))
       .filter(Boolean) as StateNode[];
     const mergedByName = new Map<string, StateNode>();
     for (const st of rawParts) {
+      // Record source file for each event and action
+      for (const e of st.events) {
+        if (st.file) eventFileMap.set(e.name, st.file);
+      }
+      for (const a of st.actions) {
+        if (st.file) actionFileMap.set(a.name, st.file);
+      }
       const existing = mergedByName.get(st.name);
       if (existing) {
         // Merge actions and events, avoiding duplicates
@@ -450,7 +495,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           pos: { x: eventColX, y: evtY },
           type: "event",
           label: en,
-          file: st.file,
+          file: eventFileMap.get(en) ?? st.file,
           projections: eventProjections.get(en),
           reactions: eventReactions.get(en),
         });
@@ -495,6 +540,25 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
         evtY += H + GAP / 2;
       }
+
+      // ── Projections below events ──────────────────────────────
+      const seenProj = new Set<string>();
+      for (const me of measuredEvents) {
+        const projs = eventProjections.get(me.eventName);
+        if (!projs) continue;
+        for (const pn of projs) {
+          if (seenProj.has(pn)) continue;
+          seenProj.add(pn);
+          ns.push({
+            key: `p:${pn}:${slice.name}`,
+            pos: { x: eventColX, y: evtY },
+            type: "projection",
+            label: pn,
+          });
+          evtY += H + GAP / 2;
+        }
+      }
+
       sliceRightX = sliceRightXRef.value;
 
       // ── Actions centered relative to state ─────────────────────
@@ -517,7 +581,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           label: action.name,
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
-          file: st.file,
+          file: actionFileMap.get(action.name) ?? st.file,
         });
         for (const en of action.emits) {
           const ey = eventYMap.get(en);

@@ -28,7 +28,8 @@ const COLORS = {
   event: { bg: "#c2410c", border: "#f97316", text: "#fed7aa" },
   state: { bg: "#a16207", border: "#eab308", text: "#fef08a" },
   reaction: { bg: "#7e22ce", border: "#a855f7", text: "#d8b4fe" },
-  projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" },
+  projection: { bg: "#059669", border: "#34d399", text: "#6ff7b5" },
+  error: { bg: "#991b1b", border: "#ef4444", text: "#fca5a5" },
 };
 
 /** Semi-transparent version of a hex color for box fills */
@@ -428,49 +429,66 @@ export function Diagram({
         <svg width="100%" height="100%" className="select-none">
           <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
             {/* Slice boundaries */}
-            {boxes.map((b) => (
-              <g key={b.label}>
-                <rect
-                  x={b.x}
-                  y={b.y}
-                  width={b.w}
-                  height={b.h}
-                  rx={8}
-                  fill={COLORS.state.bg}
-                  fillOpacity={0.1}
-                  stroke={COLORS.state.border}
-                  strokeWidth={1.5}
-                  strokeOpacity={0.4}
-                />
-                {/* Vertical label strip on left — rounded left, flat right */}
-                <clipPath id={`clip-${b.label}`}>
-                  <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
-                </clipPath>
-                <rect
-                  x={b.x}
-                  y={b.y}
-                  width={SLICE_PAD + 8}
-                  height={b.h}
-                  rx={8}
-                  fill="#a16207"
-                  fillOpacity={0.25}
-                  clipPath={`url(#clip-${b.label})`}
-                />
-                {/* Vertical text — clickable to navigate to slice definition */}
-                <text
-                  x={b.x + SLICE_PAD / 2}
-                  y={b.y + b.h / 2}
-                  fill={COLORS.state.text}
-                  className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
-                  onClick={() => onClickElement?.(b.label)}
-                >
-                  {b.label}
-                </text>
-              </g>
-            ))}
+            {boxes.map((b) => {
+              const isError = !!b.error;
+              const boxColor = isError ? COLORS.error : COLORS.state;
+              const stripFill = isError ? COLORS.error.bg : "#a16207";
+              return (
+                <g key={b.label}>
+                  <rect
+                    x={b.x}
+                    y={b.y}
+                    width={b.w}
+                    height={b.h}
+                    rx={8}
+                    fill={boxColor.bg}
+                    fillOpacity={0.1}
+                    stroke={boxColor.border}
+                    strokeWidth={1.5}
+                    strokeOpacity={isError ? 0.7 : 0.4}
+                  />
+                  {/* Vertical label strip on left — rounded left, flat right */}
+                  <clipPath id={`clip-${b.label}`}>
+                    <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
+                  </clipPath>
+                  <rect
+                    x={b.x}
+                    y={b.y}
+                    width={SLICE_PAD + 8}
+                    height={b.h}
+                    rx={8}
+                    fill={stripFill}
+                    fillOpacity={0.25}
+                    clipPath={`url(#clip-${b.label})`}
+                  />
+                  {/* Vertical text — clickable to navigate to slice definition */}
+                  <text
+                    x={b.x + SLICE_PAD / 2}
+                    y={b.y + b.h / 2}
+                    fill={isError ? COLORS.error.text : COLORS.state.text}
+                    className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
+                    onClick={() => onClickElement?.(b.label)}
+                  >
+                    {b.label}
+                  </text>
+                  {/* Error message inside the slice box */}
+                  {isError && (
+                    <text
+                      x={b.x + SLICE_PAD + 12}
+                      y={b.y + b.h / 2}
+                      fill={COLORS.error.text}
+                      className="text-[9px]"
+                      dominantBaseline="central"
+                    >
+                      {b.error}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
 
             {/* Edges */}
             {es.map((e, i) => {

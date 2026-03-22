@@ -532,10 +532,13 @@ export function extractModel(files: FileTab[]): {
     }
   }
 
+  const globalStateNames: string[] = [];
+
   for (const s of states) {
     const key = s._modelKey ?? s.name;
     if (s._tag === "State" && !statesInSlices.has(key as string)) {
       addState(model, s);
+      globalStateNames.push((s._modelKey ?? s.name) as string);
     }
   }
 
@@ -543,8 +546,10 @@ export function extractModel(files: FileTab[]): {
     for (const st of a.states) {
       /* v8 ignore next -- _modelKey set by addState */
       const stKey = st._modelKey ?? st.name;
-      if (st._tag === "State" && !statesInSlices.has(stKey as string))
+      if (st._tag === "State" && !statesInSlices.has(stKey as string)) {
         addState(model, st);
+        globalStateNames.push((st._modelKey ?? st.name) as string);
+      }
     }
     model.orchestrator = {
       slices: model.slices.map((s) => s.name),
@@ -598,6 +603,17 @@ export function extractModel(files: FileTab[]): {
       slices: entrySlices,
       projections: model.projections.filter((p) => actProjNames.has(p.name)),
       reactions: a.reactions ?? [],
+    });
+  }
+
+  // Put standalone states/reactions into a "global" slice
+  if (globalStateNames.length > 0 || model.reactions.length > 0) {
+    model.slices.push({
+      name: "global",
+      states: globalStateNames,
+      stateVars: globalStateNames,
+      projections: model.projections.map((p) => p.name),
+      reactions: model.reactions,
     });
   }
 

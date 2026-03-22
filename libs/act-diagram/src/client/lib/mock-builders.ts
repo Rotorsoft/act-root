@@ -189,11 +189,11 @@ export function mockSlice(onBuild?: (info: any) => void) {
 
   const builder: any = {
     withState(s: any) {
-      info.states.push(s);
+      if (s) info.states.push(s);
       return builder;
     },
     withProjection(p: any) {
-      info.projections.push(p);
+      if (p) info.projections.push(p);
       return builder;
     },
     on(eventName: string) {
@@ -274,15 +274,15 @@ export function mockAct(onBuild?: (info: any) => void) {
 
   const builder: any = {
     withState(s: any) {
-      info.states.push(s);
+      if (s) info.states.push(s);
       return builder;
     },
     withSlice(s: any) {
-      info.slices.push(s);
+      if (s) info.slices.push(s);
       return builder;
     },
     withProjection(p: any) {
-      info.projections.push(p);
+      if (p) info.projections.push(p);
       return builder;
     },
     withActor: () => builder,
