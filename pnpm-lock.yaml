@@ -198,7 +198,7 @@ importers:
         specifier: ^0.79.0
         version: 0.79.0(zod@4.3.6)
       '@tailwindcss/vite':
-        specifier: ^4.1.8
+        specifier: ^4.1.18
         version: 4.2.2(vite@7.3.1(@types/node@25.5.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.44.1)(tsx@4.21.0)(yaml@2.8.2))
       '@types/react':
         specifier: ^19.2.14
@@ -216,10 +216,10 @@ importers:
         specifier: ^19.2.4
         version: 19.2.4(react@19.2.4)
       tailwindcss:
-        specifier: ^4.1.8
+        specifier: ^4.1.18
         version: 4.2.2
       tsx:
-        specifier: ^4.19.4
+        specifier: ^4.21.0
         version: 4.21.0
       typescript:
         specifier: ~5.9.3
