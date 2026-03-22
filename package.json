@@ -44,6 +44,7 @@
     "dev:trpc": "npx concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm -F server dev' 'pnpm -F client dev'",
     "dev:inspector": "pnpm -F @rotorsoft/act-inspector dev",
     "dev:diagram": "pnpm -F @rotorsoft/act-diagram dev",
+    "dev:nvim": "pnpm -F act-nvim dev",
     "scrub": "chmod +x ./scripts/scrub.sh && ./scripts/scrub.sh"
   },
   "dependencies": {

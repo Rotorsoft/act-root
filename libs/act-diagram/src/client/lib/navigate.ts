@@ -91,12 +91,12 @@ function buildPatterns(esc: string, type?: string): RegExp[] {
     new RegExp(`projection\\(\\s*["'\`](${esc})["'\`]`),
   ];
   const guardPatterns = [
-    // .given() usage in the state builder — where the guard is applied
-    new RegExp(`\\.given\\([\\s\\S]*?(${esc})`),
-    // Fallback: guard definition
+    // Guard definition — prefer jumping to the declaration
+    new RegExp(`(?:const|let|var)\\s+(${esc})\\s*(?::\\s*Invariant)?\\s*=`),
     new RegExp(`rule\\(\\s*["'\`](${esc})["'\`]`),
     new RegExp(`description:\\s*["'\`](${esc})["'\`]`),
-    new RegExp(`(?:const|let|var)\\s+(${esc})\\s*(?::\\s*Invariant)?\\s*=`),
+    // .given() usage in the state builder — last resort
+    new RegExp(`\\.given\\([\\s\\S]*?(${esc})`),
   ];
   const slicePatterns = [
     new RegExp(`(?:const|let|var)\\s+(${esc})\\s*=\\s*slice\\s*\\(`),
@@ -166,11 +166,13 @@ export function navigateToCode(
 
       // For events: navigate to .emits() in the state builder
       if (type === "event") {
-        // Try to find event name inside .emits({ EventName: ... })
-        const emitsInlineRe = new RegExp(`\\.emits\\([\\s\\S]*?(${esc})\\s*:`);
-        const inlineMatch = emitsInlineRe.exec(file.content);
-        if (inlineMatch) {
-          const nameIdx = inlineMatch.index + inlineMatch[0].lastIndexOf(name);
+        // Try to find event name inside .emits({ EventName: ... }) or .emits({ EventName, ... })
+        const emitsBlockRe = new RegExp(
+          `\\.emits\\([\\s\\S]*?(${esc})\\s*[,:}]`
+        );
+        const blockMatch = emitsBlockRe.exec(file.content);
+        if (blockMatch) {
+          const nameIdx = blockMatch.index + blockMatch[0].lastIndexOf(name);
           const { line, col } = positionAt(file.content, nameIdx);
           return { file: file.path, line, col };
         }
@@ -186,6 +188,32 @@ export function navigateToCode(
           }
         }
         /* v8 ignore stop */
+      }
+
+      // For guards: find the description string, then jump to the containing const declaration
+      if (type === "guard") {
+        const descRe = new RegExp(`description:\\s*["'\`]${esc}["'\`]`);
+        const descMatch = descRe.exec(file.content);
+        if (descMatch) {
+          // Walk backwards from the description to find the const/let/var declaration
+          const before = file.content.slice(0, descMatch.index);
+          const declRe =
+            /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
+          let lastDecl: RegExpExecArray | null = null;
+          let m: RegExpExecArray | null;
+          while ((m = declRe.exec(before)) !== null) {
+            lastDecl = m;
+          }
+          if (lastDecl) {
+            // Jump to the variable name in the declaration
+            const nameIdx = lastDecl.index + lastDecl[0].indexOf(lastDecl[1]);
+            const { line, col } = positionAt(file.content, nameIdx);
+            return { file: file.path, line, col };
+          }
+          // Fallback: jump to the description itself
+          const { line, col } = positionAt(file.content, descMatch.index);
+          return { file: file.path, line, col };
+        }
       }
 
       // For actions: search inside .on() block
@@ -213,7 +241,6 @@ export function navigateToCode(
   }
 
   const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = buildPatterns(esc, type);
 
   // Search source files before test/spec files so definitions win over references
   const isTestFile = (p: string) =>
@@ -221,6 +248,32 @@ export function navigateToCode(
   const sortedFiles = [...files].sort(
     (a, b) => (isTestFile(a.path) ? 1 : 0) - (isTestFile(b.path) ? 1 : 0)
   );
+
+  // Guards use description strings — find the description, then jump to the variable name
+  if (type === "guard") {
+    const descRe = new RegExp(`description:\\s*["'\`]${esc}["'\`]`);
+    for (const f of sortedFiles) {
+      if (!/\.tsx?$/.test(f.path)) continue;
+      const descMatch = descRe.exec(f.content);
+      if (descMatch && !isInsideComment(f.content, descMatch.index)) {
+        const before = f.content.slice(0, descMatch.index);
+        const declRe =
+          /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
+        let lastDecl: RegExpExecArray | null = null;
+        let m: RegExpExecArray | null;
+        while ((m = declRe.exec(before)) !== null) lastDecl = m;
+        if (lastDecl) {
+          const nameIdx = lastDecl.index + lastDecl[0].indexOf(lastDecl[1]);
+          const { line, col } = positionAt(f.content, nameIdx);
+          return { file: f.path, line, col };
+        }
+        const { line, col } = positionAt(f.content, descMatch.index);
+        return { file: f.path, line, col };
+      }
+    }
+  }
+
+  const patterns = buildPatterns(esc, type);
 
   for (const re of patterns) {
     for (let i = 0; i < sortedFiles.length; i++) {

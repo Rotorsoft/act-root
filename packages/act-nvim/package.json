@@ -1,0 +1,37 @@
+{
+  "name": "act-nvim",
+  "type": "module",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Neovim plugin for Act event-sourcing diagrams — browser sidecar with bidirectional navigation",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build:server": "tsup",
+    "build:client": "vite build",
+    "build": "pnpm build:server && pnpm build:client",
+    "dev": "tsx watch src/server/relay.ts",
+    "start": "pnpm build && node dist/server/relay.js",
+    "nvim": "node scripts/nvim.mjs"
+  },
+  "dependencies": {
+    "@rotorsoft/act-diagram": "workspace:^",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.18.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "tailwindcss": "^4.1.18",
+    "tsup": "^8.5.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.1"
+  }
+}
