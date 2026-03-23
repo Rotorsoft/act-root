@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.1...@rotorsoft/act-diagram-v0.1.2) (2026-03-23)
+
+
+### Bug Fixes
+
+* **act-diagram:** export buildModel, computeLayout, ExecuteResult from public API ([c21b096](https://github.com/rotorsoft/act-root/commit/c21b096abed3c16126548e50ac6ceb87ad9b9e67))
+
 # [@rotorsoft/act-diagram-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.0...@rotorsoft/act-diagram-v0.1.1) (2026-03-23)
 
 
