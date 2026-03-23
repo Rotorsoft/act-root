@@ -12,8 +12,7 @@ const EXCLUDE_DIRS = new Set([
   ".turbo",
 ]);
 
-const isTs = (name: string) =>
-  (name.endsWith(".ts") || name.endsWith(".tsx")) && !name.endsWith(".d.ts");
+const isTs = (name: string) => name.endsWith(".ts") && !name.endsWith(".d.ts");
 
 /** Recursively scan a directory for .ts files, returning relative paths */
 export async function scanDir(root: string): Promise<FileTab[]> {

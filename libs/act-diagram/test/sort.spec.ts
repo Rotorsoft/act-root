@@ -110,6 +110,27 @@ describe("topoSort", () => {
     expect(sorted).toHaveLength(2);
   });
 
+  it("dep already seeded in inDegree map (line 36 branch)", () => {
+    // File A depends on shared. File B also depends on shared.
+    // When processing B's dep on shared, shared is already in inDegree map.
+    // This exercises the `?? 0` fallback not being used since dep IS in inDegree.
+    const files: FileTab[] = [
+      { path: "src/shared.ts", content: `export const x = 1;` },
+      {
+        path: "src/a.ts",
+        content: `import { x } from "./shared.js";\nimport { y } from "./shared.js";`,
+      },
+      {
+        path: "src/b.ts",
+        content: `import { x } from "./shared.js";`,
+      },
+    ];
+    const sorted = topoSort(files);
+    const paths = sorted.map((f) => f.path);
+    // shared should come first
+    expect(paths.indexOf("src/shared.ts")).toBe(0);
+  });
+
   it("handles multiple files with shared dependency (in-degree > 1)", () => {
     const files: FileTab[] = [
       { path: "src/shared.ts", content: `export const x = 1;` },

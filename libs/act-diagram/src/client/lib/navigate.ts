@@ -42,7 +42,6 @@ function findNonCommentMatch(
   re: RegExp,
   startFrom = 0
 ): number {
-  /* v8 ignore next -- both branches produce equivalent "g" flag */
   const globalRe = new RegExp(
     re.source,
     re.flags.includes("g") ? re.flags : re.flags + "g"
@@ -178,7 +177,6 @@ export function navigateToCode(
         }
         // Fallback: navigate to .emits( line itself (e.g. .emits(variable))
         // Only if the event name appears somewhere in the file
-        /* v8 ignore start -- fallback for .emits(variable) pattern */
         const nameRe = new RegExp(`\\b${esc}\\b`, "g");
         if (findNonCommentMatch(file.content, nameRe) >= 0) {
           const emitsIdx = findNonCommentMatch(file.content, /\.emits\s*\(/);
@@ -187,7 +185,6 @@ export function navigateToCode(
             return { file: file.path, line, col };
           }
         }
-        /* v8 ignore stop */
       }
 
       // For guards: find the description string, then jump to the containing const declaration
@@ -279,22 +276,14 @@ export function navigateToCode(
     for (let i = 0; i < sortedFiles.length; i++) {
       if (!/\.tsx?$/.test(sortedFiles[i].path)) continue;
       const content = sortedFiles[i].content;
-      /* v8 ignore next -- buildPatterns never includes "g" flag */
-      const globalRe = new RegExp(
-        re.source,
-        re.flags.includes("g") ? re.flags : re.flags + "g"
-      );
+      const globalRe = new RegExp(re.source, re.flags + "g");
       let match: RegExpExecArray | null;
       while ((match = globalRe.exec(content)) !== null) {
         if (isInsideComment(content, match.index)) continue;
 
         const matchText = match[0];
         const nameOffsetInMatch = matchText.lastIndexOf(name);
-        /* v8 ignore next -- name always appears in match text */
-        const nameStart =
-          nameOffsetInMatch >= 0
-            ? match.index + nameOffsetInMatch
-            : match.index;
+        const nameStart = match.index + Math.max(0, nameOffsetInMatch);
         const { line, col } = positionAt(content, nameStart);
         return { file: sortedFiles[i].path, line, col };
       }

@@ -1367,6 +1367,703 @@ describe("computeLayout", () => {
   });
 });
 
+describe("error slice box (lines 318-331)", () => {
+  it("creates a box with error field for a slice with error and empty states", () => {
+    const model = emptyModel({
+      slices: [
+        {
+          name: "BrokenSlice",
+          states: [],
+          stateVars: [],
+          projections: [],
+          reactions: [],
+          error: "Failed to build this slice due to syntax error",
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should have a box with the error field set
+    expect(layout.boxes).toHaveLength(1);
+    expect(layout.boxes[0].label).toBe("BrokenSlice");
+    expect(layout.boxes[0].error).toBe(
+      "Failed to build this slice due to syntax error"
+    );
+    // Error box should have minimum dimensions
+    expect(layout.boxes[0].w).toBeGreaterThanOrEqual(300);
+    expect(layout.boxes[0].h).toBeGreaterThan(0);
+    // No nodes should be placed for error slices
+    expect(layout.ns).toHaveLength(0);
+  });
+
+  it("error slice followed by normal slice stacks vertically", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "ErrorFirst",
+          states: [],
+          stateVars: [],
+          projections: [],
+          reactions: [],
+          error: "broken",
+        },
+        {
+          name: "GoodSlice",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    expect(layout.boxes).toHaveLength(2);
+    // Error box comes first
+    expect(layout.boxes[0].error).toBe("broken");
+    // Good slice box should be below the error box
+    expect(layout.boxes[1].y).toBeGreaterThan(layout.boxes[0].y);
+  });
+});
+
+describe("projection nodes below events (lines 550-559)", () => {
+  it("places projection nodes below the events column", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "Ticket",
+          varName: "Ticket",
+          events: [
+            { name: "TicketOpened", hasCustomPatch: false },
+            { name: "TicketClosed", hasCustomPatch: false },
+          ],
+          actions: [
+            {
+              name: "OpenTicket",
+              emits: ["TicketOpened"],
+              invariants: [],
+            },
+            {
+              name: "CloseTicket",
+              emits: ["TicketClosed"],
+              invariants: [],
+            },
+          ],
+        },
+      ],
+      slices: [
+        {
+          name: "TicketSlice",
+          states: ["Ticket"],
+          stateVars: ["Ticket"],
+          projections: ["tickets"],
+          reactions: [],
+        },
+      ],
+      projections: [
+        {
+          name: "tickets",
+          varName: "tickets",
+          handles: ["TicketOpened"],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should have a projection node
+    const projNode = layout.ns.find((n) => n.type === "projection");
+    expect(projNode).toBeDefined();
+    expect(projNode!.label).toBe("tickets");
+
+    // Projection should be below all event nodes
+    const eventNodes = layout.ns.filter((n) => n.type === "event");
+    expect(eventNodes.length).toBeGreaterThan(0);
+    const maxEventBottom = Math.max(...eventNodes.map((n) => n.pos.y + H));
+    expect(projNode!.pos.y).toBeGreaterThanOrEqual(maxEventBottom);
+  });
+
+  it("places multiple projections when events map to different projections", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "E1", hasCustomPatch: false },
+            { name: "E2", hasCustomPatch: false },
+          ],
+          actions: [
+            { name: "a1", emits: ["E1"], invariants: [] },
+            { name: "a2", emits: ["E2"], invariants: [] },
+          ],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: ["projA", "projB"],
+          reactions: [],
+        },
+      ],
+      projections: [
+        { name: "projA", varName: "projA", handles: ["E1"] },
+        { name: "projB", varName: "projB", handles: ["E2"] },
+      ],
+    });
+    const layout = computeLayout(model);
+    const projNodes = layout.ns.filter((n) => n.type === "projection");
+    expect(projNodes).toHaveLength(2);
+    expect(projNodes.map((n) => n.label).sort()).toEqual(["projA", "projB"]);
+  });
+});
+
+describe("orphan events in slices (line 417)", () => {
+  it("places events declared in .emits() but not emitted by any action", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "EmittedEvt", hasCustomPatch: false },
+            { name: "OrphanEvt", hasCustomPatch: false },
+          ],
+          actions: [{ name: "doIt", emits: ["EmittedEvt"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Both events should be placed
+    const emittedEvt = find(layout, "event", "EmittedEvt");
+    const orphanEvt = find(layout, "event", "OrphanEvt");
+    expect(emittedEvt).toBeDefined();
+    expect(orphanEvt).toBeDefined();
+    // Orphan event should be below the emitted event
+    expect(orphanEvt!.pos.y).toBeGreaterThan(emittedEvt!.pos.y);
+  });
+});
+
+describe("remaining reaction edge in slice when trigger event exists (line 628)", () => {
+  it("creates edge from trigger event to second reaction on same event (remaining reactions path)", () => {
+    // Two non-void reactions on the same event. Only the first is placed inline
+    // (via sliceReactionByEvent). The second goes to the remaining reactions loop
+    // and should get an edge when the trigger event node exists.
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [
+            {
+              event: "Evt",
+              handlerName: "firstHandler",
+              dispatches: [],
+              isVoid: false,
+            },
+            {
+              event: "Evt",
+              handlerName: "secondHandler",
+              dispatches: [],
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Both reactions should be placed
+    const first = find(layout, "reaction", "firstHandler");
+    const second = find(layout, "reaction", "secondHandler");
+    expect(first).toBeDefined();
+    expect(second).toBeDefined();
+    // The second reaction should have a dashed edge from the trigger event
+    find(layout, "event", "Evt")!;
+    const dashedEdges = layout.es.filter((e) => e.dash);
+    const edge = dashedEdges.find(
+      (e) => e.to.x === second!.pos.x && e.to.y === second!.pos.y + H / 2
+    );
+    expect(edge).toBeDefined();
+  });
+});
+
+describe("standalone reaction edges", () => {
+  it("creates edge from trigger event to standalone reaction when event exists", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      reactions: [
+        {
+          event: "Evt",
+          handlerName: "onEvt",
+          dispatches: [],
+          isVoid: false,
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const reaction = find(layout, "reaction", "onEvt");
+    expect(reaction).toBeDefined();
+    // Should have a dashed edge from the event to the reaction
+    const dashedEdges = layout.es.filter((e) => e.dash);
+    expect(dashedEdges.length).toBeGreaterThanOrEqual(1);
+    const evt = find(layout, "event", "Evt")!;
+    const edge = dashedEdges.find(
+      (e) => e.from.x === evt.pos.x + W && e.to.x === reaction!.pos.x
+    );
+    expect(edge).toBeDefined();
+  });
+});
+
+describe("multi-dispatch reaction chain (line 130)", () => {
+  it("places multiple dispatched actions in the same chain", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "E1", hasCustomPatch: false },
+            { name: "E2", hasCustomPatch: false },
+            { name: "E3", hasCustomPatch: false },
+          ],
+          actions: [
+            { name: "A1", emits: ["E1"], invariants: [] },
+            { name: "A2", emits: ["E2"], invariants: [] },
+            { name: "A3", emits: ["E3"], invariants: [] },
+          ],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [
+            {
+              event: "E1",
+              handlerName: "multiDispatch",
+              dispatches: ["A2", "A3"], // dispatches TWO actions
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should have two dispatched action nodes
+    const dispatched = layout.ns.filter(
+      (n) => n.type === "action" && n.key.includes("dispatched")
+    );
+    expect(dispatched.length).toBe(2);
+  });
+});
+
+describe("void standalone reactions (line 288, 795)", () => {
+  it("skips void reactions in standalone reactions", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      reactions: [
+        {
+          event: "Evt",
+          handlerName: "voidReaction",
+          dispatches: [],
+          isVoid: true,
+        },
+        {
+          event: "Evt",
+          handlerName: "realReaction",
+          dispatches: [],
+          isVoid: false,
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Void reaction should not be placed
+    const voidNode = find(layout, "reaction", "voidReaction");
+    expect(voidNode).toBeUndefined();
+    // Real reaction should be placed
+    const realNode = find(layout, "reaction", "realReaction");
+    expect(realNode).toBeDefined();
+  });
+});
+
+describe("state with file property in slice (lines 348, 351)", () => {
+  it("maps event and action source files from state.file", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "T",
+          varName: "T",
+          file: "src/ticket.ts",
+          events: [{ name: "Opened", hasCustomPatch: false }],
+          actions: [{ name: "Open", emits: ["Opened"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["T"],
+          stateVars: ["T"],
+          projections: [],
+          reactions: [],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const evt = find(layout, "event", "Opened");
+    expect(evt).toBeDefined();
+    expect(evt!.file).toBe("src/ticket.ts");
+    const act = find(layout, "action", "Open");
+    expect(act!.file).toBe("src/ticket.ts");
+  });
+});
+
+describe("state with no events and no actions in slice (line 463)", () => {
+  it("uses default event block height for empty state", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "Empty",
+          varName: "Empty",
+          events: [],
+          actions: [],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["Empty"],
+          stateVars: ["Empty"],
+          projections: [],
+          reactions: [],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should still place a state node
+    const state = find(layout, "state", "Empty");
+    expect(state).toBeDefined();
+  });
+});
+
+describe("duplicate projection dedup in slice (line 549)", () => {
+  it("deduplicates projections when multiple events reference same projection", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "E1", hasCustomPatch: false },
+            { name: "E2", hasCustomPatch: false },
+          ],
+          actions: [
+            { name: "a1", emits: ["E1"], invariants: [] },
+            { name: "a2", emits: ["E2"], invariants: [] },
+          ],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: ["shared"],
+          reactions: [],
+        },
+      ],
+      projections: [
+        {
+          name: "shared",
+          varName: "shared",
+          handles: ["E1", "E2"], // both events handled by same projection
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should only have ONE projection node despite both events mapping to it
+    const projNodes = layout.ns.filter((n) => n.type === "projection");
+    expect(projNodes).toHaveLength(1);
+    expect(projNodes[0].label).toBe("shared");
+  });
+});
+
+describe("dispatched action with invariants (lines 193-199)", () => {
+  it("annotates dispatched action with guards when target action has invariants", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "E1", hasCustomPatch: false },
+            { name: "E2", hasCustomPatch: false },
+          ],
+          actions: [
+            { name: "A1", emits: ["E1"], invariants: [] },
+            {
+              name: "A2",
+              emits: ["E2"],
+              invariants: ["must be valid"],
+            },
+          ],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [
+            {
+              event: "E1",
+              handlerName: "r1",
+              dispatches: ["A2"],
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const dispatched = layout.ns.find(
+      (n) => n.type === "action" && n.key.includes("dispatched")
+    );
+    expect(dispatched).toBeDefined();
+    expect(dispatched!.sub).toBe("guarded");
+    expect(dispatched!.guards).toEqual(["must be valid"]);
+  });
+});
+
+describe("dispatched chain without target state (line 211)", () => {
+  it("handles dispatch to unknown action (no target state found)", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "E1", hasCustomPatch: false }],
+          actions: [{ name: "A1", emits: ["E1"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "Sl",
+          states: ["S"],
+          stateVars: ["S"],
+          projections: [],
+          reactions: [
+            {
+              event: "E1",
+              handlerName: "r1",
+              dispatches: ["UnknownAction"], // action not in any state
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    // Should still place the reaction and dispatched action
+    const reaction = find(layout, "reaction", "r1");
+    expect(reaction).toBeDefined();
+    const dispatched = layout.ns.find(
+      (n) => n.type === "action" && n.key.includes("dispatched")
+    );
+    expect(dispatched).toBeDefined();
+    // No dispatched state since target action not found
+    const dispatchedState = layout.ns.find(
+      (n) => n.type === "state" && n.key.includes("dispatched")
+    );
+    expect(dispatchedState).toBeUndefined();
+  });
+});
+
+describe("standalone action→event edge when ey not found (line 775)", () => {
+  it("skips edge when event Y position not found", () => {
+    // This is hard to trigger directly since eventYMap is built from actions.
+    // But we can test with an action that emits an event not in eventYMap.
+    // Actually this branch is: if (ey !== undefined) at line 775.
+    // The only way ey is undefined is if the event was already processed
+    // or doesn't exist. With orphan events, the action emits list
+    // reference events that ARE in eventYMap. So this requires
+    // an action.emits entry that's not in the state's events at all.
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Known", hasCustomPatch: false }],
+          actions: [
+            {
+              name: "a",
+              emits: ["Known", "Unknown"], // Unknown not in events → not in eventYMap
+              invariants: [],
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const action = find(layout, "action", "a");
+    expect(action).toBeDefined();
+  });
+});
+
+describe("standalone reaction without trigNode (line 800, 802)", () => {
+  it("places standalone reaction when trigger event not found", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      reactions: [
+        {
+          event: "NoSuchEvent", // event not in any state
+          handlerName: "orphanReaction",
+          dispatches: [],
+          isVoid: false,
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const reaction = find(layout, "reaction", "orphanReaction");
+    expect(reaction).toBeDefined();
+  });
+});
+
+describe("standalone reactions with multiple events stacking (line 812)", () => {
+  it("stacks multiple standalone reactions on same event vertically", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+        },
+      ],
+      reactions: [
+        {
+          event: "Evt",
+          handlerName: "r1",
+          dispatches: [],
+          isVoid: false,
+        },
+        {
+          event: "Evt",
+          handlerName: "r2",
+          dispatches: [],
+          isVoid: false,
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const r1 = find(layout, "reaction", "r1")!;
+    const r2 = find(layout, "reaction", "r2")!;
+    expect(r1).toBeDefined();
+    expect(r2).toBeDefined();
+    // Second reaction should be stacked below first
+    expect(r2.pos.y).toBeGreaterThan(r1.pos.y);
+  });
+});
+
+describe("guarded standalone action (line 581-582)", () => {
+  it("annotates standalone action with guards", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
+          actions: [
+            {
+              name: "guardedAction",
+              emits: ["Evt"],
+              invariants: ["must be active"],
+            },
+          ],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const action = find(layout, "action", "guardedAction");
+    expect(action).toBeDefined();
+    expect(action!.sub).toBe("guarded");
+    expect(action!.guards).toEqual(["must be active"]);
+  });
+});
+
+describe("orphan events in standalone states (lines 740-749)", () => {
+  it("places events declared in .emits() but not emitted by any action in standalone states", () => {
+    const model = emptyModel({
+      states: [
+        {
+          name: "S",
+          varName: "S",
+          events: [
+            { name: "ActionEvt", hasCustomPatch: false },
+            { name: "OrphanEvt", hasCustomPatch: false },
+          ],
+          actions: [{ name: "doIt", emits: ["ActionEvt"], invariants: [] }],
+        },
+      ],
+    });
+    const layout = computeLayout(model);
+    const actionEvt = find(layout, "event", "ActionEvt");
+    const orphanEvt = find(layout, "event", "OrphanEvt");
+    expect(actionEvt).toBeDefined();
+    expect(orphanEvt).toBeDefined();
+    // Orphan event should be below the action-emitted event
+    expect(orphanEvt!.pos.y).toBeGreaterThan(actionEvt!.pos.y);
+  });
+});
+
 // ── Shared assertions ────────────────────────────────────────────────
 
 function assertNoOverlaps(layout: Layout) {

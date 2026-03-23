@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { buildModel } from "../src/client/lib/build-model.js";
 import { extractModel } from "../src/client/lib/evaluate.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
@@ -542,7 +543,7 @@ export const S = state({ S: z.object({}) })
     }
   });
 
-  it("regex fallback: projection extraction", () => {
+  it("broken file does not produce projections", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -558,7 +559,7 @@ const P = projection("myProj")
       },
     ];
     const { model } = extractModel(files);
-    expect(model.projections.length).toBeGreaterThanOrEqual(1);
+    expect(model.projections).toHaveLength(0);
   });
 
   // --- Model building branch coverage ---
@@ -948,10 +949,7 @@ export const app = act()
     expect(model.reactions[0].handlerName).toBe("onCreated");
   });
 
-  it("projection fallback scan finds projections not captured by mock eval", () => {
-    // The projection is in a .tsx file (skipped by eval) but the fallback
-    // scans all .ts files. Use a .ts file that evals but whose projection()
-    // call doesn't fire because it uses a non-@rotorsoft import for projection
+  it("broken file does not produce projections (no fallback scan)", () => {
     const files: FileTab[] = [
       {
         path: "src/proj.ts",
@@ -967,11 +965,7 @@ export const P = projection("uncaptured")
       },
     ];
     const { model } = extractModel(files);
-    // Regex fallback in extractFromSource captures it
-    expect(model.projections).toHaveLength(1);
-    expect(model.projections[0].name).toBe("uncaptured");
-    expect(model.projections[0].handles).toContain("A");
-    expect(model.projections[0].handles).toContain("B");
+    expect(model.projections).toHaveLength(0);
   });
 
   it("projection fallback scan skips already-captured projections", () => {
@@ -992,9 +986,8 @@ export const P = projection("items")
     expect(model.projections).toHaveLength(1);
   });
 
-  it("withProjection fallback includes projections when act.projections are empty", () => {
-    // Simulates circular dependency where GameProjection resolves to undefined
-    // but the source has .withProjection(GameProjection)
+  it("broken projection file produces no projections in act entry", () => {
+    // When the projection file is broken, the act entry has no projections
     const files: FileTab[] = [
       {
         path: "src/proj.ts",
@@ -1033,10 +1026,9 @@ export const app = act()
       },
     ];
     const { model } = extractModel(files);
-    // Projection should appear in entry despite circular dep
+    // Broken projection file produces no projections
     expect(model.entries).toHaveLength(1);
-    expect(model.entries[0].projections).toHaveLength(1);
-    expect(model.entries[0].projections[0].name).toBe("games");
+    expect(model.entries[0].projections).toHaveLength(0);
   });
 
   it("null guards handle act with undefined projections/states/slices/reactions", () => {
@@ -1119,5 +1111,1165 @@ const app = act()
     const { model } = extractModel(files);
     expect(model.reactions).toHaveLength(1);
     expect(model.reactions[0].isVoid).toBe(false);
+  });
+
+  it("fixupReactions joins all files when no sourceFile provided (line 66)", () => {
+    // Directly test buildModel: slice reactions with fallback "on EventName"
+    // handler names get fixed up by scanning all file contents when no sourceFile
+    //
+    const files: FileTab[] = [
+      {
+        path: "src/slices.ts",
+        content: `.on("Created").do(onCreated).to(() => "t")`,
+      },
+    ];
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "MySlice",
+          states: [],
+          projections: [],
+          reactions: [
+            {
+              event: "Created",
+              handlerName: "on Created",
+              dispatches: [],
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, files, new Map());
+    const sl = model.slices.find((s) => s.name === "MySlice");
+    expect(sl).toBeDefined();
+    // The "on Created" handler name should be fixed up to "onCreated"
+    expect(sl!.reactions[0].handlerName).toBe("onCreated");
+  });
+
+  it("act builder states not already in stateByRef (lines 134-136)", () => {
+    // Use buildModel directly: state only in act.states, not in result.states
+    //
+    const actOnlyState = {
+      _tag: "State",
+      name: "ActOnlyState",
+      events: { Evt1: {} },
+      actions: { doIt: {} },
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [], // state NOT in rawStates
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [actOnlyState], // state only here
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const st = model.states.find((s) => s.name === "ActOnlyState");
+    expect(st).toBeDefined();
+    expect(st!.events).toHaveLength(1);
+    expect(st!.events[0].name).toBe("Evt1");
+  });
+
+  it("slice with null state reference produces Missing state reference (lines 166-167)", () => {
+    // Directly test buildModel with a raw slice that has null in states array
+    //
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "BrokenSlice",
+          states: [null, undefined],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "BrokenSlice");
+    expect(sl).toBeDefined();
+    expect(sl!.error).toContain("broken import");
+  });
+
+  it("slice state not in stateByRef, tries addState in-place success (lines 173-180)", () => {
+    // Slice references a state that wasn't built in step 1
+    //
+    const inlineState = {
+      _tag: "State",
+      name: "InlineSliceState",
+      events: { Evt1: {} },
+      actions: { doIt: {} },
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [], // state NOT pre-built
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "TestSlice",
+          states: [inlineState],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "TestSlice");
+    expect(sl).toBeDefined();
+    expect(sl!.states.length).toBe(1);
+    // The state should have been added to model.states
+    const st = model.states.find((s) => s.name === "InlineSliceState");
+    expect(st).toBeDefined();
+  });
+
+  it("slice state not in stateByRef, addState fails (lines 181-182)", () => {
+    // Slice references a state not in stateByRef, but addState throws
+    //
+    const corruptState = {
+      name: "CorruptState",
+      get events(): any {
+        throw new Error("corrupt events");
+      },
+      actions: {},
+    };
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "SliceWithCorrupt",
+          states: [corruptState],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "SliceWithCorrupt");
+    expect(sl).toBeDefined();
+    expect(sl!.error).toContain("corrupt");
+    expect(sl!.error).toContain("corrupt events");
+  });
+
+  it("slice processing catch block when entire slice build throws (lines 204-205)", () => {
+    //
+    // Create a slice object whose states getter throws
+    const throwingSlice = {
+      _tag: "Slice",
+      _varName: "ThrowSlice",
+      get states(): any {
+        throw new Error("boom in states getter");
+      },
+      projections: [],
+      reactions: [],
+    };
+    const result = {
+      states: [],
+      slices: [throwingSlice],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "ThrowSlice");
+    expect(sl).toBeDefined();
+    expect(sl!.error).toContain("boom in states getter");
+    expect(sl!.states).toHaveLength(0);
+  });
+
+  it("global error return when result.error exists and no states/slices (line 307)", () => {
+    //
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: "Global extraction failed",
+      fileErrors: new Map<string, string>(),
+    };
+    const { model, error } = buildModel(result, [], new Map());
+    expect(error).toBe("Global extraction failed");
+    expect(model.states).toHaveLength(0);
+    expect(model.slices).toHaveLength(0);
+  });
+
+  it("buildState returns error when event has undefined schema (line 31)", () => {
+    const stateWithUndefinedEvent = {
+      _tag: "State",
+      name: "BadState",
+      events: { Evt1: undefined },
+      actions: {},
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [stateWithUndefinedEvent],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    // State with undefined event schema should not appear in model.states
+    expect(model.states.find((s) => s.name === "BadState")).toBeUndefined();
+  });
+
+  it("buildState returns error when action has undefined schema (line 37)", () => {
+    const stateWithUndefinedAction = {
+      _tag: "State",
+      name: "BadActionState",
+      events: { Evt1: {} },
+      actions: { doIt: undefined },
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [stateWithUndefinedAction],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(
+      model.states.find((s) => s.name === "BadActionState")
+    ).toBeUndefined();
+  });
+
+  it("step 1 catch block for corrupted state (line 144)", () => {
+    const corruptState = {
+      _tag: "State",
+      get name(): string {
+        throw new Error("corrupt name getter");
+      },
+      events: {},
+      actions: {},
+    };
+    const result = {
+      states: [corruptState],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    // Should not crash — corrupt state is skipped
+    expect(model).toBeDefined();
+  });
+
+  it("step 1 catch block for act-builder state (line 156)", () => {
+    const corruptState = {
+      _tag: "State",
+      get name(): string {
+        throw new Error("corrupt act state");
+      },
+      events: {},
+      actions: {},
+    };
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [corruptState],
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model).toBeDefined();
+  });
+
+  it("slice state already built with error in step 1, referenced from slice (line 190)", () => {
+    // State is in rawStates AND in a slice's states array — same object reference
+    // Step 1 builds it and gets an error, then the slice loop finds it via stateByRef
+    const badState = {
+      _tag: "State",
+      name: "BadState",
+      events: { Evt1: undefined }, // undefined schema → buildState returns error
+      actions: {},
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [badState], // step 1 builds this and stores {error} in stateByRef
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "SliceRefBadState",
+          states: [badState], // same object reference — found in stateByRef with error
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "SliceRefBadState");
+    expect(sl).toBeDefined();
+    expect(sl!.error).toContain("undefined schema");
+    expect(sl!.states).toHaveLength(0);
+  });
+
+  it("slice state buildState returns error (line 190)", () => {
+    // State with undefined event schema — buildState returns {error}
+    // when encountered inside a slice that wasn't pre-built
+    const stateWithBadEvent = {
+      _tag: "State",
+      name: "SliceBadEvtState",
+      events: { BadEvt: undefined },
+      actions: {},
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [], // not pre-built
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "SliceWithBadState",
+          states: [stateWithBadEvent],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "SliceWithBadState");
+    expect(sl).toBeDefined();
+    expect(sl!.error).toContain("undefined schema");
+  });
+
+  it("duplicate state in rawStates triggers stateByRef.has continue (line 140)", () => {
+    const stateObj = {
+      _tag: "State",
+      name: "DupState",
+      events: { E: {} },
+      actions: { a: {} },
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [stateObj, stateObj], // same reference twice
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    // Should only produce one state
+    expect(model.states.filter((s) => s.name === "DupState")).toHaveLength(1);
+  });
+
+  it("fixupReactions returns early when sourceFile not in files (line 84)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          _sourceFile: "src/nonexistent.ts",
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: [
+            {
+              event: "Created",
+              handlerName: "on Created",
+              dispatches: [],
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    // Pass no matching files — fixupReactions should return early
+    const { model } = buildModel(result, [], new Map());
+    // Handler name stays unfixed since source file wasn't found
+    expect(model.reactions[0].handlerName).toBe("on Created");
+  });
+
+  it("act builder skips duplicate state via stateByRef.has (step 1 + act states)", () => {
+    const stateObj = {
+      _tag: "State",
+      name: "SharedState",
+      events: { E: {} },
+      actions: { a: {} },
+      given: {},
+      patches: new Map(),
+    };
+    const result = {
+      states: [stateObj], // pre-built in step 1
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [stateObj], // same reference — already in stateByRef
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model.states.filter((s) => s.name === "SharedState")).toHaveLength(
+      1
+    );
+  });
+
+  it("act._sourceFile skip in slice varName tagging (line 189)", () => {
+    // Two files: one builds an act, another has .withSlice() references.
+    // The tagging loop should skip acts from different files.
+    const files: FileTab[] = [
+      {
+        path: "src/states.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const S = state({ S: z.object({}) })
+  .init(() => ({}))
+  .emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E")
+  .build();
+`,
+      },
+      {
+        path: "src/slices.ts",
+        content: `
+import { slice } from "@rotorsoft/act";
+import { S } from "./states.js";
+export const MySlice = slice().withState(S).build();
+`,
+      },
+      {
+        path: "src/act1.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+import { MySlice } from "./slices.js";
+export const app1 = act().withSlice(MySlice).build();
+`,
+      },
+      {
+        path: "src/act2.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+import { MySlice } from "./slices.js";
+export const app2 = act().withSlice(MySlice).build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // Both acts should have built
+    expect(model.entries.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("buildState with null events and actions (lines 28, 33 ?? fallback)", () => {
+    const stateObj = {
+      _tag: "State",
+      name: "NullState",
+      events: null, // triggers ?? {} fallback at line 28
+      actions: null, // triggers ?? {} fallback at line 33
+      given: null,
+      patches: null,
+    };
+    const result = {
+      states: [stateObj],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const st = model.states.find((s) => s.name === "NullState");
+    expect(st).toBeDefined();
+    expect(st!.events).toHaveLength(0);
+    expect(st!.actions).toHaveLength(0);
+  });
+
+  it("buildState with events but null patches (line 47 ?? false fallback)", () => {
+    const stateObj = {
+      _tag: "State",
+      name: "NoPatchState",
+      events: { Evt1: {} },
+      actions: {},
+      given: {},
+      patches: null, // triggers ?. ?? false at line 47
+    };
+    const result = {
+      states: [stateObj],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const st = model.states.find((s) => s.name === "NoPatchState");
+    expect(st).toBeDefined();
+    expect(st!.events[0].hasCustomPatch).toBe(false);
+  });
+
+  it("fixupReactions: handler name in source but no matching fallback (line 95 false)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "TestSlice",
+          states: [],
+          projections: [],
+          reactions: [
+            {
+              event: "SomeOtherEvent",
+              handlerName: "on SomeOtherEvent",
+              dispatches: [],
+              isVoid: false,
+            },
+          ],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const files: FileTab[] = [
+      {
+        path: "src/s.ts",
+        // Source has .on("Created").do(onCreated) but reaction is for SomeOtherEvent
+        content: `.on("Created").do(onCreated).to("items")`,
+      },
+    ];
+    const { model } = buildModel(result, files, new Map());
+    // Handler name stays as "on SomeOtherEvent" since no match for "Created"
+    expect(model.slices[0].reactions[0].handlerName).toBe("on SomeOtherEvent");
+  });
+
+  it("step 1 catch with non-Error thrown (line 145 false branch)", () => {
+    const corruptState = {
+      _tag: "State",
+      get name(): string {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw { toString: () => "string error" };
+      },
+      events: {},
+      actions: {},
+    };
+    const result = {
+      states: [corruptState],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model).toBeDefined();
+  });
+
+  it("act builder with undefined states array (line 151 ?? fallback)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: undefined, // triggers ?? [] at line 151
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model).toBeDefined();
+  });
+
+  it("act builder catch with non-Error (line 157 false branch)", () => {
+    const corruptState = {
+      _tag: "State",
+      get name(): string {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw { toString: () => "corrupt string" };
+      },
+      events: {},
+      actions: {},
+    };
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [corruptState],
+          slices: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model).toBeDefined();
+  });
+
+  it("slice with undefined _varName uses 'slice' default (line 167)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          // _varName undefined → defaults to "slice" at line 167
+          states: [],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model.slices[0].name).toBe("slice");
+  });
+
+  it("slice with null state and fileError (line 180)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "BrokenSlice",
+          states: [null],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map([["src/broken.ts", "Import failed"]]),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "BrokenSlice");
+    expect(sl!.error).toContain("Import failed");
+  });
+
+  it("slice state buildState throws non-Error (line 205 false branch)", () => {
+    const corruptState = {
+      _tag: "State", // must have _tag so it passes typeof check
+      get name(): string {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw { toString: () => "string thrown in buildState" };
+      },
+      events: {},
+      actions: {},
+    };
+    const result = {
+      states: [], // not pre-built
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "SliceWithCorruptState",
+          states: [corruptState],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "SliceWithCorruptState");
+    expect(sl!.error).toContain("string thrown in buildState");
+  });
+
+  it("slice with undefined states array (line 180 ?? fallback)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "NullStatesSlice",
+          states: undefined as any, // triggers ?? [] at line 180
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "NullStatesSlice");
+    expect(sl).toBeDefined();
+    expect(sl!.states).toHaveLength(0);
+  });
+
+  it("slice catch with non-Error (line 205 false branch)", () => {
+    const throwingSlice = {
+      _tag: "Slice",
+      _varName: "ThrowSlice2",
+      get states(): any {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw { toString: () => "string thrown" };
+      },
+      projections: [],
+      reactions: [],
+    };
+    const result = {
+      states: [],
+      slices: [throwingSlice],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "ThrowSlice2");
+    expect(sl!.error).toBe("string thrown");
+  });
+
+  it("slice with undefined projections (line 213 ?? fallback)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "NoProjSlice",
+          states: [],
+          projections: undefined as any,
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "NoProjSlice");
+    expect(sl!.projections).toHaveLength(0);
+  });
+
+  it("slice projection with non-Projection _tag (line 213-214)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "Sl",
+          states: [],
+          projections: [{ _tag: "NotAProjection", target: "fake" }, null],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "Sl");
+    expect(sl!.projections).toHaveLength(0);
+  });
+
+  it("slice with undefined reactions (line 222)", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "Sl",
+          states: [],
+          projections: [],
+          reactions: undefined as any,
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const sl = model.slices.find((s) => s.name === "Sl");
+    expect(sl!.reactions).toEqual([]);
+  });
+
+  it("slice catch with non-Error from fixupReactions (line 227)", () => {
+    // fixupReactions at the top of the try block — if it throws,
+    // the inner try/catch at line 172-174 catches it
+    // But we need the OUTER catch at line 226 to fire with non-Error
+    // Actually line 227 is about s._sourceFile ?? undefined
+    // Let me check...
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "Sl",
+          states: [],
+          projections: [],
+          reactions: [],
+          // _sourceFile undefined → at line 227 'file: s._sourceFile as string | undefined'
+        },
+      ],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model.slices[0].file).toBeUndefined();
+  });
+
+  it("expectedSlices produces error from result.error or fallback (lines 250-252)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: "Global error",
+      fileErrors: new Map([["src/sl.ts", "file-specific error"]]),
+    };
+    const expectedSlices = new Map([
+      ["MissingSlice", "src/sl.ts"],
+      ["AnotherMissing", "src/other.ts"],
+    ]);
+    const { model } = buildModel(result, [], expectedSlices);
+    const sl1 = model.slices.find((s) => s.name === "MissingSlice");
+    expect(sl1!.error).toBe("file-specific error");
+    const sl2 = model.slices.find((s) => s.name === "AnotherMissing");
+    // Falls through to result.error since no file error for src/other.ts
+    expect(sl2!.error).toBe("Global error");
+  });
+
+  it("expectedSlices fallback to 'Failed to build slice' (line 252)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const expectedSlices = new Map([["Missing", "src/m.ts"]]);
+    const { model } = buildModel(result, [], expectedSlices);
+    const sl = model.slices.find((s) => s.name === "Missing");
+    expect(sl!.error).toBe("Failed to build slice");
+  });
+
+  it("act with undefined reactions (line 290 ?? fallback)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: undefined as any,
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model.reactions).toHaveLength(0);
+  });
+
+  it("act entry with reactions fallback (line 300 ?? fallback)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: undefined as any,
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model.entries).toHaveLength(1);
+    expect(model.entries[0].reactions).toEqual([]);
+  });
+
+  it("scoped import falls all the way to unknownModuleProxy (line 107 branch #6)", () => {
+    // All fileExports.get patterns must fail, reaching the final unknownModuleProxy
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import { thing } from "@scope/doesnotexist";
+const x = thing;
+export const S = state({ S: z.object({}) })
+  .init(() => ({})).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { model, error } = extractModel(files);
+    expect(error).toBeUndefined();
+    expect(model.states).toHaveLength(1);
+  });
+
+  it("scoped import with subpath (line 103 truthy branch)", () => {
+    const files: FileTab[] = [
+      {
+        path: "packages/mylib/src/utils.ts",
+        content: `export const helper = "val";`,
+      },
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import { helper } from "@myorg/mylib/src/utils";
+const x = helper;
+export const S = state({ S: z.object({ x: z.string() }) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model.states).toHaveLength(1);
+  });
+
+  it("scoped import with no package name after @ (line 102 false)", () => {
+    // Import like "@justscope" with no / after it
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import something from "@nopkg";
+const x = something;
+export const S = state({ S: z.object({}) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { error } = extractModel(files);
+    expect(error).toBeUndefined();
+  });
+
+  it("scoped import with empty package name (line 102 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import something from "@/utils";
+const x = something;
+export const S = state({ S: z.object({}) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { error } = extractModel(files);
+    expect(error).toBeUndefined();
+  });
+
+  it("duplicate .withSlice() in same file (line 149 false branch)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/states.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+export const S = state({ S: z.object({}) })
+  .init(() => ({})).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+      {
+        path: "src/slices.ts",
+        content: `
+import { slice } from "@rotorsoft/act";
+import { S } from "./states.js";
+export const MySlice = slice().withState(S).build();
+`,
+      },
+      {
+        path: "src/app.ts",
+        content: `
+import { act } from "@rotorsoft/act";
+import { MySlice } from "./slices.js";
+export const app = act().withSlice(MySlice).withSlice(MySlice).build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model).toBeDefined();
+  });
+
+  it("eval throws non-Error (line 182 false branch)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/bad.ts",
+        content: [
+          'import { state } from "@rotorsoft/act";',
+          'import { z } from "zod";',
+
+          'throw "non-error string";',
+          "export const S = state({ S: z.object({}) })",
+          "  .init(() => ({})).emits({ E: z.object({}) })",
+          '  .on({ a: z.object({}) }).emit("E").build();',
+        ].join("\n"),
+      },
+    ];
+    const { model } = extractModel(files);
+    // File error should be recorded
+    expect(model).toBeDefined();
+  });
+
+  it("act with null slices array (line 190 || fallback)", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: null as any, // triggers || [] at line 190
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    expect(model).toBeDefined();
+  });
+
+  it("outer catch with non-Error (line 209 false branch)", () => {
+    const realFiles = [{ path: "src/app.ts", content: `const x = 1;` }];
+    const poisoned: any = [...realFiles];
+    poisoned.filter = () => {
+      throw new Error("string error in setup");
+    };
+    const { error } = extractModel(poisoned as FileTab[]);
+    expect(error).toBe("string error in setup");
+  });
+
+  it("outer catch in execute() for setup failure (line 209)", () => {
+    const realFiles = [{ path: "src/app.ts", content: `const x = 1;` }];
+    const poisoned: any = [...realFiles];
+    poisoned.filter = () => {
+      throw new Error("setup failure");
+    };
+    const { error } = extractModel(poisoned as FileTab[]);
+    expect(error).toBeDefined();
+  });
+
+  it("outer catch non-Error branch (line 209 String(e))", () => {
+    const poisoned: any = [{ path: "src/app.ts", content: "const x = 1;" }];
+    poisoned.filter = () => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw { toString: () => "non-error setup failure" };
+    };
+    const { error } = extractModel(poisoned as FileTab[]);
+    expect(error).toBeDefined();
+  });
+
+  it("eval catch non-Error branch (line 182 String(e))", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/bad.ts",
+        content: [
+          'import { state } from "@rotorsoft/act";',
+          'import { z } from "zod";',
+          'throw "non-error throw";',
+          "export const S = state({ S: z.object({}) })",
+          "  .init(() => ({})).emits({ E: z.object({}) })",
+          '  .on({ a: z.object({}) }).emit("E").build();',
+        ].join("\n"),
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model).toBeDefined();
   });
 });

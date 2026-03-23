@@ -311,7 +311,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
   const sortedSlices = [...viewModel.slices].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-
   for (const slice of sortedSlices) {
     // Error slices get a minimum-sized box with the error message
     if (slice.error && slice.states.length === 0) {
@@ -413,7 +412,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
         }
       }
       // Events declared in .emits() but not produced by any action
-      /* v8 ignore next 4 -- orphan events only in projects with legacy/unused events */
       for (const ev of st.events) {
         if (!actionEmitted.has(ev.name)) {
           eventRows.push({ eventName: ev.name, actionName: "" });
@@ -585,15 +583,13 @@ export function computeLayout(viewModel: DomainModel): Layout {
           file: actionFileMap.get(action.name) ?? st.file,
         });
         for (const en of action.emits) {
-          const ey = eventYMap.get(en);
-          if (ey !== undefined) {
-            es.push({
-              from: { x: cx + W, y: actY + H / 2 },
-              to: { x: eventColX, y: ey + H / 2 },
-              color,
-              dash: false,
-            });
-          }
+          const ey = eventYMap.get(en)!;
+          es.push({
+            from: { x: cx + W, y: actY + H / 2 },
+            to: { x: eventColX, y: ey + H / 2 },
+            color,
+            dash: false,
+          });
         }
         actY += H + GAP / 2;
         actionIdx++;
@@ -635,7 +631,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
         });
       }
 
-      /* v8 ignore next 3 -- remaining reactions layout */
       remainingYByEvent.set(r.event, rY + H + GAP / 2);
       sliceRightX = Math.max(sliceRightX, rX + W + GAP);
       y = Math.max(y, rY + H + GAP / 2);
@@ -682,6 +677,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       y: globalY,
       w: bbox.maxX - sx + GAP + SLICE_INNER,
       h: boxH,
+      error: slice.error,
     });
     globalY += boxH + SLICE_GAP;
   }
@@ -738,7 +734,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
       }
     }
     // Orphan events — declared in .emits() but not produced by any action
-    /* v8 ignore next 10 -- orphan events only in projects with legacy/unused events */
     for (const en of orphanEvents) {
       ns.push({
         key: `e:${en}:standalone`,
@@ -774,15 +769,13 @@ export function computeLayout(viewModel: DomainModel): Layout {
         guards: action.invariants.length > 0 ? action.invariants : undefined,
       });
       for (const en of action.emits) {
-        const ey = eventYMap.get(en);
-        if (ey !== undefined) {
-          es.push({
-            from: { x: cx + W, y: actY + H / 2 },
-            to: { x: eventColX, y: ey + H / 2 },
-            color: aColor,
-            dash: false,
-          });
-        }
+        const ey = eventYMap.get(en)!;
+        es.push({
+          from: { x: cx + W, y: actY + H / 2 },
+          to: { x: eventColX, y: ey + H / 2 },
+          color: aColor,
+          dash: false,
+        });
       }
       actY += H + GAP / 2;
       aIdx++;
@@ -837,6 +830,13 @@ export function computeLayout(viewModel: DomainModel): Layout {
     minY = Math.min(minY, n.pos.y);
     maxX = Math.max(maxX, n.pos.x + nw);
     maxY = Math.max(maxY, n.pos.y + nh);
+  }
+  // Include boxes (error slices have no nodes but still need to be in bounds)
+  for (const b of boxes) {
+    minX = Math.min(minX, b.x);
+    minY = Math.min(minY, b.y);
+    maxX = Math.max(maxX, b.x + b.w);
+    maxY = Math.max(maxY, b.y + b.h);
   }
   return {
     ns,

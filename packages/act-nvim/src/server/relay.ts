@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { scanDir, watchDir, type WatchEvent } from "./watcher.js";
 
+process.title = "act-nvim-relay";
 const HTTP_PORT = parseInt(process.env.ACT_NVIM_HTTP_PORT ?? "4010", 10);
 const TCP_PORT = parseInt(process.env.ACT_NVIM_TCP_PORT ?? "4011", 10);
 const __dirname = fileURLToPath(new URL(".", import.meta.url));

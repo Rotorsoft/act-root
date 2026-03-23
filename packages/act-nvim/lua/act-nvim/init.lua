@@ -199,7 +199,7 @@ local function kill_orphan_relay(port)
   local result = vim.fn.system("lsof -ti :" .. port)
   for pid in result:gmatch("%d+") do
     local cmdline = vim.fn.system("ps -p " .. pid .. " -o command=")
-    if cmdline:find("relay") then
+    if cmdline:find("act%-nvim%-relay") or cmdline:find("act%-nvim") then
       vim.fn.system("kill " .. pid)
     end
   end

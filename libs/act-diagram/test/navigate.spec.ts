@@ -331,4 +331,260 @@ const x = state({ X: z.object({}) }).init(() => ({})).emits({}).build();`,
     const result = navigateToCode(files, "X", "state");
     expect(result).toBeDefined();
   });
+
+  it("guard navigation with targetFile finds const declaration (lines 195-215)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/guards.ts",
+        content: `import type { Invariant } from "@rotorsoft/act";
+
+export const mustBeOpen: Invariant<{ status: string }> = {
+  description: "Ticket must be open",
+  valid: (state) => state.status === "open",
+};
+
+export const mustBeAssigned: Invariant<{ assignedTo: string }> = {
+  description: "Must be assigned",
+  valid: (state) => !!state.assignedTo,
+};`,
+      },
+    ];
+    const result = navigateToCode(
+      files,
+      "Ticket must be open",
+      "guard",
+      "src/guards.ts"
+    );
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/guards.ts");
+    // Should jump to the const declaration, not the description string
+    expect(result!.line).toBe(3);
+  });
+
+  it("guard navigation with targetFile falls back to description when no const found (lines 213-215)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/guards.ts",
+        content: `// File with a description but no const declaration before it
+{
+  description: "Orphan guard desc",
+  valid: () => true,
+}`,
+      },
+    ];
+    const result = navigateToCode(
+      files,
+      "Orphan guard desc",
+      "guard",
+      "src/guards.ts"
+    );
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/guards.ts");
+    // Falls back to the description position itself
+    const lines = files[0].content.split("\n");
+    const descLine =
+      lines.findIndex((l) => l.includes("Orphan guard desc")) + 1;
+    expect(result!.line).toBe(descLine);
+  });
+
+  it("guard general search fallback to description when no const declaration before it (lines 270-271)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/inline.ts",
+        content: `// An inline guard object without a preceding const declaration
+{
+  description: "Inline guard check",
+  valid: (s: any) => s.active,
+}`,
+      },
+    ];
+    // No targetFile — uses general search path
+    const result = navigateToCode(files, "Inline guard check", "guard");
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/inline.ts");
+    // Should fall back to the description position
+    const lines = files[0].content.split("\n");
+    const descLine =
+      lines.findIndex((l) => l.includes("Inline guard check")) + 1;
+    expect(result!.line).toBe(descLine);
+  });
+
+  it("event navigation falls back to .emits() line when event name exists but not inline (lines 182-185)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/states.ts",
+        content: `import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import { myEvents } from "./events.js";
+
+export const Ticket = state({ Ticket: z.object({}) })
+  .init(() => ({}))
+  .emits(myEvents)
+  .on({ OpenTicket: z.object({}) })
+    .emit("TicketOpened")
+  .build();
+
+// TicketOpened is used elsewhere but not inside .emits({...}) block
+const x = "TicketOpened";`,
+      },
+    ];
+    const result = navigateToCode(
+      files,
+      "TicketOpened",
+      "event",
+      "src/states.ts"
+    );
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/states.ts");
+    // Should navigate to the .emits( line since event name exists in file but not in .emits({...}) block
+    const emitsLine =
+      files[0].content.split("\n").findIndex((l) => l.includes(".emits(")) + 1;
+    expect(result!.line).toBe(emitsLine);
+  });
+
+  it("findNonCommentMatch skips commented match and returns non-commented one (line 52)", () => {
+    // Exercises the false branch of isInsideComment check inside findNonCommentMatch
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `// .emits(commented)
+.emits(real)
+const TicketOpened = "event";`,
+      },
+    ];
+    const result = navigateToCode(files, "TicketOpened", "event", "src/t.ts");
+    expect(result).toBeDefined();
+    // Should find .emits on line 2, not the commented one on line 1
+    expect(result!.line).toBe(2);
+  });
+
+  it("event in targetFile: name exists but no .emits() call (line 183 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `const TicketOpened = "some string";
+// no .emits() call anywhere`,
+      },
+    ];
+    const result = navigateToCode(files, "TicketOpened", "event", "src/t.ts");
+    // Falls through to generic fallback search
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/t.ts");
+    expect(result!.line).toBe(1);
+  });
+
+  it("guard in targetFile: description not found (line 194 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/guards.ts",
+        content: `export const myGuard = { valid: () => true };`,
+      },
+    ];
+    const result = navigateToCode(
+      files,
+      "nonexistent description",
+      "guard",
+      "src/guards.ts"
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("action in targetFile: no .on() block (line 220 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `const MyAction = "action defined somewhere";`,
+      },
+    ];
+    const result = navigateToCode(files, "MyAction", "action", "src/t.ts");
+    expect(result).toBeDefined();
+    // Falls through to generic fallback
+    expect(result!.line).toBe(1);
+  });
+
+  it("action in targetFile: action found after .on( (line 222 true)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `const x = builder
+  .on({ OtherAction: {} })
+  .emit("Evt");
+const MyAction = "declared later";`,
+      },
+    ];
+    const result = navigateToCode(files, "MyAction", "action", "src/t.ts");
+    expect(result).toBeDefined();
+  });
+
+  it("action in targetFile: action not after .on( (line 222 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/t.ts",
+        content: `const MyAction = "defined before on block";
+const x = builder.on({ Other: {} }).emit("E");`,
+      },
+    ];
+    const result = navigateToCode(files, "MyAction", "action", "src/t.ts");
+    expect(result).toBeDefined();
+    // Falls through to generic fallback (first non-comment occurrence)
+    expect(result!.line).toBe(1);
+  });
+
+  it("generic search sorts test files after source files (line 246)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/__tests__/helper.ts",
+        content: `const MyThing = "in test folder";`,
+      },
+      {
+        path: "src/app.spec.ts",
+        content: `const MyThing = "in spec file";`,
+      },
+      {
+        path: "src/app.ts",
+        content: `const MyThing = "in source";`,
+      },
+    ];
+    const result = navigateToCode(files, "MyThing");
+    expect(result).toBeDefined();
+    // Source file should be preferred over test file
+    expect(result!.file).toBe("src/app.ts");
+  });
+
+  it("guard general search skips non-ts files (line 253)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/data.json",
+        content: `{ "description": "Some guard desc" }`,
+      },
+      {
+        path: "src/guards.ts",
+        content: `export const myGuard = {
+  description: "Some guard desc",
+  valid: (s: any) => s.ok,
+};`,
+      },
+    ];
+    const result = navigateToCode(files, "Some guard desc", "guard");
+    expect(result).toBeDefined();
+    // Should find it in .ts file, not .json
+    expect(result!.file).toBe("src/guards.ts");
+  });
+
+  it("guard general search finds const declaration when present (lines 265-268)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/guards.ts",
+        content: `export const myGuard = {
+  description: "Must be active",
+  valid: (s: any) => s.active,
+};`,
+      },
+    ];
+    const result = navigateToCode(files, "Must be active", "guard");
+    expect(result).toBeDefined();
+    expect(result!.file).toBe("src/guards.ts");
+    // Should navigate to the const declaration (line 1)
+    expect(result!.line).toBe(1);
+  });
 });

@@ -59,7 +59,10 @@ function splitLabel(label: string, maxChars = 16): string[] {
 function formatModelTree(model: DomainModel): string {
   const lines: string[] = [];
   for (const entry of model.entries) {
-    for (const sl of entry.slices) {
+    const sortedSlices = [...entry.slices].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    for (const sl of sortedSlices) {
       lines.push(`Slice: ${sl.name}`);
       for (const stKey of sl.stateVars) {
         const st = entry.states.find((s) => s.varName === stKey);
@@ -94,6 +97,15 @@ function formatModelTree(model: DomainModel): string {
       lines.push(
         `⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
       );
+    }
+    // Errors section
+    const errors = entry.slices.filter((sl) => sl.error);
+    if (errors.length > 0) {
+      lines.push("");
+      lines.push("Errors:");
+      for (const sl of errors) {
+        lines.push(`  ⚠ ${sl.name}: ${sl.error}`);
+      }
     }
   }
   return lines.join("\n");
@@ -219,6 +231,7 @@ export function Diagram({
           layoutError: undefined as string | undefined,
         };
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         return {
           ns: [],
           es: [],
@@ -227,7 +240,7 @@ export function Diagram({
           minY: 0,
           width: 100,
           height: 100,
-          layoutError: e instanceof Error ? e.message : String(e),
+          layoutError: msg,
         };
       }
     }, [viewModel]);
