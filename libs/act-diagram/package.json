@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-diagram",
   "type": "module",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Act domain model diagram — extract, visualize, and navigate Act event-sourced models",
   "author": "rotorsoft",
   "license": "MIT",
@@ -10,7 +10,9 @@
     "url": "git+https://github.com/rotorsoft/act-root.git",
     "directory": "libs/act-diagram"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/@types/index.d.ts",
