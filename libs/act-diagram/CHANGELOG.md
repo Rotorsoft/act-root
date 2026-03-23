@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.1...@rotorsoft/act-diagram-v0.1.2) (2026-03-23)
+
+
+### Bug Fixes
+
+* **act-diagram:** filter entries to only show their own slices/states/projections ([bd9145d](https://github.com/rotorsoft/act-root/commit/bd9145d6b538b52f7f26b4b363a765ee90a7c328))
+
 # [@rotorsoft/act-diagram-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.0...@rotorsoft/act-diagram-v0.1.1) (2026-03-23)
 
 
