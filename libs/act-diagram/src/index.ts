@@ -3,7 +3,9 @@ export { AiBar, type AiOptions } from "./client/components/AiBar.js";
 export { Diagram } from "./client/components/Diagram.js";
 export { Logo } from "./client/components/Logo.js";
 export { Tooltip } from "./client/components/Tooltip.js";
+export { buildModel, type ExecuteResult } from "./client/lib/build-model.js";
 export { extractModel } from "./client/lib/evaluate.js";
+export { computeLayout } from "./client/lib/layout.js";
 export { navigateToCode } from "./client/lib/navigate.js";
 export { topoSort } from "./client/lib/sort.js";
 export {
