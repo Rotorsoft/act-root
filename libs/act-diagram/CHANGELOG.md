@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.0...@rotorsoft/act-diagram-v0.1.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* **act-diagram:** trigger npm publish ([ed817e2](https://github.com/rotorsoft/act-root/commit/ed817e2401ae08a8efd79b89470fc39a3f48570b))
+
 # @rotorsoft/act-diagram-v1.0.0 (2026-03-23)
 
 
