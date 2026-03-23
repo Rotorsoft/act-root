@@ -163,6 +163,17 @@ local function connect_and_init(target_root)
   end, 200)
 end
 
+--- Kill orphan relay processes on a port (only kills node processes running relay.js)
+local function kill_orphan_relay(port)
+  local result = vim.fn.system("lsof -ti :" .. port)
+  for pid in result:gmatch("%d+") do
+    local cmdline = vim.fn.system("ps -p " .. pid .. " -o command=")
+    if cmdline:find("relay") then
+      vim.fn.system("kill " .. pid)
+    end
+  end
+end
+
 --- Spawn the relay server as a child process
 local function spawn_relay()
   local cmd = find_relay_path()
@@ -170,6 +181,10 @@ local function spawn_relay()
     vim.notify("[act-nvim] relay server not found — run pnpm build first", vim.log.levels.ERROR)
     return false
   end
+
+  -- Kill orphan relays before starting
+  kill_orphan_relay(config.http_port)
+  kill_orphan_relay(config.tcp_port)
 
   local env_http = "ACT_NVIM_HTTP_PORT=" .. config.http_port
   local env_tcp = "ACT_NVIM_TCP_PORT=" .. config.tcp_port
@@ -216,32 +231,13 @@ local function start(opts)
     return
   end
 
-  -- try connecting to an already-running relay
-  -- use a short probe: connect, and if it works, proceed
-  local uv = vim.uv or vim.loop
-  local probe = uv.new_tcp()
-  probe:connect("127.0.0.1", config.tcp_port, function(err)
-    -- close the probe regardless
-    if not probe:is_closing() then
-      probe:close()
-    end
-
-    vim.schedule(function()
-      if not err then
-        -- relay is already running externally
-        vim.notify("[act-nvim] connecting to existing relay", vim.log.levels.INFO)
-        connect_and_init(target_root)
-      else
-        -- no relay running — spawn one, then connect
-        vim.notify("[act-nvim] starting relay server...", vim.log.levels.INFO)
-        if spawn_relay() then
-          vim.defer_fn(function()
-            connect_and_init(target_root)
-          end, 500)
-        end
-      end
-    end)
-  end)
+  -- Always spawn a fresh relay (kills orphans first)
+  vim.notify("[act-nvim] starting relay server...", vim.log.levels.INFO)
+  if spawn_relay() then
+    vim.defer_fn(function()
+      connect_and_init(target_root)
+    end, 500)
+  end
 end
 
 local function stop()

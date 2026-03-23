@@ -222,7 +222,7 @@ function execute(files: FileTab[]): {
             ai < Math.min(sliceNamesInAct.length, actSlices.length);
             ai++
           ) {
-            actSlices[ai]._varName = sliceNamesInAct[ai];
+            if (actSlices[ai]) actSlices[ai]._varName = sliceNamesInAct[ai];
           }
         }
       }
@@ -465,14 +465,22 @@ export function extractModel(files: FileTab[]): {
     }
   };
   for (const a of acts) {
-    if (a.reactions)
-      fixupReactions(
-        a.reactions as ReactionNode[],
-        a._sourceFile as string | undefined
-      );
+    try {
+      if (a.reactions)
+        fixupReactions(
+          a.reactions as ReactionNode[],
+          a._sourceFile as string | undefined
+        );
+    } catch {
+      /* skip fixup on corrupted act */
+    }
   }
   for (const s of slices) {
-    fixupReactions(s.reactions as ReactionNode[]);
+    try {
+      fixupReactions(s.reactions as ReactionNode[]);
+    } catch {
+      /* skip fixup on corrupted slice */
+    }
   }
 
   const model: DomainModel = {
