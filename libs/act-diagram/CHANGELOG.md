@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.2...@rotorsoft/act-diagram-v0.1.3) (2026-03-23)
+
+
+### Bug Fixes
+
+* **act-diagram:** strip non-code from source scanning and navigation ([61167e8](https://github.com/rotorsoft/act-root/commit/61167e8ea2c203fe5c803d0d3b668d690cc0ad5e))
+
 # [@rotorsoft/act-diagram-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.1...@rotorsoft/act-diagram-v0.1.2) (2026-03-23)
 
 
