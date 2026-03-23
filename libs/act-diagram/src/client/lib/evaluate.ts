@@ -160,11 +160,6 @@ function execute(files: FileTab[]): ExecuteResult {
         // local project files (selected via folder picker or passed as props) to
         // extract Act builder structure. Same trust model as VS Code, Jupyter, or
         // any tool that runs user code. No HTTP input or untrusted data is evaluated.
-
-        // Security: new Function() is intentional — this executes the user's own
-        // local project files (selected via folder picker or passed as props) to
-        // extract Act builder structure. Same trust model as VS Code, Jupyter, or
-        // any tool that runs user code. No HTTP input or untrusted data is evaluated.
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const fn = new Function( // lgtm[js/code-injection]
           "require",

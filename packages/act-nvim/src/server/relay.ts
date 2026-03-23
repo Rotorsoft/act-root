@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer, type Socket } from "node:net";
-import { extname, join } from "node:path";
+import { extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { scanDir, watchDir, type WatchEvent } from "./watcher.js";
@@ -53,8 +53,13 @@ function sendToBrowser(msg: object) {
 const httpServer = createHttpServer(async (req, res) => {
   const rawUrl = req.url?.split("?")[0] ?? "/";
   const url = rawUrl === "/" ? "/index.html" : rawUrl;
-  const filePath = join(CLIENT_DIR, url);
-  console.log(`[relay] HTTP ${req.method} ${url} -> ${filePath}`);
+  const filePath = resolve(CLIENT_DIR, "." + url);
+  // Prevent path traversal
+  if (!filePath.startsWith(resolve(CLIENT_DIR))) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
   try {
     const data = await readFile(filePath);
     const ext = extname(filePath);

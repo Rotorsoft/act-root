@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -11,13 +11,16 @@ const target = process.argv[2] ? resolve(userCwd, process.argv[2]) : "";
 const actCmd = target ? `ActDiagram ${target}` : "ActDiagram";
 
 try {
-  execSync(
+  execFileSync(
+    "nvim",
     [
-      "nvim",
-      `--cmd 'set runtimepath+=${pluginRoot}'`,
-      `-c 'lua require("act-nvim").setup()'`,
-      `-c '${actCmd}'`,
-    ].join(" "),
+      "--cmd",
+      `set runtimepath+=${pluginRoot}`,
+      "-c",
+      'lua require("act-nvim").setup()',
+      "-c",
+      actCmd,
+    ],
     { stdio: "inherit", cwd: userCwd },
   );
 } catch {
