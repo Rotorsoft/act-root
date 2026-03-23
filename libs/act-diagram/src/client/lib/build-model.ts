@@ -292,11 +292,55 @@ export function buildModel(
     }
 
     const entryPath = (a._sourceFile ?? "app.ts") as string;
+
+    // Filter to items owned by this act builder
+    const actSliceNames = new Set<string>(
+      ((a.slices as any[]) ?? [])
+        .filter((s: any) => s != null)
+        .map((s: any) => s._varName ?? "")
+        .filter(Boolean)
+    );
+    // Also include error placeholder slices from files referenced by this act
+    for (const sl of model.slices) {
+      if (sl.error && !actSliceNames.has(sl.name)) {
+        // Check if this act's source file references this slice name
+        const actSrc = files.find((f) => f.path === entryPath)?.content ?? "";
+        if (actSrc.includes(sl.name)) {
+          actSliceNames.add(sl.name);
+        }
+      }
+    }
+
+    const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
+    const sliceStateKeys = new Set(entrySlices.flatMap((s) => s.states));
+
+    const actStateKeys = new Set<string>();
+    for (const s of (a.states as any[]) ?? []) {
+      try {
+        if (s && s._tag === "State") {
+          actStateKeys.add((s._modelKey ?? s.name) as string);
+        }
+      } catch {
+        /* skip corrupt state */
+      }
+    }
+    const allStateKeys = new Set([...actStateKeys, ...sliceStateKeys]);
+
+    const actProjNames = new Set<string>(
+      ((a.projections as any[]) ?? [])
+        .filter((p: any) => p && p._tag === "Projection")
+        .map((p: any) => p.target as string)
+    );
+    // Include projections embedded in slices
+    for (const sl of entrySlices) {
+      for (const pn of sl.projections) actProjNames.add(pn);
+    }
+
     model.entries.push({
       path: entryPath,
-      states: model.states,
-      slices: model.slices,
-      projections: model.projections,
+      states: model.states.filter((s) => allStateKeys.has(s.varName)),
+      slices: entrySlices,
+      projections: model.projections.filter((p) => actProjNames.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) ?? [],
     });
   }
