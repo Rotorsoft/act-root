@@ -726,4 +726,35 @@ export const S = state({ S: z.object({}) })
     const { error } = extractModel(files);
     expect(error).toBeUndefined();
   });
+
+  it("file calling require.resolve does not crash evaluation", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/config.ts",
+        content: `const p = require.resolve("./something");`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model).toBeDefined();
+  });
+
+  it("stripNonCode filters slice declarations inside template literals", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/samples.ts",
+        content: `
+import type { FileTab } from "./types.js";
+export const SAMPLES: FileTab[] = [
+  { path: "src/slices.ts", content: \`
+import { slice } from "@rotorsoft/act";
+export const FakeSlice = slice().build();
+\` }
+];`,
+      },
+    ];
+    const { model } = extractModel(files);
+    // FakeSlice is inside a template literal — should not appear
+    const fake = model.slices.find((s) => s.name === "FakeSlice");
+    expect(fake).toBeUndefined();
+  });
 });

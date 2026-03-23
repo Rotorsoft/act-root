@@ -888,6 +888,221 @@ describe("buildModel direct tests", () => {
     expect(model.entries[0].reactions).toEqual([]);
   });
 
+  it("act entry includes error placeholder slice referenced in source", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "BrokenSlice",
+          states: [null], // null state triggers error
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [], // slice not in act.slices (failed to resolve)
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const files = [{ path: "src/app.ts", content: "withSlice(BrokenSlice)" }];
+    const { model } = buildModel(result, files, new Map());
+    const entry = model.entries[0];
+    expect(entry.slices).toHaveLength(1);
+    expect(entry.slices[0].name).toBe("BrokenSlice");
+    expect(entry.slices[0].error).toBeDefined();
+  });
+
+  it("act entry with states and projections from act builder", () => {
+    const stateObj = {
+      _tag: "State",
+      name: "MyState",
+      events: { Evt: {} },
+      actions: { doIt: {} },
+      given: {},
+      patches: new Map(),
+      _modelKey: undefined as string | undefined,
+    };
+    const projObj = { _tag: "Projection", target: "myproj", handles: ["Evt"] };
+    const result = {
+      states: [stateObj],
+      slices: [],
+      projections: [projObj],
+      acts: [
+        {
+          _tag: "Act",
+          states: [stateObj],
+          slices: [],
+          projections: [projObj],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const entry = model.entries[0];
+    expect(entry.states).toHaveLength(1);
+    expect(entry.projections).toHaveLength(1);
+    expect(entry.projections[0].name).toBe("myproj");
+  });
+
+  it("act entry error slice not referenced in source is excluded", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "UnrelatedSlice",
+          states: [null],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    // Source does NOT reference UnrelatedSlice
+    const files = [{ path: "src/app.ts", content: "act().build()" }];
+    const { model } = buildModel(result, files, new Map());
+    const entry = model.entries[0];
+    expect(entry.slices).toHaveLength(0);
+  });
+
+  it("act entry error slice with missing source file uses empty fallback", () => {
+    const result = {
+      states: [],
+      slices: [
+        {
+          _tag: "Slice",
+          _varName: "OrphanSlice",
+          states: [null],
+          projections: [],
+          reactions: [],
+        },
+      ],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [],
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/missing.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    // No file matches src/missing.ts — triggers ?? "" fallback
+    const files = [{ path: "src/other.ts", content: "something" }];
+    const { model } = buildModel(result, files, new Map());
+    const entry = model.entries[0];
+    expect(entry.slices).toHaveLength(0);
+  });
+
+  it("act entry skips non-State items in states array", () => {
+    const realState = {
+      _tag: "State",
+      name: "Real",
+      events: {},
+      actions: {},
+      given: {},
+      patches: new Map(),
+      _modelKey: undefined as string | undefined,
+    };
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [{ _tag: "NotAState", name: "Fake" }, null, realState],
+          slices: [],
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const entry = model.entries[0];
+    // Only "Real" state passes the _tag === "State" check
+    expect(entry.states).toHaveLength(1);
+    expect(entry.states[0].name).toBe("Real");
+  });
+
+  it("act entry slice with undefined _varName is filtered out", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [{ _tag: "Slice", _varName: undefined }],
+          projections: [],
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const entry = model.entries[0];
+    expect(entry.slices).toHaveLength(0);
+  });
+
+  it("act entry with undefined projections array", () => {
+    const result = {
+      states: [],
+      slices: [],
+      projections: [],
+      acts: [
+        {
+          _tag: "Act",
+          states: [],
+          slices: [],
+          projections: undefined as any,
+          reactions: [],
+          _sourceFile: "src/app.ts",
+        },
+      ],
+      error: undefined,
+      fileErrors: new Map<string, string>(),
+    };
+    const { model } = buildModel(result, [], new Map());
+    const entry = model.entries[0];
+    expect(entry.projections).toHaveLength(0);
+  });
+
   it("act with null slices array (line 190 || fallback)", () => {
     const result = {
       states: [],

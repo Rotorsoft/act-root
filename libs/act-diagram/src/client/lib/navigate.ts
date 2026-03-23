@@ -6,53 +6,7 @@
  * Pure function — no side effects, no VS Code / Monaco dependency.
  */
 import type { FileTab } from "../types/index.js";
-
-/** Check if a position in source text falls inside a comment */
-function isInsideComment(content: string, matchIndex: number): boolean {
-  const before = content.slice(0, matchIndex);
-  const lastNl = before.lastIndexOf("\n");
-  const lineStart = lastNl >= 0 ? lastNl + 1 : 0;
-  const lineEnd = content.indexOf("\n", matchIndex);
-  const lineText = content
-    .slice(lineStart, lineEnd >= 0 ? lineEnd : content.length)
-    .trimStart();
-
-  // Line comment or JSDoc continuation
-  if (
-    lineText.startsWith("//") ||
-    lineText.startsWith("*") ||
-    lineText.startsWith("/*")
-  ) {
-    return true;
-  }
-
-  // Check if inside a block comment that started on a previous line
-  const lastBlockOpen = before.lastIndexOf("/*");
-  if (lastBlockOpen >= 0) {
-    const lastBlockClose = before.lastIndexOf("*/");
-    if (lastBlockClose < lastBlockOpen) return true; // unclosed block comment
-  }
-
-  return false;
-}
-
-/** Find the first non-comment match of a regex in content, return its index or -1 */
-function findNonCommentMatch(
-  content: string,
-  re: RegExp,
-  startFrom = 0
-): number {
-  const globalRe = new RegExp(
-    re.source,
-    re.flags.includes("g") ? re.flags : re.flags + "g"
-  );
-  globalRe.lastIndex = startFrom;
-  let match: RegExpExecArray | null;
-  while ((match = globalRe.exec(content)) !== null) {
-    if (!isInsideComment(content, match.index)) return match.index;
-  }
-  return -1;
-}
+import { stripNonCode } from "./evaluate.js";
 
 /** Compute line/col for a character index in content */
 function positionAt(
@@ -143,11 +97,22 @@ export function navigateToCode(
   type?: string,
   targetFile?: string
 ): NavigateResult | undefined {
+  // Strip non-code once per file — offsets stay valid
+  const stripped = new Map<string, string>();
+  const code = (f: FileTab) => {
+    let c = stripped.get(f.path);
+    if (c === undefined) {
+      c = stripNonCode(f.content, "nav");
+      stripped.set(f.path, c);
+    }
+    return c;
+  };
+
   // Direct file navigation — find act() call in the file
   if (type === "file") {
     const file = files.find((f) => f.path === name || f.path.endsWith(name));
     if (file) {
-      const actMatch = /\bact\s*\(\s*\)/.exec(file.content);
+      const actMatch = /\bact\s*\(\s*\)/.exec(code(file));
       if (actMatch) {
         const { line, col } = positionAt(file.content, actMatch.index);
         return { file: file.path, line, col };
@@ -161,27 +126,28 @@ export function navigateToCode(
   if (targetFile) {
     const file = files.find((f) => f.path === targetFile);
     if (file) {
+      const c = code(file);
       const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
       // For events: navigate to .emits() in the state builder
       if (type === "event") {
-        // Try to find event name inside .emits({ EventName: ... }) or .emits({ EventName, ... })
         const emitsBlockRe = new RegExp(
           `\\.emits\\([\\s\\S]*?(${esc})\\s*[,:}]`
         );
-        const blockMatch = emitsBlockRe.exec(file.content);
+        const blockMatch = emitsBlockRe.exec(c);
         if (blockMatch) {
           const nameIdx = blockMatch.index + blockMatch[0].lastIndexOf(name);
           const { line, col } = positionAt(file.content, nameIdx);
           return { file: file.path, line, col };
         }
-        // Fallback: navigate to .emits( line itself (e.g. .emits(variable))
-        // Only if the event name appears somewhere in the file
         const nameRe = new RegExp(`\\b${esc}\\b`, "g");
-        if (findNonCommentMatch(file.content, nameRe) >= 0) {
-          const emitsIdx = findNonCommentMatch(file.content, /\.emits\s*\(/);
-          if (emitsIdx >= 0) {
-            const { line, col } = positionAt(file.content, emitsIdx + 1);
+        if (nameRe.exec(c)) {
+          const emitsMatch = /\.emits\s*\(/.exec(c);
+          if (emitsMatch) {
+            const { line, col } = positionAt(
+              file.content,
+              emitsMatch.index + 1
+            );
             return { file: file.path, line, col };
           }
         }
@@ -190,10 +156,9 @@ export function navigateToCode(
       // For guards: find the description string, then jump to the containing const declaration
       if (type === "guard") {
         const descRe = new RegExp(`description:\\s*["'\`]${esc}["'\`]`);
-        const descMatch = descRe.exec(file.content);
+        const descMatch = descRe.exec(c);
         if (descMatch) {
-          // Walk backwards from the description to find the const/let/var declaration
-          const before = file.content.slice(0, descMatch.index);
+          const before = c.slice(0, descMatch.index);
           const declRe =
             /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
           let lastDecl: RegExpExecArray | null = null;
@@ -202,12 +167,10 @@ export function navigateToCode(
             lastDecl = m;
           }
           if (lastDecl) {
-            // Jump to the variable name in the declaration
             const nameIdx = lastDecl.index + lastDecl[0].indexOf(lastDecl[1]);
             const { line, col } = positionAt(file.content, nameIdx);
             return { file: file.path, line, col };
           }
-          // Fallback: jump to the description itself
           const { line, col } = positionAt(file.content, descMatch.index);
           return { file: file.path, line, col };
         }
@@ -216,21 +179,22 @@ export function navigateToCode(
       // For actions: search inside .on() block
       if (type === "action") {
         const nameRe = new RegExp(`\\b${esc}\\b`, "g");
-        const blockStart = file.content.indexOf(".on(");
+        const blockStart = c.indexOf(".on(");
         if (blockStart >= 0) {
-          const idx = findNonCommentMatch(file.content, nameRe, blockStart);
-          if (idx >= 0) {
-            const { line, col } = positionAt(file.content, idx);
+          nameRe.lastIndex = blockStart;
+          const match = nameRe.exec(c);
+          if (match) {
+            const { line, col } = positionAt(file.content, match.index);
             return { file: file.path, line, col };
           }
         }
       }
 
-      // Fallback: first non-comment occurrence of name in file
-      const nameRe = new RegExp(`\\b${esc}\\b`, "g");
-      const idx = findNonCommentMatch(file.content, nameRe);
-      if (idx >= 0) {
-        const { line, col } = positionAt(file.content, idx);
+      // Fallback: first occurrence of name in code
+      const nameRe = new RegExp(`\\b${esc}\\b`);
+      const match = nameRe.exec(c);
+      if (match) {
+        const { line, col } = positionAt(file.content, match.index);
         return { file: file.path, line, col };
       }
     }
@@ -251,9 +215,10 @@ export function navigateToCode(
     const descRe = new RegExp(`description:\\s*["'\`]${esc}["'\`]`);
     for (const f of sortedFiles) {
       if (!/\.tsx?$/.test(f.path)) continue;
-      const descMatch = descRe.exec(f.content);
-      if (descMatch && !isInsideComment(f.content, descMatch.index)) {
-        const before = f.content.slice(0, descMatch.index);
+      const c = code(f);
+      const descMatch = descRe.exec(c);
+      if (descMatch) {
+        const before = c.slice(0, descMatch.index);
         const declRe =
           /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::\s*Invariant[^=]*)?\s*=/g;
         let lastDecl: RegExpExecArray | null = null;
@@ -273,19 +238,17 @@ export function navigateToCode(
   const patterns = buildPatterns(esc, type);
 
   for (const re of patterns) {
-    for (let i = 0; i < sortedFiles.length; i++) {
-      if (!/\.tsx?$/.test(sortedFiles[i].path)) continue;
-      const content = sortedFiles[i].content;
+    for (const f of sortedFiles) {
+      if (!/\.tsx?$/.test(f.path)) continue;
+      const c = code(f);
       const globalRe = new RegExp(re.source, re.flags + "g");
       let match: RegExpExecArray | null;
-      while ((match = globalRe.exec(content)) !== null) {
-        if (isInsideComment(content, match.index)) continue;
-
+      while ((match = globalRe.exec(c)) !== null) {
         const matchText = match[0];
         const nameOffsetInMatch = matchText.lastIndexOf(name);
         const nameStart = match.index + Math.max(0, nameOffsetInMatch);
-        const { line, col } = positionAt(content, nameStart);
-        return { file: sortedFiles[i].path, line, col };
+        const { line, col } = positionAt(f.content, nameStart);
+        return { file: f.path, line, col };
       }
     }
   }

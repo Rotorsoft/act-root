@@ -8,6 +8,35 @@ import { buildModel, type ExecuteResult } from "./build-model.js";
 import { MODULES, unknownModuleProxy } from "./mock-builders.js";
 import { topoSort } from "./sort.js";
 
+/** Replace non-executable content with same-length whitespace (preserving offsets).
+ *  `level: "full"` strips comments + strings + template literals (for scanning).
+ *  `level: "nav"` strips comments + template literals only (for navigation). */
+export const stripNonCode = (src: string, level: "full" | "nav" = "full") => {
+  const blank = (m: string) => m.replace(/[^\n]/g, " ");
+  let result = src
+    .replace(/\/\/[^\n]*/g, blank) // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, blank) // block comments
+    .replace(/`(?:\\[\s\S]|[^`])*`/g, blank); // template literals
+  if (level === "full") {
+    result = result
+      .replace(/"(?:\\[\s\S]|[^"])*"/g, blank) // double-quoted strings
+      .replace(/'(?:\\[\s\S]|[^'])*'/g, blank); // single-quoted strings
+  }
+  return result;
+};
+
+/** Source file filter — excludes tests, declarations, and non-TS files */
+const isSourceFile = (f: FileTab) =>
+  f.path.endsWith(".ts") &&
+  !f.path.endsWith(".d.ts") &&
+  !f.path.endsWith(".tsx") &&
+  !f.path.endsWith(".spec.ts") &&
+  !f.path.endsWith(".test.ts") &&
+  !f.path.includes("node_modules/") &&
+  !f.path.includes("__tests__/") &&
+  !f.path.includes("/test/") &&
+  !f.path.startsWith("test/");
+
 // ─── Code transpilation ─────────────────────────────────────────────
 
 function transpile(code: string): string {
@@ -28,7 +57,9 @@ function transpile(code: string): string {
 
 // ─── Per-file module execution ──────────────────────────────────────
 
-function execute(files: FileTab[]): ExecuteResult {
+function execute(
+  files: FileTab[]
+): ExecuteResult & { expectedSlices: Map<string, string> } {
   const result = {
     states: [] as any[],
     slices: [] as any[],
@@ -36,6 +67,7 @@ function execute(files: FileTab[]): ExecuteResult {
     acts: [] as any[],
     error: undefined as string | undefined,
     fileErrors: new Map<string, string>(),
+    expectedSlices: new Map<string, string>(),
   };
 
   try {
@@ -119,20 +151,7 @@ function execute(files: FileTab[]): ExecuteResult {
     };
 
     // Evaluate each file in topo order, each in its own scope
-    const sorted = topoSort(
-      files.filter(
-        (f) =>
-          f.path.endsWith(".ts") &&
-          !f.path.endsWith(".d.ts") &&
-          !f.path.endsWith(".tsx") &&
-          !f.path.endsWith(".spec.ts") &&
-          !f.path.endsWith(".test.ts") &&
-          !f.path.includes("node_modules/") &&
-          !f.path.includes("__tests__/") &&
-          !f.path.includes("/test/") &&
-          !f.path.startsWith("test/")
-      )
-    );
+    const sorted = topoSort(files.filter(isSourceFile));
 
     for (const file of sorted) {
       _currentFile = file.path;
@@ -145,11 +164,23 @@ function execute(files: FileTab[]): ExecuteResult {
       const sliceNamesInAct: string[] = [];
       const wsRe = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
       let wsm;
-      while ((wsm = wsRe.exec(js)) !== null) {
+      const codeOnly = stripNonCode(js);
+      while ((wsm = wsRe.exec(codeOnly)) !== null) {
         if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
       }
 
-      const fileRequire = (mod: string) => resolveModule(mod, key);
+      // Inventory: detect slice declarations in executable code
+      // sucrase may emit slice() or slice.call(void 0, )
+      for (const m of codeOnly.matchAll(
+        /(?:exports\.)?(\w+)\s*=\s*(?:\w+\.)?slice(?:\s*\(\s*\)|\.call\(void 0,\s*\))/g
+      )) {
+        result.expectedSlices.set(m[1], file.path);
+      }
+
+      const fileRequire = Object.assign(
+        (mod: string) => resolveModule(mod, key),
+        { resolve: (mod: string) => mod, cache: {}, main: undefined }
+      );
 
       try {
         // Strip __dirname/__filename declarations that would conflict with our injected vars
@@ -219,24 +250,5 @@ export function extractModel(files: FileTab[]): {
   error?: string;
 } {
   const result = execute(files);
-
-  // Scan source for expected slice declarations (inventory)
-  const expectedSlices = new Map<string, string>();
-  for (const file of files) {
-    if (
-      !file.path.endsWith(".ts") ||
-      file.path.endsWith(".d.ts") ||
-      file.path.endsWith(".spec.ts") ||
-      file.path.endsWith(".test.ts") ||
-      file.path.includes("node_modules/")
-    )
-      continue;
-    for (const m of file.content.matchAll(
-      /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*slice\s*\(\s*\)/g
-    )) {
-      expectedSlices.set(m[1], file.path);
-    }
-  }
-
-  return buildModel(result, files, expectedSlices);
+  return buildModel(result, files, result.expectedSlices);
 }
