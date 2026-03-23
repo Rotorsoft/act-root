@@ -16,6 +16,15 @@
 * **act-diagram:** re-trigger CI publish ([67273b6](https://github.com/rotorsoft/act-root/commit/67273b60e151276833ab27d7973394329f7cf06f))
 * **act-diagram:** trigger npm publish ([ed817e2](https://github.com/rotorsoft/act-root/commit/ed817e2401ae08a8efd79b89470fc39a3f48570b))
 
+# [@rotorsoft/act-diagram-v0.1.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.0...@rotorsoft/act-diagram-v0.1.1) (2026-03-23)
+
+
+### Bug Fixes
+
+* **act-diagram:** export buildModel, computeLayout, ExecuteResult from public API ([c21b096](https://github.com/rotorsoft/act-root/commit/c21b096abed3c16126548e50ac6ceb87ad9b9e67))
+* **act-diagram:** re-trigger CI publish ([67273b6](https://github.com/rotorsoft/act-root/commit/67273b60e151276833ab27d7973394329f7cf06f))
+* **act-diagram:** trigger npm publish ([ed817e2](https://github.com/rotorsoft/act-root/commit/ed817e2401ae08a8efd79b89470fc39a3f48570b))
+
 # [@rotorsoft/act-diagram-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.1...@rotorsoft/act-diagram-v0.1.2) (2026-03-23)
 
 
