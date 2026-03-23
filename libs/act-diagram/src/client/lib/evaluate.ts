@@ -153,12 +153,18 @@ function execute(files: FileTab[]): {
       const fileExp: Record<string, any> = {};
       fileExports.set(key, fileExp);
 
-      // Capture slice names from .withSlice(VAR) calls in act() chains
+      // Pre-scan: capture slice variable names before eval
       const sliceNamesInAct: string[] = [];
       const wsRe = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
       let wsm;
       while ((wsm = wsRe.exec(js)) !== null) {
         if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
+      }
+      const sliceVarNames: string[] = [];
+      const svRe = /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*slice\s*\(/g;
+      let svm;
+      while ((svm = svRe.exec(js)) !== null) {
+        sliceVarNames.push(svm[1]);
       }
 
       const fileRequire = (mod: string) => resolveModule(mod, key);
@@ -188,13 +194,21 @@ function execute(files: FileTab[]): {
         `
         );
         fn(fileRequire, fileExp, { exports: fileExp });
-      } catch {
-        // Eval failed — fall through to regex extraction
-        const fallback = extractFromSource(file.content);
-        for (const s of fallback.states) __built__.states.push(s);
-        for (const s of fallback.slices) __built__.slices.push(s);
-        for (const p of fallback.projections) __built__.projections.push(p);
-        for (const a of fallback.acts) __built__.acts.push(a);
+      } catch (evalErr: unknown) {
+        // Eval failed — create error placeholders for slices defined in this file
+        const errMsg =
+          evalErr instanceof Error ? evalErr.message : String(evalErr);
+        for (const name of sliceVarNames) {
+          __built__.slices.push({
+            _tag: "Slice",
+            _varName: name,
+            _sourceFile: file.path,
+            states: [],
+            projections: [],
+            reactions: [],
+            _error: errMsg,
+          });
+        }
       }
 
       // Tag slices with names from .withSlice(VAR) — only for acts built in THIS file
@@ -233,6 +247,8 @@ function execute(files: FileTab[]): {
  * This is a fallback for files that fail mock evaluation — it captures the
  * essential builder structure without executing the code.
  */
+// Kept for tests that verify regex fallback behavior
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function extractFromSource(content: string): {
   states: any[];
   slices: any[];
@@ -472,6 +488,20 @@ export function extractModel(files: FileTab[]): {
 
   for (const s of slices) {
     const sliceName = (s._varName ?? "slice") as string;
+
+    // Error placeholder from failed eval
+    if (s._error) {
+      model.slices.push({
+        name: sliceName,
+        states: [],
+        stateVars: [],
+        projections: [],
+        reactions: [],
+        error: s._error as string,
+      });
+      continue;
+    }
+
     try {
       const sliceStateNames: string[] = [];
       for (const st of s.states) {

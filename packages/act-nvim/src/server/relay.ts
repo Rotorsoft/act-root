@@ -185,6 +185,22 @@ async function handleNvimMessage(msg: {
 }
 
 // --- Start ---
+httpServer.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`[relay] port ${HTTP_PORT} already in use — exiting`);
+    process.exit(1);
+  }
+  throw e;
+});
+
+tcpServer.on("error", (e: NodeJS.ErrnoException) => {
+  if (e.code === "EADDRINUSE") {
+    console.error(`[relay] port ${TCP_PORT} already in use — exiting`);
+    process.exit(1);
+  }
+  throw e;
+});
+
 httpServer.listen(HTTP_PORT, () => {
   console.log(`[relay] HTTP + WS on http://localhost:${HTTP_PORT}`);
 });

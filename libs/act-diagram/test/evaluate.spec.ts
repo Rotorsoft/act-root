@@ -160,7 +160,7 @@ export const TicketProjection = projection("tickets")
     expect(model.states).toHaveLength(0);
   });
 
-  it("handles files with syntax errors via regex fallback", () => {
+  it("handles files with syntax errors gracefully", () => {
     const files: FileTab[] = [
       {
         path: "src/broken.ts",
@@ -178,7 +178,8 @@ export const Widget = state({ Widget: z.object({ value: z.string() }) })
       },
     ];
     const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
+    // Broken file produces no states (no regex fallback), but doesn't crash
+    expect(model.states).toHaveLength(0);
   });
 
   it("handles import.meta replacement", () => {
@@ -445,7 +446,7 @@ export const app = act().withState(T).build();
 
   // --- Regex fallback branches ---
 
-  it("regex fallback extracts patches", () => {
+  it("broken file with only states produces nothing", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -463,7 +464,7 @@ export const S = state({ S: z.object({}) })
       },
     ];
     const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
+    expect(model.states).toHaveLength(0);
   });
 
   it("regex fallback extracts emit from arrow function handler with single-quoted event", () => {
@@ -683,8 +684,7 @@ export const S = state({ S: z.object({}) })
     expect(error).toBeUndefined();
   });
 
-  it("regex fallback: backtick-quoted event name in emit handler", () => {
-    // Exercises line 304: handlerBody.includes(\`${evName}\`)
+  it("broken file with only states and backtick emits produces nothing", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -693,7 +693,7 @@ export const S = state({ S: z.object({}) })
       },
     ];
     const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
+    expect(model.states).toHaveLength(0);
   });
 
   it("regex fallback: slice reaction with variable reference handler", () => {
@@ -885,12 +885,12 @@ export const app = act().withSlice(MySlice).build();
     expect(model.slices[0].name).toBe("MySlice");
   });
 
-  it("regex fallback state without patches (hasCustomPatch false via ?? false)", () => {
+  it("broken file produces error placeholder for slices defined in it", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
         content: `
-import { state } from "@rotorsoft/act";
+import { state, slice } from "@rotorsoft/act";
 import { z } from "zod";
 const x = ({{ broken }});
 export const S = state({ S: z.object({}) })
@@ -898,17 +898,17 @@ export const S = state({ S: z.object({}) })
   .emits({ Done: z.object({}) })
   .on({ doIt: z.object({}) }).emit("Done")
   .build();
+export const MySlice = slice()
+  .withState(S)
+  .build();
 `,
       },
     ];
     const { model } = extractModel(files);
-    const st = model.states.find((s) => s.name === "S");
-    expect(st).toBeDefined();
-    if (st && st.events.length > 0) {
-      // Regex fallback creates a patches Set, but the event "Done"
-      // isn't in .patch(), so hasCustomPatch should be false
-      expect(st.events[0].hasCustomPatch).toBe(false);
-    }
+    expect(model.states).toHaveLength(0);
+    expect(model.slices).toHaveLength(1);
+    expect(model.slices[0].name).toBe("MySlice");
+    expect(model.slices[0].error).toBeDefined();
   });
 
   it("fixes up reaction handler names from source when mock yields 'on EventName'", () => {
