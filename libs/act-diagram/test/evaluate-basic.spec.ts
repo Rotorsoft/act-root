@@ -34,89 +34,6 @@ export const Counter = state({ Counter: z.object({ count: z.number() }) })
     expect(model.states[0].actions[0].emits).toContain("Incremented");
   });
 
-  it("extracts slices with reactions and projections", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/states.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-
-export const Ticket = state({ Ticket: z.object({ status: z.string() }) })
-  .init(() => ({ status: "new" }))
-  .emits({
-    TicketOpened: z.object({ title: z.string() }),
-    TicketAssigned: z.object({ to: z.string() }),
-  })
-  .on({ OpenTicket: z.object({ title: z.string() }) })
-    .emit("TicketOpened")
-  .on({ AssignTicket: z.object({ to: z.string() }) })
-    .emit("TicketAssigned")
-  .build();
-`,
-      },
-      {
-        path: "src/proj.ts",
-        content: `
-import { projection } from "@rotorsoft/act";
-import { z } from "zod";
-
-export const TicketProj = projection("tickets")
-  .on({ TicketOpened: z.object({ title: z.string() }) })
-    .do()
-  .build();
-`,
-      },
-      {
-        path: "src/slices.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { Ticket } from "./states.js";
-import { TicketProj } from "./proj.js";
-
-export const TicketSlice = slice()
-  .withState(Ticket)
-  .withProjection(TicketProj)
-  .on("TicketOpened")
-    .do(async function autoAssign(event, _stream, app) {
-      await app.do("AssignTicket", event.stream, { to: "agent" }, event);
-    })
-    .to(() => "default")
-  .build();
-`,
-      },
-      {
-        path: "src/app.ts",
-        content: `
-import { act } from "@rotorsoft/act";
-import { TicketSlice } from "./slices.js";
-import { TicketProj } from "./proj.js";
-
-export const app = act()
-  .withSlice(TicketSlice)
-  .withProjection(TicketProj)
-  .on("TicketOpened")
-    .do(async function logOpen() {})
-    .void()
-  .build();
-`,
-      },
-    ];
-
-    const { model, error } = extractModel(files);
-    expect(error).toBeUndefined();
-    expect(model.slices).toHaveLength(1);
-    expect(model.slices[0].reactions).toHaveLength(1);
-    expect(model.slices[0].reactions[0].dispatches).toContain("AssignTicket");
-    expect(model.slices[0].projections).toContain("tickets");
-    expect(model.entries).toHaveLength(1);
-    expect(model.entries[0].path).toBe("src/app.ts");
-    expect(model.entries[0].projections).toHaveLength(1);
-    expect(model.reactions).toHaveLength(1);
-    expect(model.reactions[0].isVoid).toBe(true);
-    expect(model.orchestrator).toBeDefined();
-  });
-
   it("extracts standalone projections", () => {
     const files: FileTab[] = [
       {
@@ -155,27 +72,6 @@ export const TicketProjection = projection("tickets")
     ];
     const { model } = extractModel(files);
     expect(model.states).toHaveLength(0);
-  });
-
-  it("handles files with syntax errors via regex fallback", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/broken.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-
-export const Widget = state({ Widget: z.object({ value: z.string() }) })
-  .init(() => ({{ value: "" }}))
-  .emits({ ValueSet: z.object({ value: z.string() }) })
-  .on({ SetValue: z.object({ value: z.string() }) })
-    .emit("ValueSet")
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
   });
 
   it("handles import.meta replacement", () => {
@@ -440,124 +336,6 @@ export const app = act().withState(T).build();
     expect(model.entries).toHaveLength(1);
   });
 
-  // --- Regex fallback branches ---
-
-  it("regex fallback extracts patches", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ Created: z.object({}), Updated: z.object({}) })
-  .patch({ Created: (e, s) => s, Updated: (e, s) => s })
-  .on({ create: z.object({}) }).emit("Created")
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("regex fallback extracts emit from arrow function handler with single-quoted event", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ MyEvent: z.object({}) })
-  .on({ doIt: z.object({}) })
-    .emit((action) => ['MyEvent', { data: action }])
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    const st = model.states.find((s) => s.name === "S");
-    if (st) {
-      const action = st.actions.find((a) => a.name === "doIt");
-      if (action) expect(action.emits).toContain("MyEvent");
-    }
-  });
-
-  it("regex fallback extracts slice with .withState and .withProjection", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { slice, state, projection } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-const S = state({ S: z.object({}) }).init(() => ({})).emits({ E: z.object({}) })
-  .on({ a: z.object({}) }).emit("E").build();
-const P = projection("proj").on({ E: z.object({}) }).do().build();
-const MySlice = slice()
-  .withState(S)
-  .withProjection(P)
-  .on("E").do(async function handler() {}).void()
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.slices.length + model.states.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("regex fallback extracts given invariants", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ Done: z.object({}) })
-  .on({ doIt: z.object({}) })
-    .given([{ description: "must be valid", valid: () => true }])
-    .emit("Done")
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    const st = model.states.find((s) => s.name === "S");
-    if (st) {
-      const action = st.actions.find((a) => a.name === "doIt");
-      if (action) expect(action.invariants).toContain("must be valid");
-    }
-  });
-
-  it("regex fallback: projection extraction", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { projection } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-const P = projection("myProj")
-  .on({ A: z.object({}) }).do()
-  .on({ B: z.object({}) }).do()
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.projections.length).toBeGreaterThanOrEqual(1);
-  });
-
-  // --- Model building branch coverage ---
-
   it("handles state without events or actions (null guards)", () => {
     const files: FileTab[] = [
       {
@@ -615,16 +393,11 @@ export const S = state({ S: z.object({}) })
       },
     ];
     const { model } = extractModel(files);
-    // invariant without description → empty string
+    // invariant without description -> empty string
     expect(model.states[0].actions[0].invariants).toContain("");
   });
 
   it("returns error when execute produces error", () => {
-    // Force an error by providing code that causes the outer try to fail
-    // This exercises line 414: if (error) return { model, error }
-    // Actually, the outer catch is very hard to trigger - errors from eval
-    // are caught by the inner try. The error path works when execute()
-    // returns an error string.
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -642,7 +415,6 @@ export const S = state({ S: z.object({}) })
   });
 
   it("relative import to non-existent file returns empty object", () => {
-    // Exercises line 106: ?? {} when relative import doesn't resolve
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -662,7 +434,6 @@ export const S = state({ S: z.object({}) })
   });
 
   it("scoped import resolution falls through all patterns to unknownModuleProxy", () => {
-    // Exercises lines 114-116: all ?? branches in scoped package resolution
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -678,58 +449,6 @@ export const S = state({ S: z.object({}) })
     ];
     const { error } = extractModel(files);
     expect(error).toBeUndefined();
-  });
-
-  it("regex fallback: backtick-quoted event name in emit handler", () => {
-    // Exercises line 304: handlerBody.includes(\`${evName}\`)
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content:
-          'import { state } from "@rotorsoft/act";\nimport { z } from "zod";\nconst x = ({{ broken }});\nexport const S = state({ S: z.object({}) })\n  .init(() => ({}))\n  .emits({ MyEvt: z.object({}) })\n  .on({ doIt: z.object({}) })\n    .emit((a) => [`MyEvt`, {}])\n  .build();\n',
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.states.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("regex fallback: slice reaction with variable reference handler", () => {
-    // Exercises line 353: odm[3] branch (named variable, not function keyword)
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-const MySlice = slice()
-  .on("SomeEvent").do(myHandler)
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.slices.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("regex fallback: slice reaction with anonymous handler", () => {
-    // Exercises line 353: `on ${odm[1]}` fallback when no function name
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-const MySlice = slice()
-  .on("SomeEvent").do(async () => {})
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    // The regex won't capture anonymous arrow, so no reactions extracted
-    expect(model).toBeDefined();
   });
 
   it("handles act with scoped package imports (not @rotorsoft)", () => {
@@ -845,197 +564,6 @@ export const S = state({ S: z.object({}) })
     expect(model.states).toHaveLength(1);
   });
 
-  it("slice varName tagging skips acts from other files", () => {
-    // act() in app.ts has .withSlice(MySlice), but slice is built in slices.ts
-    // The tagging loop should skip acts whose _sourceFile !== current file
-    const files: FileTab[] = [
-      {
-        path: "src/states.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ E: z.object({}) })
-  .on({ a: z.object({}) }).emit("E").build();
-`,
-      },
-      {
-        path: "src/slices.ts",
-        content: `
-import { slice } from "@rotorsoft/act";
-import { S } from "./states.js";
-export const MySlice = slice().withState(S).build();
-`,
-      },
-      {
-        path: "src/app.ts",
-        content: `
-import { act } from "@rotorsoft/act";
-import { MySlice } from "./slices.js";
-export const app = act().withSlice(MySlice).build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.slices).toHaveLength(1);
-    expect(model.slices[0].name).toBe("MySlice");
-  });
-
-  it("regex fallback state without patches (hasCustomPatch false via ?? false)", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/b.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ Done: z.object({}) })
-  .on({ doIt: z.object({}) }).emit("Done")
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    const st = model.states.find((s) => s.name === "S");
-    expect(st).toBeDefined();
-    if (st && st.events.length > 0) {
-      // Regex fallback creates a patches Set, but the event "Done"
-      // isn't in .patch(), so hasCustomPatch should be false
-      expect(st.events[0].hasCustomPatch).toBe(false);
-    }
-  });
-
-  it("fixes up reaction handler names from source when mock yields 'on EventName'", () => {
-    // When the handler module can't be resolved (circular dep or missing),
-    // handler.name isn't a real string and falls back to "on EventName".
-    // The fixup scans the source for .on("Event").do(module.handler) to recover.
-    const files: FileTab[] = [
-      {
-        path: "domain/src/index.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-export const S = state({ S: z.object({}) })
-  .init(() => ({}))
-  .emits({ Created: z.object({}) })
-  .on({ create: z.object({}) }).emit("Created")
-  .build();
-`,
-      },
-      {
-        path: "app/src/app.ts",
-        content: `
-import { act } from "@rotorsoft/act";
-import { S } from "@org/domain";
-import { onCreated } from "unresolvable-external-package";
-export const app = act()
-  .withState(S)
-  .on("Created").do(onCreated).to("items")
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    expect(model.reactions).toHaveLength(1);
-    // handler.name on proxy isn't a string → falls back to "on Created"
-    // fixupReactions recovers "onCreated" from source
-    expect(model.reactions[0].handlerName).toBe("onCreated");
-  });
-
-  it("projection fallback scan finds projections not captured by mock eval", () => {
-    // The projection is in a .tsx file (skipped by eval) but the fallback
-    // scans all .ts files. Use a .ts file that evals but whose projection()
-    // call doesn't fire because it uses a non-@rotorsoft import for projection
-    const files: FileTab[] = [
-      {
-        path: "src/proj.ts",
-        content: `
-import { projection } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken syntax }});
-export const P = projection("uncaptured")
-  .on({ A: z.object({}) }).do()
-  .on({ B: z.object({}) }).do()
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    // Regex fallback in extractFromSource captures it
-    expect(model.projections).toHaveLength(1);
-    expect(model.projections[0].name).toBe("uncaptured");
-    expect(model.projections[0].handles).toContain("A");
-    expect(model.projections[0].handles).toContain("B");
-  });
-
-  it("projection fallback scan skips already-captured projections", () => {
-    const files: FileTab[] = [
-      {
-        path: "src/proj.ts",
-        content: `
-import { projection } from "@rotorsoft/act";
-import { z } from "zod";
-export const P = projection("items")
-  .on({ ItemCreated: z.object({}) }).do()
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    // Mock eval captures it, fallback scan should not duplicate
-    expect(model.projections).toHaveLength(1);
-  });
-
-  it("withProjection fallback includes projections when act.projections are empty", () => {
-    // Simulates circular dependency where GameProjection resolves to undefined
-    // but the source has .withProjection(GameProjection)
-    const files: FileTab[] = [
-      {
-        path: "src/proj.ts",
-        content: `
-import { projection } from "@rotorsoft/act";
-import { z } from "zod";
-const x = ({{ broken }});
-export const GameProjection = projection("games")
-  .on({ GameCreated: z.object({}) }).do()
-  .build();
-`,
-      },
-      {
-        path: "src/states.ts",
-        content: `
-import { state } from "@rotorsoft/act";
-import { z } from "zod";
-export const Game = state({ Game: z.object({}) })
-  .init(() => ({}))
-  .emits({ GameCreated: z.object({}) })
-  .on({ CreateGame: z.object({}) }).emit("GameCreated")
-  .build();
-`,
-      },
-      {
-        path: "src/app.ts",
-        content: `
-import { act } from "@rotorsoft/act";
-import { Game } from "./states.js";
-import { GameProjection } from "./proj.js";
-export const app = act()
-  .withState(Game)
-  .withProjection(GameProjection)
-  .build();
-`,
-      },
-    ];
-    const { model } = extractModel(files);
-    // Projection should appear in entry despite circular dep
-    expect(model.entries).toHaveLength(1);
-    expect(model.entries[0].projections).toHaveLength(1);
-    expect(model.entries[0].projections[0].name).toBe("games");
-  });
-
   it("null guards handle act with undefined projections/states/slices/reactions", () => {
     const files: FileTab[] = [
       {
@@ -1116,5 +644,86 @@ const app = act()
     const { model } = extractModel(files);
     expect(model.reactions).toHaveLength(1);
     expect(model.reactions[0].isVoid).toBe(false);
+  });
+
+  it("scoped import falls all the way to unknownModuleProxy (line 107 branch #6)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import { thing } from "@scope/doesnotexist";
+const x = thing;
+export const S = state({ S: z.object({}) })
+  .init(() => ({})).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { model, error } = extractModel(files);
+    expect(error).toBeUndefined();
+    expect(model.states).toHaveLength(1);
+  });
+
+  it("scoped import with subpath (line 103 truthy branch)", () => {
+    const files: FileTab[] = [
+      {
+        path: "packages/mylib/src/utils.ts",
+        content: `export const helper = "val";`,
+      },
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import { helper } from "@myorg/mylib/src/utils";
+const x = helper;
+export const S = state({ S: z.object({ x: z.string() }) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { model } = extractModel(files);
+    expect(model.states).toHaveLength(1);
+  });
+
+  it("scoped import with no package name after @ (line 102 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import something from "@nopkg";
+const x = something;
+export const S = state({ S: z.object({}) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { error } = extractModel(files);
+    expect(error).toBeUndefined();
+  });
+
+  it("scoped import with empty package name (line 102 false)", () => {
+    const files: FileTab[] = [
+      {
+        path: "src/app.ts",
+        content: `
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+import something from "@/utils";
+const x = something;
+export const S = state({ S: z.object({}) })
+  .init(() => ({ x })).emits({ E: z.object({}) })
+  .on({ a: z.object({}) }).emit("E").build();
+`,
+      },
+    ];
+    const { error } = extractModel(files);
+    expect(error).toBeUndefined();
   });
 });

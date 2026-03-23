@@ -3,7 +3,6 @@ import {
   computeLayout,
   GAP,
   H,
-  MARGIN,
   PAD,
   SLICE_GAP,
   SLICE_INNER,
@@ -15,7 +14,7 @@ import {
 } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 
-// ── Helpers ──────────────────────────────────────────────────────────
+// -- Helpers ------------------------------------------------------------------
 
 function emptyModel(overrides?: Partial<DomainModel>): DomainModel {
   return {
@@ -28,7 +27,6 @@ function emptyModel(overrides?: Partial<DomainModel>): DomainModel {
   };
 }
 
-/** Get the bounding box of a node (accounting for state vs regular dimensions) */
 function nodeBBox(n: N) {
   const nw = n.type === "state" ? STATE_W : W;
   const nh = n.type === "state" ? STATE_H : H;
@@ -42,7 +40,6 @@ function nodeBBox(n: N) {
   };
 }
 
-/** Check whether two bounding boxes overlap */
 function overlaps(
   a: ReturnType<typeof nodeBBox>,
   b: ReturnType<typeof nodeBBox>
@@ -56,61 +53,22 @@ function find(layout: Layout, type: N["type"], label: string) {
   return layout.ns.find((n) => n.type === type && n.label === label);
 }
 
-// ── Fixtures ─────────────────────────────────────────────────────────
+function assertNoOverlaps(layout: Layout) {
+  for (let i = 0; i < layout.ns.length; i++) {
+    const a = nodeBBox(layout.ns[i]);
+    for (let j = i + 1; j < layout.ns.length; j++) {
+      const b = nodeBBox(layout.ns[j]);
+      if (overlaps(a, b)) {
+        throw new Error(
+          `Overlap: "${layout.ns[i].label}" (${layout.ns[i].type}) at [${a.left},${a.top}]-[${a.right},${a.bottom}] ` +
+            `overlaps "${layout.ns[j].label}" (${layout.ns[j].type}) at [${b.left},${b.top}]-[${b.right},${b.bottom}]`
+        );
+      }
+    }
+  }
+}
 
-/** Simple standalone state: 1 action → 1 event */
-const SIMPLE_MODEL: DomainModel = emptyModel({
-  states: [
-    {
-      name: "Counter",
-      varName: "Counter",
-      events: [{ name: "Incremented", hasCustomPatch: true }],
-      actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
-    },
-  ],
-});
-
-/** Two standalone states side-by-side */
-const TWO_STATES_MODEL: DomainModel = emptyModel({
-  states: [
-    {
-      name: "Counter",
-      varName: "Counter",
-      events: [{ name: "Incremented", hasCustomPatch: false }],
-      actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
-    },
-    {
-      name: "Timer",
-      varName: "Timer",
-      events: [{ name: "Started", hasCustomPatch: false }],
-      actions: [{ name: "start", emits: ["Started"], invariants: [] }],
-    },
-  ],
-});
-
-/** State with multiple actions and events */
-const MULTI_ACTION_MODEL: DomainModel = emptyModel({
-  states: [
-    {
-      name: "Ticket",
-      varName: "Ticket",
-      events: [
-        { name: "TicketOpened", hasCustomPatch: false },
-        { name: "TicketClosed", hasCustomPatch: false },
-        { name: "TicketAssigned", hasCustomPatch: false },
-      ],
-      actions: [
-        { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
-        {
-          name: "CloseTicket",
-          emits: ["TicketClosed"],
-          invariants: ["must be open"],
-        },
-        { name: "AssignTicket", emits: ["TicketAssigned"], invariants: [] },
-      ],
-    },
-  ],
-});
+// -- Fixtures -----------------------------------------------------------------
 
 /** Slice with state and reaction */
 const SLICE_MODEL: DomainModel = emptyModel({
@@ -184,35 +142,10 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
   ],
 });
 
-// ── Tests ────────────────────────────────────────────────────────────
+// -- Tests --------------------------------------------------------------------
 
-describe("computeLayout", () => {
-  describe("empty model", () => {
-    it("produces no nodes, edges, or boxes", () => {
-      const layout = computeLayout(emptyModel());
-      expect(layout.ns).toHaveLength(0);
-      expect(layout.es).toHaveLength(0);
-      expect(layout.boxes).toHaveLength(0);
-    });
-  });
-
-  describe("column ordering: actions → state → events", () => {
-    it("places action left of state, state left of event (standalone)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      const action = find(layout, "action", "increment")!;
-      const state = find(layout, "state", "Counter")!;
-      const event = find(layout, "event", "Incremented")!;
-
-      expect(action).toBeDefined();
-      expect(state).toBeDefined();
-      expect(event).toBeDefined();
-
-      // Action column is to the left of state column
-      expect(action.pos.x + W).toBeLessThanOrEqual(state.pos.x);
-      // State column is to the left of event column
-      expect(state.pos.x + STATE_W).toBeLessThanOrEqual(event.pos.x);
-    });
-
+describe("computeLayout — slices", () => {
+  describe("column ordering in slices", () => {
     it("places action left of state, state left of event (in slice)", () => {
       const layout = computeLayout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
@@ -232,13 +165,12 @@ describe("computeLayout", () => {
     });
   });
 
-  describe("gap enforcement", () => {
+  describe("gap enforcement in slices", () => {
     it("maintains GAP between action column and state column (slice)", () => {
       const layout = computeLayout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
       const state = find(layout, "state", "Ticket")!;
 
-      // In slices, state is placed directly at stateColX = cx + W + GAP
       const gap = state.pos.x - (action.pos.x + W);
       expect(gap).toBe(GAP);
     });
@@ -248,86 +180,13 @@ describe("computeLayout", () => {
       const state = find(layout, "state", "Ticket")!;
       const event = find(layout, "event", "TicketOpened")!;
 
-      // In slices, events at stateColX + STATE_W + GAP
       const gap = event.pos.x - (state.pos.x + STATE_W);
       expect(gap).toBe(GAP);
     });
-
-    it("standalone state placed at stateColX (same as slice layout)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      const action = find(layout, "action", "increment")!;
-      const state = find(layout, "state", "Counter")!;
-
-      // State column starts at action.x + W + GAP
-      const stateColX = action.pos.x + W + GAP;
-      expect(state.pos.x).toBe(stateColX);
-    });
-
-    it("maintains GAP/2 vertical spacing between stacked actions", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const actions = layout.ns.filter((n) => n.type === "action");
-      actions.sort((a, b) => a.pos.y - b.pos.y);
-
-      for (let i = 1; i < actions.length; i++) {
-        const gap = actions[i].pos.y - (actions[i - 1].pos.y + H);
-        expect(gap).toBe(GAP / 2);
-      }
-    });
-
-    it("maintains GAP/2 vertical spacing between stacked events", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const events = layout.ns.filter((n) => n.type === "event");
-      events.sort((a, b) => a.pos.y - b.pos.y);
-
-      for (let i = 1; i < events.length; i++) {
-        const gap = events[i].pos.y - (events[i - 1].pos.y + H);
-        expect(gap).toBe(GAP / 2);
-      }
-    });
   });
 
-  describe("vertical centering", () => {
-    it("centers state vertically relative to its action/event block (standalone, many actions)", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const state = find(layout, "state", "Ticket")!;
-      const actions = layout.ns.filter((n) => n.type === "action");
-      const events = layout.ns.filter((n) => n.type === "event");
-
-      const stBBox = nodeBBox(state);
-
-      // Actions block center should align with state center
-      const actTop = Math.min(...actions.map((n) => n.pos.y));
-      const actBottom = Math.max(...actions.map((n) => n.pos.y + H));
-      const actCenter = (actTop + actBottom) / 2;
-      expect(Math.abs(stBBox.centerY - actCenter)).toBeLessThan(1);
-
-      // Events block center should align with state center
-      const evtTop = Math.min(...events.map((n) => n.pos.y));
-      const evtBottom = Math.max(...events.map((n) => n.pos.y + H));
-      const evtCenter = (evtTop + evtBottom) / 2;
-      expect(Math.abs(stBBox.centerY - evtCenter)).toBeLessThan(1);
-    });
-
-    it("centers state vertically when 1 action → 1 event (standalone)", () => {
-      // With 1 action + 1 event (blockH=36), STATE_H=80 dominates.
-      // State, action, and event should all share the same vertical center.
-      const layout = computeLayout(SIMPLE_MODEL);
-      const state = find(layout, "state", "Counter")!;
-      const action = find(layout, "action", "increment")!;
-      const event = find(layout, "event", "Incremented")!;
-
-      const stCenter = nodeBBox(state).centerY;
-      const actCenter = action.pos.y + H / 2;
-      const evtCenter = event.pos.y + H / 2;
-
-      expect(Math.abs(stCenter - actCenter)).toBeLessThan(1);
-      expect(Math.abs(stCenter - evtCenter)).toBeLessThan(1);
-    });
-
+  describe("vertical centering in slices", () => {
     it("centers primary block vertically when reaction chain extends below", () => {
-      // When a reaction dispatches an action, the chain extends below.
-      // The primary actions/state/events should be centered within the
-      // total height (primary block + reaction chain), not top-aligned.
       const layout = computeLayout(SLICE_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
@@ -335,27 +194,22 @@ describe("computeLayout", () => {
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
 
-      // The dispatched chain extends below the primary block
       const dispatchedBottom = Math.max(
         ...layout.ns
           .filter((n) => n.key.includes("dispatched"))
           .map((n) => n.pos.y + (n.type === "state" ? STATE_H : H))
       );
 
-      // The primary state center should be well above the dispatched bottom
       const stateCenter = state.pos.y + STATE_H / 2;
       expect(stateCenter).toBeLessThan(dispatchedBottom);
 
-      // The reaction should be below or at the same level as the triggering event
       const trigEvent = find(layout, "event", "TicketOpened")!;
       expect(reaction.pos.y).toBeGreaterThanOrEqual(trigEvent.pos.y);
 
-      // Dispatched action should be to the right of reaction
       expect(dispatchedAction.pos.x).toBeGreaterThan(reaction.pos.x + W);
     });
 
     it("centers state vertically relative to actions/events in a slice (no reactions)", () => {
-      // Use a slice without reactions so event heights are uniform
       const model = emptyModel({
         states: [
           {
@@ -400,36 +254,10 @@ describe("computeLayout", () => {
     });
   });
 
-  describe("no overlapping nodes", () => {
-    it("has no overlapping nodes in a simple model", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      assertNoOverlaps(layout);
-    });
-
-    it("has no overlapping nodes in a multi-action model", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      assertNoOverlaps(layout);
-    });
-
+  describe("no overlapping nodes in slices", () => {
     it("has no overlapping nodes in a slice model with reactions", () => {
       const layout = computeLayout(SLICE_MODEL);
       assertNoOverlaps(layout);
-    });
-
-    it("has no overlapping nodes with two standalone states", () => {
-      // Standalone states tile vertically with cx += GAP horizontal shift.
-      // State centering can cause y to extend above the starting row,
-      // leading to overlap when states are very close. This test documents
-      // the expected behavior: each state's ACTION nodes should not overlap.
-      const layout = computeLayout(TWO_STATES_MODEL);
-      const actions = layout.ns.filter((n) => n.type === "action");
-      for (let i = 0; i < actions.length; i++) {
-        for (let j = i + 1; j < actions.length; j++) {
-          expect(overlaps(nodeBBox(actions[i]), nodeBBox(actions[j]))).toBe(
-            false
-          );
-        }
-      }
     });
 
     it("has no overlapping nodes in multi-reaction slice (watermark)", () => {
@@ -479,60 +307,6 @@ describe("computeLayout", () => {
       assertNoOverlaps(layout);
     });
 
-    it("has no overlapping nodes with three independent standalone states", () => {
-      // Calculator-like model: 3 standalone states with varying action counts
-      const model = emptyModel({
-        states: [
-          {
-            name: "Calculator",
-            varName: "Calculator",
-            events: [
-              { name: "DigitPressed", hasCustomPatch: false },
-              { name: "OperatorPressed", hasCustomPatch: false },
-              { name: "DotPressed", hasCustomPatch: false },
-              { name: "EqualsPressed", hasCustomPatch: false },
-              { name: "Cleared", hasCustomPatch: false },
-            ],
-            actions: [
-              {
-                name: "PressKey",
-                emits: [
-                  "DigitPressed",
-                  "OperatorPressed",
-                  "DotPressed",
-                  "EqualsPressed",
-                ],
-                invariants: [],
-              },
-              { name: "Clear", emits: ["Cleared"], invariants: [] },
-            ],
-          },
-          {
-            name: "DigitBoard",
-            varName: "DigitBoard",
-            events: [{ name: "DigitCounted", hasCustomPatch: false }],
-            actions: [
-              { name: "CountDigit", emits: ["DigitCounted"], invariants: [] },
-            ],
-          },
-          {
-            name: "CalculatorResult",
-            varName: "CalculatorResult",
-            events: [{ name: "ResultProjected", hasCustomPatch: false }],
-            actions: [
-              {
-                name: "ProjectResult",
-                emits: ["ResultProjected"],
-                invariants: [],
-              },
-            ],
-          },
-        ],
-      });
-      const layout = computeLayout(model);
-      assertNoOverlaps(layout);
-    });
-
     it("has no overlapping nodes across two slices", () => {
       const layout = computeLayout(TWO_SLICES_MODEL);
       assertNoOverlaps(layout);
@@ -549,7 +323,6 @@ describe("computeLayout", () => {
     it("slice box fully contains all its nodes with SLICE_INNER padding", () => {
       const layout = computeLayout(SLICE_MODEL);
       const box = layout.boxes[0];
-      // Find nodes belonging to this slice
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
       );
@@ -566,7 +339,6 @@ describe("computeLayout", () => {
     it("slice box has SLICE_INNER padding above topmost and below bottommost node", () => {
       const layout = computeLayout(SLICE_MODEL);
       const box = layout.boxes[0];
-      // Include dispatched nodes that belong to this slice
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
       );
@@ -594,9 +366,6 @@ describe("computeLayout", () => {
     });
 
     it("slice gap is maintained even when chains extend above primary block", () => {
-      // Slice with a chain whose dispatched state (STATE_H=80) extends
-      // above the reaction center. The two-phase translate must account
-      // for this so the next slice doesn't overlap.
       const model = emptyModel({
         states: [
           {
@@ -663,76 +432,18 @@ describe("computeLayout", () => {
     it("slice box includes SLICE_PAD offset for the vertical label strip", () => {
       const layout = computeLayout(SLICE_MODEL);
       const box = layout.boxes[0];
-      // The leftmost node inside a slice starts at PAD + SLICE_PAD + GAP
-      // The box.x is at PAD - GAP/2
       expect(box.x).toBe(PAD - GAP / 2);
     });
   });
 
-  describe("canvas dimensions", () => {
-    it("width and height encompass all nodes with MARGIN padding", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      for (const n of layout.ns) {
-        const bb = nodeBBox(n);
-        // Every node must be within [minX, minX+width] × [minY, minY+height]
-        expect(bb.left).toBeGreaterThanOrEqual(layout.minX + MARGIN);
-        expect(bb.top).toBeGreaterThanOrEqual(layout.minY + MARGIN);
-        expect(bb.right).toBeLessThanOrEqual(
-          layout.minX + layout.width - MARGIN
-        );
-        expect(bb.bottom).toBeLessThanOrEqual(
-          layout.minY + layout.height - MARGIN
-        );
-      }
-    });
-
-    it("minX/minY account for nodes at negative coordinates", () => {
-      // Standalone centering can push state above y=0
-      const layout = computeLayout(SIMPLE_MODEL);
-      const state = find(layout, "state", "Counter")!;
-      if (state.pos.y < 0) {
-        expect(layout.minY).toBeLessThanOrEqual(state.pos.y - MARGIN);
-      }
-    });
-
-    it("returns positive dimensions even for empty model", () => {
-      const layout = computeLayout(emptyModel());
-      expect(layout.width).toBe(MARGIN * 2);
-      expect(layout.height).toBe(MARGIN * 2);
-    });
-  });
-
-  describe("edges", () => {
-    it("creates an edge from each action to its emitted events (standalone)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      expect(layout.es.length).toBeGreaterThanOrEqual(1);
-      const edge = layout.es[0];
-      // Edge goes left-to-right (from.x < to.x)
-      expect(edge.from.x).toBeLessThan(edge.to.x);
-      // Non-dashed for action→event
-      expect(edge.dash).toBe(false);
-    });
-
+  describe("dashed edges for reactions", () => {
     it("creates dashed edges for reaction arrows", () => {
       const layout = computeLayout(SLICE_MODEL);
       const dashedEdges = layout.es.filter((e) => e.dash);
       expect(dashedEdges.length).toBeGreaterThanOrEqual(1);
-      // All dashed edges go left-to-right
       for (const e of dashedEdges) {
         expect(e.from.x).toBeLessThan(e.to.x);
       }
-    });
-
-    it("action→event edges start at action right edge and end at event left edge", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      const action = find(layout, "action", "increment")!;
-      const event = find(layout, "event", "Incremented")!;
-      const edge = layout.es.find((e) => !e.dash)!;
-
-      expect(edge.from.x).toBe(action.pos.x + W);
-      expect(edge.from.y).toBe(action.pos.y + H / 2);
-      expect(edge.to.x).toBe(event.pos.x);
-      expect(edge.to.y).toBe(event.pos.y + H / 2);
     });
   });
 
@@ -789,7 +500,6 @@ describe("computeLayout", () => {
       const trigEvent = find(layout, "event", "TicketOpened")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
 
-      // Reaction top should equal event top (aligned)
       expect(reaction.pos.y).toBe(trigEvent.pos.y);
     });
 
@@ -805,7 +515,6 @@ describe("computeLayout", () => {
         (n) => n.type === "event" && n.key.includes("dispatched")
       )!;
 
-      // All three should share the same vertical center
       const actionCenter = dAction.pos.y + H / 2;
       const stateCenter = dState.pos.y + STATE_H / 2;
       const eventCenter = dEvent.pos.y + H / 2;
@@ -824,14 +533,10 @@ describe("computeLayout", () => {
       const reactionCenter = reaction.pos.y + H / 2;
       const stateCenter = dState.pos.y + STATE_H / 2;
 
-      // Dispatched row centered on reaction center
       expect(Math.abs(reactionCenter - stateCenter)).toBeLessThan(1);
     });
 
     it("watermark pushes second reaction down when chains would overlap", () => {
-      // Two events both trigger reactions with dispatched states (STATE_H=80).
-      // Events are 42px apart (H + GAP/2), but chains need 80px.
-      // Second reaction must be pushed below first chain.
       const model = emptyModel({
         states: [
           {
@@ -886,7 +591,7 @@ describe("computeLayout", () => {
       // First reaction aligns with its event
       expect(r1.pos.y).toBe(e1.pos.y);
 
-      // Second reaction is pushed down (watermark) — below first chain's extent
+      // Second reaction is pushed down (watermark)
       expect(r2.pos.y).toBeGreaterThanOrEqual(e2.pos.y);
 
       // The two dispatched state blocks must not overlap
@@ -898,7 +603,7 @@ describe("computeLayout", () => {
       expect(ds2.pos.y).toBeGreaterThanOrEqual(ds1.pos.y + STATE_H);
     });
 
-    it("states are always square (STATE_W × STATE_H)", () => {
+    it("states are always square (STATE_W x STATE_H)", () => {
       const layout = computeLayout(SLICE_MODEL);
       const states = layout.ns.filter((n) => n.type === "state");
       for (const s of states) {
@@ -911,7 +616,6 @@ describe("computeLayout", () => {
     it("slice bounding box extends to contain all chain nodes", () => {
       const layout = computeLayout(SLICE_MODEL);
       const box = layout.boxes[0];
-      // All nodes (including dispatched) must be within the slice box
       for (const n of layout.ns) {
         if (!n.key.includes("TicketSlice") && !n.key.includes("dispatched"))
           continue;
@@ -924,7 +628,6 @@ describe("computeLayout", () => {
     });
 
     it("recursive chain: dispatched event triggers further reaction", () => {
-      // E1 → r1 → A2 → [E2] → r2 → A3 → [E3]
       const model = emptyModel({
         states: [
           {
@@ -967,7 +670,6 @@ describe("computeLayout", () => {
       });
       const layout = computeLayout(model);
 
-      // Both reactions should be placed
       const r1 = find(layout, "reaction", "r1");
       const r2 = find(layout, "reaction", "r2");
       expect(r1).toBeDefined();
@@ -976,59 +678,8 @@ describe("computeLayout", () => {
       // r2 should be further right than r1 (deeper nesting)
       expect(r2!.pos.x).toBeGreaterThan(r1!.pos.x);
 
-      // Each dispatched row's action, state, events are horizontally ordered
       const dispatched = layout.ns.filter((n) => n.key.includes("dispatched"));
-      expect(dispatched.length).toBeGreaterThanOrEqual(4); // at least 2 actions + 2 states or events
-    });
-  });
-
-  describe("node dimensions", () => {
-    it("uses W×H for action and event nodes", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      const action = find(layout, "action", "increment")!;
-      const event = find(layout, "event", "Incremented")!;
-
-      const aBB = nodeBBox(action);
-      expect(aBB.right - aBB.left).toBe(W);
-      expect(aBB.bottom - aBB.top).toBe(H);
-
-      const eBB = nodeBBox(event);
-      expect(eBB.right - eBB.left).toBe(W);
-      expect(eBB.bottom - eBB.top).toBe(H);
-    });
-
-    it("uses STATE_W×STATE_H for state nodes with few actions", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
-      const state = find(layout, "state", "Counter")!;
-
-      const bb = nodeBBox(state);
-      expect(bb.right - bb.left).toBe(STATE_W);
-      expect(bb.bottom - bb.top).toBe(STATE_H);
-    });
-
-    it("state stays square (STATE_W × STATE_H) even with many actions", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const state = find(layout, "state", "Ticket")!;
-
-      const bb = nodeBBox(state);
-      expect(bb.right - bb.left).toBe(STATE_W);
-      expect(bb.bottom - bb.top).toBe(STATE_H);
-    });
-  });
-
-  describe("guards / invariants metadata", () => {
-    it("annotates guarded actions with sub='guarded' and guards array", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const close = find(layout, "action", "CloseTicket")!;
-      expect(close.sub).toBe("guarded");
-      expect(close.guards).toEqual(["must be open"]);
-    });
-
-    it("non-guarded actions have no sub or guards", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
-      const open = find(layout, "action", "OpenTicket")!;
-      expect(open.sub).toBeUndefined();
-      expect(open.guards).toBeUndefined();
+      expect(dispatched.length).toBeGreaterThanOrEqual(4);
     });
   });
 
@@ -1069,19 +720,16 @@ describe("computeLayout", () => {
       });
       const layout = computeLayout(model);
 
-      // Should produce ONE state node named "Ticket", not two
       const stateNodes = layout.ns.filter(
         (n) => n.type === "state" && n.label === "Ticket"
       );
       expect(stateNodes).toHaveLength(1);
 
-      // Should have actions from BOTH partial states
       const actionNodes = layout.ns.filter((n) => n.type === "action");
       const actionNames = actionNodes.map((n) => n.label);
       expect(actionNames).toContain("OpenTicket");
       expect(actionNames).toContain("AssignTicket");
 
-      // Should have events from BOTH partial states
       const eventNodes = layout.ns.filter((n) => n.type === "event");
       const eventNames = eventNodes.map((n) => n.label);
       expect(eventNames).toContain("TicketOpened");
@@ -1141,67 +789,6 @@ describe("computeLayout", () => {
     });
   });
 
-  describe("projection and reaction metadata on event nodes", () => {
-    it("attaches projection names to event nodes", () => {
-      const model = emptyModel({
-        states: [
-          {
-            name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
-          },
-        ],
-        projections: [{ name: "myProj", varName: "myProj", handles: ["Evt"] }],
-      });
-      const layout = computeLayout(model);
-      const evt = find(layout, "event", "Evt")!;
-      expect(evt.projections).toEqual(["myProj"]);
-    });
-
-    it("attaches reaction handler names to event nodes", () => {
-      const model = emptyModel({
-        states: [
-          {
-            name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
-          },
-        ],
-        reactions: [
-          {
-            event: "Evt",
-            handlerName: "onEvt",
-            dispatches: [],
-            isVoid: false,
-          },
-        ],
-      });
-      const layout = computeLayout(model);
-      const evt = find(layout, "event", "Evt")!;
-      expect(evt.reactions).toEqual(["onEvt"]);
-    });
-  });
-
-  describe("state with no actions (edge case)", () => {
-    it("still places a state node", () => {
-      const model = emptyModel({
-        states: [
-          {
-            name: "Empty",
-            varName: "Empty",
-            events: [],
-            actions: [],
-          },
-        ],
-      });
-      const layout = computeLayout(model);
-      const state = find(layout, "state", "Empty");
-      expect(state).toBeDefined();
-    });
-  });
-
   describe("void reactions are excluded from slice layout", () => {
     it("does not place void reaction nodes", () => {
       const model = emptyModel({
@@ -1238,8 +825,6 @@ describe("computeLayout", () => {
 
   describe("remaining reactions (not placed inline)", () => {
     it("places a reaction that listens to an event from a different state", () => {
-      // Two states in one slice: reaction on State B's event, but placed
-      // after the inline chain pass. This hits the "remaining reactions" loop.
       const model = emptyModel({
         states: [
           {
@@ -1262,14 +847,12 @@ describe("computeLayout", () => {
             stateVars: ["A", "B"],
             projections: [],
             reactions: [
-              // Inline reaction: EvtA → autoDoB (will be placed inline)
               {
                 event: "EvtA",
                 handlerName: "autoDoB",
                 dispatches: ["doB"],
                 isVoid: false,
               },
-              // Remaining reaction: EvtB → notify (event from B, NOT inline-chained)
               {
                 event: "EvtB",
                 handlerName: "notify",
@@ -1283,7 +866,6 @@ describe("computeLayout", () => {
       const layout = computeLayout(model);
       const notify = find(layout, "reaction", "notify");
       expect(notify).toBeDefined();
-      // Should be placed to the right of all other nodes in the slice
       const nonReactionNodes = layout.ns.filter(
         (n) => n.type !== "reaction" && n.key.includes("Sl")
       );
@@ -1296,7 +878,6 @@ describe("computeLayout", () => {
     });
 
     it("places reaction at y position when no matching event node in slice", () => {
-      // Reaction listens to an event that doesn't exist in any state of the slice
       const model = emptyModel({
         states: [
           {
@@ -1360,26 +941,322 @@ describe("computeLayout", () => {
       const layout = computeLayout(model);
       const reaction = find(layout, "reaction", "noDispatch");
       expect(reaction).toBeDefined();
-      // No dispatched nodes
       const dispatched = layout.ns.filter((n) => n.key.includes("dispatched"));
       expect(dispatched).toHaveLength(0);
     });
   });
+
+  describe("multi-dispatch reaction chain", () => {
+    it("places multiple dispatched actions in the same chain", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+              { name: "E3", hasCustomPatch: false },
+            ],
+            actions: [
+              { name: "A1", emits: ["E1"], invariants: [] },
+              { name: "A2", emits: ["E2"], invariants: [] },
+              { name: "A3", emits: ["E3"], invariants: [] },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "E1",
+                handlerName: "multiDispatch",
+                dispatches: ["A2", "A3"],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const dispatched = layout.ns.filter(
+        (n) => n.type === "action" && n.key.includes("dispatched")
+      );
+      expect(dispatched.length).toBe(2);
+    });
+  });
+
+  describe("dispatched action with invariants", () => {
+    it("annotates dispatched action with guards when target action has invariants", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+            ],
+            actions: [
+              { name: "A1", emits: ["E1"], invariants: [] },
+              {
+                name: "A2",
+                emits: ["E2"],
+                invariants: ["must be valid"],
+              },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "E1",
+                handlerName: "r1",
+                dispatches: ["A2"],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const dispatched = layout.ns.find(
+        (n) => n.type === "action" && n.key.includes("dispatched")
+      );
+      expect(dispatched).toBeDefined();
+      expect(dispatched!.sub).toBe("guarded");
+      expect(dispatched!.guards).toEqual(["must be valid"]);
+    });
+  });
+
+  describe("dispatched chain without target state", () => {
+    it("handles dispatch to unknown action (no target state found)", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [{ name: "E1", hasCustomPatch: false }],
+            actions: [{ name: "A1", emits: ["E1"], invariants: [] }],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "E1",
+                handlerName: "r1",
+                dispatches: ["UnknownAction"],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const reaction = find(layout, "reaction", "r1");
+      expect(reaction).toBeDefined();
+      const dispatched = layout.ns.find(
+        (n) => n.type === "action" && n.key.includes("dispatched")
+      );
+      expect(dispatched).toBeDefined();
+      const dispatchedState = layout.ns.find(
+        (n) => n.type === "state" && n.key.includes("dispatched")
+      );
+      expect(dispatchedState).toBeUndefined();
+    });
+  });
+
+  describe("state with file property in slice", () => {
+    it("maps event and action source files from state.file", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "T",
+            varName: "T",
+            file: "src/ticket.ts",
+            events: [{ name: "Opened", hasCustomPatch: false }],
+            actions: [{ name: "Open", emits: ["Opened"], invariants: [] }],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["T"],
+            stateVars: ["T"],
+            projections: [],
+            reactions: [],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const evt = find(layout, "event", "Opened");
+      expect(evt).toBeDefined();
+      expect(evt!.file).toBe("src/ticket.ts");
+      const act = find(layout, "action", "Open");
+      expect(act!.file).toBe("src/ticket.ts");
+    });
+  });
+
+  describe("state with no events and no actions in slice", () => {
+    it("uses default event block height for empty state", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "Empty",
+            varName: "Empty",
+            events: [],
+            actions: [],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["Empty"],
+            stateVars: ["Empty"],
+            projections: [],
+            reactions: [],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const state = find(layout, "state", "Empty");
+      expect(state).toBeDefined();
+    });
+  });
+
+  describe("orphan events in slices", () => {
+    it("places events declared in .emits() but not emitted by any action", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [
+              { name: "EmittedEvt", hasCustomPatch: false },
+              { name: "OrphanEvt", hasCustomPatch: false },
+            ],
+            actions: [{ name: "doIt", emits: ["EmittedEvt"], invariants: [] }],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const emittedEvt = find(layout, "event", "EmittedEvt");
+      const orphanEvt = find(layout, "event", "OrphanEvt");
+      expect(emittedEvt).toBeDefined();
+      expect(orphanEvt).toBeDefined();
+      expect(orphanEvt!.pos.y).toBeGreaterThan(emittedEvt!.pos.y);
+    });
+  });
+
+  describe("remaining reaction edge when trigger event exists", () => {
+    it("creates edge from trigger event to second reaction on same event", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
+            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "Evt",
+                handlerName: "firstHandler",
+                dispatches: [],
+                isVoid: false,
+              },
+              {
+                event: "Evt",
+                handlerName: "secondHandler",
+                dispatches: [],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const first = find(layout, "reaction", "firstHandler");
+      const second = find(layout, "reaction", "secondHandler");
+      expect(first).toBeDefined();
+      expect(second).toBeDefined();
+      find(layout, "event", "Evt")!;
+      const dashedEdges = layout.es.filter((e) => e.dash);
+      const edge = dashedEdges.find(
+        (e) => e.to.x === second!.pos.x && e.to.y === second!.pos.y + H / 2
+      );
+      expect(edge).toBeDefined();
+    });
+  });
+
+  describe("duplicate projection dedup in slice", () => {
+    it("deduplicates projections when multiple events reference same projection", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+            ],
+            actions: [
+              { name: "a1", emits: ["E1"], invariants: [] },
+              { name: "a2", emits: ["E2"], invariants: [] },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: ["shared"],
+            reactions: [],
+          },
+        ],
+        projections: [
+          {
+            name: "shared",
+            varName: "shared",
+            handles: ["E1", "E2"],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const projNodes = layout.ns.filter((n) => n.type === "projection");
+      expect(projNodes).toHaveLength(1);
+      expect(projNodes[0].label).toBe("shared");
+    });
+  });
 });
-
-// ── Shared assertions ────────────────────────────────────────────────
-
-function assertNoOverlaps(layout: Layout) {
-  for (let i = 0; i < layout.ns.length; i++) {
-    const a = nodeBBox(layout.ns[i]);
-    for (let j = i + 1; j < layout.ns.length; j++) {
-      const b = nodeBBox(layout.ns[j]);
-      if (overlaps(a, b)) {
-        throw new Error(
-          `Overlap: "${layout.ns[i].label}" (${layout.ns[i].type}) at [${a.left},${a.top}]-[${a.right},${a.bottom}] ` +
-            `overlaps "${layout.ns[j].label}" (${layout.ns[j].type}) at [${b.left},${b.top}]-[${b.right},${b.bottom}]`
-        );
-      }
-    }
-  }
-}

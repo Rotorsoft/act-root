@@ -53,6 +53,8 @@ export type SliceNode = {
   stateVars: string[]; // original variable names from .withState()
   projections: string[];
   reactions: ReactionNode[];
+  error?: string; // extraction/compilation error for this slice
+  file?: string; // source file path
   line?: number;
 };
 

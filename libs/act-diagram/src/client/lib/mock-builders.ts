@@ -6,6 +6,9 @@
 import { z } from "zod";
 import type { ReactionNode } from "../types/index.js";
 
+/** Shared no-op function used as Proxy targets (body is never reached through the proxy) */
+export function proxyTarget() {}
+
 function attachEmit(
   info: { actions: Record<string, any>; events: Record<string, any> },
   actionName: string,
@@ -31,16 +34,14 @@ function attachEmit(
     // the handler with Proxy-based dummy args to capture event name
     if (emits.length === 0) {
       try {
-        /* v8 ignore start -- proxy trap lambdas are not reliably instrumented */
         const deepProxy: any = new Proxy(
           {},
           {
             get: () => deepProxy,
-            apply: () => deepProxy,
             has: () => true,
           }
         );
-        const proxyFn = new Proxy(function () {}, {
+        const proxyFn = new Proxy(proxyTarget, {
           get: () => deepProxy,
           apply: () => deepProxy,
         });
@@ -53,13 +54,10 @@ function attachEmit(
             },
           }
         );
-        /* v8 ignore stop */
         const result = handler(dummyArg, dummyArg, dummyArg);
-        /* v8 ignore start -- conditional push after proxy execution */
         if (Array.isArray(result) && typeof result[0] === "string") {
           emits.push(result[0]);
         }
-        /* v8 ignore stop */
       } catch {
         // Proxy execution failed — keep emits empty
       }
@@ -146,7 +144,6 @@ function captureDispatches(handler: any): string[] {
         return Promise.resolve([]);
       },
     };
-    /* v8 ignore start -- proxy trap lambdas */
     const mockEvent = new Proxy({} as Record<string, unknown>, {
       get: (_, prop) =>
         prop === "stream"
@@ -155,7 +152,6 @@ function captureDispatches(handler: any): string[] {
             ? new Proxy({}, { get: () => "" })
             : "",
     });
-    /* v8 ignore stop */
     const result = handler(mockEvent, "mock", mockApp);
     // Swallow async rejections (handlers that access db, etc.)
     if (result && typeof result.catch === "function") {
@@ -189,11 +185,11 @@ export function mockSlice(onBuild?: (info: any) => void) {
 
   const builder: any = {
     withState(s: any) {
-      info.states.push(s);
+      info.states.push(s ?? null);
       return builder;
     },
     withProjection(p: any) {
-      info.projections.push(p);
+      if (p) info.projections.push(p);
       return builder;
     },
     on(eventName: string) {
@@ -274,15 +270,17 @@ export function mockAct(onBuild?: (info: any) => void) {
 
   const builder: any = {
     withState(s: any) {
-      info.states.push(s);
+      info.states.push(s ?? null);
       return builder;
     },
     withSlice(s: any) {
-      info.slices.push(s);
+      // Always push (even null/undefined) to preserve positional alignment
+      // with slice variable names extracted from .withSlice(VAR) in source
+      info.slices.push(s ?? null);
       return builder;
     },
     withProjection(p: any) {
-      info.projections.push(p);
+      if (p) info.projections.push(p);
       return builder;
     },
     withActor: () => builder,
@@ -349,7 +347,6 @@ export const MODULES: Record<string, Record<string, unknown>> = {
     slice: mockSlice,
     projection: mockProjection,
     act: mockAct,
-    /* v8 ignore start -- mock store methods are exercised via integration */
     store: () => ({
       seed: () => Promise.resolve(),
       drop: () => Promise.resolve(),
@@ -358,7 +355,6 @@ export const MODULES: Record<string, Record<string, unknown>> = {
       dispose: () => Promise.resolve(),
     }),
     dispose: () => () => Promise.resolve(),
-    /* v8 ignore stop */
     ZodEmpty: z.record(z.string(), z.never()),
     InvariantError,
   },
@@ -388,6 +384,6 @@ export function unknownModuleProxy(): Record<string, unknown> {
       return true;
     },
   };
-  const proxy: any = new Proxy(function () {}, handler);
+  const proxy: any = new Proxy(proxyTarget, handler);
   return proxy;
 }

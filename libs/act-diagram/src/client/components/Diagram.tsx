@@ -28,7 +28,8 @@ const COLORS = {
   event: { bg: "#c2410c", border: "#f97316", text: "#fed7aa" },
   state: { bg: "#a16207", border: "#eab308", text: "#fef08a" },
   reaction: { bg: "#7e22ce", border: "#a855f7", text: "#d8b4fe" },
-  projection: { bg: "#15803d", border: "#22c55e", text: "#bbf7d0" },
+  projection: { bg: "#059669", border: "#34d399", text: "#6ff7b5" },
+  error: { bg: "#991b1b", border: "#ef4444", text: "#fca5a5" },
 };
 
 /** Semi-transparent version of a hex color for box fills */
@@ -58,7 +59,10 @@ function splitLabel(label: string, maxChars = 16): string[] {
 function formatModelTree(model: DomainModel): string {
   const lines: string[] = [];
   for (const entry of model.entries) {
-    for (const sl of entry.slices) {
+    const sortedSlices = [...entry.slices].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+    for (const sl of sortedSlices) {
       lines.push(`Slice: ${sl.name}`);
       for (const stKey of sl.stateVars) {
         const st = entry.states.find((s) => s.varName === stKey);
@@ -93,6 +97,15 @@ function formatModelTree(model: DomainModel): string {
       lines.push(
         `⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
       );
+    }
+    // Errors section
+    const errors = entry.slices.filter((sl) => sl.error);
+    if (errors.length > 0) {
+      lines.push("");
+      lines.push("Errors:");
+      for (const sl of errors) {
+        lines.push(`  ⚠ ${sl.name}: ${sl.error}`);
+      }
     }
   }
   return lines.join("\n");
@@ -210,10 +223,27 @@ export function Diagram({
   const onUp = useCallback(() => {
     drag.current = false;
   }, []);
-  const { ns, es, boxes, minX, minY, width, height } = useMemo(
-    () => computeLayout(viewModel),
-    [viewModel]
-  );
+  const { ns, es, boxes, minX, minY, width, height, layoutError } =
+    useMemo(() => {
+      try {
+        return {
+          ...computeLayout(viewModel),
+          layoutError: undefined as string | undefined,
+        };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        return {
+          ns: [],
+          es: [],
+          boxes: [],
+          minX: 0,
+          minY: 0,
+          width: 100,
+          height: 100,
+          layoutError: msg,
+        };
+      }
+    }, [viewModel]);
 
   /** Compute the zoom + pan that fits the diagram in the container */
   const fitTransform = useCallback(() => {
@@ -243,6 +273,14 @@ export function Diagram({
     const id = requestAnimationFrame(() => reset());
     return () => cancelAnimationFrame(id);
   }, [reset]);
+
+  if (layoutError) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-red-400">
+        Layout error: {layoutError}
+      </div>
+    );
+  }
 
   if (viewModel.states.length === 0 && viewModel.projections.length === 0) {
     return (
@@ -428,49 +466,81 @@ export function Diagram({
         <svg width="100%" height="100%" className="select-none">
           <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
             {/* Slice boundaries */}
-            {boxes.map((b) => (
-              <g key={b.label}>
-                <rect
-                  x={b.x}
-                  y={b.y}
-                  width={b.w}
-                  height={b.h}
-                  rx={8}
-                  fill={COLORS.state.bg}
-                  fillOpacity={0.1}
-                  stroke={COLORS.state.border}
-                  strokeWidth={1.5}
-                  strokeOpacity={0.4}
-                />
-                {/* Vertical label strip on left — rounded left, flat right */}
-                <clipPath id={`clip-${b.label}`}>
-                  <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
-                </clipPath>
-                <rect
-                  x={b.x}
-                  y={b.y}
-                  width={SLICE_PAD + 8}
-                  height={b.h}
-                  rx={8}
-                  fill="#a16207"
-                  fillOpacity={0.25}
-                  clipPath={`url(#clip-${b.label})`}
-                />
-                {/* Vertical text — clickable to navigate to slice definition */}
-                <text
-                  x={b.x + SLICE_PAD / 2}
-                  y={b.y + b.h / 2}
-                  fill={COLORS.state.text}
-                  className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
-                  textAnchor="middle"
-                  dominantBaseline="central"
-                  transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
-                  onClick={() => onClickElement?.(b.label)}
-                >
-                  {b.label}
-                </text>
-              </g>
-            ))}
+            {boxes.map((b) => {
+              const isError = !!b.error;
+              const boxColor = isError ? COLORS.error : COLORS.state;
+              const stripFill = isError ? COLORS.error.bg : "#a16207";
+              return (
+                <g key={b.label}>
+                  <rect
+                    x={b.x}
+                    y={b.y}
+                    width={b.w}
+                    height={b.h}
+                    rx={8}
+                    fill={boxColor.bg}
+                    fillOpacity={0.1}
+                    stroke={boxColor.border}
+                    strokeWidth={1.5}
+                    strokeOpacity={isError ? 0.7 : 0.4}
+                  />
+                  {/* Vertical label strip on left — rounded left, flat right */}
+                  <clipPath id={`clip-${b.label}`}>
+                    <rect x={b.x} y={b.y} width={SLICE_PAD} height={b.h} />
+                  </clipPath>
+                  <rect
+                    x={b.x}
+                    y={b.y}
+                    width={SLICE_PAD + 8}
+                    height={b.h}
+                    rx={8}
+                    fill={stripFill}
+                    fillOpacity={0.25}
+                    clipPath={`url(#clip-${b.label})`}
+                  />
+                  {/* Vertical text — clickable to navigate to slice definition */}
+                  <text
+                    x={b.x + SLICE_PAD / 2}
+                    y={b.y + b.h / 2}
+                    fill={isError ? COLORS.error.text : COLORS.state.text}
+                    className="cursor-pointer text-[10px] font-semibold hover:opacity-80"
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    transform={`rotate(-90, ${b.x + SLICE_PAD / 2}, ${b.y + b.h / 2})`}
+                    onClick={() => onClickElement?.(b.label)}
+                  >
+                    {b.label}
+                  </text>
+                  {/* Error message inside the slice box */}
+                  {isError && (
+                    <foreignObject
+                      x={b.x + SLICE_PAD + 8}
+                      y={b.y + b.h - 28}
+                      width={b.w - SLICE_PAD - 16}
+                      height={20}
+                    >
+                      <div
+                        style={{
+                          fontSize: 9,
+                          fontFamily: "ui-monospace, monospace",
+                          color: COLORS.error.text,
+                          lineHeight: 1.4,
+                          wordBreak: "break-word",
+                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          height: "100%",
+                        }}
+                      >
+                        {b
+                          .error!.replace(/^.*Error:\s*/, "")
+                          .replace(/\n.*$/s, "")}
+                      </div>
+                    </foreignObject>
+                  )}
+                </g>
+              );
+            })}
 
             {/* Edges */}
             {es.map((e, i) => {

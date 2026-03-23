@@ -5,6 +5,7 @@ import {
   mockSlice,
   mockState,
   MODULES,
+  proxyTarget,
   unknownModuleProxy,
 } from "../src/client/lib/mock-builders.js";
 
@@ -87,7 +88,7 @@ describe("mockState", () => {
     expect(result._tag).toBe("State");
   });
 
-  it("handles emit with function handler that references events by string", () => {
+  it("handles emit with function handler that references events by string (Strategy 1)", () => {
     const built: any[] = [];
     mockState({ S: {} }, (info) => built.push(info))
       .init()
@@ -96,18 +97,22 @@ describe("mockState", () => {
       .emit((action: any) => ["Created", { v: action.v }])
       .build();
 
-    // Strategy 2 (proxy execution) should capture "Created"
+    // Strategy 1 (string search) finds "Created" in handler source
     expect(built[0].actions.__emits_create).toContain("Created");
   });
 
   it("exercises proxy traps directly in attachEmit Strategy 2", () => {
     // Build a state where the handler function body has no string references
-    // to event names, forcing proxy execution path
+    // to event names, forcing proxy execution path.
+    // The event name must NOT appear as a quoted string in the handler source,
+    // otherwise Strategy 1 (string search) would find it first.
     const built: any[] = [];
-    const events = { MyEvt: {} };
 
-    // Use mockState directly, set events, then call emit with a handler
-    // that returns ["MyEvt", data] through proxy interaction
+    // The event name that Strategy 1 won't find in handler source
+    const eventName = "Cre" + "ated"; // concatenated so string search won't find it
+    const events: Record<string, any> = {};
+    events[eventName] = {};
+
     mockState({ S: {} }, (info) => built.push(info))
       .init()
       .emits(events)
@@ -117,18 +122,68 @@ describe("mockState", () => {
         const val = arg.someProperty;
         // Call proxyFn to trigger proxyFn.apply → deepProxy
         const result = val("test");
-        // Access deepProxy to trigger deepProxy.get
+        // Access deepProxy property to trigger deepProxy.get
         const nested = result.deep;
         // Check 'in' to trigger deepProxy.has
         if ("x" in nested) {
           void nested;
         }
-        // Return array with event name from actual events object
-        return ["MyEvt", {}];
+        // Return array with event name — constructed dynamically
+        const name = ["Cre", "ated"].join("");
+        return [name, {}];
       })
       .build();
 
-    expect(built[0].actions.__emits_action1).toContain("MyEvt");
+    expect(built[0].actions.__emits_action1).toContain("Created");
+  });
+
+  it("exercises dummyArg Symbol access returning undefined (line 50-51)", () => {
+    // When the handler accesses a Symbol property on dummyArg,
+    // the get trap returns undefined (not proxyFn)
+    const built: any[] = [];
+    const eventName = "Fin" + "ished";
+    const events: Record<string, any> = {};
+    events[eventName] = {};
+
+    mockState({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits(events)
+      .on({ action1: {} })
+      .emit(function handler(arg: any) {
+        // Symbol access triggers dummyArg.get with non-string prop → undefined
+        const sym = arg[Symbol.iterator];
+        void sym; // just access it, don't use
+        const name = ["Fin", "ished"].join("");
+        return [name, {}];
+      })
+      .build();
+
+    expect(built[0].actions.__emits_action1).toContain("Finished");
+  });
+
+  it("exercises proxyFn.get trap (line 42-43)", () => {
+    // When handler accesses a property on proxyFn (returned by dummyArg.get),
+    // proxyFn.get returns deepProxy
+    const built: any[] = [];
+    const eventName = "Up" + "dated";
+    const events: Record<string, any> = {};
+    events[eventName] = {};
+
+    mockState({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits(events)
+      .on({ action1: {} })
+      .emit(function handler(arg: any) {
+        // arg.prop returns proxyFn, accessing .something on proxyFn triggers proxyFn.get
+        const fn = arg.myMethod;
+        const deepResult = fn.nestedProp; // proxyFn.get → deepProxy
+        void deepResult;
+        const name = ["Up", "dated"].join("");
+        return [name, {}];
+      })
+      .build();
+
+    expect(built[0].actions.__emits_action1).toContain("Updated");
   });
 
   it("handles emit with function that accesses event properties via proxy", () => {
@@ -241,6 +296,15 @@ describe("mockSlice", () => {
     expect(built[0].projections).toContain(fakeProj);
   });
 
+  it("withProjection(null) does not add to projections (line 192)", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .withProjection(null)
+      .build();
+
+    expect(built[0].projections).toHaveLength(0);
+  });
+
   it("captures reactions with .to()", () => {
     const built: any[] = [];
     mockSlice((info) => built.push(info))
@@ -349,6 +413,36 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toContain("ActionFromData");
   });
 
+  it("captureDispatches swallows rejected promise from async handler (line 155)", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .on("Evt")
+      .do(async function rejectHandler(_event: any, _stream: any, app: any) {
+        await app.do("CapturedAction", "s", {});
+        throw new Error("async rejection after dispatch");
+      })
+      .to(() => "x")
+      .build();
+
+    // The dispatch should still be captured despite the handler rejecting
+    expect(built[0].reactions[0].dispatches).toContain("CapturedAction");
+  });
+
+  it("captureDispatches mockEvent returns empty string for unknown props (line 151)", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .on("Evt")
+      .do(async function propAccessor(event: any, _stream: any, app: any) {
+        // Access a property that is neither "stream" nor "data"
+        const id = event.id; // triggers the "" fallback
+        await app.do("ActionFromId", id || "default", {});
+      })
+      .to(() => "x")
+      .build();
+
+    expect(built[0].reactions[0].dispatches).toContain("ActionFromId");
+  });
+
   it("captureDispatches handles handler that throws", () => {
     const built: any[] = [];
     mockSlice((info) => built.push(info))
@@ -439,6 +533,15 @@ describe("mockAct", () => {
     expect(built[0].projections).toContain(fakeProj);
   });
 
+  it("withState(null) pushes null to states (line 273)", () => {
+    const built: any[] = [];
+    mockAct((info) => built.push(info))
+      .withState(null)
+      .build();
+
+    expect(built[0].states).toContain(null);
+  });
+
   it("captures reactions with .to() and .void()", () => {
     const built: any[] = [];
     mockAct((info) => built.push(info))
@@ -482,6 +585,13 @@ describe("mockAct", () => {
     // settle and start_correlations return the stub (noop)
     expect(stub.settle()).toBe(stub);
     expect(stub.start_correlations()).toBe(stub);
+  });
+});
+
+describe("proxyTarget", () => {
+  it("is a callable no-op function used as Proxy target", () => {
+    expect(typeof proxyTarget).toBe("function");
+    expect(proxyTarget()).toBeUndefined();
   });
 });
 
@@ -541,9 +651,11 @@ describe("MODULES", () => {
     await expect(store.dispose()).resolves.toBeUndefined();
   });
 
-  it("dispose() returns a function", () => {
+  it("dispose() returns a function that returns a promise", async () => {
     const dispose = (MODULES["@rotorsoft/act"].dispose as any)();
     expect(typeof dispose).toBe("function");
+    // Call the inner function to cover line 354
+    await expect(dispose()).resolves.toBeUndefined();
   });
 
   it("has zod module", () => {

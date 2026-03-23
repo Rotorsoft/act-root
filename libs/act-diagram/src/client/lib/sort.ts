@@ -33,8 +33,7 @@ export function topoSort(tsFiles: FileTab[]): FileTab[] {
   for (const f of tsFiles) inDegree.set(strip(f.path), 0);
   for (const [, fileDeps] of deps) {
     for (const dep of fileDeps) {
-      /* v8 ignore next -- dep always seeded in inDegree map */
-      inDegree.set(dep, (inDegree.get(dep) ?? 0) + 1);
+      inDegree.set(dep, inDegree.get(dep)! + 1);
     }
   }
 
