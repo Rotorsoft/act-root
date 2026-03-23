@@ -29,3 +29,4 @@ export type {
 } from "./client/types/domain-model.js";
 export type { FileTab } from "./client/types/file-tab.js";
 export type { DiagramMessage, HostMessage } from "./client/types/protocol.js";
+// v0.1.1
