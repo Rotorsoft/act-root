@@ -278,7 +278,9 @@ export function mockAct(onBuild?: (info: any) => void) {
       return builder;
     },
     withSlice(s: any) {
-      if (s) info.slices.push(s);
+      // Always push (even null/undefined) to preserve positional alignment
+      // with slice variable names extracted from .withSlice(VAR) in source
+      info.slices.push(s ?? null);
       return builder;
     },
     withProjection(p: any) {
