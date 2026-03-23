@@ -506,6 +506,7 @@ export function extractModel(files: FileTab[]): {
         projections: [],
         reactions: [],
         error: s._error as string,
+        file: s._sourceFile as string | undefined,
       });
       continue;
     }
@@ -532,6 +533,7 @@ export function extractModel(files: FileTab[]): {
         stateVars: sliceStateNames,
         projections: projNames,
         reactions: s.reactions ?? [],
+        file: s._sourceFile as string | undefined,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

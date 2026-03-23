@@ -134,6 +134,36 @@ local function setup_autocmd()
     end,
   })
 
+  -- Send LSP diagnostics to relay so browser can mark slices with errors
+  vim.api.nvim_create_autocmd("DiagnosticChanged", {
+    group = augroup,
+    callback = function()
+      if not tcp.is_connected() then return end
+      if not project_root then return end
+
+      -- Collect errors per file
+      local file_errors = {}
+      local diagnostics = vim.diagnostic.get(nil, { severity = vim.diagnostic.severity.ERROR })
+      for _, d in ipairs(diagnostics) do
+        local bufnr = d.bufnr
+        if bufnr then
+          local abs_path = vim.api.nvim_buf_get_name(bufnr)
+          if vim.startswith(abs_path, project_root .. "/") then
+            local rel = abs_path:sub(#project_root + 2)
+            if not file_errors[rel] then
+              file_errors[rel] = d.message
+            end
+          end
+        end
+      end
+
+      tcp.send({
+        type = "diagnostics",
+        errors = file_errors,
+      })
+    end,
+  })
+
   -- Debounced live refresh as you type
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
     group = augroup,

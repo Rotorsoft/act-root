@@ -54,6 +54,7 @@ export type SliceNode = {
   projections: string[];
   reactions: ReactionNode[];
   error?: string; // extraction/compilation error for this slice
+  file?: string; // source file path
   line?: number;
 };
 

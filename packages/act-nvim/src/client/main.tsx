@@ -54,6 +54,7 @@ const RECONNECT_MS = 1000;
 function App() {
   const [files, setFiles] = useState<FileTab[]>([]);
   const [connected, setConnected] = useState(false);
+  const [fileErrors, setFileErrors] = useState<Record<string, string>>({});
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -74,6 +75,10 @@ function App() {
           const raw = JSON.parse(e.data as string) as Record<string, unknown>;
           if (raw.type === "projectName") {
             document.title = `Act — ${raw.name as string}`;
+            return;
+          }
+          if (raw.type === "diagnostics") {
+            setFileErrors((raw.errors as Record<string, string>) ?? {});
             return;
           }
           const msg = raw as unknown as HostMessage;
@@ -140,6 +145,26 @@ function App() {
       };
     try {
       const { model, error } = extractModel(files);
+      // Overlay LSP diagnostics: mark slices whose source file has errors
+      for (const slice of model.slices) {
+        if (slice.file && fileErrors[slice.file] && !slice.error) {
+          slice.error = fileErrors[slice.file];
+        }
+      }
+      // Also mark slices whose states come from files with errors
+      for (const slice of model.slices) {
+        if (slice.error) continue;
+        for (const st of model.states) {
+          if (
+            slice.states.includes(st.varName) &&
+            st.file &&
+            fileErrors[st.file]
+          ) {
+            slice.error = fileErrors[st.file];
+            break;
+          }
+        }
+      }
       const warnings = validate(model);
       return { model, warnings, error };
     } catch (e) {
@@ -157,7 +182,7 @@ function App() {
         error: msg,
       };
     }
-  }, [files]);
+  }, [files, fileErrors]);
 
   const handleClick = useCallback(
     (name: string, type?: string, file?: string) => {

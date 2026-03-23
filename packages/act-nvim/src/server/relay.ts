@@ -177,7 +177,11 @@ async function handleNvimMessage(msg: {
     }
 
     case "fileChanged": {
-      // Neovim buffer save — forward to browser
+      sendToBrowser(msg);
+      break;
+    }
+
+    case "diagnostics": {
       sendToBrowser(msg);
       break;
     }
