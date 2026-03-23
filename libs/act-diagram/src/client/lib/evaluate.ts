@@ -146,6 +146,20 @@ function execute(files: FileTab[]): {
       )
     );
 
+    // Step 1: scan all source files for slice declarations
+    const expectedSlices = new Map<string, string>(); // name → file path
+    for (const file of sorted) {
+      const sliceDecls = file.content.matchAll(
+        /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*slice\s*\(\s*\)/g
+      );
+      for (const m of sliceDecls) {
+        expectedSlices.set(m[1], file.path);
+      }
+    }
+
+    // Step 2: eval all files (build slices via mock builders)
+    const fileErrors = new Map<string, string>(); // file path → error message
+
     for (const file of sorted) {
       _currentFile = file.path;
       const js = transpile(file.content);
@@ -159,12 +173,6 @@ function execute(files: FileTab[]): {
       let wsm;
       while ((wsm = wsRe.exec(js)) !== null) {
         if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
-      }
-      const sliceVarNames: string[] = [];
-      const svRe = /(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*slice\s*\(/g;
-      let svm;
-      while ((svm = svRe.exec(js)) !== null) {
-        sliceVarNames.push(svm[1]);
       }
 
       const fileRequire = (mod: string) => resolveModule(mod, key);
@@ -195,36 +203,48 @@ function execute(files: FileTab[]): {
         );
         fn(fileRequire, fileExp, { exports: fileExp });
       } catch (evalErr: unknown) {
-        // Eval failed — create error placeholders for slices defined in this file
+        // Just record the error — Step 3 creates placeholders for missing slices
         const errMsg =
           evalErr instanceof Error ? evalErr.message : String(evalErr);
-        for (const name of sliceVarNames) {
-          __built__.slices.push({
-            _tag: "Slice",
-            _varName: name,
-            _sourceFile: file.path,
-            states: [],
-            projections: [],
-            reactions: [],
-            _error: errMsg,
-          });
-        }
+        fileErrors.set(file.path, errMsg);
       }
 
       // Tag slices with names from .withSlice(VAR) — only for acts built in THIS file
       if (sliceNamesInAct.length > 0) {
         for (const actObj of __built__.acts) {
           if ((actObj._sourceFile as string) !== file.path) continue;
-          /* v8 ignore next -- actObj.slices always populated by mockAct */
           const actSlices = (actObj.slices as any[]) || [];
           for (
             let ai = 0;
             ai < Math.min(sliceNamesInAct.length, actSlices.length);
             ai++
           ) {
-            if (actSlices[ai]) actSlices[ai]._varName = sliceNamesInAct[ai];
+            if (actSlices[ai]) {
+              actSlices[ai]._varName = sliceNamesInAct[ai];
+            }
           }
         }
+      }
+    }
+
+    // Step 3: create error placeholders for expected slices that weren't built
+    const builtSliceNames = new Set(
+      __built__.slices
+        .filter((s: any) => s && s._tag === "Slice")
+        .map((s: any) => s._varName as string)
+        .filter(Boolean)
+    );
+    for (const [name, filePath] of expectedSlices) {
+      if (!builtSliceNames.has(name)) {
+        __built__.slices.push({
+          _tag: "Slice",
+          _varName: name,
+          _sourceFile: filePath,
+          states: [],
+          projections: [],
+          reactions: [],
+          _error: fileErrors.get(filePath) ?? "Failed to build slice",
+        });
       }
     }
 
@@ -434,6 +454,17 @@ export function extractModel(files: FileTab[]): {
 } {
   const result = execute(files);
   const error = result.error;
+
+  console.log(
+    "[extract] raw:",
+    result.slices.length,
+    "slices,",
+    result.states.length,
+    "states, error:",
+    error ?? "none",
+    "names:",
+    result.slices.map((s: any) => s?._varName ?? s?._tag ?? "null").join(",")
+  );
   const states = result.states.filter((s: any) => s && s._tag);
   const slices = result.slices.filter((s: any) => s && s._tag);
   const projections = result.projections.filter((p: any) => p && p._tag);
@@ -513,8 +544,12 @@ export function extractModel(files: FileTab[]): {
 
     try {
       const sliceStateNames: string[] = [];
+      let missingStates = 0;
       for (const st of s.states) {
-        if (!st || typeof st !== "object" || st._tag !== "State") continue;
+        if (!st || typeof st !== "object" || st._tag !== "State") {
+          missingStates++;
+          continue;
+        }
         addState(model, st);
         const key = (st._modelKey ?? st.name) as string;
         sliceStateNames.push(key);
@@ -534,6 +569,10 @@ export function extractModel(files: FileTab[]): {
         projections: projNames,
         reactions: s.reactions ?? [],
         file: s._sourceFile as string | undefined,
+        error:
+          missingStates > 0
+            ? `${missingStates} state(s) failed to load`
+            : undefined,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -624,46 +663,13 @@ export function extractModel(files: FileTab[]): {
 
       /* v8 ignore next -- _sourceFile always set by capture callback */
       const entryPath = a._sourceFile ?? "app.ts";
-      const actSliceNames = new Set<string>(
-        /* v8 ignore next 5 -- _varName always set by slice tagging */
-        ((a.slices as any[]) ?? []).map(
-          (s: any) =>
-            s._varName ?? s.states?.map((st: any) => st.name).join(", ") ?? ""
-        )
-      );
-      const actStateNames = new Set<string>(
-        ((a.states as any[]) ?? [])
-          .filter((s: any) => s?._tag === "State")
-          /* v8 ignore next -- _modelKey set by addState */
-          .map((s: any) => s._modelKey ?? s.name)
-      );
-      const actProjNames = new Set<string>(
-        ((a.projections as any[]) ?? [])
-          .filter((p: any) => p?._tag === "Projection")
-          .map((p: any) => p.target)
-      );
 
-      // Fallback: if act projections are empty (circular deps), scan source for .withProjection(Var)
-      /* v8 ignore next 9 -- resilience path for circular deps */
-      if (actProjNames.size === 0 && model.projections.length > 0) {
-        const src = files.find((f) => f.path === entryPath)?.content ?? "";
-        const wpRe = /\.withProjection\(\s*(?:\w+\.)*(\w+)\s*\)/g;
-        while (wpRe.exec(src) !== null) {
-          for (const p of model.projections) {
-            actProjNames.add(p.name);
-          }
-        }
-      }
-
-      const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
-      const sliceStateNames = new Set(entrySlices.flatMap((s) => s.states));
-      const allStateNames = new Set([...actStateNames, ...sliceStateNames]);
-
+      // Always show everything found in the project
       model.entries.push({
         path: entryPath,
-        states: model.states.filter((s) => allStateNames.has(s.varName)),
-        slices: entrySlices,
-        projections: model.projections.filter((p) => actProjNames.has(p.name)),
+        states: model.states,
+        slices: model.slices,
+        projections: model.projections,
         reactions: a.reactions ?? [],
       });
     } catch {

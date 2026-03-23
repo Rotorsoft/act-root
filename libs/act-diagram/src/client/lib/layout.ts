@@ -314,10 +314,11 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
   for (const slice of sortedSlices) {
     // Error slices get a minimum-sized box with the error message
-    if (slice.error) {
+    if (slice.error && slice.states.length === 0) {
       const sx = PAD;
       const errorW = Math.max(300, slice.error.length * 5);
-      const errorH = H * 2 + GAP;
+      const nameH = slice.name.length * 7;
+      const errorH = Math.max(H * 2 + GAP, nameH + GAP * 2);
       boxes.push({
         label: slice.name,
         x: sx - GAP / 2,

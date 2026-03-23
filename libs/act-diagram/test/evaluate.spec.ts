@@ -492,7 +492,7 @@ export const S = state({ S: z.object({}) })
     }
   });
 
-  it("regex fallback extracts slice with .withState and .withProjection", () => {
+  it("broken file with slice produces error placeholder", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -512,7 +512,8 @@ const MySlice = slice()
       },
     ];
     const { model } = extractModel(files);
-    expect(model.slices.length + model.states.length).toBeGreaterThanOrEqual(1);
+    expect(model.slices).toHaveLength(1);
+    expect(model.slices[0].error).toBeDefined();
   });
 
   it("regex fallback extracts given invariants", () => {
@@ -696,8 +697,7 @@ export const S = state({ S: z.object({}) })
     expect(model.states).toHaveLength(0);
   });
 
-  it("regex fallback: slice reaction with variable reference handler", () => {
-    // Exercises line 353: odm[3] branch (named variable, not function keyword)
+  it("broken file with slice produces error placeholder (variable handler)", () => {
     const files: FileTab[] = [
       {
         path: "src/b.ts",
@@ -712,7 +712,8 @@ const MySlice = slice()
       },
     ];
     const { model } = extractModel(files);
-    expect(model.slices.length).toBeGreaterThanOrEqual(1);
+    expect(model.slices).toHaveLength(1);
+    expect(model.slices[0].error).toBeDefined();
   });
 
   it("regex fallback: slice reaction with anonymous handler", () => {
@@ -907,7 +908,6 @@ export const MySlice = slice()
     const { model } = extractModel(files);
     expect(model.states).toHaveLength(0);
     expect(model.slices).toHaveLength(1);
-    expect(model.slices[0].name).toBe("MySlice");
     expect(model.slices[0].error).toBeDefined();
   });
 

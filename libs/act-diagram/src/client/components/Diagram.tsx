@@ -211,10 +211,26 @@ export function Diagram({
   const onUp = useCallback(() => {
     drag.current = false;
   }, []);
-  const { ns, es, boxes, minX, minY, width, height } = useMemo(
-    () => computeLayout(viewModel),
-    [viewModel]
-  );
+  const { ns, es, boxes, minX, minY, width, height, layoutError } =
+    useMemo(() => {
+      try {
+        return {
+          ...computeLayout(viewModel),
+          layoutError: undefined as string | undefined,
+        };
+      } catch (e) {
+        return {
+          ns: [],
+          es: [],
+          boxes: [],
+          minX: 0,
+          minY: 0,
+          width: 100,
+          height: 100,
+          layoutError: e instanceof Error ? e.message : String(e),
+        };
+      }
+    }, [viewModel]);
 
   /** Compute the zoom + pan that fits the diagram in the container */
   const fitTransform = useCallback(() => {
@@ -244,6 +260,14 @@ export function Diagram({
     const id = requestAnimationFrame(() => reset());
     return () => cancelAnimationFrame(id);
   }, [reset]);
+
+  if (layoutError) {
+    return (
+      <div className="flex h-full items-center justify-center text-xs text-red-400">
+        Layout error: {layoutError}
+      </div>
+    );
+  }
 
   if (viewModel.states.length === 0 && viewModel.projections.length === 0) {
     return (
@@ -476,15 +500,30 @@ export function Diagram({
                   </text>
                   {/* Error message inside the slice box */}
                   {isError && (
-                    <text
-                      x={b.x + SLICE_PAD + 12}
-                      y={b.y + b.h / 2}
-                      fill={COLORS.error.text}
-                      className="text-[9px]"
-                      dominantBaseline="central"
+                    <foreignObject
+                      x={b.x + SLICE_PAD + 8}
+                      y={b.y + b.h - 28}
+                      width={b.w - SLICE_PAD - 16}
+                      height={20}
                     >
-                      {b.error}
-                    </text>
+                      <div
+                        style={{
+                          fontSize: 9,
+                          fontFamily: "ui-monospace, monospace",
+                          color: COLORS.error.text,
+                          lineHeight: 1.4,
+                          wordBreak: "break-word",
+                          overflow: "hidden",
+                          display: "flex",
+                          alignItems: "center",
+                          height: "100%",
+                        }}
+                      >
+                        {b
+                          .error!.replace(/^.*Error:\s*/, "")
+                          .replace(/\n.*$/s, "")}
+                      </div>
+                    </foreignObject>
                   )}
                 </g>
               );

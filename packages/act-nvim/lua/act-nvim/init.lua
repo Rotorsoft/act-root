@@ -161,6 +161,7 @@ local function setup_autocmd()
         type = "diagnostics",
         errors = file_errors,
       })
+
     end,
   })
 
