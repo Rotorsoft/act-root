@@ -7,7 +7,7 @@
 import type {
   Actor,
   Committed,
-  Dispatcher,
+  IAct,
   Query,
   Schema,
   Schemas,
@@ -57,7 +57,7 @@ export type ReactionHandler<
 > = (
   event: Committed<TEvents, TKey>,
   stream: string,
-  app: Dispatcher<TActions, TActor>
+  app: IAct<TEvents, TActions, TActor>
 ) => Promise<Snapshot<Schema, TEvents> | void>;
 
 /**

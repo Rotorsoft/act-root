@@ -174,22 +174,22 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void app.do("log", target, { message: "test" });
 }
 
-// ── TEST 13: ReactionHandler.app is typed Dispatcher (not any) ──────
+// ── TEST 13: ReactionHandler.app is typed IAct (not any) ────────────
 {
   const _app = act()
     .withState(Counter)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
-      // app should be Dispatcher<A>, not any — autocomplete works
+      // app should be IAct — autocomplete works for do, load, query, query_array
       void app.do("increment", target, { by: 1 });
-      // @ts-expect-error - wrong payload shape for typed Dispatcher
+      // @ts-expect-error - wrong payload shape for typed IAct
       void app.do("increment", target, { wrong: "field" });
     })
     .void()
     .build();
 }
 
-// ── TEST 14: Dispatcher.do() returns typed result (not any) ─────────
+// ── TEST 14: IAct.do() returns typed result (not any) ───────────────
 {
   const app = act().withState(Counter).build();
   void app.do("increment", target, { by: 1 }).then((snapshots) => {
@@ -220,7 +220,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void act().withState(Counter).withProjection(InvalidProj);
 }
 
-// ── TEST 16: Slice .on().do() handler app is typed Dispatcher ───────
+// ── TEST 16: Slice .on().do() handler app is typed IAct ─────────────
 {
   const _s = slice()
     .withState(Counter)
@@ -275,7 +275,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .withProjection(CounterProj)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
-      // Handler receives Dispatcher<A_Counter & A_Logger>
+      // Handler receives IAct<E_Counter & E_Logger, A_Counter & A_Logger>
       void app.do("increment", target, { by: 1 });
       void app.do("log", target, { message: "hello" });
       // @ts-expect-error - wrong action name
@@ -346,7 +346,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
   void app.do("increment", target, { message: "wrong" });
 }
 
-// ── TEST 23: act .on() handler Dispatcher has all actions ───────────
+// ── TEST 23: act .on() handler IAct has all actions ─────────────────
 {
   const CounterSlice = slice().withState(Counter).build();
   const _app = act()
@@ -354,7 +354,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .withState(Logger)
     .on("Incremented")
     .do(async (_event, _stream, app) => {
-      // Dispatcher should see both Counter and Logger actions
+      // IAct should see both Counter and Logger actions
       void app.do("increment", target, { by: 1 });
       void app.do("log", target, { message: "reacted" });
       // @ts-expect-error - wrong action name

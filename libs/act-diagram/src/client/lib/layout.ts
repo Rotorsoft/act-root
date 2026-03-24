@@ -422,38 +422,33 @@ export function computeLayout(viewModel: DomainModel): Layout {
         eventName: string;
         actionName: string;
         h: number;
-        chain?: ChainMeasure;
-        chainReaction?: ReactionDef;
+        chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }>;
       };
       const measuredEvents: EventMeasure[] = [];
       let evtBlockH = 0;
       for (const { eventName: en, actionName } of eventRows) {
-        const rDef = sliceReactionByEvent.get(en);
-        let eventH = H;
-        let chain: ChainMeasure | undefined;
-        let chainReaction: ReactionDef | undefined;
-        if (
-          rDef &&
-          !visitedEvents.has(en) &&
-          !visitedReactions.has(rDef.handlerName)
-        ) {
-          visitedEvents.add(en);
-          visitedReactions.add(rDef.handlerName);
-          chain = measureChain(
-            rDef,
-            sliceReactionByEvent,
-            visitedReactions,
-            viewModel.states
-          );
-          chainReaction = rDef;
-          eventH = Math.max(H, chain.groupH);
+        const chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }> =
+          [];
+        if (!visitedEvents.has(en)) {
+          const rDefs = sliceReactionsByEvent.get(en) ?? [];
+          for (const rDef of rDefs) {
+            if (visitedReactions.has(rDef.handlerName)) continue;
+            visitedReactions.add(rDef.handlerName);
+            const chain = measureChain(
+              rDef,
+              sliceReactionByEvent,
+              visitedReactions,
+              viewModel.states
+            );
+            chains.push({ chain, reaction: rDef });
+          }
+          if (rDefs.length > 0) visitedEvents.add(en);
         }
         measuredEvents.push({
           eventName: en,
           actionName,
-          h: eventH,
-          chain,
-          chainReaction,
+          h: H,
+          chains,
         });
         if (evtBlockH > 0) evtBlockH += GAP / 2;
         // Primary event always claims H in the event column —
@@ -483,12 +478,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       const eventYMap = new Map<string, number>();
 
       for (let ei = 0; ei < measuredEvents.length; ei++) {
-        const {
-          eventName: en,
-          actionName,
-          chain,
-          chainReaction,
-        } = measuredEvents[ei];
+        const { eventName: en, actionName, chains } = measuredEvents[ei];
         ns.push({
           key: `e:${en}:${slice.name}:${actionName}`,
           pos: { x: eventColX, y: evtY },
@@ -500,9 +490,10 @@ export function computeLayout(viewModel: DomainModel): Layout {
         });
         eventYMap.set(en, evtY);
 
-        // Place sub-chain — reaction aligns with event when possible,
-        // pushed down by watermark when previous chains need space
-        if (chain && chainReaction) {
+        // Place all reaction chains for this event — each aligns with
+        // the event when possible, pushed down by watermark when
+        // previous chains need space
+        for (const { chain, reaction: chainReaction } of chains) {
           const rX = eventColX + W + GAP * 3;
           // Reaction must be placed so its dispatched block doesn't
           // overlap previous chains. The block extends dispatchBlockH/2
@@ -599,22 +590,13 @@ export function computeLayout(viewModel: DomainModel): Layout {
       partIdx++;
     }
 
-    // Remaining reactions not already placed inline — stack vertically per event
-    const remainingYByEvent = new Map<string, number>();
+    // Remaining reactions not already placed inline (e.g., reactions on
+    // events not declared in any state within this slice)
     for (const r of slice.reactions) {
       if (r.isVoid || visitedReactions.has(r.handlerName)) continue;
 
-      const trigNode = ns.find(
-        (n) =>
-          n.type === "event" &&
-          n.label === r.event &&
-          n.key.includes(slice.name)
-      );
-      const baseY = trigNode ? trigNode.pos.y : y;
-      const rY = remainingYByEvent.get(r.event) ?? baseY;
       const rX = sliceRightX + GAP * 2;
-
-      const rp = { x: rX, y: rY };
+      const rp = { x: rX, y };
       ns.push({
         key: `r:${r.handlerName}:${slice.name}`,
         pos: rp,
@@ -622,18 +604,8 @@ export function computeLayout(viewModel: DomainModel): Layout {
         label: r.handlerName,
       });
 
-      if (trigNode) {
-        es.push({
-          from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
-          to: { x: rp.x, y: rp.y + H / 2 },
-          color: COLORS.reaction.border,
-          dash: true,
-        });
-      }
-
-      remainingYByEvent.set(r.event, rY + H + GAP / 2);
       sliceRightX = Math.max(sliceRightX, rX + W + GAP);
-      y = Math.max(y, rY + H + GAP / 2);
+      y += H + GAP / 2;
     }
 
     // Compute bounding box from ALL nodes placed for this slice

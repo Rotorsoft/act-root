@@ -394,31 +394,35 @@ export type InferEvents<
 };
 
 /**
- * Typed interface for the `app.do()` method, enabling reaction handlers
- * to dispatch actions with full autocomplete.
+ * Public interface for the Act orchestrator, passed to reaction handlers.
  *
- * Construct with {@link InferActions} to avoid circular imports between
- * slice files and the bootstrap module.
+ * Provides typed access to action dispatch, state loading, and event querying.
+ * Construct with {@link InferActions} and {@link InferEvents} to avoid circular
+ * imports between slice files and the bootstrap module.
  *
+ * @template TEvents - Event schemas
  * @template TActions - Action schemas (maps action names to payload types)
  * @template TActor - Actor type extending base Actor
  *
  * @example
  * ```typescript
- * import type { Dispatcher, InferActions } from "@rotorsoft/act";
+ * import type { IAct, InferActions, InferEvents } from "@rotorsoft/act";
  *
- * type App = Dispatcher<
- *   InferActions<typeof StateA> &
- *   InferActions<typeof StateB>
+ * type App = IAct<
+ *   InferEvents<typeof StateA> & InferEvents<typeof StateB>,
+ *   InferActions<typeof StateA> & InferActions<typeof StateB>
  * >;
  *
  * async function myReaction(event: ..., stream: string, app: App) {
  *   await app.do("someAction", target, payload, event);
+ *   const snapshot = await app.load(MyState, "stream-1");
+ *   const events = await app.query_array({ stream: "stream-1" });
  * }
  * ```
  */
-export interface Dispatcher<
-  TActions extends Schemas,
+export interface IAct<
+  TEvents extends Schemas = Schemas,
+  TActions extends Schemas = Schemas,
   TActor extends Actor = Actor,
 > {
   do<TKey extends keyof TActions & string>(
@@ -428,4 +432,21 @@ export interface Dispatcher<
     reactingTo?: Committed<Schemas, string>,
     skipValidation?: boolean
   ): Promise<Snapshot<any, any>[]>;
+
+  load(
+    state: State<any, any, any> | string,
+    stream: string,
+    callback?: (snapshot: Snapshot<any, any>) => void
+  ): Promise<Snapshot<any, any>>;
+
+  query(
+    query: Query,
+    callback?: (event: Committed<TEvents, keyof TEvents>) => void
+  ): Promise<{
+    first?: Committed<TEvents, keyof TEvents>;
+    last?: Committed<TEvents, keyof TEvents>;
+    count: number;
+  }>;
+
+  query_array(query: Query): Promise<Committed<TEvents, keyof TEvents>[]>;
 }

@@ -1172,7 +1172,7 @@ describe("computeLayout — slices", () => {
   });
 
   describe("remaining reaction edge when trigger event exists", () => {
-    it("creates edge from trigger event to second reaction on same event", () => {
+    it("creates edge from trigger event to both inline reactions on same event", () => {
       const model = emptyModel({
         states: [
           {
@@ -1210,12 +1210,178 @@ describe("computeLayout — slices", () => {
       const second = find(layout, "reaction", "secondHandler");
       expect(first).toBeDefined();
       expect(second).toBeDefined();
-      find(layout, "event", "Evt")!;
+      // Both reactions should have dashed edges from the event
       const dashedEdges = layout.es.filter((e) => e.dash);
-      const edge = dashedEdges.find(
+      const edgeToFirst = dashedEdges.find(
+        (e) => e.to.x === first!.pos.x && e.to.y === first!.pos.y + H / 2
+      );
+      const edgeToSecond = dashedEdges.find(
         (e) => e.to.x === second!.pos.x && e.to.y === second!.pos.y + H / 2
       );
-      expect(edge).toBeDefined();
+      expect(edgeToFirst).toBeDefined();
+      expect(edgeToSecond).toBeDefined();
+    });
+
+    it("places remaining reaction without edge when event is not in any state", () => {
+      // Reaction triggers on "UnknownEvt" which is not declared in any state.
+      // No event node exists, so trigNode is null and no edge is created.
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
+            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "UnknownEvt",
+                handlerName: "orphanHandler",
+                dispatches: [],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      const reaction = find(layout, "reaction", "orphanHandler");
+      expect(reaction).toBeDefined();
+      // No event node for UnknownEvt, so no dashed edge to reaction
+      const dashedToReaction = layout.es.filter(
+        (e) =>
+          e.dash &&
+          e.to.x === reaction!.pos.x &&
+          e.to.y === reaction!.pos.y + H / 2
+      );
+      expect(dashedToReaction).toHaveLength(0);
+    });
+  });
+
+  describe("multiple reactions with dispatches on same event", () => {
+    it("places all dispatched actions inline for multi-reaction events", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [
+              { name: "Archived", hasCustomPatch: false },
+              { name: "Reviewed", hasCustomPatch: false },
+              { name: "Notified", hasCustomPatch: false },
+              { name: "Logged", hasCustomPatch: false },
+            ],
+            actions: [
+              { name: "Archive", emits: ["Archived"], invariants: [] },
+              { name: "Review", emits: ["Reviewed"], invariants: [] },
+              { name: "Notify", emits: ["Notified"], invariants: [] },
+              { name: "Log", emits: ["Logged"], invariants: [] },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "Archived",
+                handlerName: "autoReview",
+                dispatches: ["Review"],
+                isVoid: false,
+              },
+              {
+                event: "Archived",
+                handlerName: "notifyOnArchive",
+                dispatches: ["Notify"],
+                isVoid: false,
+              },
+              {
+                event: "Archived",
+                handlerName: "logOnArchive",
+                dispatches: ["Log"],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+
+      // All three reactions should be placed
+      const r1 = find(layout, "reaction", "autoReview");
+      const r2 = find(layout, "reaction", "notifyOnArchive");
+      const r3 = find(layout, "reaction", "logOnArchive");
+      expect(r1).toBeDefined();
+      expect(r2).toBeDefined();
+      expect(r3).toBeDefined();
+
+      // All three dispatched actions should be placed inline (as dispatched copies)
+      const dispatched = layout.ns.filter(
+        (n) => n.type === "action" && n.key.includes("dispatched")
+      );
+      const dispatchedNames = dispatched.map((n) => n.label);
+      expect(dispatchedNames).toContain("Review");
+      expect(dispatchedNames).toContain("Notify");
+      expect(dispatchedNames).toContain("Log");
+
+      // Reactions should not overlap each other
+      for (const [a, b] of [
+        [r1!, r2!],
+        [r2!, r3!],
+        [r1!, r3!],
+      ]) {
+        expect(overlaps(nodeBBox(a), nodeBBox(b))).toBe(false);
+      }
+    });
+  });
+
+  describe("shared event emitted by multiple actions", () => {
+    it("measures reactions only once when event appears in multiple action rows", () => {
+      const model = emptyModel({
+        states: [
+          {
+            name: "S",
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
+            actions: [
+              { name: "a1", emits: ["Evt"], invariants: [] },
+              { name: "a2", emits: ["Evt"], invariants: [] },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "Sl",
+            states: ["S"],
+            stateVars: ["S"],
+            projections: [],
+            reactions: [
+              {
+                event: "Evt",
+                handlerName: "handler",
+                dispatches: [],
+                isVoid: false,
+              },
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+      // Reaction should appear exactly once even though Evt is in two action rows
+      const reactions = layout.ns.filter(
+        (n) => n.type === "reaction" && n.label === "handler"
+      );
+      expect(reactions).toHaveLength(1);
     });
   });
 

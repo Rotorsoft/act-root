@@ -11,8 +11,8 @@ import type { Slice } from "./slice-builder.js";
 import type {
   Actor,
   Committed,
-  Dispatcher,
   EventRegister,
+  IAct,
   Reaction,
   ReactionHandler,
   ReactionOptions,
@@ -160,7 +160,7 @@ export type ActBuilder<
       handler: (
         event: Committed<TEvents, TKey>,
         stream: string,
-        app: Dispatcher<TActions, TActor>
+        app: IAct<TEvents, TActions, TActor>
       ) => Promise<Snapshot<Schema, TEvents> | void>,
       options?: Partial<ReactionOptions>
     ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> & {
@@ -331,7 +331,7 @@ export function act<
           handler: (
             event: Committed<TEvents, TKey>,
             stream: string,
-            app: Dispatcher<TActions, TActor>
+            app: IAct<TEvents, TActions, TActor>
           ) => Promise<Snapshot<Schema, TEvents> | void>,
           options?: Partial<ReactionOptions>
         ) => {

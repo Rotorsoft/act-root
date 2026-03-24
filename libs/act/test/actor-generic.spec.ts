@@ -64,7 +64,7 @@ describe("actor generic", () => {
     expect(snaps[0].state.count).toBe(1);
   });
 
-  it("should type-check .withActor() reactions with typed Dispatcher", async () => {
+  it("should type-check .withActor() reactions with typed IAct", async () => {
     const reactionTarget = {
       stream: "counter-4",
       actor: { id: "sys", name: "System", role: "system", tenantId: "t0" },

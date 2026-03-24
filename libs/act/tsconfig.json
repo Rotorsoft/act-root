@@ -3,6 +3,11 @@
   "compilerOptions": {
     "rootDir": ".",
   },
+  "references": [
+    {
+      "path": "../act-patch/tsconfig.build.json"
+    }
+  ],
   "exclude": [
     "dist",
     "node_modules"

@@ -53,7 +53,7 @@ type DoResult<
  *
  * Provides a chainable API for registering event handlers that update
  * read models. Unlike slices, projections have no `.withState()` for states
- * and handlers do not receive a `Dispatcher`.
+ * and handlers do not receive the app interface.
  *
  * When a default target is provided via `projection("target")`, all
  * handlers inherit that resolver. Per-handler `.to()` or `.void()` can

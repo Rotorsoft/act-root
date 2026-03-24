@@ -143,6 +143,9 @@ function captureDispatches(handler: any): string[] {
           dispatches.push(actionName);
         return Promise.resolve([]);
       },
+      load: () => Promise.resolve({}),
+      query: () => Promise.resolve({ count: 0 }),
+      query_array: () => Promise.resolve([]),
     };
     const mockEvent = new Proxy({} as Record<string, unknown>, {
       get: (_, prop) =>

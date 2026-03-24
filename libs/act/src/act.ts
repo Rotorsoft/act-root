@@ -8,6 +8,7 @@ import type {
   Committed,
   Drain,
   DrainOptions,
+  IAct,
   Lease,
   Query,
   ReactionPayload,
@@ -55,7 +56,7 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
-> {
+> implements IAct<TEvents, TActions, TActor> {
   private _emitter = new EventEmitter();
   private _drain_locked = false;
   private _drain_lag2lead_ratio = 0.5;

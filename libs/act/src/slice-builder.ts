@@ -10,8 +10,8 @@ import type { Projection } from "./projection-builder.js";
 import type {
   Actor,
   Committed,
-  Dispatcher,
   EventRegister,
+  IAct,
   Reaction,
   ReactionHandler,
   ReactionOptions,
@@ -99,7 +99,7 @@ export type SliceBuilder<
    * Embeds a built Projection within this slice. The projection's events
    * must be a subset of events from states already registered via
    * `.withState()`. Projection handlers preserve their `(event, stream)`
-   * signature and do not receive a Dispatcher.
+   * signature and do not receive the app interface.
    */
   withProjection: <TNewEvents extends Schemas>(
     projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
@@ -116,7 +116,7 @@ export type SliceBuilder<
       handler: (
         event: Committed<TEvents, TKey>,
         stream: string,
-        app: Dispatcher<TActions, TActor>
+        app: IAct<TEvents, TActions, TActor>
       ) => Promise<Snapshot<Schema, TEvents> | void>,
       options?: Partial<ReactionOptions>
     ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> & {
@@ -235,7 +235,7 @@ export function slice<
         handler: (
           event: Committed<TEvents, TKey>,
           stream: string,
-          app: Dispatcher<TActions, TActor>
+          app: IAct<TEvents, TActions, TActor>
         ) => Promise<Snapshot<Schema, TEvents> | void>,
         options?: Partial<ReactionOptions>
       ) => {

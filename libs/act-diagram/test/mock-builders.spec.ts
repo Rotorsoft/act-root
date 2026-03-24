@@ -456,6 +456,23 @@ describe("mockSlice", () => {
     // Should not crash
     expect(built[0].reactions[0].dispatches).toEqual([]);
   });
+
+  it("captureDispatches supports handlers calling app.load, query, query_array", () => {
+    const built: any[] = [];
+    mockSlice((info) => built.push(info))
+      .on("Evt")
+      .do(async function loader(_event: any, _stream: string, app: any) {
+        await app.load("S", "stream-1");
+        await app.query({ stream: "stream-1" });
+        await app.query_array({ stream: "stream-1" });
+        await app.do("DoSomething", {}, {});
+      })
+      .to(() => "x")
+      .build();
+
+    // Should capture the dispatched action and not crash on load/query calls
+    expect(built[0].reactions[0].dispatches).toEqual(["DoSomething"]);
+  });
 });
 
 describe("mockProjection", () => {
