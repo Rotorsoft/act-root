@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { extractModel } from "../lib/evaluate.js";
 import { navigateToCode } from "../lib/navigate.js";
 import { validate } from "../lib/validate.js";
@@ -10,6 +10,61 @@ import type {
 } from "../types/index.js";
 import { AiBar, type AiOptions } from "./AiBar.js";
 import { Diagram } from "./Diagram.js";
+
+const emptyModel: DomainModel = {
+  entries: [],
+  states: [],
+  slices: [],
+  projections: [],
+  reactions: [],
+};
+
+/** Debounced model extraction with fallback to last good model */
+function useExtractModel(files: FileTab[]) {
+  const [result, setResult] = useState<{
+    model: DomainModel;
+    warnings: ValidationWarning[];
+  }>({ model: emptyModel, warnings: [] });
+  const lastGoodRef = useRef<{
+    model: DomainModel;
+    warnings: ValidationWarning[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (files.length === 0) {
+      lastGoodRef.current = null;
+      setResult({ model: emptyModel, warnings: [] });
+      return;
+    }
+
+    // Debounce: wait for file changes to settle before extracting
+    const timer = setTimeout(() => {
+      const { model, error } = extractModel(files);
+      const warnings = validate(model);
+
+      // Check if the model has errors (slice errors or global error)
+      const hasErrors = !!error || model.slices.some((s) => !!s.error);
+
+      if (!hasErrors) {
+        // Good extraction — update and save as fallback
+        const next = { model, warnings };
+        lastGoodRef.current = next;
+        setResult(next);
+      } else if (lastGoodRef.current) {
+        // Errors during extraction — keep showing last good model
+        // (transient errors from files being created/deleted/changed)
+        // Don't update state — the diagram stays stable
+      } else {
+        // No last good model — show errors (first load or persistent errors)
+        setResult({ model, warnings });
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [files]);
+
+  return result;
+}
 
 type Props = {
   /** Direct file injection */
@@ -68,22 +123,7 @@ export function ActDiagram({
     return () => window.removeEventListener("message", handler);
   }, [usePostMessage]);
 
-  const { model, warnings } = useMemo(() => {
-    if (files.length === 0)
-      return {
-        model: {
-          entries: [],
-          states: [],
-          slices: [],
-          projections: [],
-          reactions: [],
-        } as DomainModel,
-        warnings: [] as ValidationWarning[],
-      };
-    const { model } = extractModel(files);
-    const warnings = validate(model);
-    return { model, warnings };
-  }, [files]);
+  const { model, warnings } = useExtractModel(files);
 
   const handleClick = useCallback(
     (name: string, type?: string, file?: string) => {

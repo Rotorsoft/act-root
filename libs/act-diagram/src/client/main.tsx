@@ -17,23 +17,27 @@ async function readDirectory(
   const files: FileTab[] = [];
   for await (const entry of dirHandle.values()) {
     const path = prefix ? `${prefix}/${entry.name}` : entry.name;
-    if (
-      entry.kind === "file" &&
-      entry.name.endsWith(".ts") &&
-      !entry.name.endsWith(".d.ts")
-    ) {
-      const file = await (entry as FileSystemFileHandle).getFile();
-      const content = await file.text();
-      files.push({ path, content });
-    } else if (
-      entry.kind === "directory" &&
-      !["node_modules", "dist", ".git", "coverage"].includes(entry.name)
-    ) {
-      const nested = await readDirectory(
-        entry as FileSystemDirectoryHandle,
-        path
-      );
-      files.push(...nested);
+    try {
+      if (
+        entry.kind === "file" &&
+        entry.name.endsWith(".ts") &&
+        !entry.name.endsWith(".d.ts")
+      ) {
+        const file = await (entry as FileSystemFileHandle).getFile();
+        const content = await file.text();
+        files.push({ path, content });
+      } else if (
+        entry.kind === "directory" &&
+        !["node_modules", "dist", ".git", "coverage"].includes(entry.name)
+      ) {
+        const nested = await readDirectory(
+          entry as FileSystemDirectoryHandle,
+          path
+        );
+        files.push(...nested);
+      }
+    } catch {
+      // File may have been deleted/locked mid-scan — skip it
     }
   }
   return files.sort((a, b) => a.path.localeCompare(b.path));
@@ -89,18 +93,22 @@ function DevApp() {
 
   const refresh = useCallback(async () => {
     if (!dirRef.current) return;
-    const scanned = await readDirectory(dirRef.current);
-    setFiles((prev) => {
-      if (prev.length !== scanned.length) return scanned;
-      for (let i = 0; i < prev.length; i++) {
-        if (
-          prev[i].path !== scanned[i].path ||
-          prev[i].content !== scanned[i].content
-        )
-          return scanned;
-      }
-      return prev;
-    });
+    try {
+      const scanned = await readDirectory(dirRef.current);
+      setFiles((prev) => {
+        if (prev.length !== scanned.length) return scanned;
+        for (let i = 0; i < prev.length; i++) {
+          if (
+            prev[i].path !== scanned[i].path ||
+            prev[i].content !== scanned[i].content
+          )
+            return scanned;
+        }
+        return prev;
+      });
+    } catch {
+      // Directory scan failed (e.g., permission revoked) — keep current state
+    }
   }, []);
 
   // Auto-scroll AI stream to bottom
