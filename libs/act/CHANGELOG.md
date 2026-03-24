@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.24.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.24.0...@rotorsoft/act-v0.24.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **act:** patch merge priority for partial states and diagram projection layout ([36bb9a2](https://github.com/rotorsoft/act-root/commit/36bb9a2614d7786164b034db60d73109d98de287))
+
 # [@rotorsoft/act-v0.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.23.2...@rotorsoft/act-v0.24.0) (2026-03-24)
 
 
