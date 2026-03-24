@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.3...@rotorsoft/act-diagram-v0.2.0) (2026-03-24)
+
+
+### Features
+
+* **act, act-diagram:** replace Dispatcher with IAct interface and fix multi-reaction layout ([806e886](https://github.com/rotorsoft/act-root/commit/806e886868c16dabf2b71662479b68ecb0ebfe11))
+
 # [@rotorsoft/act-diagram-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.2...@rotorsoft/act-diagram-v0.1.3) (2026-03-23)
 
 
