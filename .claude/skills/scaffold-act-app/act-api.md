@@ -93,7 +93,7 @@ type Events = InferEvents<typeof Item>;
 type Actions = InferActions<typeof Item>;
 // => { CreateItem: { name: string }; CloseItem: Record<string, never> }
 
-// Combine multiple states (useful for typed Dispatcher construction)
+// Combine multiple states (useful for typed IAct construction)
 type AllEvents = InferEvents<typeof StateA> & InferEvents<typeof StateB>;
 type AllActions = InferActions<typeof StateA> & InferActions<typeof StateB>;
 ```
@@ -381,7 +381,7 @@ interface Cache extends Disposable {
 
 ## 12. Projection Builder
 
-Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive a `Dispatcher`.
+Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive the app interface.
 
 ```typescript
 import { projection } from "@rotorsoft/act";
@@ -402,7 +402,7 @@ const ItemProjection = projection("items")
 **API:**
 - `projection(target?)` — Creates a builder; optional default target stream
 - `.on({ EventName: schema })` — Register an event handler (record shorthand)
-- `.do(handler)` — Handler receives `(event, stream)` — no Dispatcher
+- `.do(handler)` — Handler receives `(event, stream)` — no app interface
 - `.to(resolver)` / `.void()` — Override the default resolver per handler
 - `.build()` — Returns a `Projection` with `_tag: "Projection"`
 
@@ -410,7 +410,7 @@ const ItemProjection = projection("items")
 
 ## 13. Slice Builder — Vertical Slice Architecture
 
-Slices group partial states with scoped reactions into self-contained feature modules. Handlers receive a typed `Dispatcher` for cross-state action dispatch.
+Slices group partial states with scoped reactions into self-contained feature modules. Handlers receive the full `IAct` interface for action dispatch, state loading, and event querying.
 
 ```typescript
 import { slice } from "@rotorsoft/act";
@@ -420,8 +420,10 @@ const ItemSlice = slice()
   .withProjection(ItemProjection)  // embed projection (events must be subset of slice events)
   .on("ItemCreated")  // plain string, NOT record shorthand
     .do(async (event, stream, app) => {
-      // app is a typed Dispatcher — use for cross-state actions
+      // app implements IAct — dispatch actions, load state, query events
       await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
+      const snapshot = await app.load(Item, stream);
+      const events = await app.query_array({ stream });
     })
     .to((event) => ({ target: event.stream }))
   .build();
@@ -432,7 +434,7 @@ const ItemSlice = slice()
 - `.withState(state)` — Register a partial state
 - `.withProjection(proj)` — Embed a built Projection (events must be a subset of slice events)
 - `.on(eventName)` — React to an event (string, not record)
-- `.do(handler)` — Handler receives `(event, stream, app)` where `app` is a `Dispatcher`
+- `.do(handler)` — Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
 - `.to(resolver)` / `.void()` — Set target stream resolver
 - `.build()` — Returns a `Slice` with `_tag: "Slice"`
 

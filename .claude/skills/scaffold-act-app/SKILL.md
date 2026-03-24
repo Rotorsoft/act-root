@@ -279,7 +279,7 @@ export const ItemSlice = slice()
   .withProjection(ItemProjection)
   .on("ItemCreated")  // plain string, NOT record shorthand
   .do(async function notify(event, stream, app) {
-    // app is a typed Dispatcher — use for cross-state actions
+    // app implements IAct — dispatch actions, load state, query events
     // Pass event as 4th arg for causation tracking
     await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
   })

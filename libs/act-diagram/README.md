@@ -16,7 +16,7 @@ Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/pack
 - **IDE-agnostic** — works over props, postMessage, or WebSocket (see [act-nvim](https://github.com/Rotorsoft/act-nvim) for Neovim integration)
 - **Embeddable** — React component for any host (IDE webview, standalone app, docs site)
 - **AI refinement** — optional prompt bar to generate code via a streaming endpoint
-- **100% test coverage** — 305 tests across all metrics
+- **100% test coverage** — 315+ tests across all metrics
 
 ## Installation
 
@@ -198,7 +198,7 @@ See [@rotorsoft/act-nvim](https://github.com/Rotorsoft/act-nvim) — a Neovim pl
 # Visual dev server with sample diagram
 pnpm -F @rotorsoft/act-diagram dev
 
-# Run tests (305 tests, 100% coverage)
+# Run tests (315+ tests, 100% coverage)
 pnpm -F @rotorsoft/act-diagram test
 
 # Build library

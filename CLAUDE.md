@@ -145,7 +145,7 @@ type AllEvents = InferEvents<typeof StateA> & InferEvents<typeof StateB>;
 
 ### Projection Builder
 
-Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive a `Dispatcher`.
+Projections are read-model updaters that react to events and update external state (databases, caches, etc.). Unlike slices, projections have no states and handlers do not receive the app interface.
 
 ```typescript
 import { projection } from "@rotorsoft/act";
@@ -171,12 +171,12 @@ const TicketProjection = projection("tickets")
 
 ### Slice Builder
 
-Slices group partial states with scoped reactions into self-contained feature modules (vertical slice architecture). Handlers receive a typed `Dispatcher` for cross-state action dispatch.
+Slices group partial states with scoped reactions into self-contained feature modules (vertical slice architecture). Handlers receive the full `IAct` interface for action dispatch, state loading, and event querying.
 
 ```typescript
 import { slice } from "@rotorsoft/act";
 
-// Handlers receive (event, stream, app) — app is a typed Dispatcher
+// Handlers receive (event, stream, app) — app implements IAct
 const CreationSlice = slice()
   .withState(TicketCreation)
   .withState(TicketOperations)
@@ -184,6 +184,8 @@ const CreationSlice = slice()
   .on("TicketOpened")
     .do(async (event, _stream, app) => {
       await app.do("AssignTicket", target, payload, event);
+      const snapshot = await app.load(TicketCreation, event.stream);
+      const events = await app.query_array({ stream: event.stream });
     })
     .void()
   .build();
@@ -191,9 +193,9 @@ const CreationSlice = slice()
 
 - `slice()` - Creates a builder
 - `.withState(state)` - Register a partial state (include all states whose actions handlers need)
-- `.withProjection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no Dispatcher.
+- `.withProjection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no app interface.
 - `.on(eventName)` - React to an event from the slice's states (string, not record)
-- `.do(handler)` - Handler receives `(event, stream, app)` where `app` is a `Dispatcher`
+- `.do(handler)` - Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
 - `.to(resolver)` / `.void()` - Set the target stream resolver
 - `.build()` - Returns a `Slice` with `_tag: "Slice"`
 

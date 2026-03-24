@@ -1220,7 +1220,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
             <h4>Group states and reactions into feature modules</h4>
             <p>
               Each slice owns a set of partial states and their scoped reactions.
-              Handlers receive a typed <code style="color: var(--code-green)">Dispatcher</code> for cross-state coordination.
+              Handlers receive the full <code style="color: var(--code-green)">IAct</code> interface for cross-state coordination.
             </p>
 <pre class="patterns-code"><code class="language-typescript">const TicketCreationSlice = slice()
   .withState(TicketCreation)      // partial state
@@ -1243,7 +1243,7 @@ console.log(await app.load(Counter, "counter1"));</code></pre>
             <h4>Build read-model updaters from events</h4>
             <p>
               Projections react to events and update external state (databases, caches).
-              Unlike slices, handlers are pure side effects — no <code style="color: var(--code-green)">Dispatcher</code> needed.
+              Unlike slices, handlers are pure side effects — no <code style="color: var(--code-green)">IAct</code> needed.
             </p>
 <pre class="patterns-code"><code class="language-typescript">const TicketProjection = projection("tickets")
   .on({ TicketOpened })

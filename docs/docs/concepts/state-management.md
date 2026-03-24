@@ -132,7 +132,7 @@ const TicketSlice = slice()
   .build();
 ```
 
-Slice handlers receive `(event, stream, app)` where `app` is a typed `Dispatcher`.
+Slice handlers receive `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array).
 
 ## Act Orchestrator
 

@@ -219,9 +219,12 @@ function placeChain(
       nextX += STATE_W + GAP;
     }
 
-    // Dispatched events — tightly stacked, sub-chains extend rightward
+    // Dispatched events — vertically centered with the state box,
+    // each event node is H tall; sub-chains extend rightward
     const evtX = nextX;
-    let emitY = rowCenterY - row.emitsH / 2;
+    const nEvents = row.emitInfos.length;
+    const eventsOnlyH = nEvents * H + (nEvents - 1) * (GAP / 2);
+    let emitY = rowCenterY - eventsOnlyH / 2;
     for (const emit of row.emitInfos) {
       ns.push({
         key: `e:${emit.name}:dispatched:${rDef.handlerName}:${row.an}`,
@@ -253,7 +256,7 @@ function placeChain(
         );
       }
 
-      emitY += emit.h;
+      emitY += H + GAP / 2;
     }
     if (row.emitInfos.length > 0) nextX = evtX + W + GAP;
     sliceRightXRef.value = Math.max(sliceRightXRef.value, nextX);
