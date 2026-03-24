@@ -57,6 +57,13 @@ const TicketOperations = state({ Ticket: z.object({ status: z.string() }) })
 // These merge into a single "Ticket" state with both actions and events
 ```
 
+**Patch merge priority:** When partials are merged and both declare the same event:
+- One custom, one passthrough → keep the custom one (order doesn't matter)
+- Same function reference → re-registration from another slice, allowed
+- Two different custom patches → throw error at build time
+
+This means a partial can redeclare an event in `.emits()` (to react to it via `.on()`) without overwriting the custom reducer from the partial that owns the event.
+
 ## Invariants
 
 Business rules enforced before actions execute:

@@ -238,9 +238,19 @@ export const Item = state({ Item: ItemState })
 
 **Emit handler**: `(actionPayload, snapshot, target) => [EventName, data]` — destructure as `(data, { state }, { stream, actor })`.
 
-**Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act.
+**Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act. When a partial redeclares an event in `.emits()` without a `.patch()`, it gets a passthrough reducer that yields to any custom reducer from another partial. Two different custom patches for the same event throw at build time.
 
 ### Step 4 — Define Slices with Co-located Projections
+
+**Slice design decisions:**
+
+- **Lifecycle slice first** — every state starts with a lifecycle slice that owns the CRUD-like actions (create, update, close/delete). It may also contain simple reaction flows.
+- **One slice per reaction flow** — when reaction chains grow, each serial chain (event → reaction → action → state → event → reaction → …) lives in its own slice. A long serial chain stays in one slice when there is no fan-out at any junction point.
+- **Slices are minimal and self-contained** — each slice includes only the state it owns. It defines its own actions, events, patches, reactions, and projections.
+- **Single state schema, multiple partials** — one Zod schema defines the full state shape. Each slice declares a partial via `state({ Name: Schema })` with its own `.init()`, `.emits()`, `.patch()`, and `.on()`. The framework merges partials at build time.
+- **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, it redeclares the event in `.emits()` so `.on("EventName")` compiles. The passthrough default is discarded in favor of the custom reducer from the owning partial.
+- **One custom patch per event enforced at build time** — conflicting custom patches throw. Passthroughs always yield to custom reducers.
+- **Serial chains connect slices** — when one slice's output event is another's input with no other subscribers, they can be merged into a single slice.
 
 Group states with reactions and projections for vertical slice architecture. Each feature file exports both the State and Slice, co-locating the projection:
 

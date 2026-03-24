@@ -1167,7 +1167,8 @@ describe("computeLayout — slices", () => {
       const orphanEvt = find(layout, "event", "OrphanEvt");
       expect(emittedEvt).toBeDefined();
       expect(orphanEvt).toBeDefined();
-      expect(orphanEvt!.pos.y).toBeGreaterThan(emittedEvt!.pos.y);
+      // Trigger events placed before action-emitted events for serial chain detection
+      expect(orphanEvt!.pos.y).toBeLessThan(emittedEvt!.pos.y);
     });
   });
 
@@ -1382,6 +1383,108 @@ describe("computeLayout — slices", () => {
         (n) => n.type === "reaction" && n.label === "handler"
       );
       expect(reactions).toHaveLength(1);
+    });
+  });
+
+  describe("multi-state slice with projections below first state", () => {
+    it("second state does not overlap projections placed below first state events", () => {
+      // Mirrors InventorySlice: Cart (with projections) + Inventory
+      const model = emptyModel({
+        states: [
+          {
+            name: "Cart",
+            varName: "Cart",
+            events: [
+              { name: "CartSubmitted", hasCustomPatch: false },
+              { name: "CartPublished", hasCustomPatch: false },
+            ],
+            actions: [
+              { name: "PlaceOrder", emits: ["CartSubmitted"], invariants: [] },
+              { name: "PublishCart", emits: ["CartPublished"], invariants: [] },
+            ],
+          },
+          {
+            name: "Inventory",
+            varName: "Inventory",
+            events: [
+              { name: "InventoryImported", hasCustomPatch: false },
+              { name: "InventoryAdjusted", hasCustomPatch: false },
+              { name: "InventoryDecommissioned", hasCustomPatch: false },
+            ],
+            actions: [
+              {
+                name: "ImportInventory",
+                emits: ["InventoryImported"],
+                invariants: [],
+              },
+              {
+                name: "AdjustInventory",
+                emits: ["InventoryAdjusted"],
+                invariants: [],
+              },
+              {
+                name: "DecommissionInventory",
+                emits: ["InventoryDecommissioned"],
+                invariants: [],
+              },
+            ],
+          },
+        ],
+        slices: [
+          {
+            name: "InventorySlice",
+            states: ["Cart", "Inventory"],
+            stateVars: ["Cart", "Inventory"],
+            projections: ["inventory"],
+            reactions: [],
+          },
+        ],
+        projections: [
+          {
+            name: "inventory",
+            varName: "InventoryProjection",
+            handles: [
+              "InventoryImported",
+              "InventoryAdjusted",
+              "InventoryDecommissioned",
+              "CartPublished",
+            ],
+          },
+        ],
+      });
+      const layout = computeLayout(model);
+
+      // Projection should be placed
+      const projNode = layout.ns.find(
+        (n) => n.type === "projection" && n.label === "inventory"
+      );
+      expect(projNode).toBeDefined();
+
+      // Inventory state and events should not overlap with the projection
+      const inventoryNodes = layout.ns.filter(
+        (n) =>
+          (n.type === "state" && n.label === "Inventory") ||
+          (n.type === "event" &&
+            [
+              "InventoryImported",
+              "InventoryAdjusted",
+              "InventoryDecommissioned",
+            ].includes(n.label)) ||
+          (n.type === "action" &&
+            [
+              "ImportInventory",
+              "AdjustInventory",
+              "DecommissionInventory",
+            ].includes(n.label))
+      );
+
+      const projBB = nodeBBox(projNode!);
+      for (const n of inventoryNodes) {
+        const bb = nodeBBox(n);
+        expect(overlaps(projBB, bb)).toBe(false);
+        // Inventory nodes should be below the projection
+        expect(bb.top).toBeGreaterThanOrEqual(projBB.bottom);
+      }
     });
   });
 

@@ -72,7 +72,7 @@ describe("partial-state", () => {
     );
   });
 
-  it("should throw on duplicate event across partials", () => {
+  it("should throw on conflicting custom patches for same event across partials", () => {
     const DupEvent = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ Incremented: z.object({ by: z.number() }) })
@@ -82,7 +82,7 @@ describe("partial-state", () => {
       .build();
 
     expect(() => act().withState(PartA).withState(DupEvent)).toThrow(
-      'Duplicate event "Incremented"'
+      'Duplicate custom patch for event "Incremented" in state "Thing"'
     );
   });
 
@@ -309,6 +309,138 @@ describe("partial-state", () => {
       .build();
 
     expect(() => act().withState(PartialA).withState(PartialB)).not.toThrow();
+  });
+
+  describe("patch merge priority (passthrough vs custom)", () => {
+    it("should keep custom patch when existing is passthrough", async () => {
+      // AutoArchive partial defines a custom patch for ListArchived
+      const AutoArchive = state({
+        TodoList: z.object({ status: z.string() }),
+      })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({
+          ListArchived: () => ({ status: "archived" }),
+        })
+        .on({ archiveList: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      // Audit partial redeclares ListArchived with passthrough (just needs the event registered)
+      const Audit = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        // no .patch() — passthrough is the default
+        .on({ auditList: z.object({ note: z.string() }) })
+        .emit(() => ["ListArchived", { reason: "audit" }])
+        .build();
+
+      // Custom registered first, passthrough second — custom must win
+      const app = act().withState(AutoArchive).withState(Audit).build();
+      await app.do("archiveList", { stream: "t1", actor }, { reason: "done" });
+      const snap = await app.load("TodoList", "t1");
+      expect(snap.state.status).toBe("archived");
+    });
+
+    it("should keep custom patch when incoming is passthrough (reverse order)", async () => {
+      // Passthrough partial registered first
+      const Audit = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        // passthrough default
+        .on({ auditList: z.object({ note: z.string() }) })
+        .emit(() => ["ListArchived", { reason: "audit" }])
+        .build();
+
+      // Custom patch registered second — must still win
+      const AutoArchive = state({
+        TodoList: z.object({ status: z.string() }),
+      })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({
+          ListArchived: () => ({ status: "archived" }),
+        })
+        .on({ archiveList: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      const app = act().withState(Audit).withState(AutoArchive).build();
+      await app.do("archiveList", { stream: "t2", actor }, { reason: "done" });
+      const snap = await app.load("TodoList", "t2");
+      expect(snap.state.status).toBe("archived");
+    });
+
+    it("should allow same function reference (re-registration from another slice)", () => {
+      const customPatch = () => ({ status: "archived" });
+      const PartA = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({ ListArchived: customPatch })
+        .on({ archiveA: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      const PartB = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({ ListArchived: customPatch }) // same function reference
+        .on({ archiveB: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      expect(() => act().withState(PartA).withState(PartB)).not.toThrow();
+    });
+
+    it("should throw when partial redeclares an event owned by a different state", () => {
+      const Other = state({ Other: z.object({}) })
+        .init(() => ({}))
+        .emits({ Shared: z.object({}) })
+        .on({ doOther: z.object({}) })
+        .emit("Shared")
+        .build();
+
+      const PartA = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ Done: z.object({}) })
+        .on({ finish: z.object({}) })
+        .emit("Done")
+        .build();
+
+      // PartB is a partial of TodoList but declares "Shared" which belongs to Other
+      const PartB = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ Shared: z.object({}) })
+        .on({ reuse: z.object({}) })
+        .emit("Shared")
+        .build();
+
+      expect(() =>
+        act().withState(Other).withState(PartA).withState(PartB)
+      ).toThrow('Duplicate event "Shared"');
+    });
+
+    it("should throw on two different custom patches for the same event", () => {
+      const PartA = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({ ListArchived: () => ({ status: "archived" }) })
+        .on({ archiveA: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      const PartB = state({ TodoList: z.object({ status: z.string() }) })
+        .init(() => ({ status: "active" }))
+        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .patch({ ListArchived: () => ({ status: "deleted" }) }) // different custom patch
+        .on({ archiveB: z.object({ reason: z.string() }) })
+        .emit((a) => ["ListArchived", { reason: a.reason }])
+        .build();
+
+      expect(() => act().withState(PartA).withState(PartB)).toThrow(
+        'Duplicate custom patch for event "ListArchived" in state "TodoList"'
+      );
+    });
   });
 
   it("should merge given (invariants) from partials", async () => {

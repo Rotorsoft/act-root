@@ -173,6 +173,16 @@ const TicketProjection = projection("tickets")
 
 Slices group partial states with scoped reactions into self-contained feature modules (vertical slice architecture). Handlers receive the full `IAct` interface for action dispatch, state loading, and event querying.
 
+**Slice design decisions:**
+
+- **Lifecycle slice first** — every state starts with a lifecycle slice that owns the CRUD-like actions (create, update, close/delete). It may also contain simple reaction flows.
+- **One slice per reaction flow** — when reactions are introduced, each serial chain (event → reaction → action → state → event → reaction → …) lives in its own slice. A long serial chain stays in one slice when there is no fan-out at any junction point.
+- **Slices are minimal and self-contained** — each slice includes only the state it owns. It defines its own actions, events, patches, reactions, and projections. No foreign states needed.
+- **Single state schema, multiple partials** — one Zod schema defines the full state shape. Each slice declares a partial via `state({ Name: Schema })` with its own `.init()`, `.emits()`, `.patch()`, and `.on()`. The framework merges partials at build time.
+- **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, it redeclares the event in `.emits()` so `.on("EventName")` compiles. The passthrough default is discarded in favor of the custom reducer from the partial that owns the event.
+- **One custom patch per event enforced at build time** — the merge detects conflicting custom patches for the same event and throws. Re-registration of the same patch (same state via different slices) is allowed. Passthroughs always yield to custom reducers.
+- **Serial chains connect slices** — when one slice's output event is another's input with no other subscribers, they can be merged into a single slice.
+
 ```typescript
 import { slice } from "@rotorsoft/act";
 

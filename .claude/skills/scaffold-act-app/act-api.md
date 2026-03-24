@@ -438,4 +438,11 @@ const ItemSlice = slice()
 - `.to(resolver)` / `.void()` — Set target stream resolver
 - `.build()` — Returns a `Slice` with `_tag: "Slice"`
 
+**Slice design decisions:**
+- **Lifecycle slice first** — every state starts with a lifecycle slice for CRUD-like actions. It may also contain simple reaction flows.
+- **One slice per reaction flow** — each serial chain (event → reaction → action → state → event → …) lives in its own slice when reaction chains grow.
+- **Single state schema, multiple partials** — one Zod schema, each slice declares a partial with its own `.init()`, `.emits()`, `.patch()`, `.on()`.
+- **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, redeclare in `.emits()`. The passthrough yields to the custom reducer from the owning partial.
+- **One custom patch per event** — conflicting custom patches throw at build time. Passthroughs always yield to custom reducers.
+
 **Important:** `.void()` reactions are **never processed by `drain()`**. Use `.to(resolver)` for any reaction that must be discovered and executed during drain.

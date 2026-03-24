@@ -466,10 +466,11 @@ export function state<TName extends string, TState extends Schema>(
         emits<TEvents extends Schema>(events: ZodTypes<TEvents>) {
           // Default passthrough patches: event data merges into state
           const defaultPatch = Object.fromEntries(
-            Object.keys(events).map((k) => [
-              k,
-              ({ data }: { data: any }) => data,
-            ])
+            Object.keys(events).map((k) => {
+              const fn = ({ data }: { data: any }) => data;
+              (fn as any)._passthrough = true;
+              return [k, fn];
+            })
           ) as unknown as PatchHandlers<TState, TEvents>;
 
           // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature

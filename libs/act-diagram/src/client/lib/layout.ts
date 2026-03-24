@@ -410,14 +410,20 @@ export function computeLayout(viewModel: DomainModel): Layout {
       const actionEmitted = new Set<string>();
       for (const action of st.actions) {
         for (const en of action.emits) {
-          eventRows.push({ eventName: en, actionName: action.name });
           actionEmitted.add(en);
         }
       }
-      // Events declared in .emits() but not produced by any action
+      // Trigger events first (declared in .emits() but not produced by any
+      // action) — these are chain entry points and must be processed before
+      // their downstream events so the full serial chain is detected
       for (const ev of st.events) {
         if (!actionEmitted.has(ev.name)) {
           eventRows.push({ eventName: ev.name, actionName: "" });
+        }
+      }
+      for (const action of st.actions) {
+        for (const en of action.emits) {
+          eventRows.push({ eventName: en, actionName: action.name });
         }
       }
       // ── Measure per-event heights (including sub-chains) ─────
@@ -589,7 +595,14 @@ export function computeLayout(viewModel: DomainModel): Layout {
         actionIdx++;
       }
 
-      y += primaryBlockH + GAP / 2;
+      // Advance y past projections and chain watermarks that may extend
+      // beyond the primary action/state/event block
+      const contentBottomY = Math.max(
+        y + primaryBlockH,
+        evtY,
+        chainWatermark > -Infinity ? chainWatermark : 0
+      );
+      y = contentBottomY + GAP / 2;
       partIdx++;
     }
 

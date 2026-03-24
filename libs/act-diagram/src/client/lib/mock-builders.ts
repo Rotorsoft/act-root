@@ -137,13 +137,15 @@ function captureDispatches(handler: any): string[] {
 
   // Strategy 1: execute handler with mock app to capture app.do() calls
   try {
+    const safeProxy = (): any =>
+      new Proxy({} as Record<string, unknown>, { get: () => "" });
     const mockApp = {
       do: (actionName: string) => {
         if (typeof actionName === "string" && !dispatches.includes(actionName))
           dispatches.push(actionName);
         return Promise.resolve([]);
       },
-      load: () => Promise.resolve({}),
+      load: () => Promise.resolve({ state: safeProxy(), version: 0 }),
       query: () => Promise.resolve({ count: 0 }),
       query_array: () => Promise.resolve([]),
     };

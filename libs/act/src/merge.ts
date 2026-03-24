@@ -82,7 +82,36 @@ export function registerState(
     for (const name of Object.keys(state.events)) {
       // Same schema reference means the same partial re-registered via another slice
       if (existing.events[name] === state.events[name]) continue;
+      // Allow same-name state partials to redeclare the same event
+      // (e.g., a partial that only needs the event name for .on() reactions)
+      if (existing.events[name]) continue;
       if (events[name]) throw new Error(`Duplicate event "${name}"`);
+    }
+    // Merge patches: only one custom (non-passthrough) patch per event allowed
+    const mergedPatch = { ...existing.patch };
+    for (const name of Object.keys(state.patch)) {
+      const existingP = existing.patch[name];
+      const incomingP = state.patch[name];
+      if (!existingP) {
+        mergedPatch[name] = incomingP;
+      } else {
+        const existingIsDefault = (existingP as any)._passthrough;
+        const incomingIsDefault = (incomingP as any)._passthrough;
+        if (
+          !existingIsDefault &&
+          !incomingIsDefault &&
+          existingP !== incomingP
+        ) {
+          throw new Error(
+            `Duplicate custom patch for event "${name}" in state "${state.name}"`
+          );
+        }
+        // Keep whichever is custom
+        if (existingIsDefault && !incomingIsDefault) {
+          mergedPatch[name] = incomingP;
+        }
+        // else: existing is custom or both are passthrough — keep existing
+      }
     }
     const merged = {
       ...existing,
@@ -90,7 +119,7 @@ export function registerState(
       init: mergeInits(existing.init, state.init),
       events: { ...existing.events, ...state.events },
       actions: { ...existing.actions, ...state.actions },
-      patch: { ...existing.patch, ...state.patch },
+      patch: mergedPatch,
       on: { ...existing.on, ...state.on },
       given: { ...existing.given, ...state.given },
       snap: state.snap || existing.snap,

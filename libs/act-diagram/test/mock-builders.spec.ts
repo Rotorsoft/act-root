@@ -462,7 +462,9 @@ describe("mockSlice", () => {
     mockSlice((info) => built.push(info))
       .on("Evt")
       .do(async function loader(_event: any, _stream: string, app: any) {
-        await app.load("S", "stream-1");
+        const snap = await app.load("S", "stream-1");
+        // Access state property to exercise safeProxy get handler
+        void snap.state.status;
         await app.query({ stream: "stream-1" });
         await app.query_array({ stream: "stream-1" });
         await app.do("DoSomething", {}, {});
@@ -625,9 +627,16 @@ describe("unknownModuleProxy", () => {
     expect(typeof result).toBe("function");
   });
 
-  it("constructor call returns the proxy", () => {
+  it("constructor call on nested export returns the proxy", () => {
     const proxy = unknownModuleProxy();
     const result = new (proxy as any).SomeClass();
+    expect(typeof result).toBe("function");
+  });
+
+  it("direct constructor call returns the proxy", () => {
+    const proxy = unknownModuleProxy();
+    // Calls the top-level construct handler
+    const result = new (proxy as any)();
     expect(typeof result).toBe("function");
   });
 
