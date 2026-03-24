@@ -66,9 +66,9 @@
     "@types/chance": "^1.1.7",
     "@types/minimist": "^1.2.5",
     "@types/node": "^25.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.57.1",
-    "@typescript-eslint/parser": "^8.57.1",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.2",
+    "@typescript-eslint/parser": "^8.57.2",
+    "@vitest/coverage-v8": "^4.1.1",
     "chance": "^1.1.13",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
@@ -84,7 +84,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.1.0"
+    "vitest": "^4.1.1"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
