@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.2.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.2.0...@rotorsoft/act-diagram-v0.2.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* **act-diagram:** debounce extraction and keep last good model during file changes ([dd3becf](https://github.com/rotorsoft/act-root/commit/dd3becf295d064ee738f6753a584663ab5b11f4a))
+
 # [@rotorsoft/act-diagram-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.1.3...@rotorsoft/act-diagram-v0.2.0) (2026-03-24)
 
 
