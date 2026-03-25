@@ -101,6 +101,9 @@ export type Disposable = { dispose: Disposer };
  * - `(obj: unknown, msg?: string)` — structured data with optional message
  *
  * Implementations should respect `level` to gate output.
+ *
+ * @see {@link ConsoleLogger} for the default implementation
+ * @see {@link https://www.npmjs.com/package/@rotorsoft/act-pino | @rotorsoft/act-pino} for the Pino adapter
  */
 export interface Logger extends Disposable {
   level: string;

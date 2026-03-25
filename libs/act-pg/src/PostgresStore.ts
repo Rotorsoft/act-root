@@ -2,6 +2,7 @@ import type {
   Committed,
   EventMeta,
   Lease,
+  Logger,
   Message,
   Query,
   Schemas,
@@ -10,7 +11,7 @@ import type {
 import { ConcurrencyError, SNAP_EVENT, log } from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
-const logger = log();
+const logger: Logger = log();
 
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>
