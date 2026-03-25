@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
 import { action, load, snap } from "../src/event-sourcing.js";
-import { dispose, logger, SNAP_EVENT, store } from "../src/ports.js";
+import { dispose, SNAP_EVENT, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 import { Snapshot } from "../src/types/action.js";
 import { InvariantError } from "../src/types/errors.js";
@@ -31,8 +31,6 @@ const me = state({ me: z.object({ count: z.number() }) })
 describe("event-sourcing", () => {
   beforeEach(() => {
     store(new InMemoryStore());
-    vi.spyOn(logger, "error");
-    vi.spyOn(logger, "trace");
   });
 
   afterEach(async () => {
@@ -40,8 +38,8 @@ describe("event-sourcing", () => {
     vi.restoreAllMocks();
   });
 
-  it("should call logger.trace on action with expectedVersion", async () => {
-    await action(
+  it("should commit events on action with expectedVersion", async () => {
+    const [snapshot] = await action(
       { ...me, given: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" }, expectedVersion: -1 },
@@ -49,30 +47,31 @@ describe("event-sourcing", () => {
       undefined,
       true
     );
-    expect(logger.trace).toHaveBeenCalled();
+    expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
-  it("should call logger.error on snap error", async () => {
+  it("should not throw on snap error", async () => {
     vi.spyOn(store(), "commit").mockRejectedValueOnce(new Error("fail"));
-    await snap({
-      event: {
-        id: 1,
-        stream: "s",
-        name: "INCREMENT",
-        version: 1,
-        created: new Date(),
-        data: {},
-        meta: { correlation: "c", causation: {} },
-      },
-      state: {},
-      patches: 0,
-      snaps: 0,
-    });
-    expect(logger.error).toHaveBeenCalled();
+    // snap swallows errors internally — should not throw
+    await expect(
+      snap({
+        event: {
+          id: 1,
+          stream: "s",
+          name: "INCREMENT",
+          version: 1,
+          created: new Date(),
+          data: {},
+          meta: { correlation: "c", causation: {} },
+        },
+        state: {},
+        patches: 0,
+        snaps: 0,
+      })
+    ).resolves.toBeUndefined();
   });
 
-  it("should call logger.trace on snap success", async () => {
-    // First, commit a real event to get a valid payload for snap
+  it("should persist snapshot event on snap success", async () => {
     const committed = await store().commit(
       "s",
       [{ name: "INCREMENT", data: { by: 1 } }],
@@ -85,10 +84,8 @@ describe("event-sourcing", () => {
       patches: 1,
       snaps: 0,
     });
-    expect(logger.trace).toHaveBeenCalled();
     const events: any[] = [];
     await store().query((e) => events.push(e), { with_snaps: true });
-    // The original event is [0], the snap event is [1]
     expect(events[1].name).toBe(SNAP_EVENT);
     expect(events[1].data.count).toBe(1);
   });
@@ -346,7 +343,7 @@ describe("event-sourcing", () => {
     expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
-  it("should log error when snap fails", async () => {
+  it("should not throw when snap fails", async () => {
     vi.spyOn(store(), "commit").mockRejectedValueOnce(
       new Error("snap commit failed")
     );
@@ -364,8 +361,8 @@ describe("event-sourcing", () => {
       patches: 1,
       snaps: 0,
     };
-    await snap(snapshot);
-    expect(logger.error).toHaveBeenCalledWith(new Error("snap commit failed"));
+    // snap swallows errors — should not propagate
+    await expect(snap(snapshot)).resolves.toBeUndefined();
   });
 
   it("should use snapshot.event.version when reactingTo and expectedVersion are undefined", async () => {
@@ -398,8 +395,6 @@ describe("event-sourcing", () => {
   });
 
   it("should call callback in load and handle patch/snap logic", async () => {
-    vi.resetModules();
-    const { load } = await import("../src/event-sourcing.js");
     const state = {
       name: "test",
       state: ZodEmpty,
@@ -409,7 +404,6 @@ describe("event-sourcing", () => {
       patch: { E: vi.fn() },
       on: {},
     };
-    const { store } = await import("../src/ports.js");
     await store().commit("stream", [{ name: "E", data: {} }], {
       correlation: "c",
       causation: {},
@@ -419,8 +413,6 @@ describe("event-sourcing", () => {
   });
 
   it("should throw on missing stream in action", async () => {
-    vi.resetModules();
-    const { action } = await import("../src/event-sourcing.js");
     const state = {
       name: "test",
       state: ZodEmpty,
@@ -442,7 +434,7 @@ describe("event-sourcing", () => {
       const actual = await importOriginal();
       return Object.assign({}, actual, {
         store: () => ({ commit: vi.fn().mockRejectedValue(new Error("fail")) }),
-        logger: fakeLogger,
+        log: () => fakeLogger,
       });
     });
     const { snap } = await import("../src/event-sourcing.js");

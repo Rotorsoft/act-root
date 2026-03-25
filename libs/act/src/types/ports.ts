@@ -93,6 +93,32 @@ export type Disposable = { dispose: Disposer };
  * @see {@link InMemoryStore} for the default implementation
  * @see {@link PostgresStore} for the PostgreSQL implementation
  */
+/**
+ * Minimal logger port compatible with pino, winston, bunyan, and console.
+ *
+ * Each log method accepts either:
+ * - `(msg: string)` — plain message
+ * - `(obj: unknown, msg?: string)` — structured data with optional message
+ *
+ * Implementations should respect `level` to gate output.
+ */
+export interface Logger extends Disposable {
+  level: string;
+  fatal(obj: unknown, msg?: string): void;
+  fatal(msg: string): void;
+  error(obj: unknown, msg?: string): void;
+  error(msg: string): void;
+  warn(obj: unknown, msg?: string): void;
+  warn(msg: string): void;
+  info(obj: unknown, msg?: string): void;
+  info(msg: string): void;
+  debug(obj: unknown, msg?: string): void;
+  debug(msg: string): void;
+  trace(obj: unknown, msg?: string): void;
+  trace(msg: string): void;
+  child(bindings: Record<string, unknown>): Logger;
+}
+
 export interface Store extends Disposable {
   /**
    * Initializes or resets the store.

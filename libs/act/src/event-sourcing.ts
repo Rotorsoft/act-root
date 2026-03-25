@@ -7,7 +7,7 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
-import { cache, logger, SNAP_EVENT, store } from "./ports.js";
+import { cache, log, SNAP_EVENT, store } from "./ports.js";
 import { InvariantError } from "./types/errors.js";
 import type {
   Committed,
@@ -20,6 +20,8 @@ import type {
   Target,
 } from "./types/index.js";
 import { validate } from "./utils.js";
+
+const logger = log();
 
 /**
  * Event sourcing utilities for snapshotting, loading, and committing actions/events.

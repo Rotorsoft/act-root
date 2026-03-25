@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
-import { build_tracer, dispose, logger, store } from "./ports.js";
+import { build_tracer, dispose, log, store } from "./ports.js";
 import type {
   Actor,
   Committed,
@@ -22,6 +22,7 @@ import type {
   Target,
 } from "./types/index.js";
 
+const logger = log();
 const tracer = build_tracer(config().logLevel);
 
 /**

@@ -74,7 +74,50 @@ const app = act()
 
 ## Port/Adapter Pattern
 
-Infrastructure concerns (storage, caching) use singleton adapters injected via port functions.
+Infrastructure concerns (logging, storage, caching) use singleton adapters injected via port functions. All three ports follow the same pattern — first call wins, with a sensible default:
+
+```typescript
+import { log, store, cache } from "@rotorsoft/act";
+
+const logger = log();   // ConsoleLogger (default)
+const s = store();       // InMemoryStore (default)
+const c = cache();       // InMemoryCache (default)
+```
+
+### Logger
+
+The default `ConsoleLogger` emits JSON lines in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized output in development — zero dependencies.
+
+```typescript
+import { log } from "@rotorsoft/act";
+
+const logger = log();
+logger.info("Application started");
+```
+
+For pino, inject the adapter from `@rotorsoft/act-pino`:
+
+```typescript
+import { log } from "@rotorsoft/act";
+import { PinoLogger } from "@rotorsoft/act-pino";
+
+log(new PinoLogger({ level: "debug", pretty: true }));
+```
+
+The `Logger` interface is minimal and compatible with pino, winston, bunyan, and other popular loggers:
+
+```typescript
+interface Logger extends Disposable {
+  level: string;
+  fatal(obj: unknown, msg?: string): void;
+  error(obj: unknown, msg?: string): void;
+  warn(obj: unknown, msg?: string): void;
+  info(obj: unknown, msg?: string): void;
+  debug(obj: unknown, msg?: string): void;
+  trace(obj: unknown, msg?: string): void;
+  child(bindings: Record<string, unknown>): Logger;
+}
+```
 
 ### Store
 
@@ -121,7 +164,7 @@ interface Cache extends Disposable {
 
 ### Resource Disposal
 
-All adapters are cleaned up via `dispose()()`:
+All adapters (logger, store, cache, and custom disposers) are cleaned up via `dispose()()`:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";

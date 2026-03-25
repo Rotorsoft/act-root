@@ -71,6 +71,7 @@ const app = act().withSlice(CounterSlice).build();
 ## Related
 
 - [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) - PostgreSQL adapter for production deployments
+- [@rotorsoft/act-pino](https://www.npmjs.com/package/@rotorsoft/act-pino) - Pino logger adapter
 - [Full Documentation](https://rotorsoft.github.io/act-root/)
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
 - [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
@@ -184,6 +185,28 @@ cache(new RedisCache({ url: "redis://localhost:6379" }));
 ```
 
 The `Cache` interface is async, so you can implement adapters backed by Redis or other external caches. `InMemoryCache` is included as a fast, in-process LRU implementation.
+
+### Logger
+
+Logging uses the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized output in development — zero dependencies.
+
+```typescript
+import { log } from "@rotorsoft/act";
+
+const logger = log(); // ConsoleLogger (default)
+logger.info("Application started");
+```
+
+For pino, inject the adapter from `@rotorsoft/act-pino`:
+
+```typescript
+import { log } from "@rotorsoft/act";
+import { PinoLogger } from "@rotorsoft/act-pino";
+
+log(new PinoLogger({ level: "debug", pretty: true }));
+```
+
+Custom logger implementations must fulfill the `Logger` interface (extends `Disposable` with `fatal`, `error`, `warn`, `info`, `debug`, `trace`, and `child` methods).
 
 #### Snapshots vs Cache
 
