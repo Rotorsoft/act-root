@@ -2,6 +2,14 @@
 
 tRPC router in `packages/app/src/api/`, decomposed into focused route modules.
 
+**Why decompose into many small files instead of one router?** Each file has a single responsibility and a clear dependency graph. `trpc.ts` knows nothing about auth; `context.ts` knows nothing about routes; route files know nothing about each other. This prevents circular dependencies and makes it easy to find where a specific endpoint lives. When the spec adds a new domain aggregate, you add handlers to `domain.routes.ts` without touching auth or SSE logic.
+
+**The mutation sequence is always: `doAction()` → `broadcastState()` → `settle()` → return.** Every mutation follows this exact order. If you skip `broadcastState()`, SSE clients won't see the change. If you skip `settle()`, reactions and projections won't process. If you read from a projection instead of the snapshot in the response, you'll return stale data because projections are async. Always return data from the snapshot, never from a projection query in the same request.
+
+**Choosing the right procedure type:** Use `publicProcedure` for unauthenticated reads (list views, SSE subscriptions). Use `authedProcedure` for any mutation that modifies state — the middleware guarantees `ctx.actor` is non-null and typed. Use `adminProcedure` for administrative operations (role assignment, user management). Never use `publicProcedure` for mutations unless the spec explicitly allows anonymous writes.
+
+**Two SSE subscriptions serve different purposes:** `onStateChange` pushes incremental state patches for a *specific stream* (one entity) — used by detail views. `onEvent` replays the *global event log* — used by admin tools and event explorers. Don't confuse them: `onStateChange` uses `broadcast.subscribe()` (act-sse), while `onEvent` uses `app.on("settled")` (framework lifecycle).
+
 ## Overview
 
 | File | Purpose | Key pattern |

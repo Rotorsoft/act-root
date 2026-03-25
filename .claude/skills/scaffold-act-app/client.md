@@ -2,6 +2,18 @@
 
 React + Vite frontend in `packages/app/src/client/`.
 
+**The client has two real-time data flows — understand which to use where:**
+
+1. **State stream** (`useStateStream`) — subscribes to a *single entity's state* via `onStateChange`. The server pushes incremental JSON patches (RFC 6902) after every mutation. Use this for detail views where you're watching one entity (a game board, an order, a ticket). The hook applies patches to the React Query cache directly — no refetch needed.
+
+2. **Event stream** (`useEventStream`) — subscribes to the *global event log* via `onEvent`. Every event across all streams arrives here. Use this for event replay UIs, admin dashboards, and activity feeds. It triggers cache invalidation on relevant queries (e.g., invalidate the list when an item is created).
+
+**Most views need state stream, not event stream.** A common mistake is subscribing to the event stream to watch for changes to a specific entity — that's what the state stream is for. The event stream is for cross-entity awareness.
+
+**splitLink is required, not optional.** tRPC SSE subscriptions use `httpSubscriptionLink`, while mutations/queries use `httpLink`. Without `splitLink`, subscriptions will fail with HTTP errors because `httpLink` doesn't support the SSE protocol.
+
+**Version handling in useStateStream:** The hook handles 4 cases from `applyBroadcastMessage()`: `ok` (apply patch to cache), `behind` (client missed a version — invalidate and refetch), `patch-failed` (patch couldn't apply — invalidate and refetch), `stale` (client is ahead because the mutation response arrived before the SSE patch — ignore). Getting these wrong causes UI glitches or infinite refetch loops.
+
 ## Key Patterns
 
 - `App.tsx` uses `splitLink` — routes subscriptions through `httpSubscriptionLink` (SSE), mutations/queries through `httpLink`

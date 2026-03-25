@@ -2,6 +2,12 @@
 
 Server setup in `packages/app/src/` and production deployment patterns.
 
+**Dev vs production server:** The dev server seeds sample data and uses `InMemoryStore` (default) — fast iteration, no database needed. The production server uses `PostgresStore`, calls `settle()` on startup to process any pending reactions from previous runs, and expects data to already exist. Never put seed logic in the production server.
+
+**The cardinal rule of event-sourced APIs: snapshots are truth, projections are eventually consistent.** After `app.do()`, the returned snapshot has all events applied immediately. Projections run asynchronously via `settle()` and may lag. In request handlers, always return data from snapshots. Projections are for list views and background queries, not for mutation responses.
+
+**The `doAction()` helper exists for a reason.** `app.do()` returns an array of snapshots (one per emitted event). Destructuring `const [snap] = await app.do(...)` silently drops later snapshots if the action emits multiple events. Always use the last snapshot: `snaps[snaps.length - 1]`. The `doAction()` helper wraps this to prevent the mistake.
+
 ## Dev Server (seed data + API)
 
 ```typescript

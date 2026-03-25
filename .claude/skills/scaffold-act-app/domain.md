@@ -2,9 +2,15 @@
 
 Pure domain logic in `packages/domain/` — zero infrastructure deps (only `@rotorsoft/act` and `zod`).
 
+**Why a separate domain package?** Domain logic must be testable without databases, HTTP servers, or React. Keeping it isolated forces clean boundaries — if you find yourself importing `cors` or `@trpc/server` here, the dependency is going the wrong direction. The domain package is the only one that matters for correctness; everything else is infrastructure glue.
+
+**Build order matters.** States must exist before slices (slices merge state partials). Schemas must exist before states (states reference them). Invariants can be defined alongside or before states. Bootstrap comes last — it wires everything together. If you define slices before their states, the build will fail with missing event errors.
+
 ## Schemas & Actor Type
 
 All Zod schemas and the custom actor type in `packages/domain/src/schemas.ts`.
+
+**Deciding what goes in schemas.ts vs feature files:** Put *shared* schemas here — the AppActor type, systemActor constant, and any schemas referenced across multiple features. Feature-specific schemas (used by only one state) can live in the feature file instead. The key rule: if two features import the same schema, it belongs in schemas.ts.
 
 ```typescript
 import type { Actor } from "@rotorsoft/act";
@@ -41,6 +47,10 @@ Use `ZodEmpty` for empty payloads. Use `.and()` or `.extend()` for composition.
 
 ## Invariants
 
+**When to create an invariant vs inline validation:** Invariants enforce business rules that depend on *current state* — "ticket must be open to close it." If the rule only validates *input shape* (e.g., "name must be non-empty"), that belongs in the Zod schema, not an invariant. Invariants run *after* Zod validation, *before* the emit handler. If an invariant fails, no event is emitted.
+
+**Actor-aware invariants:** The `valid` function receives an optional second parameter `actor`. Use this for authorization rules like "only the assigned user can close this ticket." Keep authorization invariants separate from state invariants for clarity.
+
 In `packages/domain/src/invariants.ts`:
 
 ```typescript
@@ -55,6 +65,10 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 `Invariant<S>` requires `{ description: string; valid: (state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` with minimal fields (contravariance allows assignment to subtypes).
 
 ## States
+
+**Deciding when to use `.patch()` vs passthrough:** Most events don't need custom reducers — if the event data shape matches the state fields you want to update, passthrough works (the event data merges into state). Use `.patch()` only when: (1) the event data needs transformation before it becomes state (e.g., computing a derived field), (2) you need to read current state to compute the new value (e.g., incrementing a counter), or (3) the event updates fields not present in the event data (e.g., setting `status: "Closed"` from a `ClosedBy` event). A common AI mistake is adding `.patch()` entries that just return `({ data }) => data` — this is redundant since passthrough is the default.
+
+**Deciding between `.emit("EventName")` string passthrough and a handler function:** Use the string form when the action payload matches the event data exactly — no transformation needed. Use the handler function when you need to: add fields from the actor (`createdBy: actor.id`), compute values from state, or emit multiple/conditional events. The string form is cleaner and less error-prone.
 
 ```typescript
 import { state } from "@rotorsoft/act";
@@ -85,6 +99,10 @@ export const Item = state({ Item: ItemState })
 **Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act. When a partial redeclares an event in `.emits()` without a `.patch()`, it gets a passthrough reducer that yields to any custom reducer from another partial. Two different custom patches for the same event throw at build time.
 
 ## Slices with Co-located Projections
+
+**When to use a slice vs a standalone reaction at the act level:** Use slices when the reaction is part of a feature's vertical slice — it naturally groups with the state it modifies. Use act-level reactions (`.on("Event").do(handler)`) only for cross-cutting concerns that don't belong to any single feature (e.g., global audit logging). In practice, almost all reactions belong in slices.
+
+**Choosing `.to(resolver)` vs `.void()`:** This is the most common source of bugs. Ask: "Does this reaction need to run during `drain()`?" If yes → `.to(resolver)`. If it's a fire-and-forget side effect (logging, metrics, sending a notification that doesn't need retry) → `.void()`. The trap: using `.void()` for a reaction that dispatches actions to other streams. Those actions will run during the commit but won't be retried on failure, and `drain()` won't know about them. When in doubt, use `.to()`.
 
 **Slice design decisions:**
 
@@ -153,6 +171,8 @@ export const ItemSlice = slice()
 
 ## Cross-Aggregate Projections
 
+**When a projection needs events from another aggregate:** This is the signal that your slice needs `.withState(OtherState)`. Without it, the slice won't know about the other aggregate's events and the projection handlers won't compile. This does NOT mean the slice owns that state — it just makes the events visible. The other aggregate's lifecycle slice still owns its state definition.
+
 Projections can consume events from multiple aggregates. Include the additional state in the slice to make the events available:
 
 ```typescript
@@ -186,6 +206,10 @@ export const app = act()
 > **Note:** When using reactions with `drain()`, you must call `app.correlate()` before `app.drain()` to discover target streams. Use `app.settle()` for non-blocking, debounced correlate→drain that emits a `"settled"` event when the system is consistent. See [act-api.md](act-api.md) §7 (Correlate Before Drain).
 
 ## Tests
+
+**What to test and what not to:** Test domain behavior — actions produce correct events, invariants reject invalid state transitions, reactions trigger expected downstream actions, projections build correct read models. Do NOT test framework internals (event storage, cache behavior, version numbering). Trust the framework for infrastructure; verify your business logic.
+
+**Testing reactions requires two steps:** First `correlate()` to discover target streams, then `drain()` to process them. A common AI mistake is calling only `drain()` — it returns empty because no streams were registered. In tests, always call both explicitly. In production, `settle()` handles this automatically.
 
 ```typescript
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
