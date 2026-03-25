@@ -1,6 +1,78 @@
-# Production Deployment
+# Server & Production
 
-Covers production-specific concerns beyond what's in [monorepo-template.md](monorepo-template.md). The template already provides `app.settle()`, auth crypto, `createContext()`, and dev seed scripts.
+Server setup in `packages/app/src/` and production deployment patterns.
+
+**Dev vs production server:** The dev server seeds sample data and uses `InMemoryStore` (default) — fast iteration, no database needed. The production server uses `PostgresStore`, calls `settle()` on startup to process any pending reactions from previous runs, and expects data to already exist. Never put seed logic in the production server.
+
+**The cardinal rule of event-sourced APIs: snapshots are truth, projections are eventually consistent.** After `app.do()`, the returned snapshot has all events applied immediately. Projections run asynchronously via `settle()` and may lag. In request handlers, always return data from snapshots. Projections are for list views and background queries, not for mutation responses.
+
+**The `doAction()` helper exists for a reason.** `app.do()` returns an array of snapshots (one per emitted event). Destructuring `const [snap] = await app.do(...)` silently drops later snapshots if the action emits multiple events. Always use the last snapshot: `snaps[snaps.length - 1]`. The `doAction()` helper wraps this to prevent the mistake.
+
+## Dev Server (seed data + API)
+
+```typescript
+// packages/app/src/dev-server.ts
+import { createHTTPServer } from "@trpc/server/adapters/standalone";
+import cors from "cors";
+import { app, systemActor } from "@my-app/domain";
+import { router, createContext } from "./api/index.js";
+import { hashPassword } from "./api/auth.js";
+
+async function seed() {
+  const system = { ...systemActor, name: "Seed Script" };
+
+  // Seed domain data via app.do()
+  await app.do("CreateItem", { stream: "item-1", actor: system }, { name: "Example Item" });
+
+  // Seed admin user
+  const adminHash = hashPassword("admin");
+  await app.do("RegisterUser", { stream: "admin", actor: system }, {
+    email: "admin", name: "Admin", provider: "local", providerId: "admin", passwordHash: adminHash,
+  });
+  await app.do("AssignRole", { stream: "admin", actor: system }, { role: "admin" });
+
+  // Drain reactions + projections
+  for (let i = 0; i < 3; i++) {
+    const { leased } = await app.correlate({ after: -1, limit: 500 });
+    if (leased.length === 0) break;
+    await app.drain({ streamLimit: 100, eventLimit: 500 });
+  }
+
+  console.log("Seeded dev data");
+  console.log("  Admin user: admin/admin");
+}
+
+const server = createHTTPServer({
+  middleware: cors({ origin: true, credentials: true }),
+  router,
+  createContext,
+});
+server.listen(4000);
+
+await seed();
+console.log("\nAPI server running at http://localhost:4000");
+```
+
+## Production Server
+
+```typescript
+// packages/app/src/server.ts
+import { createHTTPServer } from "@trpc/server/adapters/standalone";
+import cors from "cors";
+import { app } from "@my-app/domain";
+import { router, createContext } from "./api/index.js";
+
+const server = createHTTPServer({
+  middleware: cors({ origin: true, credentials: true }),
+  router,
+  createContext,
+});
+const port = Number(process.env.PORT) || 4000;
+server.listen(port);
+
+app.settle();
+console.log(`Server listening on http://localhost:${port}`);
+```
 
 ## Switch to PostgreSQL
 
@@ -554,7 +626,7 @@ const state = await readProjection(streamId); // stale
 
 ## Seed Data for Development
 
-See `dev-server.ts` in [monorepo-template.md](monorepo-template.md) for the complete seed pattern. Key points:
+See dev-server.ts above for the complete seed pattern. Key points:
 - Use `systemActor` for seed actions
 - Call `correlate()` + `drain()` in a loop after seeding to process all reactions and projections
 - Seed an admin user with `hashPassword()` for development access

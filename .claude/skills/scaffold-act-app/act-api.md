@@ -406,7 +406,7 @@ const ItemProjection = projection("items")
 - `.to(resolver)` / `.void()` — Override the default resolver per handler
 - `.build()` — Returns a `Projection` with `_tag: "Projection"`
 
-**Optimization:** When using `act-sse` broadcast, only register handlers for lifecycle events (entity creation, deletion, membership changes). High-frequency operational events don't need projection handlers — the broadcast cache is the source of truth. This reduces drain work and DB writes by ~95%. See [production.md](production.md) § Projection Optimization Strategies.
+**Optimization:** When using `act-sse` broadcast, only register handlers for lifecycle events (entity creation, deletion, membership changes). High-frequency operational events don't need projection handlers — the broadcast cache is the source of truth. This reduces drain work and DB writes by ~95%. See [server.md](server.md) § Projection Optimization Strategies.
 
 ## 13. Slice Builder — Vertical Slice Architecture
 
