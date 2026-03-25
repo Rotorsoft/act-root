@@ -1,4 +1,5 @@
-import { disposeAndExit, logger } from "./ports.js";
+import { disposeAndExit, log } from "./ports.js";
+const logger = log();
 
 // exit on signals
 process.once("SIGINT", async (arg?: any) => {

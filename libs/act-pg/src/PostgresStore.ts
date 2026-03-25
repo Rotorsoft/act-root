@@ -7,9 +7,10 @@ import type {
   Schemas,
   Store,
 } from "@rotorsoft/act";
-import { ConcurrencyError, SNAP_EVENT, logger } from "@rotorsoft/act";
+import { ConcurrencyError, SNAP_EVENT, log } from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
+const logger = log();
 
 const { Pool, types } = pg;
 types.setTypeParser(types.builtins.JSONB, (val) =>

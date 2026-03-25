@@ -50,9 +50,20 @@ import { cache } from "@rotorsoft/act";
 cache(new RedisCache({ url: "redis://localhost:6379" }));
 ```
 
+### Logger
+
+Logging follows the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production and colorized output in development. For pino, inject `PinoLogger` from `@rotorsoft/act-pino`:
+
+```typescript
+import { log } from "@rotorsoft/act";
+import { PinoLogger } from "@rotorsoft/act-pino";
+
+log(new PinoLogger({ level: "debug" }));
+```
+
 ### Resource Disposal
 
-All adapters (store, cache, custom disposers) are cleaned up via `dispose()()`:
+All adapters (logger, store, cache, custom disposers) are cleaned up via `dispose()()`:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";

@@ -1,14 +1,14 @@
 {
-  "name": "@rotorsoft/act",
+  "name": "@rotorsoft/act-pino",
   "type": "module",
-  "version": "0.24.1",
-  "description": "act core library",
+  "version": "0.1.0",
+  "description": "Pino logger adapter for @rotorsoft/act",
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rotorsoft/act-root.git",
-    "directory": "libs/act"
+    "directory": "libs/act-pino"
   },
   "files": [
     "dist"
@@ -23,6 +23,7 @@
       "require": "./dist/index.cjs"
     }
   },
+  "sideEffects": false,
   "engines": {
     "node": ">=22.18.0"
   },
@@ -35,7 +36,8 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
-    "@rotorsoft/act-patch": "workspace:^",
-    "zod": "^4.3.6"
+    "@rotorsoft/act": "workspace:^",
+    "pino": "^10.3.1",
+    "pino-pretty": "^13.1.3"
   }
 }
