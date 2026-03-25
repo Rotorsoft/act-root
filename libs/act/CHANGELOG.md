@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.25.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.24.1...@rotorsoft/act-v0.25.0) (2026-03-25)
+
+
+### Features
+
+* **act:** add Logger interface JSDoc cross-references ([e9772d5](https://github.com/rotorsoft/act-root/commit/e9772d54fc5e70eed9b010d97efdfe96a68d1bfb))
+
 # [@rotorsoft/act-v0.24.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.24.0...@rotorsoft/act-v0.24.1) (2026-03-24)
 
 
