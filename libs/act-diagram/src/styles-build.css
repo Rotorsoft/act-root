@@ -1,0 +1,29 @@
+@import "tailwindcss";
+@source "./client/components/*.tsx";
+
+@theme {
+  --color-zinc-925: #111113;
+}
+
+/* Webkit scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* Act Builder code navigation highlight */
+.act-builder-highlight {
+  background-color: rgba(255, 213, 79, 0.3) !important;
+  border: 1px solid rgba(255, 213, 79, 0.6);
+  border-radius: 2px;
+}
