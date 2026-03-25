@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.2.2...@rotorsoft/act-diagram-v0.3.0) (2026-03-25)
+
+
+### Features
+
+* **act-diagram:** export pre-built Tailwind CSS for consumers ([3ef29a2](https://github.com/rotorsoft/act-root/commit/3ef29a21667d7d935f19ed82ebfed2338cebbfa1))
+
 # [@rotorsoft/act-diagram-v0.2.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.2.1...@rotorsoft/act-diagram-v0.2.2) (2026-03-24)
 
 
