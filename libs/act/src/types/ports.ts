@@ -15,39 +15,6 @@ import type {
 import type { Lease } from "./reaction.js";
 
 /**
- * A cached snapshot entry for a stream.
- *
- * @template TState - The state schema type
- */
-export interface CacheEntry<TState extends Schema> {
-  readonly state: TState;
-  readonly version: number;
-  readonly event_id: number;
-  readonly patches: number;
-  readonly snaps: number;
-}
-
-/**
- * Cache port for storing stream snapshots in-process.
- *
- * Implementations should provide fast key-value access with bounded memory.
- * The async interface is forward-compatible with external caches (e.g., Redis).
- *
- * @template TState - The state schema type
- */
-export interface Cache extends Disposable {
-  get<TState extends Schema>(
-    stream: string
-  ): Promise<CacheEntry<TState> | undefined>;
-  set<TState extends Schema>(
-    stream: string,
-    entry: CacheEntry<TState>
-  ): Promise<void>;
-  invalidate(stream: string): Promise<void>;
-  clear(): Promise<void>;
-}
-
-/**
  * A function that disposes of a resource asynchronously.
  * @returns Promise that resolves when disposal is complete.
  */
@@ -57,6 +24,43 @@ export type Disposer = () => Promise<void>;
  * An object that can be disposed of asynchronously.
  */
 export type Disposable = { dispose: Disposer };
+
+// ---------------------------------------------------------------------------
+// Logger
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal logger port compatible with pino, winston, bunyan, and console.
+ *
+ * Each log method accepts either:
+ * - `(msg: string)` — plain message
+ * - `(obj: unknown, msg?: string)` — structured data with optional message
+ *
+ * Implementations should respect `level` to gate output.
+ *
+ * @see {@link ConsoleLogger} for the default implementation
+ * @see {@link https://www.npmjs.com/package/@rotorsoft/act-pino | @rotorsoft/act-pino} for the Pino adapter
+ */
+export interface Logger extends Disposable {
+  level: string;
+  fatal(obj: unknown, msg?: string): void;
+  fatal(msg: string): void;
+  error(obj: unknown, msg?: string): void;
+  error(msg: string): void;
+  warn(obj: unknown, msg?: string): void;
+  warn(msg: string): void;
+  info(obj: unknown, msg?: string): void;
+  info(msg: string): void;
+  debug(obj: unknown, msg?: string): void;
+  debug(msg: string): void;
+  trace(obj: unknown, msg?: string): void;
+  trace(msg: string): void;
+  child(bindings: Record<string, unknown>): Logger;
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
 
 /**
  * Interface for event store implementations.
@@ -93,35 +97,6 @@ export type Disposable = { dispose: Disposer };
  * @see {@link InMemoryStore} for the default implementation
  * @see {@link PostgresStore} for the PostgreSQL implementation
  */
-/**
- * Minimal logger port compatible with pino, winston, bunyan, and console.
- *
- * Each log method accepts either:
- * - `(msg: string)` — plain message
- * - `(obj: unknown, msg?: string)` — structured data with optional message
- *
- * Implementations should respect `level` to gate output.
- *
- * @see {@link ConsoleLogger} for the default implementation
- * @see {@link https://www.npmjs.com/package/@rotorsoft/act-pino | @rotorsoft/act-pino} for the Pino adapter
- */
-export interface Logger extends Disposable {
-  level: string;
-  fatal(obj: unknown, msg?: string): void;
-  fatal(msg: string): void;
-  error(obj: unknown, msg?: string): void;
-  error(msg: string): void;
-  warn(obj: unknown, msg?: string): void;
-  warn(msg: string): void;
-  info(obj: unknown, msg?: string): void;
-  info(msg: string): void;
-  debug(obj: unknown, msg?: string): void;
-  debug(msg: string): void;
-  trace(obj: unknown, msg?: string): void;
-  trace(msg: string): void;
-  child(bindings: Record<string, unknown>): Logger;
-}
-
 export interface Store extends Disposable {
   /**
    * Initializes or resets the store.
@@ -225,26 +200,6 @@ export interface Store extends Disposable {
   ) => Promise<number>;
 
   /**
-   * Acknowledges successful processing of leased streams.
-   *
-   * Updates the watermark to indicate events have been processed successfully.
-   * Releases the lease so other workers can process subsequent events.
-   *
-   * @param leases - Leases to acknowledge with updated watermarks
-   * @returns Acknowledged leases
-   *
-   * @example
-   * ```typescript
-   * const leased = await store().claim(5, 5, randomUUID(), 10000);
-   * // Process events up to ID 150
-   * await store().ack(leased.map(l => ({ ...l, at: 150 })));
-   * ```
-   *
-   * @see {@link claim} for acquiring leases
-   */
-  ack: (leases: Lease[]) => Promise<Lease[]>;
-
-  /**
    * Atomically discovers and leases streams for reaction processing.
    *
    * Combines {@link poll} and {@link lease} into a single operation, eliminating
@@ -308,6 +263,26 @@ export interface Store extends Disposable {
   ) => Promise<{ subscribed: number; watermark: number }>;
 
   /**
+   * Acknowledges successful processing of leased streams.
+   *
+   * Updates the watermark to indicate events have been processed successfully.
+   * Releases the lease so other workers can process subsequent events.
+   *
+   * @param leases - Leases to acknowledge with updated watermarks
+   * @returns Acknowledged leases
+   *
+   * @example
+   * ```typescript
+   * const leased = await store().claim(5, 5, randomUUID(), 10000);
+   * // Process events up to ID 150
+   * await store().ack(leased.map(l => ({ ...l, at: 150 })));
+   * ```
+   *
+   * @see {@link claim} for acquiring leases
+   */
+  ack: (leases: Lease[]) => Promise<Lease[]>;
+
+  /**
    * Blocks streams after persistent processing failures.
    *
    * Blocked streams won't be returned by {@link claim} until manually unblocked.
@@ -341,4 +316,41 @@ export interface Store extends Disposable {
   block: (
     leases: Array<Lease & { error: string }>
   ) => Promise<Array<Lease & { error: string }>>;
+}
+
+// ---------------------------------------------------------------------------
+// Cache
+// ---------------------------------------------------------------------------
+
+/**
+ * A cached snapshot entry for a stream.
+ *
+ * @template TState - The state schema type
+ */
+export interface CacheEntry<TState extends Schema> {
+  readonly state: TState;
+  readonly version: number;
+  readonly event_id: number;
+  readonly patches: number;
+  readonly snaps: number;
+}
+
+/**
+ * Cache port for storing stream snapshots in-process.
+ *
+ * Implementations should provide fast key-value access with bounded memory.
+ * The async interface is forward-compatible with external caches (e.g., Redis).
+ *
+ * @template TState - The state schema type
+ */
+export interface Cache extends Disposable {
+  get<TState extends Schema>(
+    stream: string
+  ): Promise<CacheEntry<TState> | undefined>;
+  set<TState extends Schema>(
+    stream: string,
+    entry: CacheEntry<TState>
+  ): Promise<void>;
+  invalidate(stream: string): Promise<void>;
+  clear(): Promise<void>;
 }
