@@ -16,11 +16,11 @@ export const stripNonCode = (src: string, level: "full" | "nav" = "full") => {
   let result = src
     .replace(/\/\/[^\n]*/g, blank) // line comments
     .replace(/\/\*[\s\S]*?\*\//g, blank) // block comments
-    .replace(/`(?:\\[\s\S]|[^`])*`/g, blank); // template literals
+    .replace(/`(?:\\[\s\S]|[^`\\])*`/g, blank); // template literals
   if (level === "full") {
     result = result
-      .replace(/"(?:\\[\s\S]|[^"])*"/g, blank) // double-quoted strings
-      .replace(/'(?:\\[\s\S]|[^'])*'/g, blank); // single-quoted strings
+      .replace(/"(?:\\[\s\S]|[^"\\])*"/g, blank) // double-quoted strings
+      .replace(/'(?:\\[\s\S]|[^'\\])*'/g, blank); // single-quoted strings
   }
   return result;
 };

@@ -68,7 +68,7 @@
     "@types/node": "^25.5.0",
     "@typescript-eslint/eslint-plugin": "^8.57.2",
     "@typescript-eslint/parser": "^8.57.2",
-    "@vitest/coverage-v8": "^4.1.1",
+    "@vitest/coverage-v8": "^4.1.2",
     "chance": "^1.1.13",
     "eslint": "^10.1.0",
     "eslint-config-prettier": "^10.1.8",
@@ -84,7 +84,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.1.1"
+    "vitest": "^4.1.2"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
@@ -95,5 +95,18 @@
     "*.{ts,tsx}": [
       "eslint --fix"
     ]
+  },
+  "pnpm": {
+    "overrides": {
+      "flatted": ">=3.4.2",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=4 <4.0.4": ">=4.0.4",
+      "yaml": ">=2.8.3",
+      "undici": ">=7.24.0",
+      "rollup": ">=4.59.0",
+      "minimatch@<3.1.4": ">=3.1.4",
+      "serialize-javascript": ">=7.0.3",
+      "svgo": ">=3.3.3"
+    }
   }
 }
