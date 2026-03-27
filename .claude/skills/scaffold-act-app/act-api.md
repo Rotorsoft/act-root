@@ -205,11 +205,17 @@ it("should process reactions", async () => {
 });
 ```
 
-**In API mutations:** Call `settle()` and return immediately:
+**In bootstrap:** Wire `app.on("committed", () => app.settle())` before the initial settle. This ensures reaction chains fully propagate — when a reaction produces new events during drain, the `committed` listener triggers another settle cycle to process those events through projections and further reactions. Without this, projection streams lag behind after reaction chains.
+
+```typescript
+const settleOpts = { maxPasses: 10, streamLimit: 100, eventLimit: 1000 };
+app.on("committed", () => app.settle(settleOpts));
+```
+
+**In API mutations:** No explicit `settle()` needed — the `committed` listener handles it automatically:
 ```typescript
 CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
   await app.do("CreateItem", target, input);
-  app.settle();  // fire-and-forget — UI notified via "settled" event
   return { success: true };
 });
 ```
