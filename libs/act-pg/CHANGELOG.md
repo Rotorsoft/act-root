@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.14.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.0...@rotorsoft/act-pg-v0.14.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* **act, act-pg:** add stream_exact query option for exact stream matching ([1ed4e5b](https://github.com/rotorsoft/act-root/commit/1ed4e5bf98ac454d60ea5aa9563e5338c75e2b2d))
+
 # [@rotorsoft/act-pg-v0.14.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.13.1...@rotorsoft/act-pg-v0.14.0) (2026-03-25)
 
 
