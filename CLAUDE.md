@@ -505,6 +505,7 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - Use `app.on("settled", ...)` to react when `settle()` completes all correlate/drain passes
 - Use `app.on("blocked", ...)` to catch reaction processing failures
 - Query events directly: `await app.query_array({ stream: "mystream" })`
+- Query with exact stream match: `await app.query_array({ stream: "mystream", stream_exact: true })` — by default, `stream` uses regex matching; `stream_exact: true` uses exact string equality. `load()` always uses exact match internally.
 
 ### Performance
 

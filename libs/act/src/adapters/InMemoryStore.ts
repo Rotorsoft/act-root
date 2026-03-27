@@ -212,8 +212,11 @@ export class InMemoryStore implements Store {
   }
 
   private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
-    if (query.stream && !RegExp(`^${query.stream}$`).test(e.stream))
-      return false;
+    if (query.stream) {
+      if (query.stream_exact) {
+        if (e.stream !== query.stream) return false;
+      } else if (!RegExp(`^${query.stream}$`).test(e.stream)) return false;
+    }
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)
       return false;

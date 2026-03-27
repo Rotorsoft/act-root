@@ -158,6 +158,45 @@ describe("InMemoryStore", () => {
       expect(result.length).toBe(6);
     });
 
+    it("should filter by stream_exact without regex matching", async () => {
+      const s = store();
+      await s.commit("ticker-VT", [{ name: "A", data: { a: 1 } }], {
+        correlation: "c1",
+        causation: {},
+      });
+      await s.commit("ticker-VTI", [{ name: "A", data: { a: 2 } }], {
+        correlation: "c2",
+        causation: {},
+      });
+      await s.commit("ticker-VTV", [{ name: "A", data: { a: 3 } }], {
+        correlation: "c3",
+        causation: {},
+      });
+
+      // Regex match with pattern: ticker-VT. matches VTI and VTV
+      let result: any[] = [];
+      await s.query((e) => result.push(e), { stream: "ticker-VT." });
+      expect(result.length).toBe(2); // VTI and VTV
+
+      // Exact match: only ticker-VT
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "ticker-VT",
+        stream_exact: true,
+      });
+      expect(result.length).toBe(1);
+      expect(result[0].data.a).toBe(1);
+
+      // Exact match: only ticker-VTI
+      result = [];
+      await s.query((e) => result.push(e), {
+        stream: "ticker-VTI",
+        stream_exact: true,
+      });
+      expect(result.length).toBe(1);
+      expect(result[0].data.a).toBe(2);
+    });
+
     it("should subscribe and claim streams", async () => {
       const s = store();
       const { subscribed } = await s.subscribe([{ stream: "L1" }]);
