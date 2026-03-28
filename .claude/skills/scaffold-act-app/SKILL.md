@@ -184,7 +184,8 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 9. **ESM only** — All packages use `"type": "module"` and `.js` import extensions.
 10. **Single-key records** — `state({})`, `.on({})`, `.emits({})` take single-key records. Multi-key throws at runtime.
 11. **API decomposition** — Split tRPC router into focused route files (`auth.routes.ts`, `domain.routes.ts`, `events.routes.ts`). Keep `trpc.ts` for init + middleware, `context.ts` for request context, `helpers.ts` for shared utilities.
-12. **settle() after mutations** — Call `app.settle()` after every `app.do()` in API mutations. This is non-blocking (returns immediately), debounced (coalesces rapid commits), and emits a `"settled"` event only after all correlate/drain iterations and projections are fully processed.
+12. **settle() on committed** — Wire `app.on("committed", () => app.settle())` in bootstrap. No explicit `settle()` in API mutations — the committed listener handles it automatically.
+13. **No redundant timestamps in events** — Never add `createdAt`, `updatedAt`, `openedAt`, `closedAt`, `removedAt`, `registeredAt`, or similar timestamp fields to event schemas. Every committed event already has a `created` timestamp provided by the framework. Use `event.created` in projections. Only include dates that represent *business dates* distinct from when the event was recorded (e.g., `transaction_date` for a trade that happened on a different day than when it was entered).
 
 ## Error Handling
 

@@ -61,6 +61,9 @@ import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import cors from "cors";
 import { app } from "@my-app/domain";
 import { router, createContext } from "./api/index.js";
+import { bootstrap } from "./bootstrap.js";
+
+await bootstrap();
 
 const server = createHTTPServer({
   middleware: cors({ origin: true, credentials: true }),
@@ -70,7 +73,6 @@ const server = createHTTPServer({
 const port = Number(process.env.PORT) || 4000;
 server.listen(port);
 
-app.settle();
 console.log(`Server listening on http://localhost:${port}`);
 ```
 
@@ -592,19 +594,29 @@ broadcastState(streamId, snap); // single function, every path
 
 ### Bootstrap Order
 
-Initialize in this order: DB → event store (+ optional cache adapter) → initial settle (replays events and runs projections) → warm caches → enable background processes.
+Initialize in this order: DB → event store (+ optional cache adapter) → wire `committed` listener → initial settle (replays events and runs projections) → warm caches → enable background processes.
+
+**Critical pattern: settle on committed events.** Reactions produce new events during drain. Those new events fire `committed`, which must trigger another `settle()` to process the reaction's output through projections and further reactions. Without this, projection streams lag behind after reaction chains. Wire `app.on("committed", () => app.settle())` **before** the initial settle so that events produced during startup settle are also processed.
 
 ```typescript
 async function bootstrap() {
   await initDb();
   await store().seed();
+
+  const settleOpts = { maxPasses: 10, streamLimit: 100, eventLimit: 1000 };
+
+  // Settle after every commit — ensures reaction chains fully propagate
+  app.on("committed", () => app.settle(settleOpts));
+
+  // Settle on startup — replays pending events and runs projections
   await new Promise<void>((resolve) => {
     app.on("settled", function handler() {
       app.off("settled", handler);
       resolve();
     });
-    app.settle();
+    app.settle(settleOpts);
   });
+
   await warmCaches();
   enableBackgroundProcesses();
 }
