@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.14.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.1...@rotorsoft/act-pg-v0.14.2) (2026-03-29)
+
+
+### Bug Fixes
+
+* **security:** sanitize SQL identifiers, escape RegExp, fix code injection vectors ([afbe25e](https://github.com/rotorsoft/act-root/commit/afbe25e5e61c75d0d245070bb6c9b79affb9fe74))
+
 # [@rotorsoft/act-pg-v0.14.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.0...@rotorsoft/act-pg-v0.14.1) (2026-03-27)
 
 
