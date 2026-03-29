@@ -21,6 +21,10 @@ import type {
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /**
  * @internal
  * Represents an in-memory stream for event processing and leasing.
@@ -212,7 +216,10 @@ export class InMemoryStore implements Store {
   }
 
   private in_query<E extends Schemas>(query: Query, e: Committed<E, keyof E>) {
-    if (query.stream && !RegExp(`^${query.stream}$`).test(e.stream))
+    if (
+      query.stream &&
+      !RegExp(`^${escapeRegExp(query.stream)}$`).test(e.stream)
+    )
       return false;
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)

@@ -198,7 +198,7 @@ function execute(
           "module",
           `
           "use strict";
-          var __filename = "${file.path}";
+          var __filename = ${JSON.stringify(file.path)};
           var __dirname = ".";
           var process = { env: {}, cwd: function() { return "/"; }, exit: function() {}, on: function() {}, off: function() {} };
           var Buffer = { from: function() { return ""; } };
