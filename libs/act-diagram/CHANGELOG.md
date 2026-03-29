@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.0...@rotorsoft/act-diagram-v0.3.1) (2026-03-26)
+
+
+### Bug Fixes
+
+* **security:** resolve ReDoS and dependency vulnerabilities ([e0a7945](https://github.com/rotorsoft/act-root/commit/e0a7945659b7354aa95ff2109444b00c3b6b39be))
+
 # [@rotorsoft/act-diagram-v0.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.2.2...@rotorsoft/act-diagram-v0.3.0) (2026-03-25)
 
 

@@ -91,7 +91,8 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 /**
  * Query options for event store queries.
  *
- * @property `stream?` - Filter by stream name
+ * @property `stream?` - Filter by stream name (regex match by default)
+ * @property `stream_exact?` - When true, match stream name exactly instead of regex (used by load)
  * @property `names?` - Filter by event names
  * @property `before?` - Filter events before this id
  * @property `after?` - Filter events after this id

@@ -30,6 +30,9 @@ export const CreateItem = z.object({ name: z.string().min(1) });
 export const CloseItem = ZodEmpty;
 
 // Events (immutable — never modify published schemas)
+// NOTE: Do NOT add timestamp fields (createdAt, updatedAt, etc.) to events.
+// Every committed event has a `created` timestamp from the framework.
+// Only include business dates distinct from event creation (e.g., transaction_date).
 export const ItemCreated = z.object({ name: z.string(), createdBy: z.string() });
 export const ItemClosed = z.object({ closedBy: z.string() });
 

@@ -125,6 +125,36 @@ export const ItemClosed = ZodEmpty; // event with no data
 
 Do NOT use `z.object({})` — use `ZodEmpty` for consistency and correct validation.
 
+## 5b. No Redundant Timestamps in Events
+
+Every committed event has a `created` timestamp provided by the framework (`event.created: Date`). Do NOT add timestamp fields like `createdAt`, `updatedAt`, `openedAt`, `closedAt`, `removedAt`, `registeredAt`, or `addedAt` to event schemas — they duplicate `event.created`.
+
+**Only include dates that represent business dates** distinct from when the event was recorded. For example, a `transaction_date` for a stock trade that happened on a different day than when it was entered into the system.
+
+```typescript
+// ❌ Don't do this — redundant with event.created
+export const ItemCreated = z.object({ name: z.string(), createdAt: z.string() });
+
+// ✅ Do this — no timestamp, use event.created in projections
+export const ItemCreated = z.object({ name: z.string(), createdBy: z.string() });
+
+// ✅ Business date that differs from event creation
+export const LotAdded = z.object({ ticker: z.string(), lot: Lot });
+// where Lot has transaction_date: z.string() — the actual trade date
+```
+
+In projections, use `event.created` for the timestamp:
+```typescript
+.on({ ItemCreated })
+.do(async (event) => {
+  await db().insert(items).values({
+    id: event.stream,
+    name: event.data.name,
+    createdAt: event.created.toISOString(), // from framework, not event data
+  });
+})
+```
+
 ## 6. Void Reactions — NEVER Processed by drain()
 
 **Critical:** `.void()` sets a reaction's resolver to return `undefined`. During `drain()`, reactions with `undefined` targets are **filtered out and skipped entirely**.
@@ -205,11 +235,17 @@ it("should process reactions", async () => {
 });
 ```
 
-**In API mutations:** Call `settle()` and return immediately:
+**In bootstrap:** Wire `app.on("committed", () => app.settle())` before the initial settle. This ensures reaction chains fully propagate — when a reaction produces new events during drain, the `committed` listener triggers another settle cycle to process those events through projections and further reactions. Without this, projection streams lag behind after reaction chains.
+
+```typescript
+const settleOpts = { maxPasses: 10, streamLimit: 100, eventLimit: 1000 };
+app.on("committed", () => app.settle(settleOpts));
+```
+
+**In API mutations:** No explicit `settle()` needed — the `committed` listener handles it automatically:
 ```typescript
 CreateItem: authedProcedure.mutation(async ({ input, ctx }) => {
   await app.do("CreateItem", target, input);
-  app.settle();  // fire-and-forget — UI notified via "settled" event
   return { success: true };
 });
 ```

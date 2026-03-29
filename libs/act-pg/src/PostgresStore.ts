@@ -317,7 +317,11 @@ export class PostgresStore implements Store {
       }
       if (stream) {
         values.push(stream);
-        conditions.push(`stream ~ $${values.length}`);
+        conditions.push(
+          query.stream_exact
+            ? `stream = $${values.length}`
+            : `stream ~ $${values.length}`
+        );
       }
       if (names && names.length) {
         values.push(names);

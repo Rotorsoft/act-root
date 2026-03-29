@@ -107,7 +107,7 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream, with_snaps: !cached, after: cached?.event_id }
+    { stream, with_snaps: !cached, after: cached?.event_id, stream_exact: true }
   );
 
   logger.trace(
