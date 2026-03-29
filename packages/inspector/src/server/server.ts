@@ -5,7 +5,9 @@ import { inspectorRouter } from "./router.js";
 const PORT = parseInt(process.env.PORT || "4001", 10);
 
 const server = createHTTPServer({
-  middleware: cors(),
+  middleware: cors({
+    origin: process.env.CORS_ORIGIN || "http://localhost:5174",
+  }),
   router: inspectorRouter,
 });
 

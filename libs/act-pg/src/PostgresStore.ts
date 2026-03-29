@@ -20,6 +20,12 @@ types.setTypeParser(types.builtins.JSONB, (val) =>
 
 type Config = Readonly<{ schema: string; table: string }> & pg.PoolConfig;
 
+const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+function assertSafeIdentifier(value: string, label: string) {
+  if (!SAFE_IDENTIFIER.test(value))
+    throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
+}
+
 const DEFAULT_CONFIG: Config = {
   host: "localhost",
   port: 5432,
@@ -150,6 +156,8 @@ export class PostgresStore implements Store {
    */
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    assertSafeIdentifier(this.config.schema, "schema");
+    assertSafeIdentifier(this.config.table, "table");
     const { schema: _, table: __, ...poolConfig } = this.config;
     this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
