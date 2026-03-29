@@ -259,6 +259,71 @@ async function discover(
   return stores;
 }
 
+/** CSV column order for backup/restore */
+const CSV_COLUMNS = [
+  "id",
+  "name",
+  "data",
+  "stream",
+  "version",
+  "created",
+  "meta",
+] as const;
+
+/** Escape a value for CSV (RFC 4180) */
+function csvEscape(value: string): string {
+  if (value.includes('"') || value.includes(",") || value.includes("\n")) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+/** Parse a CSV line respecting quoted fields */
+function csvParseLine(line: string): string[] {
+  const fields: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (i + 1 < line.length && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        current += ch;
+      }
+    } else if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      fields.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  fields.push(current);
+  return fields;
+}
+
+/** Get a raw pg client for direct queries */
+async function getRawClient(): Promise<pg.Client> {
+  if (!currentConfig) throw new Error("Not connected to a store");
+  const client = new pg.Client({
+    host: currentConfig.host,
+    port: currentConfig.port,
+    database: currentConfig.database,
+    user: currentConfig.user,
+    password: currentConfig.password,
+    connectionTimeoutMillis: 5000,
+  });
+  await client.connect();
+  return client;
+}
+
 export const inspectorRouter = t.router({
   /** Scan host for PG servers and discover Act event stores */
   discover: t.procedure
@@ -632,6 +697,111 @@ export const inspectorRouter = t.router({
       if (pgClient) await pgClient.end();
     }
   }),
+
+  /** Export events as CSV rows */
+  backup: t.procedure
+    .input(
+      z.object({
+        stream: z.string().optional(),
+        names: z.string().array().optional(),
+        created_before: z.string().optional(),
+        created_after: z.string().optional(),
+        correlation: z.string().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      const s = getStore();
+      const events: AnyEvent[] = [];
+      await s.query<Schemas>(collect(events), {
+        ...input,
+        created_before: toDate(input.created_before),
+        created_after: toDate(input.created_after),
+        with_snaps: true,
+      });
+
+      // Build CSV
+      const header = CSV_COLUMNS.join(",");
+      const rows = events.map((e) =>
+        CSV_COLUMNS.map((col) => {
+          const val = e[col as keyof typeof e];
+          if (col === "data" || col === "meta")
+            return csvEscape(JSON.stringify(val));
+          if (val instanceof Date) return csvEscape(val.toISOString());
+          return csvEscape(
+            typeof val === "object" && val !== null
+              ? JSON.stringify(val)
+              : String(val as string | number | boolean)
+          );
+        }).join(",")
+      );
+
+      return { csv: [header, ...rows].join("\n"), count: events.length };
+    }),
+
+  /** Restore events from CSV — drops and re-seeds the store, inserts with sequential IDs */
+  restore: t.procedure
+    .input(z.object({ csv: z.string() }))
+    .mutation(async ({ input }) => {
+      if (!currentConfig) throw new Error("Not connected to a store");
+      const fqt = `"${currentConfig.schema}"."${currentConfig.table}"`;
+      const fqs = `"${currentConfig.schema}"."${currentConfig.table}_streams"`;
+
+      // Parse CSV
+      const lines = input.csv.split("\n").filter((l) => l.trim());
+      if (lines.length < 2)
+        throw new Error("CSV must have a header and at least one row");
+
+      const headerFields = lines[0].split(",");
+      const expectedHeader = CSV_COLUMNS.join(",");
+      if (headerFields.join(",") !== expectedHeader)
+        throw new Error(`Invalid CSV header. Expected: ${expectedHeader}`);
+
+      const rows = lines.slice(1).map((line, lineIdx) => {
+        const fields = csvParseLine(line);
+        if (fields.length !== CSV_COLUMNS.length)
+          throw new Error(
+            `Row ${lineIdx + 1}: expected ${CSV_COLUMNS.length} fields, got ${fields.length}`
+          );
+        return {
+          name: fields[1],
+          data: JSON.parse(fields[2]),
+          stream: fields[3],
+          version: parseInt(fields[4], 10),
+          created: fields[5],
+          meta: JSON.parse(fields[6]),
+        };
+      });
+
+      // Drop existing data and re-seed
+      const client = await getRawClient();
+      try {
+        await client.query("BEGIN");
+
+        // Truncate events and streams tables, reset sequence
+        await client.query(`TRUNCATE TABLE ${fqt} RESTART IDENTITY CASCADE`);
+        await client.query(`TRUNCATE TABLE ${fqs}`);
+
+        // Insert events preserving original order (new sequential IDs from 1)
+        for (const row of rows) {
+          await client.query(
+            `INSERT INTO ${fqt}(name, data, stream, version, created, meta)
+             VALUES($1, $2, $3, $4, $5, $6)`,
+            [row.name, row.data, row.stream, row.version, row.created, row.meta]
+          );
+        }
+
+        await client.query("COMMIT");
+        return { ok: true as const, count: rows.length };
+      } catch (error) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw new Error(
+          `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      } finally {
+        await client.end();
+      }
+    }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
