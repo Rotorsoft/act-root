@@ -8,6 +8,7 @@ import {
   store,
 } from "@rotorsoft/act";
 import { Chance } from "chance";
+import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
 import { actor, app, onDecremented, onIncremented } from "./app.js";
 
@@ -519,6 +520,127 @@ describe("pg store", () => {
         result.find((l) => l.stream === "dual-frontier-test")
       ).toBeDefined();
     });
+  });
+});
+
+describe("PostgresStore error paths", () => {
+  let db: PostgresStore;
+
+  beforeAll(() => {
+    db = new PostgresStore({
+      port: 5431,
+      schema: "err_test",
+      table: "err_test",
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const mockClient = (failOn: string) => ({
+    query: (sql: string) => {
+      if (typeof sql === "string" && sql.includes(failOn))
+        return Promise.reject(new Error(`mocked ${failOn} error`));
+      return Promise.resolve({ rows: [], rowCount: 0 });
+    },
+    release: () => {},
+  });
+
+  it("should reject unsafe schema names", () => {
+    expect(() => new PostgresStore({ schema: "drop;--" })).toThrow(
+      /Unsafe SQL identifier/
+    );
+  });
+
+  it("should reject unsafe table names", () => {
+    expect(() => new PostgresStore({ table: "x'; DROP TABLE" })).toThrow(
+      /Unsafe SQL identifier/
+    );
+  });
+
+  it("should handle seed() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("CREATE") as any
+    );
+    await expect(db.seed()).rejects.toThrow("mocked CREATE error");
+  });
+
+  it("should handle commit() ROLLBACK path", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("INSERT") as any
+    );
+    await expect(
+      db.commit("s", [{ name: "A", data: {} }], {
+        correlation: "",
+        causation: {},
+      })
+    ).rejects.toThrow("mocked INSERT error");
+  });
+
+  it("should handle subscribe() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("INSERT") as any
+    );
+    const result = await db.subscribe([{ stream: "x" }]);
+    expect(result).toEqual({ subscribed: 0, watermark: -1 });
+  });
+
+  it("should handle ack() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("UPDATE") as any
+    );
+    const result = await db.ack([
+      { stream: "x", at: 0, by: "w", retry: 0, lagging: false },
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  it("should handle claim() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("BEGIN") as any
+    );
+    const result = await db.claim(1, 0, "w", 1000);
+    expect(result).toEqual([]);
+  });
+
+  it("should handle block() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("UPDATE") as any
+    );
+    const result = await db.block([
+      { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
+    ]);
+    expect(result).toEqual([]);
+  });
+
+  it("should handle ROLLBACK failure gracefully", async () => {
+    // Mock where every query fails — both the operation and the ROLLBACK
+    const failAll = () => ({
+      query: () => Promise.reject(new Error("connection dead")),
+      release: () => {},
+    });
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => failAll() as any
+    );
+    const result = await db.ack([
+      { stream: "x", at: 0, by: "w", retry: 0, lagging: false },
+    ]);
+    expect(result).toEqual([]);
+    const result2 = await db.claim(1, 0, "w", 1000);
+    expect(result2).toEqual([]);
+    const result3 = await db.subscribe([{ stream: "x" }]);
+    expect(result3).toEqual({ subscribed: 0, watermark: -1 });
+    const result4 = await db.block([
+      { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
+    ]);
+    expect(result4).toEqual([]);
+    await expect(
+      db.commit("s", [{ name: "A", data: {} }], {
+        correlation: "",
+        causation: {},
+      })
+    ).rejects.toThrow();
   });
 });
 
