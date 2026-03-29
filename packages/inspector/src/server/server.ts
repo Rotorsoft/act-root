@@ -6,7 +6,7 @@ const PORT = parseInt(process.env.PORT || "4001", 10);
 
 const server = createHTTPServer({
   middleware: cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5174",
+    origin: process.env.CORS_ORIGIN || "http://localhost:3001",
   }),
   router: inspectorRouter,
 });

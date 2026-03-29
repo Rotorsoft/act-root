@@ -1,6 +1,7 @@
 import { ChevronDown, ChevronLeft, ChevronRight, Radio } from "lucide-react";
 import { useState } from "react";
 import { viewCaption, type ViewState } from "../App.js";
+import { BackupRestore } from "./BackupRestore.js";
 import { Logo } from "./Logo.js";
 
 const POLL_OPTIONS = [
@@ -154,6 +155,9 @@ export function Header({
             ))}
           </div>
         )}
+
+        {/* Backup/Restore */}
+        {connected && <BackupRestore />}
 
         {connected ? (
           <button
