@@ -101,7 +101,7 @@
       "flatted": ">=3.4.2",
       "picomatch": ">=4.0.4",
       "yaml": ">=2.8.3",
-      "undici": ">=7.24.0",
+      "undici": ">=7.24.6",
       "rollup": ">=4.59.1",
       "minimatch@<3.1.4": ">=3.1.5",
       "serialize-javascript": ">=7.0.5",
