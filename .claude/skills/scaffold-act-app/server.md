@@ -592,6 +592,30 @@ const snap = await doAction("SomeAction", target, payload);
 broadcastState(streamId, snap); // single function, every path
 ```
 
+### Drizzle Migrations
+
+**Migrations run via `drizzle-kit` CLI before the app starts — never programmatically.** The `db:migrate` script in `packages/app/package.json` runs `cd ../domain && pnpm drizzle-kit migrate`, which reads `drizzle.config.ts` and applies pending migrations.
+
+```bash
+# Schema change workflow:
+# 1. Edit packages/domain/src/drizzle/schema.ts
+# 2. Generate migration SQL:
+pnpm -F @my-app/domain drizzle:generate
+# 3. Review the generated SQL in packages/domain/drizzle/
+# 4. Apply (happens automatically on next dev:api or start):
+pnpm -F @my-app/domain drizzle:migrate
+# 5. Commit the migration files + meta/ snapshots to git
+```
+
+For tests, run migrations with the test DB URL via `execSync`:
+
+```typescript
+import { execSync } from "node:child_process";
+execSync(`DATABASE_URL=${TEST_DB_URL} pnpm drizzle-kit migrate`, { cwd: "path/to/domain", stdio: "pipe" });
+```
+
+> **Never use `drizzle-kit push` in production or shared environments** — only for rapid local prototyping. It provides no audit trail and can cause irreversible data loss.
+
 ### Bootstrap Order
 
 Initialize in this order: DB → event store (+ optional cache adapter) → wire `committed` listener → initial settle (replays events and runs projections) → warm caches → enable background processes.

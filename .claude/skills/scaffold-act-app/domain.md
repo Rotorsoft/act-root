@@ -172,6 +172,47 @@ export const ItemSlice = slice()
 
 **Lifecycle-only projections**: When using `act-sse` for real-time broadcast, projections only need to persist data for **lifecycle events** (entity created, member added, completed, deleted, etc.) — not every high-frequency operational event. The broadcast cache is the source of truth for full state; the DB stores lightweight summaries for cold-start recovery and list views. See [server.md](server.md) § Projection Optimization Strategies.
 
+## Drizzle Projections (PostgreSQL)
+
+For persistent read models, use Drizzle ORM projections instead of in-memory maps. Schema goes in `packages/domain/src/drizzle/schema.ts`, queries alongside the projection.
+
+**Drizzle migration workflow:** Schema changes → `pnpm drizzle:generate` → review SQL → `pnpm drizzle:migrate`. Migrations run via `drizzle-kit` CLI (never programmatically). See [server.md](server.md) § Drizzle Migrations and [monorepo-template.md](monorepo-template.md) for config files.
+
+```typescript
+import { projection } from "@rotorsoft/act";
+import { eq } from "drizzle-orm";
+import { db, items } from "./drizzle/index.js";
+
+export const ItemProjection = projection("items")
+  .on({ ItemCreated })
+  .do(async ({ stream, data, created }) => {
+    await db().insert(items).values({
+      id: stream, name: data.name, status: "open", createdBy: data.createdBy,
+      createdAt: created.toISOString(),
+    }).onConflictDoUpdate({
+      target: items.id,
+      set: { name: data.name, status: "open" },
+    });
+  })
+  .on({ ItemClosed })
+  .do(async ({ stream, data, created }) => {
+    await db().update(items).set({ status: "closed", updatedAt: created.toISOString() })
+      .where(eq(items.id, stream));
+  })
+  .build();
+
+// Query functions use Drizzle, not in-memory state
+export async function getItems() {
+  return db().select().from(items);
+}
+```
+
+**Key differences from in-memory projections:**
+- Query functions are `async` (DB access)
+- Use `onConflictDoUpdate` for idempotent projection replay
+- No `clear*()` helpers needed — tests use `truncateAll()` or `drizzle-kit migrate` on a test DB
+- Schema changes require a Drizzle migration (not just a code change)
+
 ## Cross-Aggregate Projections
 
 **When a projection needs events from another aggregate:** This is the signal that your slice needs `.withState(OtherState)`. Without it, the slice won't know about the other aggregate's events and the projection handlers won't compile. This does NOT mean the slice owns that state — it just makes the events visible. The other aggregate's lifecycle slice still owns its state definition.

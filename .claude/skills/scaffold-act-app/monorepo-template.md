@@ -86,11 +86,39 @@ export default defineConfig({
   "type": "module",
   "version": "0.0.1",
   "main": "./src/index.ts",
+  "scripts": {
+    "drizzle:generate": "drizzle-kit generate",
+    "drizzle:migrate": "drizzle-kit migrate",
+    "drizzle:push": "drizzle-kit push",
+    "drizzle:studio": "drizzle-kit studio"
+  },
   "dependencies": {
     "@rotorsoft/act": "^0.20.0",
+    "drizzle-orm": "^0.45.1",
+    "postgres": "^3.4.7",
     "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10"
   }
 }
+```
+
+> **Drizzle migrations are CLI-only.** Never write programmatic migration code (custom `migrateDb()` functions using `drizzle-orm/migrator`). Use `drizzle-kit generate` to create migration files and `drizzle-kit migrate` to apply them. Migration files and `meta/` snapshots are committed to git.
+
+## Domain drizzle.config.ts
+
+```typescript
+import { defineConfig } from "drizzle-kit";
+
+export default defineConfig({
+  schema: "./src/drizzle/schema.ts",
+  out: "./drizzle",
+  dialect: "postgresql",
+  dbCredentials: {
+    url: process.env.DATABASE_URL ?? "postgres://postgres:postgres@localhost:5432/myapp",
+  },
+});
 ```
 
 ## Domain tsconfig — packages/domain/tsconfig.json
@@ -114,11 +142,12 @@ export default defineConfig({
   "type": "module",
   "version": "0.0.1",
   "scripts": {
+    "db:migrate": "cd ../domain && pnpm drizzle-kit migrate",
     "dev": "tsx watch src/dev-server.ts",
-    "dev:api": "tsx watch src/dev-server.ts",
+    "dev:api": "pnpm db:migrate && tsx watch src/dev-server.ts",
     "dev:client": "vite --host",
     "build": "vite build && tsc -p tsconfig.server.json",
-    "start": "node dist/server.js"
+    "start": "pnpm db:migrate && node dist/server.js"
   },
   "dependencies": {
     "@my-app/domain": "workspace:*",
@@ -237,7 +266,8 @@ mkdir -p packages/domain/{src,test} packages/app/src/{api,client/{hooks,componen
 pnpm add -Dw typescript tsx vitest @vitest/coverage-v8
 
 # Domain
-pnpm -F @my-app/domain add @rotorsoft/act zod
+pnpm -F @my-app/domain add @rotorsoft/act drizzle-orm postgres zod
+pnpm -F @my-app/domain add -D drizzle-kit
 
 # App (server + client combined)
 pnpm -F @my-app/app add @my-app/domain @rotorsoft/act @rotorsoft/act-sse @trpc/server @trpc/client @trpc/react-query @tanstack/react-query cors react react-dom zod
