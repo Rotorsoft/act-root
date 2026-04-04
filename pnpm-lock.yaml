@@ -8,7 +8,7 @@ overrides:
   flatted: '>=3.4.2'
   picomatch: '>=4.0.4'
   yaml: '>=2.8.3'
-  undici: '>=7.24.6'
+  undici: '>=7.24.7'
   rollup: '>=4.59.1'
   minimatch@<3.1.4: '>=3.1.5'
   serialize-javascript: '>=7.0.5'
@@ -8831,9 +8831,9 @@ packages:
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
-  undici@7.24.6:
-    resolution: {integrity: sha512-Xi4agocCbRzt0yYMZGMA6ApD7gvtUFaxm4ZmeacWI4cZxaF6C+8I8QfofC20NAePiB/IcvZmzkJ7XPa471AEtA==}
-    engines: {node: '>=20.18.1'}
+  undici@8.0.1:
+    resolution: {integrity: sha512-6qdTUr+jabXmYKeYkv/+pIvO7d0bs1k9uy+5PFnXr4segNVwILH1KExhwRh3/iGa6gSLmySK3hTnSs3k7ZPnjQ==}
+    engines: {node: '>=22.19.0'}
 
   unicode-canonical-property-names-ecmascript@2.0.1:
     resolution: {integrity: sha512-dA8WbNeb2a6oQzAQ55YlT5vQAWGV9WXOsi3SskE3bcCdM0P4SDd+24zS/OCacdRq5BkdsRj9q3Pg6YyQoxIGqg==}
@@ -9293,7 +9293,7 @@ snapshots:
   '@actions/http-client@4.0.0':
     dependencies:
       tunnel: 0.0.6
-      undici: 7.24.6
+      undici: 8.0.1
 
   '@actions/io@3.0.2': {}
 
@@ -12443,7 +12443,7 @@ snapshots:
       p-filter: 4.1.0
       semantic-release: 25.0.3(typescript@5.9.3)
       tinyglobby: 0.2.15
-      undici: 7.24.6
+      undici: 8.0.1
       url-join: 5.0.0
     transitivePeerDependencies:
       - supports-color
@@ -18820,7 +18820,7 @@ snapshots:
 
   undici-types@7.18.2: {}
 
-  undici@7.24.6: {}
+  undici@8.0.1: {}
 
   unicode-canonical-property-names-ecmascript@2.0.1: {}
 
