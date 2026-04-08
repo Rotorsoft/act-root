@@ -1,3 +1,23 @@
+# [@rotorsoft/act-v0.26.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.25.2...@rotorsoft/act-v0.26.0) (2026-04-08)
+
+
+### Bug Fixes
+
+* **act:** fix causation type in bench file ([dae55a8](https://github.com/rotorsoft/act-root/commit/dae55a8ab7d3f138af876dadbb011e6109dc2cf0))
+* **act:** revert version bump — managed by semantic-release ([04c8bb5](https://github.com/rotorsoft/act-root/commit/04c8bb5f6d8bdfb80d29bf5b8c815c579c6442e0))
+
+
+### Features
+
+* **act:** batched projection replay for high-throughput event processing ([4157c7d](https://github.com/rotorsoft/act-root/commit/4157c7dfc49461604e2ea51e03189caf99238edc)), closes [hi#throughput](https://github.com/hi/issues/throughput) [#556](https://github.com/rotorsoft/act-root/issues/556)
+
+
+### Performance Improvements
+
+* **act:** add PostgreSQL batch projection benchmark — 20x speedup ([44a4d06](https://github.com/rotorsoft/act-root/commit/44a4d0694a14914b04591002351661c3a2df82d0))
+* **act:** improve batch projection benchmark — drain-phase only measurement ([cb1fa2b](https://github.com/rotorsoft/act-root/commit/cb1fa2bffcce96c83bc926327f03157666e13c69))
+* **act:** pg batch benchmark at 1K/5K/10K — consistent ~19x speedup ([4b25585](https://github.com/rotorsoft/act-root/commit/4b25585b63c472b5fd43882c4cf5d3a63fe16daf))
+
 # [@rotorsoft/act-v0.25.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.25.1...@rotorsoft/act-v0.25.2) (2026-03-29)
 
 
