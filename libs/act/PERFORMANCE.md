@@ -255,7 +255,7 @@ Purely internal to `Act` — two new private fields (`_reactive_events`, `_needs
 
 ---
 
-## Batched Projection Replay (v0.26.0)
+## Batched Projection Replay
 
 **Issue:** #556 — Optional `.batch()` handler on projections for bulk event processing.
 
