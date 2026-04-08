@@ -296,16 +296,19 @@ Key design decisions:
 - **Discriminated union types** — `BatchEvent<TEvents>` distributes `Committed` over each key, enabling `switch (event.name)` to narrow both `name` and `data`
 - **Batch error = total rollback** — if the handler throws, `handled: 0` and watermark does not advance
 
-### Benchmark (InMemoryStore, 50 events/stream, simulated 1ms I/O per write)
+### Benchmark (InMemoryStore, drain phase only, simulated 1ms I/O per handler call)
 
-| Mode | hz | mean (ms) | Speedup |
-|---|---:|---:|---|
-| **Per-event (N handler calls)** | 5.6 | 178.4 | — |
-| **Batched (1 handler call)** | 8.2 | 122.1 | **1.46x faster** |
+Events are pre-seeded; only the drain call is timed. Per-event handlers simulate N × 1ms async writes; the batch handler simulates 1 × 1ms for the entire batch.
 
-With InMemoryStore, the improvement reflects the framework overhead reduction (N async handler invocations → 1). The seeding cost (~120ms for 50 commits) is included in both measurements.
+| Events | Per-event drain (ms) | Batched drain (ms) | Speedup |
+|---:|---:|---:|---|
+| **50** | 62.7 | 4.8 | **13x** |
+| **200** | 231.8 | 5.9 | **39x** |
+| **500** | 573.2 | 5.9 | **97x** |
 
-**Expected PostgreSQL improvement:** With real DB I/O, the improvement is proportionally larger. Each per-event handler call incurs network round-trip + transaction overhead (~1-5ms per write to a local PG instance). For 50 events: ~50-250ms of handler overhead reduced to ~1-5ms — an estimated **10-50x improvement** in the drain phase alone.
+Per-event drain scales linearly (N × ~1.15ms per handler call). Batched drain is constant (~5ms) regardless of event count — one handler call plus framework overhead. The speedup is proportional to event count.
+
+With real PostgreSQL I/O (1-5ms per write including network latency), the absolute times increase but the ratio holds: batching converts N sequential DB writes into 1 transaction.
 
 ### Interface changes
 
