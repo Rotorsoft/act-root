@@ -160,8 +160,7 @@ function _projection<
   TTarget extends string | undefined,
 >(
   target: TTarget,
-  events: EventRegister<TEvents>,
-  batchHandler?: BatchHandler<TEvents>
+  events: EventRegister<TEvents>
 ): ProjectionBuilder<TEvents, TTarget> {
   const defaultResolver: { target: string } | undefined =
     typeof target === "string" ? { target } : undefined;
@@ -208,13 +207,7 @@ function _projection<
           const nextBuilder = _projection<
             TEvents & { [P in TKey]: TData },
             TTarget
-          >(
-            target,
-            events as EventRegister<TEvents & { [P in TKey]: TData }>,
-            batchHandler as
-              | BatchHandler<TEvents & { [P in TKey]: TData }>
-              | undefined
-          );
+          >(target, events as EventRegister<TEvents & { [P in TKey]: TData }>);
           return {
             ...nextBuilder,
             to(
@@ -246,7 +239,6 @@ function _projection<
       _tag: "Projection" as const,
       events,
       ...(target !== undefined && { target }),
-      ...(batchHandler && { batchHandler }),
     }),
     events,
   };
