@@ -363,6 +363,39 @@ describe("projection", () => {
     expect(batchFn).toHaveBeenCalledTimes(1);
   });
 
+  it("should block batch projection after max retries", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockRejectedValue(new Error("permanent failure"));
+
+    const BatchProjection = projection("batch-block")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const blocked: Array<{ stream: string; error: string }> = [];
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+    app_.on("blocked", (b) => blocked.push(...b));
+
+    await app_.do("increment", { stream, actor }, { by: 1 });
+    await app_.correlate();
+
+    // Drain with very short lease so retries happen immediately
+    // retry increments on each claim: 0→fail, 1→fail, 2→fail, 3→block
+    for (let i = 0; i < 5; i++) {
+      await app_.drain({ eventLimit: 100, leaseMillis: 1 });
+      // Wait for lease to expire between retries
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    // Should have blocked after retries exhausted
+    expect(blocked.length).toBeGreaterThanOrEqual(1);
+    expect(blocked[0].error).toBe("permanent failure");
+  });
+
   it("should use batch handler from projection embedded in slice", async () => {
     const stream = nextStream();
     const batchFn = vi.fn().mockResolvedValue(undefined);

@@ -543,8 +543,6 @@ export class Act<
     readonly error?: string;
     readonly block?: boolean;
   }> {
-    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
-
     const stream = lease.stream;
     const events = payloads.map((p) => p.event);
     const at = events.at(-1)!.id;
