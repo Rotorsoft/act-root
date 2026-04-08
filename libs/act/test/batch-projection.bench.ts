@@ -34,7 +34,7 @@ async function seedEvents(stream: string, count: number) {
   const meta = {
     actor,
     correlation: "bench",
-    causation: "bench",
+    causation: {},
   };
   // Commit in batches of 1000 to avoid overwhelming the store
   const BATCH = 1000;
