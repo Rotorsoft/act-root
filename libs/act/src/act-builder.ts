@@ -10,6 +10,7 @@ import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 import type {
   Actor,
+  BatchHandler,
   Committed,
   EventRegister,
   IAct,
@@ -241,7 +242,8 @@ export function act<
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
   },
-  pendingProjections: Projection<any>[] = []
+  pendingProjections: Projection<any>[] = [],
+  batchHandlers: Map<string, BatchHandler<any>> = new Map()
 ): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
   const builder: ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> =
     {
@@ -267,7 +269,8 @@ export function act<
             TEvents & TNewEvents,
             TActions & TNewActions
           >,
-          pendingProjections
+          pendingProjections,
+          batchHandlers
         );
       },
       withSlice: <
@@ -306,24 +309,30 @@ export function act<
             TEvents & TNewEvents,
             TActions & TNewActions
           >,
-          pendingProjections
+          pendingProjections,
+          batchHandlers
         );
       },
       withProjection: <TNewEvents extends Schemas>(
         proj: Projection<TNewEvents>
       ) => {
         mergeProjection(proj, registry.events);
+        if (proj.batchHandler && proj.target) {
+          batchHandlers.set(proj.target, proj.batchHandler);
+        }
         return act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           states,
           registry,
-          pendingProjections
+          pendingProjections,
+          batchHandlers
         );
       },
       withActor: <TNewActor extends Actor>() => {
         return act<TSchemaReg, TEvents, TActions, TStateMap, TNewActor>(
           states,
           registry,
-          pendingProjections
+          pendingProjections,
+          batchHandlers
         );
       },
       on: <TKey extends keyof TEvents>(event: TKey) => ({
@@ -377,10 +386,14 @@ export function act<
       build: () => {
         for (const proj of pendingProjections) {
           mergeProjection(proj, registry.events as Record<string, any>);
+          if (proj.batchHandler && proj.target) {
+            batchHandlers.set(proj.target, proj.batchHandler);
+          }
         }
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
-          states
+          states,
+          batchHandlers
         );
       },
       events: registry.events,

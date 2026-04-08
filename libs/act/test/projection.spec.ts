@@ -245,4 +245,227 @@ describe("projection", () => {
     expect(b.events["Foo"]).toBeDefined();
     expect(b.events["Foo"].schema).toBeDefined();
   });
+
+  // --- Batch projection tests ---
+
+  it("should build a projection with batch handler", () => {
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+    const p = projection("target")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    expect(p._tag).toBe("Projection");
+    expect(p.target).toBe("target");
+    expect(p.batchHandler).toBe(batchFn);
+  });
+
+  it("should not expose .batch() on projections without static target", () => {
+    const p = projection()
+      .on({ Incremented })
+      .do(async () => {});
+
+    expect("batch" in p).toBe(false);
+  });
+
+  it("should store target on projection with static target", () => {
+    const p = projection("my-target")
+      .on({ Incremented })
+      .do(async () => {})
+      .build();
+
+    expect(p.target).toBe("my-target");
+  });
+
+  it("should call batch handler during drain instead of individual handlers", async () => {
+    const stream = nextStream();
+    const singleHandler = vi.fn().mockResolvedValue(undefined);
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+
+    const BatchProjection = projection("batch-proj")
+      .on({ Incremented })
+      .do(singleHandler)
+      .batch(batchFn)
+      .build();
+
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+
+    // Emit multiple events
+    await app_.do("increment", { stream, actor }, { by: 1 });
+    await app_.do("increment", { stream, actor }, { by: 2 });
+    await app_.do("increment", { stream, actor }, { by: 3 });
+    await app_.correlate();
+    await app_.drain({ eventLimit: 100 });
+
+    // Batch handler called once with all events
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const [events, target] = batchFn.mock.calls[0];
+    expect(target).toBe("batch-proj");
+    expect(events).toHaveLength(3);
+    expect(events[0].data).toEqual({ by: 1 });
+    expect(events[1].data).toEqual({ by: 2 });
+    expect(events[2].data).toEqual({ by: 3 });
+
+    // Single handler NOT called (batch takes over)
+    expect(singleHandler).not.toHaveBeenCalled();
+  });
+
+  it("should call batch handler even for a single event", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+
+    const BatchProjection = projection("batch-single")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+
+    await app_.do("increment", { stream, actor }, { by: 7 });
+    await app_.correlate();
+    await app_.drain({ eventLimit: 100 });
+
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const [events] = batchFn.mock.calls[0];
+    expect(events).toHaveLength(1);
+    expect(events[0].data).toEqual({ by: 7 });
+  });
+
+  it("should handle batch error with handled=0 and retry semantics", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockRejectedValue(new Error("batch failed"));
+
+    const BatchProjection = projection("batch-error")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+
+    await app_.do("increment", { stream, actor }, { by: 1 });
+    await app_.correlate();
+    const result = await app_.drain({ eventLimit: 100 });
+
+    // Batch failed — nothing acked, error reported
+    expect(result.acked).toHaveLength(0);
+    expect(batchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("should block batch projection after max retries", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockRejectedValue(new Error("permanent failure"));
+
+    const BatchProjection = projection("batch-block")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const blocked: Array<{ stream: string; error: string }> = [];
+    const app_ = act()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+    app_.on("blocked", (b) => blocked.push(...b));
+
+    await app_.do("increment", { stream, actor }, { by: 1 });
+    await app_.correlate();
+
+    // Drain with very short lease so retries happen immediately
+    // retry increments on each claim: 0→fail, 1→fail, 2→fail, 3→block
+    for (let i = 0; i < 5; i++) {
+      await app_.drain({ eventLimit: 100, leaseMillis: 1 });
+      // Wait for lease to expire between retries
+      await new Promise((r) => setTimeout(r, 5));
+    }
+
+    // Should have blocked after retries exhausted
+    expect(blocked.length).toBeGreaterThanOrEqual(1);
+    expect(blocked[0].error).toBe("permanent failure");
+  });
+
+  it("should use batch handler from projection embedded in slice", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+
+    const BatchProjection = projection("slice-batch")
+      .on({ Incremented })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const CounterSlice = slice()
+      .withState(Counter)
+      .withProjection(BatchProjection)
+      .build();
+
+    const app_ = act().withSlice(CounterSlice).build();
+
+    await app_.do("increment", { stream, actor }, { by: 4 });
+    await app_.correlate();
+    await app_.drain({ eventLimit: 100 });
+
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const [events] = batchFn.mock.calls[0];
+    expect(events).toHaveLength(1);
+    expect(events[0].data).toEqual({ by: 4 });
+  });
+
+  it("should handle mixed event types in batch handler", async () => {
+    const stream = nextStream();
+    const batchFn = vi.fn().mockResolvedValue(undefined);
+
+    const Widget = state({
+      Widget: z.object({ count: z.number(), label: z.string() }),
+    })
+      .init(() => ({ count: 0, label: "" }))
+      .emits({ Incremented, Labeled })
+      .patch({
+        Incremented: (event, s) => ({ ...s, count: s.count + event.data.by }),
+        Labeled: (event, s) => ({ ...s, label: event.data.label }),
+      })
+      .on({ increment: z.object({ by: z.number() }) })
+      .emit((a) => ["Incremented", { by: a.by }])
+      .on({ label: z.object({ label: z.string() }) })
+      .emit((a) => ["Labeled", { label: a.label }])
+      .build();
+
+    const MixedProjection = projection("mixed-batch")
+      .on({ Incremented })
+      .do(async () => {})
+      .on({ Labeled })
+      .do(async () => {})
+      .batch(batchFn)
+      .build();
+
+    const app_ = act()
+      .withState(Widget)
+      .withProjection(MixedProjection)
+      .build();
+
+    await app_.do("increment", { stream, actor }, { by: 1 });
+    await app_.do("label", { stream, actor }, { label: "hello" });
+    await app_.do("increment", { stream, actor }, { by: 2 });
+    await app_.correlate();
+    await app_.drain({ eventLimit: 100 });
+
+    expect(batchFn).toHaveBeenCalledTimes(1);
+    const [events] = batchFn.mock.calls[0];
+    expect(events).toHaveLength(3);
+    expect(events[0].name).toBe("Incremented");
+    expect(events[1].name).toBe("Labeled");
+    expect(events[2].name).toBe("Incremented");
+  });
 });

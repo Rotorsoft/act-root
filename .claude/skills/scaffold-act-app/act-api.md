@@ -440,6 +440,7 @@ const ItemProjection = projection("items")
 - `.on({ EventName: schema })` — Register an event handler (record shorthand)
 - `.do(handler)` — Handler receives `(event, stream)` — no app interface
 - `.to(resolver)` / `.void()` — Override the default resolver per handler
+- `.batch(handler)` — Register a batch handler for bulk event processing (static-target only). Receives `ReadonlyArray<BatchEvent<TEvents>>` (discriminated union) and `stream`. When defined, always called instead of individual `.do()` handlers — even for a single event.
 - `.build()` — Returns a `Projection` with `_tag: "Projection"`
 
 **Optimization:** When using `act-sse` broadcast, only register handlers for lifecycle events (entity creation, deletion, membership changes). High-frequency operational events don't need projection handlers — the broadcast cache is the source of truth. This reduces drain work and DB writes by ~95%. See [server.md](server.md) § Projection Optimization Strategies.

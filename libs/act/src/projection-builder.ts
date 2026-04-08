@@ -11,6 +11,7 @@
 import type { ZodType } from "zod";
 import { _this_, _void_ } from "./merge.js";
 import type {
+  BatchHandler,
   Committed,
   EventRegister,
   Reaction,
@@ -29,6 +30,8 @@ import type {
 export type Projection<TEvents extends Schemas> = {
   readonly _tag: "Projection";
   readonly events: EventRegister<TEvents>;
+  readonly target?: string;
+  readonly batchHandler?: BatchHandler<TEvents>;
 };
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
@@ -41,27 +44,28 @@ type DoResult<
   TEvents extends Schemas,
   TKey extends string,
   TData extends Schema,
-> = ProjectionBuilder<TEvents & { [P in TKey]: TData }> & {
+  TTarget extends string | undefined = undefined,
+> = ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget> & {
   to: (
     resolver: ReactionResolver<TEvents & { [P in TKey]: TData }, TKey> | string
-  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }>;
-  void: () => ProjectionBuilder<TEvents & { [P in TKey]: TData }>;
+  ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget>;
+  void: () => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget>;
 };
 
 /**
  * Fluent builder interface for composing projections.
  *
- * Provides a chainable API for registering event handlers that update
- * read models. Unlike slices, projections have no `.withState()` for states
- * and handlers do not receive the app interface.
- *
- * When a default target is provided via `projection("target")`, all
- * handlers inherit that resolver. Per-handler `.to()` or `.void()` can
- * still override it.
+ * When a static target is provided via `projection("target")`, the builder
+ * exposes a `.batch()` method for registering a batch handler that processes
+ * all events in a single call.
  *
  * @template TEvents - Event schemas
+ * @template TTarget - Static target string or undefined
  */
-export type ProjectionBuilder<TEvents extends Schemas> = {
+export type ProjectionBuilder<
+  TEvents extends Schemas,
+  TTarget extends string | undefined = undefined,
+> = {
   /**
    * Begins defining a projection handler for a specific event.
    *
@@ -77,7 +81,7 @@ export type ProjectionBuilder<TEvents extends Schemas> = {
         event: Committed<TEvents & { [P in TKey]: TData }, TKey>,
         stream: string
       ) => Promise<void>
-    ) => DoResult<TEvents, TKey, TData>;
+    ) => DoResult<TEvents, TKey, TData, TTarget>;
   };
   /**
    * Builds and returns the Projection data structure.
@@ -87,7 +91,24 @@ export type ProjectionBuilder<TEvents extends Schemas> = {
    * The registered event schemas and their reaction maps.
    */
   readonly events: EventRegister<TEvents>;
-};
+} & (TTarget extends string
+  ? {
+      /**
+       * Registers a batch handler that processes all events in a single call.
+       *
+       * Only available on projections with a static target (`projection("target")`).
+       * The handler receives a discriminated union of all declared events,
+       * enabling bulk DB operations in a single transaction.
+       *
+       * When defined, the batch handler is always called — even for a single event.
+       * Individual `.do()` handlers serve as fallback for projections without `.batch()`.
+       */
+      batch: (handler: BatchHandler<TEvents>) => {
+        build: () => Projection<TEvents>;
+      };
+    }
+  : // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+    {});
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
 
@@ -133,15 +154,18 @@ export type ProjectionBuilder<TEvents extends Schemas> = {
  * @see {@link ProjectionBuilder} for builder methods
  * @see {@link Projection} for the output type
  */
-export function projection<TEvents extends Schemas = {}>(
-  target?: string,
-  events: EventRegister<TEvents> = {} as EventRegister<TEvents>
-): ProjectionBuilder<TEvents> {
-  const defaultResolver: { target: string } | undefined = target
-    ? { target }
-    : undefined;
+/** @internal Builds the core builder object (shared between overloads) */
+function _projection<
+  TEvents extends Schemas,
+  TTarget extends string | undefined,
+>(
+  target: TTarget,
+  events: EventRegister<TEvents>
+): ProjectionBuilder<TEvents, TTarget> {
+  const defaultResolver: { target: string } | undefined =
+    typeof target === "string" ? { target } : undefined;
 
-  const builder: ProjectionBuilder<TEvents> = {
+  const base = {
     on: <TKey extends string, TData extends Schema>(
       entry: EventEntry<TKey, TData>
     ) => {
@@ -180,10 +204,10 @@ export function projection<TEvents extends Schemas = {}>(
           const name = handler.name || `${event}_${register.reactions.size}`;
           register.reactions.set(name, reaction);
 
-          const nextBuilder = projection<TEvents & { [P in TKey]: TData }>(
-            target,
-            events as EventRegister<TEvents & { [P in TKey]: TData }>
-          );
+          const nextBuilder = _projection<
+            TEvents & { [P in TKey]: TData },
+            TTarget
+          >(target, events as EventRegister<TEvents & { [P in TKey]: TData }>);
           return {
             ...nextBuilder,
             to(
@@ -214,8 +238,53 @@ export function projection<TEvents extends Schemas = {}>(
     build: () => ({
       _tag: "Projection" as const,
       events,
+      ...(target !== undefined && { target }),
     }),
     events,
   };
-  return builder;
+
+  // Add .batch() only for static-target projections
+  if (typeof target === "string") {
+    return {
+      ...base,
+      batch: (handler: BatchHandler<TEvents>) => ({
+        build: () => ({
+          _tag: "Projection" as const,
+          events,
+          target,
+          batchHandler: handler,
+        }),
+      }),
+    } as ProjectionBuilder<TEvents, TTarget>;
+  }
+
+  return base as ProjectionBuilder<TEvents, TTarget>;
+}
+
+/**
+ * Creates a new projection builder with a static target stream.
+ *
+ * All handlers inherit the target resolver automatically. Enables `.batch()`
+ * for bulk event processing in a single transaction.
+ *
+ * @param target - Static target stream for all handlers
+ */
+export function projection<TEvents extends Schemas = {}>(
+  target: string,
+  events?: EventRegister<TEvents>
+): ProjectionBuilder<TEvents, string>;
+/**
+ * Creates a new projection builder without a default target.
+ *
+ * Use per-handler `.to()` / `.void()` to route events.
+ */
+export function projection<TEvents extends Schemas = {}>(
+  target?: undefined,
+  events?: EventRegister<TEvents>
+): ProjectionBuilder<TEvents, undefined>;
+export function projection<TEvents extends Schemas = {}>(
+  target?: string,
+  events: EventRegister<TEvents> = {} as EventRegister<TEvents>
+): ProjectionBuilder<TEvents, string | undefined> {
+  return _projection(target, events);
 }

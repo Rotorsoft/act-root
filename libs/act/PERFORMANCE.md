@@ -252,3 +252,82 @@ The 27ms saved per non-reactive cycle corresponds to the 3 DB round-trips (claim
 ### No interface changes
 
 Purely internal to `Act` — two new private fields (`_reactive_events`, `_needs_drain`), no Store interface changes.
+
+---
+
+## Batched Projection Replay
+
+**Issue:** #556 — Optional `.batch()` handler on projections for bulk event processing.
+
+### Problem
+
+Projections process events one at a time during drain — each handler call is an independent async operation. When replaying large streams (rebuilding a projection, deploying a new read model, catching up after downtime), this produces N sequential writes instead of 1 batched transaction.
+
+With PostgreSQL, a single transaction wrapping N writes is dramatically faster than N individual writes. The framework's per-event handler loop in `handle()` made it impossible to batch without working around the framework.
+
+### Strategy
+
+Add an optional `.batch()` method to the projection builder (static-target projections only). When defined, `drain()` calls the batch handler once with the full ordered array of all event types instead of calling individual `.do()` handlers per event.
+
+```typescript
+const TicketProjection = projection("tickets")
+  .on({ TicketOpened })
+    .do(async ({ stream, data }) => { /* single-event fallback */ })
+  .on({ TicketClosed })
+    .do(async ({ stream, data }) => { /* single-event fallback */ })
+  .batch(async (events, stream) => {
+    // ALL events in one transaction — one DB round-trip
+    await db.transaction(async (tx) => {
+      for (const event of events) {
+        switch (event.name) {
+          case "TicketOpened": /* ... */ break;
+          case "TicketClosed": /* ... */ break;
+        }
+      }
+    });
+  })
+  .build();
+```
+
+Key design decisions:
+- **Projection-level, not per-event** — one handler for all event types in a single transaction
+- **Always called when defined** — even for a single event, no conditional switching
+- **Static-target only** — `.batch()` available only on `projection("target")`; the Act class maps `target → batchHandler` at build time
+- **Discriminated union types** — `BatchEvent<TEvents>` distributes `Committed` over each key, enabling `switch (event.name)` to narrow both `name` and `data`
+- **Batch error = total rollback** — if the handler throws, `handled: 0` and watermark does not advance
+
+### Benchmark (InMemoryStore, drain phase only, simulated 1ms I/O per handler call)
+
+Events are pre-seeded; only the drain call is timed. Per-event handlers simulate N × 1ms async writes; the batch handler simulates 1 × 1ms for the entire batch.
+
+| Events | Per-event drain (ms) | Batched drain (ms) | Speedup |
+|---:|---:|---:|---|
+| **50** | 62.7 | 4.8 | **13x** |
+| **200** | 231.8 | 5.9 | **39x** |
+| **500** | 573.2 | 5.9 | **97x** |
+
+Per-event drain scales linearly (N × ~1.15ms per handler call). Batched drain is constant (~5ms) regardless of event count — one handler call plus framework overhead. The speedup is proportional to event count.
+
+### Benchmark (PostgreSQL, drain phase only, real PG upserts)
+
+Each handler performs a real `INSERT ... ON CONFLICT DO UPDATE` against a PG table. Per-event makes N individual writes; batched wraps all N in a single transaction.
+
+| Events | Per-event drain | Batched drain | Speedup |
+|---:|---:|---:|---|
+| **1,000** | 5.7s | 294ms | **19.5x** |
+| **5,000** | 27.5s | 1.4s | **19.4x** |
+| **10,000** | 54.1s | 3.0s | **17.8x** |
+
+Consistent ~19x improvement across event counts. The speedup comes from eliminating per-write transaction overhead (implicit BEGIN/COMMIT per row) and reducing network round-trips. Per-event scales linearly (~5.4ms/event); batched scales sub-linearly (~0.3ms/event) thanks to PG's transaction batching.
+
+### Interface changes
+
+| New API | Description |
+|---|---|
+| `projection("target").batch(handler)` | Register a batch handler for bulk event processing |
+| `BatchEvent<TEvents>` | Distributive discriminated union type for batch handler events |
+| `BatchHandler<TEvents>` | Type for batch handler functions |
+| `Projection.target` | Static target string, exposed on the Projection type |
+| `Projection.batchHandler` | Optional batch handler, exposed on the Projection type |
+
+No Store interface changes. Batching is handled entirely at the Act orchestrator level.
