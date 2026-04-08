@@ -308,7 +308,16 @@ Events are pre-seeded; only the drain call is timed. Per-event handlers simulate
 
 Per-event drain scales linearly (N × ~1.15ms per handler call). Batched drain is constant (~5ms) regardless of event count — one handler call plus framework overhead. The speedup is proportional to event count.
 
-With real PostgreSQL I/O (1-5ms per write including network latency), the absolute times increase but the ratio holds: batching converts N sequential DB writes into 1 transaction.
+### Benchmark (PostgreSQL, drain phase only, 10K events, real PG upserts)
+
+Each handler performs a real `INSERT ... ON CONFLICT DO UPDATE` against a PG table. Per-event makes 10K individual writes; batched wraps all 10K in a single transaction.
+
+| Mode | Drain time | Speedup |
+|---|---:|---|
+| **Per-event (10K individual PG writes)** | 57.7s | — |
+| **Batched (1 PG transaction)** | 2.9s | **19.6x faster** |
+
+The ~20x improvement comes from eliminating per-write transaction overhead (BEGIN/COMMIT per row) and reducing network round-trips. At 100K events, the per-event drain would take ~10 minutes vs ~30s batched.
 
 ### Interface changes
 
