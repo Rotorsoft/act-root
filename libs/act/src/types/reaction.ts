@@ -123,6 +123,53 @@ export type ReactionOptions = {
 };
 
 /**
+ * Distributive mapped type that produces a proper discriminated union of
+ * committed events. Unlike `Committed<TEvents, keyof TEvents>` (where
+ * `name` and `data` are independent unions), each variant correlates
+ * `name` with its corresponding `data` — enabling `switch (event.name)`
+ * to narrow both fields correctly.
+ *
+ * @template TEvents - Event schemas
+ *
+ * @example Exhaustive switch
+ * ```typescript
+ * for (const event of events) {
+ *   switch (event.name) {
+ *     case "TicketOpened":
+ *       event.data; // typed as TicketOpened's schema
+ *       break;
+ *     case "TicketClosed":
+ *       event.data; // typed as TicketClosed's schema
+ *       break;
+ *     default:
+ *       const _: never = event; // compile error if a case is missing
+ *   }
+ * }
+ * ```
+ */
+export type BatchEvent<TEvents extends Schemas> = {
+  [K in keyof TEvents]: Committed<TEvents, K>;
+}[keyof TEvents];
+
+/**
+ * Batch handler for projections that processes multiple events in a single call.
+ *
+ * Receives the full ordered array of all event types declared on the projection,
+ * enabling bulk DB operations (batch INSERT/UPDATE) in a single transaction.
+ * The handler is always called when defined — even for a single event.
+ *
+ * @template TEvents - Event schemas (all events declared on the projection)
+ * @param events - Ordered array of committed events (discriminated union)
+ * @param stream - The target stream name
+ *
+ * @see {@link BatchEvent} for the discriminated union type
+ */
+export type BatchHandler<TEvents extends Schemas> = (
+  events: ReadonlyArray<BatchEvent<TEvents>>,
+  stream: string
+) => Promise<void>;
+
+/**
  * Defines a reaction to an event.
  * @template TEvents - Event schemas.
  * @template TKey - Event name.

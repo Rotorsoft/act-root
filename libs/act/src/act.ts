@@ -5,6 +5,7 @@ import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, log, store } from "./ports.js";
 import type {
   Actor,
+  BatchHandler,
   Committed,
   Drain,
   DrainOptions,
@@ -141,11 +142,15 @@ export class Act<
    */
   /** Static resolver targets collected at build time */
   private readonly _static_targets: Array<{ stream: string; source?: string }>;
+  /** Batch handlers for static-target projections (target → handler) */
+  private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
-    private readonly _states: Map<string, State<any, any, any>> = new Map()
+    private readonly _states: Map<string, State<any, any, any>> = new Map(),
+    batchHandlers: Map<string, BatchHandler<any>> = new Map()
   ) {
+    this._batch_handlers = batchHandlers as Map<string, BatchHandler<TEvents>>;
     // Classify resolvers and reactive events at build time
     const statics: Array<{ stream: string; source?: string }> = [];
     for (const [name, register] of Object.entries(this.registry.events)) {
@@ -515,6 +520,57 @@ export class Act<
   }
 
   /**
+   * Handles a batch of events for a projection with a batch handler.
+   *
+   * Called by `drain()` when a leased stream is a static-target projection
+   * with a registered batch handler. All events are passed to the handler
+   * in a single call, enabling bulk DB operations.
+   *
+   * @internal
+   * @param lease The lease to handle
+   * @param payloads The reactions to handle
+   * @param batchHandler The batch handler for this projection
+   * @returns The lease with results
+   */
+  private async handleBatch(
+    lease: Lease,
+    payloads: ReactionPayload<TEvents>[],
+    batchHandler: BatchHandler<TEvents>
+  ): Promise<{
+    readonly lease: Lease;
+    readonly handled: number;
+    readonly at: number;
+    readonly error?: string;
+    readonly block?: boolean;
+  }> {
+    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
+
+    const stream = lease.stream;
+    const events = payloads.map((p) => p.event);
+    const at = events.at(-1)!.id;
+
+    lease.retry > 0 &&
+      logger.warn(`Retrying batch ${stream}@${events[0].id} (${lease.retry}).`);
+
+    try {
+      await batchHandler(events, stream);
+      return { lease, handled: events.length, at };
+    } catch (error) {
+      logger.error(error);
+      const { options } = payloads[0];
+      const block = lease.retry >= options.maxRetries && options.blockOnError;
+      block && logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
+      return {
+        lease,
+        handled: 0,
+        at: lease.at,
+        error: (error as Error).message,
+        block,
+      };
+    }
+  }
+
+  /**
    * Processes pending reactions by draining uncommitted events from the event store.
    *
    * Runs a single drain cycle:
@@ -626,10 +682,12 @@ export class Act<
             // fast-forward watermark using fetched events or window max
             const streamFetch = fetched.find((f) => f.stream === lease.stream);
             const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
-            return this.handle(
-              { ...lease, at },
-              payloadsMap.get(lease.stream)!
-            );
+            const payloads = payloadsMap.get(lease.stream)!;
+            const batchHandler = this._batch_handlers.get(lease.stream);
+            if (batchHandler && payloads.length > 0) {
+              return this.handleBatch({ ...lease, at }, payloads, batchHandler);
+            }
+            return this.handle({ ...lease, at }, payloads);
           })
         );
 

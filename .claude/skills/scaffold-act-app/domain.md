@@ -213,6 +213,40 @@ export async function getItems() {
 - No `clear*()` helpers needed — tests use `truncateAll()` or `drizzle-kit migrate` on a test DB
 - Schema changes require a Drizzle migration (not just a code change)
 
+**Batched Drizzle projections:** For high-throughput replay (rebuilding projections, catch-up), add `.batch()` to wrap all events in a single DB transaction. Only available on static-target projections:
+
+```typescript
+export const ItemProjection = projection("items")
+  .on({ ItemCreated })
+  .do(async ({ stream, data, created }) => {
+    await db().insert(items).values({ id: stream, name: data.name, status: "open" })
+      .onConflictDoUpdate({ target: items.id, set: { name: data.name } });
+  })
+  .on({ ItemClosed })
+  .do(async ({ stream, data, created }) => {
+    await db().update(items).set({ status: "closed" }).where(eq(items.id, stream));
+  })
+  .batch(async (events, stream) => {
+    // All events in one transaction — one DB round-trip
+    await db().transaction(async (tx) => {
+      for (const event of events) {
+        switch (event.name) {
+          case "ItemCreated":
+            await tx.insert(items).values({ id: event.stream, name: event.data.name, status: "open" })
+              .onConflictDoUpdate({ target: items.id, set: { name: event.data.name } });
+            break;
+          case "ItemClosed":
+            await tx.update(items).set({ status: "closed" }).where(eq(items.id, event.stream));
+            break;
+        }
+      }
+    });
+  })
+  .build();
+```
+
+`BatchEvent<TEvents>` is a discriminated union — `switch (event.name)` narrows both `name` and `data`. Add `default: never` for exhaustive checking.
+
 ## Cross-Aggregate Projections
 
 **When a projection needs events from another aggregate:** This is the signal that your slice needs `.withState(OtherState)`. Without it, the slice won't know about the other aggregate's events and the projection handlers won't compile. This does NOT mean the slice owns that state — it just makes the events visible. The other aggregate's lifecycle slice still owns its state definition.

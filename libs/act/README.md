@@ -309,6 +309,8 @@ The `settle()` method is the recommended production pattern — it debounces rap
 
 **Drain skip optimization:** At build time, Act classifies which event names have registered reactions. When `do()` commits events that have no reactions, `drain()` returns immediately — zero DB round-trips. This eliminates wasted claim/query/ack cycles for high-frequency events that don't need reaction processing. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
 
+**Batched projection replay:** Static-target projections can register a `.batch()` handler that receives all events in a single call, enabling bulk DB operations in one transaction. When defined, the batch handler replaces individual `.do()` handlers during drain — reducing N DB writes to 1. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
+
 ### Real-Time Notifications
 
 When using the PostgreSQL backend, the store emits `NOTIFY` events on each commit, enabling consumers to react immediately via `LISTEN` rather than polling. This reduces latency and unnecessary database queries in production deployments.

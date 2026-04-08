@@ -167,7 +167,36 @@ const TicketProjection = projection("tickets")
 - `.on({ EventName: schema })` - Register an event handler (record shorthand)
 - `.do(handler)` - Handler receives `(event, stream)`
 - `.to(resolver)` / `.void()` - Override the default resolver per handler
+- `.batch(handler)` - Register a batch handler for bulk event processing (static-target projections only). Receives `ReadonlyArray<BatchEvent<TEvents>>` — a discriminated union where `switch (event.name)` narrows both `name` and `data`. When defined, always called instead of individual `.do()` handlers.
 - `.build()` - Returns a `Projection` with `_tag: "Projection"`
+
+#### Batched Projection Replay
+
+For high-throughput replay scenarios (rebuilding projections, catch-up after downtime), use `.batch()` to process all events in a single transaction instead of one at a time:
+
+```typescript
+const TicketProjection = projection("tickets")
+  .on({ TicketOpened })
+    .do(async ({ stream, data }) => { /* single-event fallback */ })
+  .on({ TicketClosed })
+    .do(async ({ stream, data }) => { /* single-event fallback */ })
+  .batch(async (events, stream) => {
+    await db.transaction(async (tx) => {
+      for (const event of events) {
+        switch (event.name) {
+          case "TicketOpened": /* bulk insert */ break;
+          case "TicketClosed": /* bulk update */ break;
+        }
+      }
+    });
+  })
+  .build();
+```
+
+- `.batch()` is only available on static-target projections (`projection("target")`)
+- When defined, always called — even for a single event (no conditional switching)
+- `BatchEvent<TEvents>` is a distributive discriminated union enabling exhaustive `switch` with `default: never`
+- `.do()` handlers serve as fallback for projections without `.batch()`
 
 ### Slice Builder
 
