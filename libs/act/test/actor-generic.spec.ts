@@ -74,7 +74,7 @@ describe("actor generic", () => {
       .withActor<MyActor>()
       .withState(Counter)
       .on("Incremented")
-      .do(async (_event, _stream, dispatcher) => {
+      .do(async function onIncremented(_event, _stream, dispatcher) {
         await dispatcher.do("increment", reactionTarget, { by: 1 });
       })
       .void()

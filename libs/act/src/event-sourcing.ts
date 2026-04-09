@@ -158,7 +158,7 @@ export async function action<
     : validate(action as string, payload, me.actions[action]);
 
   const snapshot = await load(me, stream);
-  const expected = expectedVersion || snapshot.event?.version;
+  const expected = expectedVersion ?? snapshot.event?.version;
 
   logger.trace(
     payload as object,
@@ -234,7 +234,7 @@ export async function action<
   } catch (error) {
     // Invalidate cache on concurrency errors — cached state is stale
     if ((error as { name?: string }).name === "ERR_CONCURRENCY") {
-      void cache().invalidate(stream);
+      await cache().invalidate(stream);
     }
     throw error;
   }

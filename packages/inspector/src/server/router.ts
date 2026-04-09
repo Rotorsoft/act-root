@@ -546,11 +546,10 @@ export const inspectorRouter = t.router({
         retry: number;
         blocked: boolean;
         error: string | null;
-        leased_at: number | null;
         leased_by: string | null;
         leased_until: string | null;
       }>(
-        `SELECT stream, source, at, retry, blocked, error, leased_at, leased_by, leased_until FROM ${fqs} ORDER BY stream`
+        `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${fqs} ORDER BY stream`
       );
       return result.rows;
     } catch {
@@ -585,11 +584,10 @@ export const inspectorRouter = t.router({
         retry: number;
         blocked: boolean;
         error: string | null;
-        leased_at: number | null;
         leased_by: string | null;
         leased_until: string | null;
       }>(
-        `SELECT stream, source, at, retry, blocked, error, leased_at, leased_by, leased_until FROM ${fqs} ORDER BY stream`
+        `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${fqs} ORDER BY stream`
       );
 
       const rows = result.rows;
@@ -612,7 +610,6 @@ export const inspectorRouter = t.router({
         stream: string;
         source: string | null;
         leased_by: string;
-        leased_at: number;
         leased_until: string;
       }> = [];
       const gaps: number[] = [];
@@ -641,7 +638,6 @@ export const inspectorRouter = t.router({
             stream: r.stream,
             source: r.source,
             leased_by: r.leased_by,
-            leased_at: r.leased_at ?? 0,
             leased_until: r.leased_until,
           });
         } else if (gap > 10) {

@@ -122,7 +122,14 @@ export function registerState(
       patch: mergedPatch,
       on: { ...existing.on, ...state.on },
       given: { ...existing.given, ...state.given },
-      snap: state.snap || existing.snap,
+      snap:
+        state.snap && existing.snap && state.snap !== existing.snap
+          ? (() => {
+              throw new Error(
+                `Duplicate snap strategy for state "${state.name}"`
+              );
+            })()
+          : state.snap || existing.snap,
     };
     states.set(state.name, merged);
     // Update ALL action->state pointers to the merged object

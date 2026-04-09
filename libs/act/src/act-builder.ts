@@ -357,14 +357,15 @@ export function act<
               maxRetries: options?.maxRetries ?? 3,
             },
           };
-          const name =
-            handler.name ||
-            `${String(event)}_${registry.events[event].reactions.size}`;
-          registry.events[event].reactions.set(name, reaction);
+          if (!handler.name)
+            throw new Error(
+              `Reaction handler for "${String(event)}" must be a named function`
+            );
+          registry.events[event].reactions.set(handler.name, reaction);
           return {
             ...builder,
             to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              registry.events[event].reactions.set(name, {
+              registry.events[event].reactions.set(handler.name, {
                 ...reaction,
                 resolver:
                   typeof resolver === "string"
@@ -374,7 +375,7 @@ export function act<
               return builder;
             },
             void() {
-              registry.events[event].reactions.set(name, {
+              registry.events[event].reactions.set(handler.name, {
                 ...reaction,
                 resolver: _void_,
               });

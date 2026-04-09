@@ -228,7 +228,6 @@ export class PostgresStore implements Store {
           retry smallint NOT NULL DEFAULT 0,
           blocked boolean NOT NULL DEFAULT false,
           error text,
-          leased_at int,
           leased_by text,
           leased_until timestamptz
         ) TABLESPACE pg_default;`
@@ -586,6 +585,7 @@ export class PostgresStore implements Store {
         stream: string;
         source: string | null;
         at: number;
+        by: string;
         retry: number;
         lagging: boolean;
       }>(
@@ -599,11 +599,10 @@ export class PostgresStore implements Store {
         at = i.at,
         retry = -1,
         leased_by = NULL,
-        leased_at = NULL,
         leased_until = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
-      RETURNING s.stream, s.source, s.at, s.retry, i.lagging
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging
       `,
         [JSON.stringify(leases)]
       );
@@ -613,7 +612,7 @@ export class PostgresStore implements Store {
         stream: row.stream,
         source: row.source ?? undefined,
         at: row.at,
-        by: "",
+        by: row.by,
         retry: row.retry,
         lagging: row.lagging,
       }));

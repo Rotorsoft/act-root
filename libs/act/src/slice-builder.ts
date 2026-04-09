@@ -247,13 +247,15 @@ export function slice<
             maxRetries: options?.maxRetries ?? 3,
           },
         };
-        const name =
-          handler.name || `${String(event)}_${events[event].reactions.size}`;
-        events[event].reactions.set(name, reaction);
+        if (!handler.name)
+          throw new Error(
+            `Reaction handler for "${String(event)}" must be a named function`
+          );
+        events[event].reactions.set(handler.name, reaction);
         return {
           ...builder,
           to(resolver: ReactionResolver<TEvents, TKey> | string) {
-            events[event].reactions.set(name, {
+            events[event].reactions.set(handler.name, {
               ...reaction,
               resolver:
                 typeof resolver === "string" ? { target: resolver } : resolver,
@@ -261,7 +263,7 @@ export function slice<
             return builder;
           },
           void() {
-            events[event].reactions.set(name, {
+            events[event].reactions.set(handler.name, {
               ...reaction,
               resolver: _void_,
             });

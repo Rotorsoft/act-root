@@ -38,7 +38,7 @@ class InMemoryStream {
     readonly source: string | undefined
   ) {}
 
-  get is_avaliable() {
+  get is_available() {
     return (
       !this._blocked &&
       (!this._leased_until || this._leased_until <= new Date())
@@ -324,7 +324,7 @@ export class InMemoryStore implements Store {
     await sleep();
     const available = [...this._streams.values()].filter(
       (s) =>
-        s.is_avaliable &&
+        s.is_available &&
         (s.at < 0 ||
           this._events.some(
             (e) =>

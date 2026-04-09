@@ -69,16 +69,13 @@ describe("slice", () => {
     expect(s.events["Incremented"].reactions.size).toBe(1);
   });
 
-  it("should generate a reaction name for anonymous handlers", () => {
-    const s = slice()
-      .withState(PartA)
-      .on("Incremented")
-      .do(async () => {})
-      .void()
-      .build();
-
-    const [name] = [...s.events["Incremented"].reactions.keys()];
-    expect(name).toBe("Incremented_0");
+  it("should throw for anonymous handlers", () => {
+    expect(() =>
+      slice()
+        .withState(PartA)
+        .on("Incremented")
+        .do(async () => {})
+    ).toThrow('Reaction handler for "Incremented" must be a named function');
   });
 
   it("should register scoped reactions via .on().do().to() with string", () => {
@@ -391,7 +388,7 @@ describe("slice", () => {
     const Incremented = z.object({ by: z.number() });
     const proj = projection("counters")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .build();
 
     const s = slice().withState(PartA).withProjection(proj).build();

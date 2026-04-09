@@ -131,6 +131,30 @@ describe("partial-state", () => {
     expect(app).toBeDefined();
   });
 
+  it("should throw on conflicting snap strategies", () => {
+    const Snap1 = state({ Snapped: schema })
+      .init(() => ({ count: 0, label: "" }))
+      .emits({ X: ZodEmpty })
+      .patch({ X: () => ({}) })
+      .on({ doX: ZodEmpty })
+      .emit(() => ["X", {}])
+      .snap(() => true)
+      .build();
+
+    const Snap2 = state({ Snapped: schema })
+      .init(() => ({ count: 0, label: "" }))
+      .emits({ Y: ZodEmpty })
+      .patch({ Y: () => ({}) })
+      .on({ doY: ZodEmpty })
+      .emit(() => ["Y", {}])
+      .snap(() => false)
+      .build();
+
+    expect(() => act().withState(Snap1).withState(Snap2).build()).toThrow(
+      'Duplicate snap strategy for state "Snapped"'
+    );
+  });
+
   it("should work with single-chain states (backward compat)", async () => {
     const counter = state({ Counter: z.object({ count: z.number() }) })
       .init(() => ({ count: 0 }))

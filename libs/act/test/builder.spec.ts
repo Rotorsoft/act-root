@@ -38,10 +38,14 @@ describe("Builder", () => {
     const app = act()
       .withState(A1)
       .on("Event1")
-      .do(() => Promise.resolve())
+      .do(function handleEvent1() {
+        return Promise.resolve();
+      })
       .void()
       .on("Event2")
-      .do(() => Promise.resolve())
+      .do(function handleEvent2() {
+        return Promise.resolve();
+      })
       .to("abc")
       .build();
 
@@ -84,14 +88,27 @@ describe("Builder", () => {
     expect(() => builder.withState(state2)).toThrow("Duplicate action");
   });
 
+  it("should throw for anonymous handlers in act builder", () => {
+    expect(() =>
+      act()
+        .withState(A1)
+        .on("Event1")
+        .do(async () => {})
+    ).toThrow('Reaction handler for "Event1" must be a named function');
+  });
+
   it("should allow chaining .on().do().to() and .on().do().void()", () => {
     const app = act()
       .withState(A1)
       .on("Event1")
-      .do(() => Promise.resolve())
+      .do(function handleEvent1() {
+        return Promise.resolve();
+      })
       .to("custom")
       .on("Event2")
-      .do(() => Promise.resolve())
+      .do(function handleEvent2() {
+        return Promise.resolve();
+      })
       .void()
       .build();
     expect(app).toBeDefined();
@@ -142,7 +159,9 @@ describe("Builder", () => {
     const app = act()
       .withState(testState)
       .on("E")
-      .do(() => Promise.resolve())
+      .do(function handleE() {
+        return Promise.resolve();
+      })
       .void()
       .build();
 

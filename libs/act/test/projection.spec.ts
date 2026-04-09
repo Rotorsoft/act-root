@@ -30,7 +30,7 @@ describe("projection", () => {
   it("should build a projection with _tag Projection", () => {
     const p = projection("target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .build();
 
     expect(p._tag).toBe("Projection");
@@ -41,7 +41,7 @@ describe("projection", () => {
   it("should use default target from projection(target)", () => {
     const p = projection("counters")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .build();
 
     const [reaction] = [...p.events["Incremented"].reactions.values()];
@@ -51,7 +51,7 @@ describe("projection", () => {
   it("should fall back to _this_ resolver when no default target", () => {
     const p = projection()
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .build();
 
     const [reaction] = [...p.events["Incremented"].reactions.values()];
@@ -62,7 +62,7 @@ describe("projection", () => {
   it("should allow per-handler .to() to override default target", () => {
     const p = projection("default-target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .to("override-target")
       .build();
 
@@ -74,7 +74,7 @@ describe("projection", () => {
     const resolver = (event: any) => ({ target: event.stream });
     const p = projection("default-target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .to(resolver)
       .build();
 
@@ -85,7 +85,7 @@ describe("projection", () => {
   it("should allow per-handler .void() to override default target", () => {
     const p = projection("default-target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .void()
       .build();
 
@@ -104,22 +104,20 @@ describe("projection", () => {
     expect(name).toBe("myHandler");
   });
 
-  it("should generate reaction names for anonymous handlers", () => {
-    const p = projection("target")
-      .on({ Incremented })
-      .do(async () => {})
-      .build();
-
-    const [name] = [...p.events["Incremented"].reactions.keys()];
-    expect(name).toBe("Incremented_0");
+  it("should throw for anonymous handlers", () => {
+    expect(() =>
+      projection("target")
+        .on({ Incremented })
+        .do(async () => {})
+    ).toThrow('Projection handler for "Incremented" must be a named function');
   });
 
   it("should register multiple event handlers with default target", () => {
     const p = projection("read-model")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .on({ Labeled })
-      .do(async () => {})
+      .do(async function handleLabeled() {})
       .build();
 
     expect(p.events["Incremented"]).toBeDefined();
@@ -240,7 +238,7 @@ describe("projection", () => {
     const Foo = z.object({ x: z.number() });
     const b = projection("bar")
       .on({ Foo })
-      .do(async () => {});
+      .do(async function handleFoo() {});
     expect(b.events).toBeDefined();
     expect(b.events["Foo"]).toBeDefined();
     expect(b.events["Foo"].schema).toBeDefined();
@@ -252,7 +250,7 @@ describe("projection", () => {
     const batchFn = vi.fn().mockResolvedValue(undefined);
     const p = projection("target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .batch(batchFn)
       .build();
 
@@ -264,7 +262,7 @@ describe("projection", () => {
   it("should not expose .batch() on projections without static target", () => {
     const p = projection()
       .on({ Incremented })
-      .do(async () => {});
+      .do(async function handleIncremented() {});
 
     expect("batch" in p).toBe(false);
   });
@@ -272,7 +270,7 @@ describe("projection", () => {
   it("should store target on projection with static target", () => {
     const p = projection("my-target")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .build();
 
     expect(p.target).toBe("my-target");
@@ -283,6 +281,9 @@ describe("projection", () => {
     const singleHandler = vi.fn().mockResolvedValue(undefined);
     const batchFn = vi.fn().mockResolvedValue(undefined);
 
+    Object.defineProperty(singleHandler, "name", {
+      value: "handleIncremented",
+    });
     const BatchProjection = projection("batch-proj")
       .on({ Incremented })
       .do(singleHandler)
@@ -320,7 +321,7 @@ describe("projection", () => {
 
     const BatchProjection = projection("batch-single")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .batch(batchFn)
       .build();
 
@@ -345,7 +346,7 @@ describe("projection", () => {
 
     const BatchProjection = projection("batch-error")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .batch(batchFn)
       .build();
 
@@ -369,7 +370,7 @@ describe("projection", () => {
 
     const BatchProjection = projection("batch-block")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .batch(batchFn)
       .build();
 
@@ -402,7 +403,7 @@ describe("projection", () => {
 
     const BatchProjection = projection("slice-batch")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .batch(batchFn)
       .build();
 
@@ -444,9 +445,9 @@ describe("projection", () => {
 
     const MixedProjection = projection("mixed-batch")
       .on({ Incremented })
-      .do(async () => {})
+      .do(async function handleIncremented() {})
       .on({ Labeled })
-      .do(async () => {})
+      .do(async function handleLabeled() {})
       .batch(batchFn)
       .build();
 

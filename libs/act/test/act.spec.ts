@@ -46,11 +46,15 @@ describe("act", () => {
     .on("decremented")
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
     .on("ignored")
-    .do(() => Promise.resolve())
+    .do(function handleIgnored() {
+      return Promise.resolve();
+    })
     .void() // void resolver — correlate should skip this
     .withState(dummy)
     .on("added")
-    .do(() => Promise.resolve())
+    .do(function handleAdded() {
+      return Promise.resolve();
+    })
     .build();
 
   const actor = { id: "a", name: "a" };
@@ -285,7 +289,9 @@ describe("act", () => {
     const dynApp = act()
       .withState(dynState)
       .on("DynEvt")
-      .do(() => Promise.resolve())
+      .do(function handleDynEvt() {
+        return Promise.resolve();
+      })
       .to((event) => ({ target: `dyn-${event.stream}` }))
       .build();
 
@@ -313,7 +319,9 @@ describe("act", () => {
     const dynApp = act()
       .withState(dynState)
       .on("Dyn2Evt")
-      .do(() => Promise.resolve())
+      .do(function handleDyn2Evt() {
+        return Promise.resolve();
+      })
       .to((event) => ({ target: `dyn2-${event.stream}` }))
       .build();
 
@@ -517,7 +525,9 @@ describe("act", () => {
     const staticApp = act()
       .withState(s)
       .on("StaticEvt")
-      .do(() => Promise.resolve())
+      .do(function handleStaticEvt() {
+        return Promise.resolve();
+      })
       .to("my-static-target") // static resolver — covers constructor branch
       .build();
 
@@ -609,10 +619,14 @@ describe("act", () => {
     const mixApp = act()
       .withState(s)
       .on("MixEvt")
-      .do(() => Promise.resolve())
+      .do(function handleMixEvtStatic() {
+        return Promise.resolve();
+      })
       .to("static-target") // static resolver
       .on("MixEvt")
-      .do(() => Promise.resolve())
+      .do(function handleMixEvtDynamic() {
+        return Promise.resolve();
+      })
       .to((e) => ({ target: `dyn-${e.stream}` })) // dynamic resolver
       .build();
 

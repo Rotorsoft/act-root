@@ -201,8 +201,11 @@ function _projection<
             },
           };
           const register = (events as Record<string, any>)[event];
-          const name = handler.name || `${event}_${register.reactions.size}`;
-          register.reactions.set(name, reaction);
+          if (!handler.name)
+            throw new Error(
+              `Projection handler for "${event}" must be a named function`
+            );
+          register.reactions.set(handler.name, reaction);
 
           const nextBuilder = _projection<
             TEvents & { [P in TKey]: TData },
@@ -215,7 +218,7 @@ function _projection<
                 | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
                 | string
             ) {
-              register.reactions.set(name, {
+              register.reactions.set(handler.name, {
                 ...reaction,
                 resolver:
                   typeof resolver === "string"
@@ -225,7 +228,7 @@ function _projection<
               return nextBuilder;
             },
             void() {
-              register.reactions.set(name, {
+              register.reactions.set(handler.name, {
                 ...reaction,
                 resolver: _void_,
               });
