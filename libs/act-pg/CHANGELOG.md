@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.14.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.3...@rotorsoft/act-pg-v0.14.4) (2026-04-09)
+
+
+### Bug Fixes
+
+* **act:** harden framework with correctness and safety fixes ([7b6406a](https://github.com/rotorsoft/act-root/commit/7b6406aa5e7179e4d0a7bf3e91829670dd51226b))
+
 # [@rotorsoft/act-pg-v0.14.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.2...@rotorsoft/act-pg-v0.14.3) (2026-04-08)
 
 
