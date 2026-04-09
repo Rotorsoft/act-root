@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.26.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.26.0...@rotorsoft/act-v0.26.1) (2026-04-09)
+
+
+### Bug Fixes
+
+* **act:** harden framework with correctness and safety fixes ([7b6406a](https://github.com/rotorsoft/act-root/commit/7b6406aa5e7179e4d0a7bf3e91829670dd51226b))
+
 # [@rotorsoft/act-v0.26.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.25.2...@rotorsoft/act-v0.26.0) (2026-04-08)
 
 
