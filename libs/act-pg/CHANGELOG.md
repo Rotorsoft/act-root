@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.4...@rotorsoft/act-pg-v0.15.0) (2026-04-11)
+
+
+### Features
+
+* **act, act-pg:** add Store.reset() for projection rebuild ([66fa95a](https://github.com/rotorsoft/act-root/commit/66fa95ac63e03da4da472f14cc3776c1f09b1826)), closes [#564](https://github.com/rotorsoft/act-root/issues/564)
+
 # [@rotorsoft/act-pg-v0.14.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.3...@rotorsoft/act-pg-v0.14.4) (2026-04-09)
 
 
