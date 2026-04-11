@@ -112,6 +112,18 @@ class InMemoryStream {
       };
     }
   }
+
+  /**
+   * Reset this stream's watermark and state for replay.
+   */
+  reset() {
+    this._at = -1;
+    this._retry = 0;
+    this._blocked = false;
+    this._error = "";
+    this._leased_by = undefined;
+    this._leased_until = undefined;
+  }
 }
 
 /**
@@ -408,5 +420,24 @@ export class InMemoryStore implements Store {
     return leases
       .map((l) => this._streams.get(l.stream)?.block(l, l.error))
       .filter((l) => !!l);
+  }
+
+  /**
+   * Reset watermarks for the given streams to -1, clearing retry, blocked,
+   * error, and lease state so they can be replayed from the beginning.
+   * @param streams - Stream names to reset.
+   * @returns Count of streams that were actually reset.
+   */
+  async reset(streams: string[]) {
+    await sleep();
+    let count = 0;
+    for (const name of streams) {
+      const s = this._streams.get(name);
+      if (s) {
+        s.reset();
+        count++;
+      }
+    }
+    return count;
   }
 }

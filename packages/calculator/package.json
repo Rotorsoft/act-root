@@ -6,7 +6,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "LOG_LEVEL=trace tsx watch src/main.ts"
+    "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
+    "dev:rebuild": "tsx src/rebuild-demo.ts"
   },
   "dependencies": {
     "@rotorsoft/act": "^0.25.2",

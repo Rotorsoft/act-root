@@ -387,6 +387,26 @@ Control when snapshots are taken for cold-start resilience (on cache miss, proce
 
 Snap writes are fire-and-forget — the cache is updated synchronously within `action()`, so subsequent reads see the post-commit state immediately without waiting for the store write.
 
+### Projection Rebuild
+
+Projections are derived data — disposable by design. When a projection's logic changes (new fields, bug fix, different aggregation), reset its watermark with `store().reset()` and let the existing drain machinery replay all events from the beginning:
+
+```typescript
+// Reset the projection stream watermark to -1
+await store().reset(["my-projection"]);
+
+// Next drain replays all events through the projection handlers
+await app.drain({ eventLimit: 1000 });
+```
+
+`store().reset(streams)` sets `at = -1`, clears `retry`, `blocked`, `error`, and lease state for the given streams. This makes them eligible for `claim()` from the beginning. The framework's existing drain cycle handles the replay — no special rebuild API is needed.
+
+**Typical production workflow:**
+1. Deploy updated projection code
+2. Clear projected data (truncate read-model table, flush cache)
+3. Call `store().reset(["projection-target"])` to reset watermarks
+4. Normal `drain()` or `settle()` replays all events through the updated handlers
+
 ## Code Organization
 
 ### Core Library (`libs/act/src`)
@@ -413,7 +433,7 @@ Snap writes are fire-and-forget — the cache is updated synchronously within `a
 
 Each example demonstrates different framework capabilities:
 
-- **Calculator** - Single state machine, no reactions, simple event flow
+- **Calculator** - Single state machine, reactions, projection rebuild demo (`pnpm -F calculator dev:rebuild`)
 - **WolfDesk** - Multiple aggregates, projections, complex reactions, invariants
 - **Server/Client** - Integration with external APIs (tRPC), web application pattern
 
@@ -488,6 +508,7 @@ interface Store extends Disposable {
   subscribe(streams): Promise<{ subscribed: number; watermark: number }>;  // Register streams + max watermark
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
+  reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```
