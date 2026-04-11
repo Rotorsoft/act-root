@@ -316,6 +316,26 @@ export interface Store extends Disposable {
   block: (
     leases: Array<Lease & { error: string }>
   ) => Promise<Array<Lease & { error: string }>>;
+
+  /**
+   * Resets watermarks for the given streams to -1, making them eligible
+   * for replay from the beginning. Also clears retry, blocked, error,
+   * and lease state so the streams can be claimed immediately.
+   *
+   * Used by `Act.rebuild()` to replay events through updated projections.
+   *
+   * @param streams - Stream names to reset
+   * @returns Count of streams that were actually reset
+   *
+   * @example
+   * ```typescript
+   * const count = await store().reset(["my-projection"]);
+   * console.log(`Reset ${count} streams for replay`);
+   * ```
+   *
+   * @see {@link Act.rebuild} for the high-level rebuild API
+   */
+  reset: (streams: string[]) => Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

@@ -420,6 +420,64 @@ describe("pg store", () => {
       await s.ack([claimed[0]]);
     });
 
+    it("should reset stream watermarks for projection rebuild", async () => {
+      const s = store();
+      // Subscribe and advance watermark via claim+ack
+      await s.subscribe([{ stream: "reset-test" }]);
+      const claimed = await s.claim(100, 0, "w", 10000);
+      const target = claimed.find((l) => l.stream === "reset-test")!;
+      expect(target).toBeDefined();
+      await s.ack(claimed.map((l) => ({ ...l, at: 99 })));
+
+      // Reset the stream
+      const count = await s.reset(["reset-test"]);
+      expect(count).toBe(1);
+
+      // Stream should now be claimable again from the beginning
+      const claimed2 = await s.claim(100, 0, "w2", 10000);
+      const target2 = claimed2.find((l) => l.stream === "reset-test");
+      expect(target2).toBeDefined();
+      expect(target2!.at).toBe(-1);
+      await s.ack(claimed2);
+    });
+
+    it("should reset blocked streams", async () => {
+      const s = store();
+      await s.subscribe([{ stream: "reset-blocked" }]);
+      const claimed = await s.claim(100, 0, "w", 10000);
+      const target = claimed.find((l) => l.stream === "reset-blocked")!;
+      const others = claimed.filter((l) => l.stream !== "reset-blocked");
+      if (others.length) await s.ack(others);
+      await s.block([{ ...target, error: "test-error" }]);
+
+      // Blocked stream should not be claimable
+      const claimed2 = await s.claim(100, 100, "w2", 10000);
+      expect(
+        claimed2.find((l) => l.stream === "reset-blocked")
+      ).toBeUndefined();
+      if (claimed2.length) await s.ack(claimed2);
+
+      // Reset unblocks it
+      const count = await s.reset(["reset-blocked"]);
+      expect(count).toBe(1);
+
+      const claimed3 = await s.claim(100, 0, "w3", 10000);
+      const target3 = claimed3.find((l) => l.stream === "reset-blocked");
+      expect(target3).toBeDefined();
+      expect(target3!.at).toBe(-1);
+      await s.ack(claimed3);
+    });
+
+    it("should return 0 when resetting non-existent streams", async () => {
+      const count = await store().reset(["does-not-exist"]);
+      expect(count).toBe(0);
+    });
+
+    it("should return 0 when resetting empty array", async () => {
+      const count = await store().reset([]);
+      expect(count).toBe(0);
+    });
+
     it("should not claim blocked streams", async () => {
       const s = store();
       await s.subscribe([{ stream: "block-test" }]);
@@ -584,6 +642,15 @@ describe("PostgresStore error paths", () => {
     );
     const result = await db.subscribe([{ stream: "x" }]);
     expect(result).toEqual({ subscribed: 0, watermark: -1 });
+  });
+
+  it("should handle reset() with null rowCount", async () => {
+    vi.spyOn(Pool.prototype, "query").mockResolvedValueOnce(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- testing null rowCount path
+      { rows: [], rowCount: null } as any
+    );
+    const result = await db.reset(["x"]);
+    expect(result).toBe(0);
   });
 
   it("should handle ack() error", async () => {

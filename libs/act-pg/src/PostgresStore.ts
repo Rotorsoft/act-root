@@ -677,4 +677,22 @@ export class PostgresStore implements Store {
       client.release();
     }
   }
+
+  /**
+   * Reset watermarks for the given streams to -1, clearing retry, blocked,
+   * error, and lease state so they can be replayed from the beginning.
+   * @param streams - Stream names to reset.
+   * @returns Count of streams that were actually reset.
+   */
+  async reset(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const { rowCount } = await this._pool.query(
+      `UPDATE ${this._fqs}
+       SET at = -1, retry = 0, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL
+       WHERE stream = ANY($1)`,
+      [streams]
+    );
+    return rowCount ?? 0;
+  }
 }
