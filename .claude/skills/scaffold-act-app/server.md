@@ -196,6 +196,58 @@ try {
 
 Error constants: `Errors.ValidationError = "ERR_VALIDATION"`, `Errors.InvariantError = "ERR_INVARIANT"`, `Errors.ConcurrencyError = "ERR_CONCURRENCY"`.
 
+## Idempotent API Requests
+
+Request-level idempotency belongs in API middleware, not in the event sourcing framework. Act uses optimistic concurrency (`expectedVersion`) for conflict detection at the store level.
+
+For safe client retries, add a tRPC middleware with a dedicated cache:
+
+```typescript
+// packages/app/src/api/middleware.ts
+const idempotencyKeys = new Map<string, { response: unknown; expiresAt: number }>();
+const IDEMPOTENCY_TTL = 86_400_000; // 24 hours
+
+export const idempotent = t.middleware(async ({ ctx, next, rawInput }) => {
+  const key = (rawInput as any)?.idempotencyKey as string | undefined;
+  if (key) {
+    const cached = idempotencyKeys.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+      return { ok: true, data: cached.response } as any;
+    }
+  }
+  const result = await next({ ctx });
+  if (key && result.ok) {
+    idempotencyKeys.set(key, {
+      response: (result as any).data,
+      expiresAt: Date.now() + IDEMPOTENCY_TTL,
+    });
+  }
+  return result;
+});
+
+// Usage in router
+const protectedIdempotent = protectedProcedure.use(idempotent);
+
+export const appRouter = router({
+  transferFunds: protectedIdempotent
+    .input(z.object({
+      idempotencyKey: z.string().optional(),
+      amount: z.number(),
+      streamId: z.string(),
+    }))
+    .mutation(async ({ input, ctx }) => {
+      const snap = await doAction("TransferFunds",
+        { stream: input.streamId, actor: ctx.actor },
+        { amount: input.amount });
+      return snap.state;
+    }),
+});
+```
+
+For distributed deployments, replace the in-memory Map with Redis. The client sends a unique `idempotencyKey` per logical request (typically a UUID generated before the first attempt). Retries send the same key.
+
+**Why not at the framework level?** Framework-level dedup (checking event metadata before commit) has TOCTOU races under concurrent retries, conflates correlation IDs (trace IDs) with idempotency keys, and provides no TTL for stale entries.
+
 ## Drain Options
 
 ```typescript

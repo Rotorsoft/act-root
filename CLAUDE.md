@@ -355,6 +355,38 @@ Dynamic stream discovery through correlation metadata:
 
 **Drain optimization:** At build time, `_reactive_events` collects event names with at least one registered reaction. In `do()`, the `_needs_drain` flag is set when a committed event matches. `drain()` returns immediately when the flag is false — saving 3 DB round-trips (claim, query, ack) per non-reactive cycle. The flag clears only when drain completes with nothing acked, blocked, or errored. Cold start sets the flag in `_init_correlation()` to process historical events. Default `maxPasses` is 1 (single correlate→drain pass per settle).
 
+### Idempotency
+
+Act uses **optimistic concurrency** (`expectedVersion`) for conflict detection at the event store level. Request-level idempotency (safe client retries) is an **API middleware concern**, not a framework concern.
+
+Framework-level deduplication (e.g., checking event correlation metadata before commit) was evaluated and rejected due to:
+- **TOCTOU races** — concurrent retries both pass the check before either commits
+- **Semantic overloading** — correlation is a trace ID that propagates through reactions; reusing it as an idempotency key conflates two concerns
+- **Cross-action dedup** — different actions with the same key silently swallow the second
+- **State drift** — dedup returns current state, not state-as-of-original-commit
+- **No TTL** — stale keys in the immutable event log block reuse forever
+
+**Recommended pattern:** tRPC middleware with a dedicated cache (in-memory Map with TTL, or Redis for distributed deployments):
+
+```typescript
+const idempotencyKeys = new Map<string, { response: unknown; expiresAt: number }>();
+
+const idempotent = t.middleware(async ({ ctx, next, rawInput }) => {
+  const key = (rawInput as any)?.idempotencyKey;
+  if (key) {
+    const cached = idempotencyKeys.get(key);
+    if (cached && cached.expiresAt > Date.now()) return { ok: true, data: cached.response };
+  }
+  const result = await next({ ctx });
+  if (key && result.ok) {
+    idempotencyKeys.set(key, { response: result.data, expiresAt: Date.now() + 86_400_000 });
+  }
+  return result;
+});
+```
+
+This cleanly separates "has this request been processed?" (API concern) from "what events exist?" (event store concern).
+
 ### Invariants
 
 Business rules enforced before actions execute:

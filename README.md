@@ -140,6 +140,32 @@ Reactions are processed by polling (`drain()`), not by pub/sub. The store's `cla
 
 At build time, reaction resolvers are classified as static (known target) or dynamic (function). Static targets are subscribed once at init. Dynamic targets are discovered by `correlate()`, which scans new events and registers target streams. When no dynamic resolvers exist, correlation is skipped entirely — zero overhead.
 
+### Idempotency at the API Layer, Not the Framework
+
+Duplicate request detection is a common need, but it belongs in API middleware — not the event sourcing framework. Framework-level deduplication (checking event metadata before commit) has fundamental holes: TOCTOU races under concurrent retries, semantic overloading of correlation IDs (trace ID vs idempotency key), and no TTL for stale keys.
+
+Act relies on **optimistic concurrency** (`expectedVersion`) for conflict detection at the event store level. For request-level idempotency, use a dedicated cache in your API middleware:
+
+```ts
+// tRPC middleware example
+const idempotencyKeys = new Map<string, { response: unknown; expiresAt: number }>();
+
+const idempotent = t.middleware(async ({ ctx, next, rawInput }) => {
+  const key = (rawInput as any)?.idempotencyKey;
+  if (key) {
+    const cached = idempotencyKeys.get(key);
+    if (cached && cached.expiresAt > Date.now()) return { ok: true, data: cached.response };
+  }
+  const result = await next({ ctx });
+  if (key && result.ok) {
+    idempotencyKeys.set(key, { response: result.data, expiresAt: Date.now() + 86_400_000 });
+  }
+  return result;
+});
+```
+
+This cleanly separates "has this request been processed?" (API concern with TTL and cache) from "what events exist?" (event store concern with immutable log). Use Redis for distributed deployments.
+
 ### Vertical Slices, Not Layers
 
 `slice()` groups a partial state with its reactions into a self-contained feature module. Each slice owns its actions, events, patches, and reaction handlers. Slices compose into the full application via `act().withSlice()`. This keeps related code together instead of scattering it across service/repository/handler layers.
