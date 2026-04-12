@@ -407,6 +407,64 @@ await app.drain({ eventLimit: 1000 });
 3. Call `store().reset(["projection-target"])` to reset watermarks
 4. Normal `drain()` or `settle()` replays all events through the updated handlers
 
+### Event Schema Evolution
+
+Events are immutable — their schemas must evolve without breaking historical data. Act uses **versioned event names** instead of upcasting, preserving full type safety through Zod schemas.
+
+**Non-breaking changes** (adding optional fields with defaults) work naturally — the Zod schema evolves and the patch handler provides defaults:
+
+```typescript
+// Before: TicketOpened had only title
+// After: added priority with a default
+.emits({
+  TicketOpened: z.object({
+    title: z.string(),
+    priority: z.enum(["low", "medium", "high"]).default("medium"),
+  })
+})
+.patch({
+  TicketOpened: ({ data }, state) => ({
+    ...state,
+    title: data.title,
+    priority: data.priority ?? "medium",  // handles old events
+  })
+})
+```
+
+**Breaking changes** (renaming fields, changing types, removing fields) require a new versioned event name. Old event types remain in the schema so historical events stay type-safe:
+
+```typescript
+.emits({
+  // v1: original schema (keep for historical events)
+  TicketOpened: z.object({ title: z.string(), type: z.string() }),
+  // v2: breaking change — renamed "type" to "category", added priority
+  TicketOpened_v2: z.object({
+    title: z.string(),
+    priority: z.enum(["low", "medium", "high"]),
+    category: z.string(),
+  }),
+})
+.patch({
+  TicketOpened: ({ data }, state) => ({
+    ...state,
+    title: data.title,
+    category: data.type,           // map old field to new state shape
+    priority: "medium",            // default for v1 events
+  }),
+  TicketOpened_v2: ({ data }, state) => ({
+    ...state,
+    title: data.title,
+    priority: data.priority,
+    category: data.category,
+  }),
+})
+// New actions emit v2
+.on({ openTicket: z.object({ title: z.string(), priority: z.enum(["low", "medium", "high"]), category: z.string() }) })
+  .emit((action) => ["TicketOpened_v2", { title: action.title, priority: action.priority, category: action.category }])
+```
+
+**Why not upcasting?** Upcasting (transforming old event data to the current schema at read time) is common in other frameworks but relies on loosely-typed transforms (`unknown → unknown`). Act's Zod schemas are the source of truth — versioned event names keep every schema version explicit and type-safe. Reducers, projections, and queries all benefit from full TypeScript inference with no type erasure.
+
 ## Code Organization
 
 ### Core Library (`libs/act/src`)
