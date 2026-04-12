@@ -338,6 +338,19 @@ export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
  * @template TActions - Action schemas.
  * @template TName - State name literal.
  */
+/**
+ * An ordered array of transform functions that upgrade old event data
+ * to the current schema shape at read time.
+ *
+ * Each function receives the (possibly already partially-upcasted) data
+ * and returns the next version. The chain runs left-to-right: v1 → v2 → v3.
+ *
+ * @template TEvents - Event schemas
+ */
+export type UpcasterChains<TEvents extends Schemas> = {
+  [TKey in keyof TEvents]?: ReadonlyArray<(data: unknown) => unknown>;
+};
+
 export type State<
   TState extends Schema,
   TEvents extends Schemas,
@@ -350,6 +363,7 @@ export type State<
   on: ActionHandlers<TState, TEvents, TActions>;
   given?: GivenHandlers<TState, TActions>;
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
+  upcast?: UpcasterChains<TEvents>;
 };
 
 /**

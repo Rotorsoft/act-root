@@ -126,6 +126,42 @@ const DigitBoard = state({ DigitBoard: schema })
   .build();
 ```
 
+### Event Upcasting
+
+Events are immutable, but schemas evolve. `.upcast()` registers transform chains that convert old event data to the current schema at read time — the bytes on disk never change, but reducers, projections, and queries always see the current shape.
+
+```typescript
+const Ticket = state({ Ticket: ticketSchema })
+  .init(() => defaults)
+  .emits({
+    TicketOpened: z.object({
+      title: z.string(),
+      priority: z.enum(["low", "medium", "high"]),  // added in v2
+      category: z.string(),                          // renamed from "type" in v3
+    })
+  })
+  .upcast({
+    TicketOpened: [
+      // v1 → v2: add default priority
+      (data) => ({ ...data, priority: data.priority ?? "medium" }),
+      // v2 → v3: rename "type" to "category"
+      (data) => {
+        const { type, ...rest } = data;
+        return { ...rest, category: data.category ?? type };
+      },
+    ]
+  })
+  .patch({ ... })
+  .on({ ... })
+  .build();
+```
+
+**Where upcasting is applied:** `load()` (before reducers), `drain()` (before reaction/projection handlers), `query()`/`query_array()` (before callbacks). Snapshots store state, not events — they are unaffected. The commit path always emits current-schema events.
+
+**Merging:** Partial states can each declare upcasters for different events. Conflicting chains for the same event throw at build time.
+
+Run `pnpm -F calculator dev:upcast` for a working demo.
+
 ### Utility Types
 
 `InferEvents` and `InferActions` extract inferred types from a built State object, avoiding repetition of the Zod-to-plain-type mapping boilerplate.

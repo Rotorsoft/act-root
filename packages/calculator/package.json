@@ -7,7 +7,8 @@
   "type": "module",
   "scripts": {
     "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
-    "dev:rebuild": "tsx src/rebuild-demo.ts"
+    "dev:rebuild": "tsx src/rebuild-demo.ts",
+    "dev:upcast": "tsx src/upcast-demo.ts"
   },
   "dependencies": {
     "@rotorsoft/act": "^0.27.0",

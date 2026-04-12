@@ -113,6 +113,21 @@ export function registerState(
         // else: existing is custom or both are passthrough — keep existing
       }
     }
+    // Merge upcasters: only one chain per event allowed
+    const mergedUpcast = { ...existing.upcast };
+    if (state.upcast) {
+      for (const name of Object.keys(state.upcast)) {
+        const existingU = existing.upcast?.[name];
+        const incomingU = state.upcast[name];
+        if (existingU && incomingU && existingU !== incomingU) {
+          throw new Error(
+            `Duplicate upcaster chain for event "${name}" in state "${state.name}"`
+          );
+        }
+        if (incomingU) mergedUpcast[name] = incomingU;
+      }
+    }
+
     const merged = {
       ...existing,
       state: mergeSchemas(existing.state, state.state, state.name),
@@ -120,6 +135,7 @@ export function registerState(
       events: { ...existing.events, ...state.events },
       actions: { ...existing.actions, ...state.actions },
       patch: mergedPatch,
+      upcast: Object.keys(mergedUpcast).length ? mergedUpcast : undefined,
       on: { ...existing.on, ...state.on },
       given: { ...existing.given, ...state.given },
       snap:

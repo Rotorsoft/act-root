@@ -144,6 +144,11 @@ export class Act<
   private readonly _static_targets: Array<{ stream: string; source?: string }>;
   /** Batch handlers for static-target projections (target → handler) */
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
+  /** Merged upcaster chains from all registered states (event name → chain) */
+  private readonly _upcasters: Map<
+    string,
+    ReadonlyArray<(data: unknown) => unknown>
+  >;
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -170,12 +175,43 @@ export class Act<
     }
     this._static_targets = statics;
 
+    // Collect upcaster chains from all registered states
+    const upcasters = new Map<
+      string,
+      ReadonlyArray<(data: unknown) => unknown>
+    >();
+    for (const state of this._states.values()) {
+      if (state.upcast) {
+        for (const [eventName, chain] of Object.entries(state.upcast)) {
+          if (chain?.length) {
+            if (upcasters.has(eventName)) {
+              throw new Error(
+                `Duplicate upcaster chain for event "${eventName}" in state "${state.name}"`
+              );
+            }
+            upcasters.set(eventName, chain);
+          }
+        }
+      }
+    }
+    this._upcasters = upcasters;
+
     dispose(() => {
       this._emitter.removeAllListeners();
       this.stop_correlations();
       this.stop_settling();
       return Promise.resolve();
     });
+  }
+
+  /** Applies upcaster chain to an event's data if one is registered. */
+  private _upcast<K extends keyof TEvents>(
+    event: Committed<TEvents, K>
+  ): Committed<TEvents, K> {
+    const chain = this._upcasters.get(event.name as string);
+    if (!chain?.length) return event;
+    const data = chain.reduce<unknown>((d, fn) => fn(d), event.data);
+    return { ...event, data } as unknown as Committed<TEvents, K>;
   }
 
   /**
@@ -358,7 +394,7 @@ export class Act<
     } else {
       merged = this._states.get(stateOrName.name) || stateOrName;
     }
-    return await es.load(merged, stream, callback);
+    return await es.load(merged, stream, callback, this._upcasters);
   }
 
   /**
@@ -423,9 +459,10 @@ export class Act<
     let first: Committed<TEvents, keyof TEvents> | undefined = undefined,
       last: Committed<TEvents, keyof TEvents> | undefined = undefined;
     const count = await store().query<TEvents>((e) => {
-      !first && (first = e);
-      last = e;
-      callback && callback(e);
+      const upcasted = this._upcast(e);
+      !first && (first = upcasted);
+      last = upcasted;
+      callback && callback(upcasted);
     }, query);
     return { first, last, count };
   }
@@ -460,7 +497,7 @@ export class Act<
     query: Query
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
     const events: Committed<TEvents, keyof TEvents>[] = [];
-    await store().query<TEvents>((e) => events.push(e), query);
+    await store().query<TEvents>((e) => events.push(this._upcast(e)), query);
     return events;
   }
 

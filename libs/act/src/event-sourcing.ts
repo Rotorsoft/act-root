@@ -86,7 +86,8 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   stream: string,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  upcasters?: Map<string, ReadonlyArray<(data: unknown) => unknown>>
 ): Promise<Snapshot<TState, TEvents>> {
   const cached = await cache().get<TState>(stream);
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
@@ -102,6 +103,12 @@ export async function load<
         snaps++;
         patches = 0;
       } else if (me.patch[e.name]) {
+        // Apply upcasters before patch (from state or injected map)
+        const chain = upcasters?.get(e.name) ?? me.upcast?.[e.name];
+        if (chain?.length) {
+          const data = chain.reduce<unknown>((d, fn) => fn(d), e.data);
+          event = { ...event, data } as unknown as Committed<TEvents, string>;
+        }
         state = patch(state, me.patch[e.name](event, state));
         patches++;
       }

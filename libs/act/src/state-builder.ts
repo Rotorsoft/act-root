@@ -15,6 +15,7 @@ import {
   Schemas,
   Snapshot,
   State,
+  UpcasterChains,
   ZodTypes,
 } from "./types/index.js";
 
@@ -280,6 +281,35 @@ export type ActionBuilder<
       TName
     >;
   };
+  /**
+   * Registers upcaster chains for event schema evolution.
+   *
+   * Upcasters transform old event data to the current schema shape at read time.
+   * The bytes on disk never change, but reducers, projections, and queries always
+   * see the current schema. Each chain is an ordered array of transform functions
+   * that run left-to-right (v1 → v2 → v3).
+   *
+   * @param upcasters - Partial map of event names to upcaster chains
+   * @returns The ActionBuilder for chaining
+   *
+   * @example
+   * ```typescript
+   * .upcast({
+   *   TicketOpened: [
+   *     // v1 → v2: add default priority
+   *     (data) => ({ ...data, priority: data.priority ?? "medium" }),
+   *     // v2 → v3: rename "type" to "category"
+   *     (data) => {
+   *       const { type, ...rest } = data;
+   *       return { ...rest, category: data.category ?? type };
+   *     },
+   *   ]
+   * })
+   * ```
+   */
+  upcast: (
+    upcasters: Partial<UpcasterChains<TEvents>>
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Defines a snapshotting strategy to optimize state reconstruction.
    *
@@ -561,6 +591,13 @@ function action_builder<
       }
 
       return { given, emit };
+    },
+
+    upcast(upcasters: Partial<UpcasterChains<TEvents>>) {
+      return action_builder<TState, TEvents, TActions, TName>({
+        ...state,
+        upcast: { ...state.upcast, ...upcasters } as UpcasterChains<TEvents>,
+      });
     },
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
