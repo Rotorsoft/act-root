@@ -87,6 +87,63 @@ To tie everything together, this approach requires a robust integration layer to
 
 Living systems demonstrate that intricate behaviors and complex structures can emerge from simple, foundational building blocks. This natural principle suggests that advanced systems can be constructed from a few elemental components. The key question is whether focusing on the core concepts of state, actions, and reactions, while layering in reliability and scalability through event-driven design, provides all the essential ingredients needed to build the next generation of software agents.
 
+## Design Decisions
+
+Act makes opinionated choices that differ from other event sourcing frameworks. Understanding these decisions helps you work with the framework rather than against it.
+
+### Zod Schemas as the Source of Truth
+
+Every action, event, and state shape is defined with a Zod schema. This gives you runtime validation, TypeScript inference, and a single definition that drives both types and checks. There are no separate type declarations — the schema *is* the type.
+
+### Immutable Events, Versioned Names
+
+Events on disk are never mutated. When schemas evolve in non-breaking ways (adding optional fields), the patch handler provides defaults. When breaking changes are needed (renaming fields, changing types), create a new versioned event name:
+
+```ts
+.emits({
+  TicketOpened: z.object({ title: z.string(), type: z.string() }),
+  TicketOpened_v2: z.object({
+    title: z.string(),
+    priority: z.enum(["low", "medium", "high"]),
+    category: z.string(),
+  }),
+})
+.patch({
+  TicketOpened: ({ data }, state) => ({
+    ...state, title: data.title, category: data.type, priority: "medium",
+  }),
+  TicketOpened_v2: ({ data }, state) => ({
+    ...state, title: data.title, priority: data.priority, category: data.category,
+  }),
+})
+```
+
+Other frameworks use **upcasting** — loosely-typed transforms that convert old event data at read time. Act rejects this because it erases the type information that Zod provides. Versioned event names keep every schema version explicit in the type system — reducers, projections, and queries all benefit from full TypeScript inference with no `unknown` escape hatches.
+
+### Passthrough by Default
+
+When `.emits()` declares events, every event gets a default passthrough reducer: `({ data }) => data`. Use `.patch()` only for events that need custom logic. Similarly, `.emit("EventName")` passes the action payload directly as event data. This eliminates boilerplate for the common case.
+
+### Projections Are Disposable
+
+Projections are derived data — you should be able to throw one away and rebuild it from the event log at any time. Reset the watermark with `store().reset(["projection-target"])` and the next `drain()` replays all events from the beginning. No special rebuild API needed — the existing drain machinery handles it.
+
+### Snapshots and Cache: Two Layers
+
+Cache (in-memory LRU) is checked first on every `load()`, eliminating store round-trips for warm streams. Snapshots (persisted as `__snapshot__` events in the store) are the fallback on cache miss — cold start, LRU eviction, or process restart. Together they keep `load()` fast regardless of stream length.
+
+### Reactions via Drain, Not Pub/Sub
+
+Reactions are processed by polling (`drain()`), not by pub/sub. The store's `claim()` uses `FOR UPDATE SKIP LOCKED` in PostgreSQL for zero-contention competing consumers — workers never block each other. This gives you exactly-once processing semantics, automatic retries, and dead-letter blocking without external infrastructure.
+
+### Static vs Dynamic Stream Discovery
+
+At build time, reaction resolvers are classified as static (known target) or dynamic (function). Static targets are subscribed once at init. Dynamic targets are discovered by `correlate()`, which scans new events and registers target streams. When no dynamic resolvers exist, correlation is skipped entirely — zero overhead.
+
+### Vertical Slices, Not Layers
+
+`slice()` groups a partial state with its reactions into a self-contained feature module. Each slice owns its actions, events, patches, and reaction handlers. Slices compose into the full application via `act().withSlice()`. This keeps related code together instead of scattering it across service/repository/handler layers.
+
 ## Quickstart
 
 Install the framework:
