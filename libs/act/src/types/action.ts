@@ -106,6 +106,15 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 export type Query = z.infer<typeof QuerySchema>;
 
 /**
+ * Time-travel options for `load()`.
+ * Filters events by position or timestamp, bypassing cache and snapshots.
+ */
+export type AsOf = Pick<
+  Query,
+  "before" | "created_before" | "created_after" | "limit"
+>;
+
+/**
  * A generic schema definition (plain object shape).
  */
 export type Schema = Record<string, any>;
@@ -437,7 +446,8 @@ export interface IAct<
   load(
     state: State<any, any, any> | string,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void
+    callback?: (snapshot: Snapshot<any, any>) => void,
+    asOf?: AsOf
   ): Promise<Snapshot<any, any>>;
 
   query(

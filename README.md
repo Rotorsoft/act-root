@@ -132,6 +132,20 @@ Projections are derived data — you should be able to throw one away and rebuil
 
 Cache (in-memory LRU) is checked first on every `load()`, eliminating store round-trips for warm streams. Snapshots (persisted as `__snapshot__` events in the store) are the fallback on cache miss — cold start, LRU eviction, or process restart. Together they keep `load()` fast regardless of stream length.
 
+### Time-Travel via Query Filters, Not a Separate API
+
+The event log is a complete history — `load()` accepts an optional `asOf` parameter to reconstruct state at any point in time. No separate time-travel API; the same `load()` you use for current state works for historical state:
+
+```ts
+// State as-of event ID
+await app.load(Counter, "counter-1", undefined, { before: 5000 });
+
+// State as-of timestamp
+await app.load(Counter, "counter-1", undefined, { created_before: new Date("2025-12-31") });
+```
+
+The callback (third parameter) receives each intermediate snapshot during replay, enabling step-through debugging. When `asOf` is present, cache is bypassed and snapshots before the cutoff are used as replay checkpoints.
+
 ### Reactions via Drain, Not Pub/Sub
 
 Reactions are processed by polling (`drain()`), not by pub/sub. The store's `claim()` uses `FOR UPDATE SKIP LOCKED` in PostgreSQL for zero-contention competing consumers — workers never block each other. This gives you exactly-once processing semantics, automatic retries, and dead-letter blocking without external infrastructure.
