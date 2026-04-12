@@ -10,6 +10,7 @@ import { randomUUID } from "crypto";
 import { cache, log, SNAP_EVENT, store } from "./ports.js";
 import { InvariantError } from "./types/errors.js";
 import type {
+  AsOf,
   Committed,
   Emitted,
   EventMeta,
@@ -86,9 +87,16 @@ export async function load<
 >(
   me: State<TState, TEvents, TActions>,
   stream: string,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
+  asOf?: AsOf
 ): Promise<Snapshot<TState, TEvents>> {
-  const cached = await cache().get<TState>(stream);
+  const timeTravel =
+    asOf &&
+    (asOf.before !== undefined ||
+      asOf.created_before !== undefined ||
+      asOf.created_after !== undefined ||
+      asOf.limit !== undefined);
+  const cached = timeTravel ? undefined : await cache().get<TState>(stream);
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
@@ -107,12 +115,16 @@ export async function load<
       }
       callback && callback({ event, state, patches, snaps });
     },
-    { stream, with_snaps: !cached, after: cached?.event_id, stream_exact: true }
+    {
+      stream,
+      stream_exact: true,
+      ...(cached ? { after: cached.event_id } : { with_snaps: true, ...asOf }),
+    }
   );
 
   logger.trace(
     state as object,
-    `🟢 load ${stream}${cached && count === 0 ? " (cached)" : ""}`
+    `🟢 load ${stream}${cached && count === 0 ? " (cached)" : ""}${timeTravel ? " (as-of)" : ""}`
   );
   return { event, state, patches, snaps };
 }

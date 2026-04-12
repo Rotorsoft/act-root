@@ -5,6 +5,7 @@ import * as es from "./event-sourcing.js";
 import { build_tracer, dispose, log, store } from "./ports.js";
 import type {
   Actor,
+  AsOf,
   BatchHandler,
   Committed,
   Drain,
@@ -338,17 +339,20 @@ export class Act<
   >(
     state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
-    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void
+    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void,
+    asOf?: AsOf
   ): Promise<Snapshot<TNewState, TNewEvents>>;
   async load<TKey extends keyof TStateMap & string>(
     name: TKey,
     stream: string,
-    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void
+    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void,
+    asOf?: AsOf
   ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
   async load<TNewState extends Schema>(
     stateOrName: State<TNewState, any, any> | string,
     stream: string,
-    callback?: (snapshot: Snapshot<any, any>) => void
+    callback?: (snapshot: Snapshot<any, any>) => void,
+    asOf?: AsOf
   ): Promise<Snapshot<any, any>> {
     let merged: State<any, any, any>;
     if (typeof stateOrName === "string") {
@@ -358,7 +362,7 @@ export class Act<
     } else {
       merged = this._states.get(stateOrName.name) || stateOrName;
     }
-    return await es.load(merged, stream, callback);
+    return await es.load(merged, stream, callback, asOf);
   }
 
   /**

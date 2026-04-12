@@ -267,6 +267,25 @@ await app.drain({ streamLimit: 100, eventLimit: 1000 });
 app.settle();
 ```
 
+### Time-Travel Queries
+
+`load()` accepts an optional `asOf` parameter (`AsOf = Pick<Query, "before" | "created_before" | "created_after" | "limit">`) to load state at a specific point in time:
+
+```typescript
+// Load state as-of a specific event ID (exclusive)
+await app.load(Counter, "counter-1", undefined, { before: 5000 });
+
+// Load state as-of a specific timestamp (exclusive)
+await app.load(Counter, "counter-1", undefined, { created_before: new Date("2025-12-31") });
+
+// Replay with a callback to inspect each intermediate state
+await app.load(Counter, "counter-1", (snap) => {
+  console.log(snap.event?.id, snap.state);
+}, { before: 5000 });
+```
+
+When `asOf` is present, `load()` bypasses the cache (read and write) and replays from the beginning with snapshots — the query filters exclude any snapshot past the cutoff. This is read-only; `action()` always operates on current state.
+
 ### Event Sourcing Model
 
 - **Append-only event log** - Complete audit trail, immutable history
@@ -644,6 +663,7 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - Use `app.on("committed", ...)` to observe all state changes
 - Use `app.on("settled", ...)` to react when `settle()` completes all correlate/drain passes
 - Use `app.on("blocked", ...)` to catch reaction processing failures
+- Use `app.load(State, stream, undefined, { before: eventId })` for time-travel queries (see `AsOf` type)
 - Query events directly: `await app.query_array({ stream: "mystream" })`
 - Query with exact stream match: `await app.query_array({ stream: "mystream", stream_exact: true })` — by default, `stream` uses regex matching; `stream_exact: true` uses exact string equality. `load()` always uses exact match internally.
 
