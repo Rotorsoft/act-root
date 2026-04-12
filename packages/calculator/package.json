@@ -10,7 +10,7 @@
     "dev:rebuild": "tsx src/rebuild-demo.ts"
   },
   "dependencies": {
-    "@rotorsoft/act": "^0.25.2",
+    "@rotorsoft/act": "^0.27.0",
     "@trpc/server": "11.12.1",
     "zod": "^4.3.6"
   },
