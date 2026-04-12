@@ -355,6 +355,25 @@ Dynamic stream discovery through correlation metadata:
 
 **Drain optimization:** At build time, `_reactive_events` collects event names with at least one registered reaction. In `do()`, the `_needs_drain` flag is set when a committed event matches. `drain()` returns immediately when the flag is false — saving 3 DB round-trips (claim, query, ack) per non-reactive cycle. The flag clears only when drain completes with nothing acked, blocked, or errored. Cold start sets the flag in `_init_correlation()` to process historical events. Default `maxPasses` is 1 (single correlate→drain pass per settle).
 
+### Idempotent Actions via Correlation
+
+Client retries over unreliable networks can cause duplicate action execution. Act solves this by reusing the existing `correlation` field in event metadata — no dedicated deduplication tables, TTL, or cleanup required.
+
+Provide a `correlation` ID on the `Target`. Before executing, `action()` queries for existing events with that correlation on the stream. If found, the original events are returned without re-executing:
+
+```typescript
+await app.do("TransferFunds", {
+  stream: "account-42",
+  actor,
+  correlation: "transfer-req-abc-123",  // client-generated, unique per logical request
+}, { amount: 1000 });
+```
+
+- Without `correlation`: current behavior (auto-generated UUID, no dedup check)
+- Same correlation + same stream: returns original events, no re-execution
+- Same correlation + different stream: both execute (correlation is scoped to stream by query)
+- Correlation lives forever in the immutable event log — no TTL needed
+
 ### Invariants
 
 Business rules enforced before actions execute:

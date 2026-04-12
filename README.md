@@ -140,6 +140,26 @@ Reactions are processed by polling (`drain()`), not by pub/sub. The store's `cla
 
 At build time, reaction resolvers are classified as static (known target) or dynamic (function). Static targets are subscribed once at init. Dynamic targets are discovered by `correlate()`, which scans new events and registers target streams. When no dynamic resolvers exist, correlation is skipped entirely — zero overhead.
 
+### Idempotency via Correlation, Not Deduplication Tables
+
+Other frameworks (Axon, Eventuous, Marten) use dedicated deduplication stores with TTL and cleanup. Act reuses the existing `correlation` field in event metadata. Provide a client-generated correlation ID on the target — if events with that correlation already exist on the stream, the original events are returned without re-executing the action:
+
+```ts
+// First call — executes normally
+await app.do("TransferFunds", {
+  stream: "account-42", actor,
+  correlation: "transfer-req-abc-123",
+}, { amount: 1000 });
+
+// Retry — returns original events, no re-execution
+await app.do("TransferFunds", {
+  stream: "account-42", actor,
+  correlation: "transfer-req-abc-123",
+}, { amount: 1000 });
+```
+
+No new tables, no TTL, no cleanup — the correlation lives in the immutable event log.
+
 ### Vertical Slices, Not Layers
 
 `slice()` groups a partial state with its reactions into a self-contained feature module. Each slice owns its actions, events, patches, and reaction handlers. Slices compose into the full application via `act().withSlice()`. This keeps related code together instead of scattering it across service/repository/handler layers.

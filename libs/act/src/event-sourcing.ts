@@ -150,8 +150,30 @@ export async function action<
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false
 ): Promise<Snapshot<TState, TEvents>[]> {
-  const { stream, expectedVersion, actor } = target;
+  const { stream, expectedVersion, actor, correlation } = target;
   if (!stream) throw new Error("Missing target stream");
+
+  // Idempotency check: if correlation is provided, look for existing events
+  if (correlation) {
+    const existing: Committed<TEvents, keyof TEvents>[] = [];
+    await store().query<TEvents>((e) => existing.push(e), {
+      stream,
+      correlation,
+      stream_exact: true,
+    });
+    if (existing.length) {
+      logger.trace(
+        `🔵 ${stream}.${action as string} deduplicated (correlation: ${correlation})`
+      );
+      const snap = await load(me, stream);
+      return existing.map((event) => ({
+        event: event as Committed<TEvents, string>,
+        state: snap.state,
+        patches: snap.patches,
+        snaps: snap.snaps,
+      }));
+    }
+  }
 
   payload = skipValidation
     ? payload
@@ -199,7 +221,7 @@ export async function action<
   }));
 
   const meta: EventMeta = {
-    correlation: reactingTo?.meta.correlation || randomUUID(),
+    correlation: correlation || reactingTo?.meta.correlation || randomUUID(),
     causation: {
       action: {
         name: action as string,

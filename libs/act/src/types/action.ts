@@ -71,6 +71,17 @@ export type Target<TActor extends Actor = Actor> = {
   readonly stream: string;
   readonly actor: TActor;
   readonly expectedVersion?: number;
+  /**
+   * Client-provided correlation ID for idempotent retries.
+   *
+   * When provided, `action()` checks if events with this correlation
+   * already exist on the stream. If found, the original events are
+   * returned without re-executing the action. This enables safe
+   * client retries over unreliable networks.
+   *
+   * When omitted, a random UUID is generated automatically.
+   */
+  readonly correlation?: string;
 };
 
 /**
