@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.28.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.27.0...@rotorsoft/act-v0.28.0) (2026-04-12)
+
+
+### Features
+
+* **act:** add query options to load() for time-travel ([ce487b4](https://github.com/rotorsoft/act-root/commit/ce487b40be0a18ca4996a48a2ca14ade86993c0a)), closes [#565](https://github.com/rotorsoft/act-root/issues/565)
+
 # [@rotorsoft/act-v0.27.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.26.1...@rotorsoft/act-v0.27.0) (2026-04-11)
 
 
