@@ -347,7 +347,7 @@ export interface Store extends Disposable {
    *    `__tombstone__` event as the sole event on the stream
    *
    * @param targets - Streams to truncate with optional snapshot state
-   * @returns Count of deleted events (excludes the seeded events)
+   * @returns `deleted` count and `seeds` array of committed seed events
    *
    * @see {@link Act.close} for the high-level close-the-books API
    */
@@ -357,7 +357,10 @@ export interface Store extends Disposable {
       snapshot?: Schema;
       meta?: EventMeta;
     }>
-  ) => Promise<number>;
+  ) => Promise<{
+    deleted: number;
+    seeds: Committed<Schemas, keyof Schemas>[];
+  }>;
 }
 
 // ---------------------------------------------------------------------------

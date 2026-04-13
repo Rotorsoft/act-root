@@ -713,8 +713,11 @@ export class PostgresStore implements Store {
       snapshot?: Schema;
       meta?: EventMeta;
     }>
-  ): Promise<number> {
-    if (!targets.length) return 0;
+  ): Promise<{
+    deleted: number;
+    seeds: Committed<Schemas, keyof Schemas>[];
+  }> {
+    if (!targets.length) return { deleted: 0, seeds: [] };
     const streams = targets.map((t) => t.stream);
     const client = await this._pool.connect();
     try {
@@ -726,11 +729,12 @@ export class PostgresStore implements Store {
       await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
         streams,
       ]);
+      const seeds: Committed<Schemas, keyof Schemas>[] = [];
       for (const { stream, snapshot, meta } of targets) {
         const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
-        await client.query(
+        const { rows } = await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
-           VALUES($1, $2, $3, 0, now(), $4)`,
+           VALUES($1, $2, $3, 0, now(), $4) RETURNING *`,
           [
             name,
             snapshot ?? {},
@@ -738,9 +742,10 @@ export class PostgresStore implements Store {
             meta ?? { correlation: "", causation: {} },
           ]
         );
+        if (rows[0]) seeds.push(rows[0] as Committed<Schemas, keyof Schemas>);
       }
       await client.query("COMMIT");
-      return rowCount ?? 0;
+      return { deleted: rowCount ?? 0, seeds };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;

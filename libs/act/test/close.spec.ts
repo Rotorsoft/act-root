@@ -357,7 +357,7 @@ describe("close", () => {
       correlation: "c",
       causation: {},
     });
-    const deleted = await store().truncate([{ stream: "direct-trunc" }]);
+    const { deleted } = await store().truncate([{ stream: "direct-trunc" }]);
     expect(deleted).toBe(1);
     const events: any[] = [];
     await store().query((e) => events.push(e), {
