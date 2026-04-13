@@ -1000,49 +1000,46 @@ export class Act<
   }
 
   /**
-   * Close the books — archive, tombstone, truncate, and optionally restart streams.
+   * Close the books — archive, truncate, and optionally restart streams.
    *
-   * This is the safe way to remove historical events from the operational store.
-   * The execution flow ensures no data loss:
+   * Safely removes historical events from the operational store:
    *
-   * 1. **Correlate** — discover all pending reaction targets
-   * 2. **Safety check** — skip streams with pending/blocked reactions
-   * 3. **Load final state** — capture before any mutations
-   * 4. **Archive** — call user callback for each safe stream (abort all on any failure)
-   * 5. **Tombstone** — commit `__tombstone__` to each closed stream
-   * 6. **Truncate** — delete all events + stream metadata
-   * 7. **Tombstone (re-commit)** — fresh tombstone for non-restarted streams
-   * 8. **Cache invalidate** — clear stale entries
-   * 9. **Restart** — execute opening action for restarted streams
-   * 10. **Emit "closed"** — lifecycle event with results
+   * 1. **Correlate** — discover pending reaction targets
+   * 2. **Safety check** — skip streams with pending reactions (skipped when no reactive events)
+   * 3. **Archive** — user callback per stream (abort-all on failure, no mutations yet)
+   * 4. **Truncate** — single batch delete of all events + stream metadata
+   * 5. **Cache invalidate** — parallel
+   * 6. **Snapshot or tombstone** — streams in `snapshots` get `__snapshot__`, others get `__tombstone__`
+   * 7. **Emit "closed"** — lifecycle event with results
    *
    * @param options - Close configuration
+   * @param options.streams - Stream names to close
+   * @param options.archive - Called per stream before truncation (use app.query() inside for pagination)
+   * @param options.snapshots - Map of stream → state for streams to restart with a snapshot
    * @returns Result with closed, skipped, restarted streams and truncated event count
    *
-   * @example Archive to external storage, then truncate
+   * @example Archive and close
    * ```typescript
-   * const result = await app.close({
+   * await app.close({
    *   streams: ["order-123", "order-456"],
-   *   archive: async (stream, events) => {
+   *   archive: async (stream) => {
+   *     const events = await app.query_array({ stream, stream_exact: true });
    *     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
    *   },
    * });
    * ```
    *
-   * @example Close and restart with opening event
+   * @example Close with restart
    * ```typescript
-   * const result = await app.close({
-   *   streams: ["account-1"],
-   *   restart: (stream, state) => ({
-   *     action: "OpenAccount",
-   *     payload: { balance: state.balance },
-   *     actor: { id: "system", name: "BookCloser" },
-   *   }),
+   * const snap = await app.load(Counter, "counter-1");
+   * await app.close({
+   *   streams: ["counter-1", "counter-2"],
+   *   snapshots: { "counter-1": snap.state },  // restart counter-1, tombstone counter-2
    * });
    * ```
    */
   async close(options: CloseOptions): Promise<CloseResult> {
-    const { streams, archive, restart } = options;
+    const { streams, archive, snapshots } = options;
     if (!streams.length)
       return { closed: [], truncated: 0, skipped: [], restarted: [] };
 
@@ -1118,11 +1115,11 @@ export class Act<
     // 6. Cache invalidate in parallel
     await Promise.all(safe.map((stream) => cache().invalidate(stream)));
 
-    // 7. Restart with snapshot or commit tombstone (parallel)
+    // 7. Snapshot (restart) or tombstone (close) per stream — parallel
     const restarted: string[] = [];
     await Promise.all(
       safe.map(async (stream) => {
-        const seed = restart?.(stream);
+        const seed = snapshots?.[stream];
         if (seed) {
           await store().commit(stream, [{ name: SNAP_EVENT, data: seed }], {
             correlation: randomUUID(),

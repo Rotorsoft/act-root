@@ -165,7 +165,7 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["restart"],
-      restart: () => ({ count: 42 }), // seed with captured state
+      snapshots: { restart: { count: 42 } },
     });
 
     expect(result.closed).toEqual(["restart"]);
@@ -197,10 +197,7 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["sel-a", "sel-b"],
-      restart: (stream) => {
-        if (stream === "sel-a") return { count: 10 }; // restart with captured state
-        return undefined; // sel-b stays closed
-      },
+      snapshots: { "sel-a": { count: 10 } }, // restart sel-a, tombstone sel-b
     });
 
     expect(result.restarted).toEqual(["sel-a"]);

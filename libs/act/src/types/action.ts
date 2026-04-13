@@ -425,17 +425,23 @@ export type CloseOptions = {
   readonly archive?: (stream: string) => Promise<void>;
 
   /**
-   * Called for each closed stream after truncation. Return a state
-   * object to seed the stream with a `__snapshot__` at version 0,
-   * or return `undefined` to leave the stream tombstoned.
+   * Map of stream → state for streams that should be restarted with a
+   * `__snapshot__` at version 0 after truncation. Streams not in this
+   * map get a `__tombstone__` instead (permanently closed).
    *
-   * Load the state yourself before calling `close()` and capture it
-   * in the closure — the framework does not load state internally.
+   * Load state via `app.load()` before calling `close()` and include
+   * the streams you want to restart.
    *
-   * @param stream - The stream being closed
-   * @returns State to seed as snapshot, or undefined to stay closed
+   * @example
+   * ```typescript
+   * const snap = await app.load(Counter, "counter-1");
+   * await app.close({
+   *   streams: ["counter-1", "counter-2"],
+   *   snapshots: { "counter-1": snap.state },  // restart counter-1, tombstone counter-2
+   * });
+   * ```
    */
-  readonly restart?: (stream: string) => Schema | undefined;
+  readonly snapshots?: Record<string, Schema>;
 };
 
 /**

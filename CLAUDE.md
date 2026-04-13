@@ -302,10 +302,11 @@ const result = await app.close({
   },
 
   // Optional: restart streams with a snapshot seeded from captured state
-  // Load state before close() and capture in the closure
-  restart: (stream) => states.get(stream),          // carry forward
-  // restart: (stream) => ({ ...states.get(stream), period: 2 }),  // transform
-  // restart: () => undefined,                      // leave tombstoned
+  // Load state before close() — streams not listed here get tombstoned
+  snapshots: {
+    "order-123": snap123.state,                       // restart with same state
+    // "order-456" omitted → tombstoned (permanently closed)
+  },
 });
 
 // result: { closed, truncated, skipped, restarted }
@@ -332,16 +333,13 @@ archive: async (stream) => {
 
 **Execution flow (each step gates the next):**
 
-1. **Correlate** — discover all pending reaction targets
-2. **Safety check** — skip streams with pending/blocked reactions (appear in `skipped`)
-3. **Load final state** — capture before any mutations
-4. **Archive** — call user callback per stream. If any throws, abort entirely (zero mutations)
-5. **Tombstone** — commit `__tombstone__` to each closing stream
-6. **Truncate** — `store().truncate()` deletes all events + stream metadata
-7. **Re-commit tombstone** — fresh tombstone for non-restarted streams (sole event on stream)
-8. **Cache invalidate** — clear stale entries
-9. **Restart** — execute opening action for restarted streams (version 0)
-10. **Emit "closed"** — lifecycle event with `CloseResult`
+1. **Correlate** — discover pending reaction targets
+2. **Safety check** — skip streams with pending reactions (skipped entirely when no reactive events)
+3. **Archive** — user callback per stream. If any throws, abort entirely (zero mutations)
+4. **Truncate** — `store().truncate()` deletes all events + stream metadata (single batch)
+5. **Cache invalidate** — parallel
+6. **Snapshot or tombstone** — streams in `snapshots` get `__snapshot__` at version 0, others get `__tombstone__`
+7. **Emit "closed"** — lifecycle event with `CloseResult`
 
 **Safety guarantees:**
 - Archive failure → no mutations, complete abort

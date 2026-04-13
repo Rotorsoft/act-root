@@ -99,7 +99,7 @@ async function main() {
       archive[stream] = events;
       console.log(`  Archived ${events.length} events from ${stream}`);
     },
-    restart: () => snapC.state, // seed with state captured before close
+    snapshots: { "counter-C": snapC.state }, // restart with captured state
   });
 
   console.log(`  Closed: ${restartResult.closed.join(", ")}`);
