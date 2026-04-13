@@ -7,7 +7,6 @@ import {
   cache,
   dispose,
   log,
-  SNAP_EVENT,
   store,
   TOMBSTONE_EVENT,
 } from "./ports.js";
@@ -1049,32 +1048,47 @@ export class Act<
     // 1. Correlate — ensure all dynamic reaction targets are discovered
     await this.correlate({ limit: 1000 });
 
-    // 2. Safety check — find max event ID per stream
-    const streamMaxIds = new Map<string, number>();
+    // 2. Collect stream info: max domain event ID + version via backward query
+    //    (one read per stream, O(1)), then load state from cache/store.
+    //    Tombstone-only or empty streams are silently skipped.
+    const mergedState = [...this._states.values()][0];
+    const streamInfo = new Map<
+      string,
+      { state: unknown; version: number; maxId: number }
+    >();
     for (const stream of streams) {
+      // Single backward query — snapshots excluded by default, O(1)
       let maxId = -1;
+      let version = -1;
       await store().query(
         (e) => {
-          if (e.name !== SNAP_EVENT && e.name !== TOMBSTONE_EVENT) maxId = e.id;
+          if (e.name !== TOMBSTONE_EVENT) {
+            maxId = e.id;
+            version = e.version;
+          }
         },
-        { stream, stream_exact: true }
+        { stream, stream_exact: true, backward: true, limit: 1 }
       );
-      streamMaxIds.set(stream, maxId);
+      if (maxId < 0) continue; // no domain events — already truncated or tombstoned
+
+      // Load state (hits cache on warm path — no store round-trip)
+      const state = mergedState
+        ? (await es.load(mergedState, stream)).state
+        : {};
+      streamInfo.set(stream, { state, version, maxId });
     }
 
-    // Claim all available reaction streams to check their watermarks
+    // 3. Safety check — claim reaction streams and compare watermarks
     const pendingSet = new Set<string>();
     const leases = await store().claim(1000, 1000, randomUUID(), 1);
-    // Release immediately — we only needed to read watermarks
     if (leases.length) await store().ack(leases);
 
-    // For each claimed stream (has pending work), check if it could process
-    // events from any of the closing streams
     for (const lease of leases) {
-      for (const [stream, maxId] of streamMaxIds) {
-        if (maxId < 0) continue; // no domain events
-        const sourcesMatch = !lease.source || RegExp(lease.source).test(stream);
-        if (sourcesMatch && lease.at < maxId) {
+      for (const [stream, info] of streamInfo) {
+        if (
+          (!lease.source || RegExp(lease.source).test(stream)) &&
+          lease.at < info.maxId
+        ) {
           pendingSet.add(stream);
         }
       }
@@ -1082,11 +1096,8 @@ export class Act<
 
     const safe: string[] = [];
     const skipped: string[] = [];
-    const streamStates = new Map<string, unknown>();
 
-    for (const stream of streams) {
-      const maxId = streamMaxIds.get(stream)!;
-      if (maxId < 0) continue; // no domain events — already truncated
+    for (const [stream] of streamInfo) {
       if (pendingSet.has(stream)) {
         skipped.push(stream);
       } else {
@@ -1105,45 +1116,21 @@ export class Act<
       return result;
     }
 
-    // 3. Load final states for all safe streams
-    for (const stream of safe) {
-      const mergedState = [...this._states.values()][0];
-      if (mergedState) {
-        const snap = await es.load(mergedState, stream);
-        streamStates.set(stream, snap.state);
-      }
-    }
-
-    // 4. Archive — call user callback. Abort everything on any failure.
-    //    The callback receives only the stream name — use app.query() or
-    //    app.query_array() inside to page through events at any batch size.
+    // 4. Archive — callback receives stream name only; caller controls pagination.
     if (archive) {
       for (const stream of safe) {
         await archive(stream); // throws → aborts, no mutations made
       }
     }
 
-    // 5. Commit tombstone to each safe stream (marks them closed before truncation)
+    // 5. Commit tombstones (version from load — no extra queries)
     for (const stream of safe) {
-      // Query the latest version for this stream
-      let lastVersion = -1;
-      await store().query(
-        (e) => {
-          lastVersion = e.version;
-        },
-        {
-          stream,
-          stream_exact: true,
-          backward: true,
-          limit: 1,
-          with_snaps: true,
-        }
-      );
+      const info = streamInfo.get(stream)!;
       await store().commit(
         stream,
-        [{ name: TOMBSTONE_EVENT, data: streamStates.get(stream) ?? {} }],
+        [{ name: TOMBSTONE_EVENT, data: info.state as Schema }],
         { correlation: randomUUID(), causation: {} },
-        lastVersion
+        info.version
       );
     }
 
@@ -1158,9 +1145,9 @@ export class Act<
     // 8. Re-commit tombstone for non-restarted streams, restart others
     const restarted: string[] = [];
     for (const stream of safe) {
-      const restartDef = restart?.(stream, streamStates.get(stream));
+      const info = streamInfo.get(stream)!;
+      const restartDef = restart?.(stream, info.state);
       if (restartDef) {
-        // Restart: commit opening action at version 0
         await this.do(
           restartDef.action as keyof TActions,
           { stream, actor: restartDef.actor } as Target<TActor>,
@@ -1168,10 +1155,9 @@ export class Act<
         );
         restarted.push(stream);
       } else {
-        // Re-commit tombstone as the sole event on this stream
         await store().commit(
           stream,
-          [{ name: TOMBSTONE_EVENT, data: streamStates.get(stream) ?? {} }],
+          [{ name: TOMBSTONE_EVENT, data: info.state as Schema }],
           { correlation: randomUUID(), causation: {} }
         );
       }
