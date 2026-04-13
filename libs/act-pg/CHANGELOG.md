@@ -1,3 +1,24 @@
+# [@rotorsoft/act-pg-v0.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.15.0...@rotorsoft/act-pg-v0.16.0) (2026-04-13)
+
+
+### Bug Fixes
+
+* **act-pg:** per-stream DELETE in loop instead of RETURNING all rows ([1d604bf](https://github.com/rotorsoft/act-root/commit/1d604bfcac5d43b74d91adf06f1836ad68856361))
+* **act:** pass proper meta from close() to store.truncate() ([2dbd31a](https://github.com/rotorsoft/act-root/commit/2dbd31a50eac4189f3b011fabf9030db7d704c14))
+* **act:** truncate returns committed seeds for correct cache warming ([f42fb94](https://github.com/rotorsoft/act-root/commit/f42fb9421ed9a0808baf14bec797631729477e44))
+* **act:** use Schema and EventMeta types in truncate implementations ([6c958a6](https://github.com/rotorsoft/act-root/commit/6c958a66b1dd15aa84750e20df976ff0bdbc8407))
+
+
+### Features
+
+* **act:** add close-the-books stream archival and truncation ([30d6587](https://github.com/rotorsoft/act-root/commit/30d6587c903022da5d0f10fa3b7b90521c2d60ce)), closes [#562](https://github.com/rotorsoft/act-root/issues/562)
+* **act:** atomic guard-first close with truncate+seed transaction ([034e20a](https://github.com/rotorsoft/act-root/commit/034e20a5b2ee037cdd90af3531bf03c7115ebbd5))
+
+
+### Performance Improvements
+
+* **act-pg:** single DELETE RETURNING instead of SELECT count + DELETE ([fb00704](https://github.com/rotorsoft/act-root/commit/fb007047aa980e4c2d44be0d9cb1adf527b31370))
+
 # [@rotorsoft/act-pg-v0.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.14.4...@rotorsoft/act-pg-v0.15.0) (2026-04-11)
 
 
