@@ -16,6 +16,7 @@ import type {
   Lease,
   Message,
   Query,
+  Schema,
   Schemas,
   Store,
 } from "../types/index.js";
@@ -447,7 +448,11 @@ export class InMemoryStore implements Store {
    * @returns Count of deleted events.
    */
   async truncate(
-    targets: Array<{ stream: string; snapshot?: any; meta?: any }>
+    targets: Array<{
+      stream: string;
+      snapshot?: Schema;
+      meta?: EventMeta;
+    }>
   ) {
     await sleep();
     const streamSet = new Set(targets.map((t) => t.stream));

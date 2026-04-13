@@ -5,6 +5,7 @@ import type {
   Logger,
   Message,
   Query,
+  Schema,
   Schemas,
   Store,
 } from "@rotorsoft/act";
@@ -709,8 +710,8 @@ export class PostgresStore implements Store {
   async truncate(
     targets: Array<{
       stream: string;
-      snapshot?: Record<string, any>;
-      meta?: Record<string, any>;
+      snapshot?: Schema;
+      meta?: EventMeta;
     }>
   ): Promise<number> {
     if (!targets.length) return 0;
