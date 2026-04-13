@@ -444,8 +444,8 @@ export class InMemoryStore implements Store {
 
   /**
    * Atomically truncates streams and seeds each with a snapshot or tombstone.
-   * @param targets - Streams to truncate with optional snapshot state.
-   * @returns Count of deleted events.
+   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
    */
   async truncate(
     targets: Array<{
