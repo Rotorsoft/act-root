@@ -99,7 +99,7 @@ async function main() {
       archive[stream] = events;
       console.log(`  Archived ${events.length} events from ${stream}`);
     },
-    restart: (_stream, finalState) => finalState, // carry forward same state
+    restart: () => snapC.state, // seed with state captured before close
   });
 
   console.log(`  Closed: ${restartResult.closed.join(", ")}`);

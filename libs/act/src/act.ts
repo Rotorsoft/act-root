@@ -1041,9 +1041,7 @@ export class Act<
    * });
    * ```
    */
-  async close(
-    options: CloseOptions<TStateMap[keyof TStateMap]>
-  ): Promise<CloseResult> {
+  async close(options: CloseOptions): Promise<CloseResult> {
     const { streams, archive, restart } = options;
     if (!streams.length)
       return { closed: [], truncated: 0, skipped: [], restarted: [] };
@@ -1107,38 +1105,24 @@ export class Act<
       return result;
     }
 
-    // 4. Load state only when restart callback needs it (parallel, cache-warm)
-    const mergedState = [...this._states.values()][0];
-    const streamStates = new Map<string, TStateMap[keyof TStateMap]>();
-    if (restart && mergedState) {
-      await Promise.all(
-        safe.map(async (stream) => {
-          const snap = await es.load(mergedState, stream);
-          streamStates.set(stream, snap.state as TStateMap[keyof TStateMap]);
-        })
-      );
-    }
-
-    // 5. Archive (sequential — abort-all on any failure, no mutations yet)
+    // 4. Archive (sequential — abort-all on any failure, no mutations yet)
     if (archive) {
       for (const stream of safe) {
         await archive(stream);
       }
     }
 
-    // 6. Truncate — single batch operation
+    // 5. Truncate — single batch operation
     const truncated = await store().truncate(safe);
 
-    // 7. Cache invalidate in parallel
+    // 6. Cache invalidate in parallel
     await Promise.all(safe.map((stream) => cache().invalidate(stream)));
 
-    // 8. Restart with snapshot or commit tombstone (parallel)
-    //    Stream is empty after truncate — no expectedVersion needed.
+    // 7. Restart with snapshot or commit tombstone (parallel)
     const restarted: string[] = [];
     await Promise.all(
       safe.map(async (stream) => {
-        const state = streamStates.get(stream);
-        const seed = state !== undefined ? restart?.(stream, state) : undefined;
+        const seed = restart?.(stream);
         if (seed) {
           await store().commit(stream, [{ name: SNAP_EVENT, data: seed }], {
             correlation: randomUUID(),
@@ -1153,16 +1137,10 @@ export class Act<
           });
           restarted.push(stream);
         } else {
-          await store().commit(
-            stream,
-            [
-              {
-                name: TOMBSTONE_EVENT,
-                data: (state ?? {}) as TStateMap[keyof TStateMap],
-              },
-            ],
-            { correlation: randomUUID(), causation: {} }
-          );
+          await store().commit(stream, [{ name: TOMBSTONE_EVENT, data: {} }], {
+            correlation: randomUUID(),
+            causation: {},
+          });
         }
       })
     );

@@ -301,10 +301,11 @@ const result = await app.close({
     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
   },
 
-  // Optional: restart streams with a snapshot seeded from final state
-  restart: (_stream, state) => state,             // carry forward same state
-  // restart: (_stream, state) => ({ ...state, period: 2 }),  // or transform it
-  // restart: () => undefined,                     // or leave tombstoned
+  // Optional: restart streams with a snapshot seeded from captured state
+  // Load state before close() and capture in the closure
+  restart: (stream) => states.get(stream),          // carry forward
+  // restart: (stream) => ({ ...states.get(stream), period: 2 }),  // transform
+  // restart: () => undefined,                      // leave tombstoned
 });
 
 // result: { closed, truncated, skipped, restarted }

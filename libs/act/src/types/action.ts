@@ -406,11 +406,9 @@ export type InferEvents<
 /**
  * Options for closing (archiving and truncating) streams.
  *
- * @template TState - Union of all registered state types
- *
  * @see {@link IAct.close} for the close-the-books API
  */
-export type CloseOptions<TState extends Schema = Schema> = {
+export type CloseOptions = {
   /** Streams to close — caller selects them using existing query/load APIs */
   readonly streams: string[];
 
@@ -428,19 +426,16 @@ export type CloseOptions<TState extends Schema = Schema> = {
 
   /**
    * Called for each closed stream after truncation. Return a state
-   * to seed the stream with a `__snapshot__` at version 0, carrying
-   * forward whatever the domain needs for the next period. Return
-   * the state as-is for a full carryover, transform it to start
-   * fresh, or return `undefined` to leave the stream tombstoned.
+   * object to seed the stream with a `__snapshot__` at version 0,
+   * or return `undefined` to leave the stream tombstoned.
+   *
+   * Load the state yourself before calling `close()` and capture it
+   * in the closure — the framework does not load state internally.
    *
    * @param stream - The stream being closed
-   * @param state - The final state snapshot before closure
-   * @returns State to seed, or undefined to stay closed
+   * @returns State to seed as snapshot, or undefined to stay closed
    */
-  readonly restart?: (
-    stream: string,
-    state: Readonly<TState>
-  ) => Readonly<TState> | undefined;
+  readonly restart?: (stream: string) => Schema | undefined;
 };
 
 /**

@@ -165,7 +165,7 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["restart"],
-      restart: (_stream, finalState) => finalState, // carry forward same state
+      restart: () => ({ count: 42 }), // seed with captured state
     });
 
     expect(result.closed).toEqual(["restart"]);
@@ -197,8 +197,8 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["sel-a", "sel-b"],
-      restart: (stream, state) => {
-        if (stream === "sel-a") return state; // restart sel-a with same state
+      restart: (stream) => {
+        if (stream === "sel-a") return { count: 10 }; // restart with captured state
         return undefined; // sel-b stays closed
       },
     });
