@@ -491,8 +491,8 @@ describe("pg store", () => {
       );
       await s.subscribe([{ stream }]);
 
-      const { deleted } = await s.truncate([{ stream }]);
-      expect(deleted).toBe(2);
+      const result = await s.truncate([{ stream }]);
+      expect(result.get(stream)!.deleted).toBe(2);
 
       // Only tombstone remains
       const after: any[] = [];
@@ -512,10 +512,8 @@ describe("pg store", () => {
         causation: {},
       });
 
-      const { deleted } = await s.truncate([
-        { stream, snapshot: { count: 99 } },
-      ]);
-      expect(deleted).toBe(1);
+      const result = await s.truncate([{ stream, snapshot: { count: 99 } }]);
+      expect(result.get(stream)!.deleted).toBe(1);
 
       // Only snapshot remains
       const after: any[] = [];
@@ -529,16 +527,14 @@ describe("pg store", () => {
       expect(after[0].data).toEqual({ count: 99 });
     });
 
-    it("should return 0 when truncating empty array", async () => {
-      const { deleted } = await store().truncate([]);
-      expect(deleted).toBe(0);
+    it("should return empty map when truncating empty array", async () => {
+      const result = await store().truncate([]);
+      expect(result.size).toBe(0);
     });
 
-    it("should return 0 when truncating non-existent streams", async () => {
-      const { deleted } = await store().truncate([
-        { stream: "does-not-exist-xyz" },
-      ]);
-      expect(deleted).toBe(0);
+    it("should return 0 deleted for non-existent streams", async () => {
+      const result = await store().truncate([{ stream: "does-not-exist-xyz" }]);
+      expect(result.get("does-not-exist-xyz")!.deleted).toBe(0);
     });
 
     it("should not claim blocked streams", async () => {
@@ -753,12 +749,25 @@ describe("PostgresStore error paths", () => {
     );
   });
 
-  it("should handle truncate() with null rowCount", async () => {
+  it("should handle truncate() with null/empty results", async () => {
     const mockTruncateClient = {
       query: (sql: string) => {
-        if (typeof sql === "string" && sql.includes("DELETE"))
-          return Promise.resolve({ rows: [], rowCount: null });
-        return Promise.resolve({ rows: [], rowCount: 0 });
+        if (typeof sql === "string" && sql.includes("RETURNING"))
+          return Promise.resolve({
+            rows: [
+              {
+                id: 1,
+                stream: "x",
+                version: 0,
+                name: "__tombstone__",
+                data: {},
+                meta: {},
+                created: new Date(),
+              },
+            ],
+            rowCount: 1,
+          });
+        return Promise.resolve({ rows: [], rowCount: null });
       },
       release: () => {},
     };
@@ -766,7 +775,7 @@ describe("PostgresStore error paths", () => {
       () => mockTruncateClient as any
     );
     const result = await db.truncate([{ stream: "x" }]);
-    expect(result.deleted).toBe(0);
+    expect(result.get("x")!.deleted).toBe(0);
   });
 
   it("should handle ROLLBACK failure gracefully", async () => {

@@ -455,11 +455,19 @@ export class InMemoryStore implements Store {
     }>
   ) {
     await sleep();
+    // Count per-stream deletions
+    const deletedCounts = new Map<string, number>();
     const streamSet = new Set(targets.map((t) => t.stream));
-    const count = this._events.length;
+    for (const e of this._events) {
+      if (streamSet.has(e.stream)) {
+        deletedCounts.set(e.stream, (deletedCounts.get(e.stream) ?? 0) + 1);
+      }
+    }
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
-    const deleted = count - this._events.length;
-    const committed: Committed<Schemas, keyof Schemas>[] = [];
+    const result = new Map<
+      string,
+      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+    >();
     for (const { stream, snapshot, meta } of targets) {
       this._streams.delete(stream);
       const event: Committed<Schemas, keyof Schemas> = {
@@ -472,8 +480,11 @@ export class InMemoryStore implements Store {
         meta: meta ?? { correlation: "", causation: {} },
       };
       this._events.push(event);
-      committed.push(event);
+      result.set(stream, {
+        deleted: deletedCounts.get(stream) ?? 0,
+        committed: event,
+      });
     }
-    return { deleted, committed };
+    return result;
   }
 }

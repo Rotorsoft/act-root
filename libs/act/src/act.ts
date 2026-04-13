@@ -1177,20 +1177,22 @@ export class Act<
         },
       };
     });
-    const { deleted: truncated, committed } =
-      await store().truncate(truncTargets);
+    const truncResult = await store().truncate(truncTargets);
+
+    // Compute total deleted
+    let truncated = 0;
+    for (const { deleted } of truncResult.values()) truncated += deleted;
 
     // 8. Cache invalidate / warm — use real event IDs from committed events
-    const committedById = new Map(committed.map((c) => [c.stream, c]));
     await Promise.all(
       guarded.map(async (stream) => {
-        const event = committedById.get(stream);
+        const entry = truncResult.get(stream);
         const state = seedStates.get(stream);
-        if (state && event) {
+        if (state && entry) {
           await cache().set(stream, {
             state,
-            version: event.version,
-            event_id: event.id,
+            version: entry.committed.version,
+            event_id: entry.committed.id,
             patches: 0,
             snaps: 1,
           });

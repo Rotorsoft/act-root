@@ -352,13 +352,19 @@ describe("close", () => {
     expect(tombstone.data).toEqual({});
   });
 
+  it("should truncate stream with no existing events", async () => {
+    const result = await store().truncate([{ stream: "empty-stream" }]);
+    expect(result.get("empty-stream")!.deleted).toBe(0);
+    expect(result.get("empty-stream")!.committed.name).toBe(TOMBSTONE_EVENT);
+  });
+
   it("should truncate directly without meta (fallback)", async () => {
     await store().commit("direct-trunc", [{ name: "Evt", data: { x: 1 } }], {
       correlation: "c",
       causation: {},
     });
-    const { deleted } = await store().truncate([{ stream: "direct-trunc" }]);
-    expect(deleted).toBe(1);
+    const result = await store().truncate([{ stream: "direct-trunc" }]);
+    expect(result.get("direct-trunc")!.deleted).toBe(1);
     const events: any[] = [];
     await store().query((e) => events.push(e), {
       stream: "direct-trunc",

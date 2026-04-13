@@ -357,10 +357,15 @@ export interface Store extends Disposable {
       snapshot?: Schema;
       meta?: EventMeta;
     }>
-  ) => Promise<{
-    deleted: number;
-    committed: Committed<Schemas, keyof Schemas>[];
-  }>;
+  ) => Promise<
+    Map<
+      string,
+      {
+        deleted: number;
+        committed: Committed<Schemas, keyof Schemas>;
+      }
+    >
+  >;
 }
 
 // ---------------------------------------------------------------------------
