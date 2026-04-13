@@ -56,10 +56,14 @@ async function main() {
 
   const result = await app.close({
     streams: ["counter-A", "counter-B"],
-    archive: async (stream, events) => {
+    archive: async (stream) => {
+      const events = await app.query_array({
+        stream,
+        stream_exact: true,
+        with_snaps: true,
+      });
       archive[stream] = events;
       console.log(`  Archived ${events.length} events from ${stream}`);
-      await Promise.resolve();
     },
   });
 
@@ -86,10 +90,14 @@ async function main() {
   console.log("\n=== Closing counter-C with restart ===");
   const restartResult = await app.close({
     streams: ["counter-C"],
-    archive: async (stream, events) => {
+    archive: async (stream) => {
+      const events = await app.query_array({
+        stream,
+        stream_exact: true,
+        with_snaps: true,
+      });
       archive[stream] = events;
       console.log(`  Archived ${events.length} events from ${stream}`);
-      await Promise.resolve();
     },
     restart: (_stream, finalState) => ({
       action: "increment",

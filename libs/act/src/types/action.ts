@@ -413,14 +413,16 @@ export type CloseOptions = {
   readonly streams: string[];
 
   /**
-   * Called with each stream's full event history before truncation.
+   * Called for each stream before truncation. The callback receives only
+   * the stream name — use `app.query()` or `app.query_array()` inside
+   * the callback to page through events with whatever batch size fits
+   * your archival target. No events are loaded into memory by the
+   * framework; the caller has full control over pagination.
+   *
    * If it throws for any stream, the entire operation aborts —
    * nothing is truncated.
    */
-  readonly archive?: (
-    stream: string,
-    events: Committed<Schemas, keyof Schemas>[]
-  ) => Promise<void>;
+  readonly archive?: (stream: string) => Promise<void>;
 
   /**
    * For each closed stream, return an action to re-open it seeded

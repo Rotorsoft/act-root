@@ -295,7 +295,9 @@ const result = await app.close({
   streams: ["order-123", "order-456"],
 
   // Optional: archive events before truncation (abort-on-failure semantics)
-  archive: async (stream, events) => {
+  // Uses app.query() for memory-safe pagination — no events loaded by the framework
+  archive: async (stream) => {
+    const events = await app.query_array({ stream, stream_exact: true, with_snaps: true });
     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
   },
 
@@ -308,6 +310,25 @@ const result = await app.close({
 });
 
 // result: { closed, truncated, skipped, restarted }
+```
+
+**Archive pattern for large streams** — the archive callback receives only the stream name. Use `app.query()` with a callback for streaming pagination, or `app.query_array()` for small streams:
+
+```typescript
+// Streaming: page through events without loading all into memory
+archive: async (stream) => {
+  let batch: any[] = [];
+  let page = 0;
+  await app.query({ stream, stream_exact: true, with_snaps: true }, (event) => {
+    batch.push(event);
+    if (batch.length >= 1000) {
+      // flush batch to cold storage
+      await s3.putObject({ Key: `${stream}/page-${page++}.json`, Body: JSON.stringify(batch) });
+      batch = [];
+    }
+  });
+  if (batch.length) await s3.putObject({ Key: `${stream}/page-${page}.json`, Body: JSON.stringify(batch) });
+}
 ```
 
 **Execution flow (each step gates the next):**

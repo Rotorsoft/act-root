@@ -82,9 +82,13 @@ describe("close", () => {
     const archived: Record<string, any[]> = {};
     const result = await app.close({
       streams: ["arch"],
-      archive: (stream, events) => {
+      archive: async (stream) => {
+        const events = await app.query_array({
+          stream,
+          stream_exact: true,
+          with_snaps: true,
+        });
         archived[stream] = events;
-        return Promise.resolve();
       },
     });
 
@@ -92,7 +96,7 @@ describe("close", () => {
     expect(archived["arch"]).toBeDefined();
     expect(archived["arch"].length).toBeGreaterThanOrEqual(2);
     // Events should include both incremented events
-    const names = archived["arch"].map((e) => e.name);
+    const names = archived["arch"].map((e: any) => e.name);
     expect(names).toContain("incremented");
   });
 
@@ -112,7 +116,7 @@ describe("close", () => {
         streams: ["fail1", "fail2"],
         archive: () => {
           callCount++;
-          if (callCount === 1) throw new Error("S3 down");
+          if (callCount === 1) return Promise.reject(new Error("S3 down"));
           return Promise.resolve();
         },
       })

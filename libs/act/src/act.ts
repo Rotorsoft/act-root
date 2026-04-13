@@ -1115,15 +1115,11 @@ export class Act<
     }
 
     // 4. Archive — call user callback. Abort everything on any failure.
+    //    The callback receives only the stream name — use app.query() or
+    //    app.query_array() inside to page through events at any batch size.
     if (archive) {
       for (const stream of safe) {
-        const events: Committed<Schemas, keyof Schemas>[] = [];
-        await store().query<Schemas>((e) => events.push(e), {
-          stream,
-          stream_exact: true,
-          with_snaps: true,
-        });
-        await archive(stream, events); // throws → aborts, no mutations made
+        await archive(stream); // throws → aborts, no mutations made
       }
     }
 
