@@ -1101,19 +1101,23 @@ export class Act<
       return result;
     }
 
-    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes
+    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
+    //    All guards share a correlation UUID (the close operation ID).
+    const correlation = randomUUID();
     const guarded: string[] = [];
+    const guardEvents = new Map<string, { id: number; stream: string }>();
     await Promise.all(
       safe.map(async (stream) => {
         try {
           const info = streamInfo.get(stream)!;
-          await store().commit(
+          const [committed] = await store().commit(
             stream,
             [{ name: TOMBSTONE_EVENT, data: {} }],
-            { correlation: randomUUID(), causation: {} },
+            { correlation, causation: {} },
             info.version
           );
           guarded.push(stream);
+          guardEvents.set(stream, { id: committed.id, stream });
         } catch {
           skipped.push(stream);
         }
@@ -1151,16 +1155,26 @@ export class Act<
       if (archiveFn) await archiveFn();
     }
 
-    // 7. Truncate + seed — atomic per store transaction
-    const correlation = randomUUID();
+    // 7. Truncate + seed — atomic per store transaction.
+    //    Seed meta traces back to the guard tombstone via causation.event.
     const restarted: string[] = [];
     const truncTargets = guarded.map((stream) => {
       const snapshot = seedStates.get(stream);
       if (snapshot) restarted.push(stream);
+      const guard = guardEvents.get(stream)!;
       return {
         stream,
         snapshot,
-        meta: { correlation, causation: {} },
+        meta: {
+          correlation,
+          causation: {
+            event: {
+              id: guard.id,
+              name: TOMBSTONE_EVENT,
+              stream: guard.stream,
+            },
+          },
+        },
       };
     });
     const truncated = await store().truncate(truncTargets);
