@@ -1,3 +1,31 @@
+# [@rotorsoft/act-v0.29.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.28.0...@rotorsoft/act-v0.29.0) (2026-04-13)
+
+
+### Bug Fixes
+
+* **act:** pass proper meta from close() to store.truncate() ([2dbd31a](https://github.com/rotorsoft/act-root/commit/2dbd31a50eac4189f3b011fabf9030db7d704c14))
+* **act:** proper meta traceability for close() events ([a9511f7](https://github.com/rotorsoft/act-root/commit/a9511f75c01a88df519323ab49737a56b0a28862))
+* **act:** truncate returns committed seeds for correct cache warming ([f42fb94](https://github.com/rotorsoft/act-root/commit/f42fb9421ed9a0808baf14bec797631729477e44))
+* **act:** use Schema and EventMeta types in truncate implementations ([6c958a6](https://github.com/rotorsoft/act-root/commit/6c958a66b1dd15aa84750e20df976ff0bdbc8407))
+
+
+### Features
+
+* **act:** add close-the-books stream archival and truncation ([30d6587](https://github.com/rotorsoft/act-root/commit/30d6587c903022da5d0f10fa3b7b90521c2d60ce)), closes [#562](https://github.com/rotorsoft/act-root/issues/562)
+* **act:** atomic guard-first close with truncate+seed transaction ([034e20a](https://github.com/rotorsoft/act-root/commit/034e20a5b2ee037cdd90af3531bf03c7115ebbd5))
+
+
+### Performance Improvements
+
+* **act:** eliminate redundant store operations in close() ([1f900c6](https://github.com/rotorsoft/act-root/commit/1f900c692593311bdb3b699db5c373020c9766d0))
+* **act:** optimize close() to minimize store round-trips ([d89b7f5](https://github.com/rotorsoft/act-root/commit/d89b7f5ad30256152d98824c94c42cfdf3bc1307))
+* **act:** parallelize close() operations ([8af1437](https://github.com/rotorsoft/act-root/commit/8af1437fbe503b7a3673381e352d0e8b3c4811dd))
+
+
+### Reverts
+
+* remove truncate(before) parameter — not needed ([24d297b](https://github.com/rotorsoft/act-root/commit/24d297b26cf364ccbd541bc911ee8a7227fb4e15))
+
 # [@rotorsoft/act-v0.28.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.27.0...@rotorsoft/act-v0.28.0) (2026-04-12)
 
 
