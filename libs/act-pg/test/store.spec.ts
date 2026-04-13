@@ -749,22 +749,10 @@ describe("PostgresStore error paths", () => {
     );
   });
 
-  it("should handle truncate() with empty delete results", async () => {
+  it("should handle truncate() with null rowCount on delete", async () => {
     const mockTruncateClient = {
       query: (sql: string) => {
-        // DELETE RETURNING stream — no rows deleted
-        if (
-          typeof sql === "string" &&
-          sql.includes("DELETE") &&
-          sql.includes("RETURNING")
-        )
-          return Promise.resolve({ rows: [], rowCount: 0 });
-        // INSERT RETURNING * — seed event
-        if (
-          typeof sql === "string" &&
-          sql.includes("INSERT") &&
-          sql.includes("RETURNING")
-        )
+        if (typeof sql === "string" && sql.includes("INSERT"))
           return Promise.resolve({
             rows: [
               {
@@ -779,7 +767,8 @@ describe("PostgresStore error paths", () => {
             ],
             rowCount: 1,
           });
-        return Promise.resolve({ rows: [], rowCount: 0 });
+        // DELETE and other queries return null rowCount
+        return Promise.resolve({ rows: [], rowCount: null });
       },
       release: () => {},
     };

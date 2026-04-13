@@ -724,15 +724,6 @@ export class PostgresStore implements Store {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
-      // Delete events and count per stream from returned rows
-      const { rows: delRows } = await client.query<{ stream: string }>(
-        `DELETE FROM ${this._fqt} WHERE stream = ANY($1) RETURNING stream`,
-        [streams]
-      );
-      const deletedCounts = new Map<string, number>();
-      for (const r of delRows) {
-        deletedCounts.set(r.stream, (deletedCounts.get(r.stream) ?? 0) + 1);
-      }
       await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
         streams,
       ]);
@@ -741,6 +732,10 @@ export class PostgresStore implements Store {
         { deleted: number; committed: Committed<Schemas, keyof Schemas> }
       >();
       for (const { stream, snapshot, meta } of targets) {
+        const { rowCount } = await client.query(
+          `DELETE FROM ${this._fqt} WHERE stream = $1`,
+          [stream]
+        );
         const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
         const { rows } = await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
@@ -753,7 +748,7 @@ export class PostgresStore implements Store {
           ]
         );
         result.set(stream, {
-          deleted: deletedCounts.get(stream) ?? 0,
+          deleted: rowCount ?? 0,
           committed: rows[0] as Committed<Schemas, keyof Schemas>,
         });
       }
