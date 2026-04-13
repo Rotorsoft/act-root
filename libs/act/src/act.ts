@@ -1040,7 +1040,9 @@ export class Act<
    * });
    * ```
    */
-  async close(options: CloseOptions): Promise<CloseResult> {
+  async close(
+    options: CloseOptions<TActions, TStateMap[keyof TStateMap], TActor>
+  ): Promise<CloseResult> {
     const { streams, archive, restart } = options;
     if (!streams.length)
       return { closed: [], truncated: 0, skipped: [], restarted: [] };
@@ -1054,7 +1056,7 @@ export class Act<
     const mergedState = [...this._states.values()][0];
     const streamInfo = new Map<
       string,
-      { state: unknown; version: number; maxId: number }
+      { state: TStateMap[keyof TStateMap]; version: number; maxId: number }
     >();
     for (const stream of streams) {
       // Single backward query — snapshots excluded by default, O(1)
@@ -1074,7 +1076,7 @@ export class Act<
       // Load state (hits cache on warm path — no store round-trip)
       const state = mergedState
         ? (await es.load(mergedState, stream)).state
-        : {};
+        : ({} as TStateMap[keyof TStateMap]);
       streamInfo.set(stream, { state, version, maxId });
     }
 
@@ -1128,7 +1130,7 @@ export class Act<
       const info = streamInfo.get(stream)!;
       await store().commit(
         stream,
-        [{ name: TOMBSTONE_EVENT, data: info.state as Schema }],
+        [{ name: TOMBSTONE_EVENT, data: info.state }],
         { correlation: randomUUID(), causation: {} },
         info.version
       );
@@ -1149,15 +1151,15 @@ export class Act<
       const restartDef = restart?.(stream, info.state);
       if (restartDef) {
         await this.do(
-          restartDef.action as keyof TActions,
-          { stream, actor: restartDef.actor } as Target<TActor>,
-          restartDef.payload as Readonly<TActions[keyof TActions]>
+          restartDef.action,
+          { stream, actor: restartDef.actor },
+          restartDef.payload
         );
         restarted.push(stream);
       } else {
         await store().commit(
           stream,
-          [{ name: TOMBSTONE_EVENT, data: info.state as Schema }],
+          [{ name: TOMBSTONE_EVENT, data: info.state }],
           { correlation: randomUUID(), causation: {} }
         );
       }

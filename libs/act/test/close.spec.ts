@@ -167,7 +167,7 @@ describe("close", () => {
       streams: ["restart"],
       restart: (_stream, finalState) => ({
         action: "increment",
-        payload: { by: (finalState as any).count },
+        payload: { by: finalState.count },
         actor,
       }),
     });

@@ -101,7 +101,7 @@ async function main() {
     },
     restart: (_stream, finalState) => ({
       action: "increment",
-      payload: { by: (finalState as { count: number }).count },
+      payload: { by: finalState.count },
       actor: { id: "system", name: "BookCloser" },
     }),
   });
