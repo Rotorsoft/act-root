@@ -341,18 +341,8 @@ export interface Store extends Disposable {
    * Atomically deletes all events for the given streams and removes
    * their entries from the streams table. Returns count of deleted events.
    *
-   * This is a blunt "delete everything" operation — no filtering, no
-   * tombstone preservation. Higher-level orchestration (e.g., `Act.close()`)
-   * is responsible for archival, tombstone commits, and restart logic.
-   *
    * @param streams - Stream names to truncate
    * @returns Count of deleted events
-   *
-   * @example
-   * ```typescript
-   * const deleted = await store().truncate(["order-123", "order-456"]);
-   * console.log(`Deleted ${deleted} events`);
-   * ```
    *
    * @see {@link Act.close} for the high-level close-the-books API
    */

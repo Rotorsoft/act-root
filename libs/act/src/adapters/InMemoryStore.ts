@@ -450,11 +450,11 @@ export class InMemoryStore implements Store {
   async truncate(streams: string[]) {
     await sleep();
     const streamSet = new Set(streams);
-    const before = this._events.length;
+    const count = this._events.length;
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
     for (const name of streams) {
       this._streams.delete(name);
     }
-    return before - this._events.length;
+    return count - this._events.length;
   }
 }
