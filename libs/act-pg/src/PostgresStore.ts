@@ -8,7 +8,12 @@ import type {
   Schemas,
   Store,
 } from "@rotorsoft/act";
-import { ConcurrencyError, SNAP_EVENT, log } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+  log,
+} from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
 const logger: Logger = log();
@@ -697,13 +702,15 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Atomically deletes all events for the given streams and removes
-   * their entries from the streams table.
-   * @param streams - Stream names to truncate.
+   * Atomically truncates streams and seeds each with a snapshot or tombstone.
+   * @param targets - Streams to truncate with optional snapshot state.
    * @returns Count of deleted events.
    */
-  async truncate(streams: string[]): Promise<number> {
-    if (!streams.length) return 0;
+  async truncate(
+    targets: Array<{ stream: string; snapshot?: Record<string, any> }>
+  ): Promise<number> {
+    if (!targets.length) return 0;
+    const streams = targets.map((t) => t.stream);
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
@@ -714,6 +721,15 @@ export class PostgresStore implements Store {
       await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
         streams,
       ]);
+      // Seed each stream with a snapshot or tombstone
+      for (const { stream, snapshot } of targets) {
+        const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
+        await client.query(
+          `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
+           VALUES($1, $2, $3, 0, now(), $4)`,
+          [name, snapshot ?? {}, stream, { correlation: "", causation: {} }]
+        );
+      }
       await client.query("COMMIT");
       return rowCount ?? 0;
     } catch (error) {

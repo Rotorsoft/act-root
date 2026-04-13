@@ -483,3 +483,44 @@ const ItemSlice = slice()
 - **One custom patch per event** — conflicting custom patches throw at build time. Passthroughs always yield to custom reducers.
 
 **Important:** `.void()` reactions are **never processed by `drain()`**. Use `.to(resolver)` for any reaction that must be discovered and executed during drain.
+
+## 14. Close the Books — Stream Archival and Truncation
+
+`app.close()` safely archives, truncates, and optionally restarts streams. It guards streams with a tombstone to block concurrent writes, archives while guarded, then atomically truncates + seeds each stream.
+
+```typescript
+// Load state before close if you need to restart
+const snap = await app.load(Counter, "counter-1");
+
+const result = await app.close({
+  streams: ["counter-1", "counter-2"],
+
+  // Optional: archive events (streams are guarded — no concurrent writes)
+  archive: async (stream) => {
+    const events = await app.query_array({ stream, stream_exact: true });
+    await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
+  },
+
+  // Optional: restart streams with a snapshot (others get tombstoned)
+  snapshots: { "counter-1": snap.state },
+});
+
+// result: { closed, truncated, skipped, restarted }
+```
+
+**Key types:**
+- `StreamClosedError` — thrown by `action()` when writing to a tombstoned stream
+- `TOMBSTONE_EVENT` (`"__tombstone__"`) — marks a stream as permanently closed
+- `CloseResult` — `{ closed: string[], truncated: number, skipped: string[], restarted: string[] }`
+
+**Flow:** correlate → safety check → guard (tombstone with expectedVersion) → archive → atomic truncate + seed → cache update → emit "closed"
+
+**In tests:**
+```typescript
+await app.do("increment", { stream: "s1", actor }, { by: 1 });
+await app.correlate();
+await app.drain();
+const result = await app.close({ streams: ["s1"] });
+expect(result.closed).toEqual(["s1"]);
+await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
+```

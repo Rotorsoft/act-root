@@ -335,17 +335,17 @@ archive: async (stream) => {
 
 1. **Correlate** — discover pending reaction targets
 2. **Safety check** — skip streams with pending reactions (skipped entirely when no reactive events)
-3. **Archive** — user callback per stream. If any throws, abort entirely (zero mutations)
-4. **Truncate** — `store().truncate()` deletes all events + stream metadata (single batch)
-5. **Cache invalidate** — parallel
-6. **Snapshot or tombstone** — streams in `snapshots` get `__snapshot__` at version 0, others get `__tombstone__`
+3. **Guard** — commit `__tombstone__` with `expectedVersion` per stream (blocks concurrent writes via `action()` guard). Streams that fail with `ConcurrencyError` are moved to `skipped`.
+4. **Archive** — user callback per stream. Streams are guarded — no concurrent writes possible. If any throws, streams remain guarded but not truncated.
+5. **Truncate + seed** — atomic per-store transaction: delete all events, insert `__snapshot__` (restart) or `__tombstone__` (close) as the sole event.
+6. **Cache** — invalidate (tombstoned) or warm (restarted)
 7. **Emit "closed"** — lifecycle event with `CloseResult`
 
 **Safety guarantees:**
-- Archive failure → no mutations, complete abort
-- Tombstone failure → partially tombstoned at worst; un-tombstoned streams untouched
-- Truncate failure → stream is tombstoned (writes blocked), events still exist, retryable
-- Idempotent — closing already-truncated streams is a no-op
+- Guard failure (concurrent write) → stream moved to `skipped`, untouched
+- Archive failure → streams are guarded (writes blocked), not truncated. Retryable.
+- Truncate + seed is atomic — if it fails, the guard tombstone remains, stream is safe
+- Idempotent — closing already-tombstoned streams is a no-op
 
 **Tombstone events** (`__tombstone__`): A tombstone marks a stream as permanently closed. `action()` throws `StreamClosedError` when the last event on a stream is a tombstone. The only way to reopen is via `close()` with a `restart` callback.
 
@@ -687,7 +687,7 @@ interface Store extends Disposable {
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
-  truncate(streams): Promise<number>;             // Delete all events + stream metadata
+  truncate(targets: {stream, snapshot?}[]): Promise<number>;  // Atomic truncate + seed
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```

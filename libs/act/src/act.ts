@@ -7,7 +7,6 @@ import {
   cache,
   dispose,
   log,
-  SNAP_EVENT,
   store,
   TOMBSTONE_EVENT,
 } from "./ports.js";
@@ -1000,16 +999,16 @@ export class Act<
   }
 
   /**
-   * Close the books — archive, truncate, and optionally restart streams.
+   * Close the books — guard, archive, truncate, and optionally restart streams.
    *
    * Safely removes historical events from the operational store:
    *
    * 1. **Correlate** — discover pending reaction targets
    * 2. **Safety check** — skip streams with pending reactions (skipped when no reactive events)
-   * 3. **Archive** — user callback per stream (abort-all on failure, no mutations yet)
-   * 4. **Truncate** — single batch delete of all events + stream metadata
-   * 5. **Cache invalidate** — parallel
-   * 6. **Snapshot or tombstone** — streams in `snapshots` get `__snapshot__`, others get `__tombstone__`
+   * 3. **Guard** — commit `__tombstone__` with `expectedVersion` to block concurrent writes
+   * 4. **Archive** — user callback per stream (abort-all on failure, streams are guarded)
+   * 5. **Truncate + seed** — atomic: delete all events, insert `__snapshot__` or `__tombstone__`
+   * 6. **Cache** — invalidate (tombstoned) or warm (restarted)
    * 7. **Emit "closed"** — lifecycle event with results
    *
    * @param options - Close configuration
@@ -1046,18 +1045,22 @@ export class Act<
     // 1. Correlate — ensure all dynamic reaction targets are discovered
     await this.correlate({ limit: 1000 });
 
-    // 2. Find max domain event ID per stream (parallel, O(1) each)
-    const streamMaxIds = new Map<string, number>();
+    // 2. Find max domain event ID + version per stream (parallel, O(1) each)
+    const streamInfo = new Map<string, { maxId: number; version: number }>();
     await Promise.all(
       streams.map(async (stream) => {
         let maxId = -1;
+        let version = -1;
         await store().query(
           (e) => {
-            if (e.name !== TOMBSTONE_EVENT) maxId = e.id;
+            if (e.name !== TOMBSTONE_EVENT) {
+              maxId = e.id;
+              version = e.version;
+            }
           },
           { stream, stream_exact: true, backward: true, limit: 1 }
         );
-        if (maxId >= 0) streamMaxIds.set(stream, maxId);
+        if (maxId >= 0) streamInfo.set(stream, { maxId, version });
       })
     );
 
@@ -1066,7 +1069,7 @@ export class Act<
     let safe: string[];
 
     if (this._reactive_events.size === 0) {
-      safe = [...streamMaxIds.keys()];
+      safe = [...streamInfo.keys()];
     } else {
       const pendingSet = new Set<string>();
       const leases = await store().claim(1000, 1000, randomUUID(), 1);
@@ -1074,15 +1077,15 @@ export class Act<
 
       for (const lease of leases) {
         const sourceRe = lease.source ? RegExp(lease.source) : undefined;
-        for (const [stream, maxId] of streamMaxIds) {
-          if ((!sourceRe || sourceRe.test(stream)) && lease.at < maxId) {
+        for (const [stream, info] of streamInfo) {
+          if ((!sourceRe || sourceRe.test(stream)) && lease.at < info.maxId) {
             pendingSet.add(stream);
           }
         }
       }
 
       safe = [];
-      for (const [stream] of streamMaxIds) {
+      for (const [stream] of streamInfo) {
         if (pendingSet.has(stream)) {
           skipped.push(stream);
         } else {
@@ -1102,29 +1105,60 @@ export class Act<
       return result;
     }
 
-    // 4. Archive (sequential — abort-all on any failure, no mutations yet)
+    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
+    //    Streams that fail (ConcurrencyError) are moved to skipped.
+    const guarded: string[] = [];
+    await Promise.all(
+      safe.map(async (stream) => {
+        try {
+          const info = streamInfo.get(stream)!;
+          await store().commit(
+            stream,
+            [{ name: TOMBSTONE_EVENT, data: {} }],
+            { correlation: randomUUID(), causation: {} },
+            info.version
+          );
+          guarded.push(stream);
+        } catch {
+          skipped.push(stream);
+        }
+      })
+    );
+
+    if (!guarded.length) {
+      const result: CloseResult = {
+        closed: [],
+        truncated: 0,
+        skipped,
+        restarted: [],
+      };
+      this.emit("closed", result);
+      return result;
+    }
+
+    // 5. Archive (sequential — abort-all on any failure)
+    //    Streams are guarded — no concurrent writes possible.
     if (archive) {
-      for (const stream of safe) {
+      for (const stream of guarded) {
         await archive(stream);
       }
     }
 
-    // 5. Truncate — single batch operation
-    const truncated = await store().truncate(safe);
-
-    // 6. Cache invalidate in parallel
-    await Promise.all(safe.map((stream) => cache().invalidate(stream)));
-
-    // 7. Snapshot (restart) or tombstone (close) per stream — parallel
+    // 6. Truncate + seed — atomic per store transaction.
+    //    Snapshot (restart) or tombstone (stay closed) as sole event.
     const restarted: string[] = [];
+    const targets = guarded.map((stream) => {
+      const seed = snapshots?.[stream];
+      if (seed) restarted.push(stream);
+      return { stream, snapshot: seed };
+    });
+    const truncated = await store().truncate(targets);
+
+    // 7. Cache invalidate / warm
     await Promise.all(
-      safe.map(async (stream) => {
+      guarded.map(async (stream) => {
         const seed = snapshots?.[stream];
         if (seed) {
-          await store().commit(stream, [{ name: SNAP_EVENT, data: seed }], {
-            correlation: randomUUID(),
-            causation: {},
-          });
           await cache().set(stream, {
             state: seed,
             version: 0,
@@ -1132,19 +1166,15 @@ export class Act<
             patches: 0,
             snaps: 1,
           });
-          restarted.push(stream);
         } else {
-          await store().commit(stream, [{ name: TOMBSTONE_EVENT, data: {} }], {
-            correlation: randomUUID(),
-            causation: {},
-          });
+          await cache().invalidate(stream);
         }
       })
     );
 
-    // 9. Emit lifecycle event
+    // 8. Emit lifecycle event
     const result: CloseResult = {
-      closed: safe,
+      closed: guarded,
       truncated,
       skipped,
       restarted,

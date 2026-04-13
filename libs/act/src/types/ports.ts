@@ -338,15 +338,22 @@ export interface Store extends Disposable {
   reset: (streams: string[]) => Promise<number>;
 
   /**
-   * Atomically deletes all events for the given streams and removes
-   * their entries from the streams table. Returns count of deleted events.
+   * Atomically truncates streams and seeds each with a final event.
    *
-   * @param streams - Stream names to truncate
-   * @returns Count of deleted events
+   * For each target, in a single transaction:
+   * 1. Deletes all events for the stream
+   * 2. Removes the stream's entry from the streams table
+   * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
+   *    `__tombstone__` event as the sole event on the stream
+   *
+   * @param targets - Streams to truncate with optional snapshot state
+   * @returns Count of deleted events (excludes the seeded events)
    *
    * @see {@link Act.close} for the high-level close-the-books API
    */
-  truncate: (streams: string[]) => Promise<number>;
+  truncate: (
+    targets: Array<{ stream: string; snapshot?: Schema }>
+  ) => Promise<number>;
 }
 
 // ---------------------------------------------------------------------------

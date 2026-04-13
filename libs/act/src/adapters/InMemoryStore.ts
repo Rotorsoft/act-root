@@ -8,7 +8,7 @@
  *
  * @category Adapters
  */
-import { SNAP_EVENT } from "../ports.js";
+import { SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   Committed,
@@ -442,19 +442,34 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Atomically deletes all events for the given streams and removes
-   * their entries from the streams table.
-   * @param streams - Stream names to truncate.
+   * Atomically truncates streams and seeds each with a snapshot or tombstone.
+   * @param targets - Streams to truncate with optional snapshot state.
    * @returns Count of deleted events.
    */
-  async truncate(streams: string[]) {
+  async truncate(targets: Array<{ stream: string; snapshot?: any }>) {
     await sleep();
-    const streamSet = new Set(streams);
+    const streamSet = new Set(targets.map((t) => t.stream));
     const count = this._events.length;
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
-    for (const name of streams) {
-      this._streams.delete(name);
+    const deleted = count - this._events.length;
+    for (const { stream, snapshot } of targets) {
+      this._streams.delete(stream);
+      // Seed with snapshot or tombstone
+      const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
+      const committed: Committed<Schemas, keyof Schemas> = {
+        id: this._events.length,
+        stream,
+        version: 0,
+        created: new Date(),
+        name,
+        data: snapshot ?? {},
+        meta: {
+          correlation: "",
+          causation: {},
+        },
+      };
+      this._events.push(committed);
     }
-    return count - this._events.length;
+    return deleted;
   }
 }
