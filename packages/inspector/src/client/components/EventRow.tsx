@@ -33,8 +33,15 @@ type EventRowProps = {
   onStream?: (stream: string) => void;
 };
 
+/** Framework internal event names */
+const FRAMEWORK_EVENTS: Record<string, string> = {
+  __tombstone__: "bg-red-900/60 text-red-300 border-red-700",
+  __snapshot__: "bg-zinc-800/60 text-zinc-400 border-zinc-700",
+};
+
 /** Deterministic color from event name */
 function nameColor(name: string): string {
+  if (FRAMEWORK_EVENTS[name]) return FRAMEWORK_EVENTS[name];
   const colors = [
     "bg-sky-900/50 text-sky-300 border-sky-800",
     "bg-amber-900/50 text-amber-300 border-amber-800",

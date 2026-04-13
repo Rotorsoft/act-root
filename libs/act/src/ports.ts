@@ -265,6 +265,15 @@ export function dispose(
  */
 export const SNAP_EVENT = "__snapshot__";
 
+/**
+ * Event name used internally for tombstone events in the event store.
+ * A tombstone marks a stream as permanently closed — no further writes
+ * are permitted until the stream is explicitly restarted via `close()`.
+ *
+ * @see {@link Act.close} for the close-the-books API
+ */
+export const TOMBSTONE_EVENT = "__tombstone__";
+
 // ---------------------------------------------------------------------------
 // Tracer
 // ---------------------------------------------------------------------------

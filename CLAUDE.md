@@ -286,6 +286,57 @@ await app.load(Counter, "counter-1", (snap) => {
 
 When `asOf` is present, `load()` bypasses the cache (read and write) and replays from the beginning with snapshots — the query filters exclude any snapshot past the cutoff. This is read-only; `action()` always operates on current state.
 
+### Close the Books
+
+`close()` archives, tombstones, and truncates streams from the operational store. This is the event sourcing equivalent of "closing the books" in accounting — summarize the period, archive the detail, and optionally restart with a fresh opening balance.
+
+```typescript
+const result = await app.close({
+  streams: ["order-123", "order-456"],
+
+  // Optional: archive events before truncation (abort-on-failure semantics)
+  archive: async (stream, events) => {
+    await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
+  },
+
+  // Optional: restart streams with an opening event seeded from final state
+  restart: (stream, state) => ({
+    action: "OpenOrder",
+    payload: { balance: state.balance },
+    actor: { id: "system", name: "BookCloser" },
+  }),
+});
+
+// result: { closed, truncated, skipped, restarted }
+```
+
+**Execution flow (each step gates the next):**
+
+1. **Correlate** — discover all pending reaction targets
+2. **Safety check** — skip streams with pending/blocked reactions (appear in `skipped`)
+3. **Load final state** — capture before any mutations
+4. **Archive** — call user callback per stream. If any throws, abort entirely (zero mutations)
+5. **Tombstone** — commit `__tombstone__` to each closing stream
+6. **Truncate** — `store().truncate()` deletes all events + stream metadata
+7. **Re-commit tombstone** — fresh tombstone for non-restarted streams (sole event on stream)
+8. **Cache invalidate** — clear stale entries
+9. **Restart** — execute opening action for restarted streams (version 0)
+10. **Emit "closed"** — lifecycle event with `CloseResult`
+
+**Safety guarantees:**
+- Archive failure → no mutations, complete abort
+- Tombstone failure → partially tombstoned at worst; un-tombstoned streams untouched
+- Truncate failure → stream is tombstoned (writes blocked), events still exist, retryable
+- Idempotent — closing already-truncated streams is a no-op
+
+**Tombstone events** (`__tombstone__`): A tombstone marks a stream as permanently closed. `action()` throws `StreamClosedError` when the last event on a stream is a tombstone. The only way to reopen is via `close()` with a `restart` callback.
+
+```typescript
+app.on("closed", (result: CloseResult) => {
+  console.log(`Closed ${result.closed.length}, skipped ${result.skipped.length}`);
+});
+```
+
 ### Event Sourcing Model
 
 - **Append-only event log** - Complete audit trail, immutable history
@@ -542,7 +593,7 @@ Events are immutable — their schemas must evolve without breaking historical d
 
 Each example demonstrates different framework capabilities:
 
-- **Calculator** - Single state machine, reactions, projection rebuild demo (`pnpm -F calculator dev:rebuild`)
+- **Calculator** - Single state machine, reactions, projection rebuild demo (`pnpm -F calculator dev:rebuild`), close-the-books demo (`pnpm -F calculator dev:close`)
 - **WolfDesk** - Multiple aggregates, projections, complex reactions, invariants
 - **Server/Client** - Integration with external APIs (tRPC), web application pattern
 
@@ -618,6 +669,7 @@ interface Store extends Disposable {
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
+  truncate(streams): Promise<number>;             // Delete all events + stream metadata
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```
@@ -655,6 +707,7 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - **ConcurrencyError** - Another process modified the stream. Retry or reload state.
 - **InvariantError** - Business rule violated. Check invariant conditions.
 - **ValidationError** - Action/event schema validation failed. Check payload structure.
+- **StreamClosedError** - Stream has a tombstone event. Use `app.close()` with `restart` to reopen.
 - **"No events committed"** - Action didn't emit any events. Check `.emit()` implementation.
 
 ### Debugging
@@ -663,6 +716,7 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - Use `app.on("committed", ...)` to observe all state changes
 - Use `app.on("settled", ...)` to react when `settle()` completes all correlate/drain passes
 - Use `app.on("blocked", ...)` to catch reaction processing failures
+- Use `app.on("closed", ...)` to observe close-the-books operations
 - Use `app.load(State, stream, undefined, { before: eventId })` for time-travel queries (see `AsOf` type)
 - Query events directly: `await app.query_array({ stream: "mystream" })`
 - Query with exact stream match: `await app.query_array({ stream: "mystream", stream_exact: true })` — by default, `stream` uses regex matching; `stream_exact: true` uses exact string equality. `load()` always uses exact match internally.

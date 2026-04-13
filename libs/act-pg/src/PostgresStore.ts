@@ -695,4 +695,32 @@ export class PostgresStore implements Store {
     );
     return rowCount ?? 0;
   }
+
+  /**
+   * Atomically deletes all events for the given streams and removes
+   * their entries from the streams table.
+   * @param streams - Stream names to truncate.
+   * @returns Count of deleted events.
+   */
+  async truncate(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    const client = await this._pool.connect();
+    try {
+      await client.query("BEGIN");
+      const { rowCount } = await client.query(
+        `DELETE FROM ${this._fqt} WHERE stream = ANY($1)`,
+        [streams]
+      );
+      await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
+        streams,
+      ]);
+      await client.query("COMMIT");
+      return rowCount ?? 0;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }

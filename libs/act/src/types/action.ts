@@ -404,6 +404,52 @@ export type InferEvents<
 };
 
 /**
+ * Options for closing (archiving and truncating) streams.
+ *
+ * @see {@link IAct.close} for the close-the-books API
+ */
+export type CloseOptions = {
+  /** Streams to close — caller selects them using existing query/load APIs */
+  readonly streams: string[];
+
+  /**
+   * Called with each stream's full event history before truncation.
+   * If it throws for any stream, the entire operation aborts —
+   * nothing is truncated.
+   */
+  readonly archive?: (
+    stream: string,
+    events: Committed<Schemas, keyof Schemas>[]
+  ) => Promise<void>;
+
+  /**
+   * For each closed stream, return an action to re-open it seeded
+   * from its final state. The same stream ID is reused at version 0.
+   * Return undefined to leave the stream closed.
+   */
+  readonly restart?: (
+    stream: string,
+    state: unknown
+  ) => { action: string; payload: unknown; actor: Actor } | undefined;
+};
+
+/**
+ * Result of a close operation.
+ *
+ * @see {@link IAct.close} for the close-the-books API
+ */
+export type CloseResult = {
+  /** Streams that were archived and truncated */
+  readonly closed: string[];
+  /** Total events deleted from the operational store */
+  readonly truncated: number;
+  /** Streams skipped due to pending reactions or blocked status */
+  readonly skipped: string[];
+  /** Streams that were restarted with a new opening event */
+  readonly restarted: string[];
+};
+
+/**
  * Public interface for the Act orchestrator, passed to reaction handlers.
  *
  * Provides typed access to action dispatch, state loading, and event querying.

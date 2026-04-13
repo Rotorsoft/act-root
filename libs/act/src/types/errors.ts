@@ -21,6 +21,7 @@ export const Errors = {
   ValidationError: "ERR_VALIDATION",
   InvariantError: "ERR_INVARIANT",
   ConcurrencyError: "ERR_CONCURRENCY",
+  StreamClosedError: "ERR_STREAM_CLOSED",
 } as const;
 
 /**
@@ -240,6 +241,39 @@ export class InvariantError<
  *
  * @see {@link Store.commit} for version checking details
  */
+/**
+ * Thrown when attempting to write to a stream that has been closed
+ * with a tombstone event.
+ *
+ * A tombstoned stream is permanently closed — no further actions can
+ * be executed against it. The only way to reopen a tombstoned stream
+ * is through `Act.close()` with a `restart` callback.
+ *
+ * @example
+ * ```typescript
+ * import { StreamClosedError } from "@rotorsoft/act";
+ *
+ * try {
+ *   await app.do("updateTicket", target, payload);
+ * } catch (error) {
+ *   if (error instanceof StreamClosedError) {
+ *     console.error(`Stream ${error.stream} is closed`);
+ *   }
+ * }
+ * ```
+ *
+ * @see {@link Act.close} for closing streams
+ */
+export class StreamClosedError extends Error {
+  constructor(
+    /** The stream that is closed */
+    public readonly stream: string
+  ) {
+    super(`Stream "${stream}" is closed (tombstoned)`);
+    this.name = Errors.StreamClosedError;
+  }
+}
+
 export class ConcurrencyError extends Error {
   constructor(
     /** The stream that had the concurrent modification */

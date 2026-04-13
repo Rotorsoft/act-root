@@ -7,6 +7,7 @@ type StreamRow = {
   eventCount: number;
   lastEvent: string;
   currentVersion: number;
+  isClosed?: boolean;
 };
 
 type SortKey = "stream" | "eventCount" | "currentVersion" | "lastEvent";
@@ -135,6 +136,11 @@ export function Streams({
                 </span>
                 <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
                   {s.stream}
+                  {s.isClosed && (
+                    <span className="ml-2 inline-block rounded border border-red-800 bg-red-900/50 px-1.5 py-0 text-[9px] font-medium text-red-400">
+                      closed
+                    </span>
+                  )}
                 </span>
               </button>
             ))

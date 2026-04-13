@@ -440,4 +440,21 @@ export class InMemoryStore implements Store {
     }
     return count;
   }
+
+  /**
+   * Atomically deletes all events for the given streams and removes
+   * their entries from the streams table.
+   * @param streams - Stream names to truncate.
+   * @returns Count of deleted events.
+   */
+  async truncate(streams: string[]) {
+    await sleep();
+    const streamSet = new Set(streams);
+    const before = this._events.length;
+    this._events = this._events.filter((e) => !streamSet.has(e.stream));
+    for (const name of streams) {
+      this._streams.delete(name);
+    }
+    return before - this._events.length;
+  }
 }

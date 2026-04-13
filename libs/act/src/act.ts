@@ -2,11 +2,21 @@ import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
-import { build_tracer, dispose, log, store } from "./ports.js";
+import {
+  build_tracer,
+  cache,
+  dispose,
+  log,
+  SNAP_EVENT,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
   BatchHandler,
+  CloseOptions,
+  CloseResult,
   Committed,
   Drain,
   DrainOptions,
@@ -87,6 +97,7 @@ export class Act<
   emit(event: "acked", args: Lease[]): boolean;
   emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
   emit(event: "settled", args: Drain<TEvents>): boolean;
+  emit(event: "closed", args: CloseResult): boolean;
   emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
   }
@@ -108,6 +119,7 @@ export class Act<
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
   on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
+  on(event: "closed", listener: (args: CloseResult) => void): this;
   on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
     return this;
@@ -130,6 +142,7 @@ export class Act<
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
   off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
+  off(event: "closed", listener: (args: CloseResult) => void): this;
   off(event: string, listener: (args: any) => void): this {
     this._emitter.off(event, listener);
     return this;
@@ -984,6 +997,199 @@ export class Act<
       clearTimeout(this._settle_timer);
       this._settle_timer = undefined;
     }
+  }
+
+  /**
+   * Close the books — archive, tombstone, truncate, and optionally restart streams.
+   *
+   * This is the safe way to remove historical events from the operational store.
+   * The execution flow ensures no data loss:
+   *
+   * 1. **Correlate** — discover all pending reaction targets
+   * 2. **Safety check** — skip streams with pending/blocked reactions
+   * 3. **Load final state** — capture before any mutations
+   * 4. **Archive** — call user callback for each safe stream (abort all on any failure)
+   * 5. **Tombstone** — commit `__tombstone__` to each closed stream
+   * 6. **Truncate** — delete all events + stream metadata
+   * 7. **Tombstone (re-commit)** — fresh tombstone for non-restarted streams
+   * 8. **Cache invalidate** — clear stale entries
+   * 9. **Restart** — execute opening action for restarted streams
+   * 10. **Emit "closed"** — lifecycle event with results
+   *
+   * @param options - Close configuration
+   * @returns Result with closed, skipped, restarted streams and truncated event count
+   *
+   * @example Archive to external storage, then truncate
+   * ```typescript
+   * const result = await app.close({
+   *   streams: ["order-123", "order-456"],
+   *   archive: async (stream, events) => {
+   *     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
+   *   },
+   * });
+   * ```
+   *
+   * @example Close and restart with opening event
+   * ```typescript
+   * const result = await app.close({
+   *   streams: ["account-1"],
+   *   restart: (stream, state) => ({
+   *     action: "OpenAccount",
+   *     payload: { balance: state.balance },
+   *     actor: { id: "system", name: "BookCloser" },
+   *   }),
+   * });
+   * ```
+   */
+  async close(options: CloseOptions): Promise<CloseResult> {
+    const { streams, archive, restart } = options;
+    if (!streams.length)
+      return { closed: [], truncated: 0, skipped: [], restarted: [] };
+
+    // 1. Correlate — ensure all dynamic reaction targets are discovered
+    await this.correlate({ limit: 1000 });
+
+    // 2. Safety check — find max event ID per stream
+    const streamMaxIds = new Map<string, number>();
+    for (const stream of streams) {
+      let maxId = -1;
+      await store().query(
+        (e) => {
+          if (e.name !== SNAP_EVENT && e.name !== TOMBSTONE_EVENT) maxId = e.id;
+        },
+        { stream, stream_exact: true }
+      );
+      streamMaxIds.set(stream, maxId);
+    }
+
+    // Claim all available reaction streams to check their watermarks
+    const pendingSet = new Set<string>();
+    const leases = await store().claim(1000, 1000, randomUUID(), 1);
+    // Release immediately — we only needed to read watermarks
+    if (leases.length) await store().ack(leases);
+
+    // For each claimed stream (has pending work), check if it could process
+    // events from any of the closing streams
+    for (const lease of leases) {
+      for (const [stream, maxId] of streamMaxIds) {
+        if (maxId < 0) continue; // no domain events
+        const sourcesMatch = !lease.source || RegExp(lease.source).test(stream);
+        if (sourcesMatch && lease.at < maxId) {
+          pendingSet.add(stream);
+        }
+      }
+    }
+
+    const safe: string[] = [];
+    const skipped: string[] = [];
+    const streamStates = new Map<string, unknown>();
+
+    for (const stream of streams) {
+      const maxId = streamMaxIds.get(stream)!;
+      if (maxId < 0) continue; // no domain events — already truncated
+      if (pendingSet.has(stream)) {
+        skipped.push(stream);
+      } else {
+        safe.push(stream);
+      }
+    }
+
+    if (!safe.length) {
+      const result: CloseResult = {
+        closed: [],
+        truncated: 0,
+        skipped,
+        restarted: [],
+      };
+      this.emit("closed", result);
+      return result;
+    }
+
+    // 3. Load final states for all safe streams
+    for (const stream of safe) {
+      const mergedState = [...this._states.values()][0];
+      if (mergedState) {
+        const snap = await es.load(mergedState, stream);
+        streamStates.set(stream, snap.state);
+      }
+    }
+
+    // 4. Archive — call user callback. Abort everything on any failure.
+    if (archive) {
+      for (const stream of safe) {
+        const events: Committed<Schemas, keyof Schemas>[] = [];
+        await store().query<Schemas>((e) => events.push(e), {
+          stream,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        await archive(stream, events); // throws → aborts, no mutations made
+      }
+    }
+
+    // 5. Commit tombstone to each safe stream (marks them closed before truncation)
+    for (const stream of safe) {
+      // Query the latest version for this stream
+      let lastVersion = -1;
+      await store().query(
+        (e) => {
+          lastVersion = e.version;
+        },
+        {
+          stream,
+          stream_exact: true,
+          backward: true,
+          limit: 1,
+          with_snaps: true,
+        }
+      );
+      await store().commit(
+        stream,
+        [{ name: TOMBSTONE_EVENT, data: streamStates.get(stream) ?? {} }],
+        { correlation: randomUUID(), causation: {} },
+        lastVersion
+      );
+    }
+
+    // 6. Truncate — delete all events + stream metadata
+    const truncated = await store().truncate(safe);
+
+    // 7. Cache invalidate
+    for (const stream of safe) {
+      await cache().invalidate(stream);
+    }
+
+    // 8. Re-commit tombstone for non-restarted streams, restart others
+    const restarted: string[] = [];
+    for (const stream of safe) {
+      const restartDef = restart?.(stream, streamStates.get(stream));
+      if (restartDef) {
+        // Restart: commit opening action at version 0
+        await this.do(
+          restartDef.action as keyof TActions,
+          { stream, actor: restartDef.actor } as Target<TActor>,
+          restartDef.payload as Readonly<TActions[keyof TActions]>
+        );
+        restarted.push(stream);
+      } else {
+        // Re-commit tombstone as the sole event on this stream
+        await store().commit(
+          stream,
+          [{ name: TOMBSTONE_EVENT, data: streamStates.get(stream) ?? {} }],
+          { correlation: randomUUID(), causation: {} }
+        );
+      }
+    }
+
+    // 9. Emit lifecycle event
+    const result: CloseResult = {
+      closed: safe,
+      truncated,
+      skipped,
+      restarted,
+    };
+    this.emit("closed", result);
+    return result;
   }
 
   /**

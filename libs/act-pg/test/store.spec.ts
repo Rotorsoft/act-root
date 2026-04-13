@@ -478,6 +478,46 @@ describe("pg store", () => {
       expect(count).toBe(0);
     });
 
+    it("should truncate streams — delete all events and stream metadata", async () => {
+      const s = store();
+      const stream = "truncate-test";
+      // Commit events
+      await s.commit(
+        stream,
+        [
+          { name: "A", data: { a: 1 } },
+          { name: "B", data: { b: 2 } },
+        ],
+        { correlation: "c", causation: {} }
+      );
+      // Subscribe the stream so it has a streams table entry
+      await s.subscribe([{ stream }]);
+
+      // Verify events exist
+      const before: any[] = [];
+      await s.query((e) => before.push(e), { stream, stream_exact: true });
+      expect(before.length).toBe(2);
+
+      // Truncate
+      const deleted = await s.truncate([stream]);
+      expect(deleted).toBe(2);
+
+      // Events should be gone
+      const after: any[] = [];
+      await s.query((e) => after.push(e), { stream, stream_exact: true });
+      expect(after.length).toBe(0);
+    });
+
+    it("should return 0 when truncating empty array", async () => {
+      const count = await store().truncate([]);
+      expect(count).toBe(0);
+    });
+
+    it("should return 0 when truncating non-existent streams", async () => {
+      const count = await store().truncate(["does-not-exist-xyz"]);
+      expect(count).toBe(0);
+    });
+
     it("should not claim blocked streams", async () => {
       const s = store();
       await s.subscribe([{ stream: "block-test" }]);
@@ -681,6 +721,29 @@ describe("PostgresStore error paths", () => {
     expect(result).toEqual([]);
   });
 
+  it("should handle truncate() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("DELETE") as any
+    );
+    await expect(db.truncate(["x"])).rejects.toThrow("mocked DELETE error");
+  });
+
+  it("should handle truncate() with null rowCount", async () => {
+    const mockTruncateClient = {
+      query: (sql: string) => {
+        if (typeof sql === "string" && sql.includes("DELETE"))
+          return Promise.resolve({ rows: [], rowCount: null });
+        return Promise.resolve({ rows: [], rowCount: 0 });
+      },
+      release: () => {},
+    };
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockTruncateClient as any
+    );
+    const result = await db.truncate(["x"]);
+    expect(result).toBe(0);
+  });
+
   it("should handle ROLLBACK failure gracefully", async () => {
     // Mock where every query fails — both the operation and the ROLLBACK
     const failAll = () => ({
@@ -708,6 +771,7 @@ describe("PostgresStore error paths", () => {
         causation: {},
       })
     ).rejects.toThrow();
+    await expect(db.truncate(["x"])).rejects.toThrow();
   });
 });
 

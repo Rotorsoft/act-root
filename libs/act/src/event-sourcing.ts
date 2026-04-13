@@ -7,8 +7,8 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
-import { cache, log, SNAP_EVENT, store } from "./ports.js";
-import { InvariantError } from "./types/errors.js";
+import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "./ports.js";
+import { InvariantError, StreamClosedError } from "./types/errors.js";
 import type {
   AsOf,
   Committed,
@@ -170,6 +170,8 @@ export async function action<
     : validate(action as string, payload, me.actions[action]);
 
   const snapshot = await load(me, stream);
+  if (snapshot.event?.name === TOMBSTONE_EVENT)
+    throw new StreamClosedError(stream);
   const expected = expectedVersion ?? snapshot.event?.version;
 
   logger.trace(
