@@ -459,10 +459,10 @@ export class InMemoryStore implements Store {
     const count = this._events.length;
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
     const deleted = count - this._events.length;
-    const seeds: Committed<Schemas, keyof Schemas>[] = [];
+    const committed: Committed<Schemas, keyof Schemas>[] = [];
     for (const { stream, snapshot, meta } of targets) {
       this._streams.delete(stream);
-      const committed: Committed<Schemas, keyof Schemas> = {
+      const event: Committed<Schemas, keyof Schemas> = {
         id: this._events.length,
         stream,
         version: 0,
@@ -471,9 +471,9 @@ export class InMemoryStore implements Store {
         data: snapshot ?? {},
         meta: meta ?? { correlation: "", causation: {} },
       };
-      this._events.push(committed);
-      seeds.push(committed);
+      this._events.push(event);
+      committed.push(event);
     }
-    return { deleted, seeds };
+    return { deleted, committed };
   }
 }

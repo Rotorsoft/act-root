@@ -341,7 +341,11 @@ archive: async (stream) => {
 - Truncate + seed is atomic — if it fails, the guard tombstone remains, stream is safe
 - Idempotent — closing already-tombstoned streams is a no-op
 
-**Tombstone events** (`__tombstone__`): A tombstone marks a stream as permanently closed. `action()` throws `StreamClosedError` when the last event on a stream is a tombstone. The only way to reopen is via `close()` with a `restart` callback.
+**Tombstone events** (`__tombstone__`): A tombstone marks a stream as permanently closed. `action()` throws `StreamClosedError` when the last event on a stream is a tombstone. The only way to reopen is via `close()` with `restart: true`.
+
+**`truncate()` Store primitive** — atomically deletes all events, removes stream metadata, and inserts a seed event (`__snapshot__` or `__tombstone__`) in a single transaction. Returns `{ deleted: number, committed: Committed[] }` so callers can use the real store-assigned event IDs (e.g., for cache warming).
+
+**Meta traceability** — all events in a close operation share a correlation UUID. Guard tombstones start the chain; truncate seeds reference the guard via `causation.event`.
 
 ```typescript
 app.on("closed", (result: CloseResult) => {
@@ -681,7 +685,7 @@ interface Store extends Disposable {
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
-  truncate(targets: {stream, snapshot?}[]): Promise<number>;  // Atomic truncate + seed
+  truncate(targets: {stream, snapshot?, meta?}[]): Promise<{deleted, committed}>;  // Atomic truncate + seed
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```

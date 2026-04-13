@@ -359,7 +359,7 @@ export interface Store extends Disposable {
     }>
   ) => Promise<{
     deleted: number;
-    seeds: Committed<Schemas, keyof Schemas>[];
+    committed: Committed<Schemas, keyof Schemas>[];
   }>;
 }
 

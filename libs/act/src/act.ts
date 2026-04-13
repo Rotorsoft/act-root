@@ -1177,19 +1177,20 @@ export class Act<
         },
       };
     });
-    const { deleted: truncated, seeds } = await store().truncate(truncTargets);
+    const { deleted: truncated, committed } =
+      await store().truncate(truncTargets);
 
-    // 8. Cache invalidate / warm — use real event IDs from committed seeds
-    const seedById = new Map(seeds.map((s) => [s.stream, s]));
+    // 8. Cache invalidate / warm — use real event IDs from committed events
+    const committedById = new Map(committed.map((c) => [c.stream, c]));
     await Promise.all(
       guarded.map(async (stream) => {
-        const committed = seedById.get(stream);
+        const event = committedById.get(stream);
         const state = seedStates.get(stream);
-        if (state && committed) {
+        if (state && event) {
           await cache().set(stream, {
             state,
-            version: committed.version,
-            event_id: committed.id,
+            version: event.version,
+            event_id: event.id,
             patches: 0,
             snaps: 1,
           });
