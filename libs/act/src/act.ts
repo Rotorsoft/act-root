@@ -1152,11 +1152,16 @@ export class Act<
     }
 
     // 7. Truncate + seed — atomic per store transaction
+    const correlation = randomUUID();
     const restarted: string[] = [];
     const truncTargets = guarded.map((stream) => {
       const snapshot = seedStates.get(stream);
       if (snapshot) restarted.push(stream);
-      return { stream, snapshot };
+      return {
+        stream,
+        snapshot,
+        meta: { correlation, causation: {} },
+      };
     });
     const truncated = await store().truncate(truncTargets);
 

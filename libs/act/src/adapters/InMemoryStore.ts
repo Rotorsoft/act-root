@@ -446,27 +446,24 @@ export class InMemoryStore implements Store {
    * @param targets - Streams to truncate with optional snapshot state.
    * @returns Count of deleted events.
    */
-  async truncate(targets: Array<{ stream: string; snapshot?: any }>) {
+  async truncate(
+    targets: Array<{ stream: string; snapshot?: any; meta?: any }>
+  ) {
     await sleep();
     const streamSet = new Set(targets.map((t) => t.stream));
     const count = this._events.length;
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
     const deleted = count - this._events.length;
-    for (const { stream, snapshot } of targets) {
+    for (const { stream, snapshot, meta } of targets) {
       this._streams.delete(stream);
-      // Seed with snapshot or tombstone
-      const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
       const committed: Committed<Schemas, keyof Schemas> = {
         id: this._events.length,
         stream,
         version: 0,
         created: new Date(),
-        name,
+        name: snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT,
         data: snapshot ?? {},
-        meta: {
-          correlation: "",
-          causation: {},
-        },
+        meta: meta ?? { correlation: "", causation: {} },
       };
       this._events.push(committed);
     }

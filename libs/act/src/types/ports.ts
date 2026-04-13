@@ -352,7 +352,11 @@ export interface Store extends Disposable {
    * @see {@link Act.close} for the high-level close-the-books API
    */
   truncate: (
-    targets: Array<{ stream: string; snapshot?: Schema }>
+    targets: Array<{
+      stream: string;
+      snapshot?: Schema;
+      meta?: EventMeta;
+    }>
   ) => Promise<number>;
 }
 

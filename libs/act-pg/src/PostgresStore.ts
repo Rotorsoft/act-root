@@ -707,7 +707,11 @@ export class PostgresStore implements Store {
    * @returns Count of deleted events.
    */
   async truncate(
-    targets: Array<{ stream: string; snapshot?: Record<string, any> }>
+    targets: Array<{
+      stream: string;
+      snapshot?: Record<string, any>;
+      meta?: Record<string, any>;
+    }>
   ): Promise<number> {
     if (!targets.length) return 0;
     const streams = targets.map((t) => t.stream);
@@ -721,13 +725,17 @@ export class PostgresStore implements Store {
       await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
         streams,
       ]);
-      // Seed each stream with a snapshot or tombstone
-      for (const { stream, snapshot } of targets) {
+      for (const { stream, snapshot, meta } of targets) {
         const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
         await client.query(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, 0, now(), $4)`,
-          [name, snapshot ?? {}, stream, { correlation: "", causation: {} }]
+          [
+            name,
+            snapshot ?? {},
+            stream,
+            meta ?? { correlation: "", causation: {} },
+          ]
         );
       }
       await client.query("COMMIT");

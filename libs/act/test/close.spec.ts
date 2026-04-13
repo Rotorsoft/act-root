@@ -352,6 +352,22 @@ describe("close", () => {
     expect(tombstone.data).toEqual({});
   });
 
+  it("should truncate directly without meta (fallback)", async () => {
+    await store().commit("direct-trunc", [{ name: "Evt", data: { x: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    const deleted = await store().truncate([{ stream: "direct-trunc" }]);
+    expect(deleted).toBe(1);
+    const events: any[] = [];
+    await store().query((e) => events.push(e), {
+      stream: "direct-trunc",
+      stream_exact: true,
+    });
+    expect(events[0].name).toBe(TOMBSTONE_EVENT);
+    expect(events[0].meta.correlation).toBe("");
+  });
+
   it("should have empty tombstone data for closed streams", async () => {
     await app.do("increment", { stream: "tdata", actor }, { by: 99 });
     await drainAll();
