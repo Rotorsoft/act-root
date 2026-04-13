@@ -478,6 +478,65 @@ describe("pg store", () => {
       expect(count).toBe(0);
     });
 
+    it("should truncate and seed with tombstone by default", async () => {
+      const s = store();
+      const stream = "truncate-test";
+      await s.commit(
+        stream,
+        [
+          { name: "A", data: { a: 1 } },
+          { name: "B", data: { b: 2 } },
+        ],
+        { correlation: "c", causation: {} }
+      );
+      await s.subscribe([{ stream }]);
+
+      const result = await s.truncate([{ stream }]);
+      expect(result.get(stream)!.deleted).toBe(2);
+
+      // Only tombstone remains
+      const after: any[] = [];
+      await s.query((e) => after.push(e), {
+        stream,
+        stream_exact: true,
+      });
+      expect(after.length).toBe(1);
+      expect(after[0].name).toBe("__tombstone__");
+    });
+
+    it("should truncate and seed with snapshot when provided", async () => {
+      const s = store();
+      const stream = "truncate-snap";
+      await s.commit(stream, [{ name: "A", data: { a: 1 } }], {
+        correlation: "c",
+        causation: {},
+      });
+
+      const result = await s.truncate([{ stream, snapshot: { count: 99 } }]);
+      expect(result.get(stream)!.deleted).toBe(1);
+
+      // Only snapshot remains
+      const after: any[] = [];
+      await s.query((e) => after.push(e), {
+        stream,
+        stream_exact: true,
+        with_snaps: true,
+      });
+      expect(after.length).toBe(1);
+      expect(after[0].name).toBe("__snapshot__");
+      expect(after[0].data).toEqual({ count: 99 });
+    });
+
+    it("should return empty map when truncating empty array", async () => {
+      const result = await store().truncate([]);
+      expect(result.size).toBe(0);
+    });
+
+    it("should return 0 deleted for non-existent streams", async () => {
+      const result = await store().truncate([{ stream: "does-not-exist-xyz" }]);
+      expect(result.get("does-not-exist-xyz")!.deleted).toBe(0);
+    });
+
     it("should not claim blocked streams", async () => {
       const s = store();
       await s.subscribe([{ stream: "block-test" }]);
@@ -681,6 +740,45 @@ describe("PostgresStore error paths", () => {
     expect(result).toEqual([]);
   });
 
+  it("should handle truncate() error", async () => {
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockClient("DELETE") as any
+    );
+    await expect(db.truncate([{ stream: "x" }])).rejects.toThrow(
+      "mocked DELETE error"
+    );
+  });
+
+  it("should handle truncate() with null rowCount on delete", async () => {
+    const mockTruncateClient = {
+      query: (sql: string) => {
+        if (typeof sql === "string" && sql.includes("INSERT"))
+          return Promise.resolve({
+            rows: [
+              {
+                id: 1,
+                stream: "x",
+                version: 0,
+                name: "__tombstone__",
+                data: {},
+                meta: {},
+                created: new Date(),
+              },
+            ],
+            rowCount: 1,
+          });
+        // DELETE and other queries return null rowCount
+        return Promise.resolve({ rows: [], rowCount: null });
+      },
+      release: () => {},
+    };
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () => mockTruncateClient as any
+    );
+    const result = await db.truncate([{ stream: "x" }]);
+    expect(result.get("x")!.deleted).toBe(0);
+  });
+
   it("should handle ROLLBACK failure gracefully", async () => {
     // Mock where every query fails — both the operation and the ROLLBACK
     const failAll = () => ({
@@ -708,6 +806,7 @@ describe("PostgresStore error paths", () => {
         causation: {},
       })
     ).rejects.toThrow();
+    await expect(db.truncate([{ stream: "x" }])).rejects.toThrow();
   });
 });
 

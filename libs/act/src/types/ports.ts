@@ -63,6 +63,16 @@ export interface Logger extends Disposable {
 // ---------------------------------------------------------------------------
 
 /**
+ * Result of a {@link Store.truncate} operation, keyed by stream name.
+ * Each entry contains the number of deleted events and the committed
+ * seed event (snapshot or tombstone).
+ */
+export type TruncateResult = Map<
+  string,
+  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+>;
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -336,6 +346,28 @@ export interface Store extends Disposable {
    * @see {@link Act.rebuild} for the high-level rebuild API
    */
   reset: (streams: string[]) => Promise<number>;
+
+  /**
+   * Atomically truncates streams and seeds each with a final event.
+   *
+   * For each target, in a single transaction:
+   * 1. Deletes all events for the stream
+   * 2. Removes the stream's entry from the streams table
+   * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
+   *    `__tombstone__` event as the sole event on the stream
+   *
+   * @param targets - Streams to truncate with optional snapshot state and meta
+   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event
+   *
+   * @see {@link Act.close} for the high-level close-the-books API
+   */
+  truncate: (
+    targets: Array<{
+      stream: string;
+      snapshot?: Schema;
+      meta?: EventMeta;
+    }>
+  ) => Promise<TruncateResult>;
 }
 
 // ---------------------------------------------------------------------------

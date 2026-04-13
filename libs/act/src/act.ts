@@ -2,11 +2,20 @@ import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import { config } from "./config.js";
 import * as es from "./event-sourcing.js";
-import { build_tracer, dispose, log, store } from "./ports.js";
+import {
+  build_tracer,
+  cache,
+  dispose,
+  log,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
   BatchHandler,
+  CloseResult,
+  CloseTarget,
   Committed,
   Drain,
   DrainOptions,
@@ -87,6 +96,7 @@ export class Act<
   emit(event: "acked", args: Lease[]): boolean;
   emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
   emit(event: "settled", args: Drain<TEvents>): boolean;
+  emit(event: "closed", args: CloseResult): boolean;
   emit(event: string, args: any): boolean {
     return this._emitter.emit(event, args);
   }
@@ -108,6 +118,7 @@ export class Act<
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
   on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
+  on(event: "closed", listener: (args: CloseResult) => void): this;
   on(event: string, listener: (args: any) => void): this {
     this._emitter.on(event, listener);
     return this;
@@ -130,6 +141,7 @@ export class Act<
     listener: (args: Array<Lease & { error: string }>) => void
   ): this;
   off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
+  off(event: "closed", listener: (args: CloseResult) => void): this;
   off(event: string, listener: (args: any) => void): this {
     this._emitter.off(event, listener);
     return this;
@@ -984,6 +996,199 @@ export class Act<
       clearTimeout(this._settle_timer);
       this._settle_timer = undefined;
     }
+  }
+
+  /**
+   * Close the books — guard, archive, truncate, and optionally restart streams.
+   *
+   * Safely removes historical events from the operational store:
+   *
+   * 1. **Correlate** — discover pending reaction targets
+   * 2. **Safety check** — skip streams with pending reactions (skipped when no reactive events)
+   * 3. **Guard** — commit `__tombstone__` with `expectedVersion` to block concurrent writes
+   * 4. **Load state** — for streams in `snapshots`, load final state while guarded (no races)
+   * 5. **Archive** — user callback per stream (abort-all on failure, streams are guarded)
+   * 6. **Truncate + seed** — atomic: delete all events, insert `__snapshot__` or `__tombstone__`
+   * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
+   * 8. **Emit "closed"** — lifecycle event with results
+   *
+   * @param targets - Per-stream close options (stream, restart?, archive?)
+   * @returns `{ truncated: TruncateResult, skipped: string[] }`
+   *
+   * @example Archive and close
+   * ```typescript
+   * await app.close([
+   *   { stream: "order-123", archive: async () => { await archiveToS3("order-123"); } },
+   *   { stream: "order-456" },
+   * ]);
+   * ```
+   *
+   * @example Close with restart (state loaded automatically after guard)
+   * ```typescript
+   * await app.close([
+   *   { stream: "counter-1", restart: true },
+   *   { stream: "counter-2" },  // tombstoned
+   * ]);
+   * ```
+   */
+  async close(targets: CloseTarget[]): Promise<CloseResult> {
+    if (!targets.length) return { truncated: new Map(), skipped: [] };
+
+    const targetMap = new Map(targets.map((t) => [t.stream, t]));
+    const streams = [...targetMap.keys()];
+
+    // 1. Correlate — ensure all dynamic reaction targets are discovered
+    await this.correlate({ limit: 1000 });
+
+    // 2. Find max domain event ID + version per stream (parallel, O(1) each)
+    const streamInfo = new Map<string, { maxId: number; version: number }>();
+    await Promise.all(
+      streams.map(async (s) => {
+        let maxId = -1;
+        let version = -1;
+        await store().query(
+          (e) => {
+            if (e.name !== TOMBSTONE_EVENT) {
+              maxId = e.id;
+              version = e.version;
+            }
+          },
+          { stream: s, stream_exact: true, backward: true, limit: 1 }
+        );
+        if (maxId >= 0) streamInfo.set(s, { maxId, version });
+      })
+    );
+
+    // 3. Safety check — skip entirely when app has no reactions
+    const skipped: string[] = [];
+    let safe: string[];
+
+    if (this._reactive_events.size === 0) {
+      safe = [...streamInfo.keys()];
+    } else {
+      const pendingSet = new Set<string>();
+      const leases = await store().claim(1000, 1000, randomUUID(), 1);
+      if (leases.length) await store().ack(leases);
+
+      for (const lease of leases) {
+        const sourceRe = lease.source ? RegExp(lease.source) : undefined;
+        for (const [stream, info] of streamInfo) {
+          if ((!sourceRe || sourceRe.test(stream)) && lease.at < info.maxId) {
+            pendingSet.add(stream);
+          }
+        }
+      }
+
+      safe = [];
+      for (const [stream] of streamInfo) {
+        if (pendingSet.has(stream)) {
+          skipped.push(stream);
+        } else {
+          safe.push(stream);
+        }
+      }
+    }
+
+    if (!safe.length) {
+      const result: CloseResult = { truncated: new Map(), skipped };
+      this.emit("closed", result);
+      return result;
+    }
+
+    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
+    //    All guards share a correlation UUID (the close operation ID).
+    const correlation = randomUUID();
+    const guarded: string[] = [];
+    const guardEvents = new Map<string, { id: number; stream: string }>();
+    await Promise.all(
+      safe.map(async (stream) => {
+        try {
+          const info = streamInfo.get(stream)!;
+          const [committed] = await store().commit(
+            stream,
+            [{ name: TOMBSTONE_EVENT, data: {} }],
+            { correlation, causation: {} },
+            info.version
+          );
+          guarded.push(stream);
+          guardEvents.set(stream, { id: committed.id, stream });
+        } catch {
+          skipped.push(stream);
+        }
+      })
+    );
+
+    if (!guarded.length) {
+      const result: CloseResult = { truncated: new Map(), skipped };
+      this.emit("closed", result);
+      return result;
+    }
+
+    // 5. Load final state for restart streams (guarded — no races)
+    const mergedState = [...this._states.values()][0];
+    const seedStates = new Map<string, Schema>();
+    if (mergedState) {
+      await Promise.all(
+        guarded
+          .filter((s) => targetMap.get(s)?.restart)
+          .map(async (stream) => {
+            const snap = await es.load(mergedState, stream);
+            seedStates.set(stream, snap.state as Schema);
+          })
+      );
+    }
+
+    // 6. Archive — per-stream callback while guarded
+    for (const stream of guarded) {
+      const archiveFn = targetMap.get(stream)?.archive;
+      if (archiveFn) await archiveFn();
+    }
+
+    // 7. Truncate + seed — atomic per store transaction.
+    //    Seed meta traces back to the guard tombstone via causation.event.
+    const truncTargets = guarded.map((stream) => {
+      const snapshot = seedStates.get(stream);
+      const guard = guardEvents.get(stream)!;
+      return {
+        stream,
+        snapshot,
+        meta: {
+          correlation,
+          causation: {
+            event: {
+              id: guard.id,
+              name: TOMBSTONE_EVENT,
+              stream: guard.stream,
+            },
+          },
+        },
+      };
+    });
+    const truncated = await store().truncate(truncTargets);
+
+    // 8. Cache invalidate / warm — use real event IDs from committed events
+    await Promise.all(
+      guarded.map(async (stream) => {
+        const entry = truncated.get(stream);
+        const state = seedStates.get(stream);
+        if (state && entry) {
+          await cache().set(stream, {
+            state,
+            version: entry.committed.version,
+            event_id: entry.committed.id,
+            patches: 0,
+            snaps: 1,
+          });
+        } else {
+          await cache().invalidate(stream);
+        }
+      })
+    );
+
+    // 9. Emit lifecycle event
+    const result: CloseResult = { truncated, skipped };
+    this.emit("closed", result);
+    return result;
   }
 
   /**

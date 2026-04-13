@@ -483,3 +483,42 @@ const ItemSlice = slice()
 - **One custom patch per event** — conflicting custom patches throw at build time. Passthroughs always yield to custom reducers.
 
 **Important:** `.void()` reactions are **never processed by `drain()`**. Use `.to(resolver)` for any reaction that must be discovered and executed during drain.
+
+## 14. Close the Books — Stream Archival and Truncation
+
+`app.close()` safely archives, truncates, and optionally restarts streams. It guards streams with a tombstone to block concurrent writes, archives while guarded, then atomically truncates + seeds each stream.
+
+```typescript
+const result = await app.close([
+  {
+    stream: "counter-1",
+    restart: true,  // restart with snapshot of final state
+    archive: async () => {
+      const events = await app.query_array({ stream: "counter-1", stream_exact: true });
+      await s3.putObject({ Key: "counter-1.json", Body: JSON.stringify(events) });
+    },
+  },
+  { stream: "counter-2" },  // tombstoned
+]);
+
+// result: { truncated: Map<stream, {deleted, committed}>, skipped: string[] }
+```
+
+**Key types:**
+- `CloseTarget` — `{ stream: string; restart?: boolean; archive?: () => Promise<void> }`
+- `StreamClosedError` — thrown by `action()` when writing to a tombstoned stream
+- `TOMBSTONE_EVENT` (`"__tombstone__"`) — marks a stream as permanently closed
+- `CloseResult` — `{ truncated: TruncateResult, skipped: string[] }`
+- `TruncateResult` — `Map<string, { deleted: number, committed: Committed }>`
+
+**Flow:** correlate → safety check → guard (tombstone with expectedVersion) → load state (for restart) → archive → atomic truncate + seed → cache update → emit "closed"
+
+**In tests:**
+```typescript
+await app.do("increment", { stream: "s1", actor }, { by: 1 });
+await app.correlate();
+await app.drain();
+const result = await app.close([{ stream: "s1" }]);
+expect(result.truncated.has("s1")).toBe(true);
+await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
+```

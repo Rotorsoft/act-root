@@ -5,10 +5,16 @@ import type {
   Logger,
   Message,
   Query,
+  Schema,
   Schemas,
   Store,
 } from "@rotorsoft/act";
-import { ConcurrencyError, SNAP_EVENT, log } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+  log,
+} from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
 const logger: Logger = log();
@@ -694,5 +700,65 @@ export class PostgresStore implements Store {
       [streams]
     );
     return rowCount ?? 0;
+  }
+
+  /**
+   * Atomically truncates streams and seeds each with a snapshot or tombstone.
+   * @param targets - Streams to truncate with optional snapshot state and meta.
+   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event.
+   */
+  async truncate(
+    targets: Array<{
+      stream: string;
+      snapshot?: Schema;
+      meta?: EventMeta;
+    }>
+  ): Promise<
+    Map<
+      string,
+      { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+    >
+  > {
+    if (!targets.length) return new Map();
+    const streams = targets.map((t) => t.stream);
+    const client = await this._pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
+        streams,
+      ]);
+      const result = new Map<
+        string,
+        { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+      >();
+      for (const { stream, snapshot, meta } of targets) {
+        const { rowCount } = await client.query(
+          `DELETE FROM ${this._fqt} WHERE stream = $1`,
+          [stream]
+        );
+        const name = snapshot !== undefined ? SNAP_EVENT : TOMBSTONE_EVENT;
+        const { rows } = await client.query(
+          `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
+           VALUES($1, $2, $3, 0, now(), $4) RETURNING *`,
+          [
+            name,
+            snapshot ?? {},
+            stream,
+            meta ?? { correlation: "", causation: {} },
+          ]
+        );
+        result.set(stream, {
+          deleted: rowCount ?? 0,
+          committed: rows[0] as Committed<Schemas, keyof Schemas>,
+        });
+      }
+      await client.query("COMMIT");
+      return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 }

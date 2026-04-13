@@ -1,5 +1,6 @@
 import type { Patch } from "@rotorsoft/act-patch";
 import { z, ZodType } from "zod";
+import type { TruncateResult } from "./ports.js";
 import {
   ActorSchema,
   CausationEventSchema,
@@ -401,6 +402,38 @@ export type InferEvents<
   T extends { readonly events: Record<string, ZodType> },
 > = {
   [K in keyof T["events"]]: T["events"][K] extends ZodType<infer V> ? V : never;
+};
+
+/**
+ * Options for closing (archiving and truncating) streams.
+ *
+ * @see {@link IAct.close} for the close-the-books API
+ */
+/**
+ * Per-stream options for closing.
+ */
+export type CloseTarget = {
+  /** Stream name to close */
+  readonly stream: string;
+  /** When true, restart with a `__snapshot__` of the final state.
+   *  When false/omitted, permanently close with a `__tombstone__`. */
+  readonly restart?: boolean;
+  /** Called before truncation while the stream is guarded (no concurrent writes).
+   *  Use `app.query()` or `app.query_array()` inside for pagination.
+   *  If it throws, the stream remains guarded but is not truncated. */
+  readonly archive?: () => Promise<void>;
+};
+
+/**
+ * Result of a close operation.
+ *
+ * @see {@link IAct.close} for the close-the-books API
+ */
+export type CloseResult = {
+  /** Per-stream truncate results (deleted count + committed event) */
+  readonly truncated: TruncateResult;
+  /** Streams skipped due to pending reactions or concurrent writes */
+  readonly skipped: string[];
 };
 
 /**

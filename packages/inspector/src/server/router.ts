@@ -506,7 +506,12 @@ export const inspectorRouter = t.router({
 
       const streamMap = new Map<
         string,
-        { count: number; lastEvent: string; lastVersion: number }
+        {
+          count: number;
+          lastEvent: string;
+          lastVersion: number;
+          lastEventName: string;
+        }
       >();
 
       for (const e of events) {
@@ -516,6 +521,7 @@ export const inspectorRouter = t.router({
             count: (existing?.count ?? 0) + 1,
             lastEvent: String(e.created),
             lastVersion: e.version,
+            lastEventName: String(e.name),
           });
         } else {
           existing.count++;
@@ -528,6 +534,7 @@ export const inspectorRouter = t.router({
           eventCount: info.count,
           lastEvent: info.lastEvent,
           currentVersion: info.lastVersion,
+          isClosed: info.lastEventName === "__tombstone__",
         }))
         .sort((a, b) => b.eventCount - a.eventCount)
         .slice(0, input?.limit ?? 100);
