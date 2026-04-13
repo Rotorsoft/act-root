@@ -1051,56 +1051,48 @@ export class Act<
     // 1. Correlate — ensure all dynamic reaction targets are discovered
     await this.correlate({ limit: 1000 });
 
-    // 2. Collect stream info in parallel: max event ID + version + state
-    const mergedState = [...this._states.values()][0];
-    const streamInfo = new Map<
-      string,
-      { state: TStateMap[keyof TStateMap]; version: number; maxId: number }
-    >();
+    // 2. Find max domain event ID per stream (parallel, O(1) each)
+    const streamMaxIds = new Map<string, number>();
     await Promise.all(
       streams.map(async (stream) => {
         let maxId = -1;
-        let version = -1;
         await store().query(
           (e) => {
-            if (e.name !== TOMBSTONE_EVENT) {
-              maxId = e.id;
-              version = e.version;
-            }
+            if (e.name !== TOMBSTONE_EVENT) maxId = e.id;
           },
           { stream, stream_exact: true, backward: true, limit: 1 }
         );
-        if (maxId < 0) return;
-        const state = mergedState
-          ? (await es.load(mergedState, stream)).state
-          : ({} as TStateMap[keyof TStateMap]);
-        streamInfo.set(stream, { state, version, maxId });
+        if (maxId >= 0) streamMaxIds.set(stream, maxId);
       })
     );
 
-    // 3. Safety check — claim reaction streams and compare watermarks
-    const pendingSet = new Set<string>();
-    const leases = await store().claim(1000, 1000, randomUUID(), 1);
-    if (leases.length) await store().ack(leases);
+    // 3. Safety check — skip entirely when app has no reactions
+    const skipped: string[] = [];
+    let safe: string[];
 
-    // Pre-compile source regexes and check all closing streams per lease
-    for (const lease of leases) {
-      const sourceRe = lease.source ? RegExp(lease.source) : undefined;
-      for (const [stream, info] of streamInfo) {
-        if ((!sourceRe || sourceRe.test(stream)) && lease.at < info.maxId) {
-          pendingSet.add(stream);
+    if (this._reactive_events.size === 0) {
+      safe = [...streamMaxIds.keys()];
+    } else {
+      const pendingSet = new Set<string>();
+      const leases = await store().claim(1000, 1000, randomUUID(), 1);
+      if (leases.length) await store().ack(leases);
+
+      for (const lease of leases) {
+        const sourceRe = lease.source ? RegExp(lease.source) : undefined;
+        for (const [stream, maxId] of streamMaxIds) {
+          if ((!sourceRe || sourceRe.test(stream)) && lease.at < maxId) {
+            pendingSet.add(stream);
+          }
         }
       }
-    }
 
-    const safe: string[] = [];
-    const skipped: string[] = [];
-
-    for (const [stream] of streamInfo) {
-      if (pendingSet.has(stream)) {
-        skipped.push(stream);
-      } else {
-        safe.push(stream);
+      safe = [];
+      for (const [stream] of streamMaxIds) {
+        if (pendingSet.has(stream)) {
+          skipped.push(stream);
+        } else {
+          safe.push(stream);
+        }
       }
     }
 
@@ -1115,25 +1107,24 @@ export class Act<
       return result;
     }
 
-    // 4. Archive (sequential — abort-all on any failure, no mutations yet)
+    // 4. Load state only when restart callback needs it (parallel, cache-warm)
+    const mergedState = [...this._states.values()][0];
+    const streamStates = new Map<string, TStateMap[keyof TStateMap]>();
+    if (restart && mergedState) {
+      await Promise.all(
+        safe.map(async (stream) => {
+          const snap = await es.load(mergedState, stream);
+          streamStates.set(stream, snap.state as TStateMap[keyof TStateMap]);
+        })
+      );
+    }
+
+    // 5. Archive (sequential — abort-all on any failure, no mutations yet)
     if (archive) {
       for (const stream of safe) {
         await archive(stream);
       }
     }
-
-    // 5. Commit tombstones in parallel
-    await Promise.all(
-      safe.map((stream) => {
-        const info = streamInfo.get(stream)!;
-        return store().commit(
-          stream,
-          [{ name: TOMBSTONE_EVENT, data: info.state }],
-          { correlation: randomUUID(), causation: {} },
-          info.version
-        );
-      })
-    );
 
     // 6. Truncate — single batch operation
     const truncated = await store().truncate(safe);
@@ -1141,12 +1132,13 @@ export class Act<
     // 7. Cache invalidate in parallel
     await Promise.all(safe.map((stream) => cache().invalidate(stream)));
 
-    // 8. Restart with snapshot or re-commit tombstone — in parallel
+    // 8. Restart with snapshot or commit tombstone (parallel)
+    //    Stream is empty after truncate — no expectedVersion needed.
     const restarted: string[] = [];
     await Promise.all(
       safe.map(async (stream) => {
-        const info = streamInfo.get(stream)!;
-        const seed = restart?.(stream, info.state);
+        const state = streamStates.get(stream);
+        const seed = state !== undefined ? restart?.(stream, state) : undefined;
         if (seed) {
           await store().commit(stream, [{ name: SNAP_EVENT, data: seed }], {
             correlation: randomUUID(),
@@ -1163,7 +1155,12 @@ export class Act<
         } else {
           await store().commit(
             stream,
-            [{ name: TOMBSTONE_EVENT, data: info.state }],
+            [
+              {
+                name: TOMBSTONE_EVENT,
+                data: (state ?? {}) as TStateMap[keyof TStateMap],
+              },
+            ],
             { correlation: randomUUID(), causation: {} }
           );
         }

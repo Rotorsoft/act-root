@@ -349,9 +349,9 @@ describe("close", () => {
       d = await app.drain();
     } while (d.acked.length);
 
+    // Without restart, tombstone is a marker with empty data (no state loaded)
     await app.close({ streams: ["tdata"] });
 
-    // Read the tombstone event
     const events: any[] = [];
     await store().query((e) => events.push(e), {
       stream: "tdata",
@@ -359,7 +359,7 @@ describe("close", () => {
     });
     const tombstone = events.find((e) => e.name === TOMBSTONE_EVENT);
     expect(tombstone).toBeDefined();
-    expect(tombstone.data.count).toBe(99);
+    expect(tombstone.data).toEqual({});
   });
 
   it("should skip streams with source-filtered pending reactions", async () => {
