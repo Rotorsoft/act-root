@@ -724,21 +724,15 @@ export class PostgresStore implements Store {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
-      // Count per-stream deletions
-      const { rows: delRows } = await client.query<{
-        stream: string;
-        count: string;
-      }>(
-        `SELECT stream, count(*)::text AS count FROM ${this._fqt}
-         WHERE stream = ANY($1) GROUP BY stream`,
+      // Delete events and count per stream from returned rows
+      const { rows: delRows } = await client.query<{ stream: string }>(
+        `DELETE FROM ${this._fqt} WHERE stream = ANY($1) RETURNING stream`,
         [streams]
       );
-      const deletedCounts = new Map(
-        delRows.map((r) => [r.stream, parseInt(r.count, 10)])
-      );
-      await client.query(`DELETE FROM ${this._fqt} WHERE stream = ANY($1)`, [
-        streams,
-      ]);
+      const deletedCounts = new Map<string, number>();
+      for (const r of delRows) {
+        deletedCounts.set(r.stream, (deletedCounts.get(r.stream) ?? 0) + 1);
+      }
       await client.query(`DELETE FROM ${this._fqs} WHERE stream = ANY($1)`, [
         streams,
       ]);
