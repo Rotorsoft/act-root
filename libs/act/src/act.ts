@@ -7,6 +7,7 @@ import {
   cache,
   dispose,
   log,
+  SNAP_EVENT,
   store,
   TOMBSTONE_EVENT,
 } from "./ports.js";
@@ -1041,7 +1042,7 @@ export class Act<
    * ```
    */
   async close(
-    options: CloseOptions<TActions, TStateMap[keyof TStateMap], TActor>
+    options: CloseOptions<TStateMap[keyof TStateMap]>
   ): Promise<CloseResult> {
     const { streams, archive, restart } = options;
     if (!streams.length)
@@ -1144,17 +1145,25 @@ export class Act<
       await cache().invalidate(stream);
     }
 
-    // 8. Re-commit tombstone for non-restarted streams, restart others
+    // 8. Restart with snapshot or re-commit tombstone
     const restarted: string[] = [];
     for (const stream of safe) {
       const info = streamInfo.get(stream)!;
-      const restartDef = restart?.(stream, info.state);
-      if (restartDef) {
-        await this.do(
-          restartDef.action,
-          { stream, actor: restartDef.actor },
-          restartDef.payload
-        );
+      const seed = restart?.(stream, info.state);
+      if (seed) {
+        // Seed the stream with a snapshot at version 0
+        await store().commit(stream, [{ name: SNAP_EVENT, data: seed }], {
+          correlation: randomUUID(),
+          causation: {},
+        });
+        // Warm the cache so subsequent loads skip the store
+        await cache().set(stream, {
+          state: seed,
+          version: 0,
+          event_id: 0,
+          patches: 0,
+          snaps: 1,
+        });
         restarted.push(stream);
       } else {
         await store().commit(

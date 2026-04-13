@@ -406,17 +406,11 @@ export type InferEvents<
 /**
  * Options for closing (archiving and truncating) streams.
  *
- * @template TActions - Action schemas from the Act instance
  * @template TState - Union of all registered state types
- * @template TActor - Actor type
  *
  * @see {@link IAct.close} for the close-the-books API
  */
-export type CloseOptions<
-  TActions extends Schemas = Schemas,
-  TState extends Schema = Schema,
-  TActor extends Actor = Actor,
-> = {
+export type CloseOptions<TState extends Schema = Schema> = {
   /** Streams to close — caller selects them using existing query/load APIs */
   readonly streams: string[];
 
@@ -433,26 +427,20 @@ export type CloseOptions<
   readonly archive?: (stream: string) => Promise<void>;
 
   /**
-   * Called for each closed stream after archival. Return an action
-   * definition to re-open the stream at version 0 — the action is
-   * executed via `app.do()` on the same stream ID, so it must be
-   * a registered action with a matching payload. Return `undefined`
-   * to leave the stream tombstoned (permanently closed).
+   * Called for each closed stream after truncation. Return a state
+   * to seed the stream with a `__snapshot__` at version 0, carrying
+   * forward whatever the domain needs for the next period. Return
+   * the state as-is for a full carryover, transform it to start
+   * fresh, or return `undefined` to leave the stream tombstoned.
    *
    * @param stream - The stream being closed
    * @param state - The final state snapshot before closure
-   * @returns Action to execute for restart, or undefined to stay closed
+   * @returns State to seed, or undefined to stay closed
    */
   readonly restart?: (
     stream: string,
     state: Readonly<TState>
-  ) =>
-    | {
-        action: keyof TActions & string;
-        payload: Readonly<TActions[keyof TActions]>;
-        actor: TActor;
-      }
-    | undefined;
+  ) => Readonly<TState> | undefined;
 };
 
 /**

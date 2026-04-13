@@ -301,12 +301,10 @@ const result = await app.close({
     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
   },
 
-  // Optional: restart streams with an opening event seeded from final state
-  restart: (stream, state) => ({
-    action: "OpenOrder",
-    payload: { balance: state.balance },
-    actor: { id: "system", name: "BookCloser" },
-  }),
+  // Optional: restart streams with a snapshot seeded from final state
+  restart: (_stream, state) => state,             // carry forward same state
+  // restart: (_stream, state) => ({ ...state, period: 2 }),  // or transform it
+  // restart: () => undefined,                     // or leave tombstoned
 });
 
 // result: { closed, truncated, skipped, restarted }

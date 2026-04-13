@@ -165,20 +165,16 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["restart"],
-      restart: (_stream, finalState) => ({
-        action: "increment",
-        payload: { by: finalState.count },
-        actor,
-      }),
+      restart: (_stream, finalState) => finalState, // carry forward same state
     });
 
     expect(result.closed).toEqual(["restart"]);
     expect(result.restarted).toEqual(["restart"]);
 
-    // Stream should be alive with the restarted state
+    // Stream should be alive with the restarted state (seeded via snapshot)
     const snap = await app.load(counter, "restart");
     expect(snap.state.count).toBe(42);
-    expect(snap.patches).toBe(1); // only the opening event
+    expect(snap.patches).toBe(0); // snapshot only, no domain events yet
 
     // No tombstone should remain
     const events: any[] = [];
@@ -201,10 +197,8 @@ describe("close", () => {
 
     const result = await app.close({
       streams: ["sel-a", "sel-b"],
-      restart: (stream) => {
-        if (stream === "sel-a") {
-          return { action: "increment", payload: { by: 1 }, actor };
-        }
+      restart: (stream, state) => {
+        if (stream === "sel-a") return state; // restart sel-a with same state
         return undefined; // sel-b stays closed
       },
     });
@@ -212,9 +206,9 @@ describe("close", () => {
     expect(result.restarted).toEqual(["sel-a"]);
     expect(result.closed).toEqual(["sel-a", "sel-b"]);
 
-    // sel-a should be alive
+    // sel-a should be alive with carried-forward state
     const snapA = await app.load(counter, "sel-a");
-    expect(snapA.state.count).toBe(1);
+    expect(snapA.state.count).toBe(10);
 
     // sel-b should be tombstoned
     await expect(

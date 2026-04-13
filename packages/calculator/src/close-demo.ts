@@ -99,11 +99,7 @@ async function main() {
       archive[stream] = events;
       console.log(`  Archived ${events.length} events from ${stream}`);
     },
-    restart: (_stream, finalState) => ({
-      action: "increment",
-      payload: { by: finalState.count },
-      actor: { id: "system", name: "BookCloser" },
-    }),
+    restart: (_stream, finalState) => finalState, // carry forward same state
   });
 
   console.log(`  Closed: ${restartResult.closed.join(", ")}`);
