@@ -408,40 +408,19 @@ export type InferEvents<
  *
  * @see {@link IAct.close} for the close-the-books API
  */
-export type CloseOptions = {
-  /** Streams to close — caller selects them using existing query/load APIs */
-  readonly streams: string[];
-
-  /**
-   * Called for each stream before truncation. The callback receives only
-   * the stream name — use `app.query()` or `app.query_array()` inside
-   * the callback to page through events with whatever batch size fits
-   * your archival target. No events are loaded into memory by the
-   * framework; the caller has full control over pagination.
-   *
-   * If it throws for any stream, the entire operation aborts —
-   * nothing is truncated.
-   */
-  readonly archive?: (stream: string) => Promise<void>;
-
-  /**
-   * Map of stream → state for streams that should be restarted with a
-   * `__snapshot__` at version 0 after truncation. Streams not in this
-   * map get a `__tombstone__` instead (permanently closed).
-   *
-   * Load state via `app.load()` before calling `close()` and include
-   * the streams you want to restart.
-   *
-   * @example
-   * ```typescript
-   * const snap = await app.load(Counter, "counter-1");
-   * await app.close({
-   *   streams: ["counter-1", "counter-2"],
-   *   snapshots: { "counter-1": snap.state },  // restart counter-1, tombstone counter-2
-   * });
-   * ```
-   */
-  readonly snapshots?: Record<string, Schema>;
+/**
+ * Per-stream options for closing.
+ */
+export type CloseTarget = {
+  /** Stream name to close */
+  readonly stream: string;
+  /** When true, restart with a `__snapshot__` of the final state.
+   *  When false/omitted, permanently close with a `__tombstone__`. */
+  readonly restart?: boolean;
+  /** Called before truncation while the stream is guarded (no concurrent writes).
+   *  Use `app.query()` or `app.query_array()` inside for pagination.
+   *  If it throws, the stream remains guarded but is not truncated. */
+  readonly archive?: () => Promise<void>;
 };
 
 /**

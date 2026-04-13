@@ -489,38 +489,35 @@ const ItemSlice = slice()
 `app.close()` safely archives, truncates, and optionally restarts streams. It guards streams with a tombstone to block concurrent writes, archives while guarded, then atomically truncates + seeds each stream.
 
 ```typescript
-// Load state before close if you need to restart
-const snap = await app.load(Counter, "counter-1");
-
-const result = await app.close({
-  streams: ["counter-1", "counter-2"],
-
-  // Optional: archive events (streams are guarded — no concurrent writes)
-  archive: async (stream) => {
-    const events = await app.query_array({ stream, stream_exact: true });
-    await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
+const result = await app.close([
+  {
+    stream: "counter-1",
+    restart: true,  // restart with snapshot of final state
+    archive: async () => {
+      const events = await app.query_array({ stream: "counter-1", stream_exact: true });
+      await s3.putObject({ Key: "counter-1.json", Body: JSON.stringify(events) });
+    },
   },
-
-  // Optional: restart streams with a snapshot (others get tombstoned)
-  snapshots: { "counter-1": snap.state },
-});
+  { stream: "counter-2" },  // tombstoned
+]);
 
 // result: { closed, truncated, skipped, restarted }
 ```
 
 **Key types:**
+- `CloseTarget` — `{ stream: string; restart?: boolean; archive?: () => Promise<void> }`
 - `StreamClosedError` — thrown by `action()` when writing to a tombstoned stream
 - `TOMBSTONE_EVENT` (`"__tombstone__"`) — marks a stream as permanently closed
 - `CloseResult` — `{ closed: string[], truncated: number, skipped: string[], restarted: string[] }`
 
-**Flow:** correlate → safety check → guard (tombstone with expectedVersion) → archive → atomic truncate + seed → cache update → emit "closed"
+**Flow:** correlate → safety check → guard (tombstone with expectedVersion) → load state (for restart) → archive → atomic truncate + seed → cache update → emit "closed"
 
 **In tests:**
 ```typescript
 await app.do("increment", { stream: "s1", actor }, { by: 1 });
 await app.correlate();
 await app.drain();
-const result = await app.close({ streams: ["s1"] });
+const result = await app.close([{ stream: "s1" }]);
 expect(result.closed).toEqual(["s1"]);
 await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
 ```

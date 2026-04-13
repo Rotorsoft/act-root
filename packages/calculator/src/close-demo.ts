@@ -4,10 +4,9 @@
  * Demonstrates how app.close() enables safe stream archival and truncation:
  * 1. Build a counter app and emit events across multiple streams
  * 2. Drain all reactions so streams are fully settled
- * 3. Archive events to "cold storage" (in-memory map for demo)
- * 4. Close streams — truncating events and leaving tombstones
- * 5. Verify tombstoned streams reject writes
- * 6. Restart a stream with an opening event seeded from final state
+ * 3. Close streams — guard, archive, truncate + seed atomically
+ * 4. Verify tombstoned streams reject writes
+ * 5. Restart a stream with a snapshot of its final state
  *
  * Run: pnpm -F calculator dev:close
  */
@@ -44,7 +43,6 @@ async function main() {
   await app.do("increment", { stream: "counter-C", actor }, { by: 999 });
   console.log(`  counter-C += 999`);
 
-  // Show current state
   for (const stream of ["counter-A", "counter-B", "counter-C"]) {
     const snap = await app.load(Counter, stream);
     console.log(`  ${stream} state: count=${snap.state.count}`);
@@ -54,18 +52,21 @@ async function main() {
   console.log("\n=== Closing counter-A and counter-B ===");
   const archive: Record<string, unknown[]> = {};
 
-  const result = await app.close({
-    streams: ["counter-A", "counter-B"],
-    archive: async (stream) => {
-      const events = await app.query_array({
-        stream,
-        stream_exact: true,
-        with_snaps: true,
-      });
-      archive[stream] = events;
-      console.log(`  Archived ${events.length} events from ${stream}`);
+  const result = await app.close([
+    {
+      stream: "counter-A",
+      archive: async () => {
+        const events = await app.query_array({
+          stream: "counter-A",
+          stream_exact: true,
+          with_snaps: true,
+        });
+        archive["counter-A"] = events;
+        console.log(`  Archived ${events.length} events from counter-A`);
+      },
     },
-  });
+    { stream: "counter-B" },
+  ]);
 
   console.log(`  Closed: ${result.closed.join(", ")}`);
   console.log(`  Truncated: ${result.truncated} events`);
@@ -88,19 +89,21 @@ async function main() {
 
   // --- Step 4: Close and restart counter-C ---
   console.log("\n=== Closing counter-C with restart ===");
-  const restartResult = await app.close({
-    streams: ["counter-C"],
-    archive: async (stream) => {
-      const events = await app.query_array({
-        stream,
-        stream_exact: true,
-        with_snaps: true,
-      });
-      archive[stream] = events;
-      console.log(`  Archived ${events.length} events from ${stream}`);
+  const restartResult = await app.close([
+    {
+      stream: "counter-C",
+      restart: true,
+      archive: async () => {
+        const events = await app.query_array({
+          stream: "counter-C",
+          stream_exact: true,
+          with_snaps: true,
+        });
+        archive["counter-C"] = events;
+        console.log(`  Archived ${events.length} events from counter-C`);
+      },
     },
-    snapshots: { "counter-C": snapC.state }, // restart with captured state
-  });
+  ]);
 
   console.log(`  Closed: ${restartResult.closed.join(", ")}`);
   console.log(`  Restarted: ${restartResult.restarted.join(", ")}`);
@@ -118,15 +121,15 @@ async function main() {
     );
   }
 
-  // --- Step 6: Idempotency — closing already-closed streams is a no-op ---
+  // --- Step 6: Idempotency ---
   console.log("\n=== Idempotent close (counter-A already closed) ===");
-  const idempotent = await app.close({ streams: ["counter-A"] });
+  const idempotent = await app.close([{ stream: "counter-A" }]);
   console.log(
     `  Closed: ${idempotent.closed.length}, Skipped: ${idempotent.skipped.length}`
   );
   console.log(`  (No-op — stream was already tombstoned)`);
 
-  // --- Step 7: Show remaining events in store ---
+  // --- Step 7: Show remaining events ---
   console.log("\n=== Events remaining in store ===");
   const allEvents: any[] = [];
   await app.query({ with_snaps: true }, (event) => allEvents.push(event));

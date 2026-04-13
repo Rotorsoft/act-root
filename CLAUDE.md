@@ -291,23 +291,17 @@ When `asOf` is present, `load()` bypasses the cache (read and write) and replays
 `close()` archives, tombstones, and truncates streams from the operational store. This is the event sourcing equivalent of "closing the books" in accounting — summarize the period, archive the detail, and optionally restart with a fresh opening balance.
 
 ```typescript
-const result = await app.close({
-  streams: ["order-123", "order-456"],
-
-  // Optional: archive events before truncation (abort-on-failure semantics)
-  // Uses app.query() for memory-safe pagination — no events loaded by the framework
-  archive: async (stream) => {
-    const events = await app.query_array({ stream, stream_exact: true, with_snaps: true });
-    await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
+const result = await app.close([
+  {
+    stream: "order-123",
+    restart: true,  // restart with snapshot of final state
+    archive: async () => {
+      const events = await app.query_array({ stream: "order-123", stream_exact: true });
+      await s3.putObject({ Key: "order-123.json", Body: JSON.stringify(events) });
+    },
   },
-
-  // Optional: restart streams with a snapshot seeded from captured state
-  // Load state before close() — streams not listed here get tombstoned
-  snapshots: {
-    "order-123": snap123.state,                       // restart with same state
-    // "order-456" omitted → tombstoned (permanently closed)
-  },
-});
+  { stream: "order-456" },  // tombstoned (permanently closed)
+]);
 
 // result: { closed, truncated, skipped, restarted }
 ```

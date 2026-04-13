@@ -14,8 +14,8 @@ import type {
   Actor,
   AsOf,
   BatchHandler,
-  CloseOptions,
   CloseResult,
+  CloseTarget,
   Committed,
   Drain,
   DrainOptions,
@@ -1006,41 +1006,37 @@ export class Act<
    * 1. **Correlate** — discover pending reaction targets
    * 2. **Safety check** — skip streams with pending reactions (skipped when no reactive events)
    * 3. **Guard** — commit `__tombstone__` with `expectedVersion` to block concurrent writes
-   * 4. **Archive** — user callback per stream (abort-all on failure, streams are guarded)
-   * 5. **Truncate + seed** — atomic: delete all events, insert `__snapshot__` or `__tombstone__`
-   * 6. **Cache** — invalidate (tombstoned) or warm (restarted)
-   * 7. **Emit "closed"** — lifecycle event with results
+   * 4. **Load state** — for streams in `snapshots`, load final state while guarded (no races)
+   * 5. **Archive** — user callback per stream (abort-all on failure, streams are guarded)
+   * 6. **Truncate + seed** — atomic: delete all events, insert `__snapshot__` or `__tombstone__`
+   * 7. **Cache** — invalidate (tombstoned) or warm (restarted)
+   * 8. **Emit "closed"** — lifecycle event with results
    *
-   * @param options - Close configuration
-   * @param options.streams - Stream names to close
-   * @param options.archive - Called per stream before truncation (use app.query() inside for pagination)
-   * @param options.snapshots - Map of stream → state for streams to restart with a snapshot
+   * @param targets - Per-stream close options (stream, restart?, archive?)
    * @returns Result with closed, skipped, restarted streams and truncated event count
    *
    * @example Archive and close
    * ```typescript
-   * await app.close({
-   *   streams: ["order-123", "order-456"],
-   *   archive: async (stream) => {
-   *     const events = await app.query_array({ stream, stream_exact: true });
-   *     await s3.putObject({ Key: `${stream}.json`, Body: JSON.stringify(events) });
-   *   },
-   * });
+   * await app.close([
+   *   { stream: "order-123", archive: async () => { await archiveToS3("order-123"); } },
+   *   { stream: "order-456" },
+   * ]);
    * ```
    *
-   * @example Close with restart
+   * @example Close with restart (state loaded automatically after guard)
    * ```typescript
-   * const snap = await app.load(Counter, "counter-1");
-   * await app.close({
-   *   streams: ["counter-1", "counter-2"],
-   *   snapshots: { "counter-1": snap.state },  // restart counter-1, tombstone counter-2
-   * });
+   * await app.close([
+   *   { stream: "counter-1", restart: true },
+   *   { stream: "counter-2" },  // tombstoned
+   * ]);
    * ```
    */
-  async close(options: CloseOptions): Promise<CloseResult> {
-    const { streams, archive, snapshots } = options;
-    if (!streams.length)
+  async close(targets: CloseTarget[]): Promise<CloseResult> {
+    if (!targets.length)
       return { closed: [], truncated: 0, skipped: [], restarted: [] };
+
+    const targetMap = new Map(targets.map((t) => [t.stream, t]));
+    const streams = [...targetMap.keys()];
 
     // 1. Correlate — ensure all dynamic reaction targets are discovered
     await this.correlate({ limit: 1000 });
@@ -1048,7 +1044,7 @@ export class Act<
     // 2. Find max domain event ID + version per stream (parallel, O(1) each)
     const streamInfo = new Map<string, { maxId: number; version: number }>();
     await Promise.all(
-      streams.map(async (stream) => {
+      streams.map(async (s) => {
         let maxId = -1;
         let version = -1;
         await store().query(
@@ -1058,9 +1054,9 @@ export class Act<
               version = e.version;
             }
           },
-          { stream, stream_exact: true, backward: true, limit: 1 }
+          { stream: s, stream_exact: true, backward: true, limit: 1 }
         );
-        if (maxId >= 0) streamInfo.set(stream, { maxId, version });
+        if (maxId >= 0) streamInfo.set(s, { maxId, version });
       })
     );
 
@@ -1105,8 +1101,7 @@ export class Act<
       return result;
     }
 
-    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
-    //    Streams that fail (ConcurrencyError) are moved to skipped.
+    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes
     const guarded: string[] = [];
     await Promise.all(
       safe.map(async (stream) => {
@@ -1136,28 +1131,39 @@ export class Act<
       return result;
     }
 
-    // 5. Archive (sequential — abort-all on any failure)
-    //    Streams are guarded — no concurrent writes possible.
-    if (archive) {
-      for (const stream of guarded) {
-        await archive(stream);
-      }
+    // 5. Load final state for restart streams (guarded — no races)
+    const mergedState = [...this._states.values()][0];
+    const seedStates = new Map<string, Schema>();
+    if (mergedState) {
+      await Promise.all(
+        guarded
+          .filter((s) => targetMap.get(s)?.restart)
+          .map(async (stream) => {
+            const snap = await es.load(mergedState, stream);
+            seedStates.set(stream, snap.state as Schema);
+          })
+      );
     }
 
-    // 6. Truncate + seed — atomic per store transaction.
-    //    Snapshot (restart) or tombstone (stay closed) as sole event.
-    const restarted: string[] = [];
-    const targets = guarded.map((stream) => {
-      const seed = snapshots?.[stream];
-      if (seed) restarted.push(stream);
-      return { stream, snapshot: seed };
-    });
-    const truncated = await store().truncate(targets);
+    // 6. Archive — per-stream callback while guarded
+    for (const stream of guarded) {
+      const archiveFn = targetMap.get(stream)?.archive;
+      if (archiveFn) await archiveFn();
+    }
 
-    // 7. Cache invalidate / warm
+    // 7. Truncate + seed — atomic per store transaction
+    const restarted: string[] = [];
+    const truncTargets = guarded.map((stream) => {
+      const snapshot = seedStates.get(stream);
+      if (snapshot) restarted.push(stream);
+      return { stream, snapshot };
+    });
+    const truncated = await store().truncate(truncTargets);
+
+    // 8. Cache invalidate / warm
     await Promise.all(
       guarded.map(async (stream) => {
-        const seed = snapshots?.[stream];
+        const seed = seedStates.get(stream);
         if (seed) {
           await cache().set(stream, {
             state: seed,
@@ -1172,7 +1178,7 @@ export class Act<
       })
     );
 
-    // 8. Emit lifecycle event
+    // 9. Emit lifecycle event
     const result: CloseResult = {
       closed: guarded,
       truncated,
