@@ -63,6 +63,16 @@ export interface Logger extends Disposable {
 // ---------------------------------------------------------------------------
 
 /**
+ * Result of a {@link Store.truncate} operation, keyed by stream name.
+ * Each entry contains the number of deleted events and the committed
+ * seed event (snapshot or tombstone).
+ */
+export type TruncateResult = Map<
+  string,
+  { deleted: number; committed: Committed<Schemas, keyof Schemas> }
+>;
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -357,15 +367,7 @@ export interface Store extends Disposable {
       snapshot?: Schema;
       meta?: EventMeta;
     }>
-  ) => Promise<
-    Map<
-      string,
-      {
-        deleted: number;
-        committed: Committed<Schemas, keyof Schemas>;
-      }
-    >
-  >;
+  ) => Promise<TruncateResult>;
 }
 
 // ---------------------------------------------------------------------------

@@ -303,7 +303,7 @@ const result = await app.close([
   { stream: "order-456" },  // tombstoned (permanently closed)
 ]);
 
-// result: { closed, truncated, skipped, restarted }
+// result: { truncated: Map<stream, {deleted, committed}>, skipped: string[] }
 ```
 
 **Archive pattern for large streams** — the archive callback receives only the stream name. Use `app.query()` with a callback for streaming pagination, or `app.query_array()` for small streams:
@@ -349,7 +349,7 @@ archive: async (stream) => {
 
 ```typescript
 app.on("closed", (result: CloseResult) => {
-  console.log(`Closed ${result.closed.length}, skipped ${result.skipped.length}`);
+  console.log(`Closed ${result.truncated.size}, skipped ${result.skipped.length}`);
 });
 ```
 

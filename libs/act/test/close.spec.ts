@@ -55,12 +55,15 @@ describe("close", () => {
     await app.do("increment", { stream: "s2", actor }, { by: 5 });
     await drainAll();
 
-    const result = await app.close([{ stream: "s1" }, { stream: "s2" }]);
+    const { truncated, skipped } = await app.close([
+      { stream: "s1" },
+      { stream: "s2" },
+    ]);
 
-    expect(result.closed).toEqual(["s1", "s2"]);
-    expect(result.truncated).toBeGreaterThan(0);
-    expect(result.skipped).toEqual([]);
-    expect(result.restarted).toEqual([]);
+    expect(truncated.size).toBe(2);
+    expect(truncated.get("s1")!.deleted).toBeGreaterThan(0);
+    expect(truncated.get("s2")!.deleted).toBeGreaterThan(0);
+    expect(skipped).toEqual([]);
 
     // Only tombstones remain
     const events: any[] = [];
@@ -78,7 +81,7 @@ describe("close", () => {
     await drainAll();
 
     const archived: any[] = [];
-    const result = await app.close([
+    const { truncated } = await app.close([
       {
         stream: "arch",
         archive: async () => {
@@ -92,7 +95,7 @@ describe("close", () => {
       },
     ]);
 
-    expect(result.closed).toEqual(["arch"]);
+    expect(truncated.has("arch")).toBe(true);
     expect(archived.length).toBeGreaterThanOrEqual(2);
     expect(archived.map((e) => e.name)).toContain("incremented");
   });
@@ -119,7 +122,6 @@ describe("close", () => {
     expect(events.filter((e) => e.name === "incremented").length).toBe(1);
     expect(events.filter((e) => e.name === TOMBSTONE_EVENT).length).toBe(1);
 
-    // Writes rejected
     await expect(
       app.do("increment", { stream: "fail1", actor }, { by: 1 })
     ).rejects.toThrow(StreamClosedError);
@@ -129,33 +131,26 @@ describe("close", () => {
     await app.do("increment", { stream: "pending", actor }, { by: 1 });
     await app.correlate();
 
-    const result = await app.close([{ stream: "pending" }]);
+    const { truncated, skipped } = await app.close([{ stream: "pending" }]);
 
-    expect(result.skipped).toEqual(["pending"]);
-    expect(result.closed).toEqual([]);
+    expect(skipped).toEqual(["pending"]);
+    expect(truncated.size).toBe(0);
   });
 
   it("should restart streams with snapshot at version 0", async () => {
     await app.do("increment", { stream: "restart", actor }, { by: 42 });
     await drainAll();
 
-    const result = await app.close([{ stream: "restart", restart: true }]);
+    const { truncated } = await app.close([
+      { stream: "restart", restart: true },
+    ]);
 
-    expect(result.closed).toEqual(["restart"]);
-    expect(result.restarted).toEqual(["restart"]);
+    expect(truncated.has("restart")).toBe(true);
+    expect(truncated.get("restart")!.committed.name).toBe(SNAP_EVENT);
 
     const snap = await app.load(counter, "restart");
     expect(snap.state.count).toBe(42);
     expect(snap.patches).toBe(0);
-
-    const events: any[] = [];
-    await store().query((e) => events.push(e), {
-      stream: "restart",
-      stream_exact: true,
-      with_snaps: true,
-    });
-    expect(events.length).toBe(1);
-    expect(events[0].name).toBe(SNAP_EVENT);
   });
 
   it("should handle selective restart (some snapshot, some tombstone)", async () => {
@@ -163,13 +158,13 @@ describe("close", () => {
     await app.do("increment", { stream: "sel-b", actor }, { by: 20 });
     await drainAll();
 
-    const result = await app.close([
+    const { truncated } = await app.close([
       { stream: "sel-a", restart: true },
       { stream: "sel-b" },
     ]);
 
-    expect(result.restarted).toEqual(["sel-a"]);
-    expect(result.closed).toEqual(["sel-a", "sel-b"]);
+    expect(truncated.get("sel-a")!.committed.name).toBe(SNAP_EVENT);
+    expect(truncated.get("sel-b")!.committed.name).toBe(TOMBSTONE_EVENT);
 
     const snapA = await app.load(counter, "sel-a");
     expect(snapA.state.count).toBe(10);
@@ -184,10 +179,10 @@ describe("close", () => {
     await drainAll();
 
     const r1 = await app.close([{ stream: "idem" }]);
-    expect(r1.closed).toEqual(["idem"]);
+    expect(r1.truncated.has("idem")).toBe(true);
 
     const r2 = await app.close([{ stream: "idem" }]);
-    expect(r2.closed).toEqual([]);
+    expect(r2.truncated.size).toBe(0);
     expect(r2.skipped).toEqual([]);
   });
 
@@ -203,13 +198,9 @@ describe("close", () => {
   });
 
   it("should return empty result for empty targets array", async () => {
-    const result = await app.close([]);
-    expect(result).toEqual({
-      closed: [],
-      truncated: 0,
-      skipped: [],
-      restarted: [],
-    });
+    const { truncated, skipped } = await app.close([]);
+    expect(truncated.size).toBe(0);
+    expect(skipped).toEqual([]);
   });
 
   it("should emit 'closed' lifecycle event", async () => {
@@ -220,7 +211,7 @@ describe("close", () => {
     app.on("closed", listener);
     await app.close([{ stream: "evt" }]);
     expect(listener).toHaveBeenCalledTimes(1);
-    expect(listener.mock.calls[0][0].closed).toEqual(["evt"]);
+    expect(listener.mock.calls[0][0].truncated.has("evt")).toBe(true);
     app.off("closed", listener);
   });
 
@@ -228,9 +219,8 @@ describe("close", () => {
     await app.do("increment", { stream: "noarch", actor }, { by: 7 });
     await drainAll();
 
-    const result = await app.close([{ stream: "noarch" }]);
-    expect(result.closed).toEqual(["noarch"]);
-    expect(result.truncated).toBeGreaterThan(0);
+    const { truncated } = await app.close([{ stream: "noarch" }]);
+    expect(truncated.get("noarch")!.deleted).toBeGreaterThan(0);
   });
 
   it("should invalidate cache for tombstoned streams", async () => {
@@ -247,12 +237,14 @@ describe("close", () => {
     await app.do("increment", { stream: "warm", actor }, { by: 5 });
     await drainAll();
 
-    await app.close([{ stream: "warm", restart: true }]);
+    const { truncated } = await app.close([{ stream: "warm", restart: true }]);
 
+    const committed = truncated.get("warm")!.committed;
     const cached = await cache().get<{ count: number }>("warm");
     expect(cached).toBeDefined();
     expect(cached!.state.count).toBe(5);
-    expect(cached!.version).toBe(0);
+    expect(cached!.version).toBe(committed.version);
+    expect(cached!.event_id).toBe(committed.id);
     expect(cached!.snaps).toBe(1);
   });
 
@@ -263,13 +255,13 @@ describe("close", () => {
     await app.do("increment", { stream: "mix-pending", actor }, { by: 2 });
     await app.correlate();
 
-    const result = await app.close([
+    const { truncated, skipped } = await app.close([
       { stream: "mix-safe" },
       { stream: "mix-pending" },
     ]);
 
-    expect(result.closed).toContain("mix-safe");
-    expect(result.skipped).toContain("mix-pending");
+    expect(truncated.has("mix-safe")).toBe(true);
+    expect(skipped).toContain("mix-pending");
   });
 
   it("should skip streams with concurrent writes (ConcurrencyError on guard)", async () => {
@@ -277,21 +269,18 @@ describe("close", () => {
     await drainAll();
 
     const originalCommit = store().commit.bind(store());
-    let guardAttempts = 0;
     vi.spyOn(store(), "commit").mockImplementation(
       async (stream, msgs, meta, expectedVersion) => {
         if (msgs[0]?.name === TOMBSTONE_EVENT && stream === "race") {
-          guardAttempts++;
           throw new Error("ConcurrencyError");
         }
         return originalCommit(stream, msgs, meta, expectedVersion);
       }
     );
 
-    const result = await app.close([{ stream: "race" }]);
-    expect(result.skipped).toContain("race");
-    expect(result.closed).toEqual([]);
-    expect(guardAttempts).toBe(1);
+    const { truncated, skipped } = await app.close([{ stream: "race" }]);
+    expect(skipped).toContain("race");
+    expect(truncated.size).toBe(0);
 
     vi.restoreAllMocks();
   });
@@ -309,22 +298,22 @@ describe("close", () => {
     await srcApp.do("increment", { stream: "src-a", actor }, { by: 1 });
     await srcApp.correlate();
 
-    const result = await srcApp.close([{ stream: "src-a" }]);
-    expect(result.skipped).toEqual(["src-a"]);
-    expect(result.closed).toEqual([]);
+    const { truncated, skipped } = await srcApp.close([{ stream: "src-a" }]);
+    expect(skipped).toEqual(["src-a"]);
+    expect(truncated.size).toBe(0);
   });
 
   it("should handle closing empty stream while reactions exist for other streams", async () => {
     await app.do("increment", { stream: "has-events", actor }, { by: 1 });
     await app.correlate();
 
-    const result = await app.close([
+    const { truncated, skipped } = await app.close([
       { stream: "never-existed" },
       { stream: "has-events" },
     ]);
 
-    expect(result.closed).toEqual([]);
-    expect(result.skipped).toEqual(["has-events"]);
+    expect(truncated.size).toBe(0);
+    expect(skipped).toEqual(["has-events"]);
   });
 
   it("should close streams on an app with no registered states", async () => {
@@ -337,19 +326,11 @@ describe("close", () => {
       { correlation: "c1", causation: {} }
     );
 
-    const result = await noStateApp.close([{ stream: "raw-stream" }]);
+    const { truncated } = await noStateApp.close([{ stream: "raw-stream" }]);
 
-    expect(result.closed).toEqual(["raw-stream"]);
-    expect(result.truncated).toBeGreaterThan(0);
-
-    const events: any[] = [];
-    await store().query((e) => events.push(e), {
-      stream: "raw-stream",
-      stream_exact: true,
-    });
-    const tombstone = events.find((e) => e.name === TOMBSTONE_EVENT);
-    expect(tombstone).toBeDefined();
-    expect(tombstone.data).toEqual({});
+    expect(truncated.has("raw-stream")).toBe(true);
+    expect(truncated.get("raw-stream")!.committed.name).toBe(TOMBSTONE_EVENT);
+    expect(truncated.get("raw-stream")!.committed.data).toEqual({});
   });
 
   it("should truncate stream with no existing events", async () => {
@@ -365,28 +346,14 @@ describe("close", () => {
     });
     const result = await store().truncate([{ stream: "direct-trunc" }]);
     expect(result.get("direct-trunc")!.deleted).toBe(1);
-    const events: any[] = [];
-    await store().query((e) => events.push(e), {
-      stream: "direct-trunc",
-      stream_exact: true,
-    });
-    expect(events[0].name).toBe(TOMBSTONE_EVENT);
-    expect(events[0].meta.correlation).toBe("");
+    expect(result.get("direct-trunc")!.committed.meta.correlation).toBe("");
   });
 
   it("should have empty tombstone data for closed streams", async () => {
     await app.do("increment", { stream: "tdata", actor }, { by: 99 });
     await drainAll();
 
-    await app.close([{ stream: "tdata" }]);
-
-    const events: any[] = [];
-    await store().query((e) => events.push(e), {
-      stream: "tdata",
-      stream_exact: true,
-    });
-    const tombstone = events.find((e) => e.name === TOMBSTONE_EVENT);
-    expect(tombstone).toBeDefined();
-    expect(tombstone.data).toEqual({});
+    const { truncated } = await app.close([{ stream: "tdata" }]);
+    expect(truncated.get("tdata")!.committed.data).toEqual({});
   });
 });

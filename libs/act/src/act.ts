@@ -1013,7 +1013,7 @@ export class Act<
    * 8. **Emit "closed"** — lifecycle event with results
    *
    * @param targets - Per-stream close options (stream, restart?, archive?)
-   * @returns Result with closed, skipped, restarted streams and truncated event count
+   * @returns `{ truncated: TruncateResult, skipped: string[] }`
    *
    * @example Archive and close
    * ```typescript
@@ -1032,8 +1032,7 @@ export class Act<
    * ```
    */
   async close(targets: CloseTarget[]): Promise<CloseResult> {
-    if (!targets.length)
-      return { closed: [], truncated: 0, skipped: [], restarted: [] };
+    if (!targets.length) return { truncated: new Map(), skipped: [] };
 
     const targetMap = new Map(targets.map((t) => [t.stream, t]));
     const streams = [...targetMap.keys()];
@@ -1091,12 +1090,7 @@ export class Act<
     }
 
     if (!safe.length) {
-      const result: CloseResult = {
-        closed: [],
-        truncated: 0,
-        skipped,
-        restarted: [],
-      };
+      const result: CloseResult = { truncated: new Map(), skipped };
       this.emit("closed", result);
       return result;
     }
@@ -1125,12 +1119,7 @@ export class Act<
     );
 
     if (!guarded.length) {
-      const result: CloseResult = {
-        closed: [],
-        truncated: 0,
-        skipped,
-        restarted: [],
-      };
+      const result: CloseResult = { truncated: new Map(), skipped };
       this.emit("closed", result);
       return result;
     }
@@ -1157,10 +1146,8 @@ export class Act<
 
     // 7. Truncate + seed — atomic per store transaction.
     //    Seed meta traces back to the guard tombstone via causation.event.
-    const restarted: string[] = [];
     const truncTargets = guarded.map((stream) => {
       const snapshot = seedStates.get(stream);
-      if (snapshot) restarted.push(stream);
       const guard = guardEvents.get(stream)!;
       return {
         stream,
@@ -1177,16 +1164,12 @@ export class Act<
         },
       };
     });
-    const truncResult = await store().truncate(truncTargets);
-
-    // Compute total deleted
-    let truncated = 0;
-    for (const { deleted } of truncResult.values()) truncated += deleted;
+    const truncated = await store().truncate(truncTargets);
 
     // 8. Cache invalidate / warm — use real event IDs from committed events
     await Promise.all(
       guarded.map(async (stream) => {
-        const entry = truncResult.get(stream);
+        const entry = truncated.get(stream);
         const state = seedStates.get(stream);
         if (state && entry) {
           await cache().set(stream, {
@@ -1203,12 +1186,7 @@ export class Act<
     );
 
     // 9. Emit lifecycle event
-    const result: CloseResult = {
-      closed: guarded,
-      truncated,
-      skipped,
-      restarted,
-    };
+    const result: CloseResult = { truncated, skipped };
     this.emit("closed", result);
     return result;
   }

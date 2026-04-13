@@ -501,14 +501,15 @@ const result = await app.close([
   { stream: "counter-2" },  // tombstoned
 ]);
 
-// result: { closed, truncated, skipped, restarted }
+// result: { truncated: Map<stream, {deleted, committed}>, skipped: string[] }
 ```
 
 **Key types:**
 - `CloseTarget` — `{ stream: string; restart?: boolean; archive?: () => Promise<void> }`
 - `StreamClosedError` — thrown by `action()` when writing to a tombstoned stream
 - `TOMBSTONE_EVENT` (`"__tombstone__"`) — marks a stream as permanently closed
-- `CloseResult` — `{ closed: string[], truncated: number, skipped: string[], restarted: string[] }`
+- `CloseResult` — `{ truncated: TruncateResult, skipped: string[] }`
+- `TruncateResult` — `Map<string, { deleted: number, committed: Committed }>`
 
 **Flow:** correlate → safety check → guard (tombstone with expectedVersion) → load state (for restart) → archive → atomic truncate + seed → cache update → emit "closed"
 
@@ -518,6 +519,6 @@ await app.do("increment", { stream: "s1", actor }, { by: 1 });
 await app.correlate();
 await app.drain();
 const result = await app.close([{ stream: "s1" }]);
-expect(result.closed).toEqual(["s1"]);
+expect(result.truncated.has("s1")).toBe(true);
 await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
 ```

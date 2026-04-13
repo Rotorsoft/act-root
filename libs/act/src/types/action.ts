@@ -1,5 +1,6 @@
 import type { Patch } from "@rotorsoft/act-patch";
 import { z, ZodType } from "zod";
+import type { TruncateResult } from "./ports.js";
 import {
   ActorSchema,
   CausationEventSchema,
@@ -429,14 +430,10 @@ export type CloseTarget = {
  * @see {@link IAct.close} for the close-the-books API
  */
 export type CloseResult = {
-  /** Streams that were archived and truncated */
-  readonly closed: string[];
-  /** Total events deleted from the operational store */
-  readonly truncated: number;
-  /** Streams skipped due to pending reactions or blocked status */
+  /** Per-stream truncate results (deleted count + committed event) */
+  readonly truncated: TruncateResult;
+  /** Streams skipped due to pending reactions or concurrent writes */
   readonly skipped: string[];
-  /** Streams that were restarted with a new opening event */
-  readonly restarted: string[];
 };
 
 /**

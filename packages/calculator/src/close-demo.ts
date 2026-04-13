@@ -68,8 +68,10 @@ async function main() {
     { stream: "counter-B" },
   ]);
 
-  console.log(`  Closed: ${result.closed.join(", ")}`);
-  console.log(`  Truncated: ${result.truncated} events`);
+  console.log(`  Closed: ${[...result.truncated.keys()].join(", ")}`);
+  let totalDeleted = 0;
+  for (const { deleted } of result.truncated.values()) totalDeleted += deleted;
+  console.log(`  Truncated: ${totalDeleted} events`);
 
   // --- Step 3: Verify tombstones block writes ---
   console.log("\n=== Verifying tombstone protection ===");
@@ -105,8 +107,11 @@ async function main() {
     },
   ]);
 
-  console.log(`  Closed: ${restartResult.closed.join(", ")}`);
-  console.log(`  Restarted: ${restartResult.restarted.join(", ")}`);
+  console.log(`  Closed: ${[...restartResult.truncated.keys()].join(", ")}`);
+  const restarted = [...restartResult.truncated.entries()]
+    .filter(([, v]) => v.committed.name === "__snapshot__")
+    .map(([k]) => k);
+  console.log(`  Restarted: ${restarted.join(", ")}`);
 
   const snapRestarted = await app.load(Counter, "counter-C");
   console.log(
@@ -125,7 +130,7 @@ async function main() {
   console.log("\n=== Idempotent close (counter-A already closed) ===");
   const idempotent = await app.close([{ stream: "counter-A" }]);
   console.log(
-    `  Closed: ${idempotent.closed.length}, Skipped: ${idempotent.skipped.length}`
+    `  Closed: ${idempotent.truncated.size}, Skipped: ${idempotent.skipped.length}`
   );
   console.log(`  (No-op — stream was already tombstoned)`);
 
