@@ -346,8 +346,8 @@ export interface Store extends Disposable {
    * 3. Inserts a `__snapshot__` (when `snapshot` is provided) or
    *    `__tombstone__` event as the sole event on the stream
    *
-   * @param targets - Streams to truncate with optional snapshot state
-   * @returns `deleted` count and `seeds` array of committed seed events
+   * @param targets - Streams to truncate with optional snapshot state and meta
+   * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event
    *
    * @see {@link Act.close} for the high-level close-the-books API
    */
