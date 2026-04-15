@@ -166,7 +166,7 @@ const TicketProjection = projection("tickets")
 - `projection(target?)` - Creates a builder; optional default target stream for all handlers
 - `.on({ EventName: schema })` - Register an event handler (record shorthand)
 - `.do(handler)` - Handler receives `(event, stream)`
-- `.to(resolver)` / `.void()` - Override the default resolver per handler
+- `.to(resolver)` - Override the default resolver per handler
 - `.batch(handler)` - Register a batch handler for bulk event processing (static-target projections only). Receives `ReadonlyArray<BatchEvent<TEvents>>` — a discriminated union where `switch (event.name)` narrows both `name` and `data`. When defined, always called instead of individual `.do()` handlers.
 - `.build()` - Returns a `Projection` with `_tag: "Projection"`
 
@@ -226,7 +226,7 @@ const CreationSlice = slice()
       const snapshot = await app.load(TicketCreation, event.stream);
       const events = await app.query_array({ stream: event.stream });
     })
-    .void()
+    .to((event) => ({ target: event.stream }))
   .build();
 ```
 
@@ -235,10 +235,8 @@ const CreationSlice = slice()
 - `.withProjection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no app interface.
 - `.on(eventName)` - React to an event from the slice's states (string, not record)
 - `.do(handler)` - Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
-- `.to(resolver)` / `.void()` - Set the target stream resolver
+- `.to(resolver)` - Set the target stream resolver
 - `.build()` - Returns a `Slice` with `_tag: "Slice"`
-
-**Important:** `.void()` reactions are **never processed by `drain()`** — the void resolver returns `undefined`, so drain filters them out. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Use `.void()` only for inline side effects that don't need drain processing.
 
 ### Act Orchestrator
 
@@ -251,7 +249,7 @@ const app = act()
   .withProjection(TicketProjection) // Standalone Projection (for cross-slice events)
   .on("SomeEvent")                 // Inline reaction
     .do(handler)
-    .to(resolver)  // or .void() for side effects only
+    .to(resolver)
   .build();
 
 // Execute actions

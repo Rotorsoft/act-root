@@ -105,8 +105,6 @@ export const Item = state({ Item: ItemState })
 
 **When to use a slice vs a standalone reaction at the act level:** Use slices when the reaction is part of a feature's vertical slice — it naturally groups with the state it modifies. Use act-level reactions (`.on("Event").do(handler)`) only for cross-cutting concerns that don't belong to any single feature (e.g., global audit logging). In practice, almost all reactions belong in slices.
 
-**Choosing `.to(resolver)` vs `.void()`:** This is the most common source of bugs. Ask: "Does this reaction need to run during `drain()`?" If yes → `.to(resolver)`. If it's a fire-and-forget side effect (logging, metrics, sending a notification that doesn't need retry) → `.void()`. The trap: using `.void()` for a reaction that dispatches actions to other streams. Those actions will run during the commit but won't be retried on failure, and `drain()` won't know about them. When in doubt, use `.to()`.
-
 **Slice design decisions:**
 
 - **Lifecycle slice first** — every state starts with a lifecycle slice that owns the CRUD-like actions (create, update, close/delete). It may also contain simple reaction flows.
@@ -167,8 +165,6 @@ export const ItemSlice = slice()
 **Query functions**: Export plain functions (`getItems()`, `getItemsByActor()`) that query the in-memory projection state. These are called from tRPC query procedures.
 
 **clear*() helpers**: Export a `clear*()` function to reset projection state in tests.
-
-> **Warning:** `.void()` reactions are **NEVER processed by `drain()`** — the void resolver returns `undefined`, so drain skips them entirely. Use `.to(resolver)` for any reaction that must be discovered and executed during drain. Reserve `.void()` only for inline side effects (logging, metrics) that don't need drain processing. See [act-api.md](act-api.md) §6 (Void Reactions).
 
 **Lifecycle-only projections**: When using `act-sse` for real-time broadcast, projections only need to persist data for **lifecycle events** (entity created, member added, completed, deleted, etc.) — not every high-frequency operational event. The broadcast cache is the source of truth for full state; the DB stores lightweight summaries for cold-start recovery and list views. See [server.md](server.md) § Projection Optimization Strategies.
 

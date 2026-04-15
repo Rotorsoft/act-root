@@ -66,7 +66,7 @@ export const app = act()
   .withProjection(TicketProj)
   .on("TicketOpened")
     .do(async function logOpen() {})
-    .void()
+    .to("log-target")
   .build();
 `,
       },
@@ -85,7 +85,7 @@ export const app = act()
     expect(model.entries[0].path).toBe("src/app.ts");
     expect(model.entries[0].projections).toHaveLength(1);
     expect(model.reactions).toHaveLength(1);
-    expect(model.reactions[0].isVoid).toBe(true);
+    expect(model.reactions[0].handlerName).toBe("logOpen");
     expect(model.orchestrator).toBeDefined();
   });
 

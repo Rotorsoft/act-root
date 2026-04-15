@@ -191,6 +191,3 @@ export const _this_ = ({ stream }: { stream: string }) => ({
   source: stream,
   target: stream,
 });
-
-// Resolves to nothing
-export const _void_ = () => undefined;

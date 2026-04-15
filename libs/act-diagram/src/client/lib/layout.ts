@@ -64,7 +64,6 @@ type ReactionDef = {
   event: string;
   handlerName: string;
   dispatches: string[];
-  isVoid: boolean;
 };
 
 type EmitMeasure = {
@@ -281,14 +280,12 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
   for (const slice of viewModel.slices) {
     for (const r of slice.reactions) {
-      if (r.isVoid) continue;
       const list = eventReactions.get(r.event) ?? [];
       list.push(r.handlerName);
       eventReactions.set(r.event, list);
     }
   }
   for (const r of viewModel.reactions) {
-    if (r.isVoid) continue;
     const list = eventReactions.get(r.event) ?? [];
     list.push(r.handlerName);
     eventReactions.set(r.event, list);
@@ -383,7 +380,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
     // Build event→reactions lookup within this slice (supports multiple per event)
     const sliceReactionsByEvent = new Map<string, typeof slice.reactions>();
     for (const r of slice.reactions) {
-      if (r.isVoid) continue;
       const list = sliceReactionsByEvent.get(r.event) ?? [];
       list.push(r);
       sliceReactionsByEvent.set(r.event, list);
@@ -609,7 +605,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
     // Remaining reactions not already placed inline (e.g., reactions on
     // events not declared in any state within this slice)
     for (const r of slice.reactions) {
-      if (r.isVoid || visitedReactions.has(r.handlerName)) continue;
+      if (visitedReactions.has(r.handlerName)) continue;
 
       const rX = sliceRightX + GAP * 2;
       const rp = { x: rX, y };
@@ -776,7 +772,6 @@ export function computeLayout(viewModel: DomainModel): Layout {
   if (viewModel.reactions.length > 0) {
     const reactionYByEvent = new Map<string, number>();
     for (const r of viewModel.reactions) {
-      if (r.isVoid) continue;
       // Find the event node this reaction listens to
       const trigNode = ns.find(
         (n) => n.type === "event" && n.label === r.event

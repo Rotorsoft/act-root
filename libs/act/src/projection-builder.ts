@@ -9,7 +9,7 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { _this_, _void_ } from "./merge.js";
+import { _this_ } from "./merge.js";
 import type {
   BatchHandler,
   Committed,
@@ -49,7 +49,6 @@ type DoResult<
   to: (
     resolver: ReactionResolver<TEvents & { [P in TKey]: TData }, TKey> | string
   ) => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget>;
-  void: () => ProjectionBuilder<TEvents & { [P in TKey]: TData }, TTarget>;
 };
 
 /**
@@ -121,7 +120,7 @@ export type ProjectionBuilder<
  *
  * Pass a target stream name to `projection("target")` so every handler
  * inherits that resolver automatically. Omit it and use per-handler
- * `.to()` / `.void()` when handlers route to different streams.
+ * `.to()` when handlers route to different streams.
  *
  * @param target - Optional default target stream for all handlers
  *
@@ -227,13 +226,6 @@ function _projection<
               });
               return nextBuilder;
             },
-            void() {
-              register.reactions.set(handler.name, {
-                ...reaction,
-                resolver: _void_,
-              });
-              return nextBuilder;
-            },
           };
         },
       };
@@ -279,7 +271,7 @@ export function projection<TEvents extends Schemas = {}>(
 /**
  * Creates a new projection builder without a default target.
  *
- * Use per-handler `.to()` / `.void()` to route events.
+ * Use per-handler `.to()` to route events to different streams.
  */
 export function projection<TEvents extends Schemas = {}>(
   target?: undefined,

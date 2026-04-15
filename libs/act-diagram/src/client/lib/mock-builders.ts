@@ -207,17 +207,11 @@ export function mockSlice(onBuild?: (info: any) => void) {
               (typeof handler?.name === "string" && handler.name) ||
               `on ${eventName}`,
             dispatches,
-            isVoid: false,
           };
           info.reactions.push(reaction);
           return {
             ...builder,
             to() {
-              reaction.isVoid = false;
-              return builder;
-            },
-            void() {
-              reaction.isVoid = true;
               return builder;
             },
           };
@@ -251,7 +245,6 @@ export function mockProjection(target?: string, onBuild?: (info: any) => void) {
               if (typeof resolver === "string") info.target = resolver;
               return builder;
             },
-            void: () => builder,
           };
         },
       };
@@ -299,17 +292,11 @@ export function mockAct(onBuild?: (info: any) => void) {
               (typeof handler?.name === "string" && handler.name) ||
               `on ${eventName}`,
             dispatches,
-            isVoid: false,
           };
           info.reactions.push(reaction);
           return {
             ...builder,
             to() {
-              reaction.isVoid = false;
-              return builder;
-            },
-            void() {
-              reaction.isVoid = true;
               return builder;
             },
           };

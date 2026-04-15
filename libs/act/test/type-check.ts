@@ -47,7 +47,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .do(async (event) => {
       const _amount: number = event.data.amount;
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -69,12 +69,12 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .do(async (event) => {
       const _amt: number = event.data.amount;
     })
-    .void()
+    .to("target")
     .on("Logged")
     .do(async (event) => {
       const _msg: string = event.data.message;
     })
-    .void();
+    .to("target");
 }
 
 // ── TEST 5: slice().withState(State) scopes events ───────────────────────
@@ -85,7 +85,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .do(async (event) => {
       const _amount: number = event.data.amount;
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -111,12 +111,12 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .do(async (event) => {
       const _amount: number = event.data.amount;
     })
-    .void()
+    .to("target")
     .on("Logged")
     .do(async (event) => {
       const _msg: string = event.data.message;
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -185,7 +185,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - wrong payload shape for typed IAct
       void app.do("increment", target, { wrong: "field" });
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -230,7 +230,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - wrong payload shape
       void app.do("increment", target, { wrong: "field" });
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -283,7 +283,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - wrong payload for log
       void app.do("log", target, { by: 1 });
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -307,7 +307,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - "message" is not on Incremented event
       event.data.message;
     })
-    .void()
+    .to("target")
     .on("Logged")
     .do(async (event) => {
       // Event data matches Logged schema
@@ -315,7 +315,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - "amount" is not on Logged event
       event.data.amount;
     })
-    .void()
+    .to("target")
     .build();
 }
 
@@ -334,7 +334,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
     .do(async (_event, _stream, app) => {
       void app.do("increment", target, { by: 1 });
     })
-    .void()
+    .to("target")
     .build();
 
   const app = act().withSlice(CounterSlice).withState(Logger).build();
@@ -360,7 +360,7 @@ const target = { stream: "s1", actor: { id: "1", name: "test" } };
       // @ts-expect-error - wrong action name
       void app.do("nonexistent", target, {});
     })
-    .void()
+    .to("target")
     .build();
 }
 

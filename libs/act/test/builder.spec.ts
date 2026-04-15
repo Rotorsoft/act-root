@@ -41,12 +41,12 @@ describe("Builder", () => {
       .do(function handleEvent1() {
         return Promise.resolve();
       })
-      .void()
+      .to("abc")
       .on("Event2")
       .do(function handleEvent2() {
         return Promise.resolve();
       })
-      .to("abc")
+      .to("def")
       .build();
 
     const result = await app.do("Act1", { stream: "A", actor }, {});
@@ -97,7 +97,7 @@ describe("Builder", () => {
     ).toThrow('Reaction handler for "Event1" must be a named function');
   });
 
-  it("should allow chaining .on().do().to() and .on().do().void()", () => {
+  it("should allow chaining .on().do().to()", () => {
     const app = act()
       .withState(A1)
       .on("Event1")
@@ -109,66 +109,9 @@ describe("Builder", () => {
       .do(function handleEvent2() {
         return Promise.resolve();
       })
-      .void()
+      .to("other")
       .build();
     expect(app).toBeDefined();
-  });
-
-  it("should execute a reaction with void resolver", () => {
-    const builder = act()
-      .withState(A1)
-      .on("Event1")
-      .do(function voidHandler() {
-        return Promise.resolve();
-      })
-      .void();
-    // Access the event registry before build()
-    const reaction = builder.events.Event1.reactions.get("voidHandler");
-    // The resolver should be the _void_ function from act-builder
-    const { resolver } = reaction || {};
-    // _void_ always returns undefined
-    expect(typeof resolver).toBe("function");
-    if (typeof resolver === "function") {
-      expect(
-        resolver({
-          name: "Event1",
-          data: {},
-          id: 1,
-          stream: "s",
-          version: 1,
-          created: new Date(),
-          meta: { correlation: "c", causation: {} },
-        })
-      ).toBeUndefined();
-    } else {
-      expect(resolver).toBeUndefined();
-    }
-  });
-
-  it("should trigger the void resolver through the Act API", async () => {
-    // Define a state with an action and event
-    const testState = state({ S: z.object({}) })
-      .init(() => ({}))
-      .emits({ E: z.object({}) })
-      .patch({ E: () => ({}) })
-      .on({ A: z.object({}) })
-      .emit(() => ["E", {}])
-      .build();
-
-    // Build an app with a void reaction for event E
-    const app = act()
-      .withState(testState)
-      .on("E")
-      .do(function handleE() {
-        return Promise.resolve();
-      })
-      .void()
-      .build();
-
-    // Trigger the action, which emits event E and should call the void resolver
-    await app.do("A", { stream: "s", actor: { id: "1", name: "actor" } }, {});
-    // If no error is thrown, the void resolver was called
-    expect(true).toBe(true);
   });
 
   it("should execute a reaction with a custom resolver using .to()", () => {

@@ -209,7 +209,6 @@ describe("projection and reaction metadata on event nodes", () => {
           event: "Evt",
           handlerName: "onEvt",
           dispatches: [],
-          isVoid: false,
         },
       ],
     });

@@ -97,7 +97,6 @@ const SLICE_MODEL: DomainModel = emptyModel({
           event: "TicketOpened",
           handlerName: "autoAssign",
           dispatches: ["AssignTicket"],
-          isVoid: false,
         },
       ],
     },
@@ -291,13 +290,11 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["A3"],
-                isVoid: false,
               },
               {
                 event: "E2",
                 handlerName: "r2",
                 dispatches: ["A4"],
-                isVoid: false,
               },
             ],
           },
@@ -398,7 +395,6 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["Do2"],
-                isVoid: false,
               },
             ],
           },
@@ -567,13 +563,11 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["A3"],
-                isVoid: false,
               },
               {
                 event: "E2",
                 handlerName: "r2",
                 dispatches: ["A4"],
-                isVoid: false,
               },
             ],
           },
@@ -656,13 +650,11 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["A2"],
-                isVoid: false,
               },
               {
                 event: "E2",
                 handlerName: "r2",
                 dispatches: ["A3"],
-                isVoid: false,
               },
             ],
           },
@@ -789,40 +781,6 @@ describe("computeLayout — slices", () => {
     });
   });
 
-  describe("void reactions are excluded from slice layout", () => {
-    it("does not place void reaction nodes", () => {
-      const model = emptyModel({
-        states: [
-          {
-            name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
-            actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
-          },
-        ],
-        slices: [
-          {
-            name: "Sl",
-            states: ["S"],
-            stateVars: ["S"],
-            projections: [],
-            reactions: [
-              {
-                event: "Evt",
-                handlerName: "voidHandler",
-                dispatches: [],
-                isVoid: true,
-              },
-            ],
-          },
-        ],
-      });
-      const layout = computeLayout(model);
-      const reaction = find(layout, "reaction", "voidHandler");
-      expect(reaction).toBeUndefined();
-    });
-  });
-
   describe("remaining reactions (not placed inline)", () => {
     it("places a reaction that listens to an event from a different state", () => {
       const model = emptyModel({
@@ -851,13 +809,11 @@ describe("computeLayout — slices", () => {
                 event: "EvtA",
                 handlerName: "autoDoB",
                 dispatches: ["doB"],
-                isVoid: false,
               },
               {
                 event: "EvtB",
                 handlerName: "notify",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
@@ -898,7 +854,6 @@ describe("computeLayout — slices", () => {
                 event: "UnknownEvent",
                 handlerName: "orphanHandler",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
@@ -932,7 +887,6 @@ describe("computeLayout — slices", () => {
                 event: "Evt",
                 handlerName: "noDispatch",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
@@ -976,7 +930,6 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "multiDispatch",
                 dispatches: ["A2", "A3"],
-                isVoid: false,
               },
             ],
           },
@@ -1022,7 +975,6 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["A2"],
-                isVoid: false,
               },
             ],
           },
@@ -1060,7 +1012,6 @@ describe("computeLayout — slices", () => {
                 event: "E1",
                 handlerName: "r1",
                 dispatches: ["UnknownAction"],
-                isVoid: false,
               },
             ],
           },
@@ -1194,13 +1145,11 @@ describe("computeLayout — slices", () => {
                 event: "Evt",
                 handlerName: "firstHandler",
                 dispatches: [],
-                isVoid: false,
               },
               {
                 event: "Evt",
                 handlerName: "secondHandler",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
@@ -1246,7 +1195,6 @@ describe("computeLayout — slices", () => {
                 event: "UnknownEvt",
                 handlerName: "orphanHandler",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
@@ -1298,19 +1246,16 @@ describe("computeLayout — slices", () => {
                 event: "Archived",
                 handlerName: "autoReview",
                 dispatches: ["Review"],
-                isVoid: false,
               },
               {
                 event: "Archived",
                 handlerName: "notifyOnArchive",
                 dispatches: ["Notify"],
-                isVoid: false,
               },
               {
                 event: "Archived",
                 handlerName: "logOnArchive",
                 dispatches: ["Log"],
-                isVoid: false,
               },
             ],
           },
@@ -1371,7 +1316,6 @@ describe("computeLayout — slices", () => {
                 event: "Evt",
                 handlerName: "handler",
                 dispatches: [],
-                isVoid: false,
               },
             ],
           },
