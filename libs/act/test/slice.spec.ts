@@ -57,14 +57,9 @@ describe("slice", () => {
     expect(s.events["Incremented"].reactions.size).toBe(0);
   });
 
-  it("should register scoped reactions via .on().do().void()", () => {
+  it("should register scoped reactions via .on().do()", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
-    const s = slice()
-      .withState(PartA)
-      .on("Incremented")
-      .do(handler)
-      .void()
-      .build();
+    const s = slice().withState(PartA).on("Incremented").do(handler).build();
 
     expect(s.events["Incremented"].reactions.size).toBe(1);
   });

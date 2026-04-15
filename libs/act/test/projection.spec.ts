@@ -82,18 +82,6 @@ describe("projection", () => {
     expect(reaction.resolver).toBe(resolver);
   });
 
-  it("should allow per-handler .void() to override default target", () => {
-    const p = projection("default-target")
-      .on({ Incremented })
-      .do(async function handleIncremented() {})
-      .void()
-      .build();
-
-    const [reaction] = [...p.events["Incremented"].reactions.values()];
-
-    expect((reaction.resolver as any)({} as any)).toBeUndefined();
-  });
-
   it("should use named handlers as reaction names", () => {
     const p = projection("target")
       .on({ Incremented })

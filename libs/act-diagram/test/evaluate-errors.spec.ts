@@ -85,7 +85,7 @@ const P = projection("proj").on({ E: z.object({}) }).do().build();
 const MySlice = slice()
   .withState(S)
   .withProjection(P)
-  .on("E").do(async function handler() {}).void()
+  .on("E").do(async function handler() {}).to("target")
   .build();
 `,
       },

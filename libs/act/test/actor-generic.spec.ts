@@ -77,7 +77,6 @@ describe("actor generic", () => {
       .do(async function onIncremented(_event, _stream, dispatcher) {
         await dispatcher.do("increment", reactionTarget, { by: 1 });
       })
-      .void()
       .build();
 
     const target = {

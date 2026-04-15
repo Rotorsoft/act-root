@@ -60,7 +60,6 @@ describe("standalone reaction edges", () => {
           event: "Evt",
           handlerName: "onEvt",
           dispatches: [],
-          isVoid: false,
         },
       ],
     });
@@ -77,8 +76,8 @@ describe("standalone reaction edges", () => {
   });
 });
 
-describe("void standalone reactions", () => {
-  it("skips void reactions in standalone reactions", () => {
+describe("standalone reactions", () => {
+  it("renders all standalone reactions", () => {
     const model = emptyModel({
       states: [
         {
@@ -91,23 +90,19 @@ describe("void standalone reactions", () => {
       reactions: [
         {
           event: "Evt",
-          handlerName: "voidReaction",
+          handlerName: "reactionA",
           dispatches: [],
-          isVoid: true,
         },
         {
           event: "Evt",
-          handlerName: "realReaction",
+          handlerName: "reactionB",
           dispatches: [],
-          isVoid: false,
         },
       ],
     });
     const layout = computeLayout(model);
-    const voidNode = find(layout, "reaction", "voidReaction");
-    expect(voidNode).toBeUndefined();
-    const realNode = find(layout, "reaction", "realReaction");
-    expect(realNode).toBeDefined();
+    expect(find(layout, "reaction", "reactionA")).toBeDefined();
+    expect(find(layout, "reaction", "reactionB")).toBeDefined();
   });
 });
 
@@ -151,7 +146,6 @@ describe("standalone reaction without trigNode", () => {
           event: "NoSuchEvent", // event not in any state
           handlerName: "orphanReaction",
           dispatches: [],
-          isVoid: false,
         },
       ],
     });
@@ -177,13 +171,11 @@ describe("standalone reactions with multiple events stacking", () => {
           event: "Evt",
           handlerName: "r1",
           dispatches: [],
-          isVoid: false,
         },
         {
           event: "Evt",
           handlerName: "r2",
           dispatches: [],
-          isVoid: false,
         },
       ],
     });

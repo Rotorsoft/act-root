@@ -643,7 +643,7 @@ const app = act()
     ];
     const { model } = extractModel(files);
     expect(model.reactions).toHaveLength(1);
-    expect(model.reactions[0].isVoid).toBe(false);
+    expect(model.reactions[0].handlerName).toBeDefined();
   });
 
   it("scoped import falls all the way to unknownModuleProxy (line 107 branch #6)", () => {

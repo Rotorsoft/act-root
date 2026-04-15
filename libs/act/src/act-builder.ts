@@ -5,7 +5,7 @@
  * Fluent builder for composing event-sourced applications.
  */
 import { Act } from "./act.js";
-import { _this_, _void_, mergeProjection, registerState } from "./merge.js";
+import { _this_, mergeProjection, registerState } from "./merge.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 import type {
@@ -34,7 +34,7 @@ import type {
  * - Registering slices via `.withSlice()`
  * - Registering projections via `.withProjection()`
  * - Locking a custom actor type via `.withActor<TActor>()`
- * - Defining event reactions via `.on()` → `.do()` → `.to()` or `.void()`
+ * - Defining event reactions via `.on()` → `.do()` → `.to()`
  * - Building the orchestrator via `.build()`
  *
  * @template TSchemaReg - Schema register for states (maps action names to state schemas)
@@ -168,7 +168,6 @@ export type ActBuilder<
       to: (
         resolver: ReactionResolver<TEvents, TKey> | string
       ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
-      void: () => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
     };
   };
   /**
@@ -216,13 +215,14 @@ export type ActBuilder<
  *   .withState(Counter)
  *   .on("Incremented")
  *     .do(async (event) => { console.log("incremented!"); })
- *     .void()
+ *     .to("counter-target")
  *   .build();
  *
  * const app = act()
  *   .withSlice(CounterSlice)
  *   .build();
  * ```
+ *
  *
  * @see {@link ActBuilder} for available builder methods
  * @see {@link Act} for orchestrator API methods
@@ -371,13 +371,6 @@ export function act<
                   typeof resolver === "string"
                     ? { target: resolver }
                     : resolver,
-              });
-              return builder;
-            },
-            void() {
-              registry.events[event].reactions.set(handler.name, {
-                ...reaction,
-                resolver: _void_,
               });
               return builder;
             },

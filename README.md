@@ -242,7 +242,7 @@ const CounterSlice = slice()
   .withProjection(CounterProjection)  // embed projection (events must be subset of slice events)
   .on("Incremented")
     .do(async (event, _stream, app) => { /* dispatch actions via app */ })
-    .void()
+    .to("counter-target")
   .build();
 
 // Standalone projections work at the act() level for cross-slice events

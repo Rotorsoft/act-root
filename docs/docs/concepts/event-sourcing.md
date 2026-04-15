@@ -98,11 +98,6 @@ const app = act()
   .build();
 ```
 
-### Void vs Routed Reactions
-
-- **`.to(resolver)`** — reaction is processed by `drain()`. The resolver returns `{ target: string, source?: string }`.
-- **`.void()`** — reaction is **never processed by `drain()`**. Use only for inline side effects (logging, metrics).
-
 ### Stream Claiming
 
 Act uses an atomic claim mechanism to coordinate distributed consumers. The `claim()` method discovers and locks streams in a single operation using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — zero-contention competing consumers where workers never block each other:

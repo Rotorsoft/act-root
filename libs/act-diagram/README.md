@@ -165,7 +165,7 @@ type ActionNode = { name, emits: string[], invariants: string[], line? };
 type EventNode = { name, hasCustomPatch: boolean, line? };
 type SliceNode = { name, states: string[], stateVars: string[], projections: string[], reactions: ReactionNode[], error?, file?, line? };
 type ProjectionNode = { name, varName, handles: string[], line? };
-type ReactionNode = { event, handlerName, dispatches: string[], isVoid: boolean, line? };
+type ReactionNode = { event, handlerName, dispatches: string[], line? };
 
 // Layout types
 type Box = { x, y, w, h, label, error? };

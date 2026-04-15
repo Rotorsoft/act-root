@@ -155,32 +155,17 @@ In projections, use `event.created` for the timestamp:
 })
 ```
 
-## 6. Void Reactions — NEVER Processed by drain()
+## 6. Resolver Patterns
 
-**Critical:** `.void()` sets a reaction's resolver to return `undefined`. During `drain()`, reactions with `undefined` targets are **filtered out and skipped entirely**.
+Every reaction requires a `.to(resolver)` to tell `drain()` which stream to process:
 
-```typescript
-// This reaction will NEVER be processed by drain()
-.on("ItemCreated")
-  .do(async (event, stream, app) => { /* ... */ })
-  .void()  // ← resolver returns undefined → drain() skips this
-
-// Use .to() for reactions that must be processed by drain()
-.on("ItemCreated")
-  .do(async (event, stream, app) => { /* ... */ })
-  .to((event) => ({ target: event.stream }))  // ← drain() processes this
-```
-
-**When to use each:**
-- `.void()` — Side-effect-only reactions triggered inline (e.g., logging, metrics). These run during commit, not during drain.
-- `.to(resolver)` — Reactions that must be discovered and processed by `drain()`. The resolver returns `{ target: string, source?: string }`.
-
-**Common resolver patterns:**
 ```typescript
 .to((event) => ({ target: event.stream }))           // self-targeting
 .to((event) => ({ target: event.data.targetId }))    // cross-stream
 .to("fixed-stream-name")                             // static target
 ```
+
+For fire-and-forget side effects (logging, metrics), use lifecycle events (`app.on("committed", ...)`) instead of reactions.
 
 ## 7. Correlate Before Drain — settle() Pattern
 
@@ -439,7 +424,7 @@ const ItemProjection = projection("items")
 - `projection(target?)` — Creates a builder; optional default target stream
 - `.on({ EventName: schema })` — Register an event handler (record shorthand)
 - `.do(handler)` — Handler receives `(event, stream)` — no app interface
-- `.to(resolver)` / `.void()` — Override the default resolver per handler
+- `.to(resolver)` — Override the default resolver per handler
 - `.batch(handler)` — Register a batch handler for bulk event processing (static-target only). Receives `ReadonlyArray<BatchEvent<TEvents>>` (discriminated union) and `stream`. When defined, always called instead of individual `.do()` handlers — even for a single event.
 - `.build()` — Returns a `Projection` with `_tag: "Projection"`
 
@@ -472,7 +457,7 @@ const ItemSlice = slice()
 - `.withProjection(proj)` — Embed a built Projection (events must be a subset of slice events)
 - `.on(eventName)` — React to an event (string, not record)
 - `.do(handler)` — Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
-- `.to(resolver)` / `.void()` — Set target stream resolver
+- `.to(resolver)` — Set target stream resolver
 - `.build()` — Returns a `Slice` with `_tag: "Slice"`
 
 **Slice design decisions:**
@@ -482,7 +467,7 @@ const ItemSlice = slice()
 - **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, redeclare in `.emits()`. The passthrough yields to the custom reducer from the owning partial.
 - **One custom patch per event** — conflicting custom patches throw at build time. Passthroughs always yield to custom reducers.
 
-**Important:** `.void()` reactions are **never processed by `drain()`**. Use `.to(resolver)` for any reaction that must be discovered and executed during drain.
+**Important:** Every reaction requires a `.to(resolver)` to be discovered and executed during drain. For fire-and-forget side effects, use lifecycle events (`app.on("committed", ...)`) instead.
 
 ## 14. Close the Books — Stream Archival and Truncation
 

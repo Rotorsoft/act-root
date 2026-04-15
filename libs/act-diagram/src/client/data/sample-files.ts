@@ -89,7 +89,7 @@ export const CreationSlice = slice()
     .do(async function notifyManager(event, _stream, _app) {
       console.log("Escalation:", event.data);
     })
-    .void()
+    .to("notifications")
   .build();`,
   },
   {

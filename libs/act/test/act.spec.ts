@@ -45,11 +45,6 @@ describe("act", () => {
     .do(onIncremented)
     .on("decremented")
     .do(onDecremented, { maxRetries: 2, blockOnError: true })
-    .on("ignored")
-    .do(function handleIgnored() {
-      return Promise.resolve();
-    })
-    .void() // void resolver — correlate should skip this
     .withState(dummy)
     .on("added")
     .do(function handleAdded() {

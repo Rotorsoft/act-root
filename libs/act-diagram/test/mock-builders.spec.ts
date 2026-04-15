@@ -314,19 +314,7 @@ describe("mockSlice", () => {
       .build();
 
     expect(built[0].reactions).toHaveLength(1);
-    expect(built[0].reactions[0].isVoid).toBe(false);
     expect(built[0].reactions[0].handlerName).toBe("handler");
-  });
-
-  it("captures reactions with .void()", () => {
-    const built: any[] = [];
-    mockSlice((info) => built.push(info))
-      .on("SomeEvent")
-      .do(async function sideEffect() {})
-      .void()
-      .build();
-
-    expect(built[0].reactions[0].isVoid).toBe(true);
   });
 
   it("captures anonymous reaction handlers", () => {
@@ -519,12 +507,12 @@ describe("mockProjection", () => {
     expect(built[0].target).toBe("initial");
   });
 
-  it(".void() chains back to builder", () => {
+  it(".to() chains back to builder", () => {
     const built: any[] = [];
     mockProjection("p", (info) => built.push(info))
       .on({ E1: {} })
       .do()
-      .void()
+      .to("target")
       .on({ E2: {} })
       .do()
       .build();
@@ -561,7 +549,7 @@ describe("mockAct", () => {
     expect(built[0].states).toContain(null);
   });
 
-  it("captures reactions with .to() and .void()", () => {
+  it("captures reactions with .to()", () => {
     const built: any[] = [];
     mockAct((info) => built.push(info))
       .on("E1")
@@ -569,12 +557,12 @@ describe("mockAct", () => {
       .to(() => "t")
       .on("E2")
       .do(async function r2() {})
-      .void()
+      .to("target")
       .build();
 
     expect(built[0].reactions).toHaveLength(2);
-    expect(built[0].reactions[0].isVoid).toBe(false);
-    expect(built[0].reactions[1].isVoid).toBe(true);
+    expect(built[0].reactions[0].handlerName).toBe("r1");
+    expect(built[0].reactions[1].handlerName).toBe("r2");
   });
 
   it("build returns an act stub with all expected methods", () => {
