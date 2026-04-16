@@ -514,30 +514,33 @@ export class Act<
     lease.retry > 0 &&
       logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
+    // Scoped proxy: auto-injects reactingTo when do() is called without it,
+    // maintaining correlation chains by default (see #587).
+    // Bind stable methods once; only the do() closure changes per event.
+    const doAction = this.do.bind(this);
+    const scopedApp: IAct<TEvents, TActions, TActor> = {
+      do: doAction as IAct<TEvents, TActions, TActor>["do"],
+      load: this.load.bind(this),
+      query: this.query.bind(this),
+      query_array: this.query_array.bind(this),
+    };
+
     for (const payload of payloads) {
       const { event, handler, options } = payload;
-      // Scoped proxy: auto-injects reactingTo when do() is called without it,
-      // maintaining correlation chains by default (see #587)
-      const doAction = this.do.bind(this);
-      const scopedApp: IAct<TEvents, TActions, TActor> = {
-        do: <TKey extends keyof TActions & string>(
-          action: TKey,
-          target: Target<TActor>,
-          payload: Readonly<TActions[TKey]>,
-          reactingTo?: Committed<Schemas, string>,
-          skipValidation?: boolean
-        ) =>
-          doAction(
-            action,
-            target,
-            payload,
-            (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-            skipValidation
-          ),
-        load: this.load.bind(this),
-        query: this.query.bind(this),
-        query_array: this.query_array.bind(this),
-      };
+      scopedApp.do = <TKey extends keyof TActions & string>(
+        action: TKey,
+        target: Target<TActor>,
+        payload: Readonly<TActions[TKey]>,
+        reactingTo?: Committed<Schemas, string>,
+        skipValidation?: boolean
+      ) =>
+        doAction(
+          action,
+          target,
+          payload,
+          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
+          skipValidation
+        );
       try {
         await handler(event, stream, scopedApp); // the actual reaction
         at = event.id;
