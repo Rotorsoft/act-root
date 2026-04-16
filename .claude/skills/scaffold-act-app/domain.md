@@ -152,9 +152,10 @@ export const ItemSlice = slice()
   .withProjection(ItemProjection)
   .on("ItemCreated")  // plain string, NOT record shorthand
   .do(async function notify(event, stream, app) {
-    // app implements IAct — dispatch actions, load state, query events
-    // Pass event as 4th arg for causation tracking
-    await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
+    // app is a scoped IAct proxy — dispatch actions, load state, query events
+    // reactingTo is auto-injected, maintaining the correlation chain
+    await app.do("SomeAction", { stream, actor: systemActor }, payload);
+    // To override with a custom event: app.do(action, target, payload, customEvent)
   })
   .to((event) => ({ target: event.stream }))  // target stream for drain processing
   .build();

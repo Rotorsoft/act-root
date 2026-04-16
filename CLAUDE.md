@@ -98,6 +98,7 @@ pnpm -F shared drizzle:migrate
    - Include resolver to determine target stream
    - Support retry and error handling
    - Enable event correlation and dynamic stream discovery
+   - **Auto-inject `reactingTo`**: When a reaction handler calls `app.do()` without the `reactingTo` parameter, the framework automatically injects the triggering event, maintaining the correlation chain by default. Pass an explicit `reactingTo` to override.
 
 ### State Builder Pattern
 
@@ -222,7 +223,8 @@ const CreationSlice = slice()
   .withProjection(TicketProjection)  // embed projection (events must be subset of slice events)
   .on("TicketOpened")
     .do(async (event, _stream, app) => {
-      await app.do("AssignTicket", target, payload, event);
+      // reactingTo is auto-injected — no need to pass event explicitly
+      await app.do("AssignTicket", target, payload);
       const snapshot = await app.load(TicketCreation, event.stream);
       const events = await app.query_array({ stream: event.stream });
     })
@@ -234,7 +236,7 @@ const CreationSlice = slice()
 - `.withState(state)` - Register a partial state (include all states whose actions handlers need)
 - `.withProjection(proj)` - Embed a built `Projection` within the slice. The projection's events must be a subset of the slice's state events (enforced at compile time). Projection handlers keep their `(event, stream)` signature — no app interface.
 - `.on(eventName)` - React to an event from the slice's states (string, not record)
-- `.do(handler)` - Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
+- `.do(handler)` - Handler receives `(event, stream, app)` where `app` is a scoped `IAct` proxy (do, load, query, query_array). When `app.do()` is called without `reactingTo`, the triggering event is auto-injected to maintain the correlation chain. Pass an explicit `reactingTo` to override.
 - `.to(resolver)` - Set the target stream resolver
 - `.build()` - Returns a `Slice` with `_tag: "Slice"`
 
@@ -428,6 +430,7 @@ This enables high-throughput event processing with eventual consistency guarante
 Dynamic stream discovery through correlation metadata:
 
 - Each action/event includes `correlation` (request ID) and `causation` (what triggered it)
+- **Auto-injected `reactingTo`**: Inside reaction handlers, `app.do()` automatically uses the triggering event as `reactingTo` when omitted. This maintains the correlation chain without developer effort. Explicitly passing `reactingTo` overrides the default.
 - Reactions can discover new streams to process by querying uncommitted events
 - `app.correlate()` - Manual correlation; returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams
 - `app.settle()` - Debounced, non-blocking correlate→drain loop; emits `"settled"` when done. Stops when `subscribed === 0` (no new streams discovered)
