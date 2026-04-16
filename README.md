@@ -4,6 +4,8 @@
 
 [![Landing Page](./assets/landing.png)](https://rotorsoft.github.io/act-root/)
 
+[![Get the Book](https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge)](https://payhip.com/b/7ezLy)
+
 The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. This project is an attempt to distill the basic building blocks of modern software design into a small, simple, and composable library.
 
 ## Libraries
