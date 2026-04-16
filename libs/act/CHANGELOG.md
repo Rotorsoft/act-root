@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.30.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.29.1...@rotorsoft/act-v0.30.0) (2026-04-16)
+
+
+### Features
+
+* **act:** auto-inject reactingTo in reaction handlers ([0caa4f9](https://github.com/rotorsoft/act-root/commit/0caa4f9cebbb5d287bf59f43f4e3d5002dfb9ad6)), closes [#587](https://github.com/rotorsoft/act-root/issues/587)
+
 # [@rotorsoft/act-v0.29.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.29.0...@rotorsoft/act-v0.29.1) (2026-04-15)
 
 # [@rotorsoft/act-v0.29.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.28.0...@rotorsoft/act-v0.29.0) (2026-04-13)
