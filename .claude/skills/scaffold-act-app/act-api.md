@@ -442,8 +442,9 @@ const ItemSlice = slice()
   .withProjection(ItemProjection)  // embed projection (events must be subset of slice events)
   .on("ItemCreated")  // plain string, NOT record shorthand
     .do(async (event, stream, app) => {
-      // app implements IAct — dispatch actions, load state, query events
-      await app.do("SomeAction", { stream, actor: systemActor }, payload, event);
+      // app is a scoped IAct proxy — reactingTo auto-injected for correlation
+      await app.do("SomeAction", { stream, actor: systemActor }, payload);
+      // To override with a custom event: app.do(action, target, payload, customEvent)
       const snapshot = await app.load(Item, stream);
       const events = await app.query_array({ stream });
     })
@@ -456,7 +457,7 @@ const ItemSlice = slice()
 - `.withState(state)` — Register a partial state
 - `.withProjection(proj)` — Embed a built Projection (events must be a subset of slice events)
 - `.on(eventName)` — React to an event (string, not record)
-- `.do(handler)` — Handler receives `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array)
+- `.do(handler)` — Handler receives `(event, stream, app)` where `app` is a scoped `IAct` proxy (do, load, query, query_array). When `app.do()` is called without `reactingTo`, the triggering event is auto-injected to maintain the correlation chain. Pass an explicit `reactingTo` to override.
 - `.to(resolver)` — Set target stream resolver
 - `.build()` — Returns a `Slice` with `_tag: "Slice"`
 

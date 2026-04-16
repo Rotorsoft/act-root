@@ -177,7 +177,7 @@ For complete workspace configuration files, see [monorepo-template.md](monorepo-
 2. **Zod schemas mandatory** — All actions, events, and states require Zod schemas. Use `ZodEmpty` for empty payloads.
 3. **Actor context required** — Every `app.do()` needs `Target` with `{ stream, actor: { id, name } }`. Use `withActor<AppActor>()` to enforce typed actors.
 4. **Partial patches** — Patch handlers return only changed fields, not the full state.
-5. **Causation tracking** — Pass triggering event as 4th arg in reactions: `app.do(action, target, payload, event)`.
+5. **Causation tracking** — Inside reaction handlers, `app.do()` auto-injects the triggering event as `reactingTo`, maintaining the correlation chain by default. Pass an explicit `reactingTo` to override: `app.do(action, target, payload, customEvent)`.
 6. **Domain isolation** — `packages/domain` has zero infrastructure deps (except `@rotorsoft/act` and `zod`).
 7. **InMemoryStore + InMemoryCache for tests** — Default store and cache. Call `store().seed()` in `beforeEach` and `dispose()()` in `afterAll`. Call `clear*()` for each projection in `beforeEach`.
 8. **TypeScript strict mode** — All packages use `"strict": true`.

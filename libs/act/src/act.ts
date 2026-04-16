@@ -247,24 +247,22 @@ export class Act<
    * }
    * ```
    *
-   * @example Reaction triggering another action
+   * @example Reaction triggering another action (reactingTo auto-injected)
    * ```typescript
    * const app = act()
    *   .withState(Order)
    *   .withState(Inventory)
    *   .on("OrderPlaced")
-   *     .do(async (event, context) => {
-   *       // This action is triggered by an event
-   *       const result = await context.app.do(
+   *     .do(async function reduceInventory(event, _stream, app) {
+   *       // Inside reaction handlers, reactingTo is auto-injected when omitted.
+   *       // The triggering event is used by default, maintaining the correlation chain.
+   *       await app.do(
    *         "reduceStock",
-   *         {
-   *           stream: "inventory-1",
-   *           actor: event.meta.causation.action.actor
-   *         },
-   *         { amount: event.data.items.length },
-   *         event // Pass event for correlation tracking
+   *         { stream: "inventory-1", actor: { id: "sys", name: "system" } },
+   *         { amount: event.data.items.length }
    *       );
-   *       return result;
+   *       // To use a different correlation, pass reactingTo explicitly:
+   *       // await app.do("reduceStock", target, payload, customEvent);
    *     })
    *     .to("inventory-1")
    *   .build();
@@ -486,6 +484,11 @@ export class Act<
    * This is called by the main `drain` loop after fetching new events.
    * It handles reactions, supporting retries, blocking, and error handling.
    *
+   * Each handler receives a scoped `IAct` proxy that auto-injects the
+   * triggering event as `reactingTo` when `do()` is called without it,
+   * maintaining correlation chains by default (#587). Handlers can still
+   * pass an explicit `reactingTo` to override this behavior.
+   *
    * @internal
    * @param lease The lease to handle
    * @param payloads The reactions to handle
@@ -513,8 +516,30 @@ export class Act<
 
     for (const payload of payloads) {
       const { event, handler, options } = payload;
+      // Scoped proxy: auto-injects reactingTo when do() is called without it,
+      // maintaining correlation chains by default (see #587)
+      const doAction = this.do.bind(this);
+      const scopedApp: IAct<TEvents, TActions, TActor> = {
+        do: <TKey extends keyof TActions & string>(
+          action: TKey,
+          target: Target<TActor>,
+          payload: Readonly<TActions[TKey]>,
+          reactingTo?: Committed<Schemas, string>,
+          skipValidation?: boolean
+        ) =>
+          doAction(
+            action,
+            target,
+            payload,
+            (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
+            skipValidation
+          ),
+        load: this.load.bind(this),
+        query: this.query.bind(this),
+        query_array: this.query_array.bind(this),
+      };
       try {
-        await handler(event, stream, this); // the actual reaction
+        await handler(event, stream, scopedApp); // the actual reaction
         at = event.id;
         handled++;
       } catch (error) {
