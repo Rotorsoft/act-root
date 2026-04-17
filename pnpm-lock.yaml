@@ -285,8 +285,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.27.0
-        version: 0.27.0
+        specifier: ^0.30.0
+        version: 0.30.0
       '@trpc/server':
         specifier: 11.12.1
         version: 11.12.1(typescript@5.9.3)
@@ -506,8 +506,8 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.27.0
-        version: 0.27.0
+        specifier: ^0.30.0
+        version: 0.30.0
       '@rotorsoft/act-pg':
         specifier: ^0.14.4
         version: 0.14.4
@@ -3157,8 +3157,8 @@ packages:
     resolution: {integrity: sha512-QURe24CdJ6wX8vvMQ1OjOg3zYPwrAaq7DETt3o5PF7qOtXWIGdPvsjSIH5Xsvyj/vabaINw+wiDM18KhxV0WeA==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act@0.27.0':
-    resolution: {integrity: sha512-0bI15lbu+QA1W2nc8F6OEAihxiBkwVzNES2QukD1JzgKOxL/5F6D6LHo43IjCFgkjLiTTglyEZUzq+zfXQ+SdA==}
+  '@rotorsoft/act@0.30.0':
+    resolution: {integrity: sha512-MQYkz1co3yZIrknnQ+t3vl2J7OBIkqzm18PfkYOJqCLPxbXGGncYVEOQvAvPDMJ/jK6i1l3ob6Ro0w01dWFoRA==}
     engines: {node: '>=22.18.0'}
 
   '@rspack/binding-darwin-arm64@1.7.11':
@@ -12685,7 +12685,7 @@ snapshots:
       '@rotorsoft/act-patch': 1.0.2
       zod: 4.3.6
 
-  '@rotorsoft/act@0.27.0':
+  '@rotorsoft/act@0.30.0':
     dependencies:
       '@rotorsoft/act-patch': 1.0.2
       zod: 4.3.6
