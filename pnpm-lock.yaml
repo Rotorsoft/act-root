@@ -512,8 +512,8 @@ importers:
         specifier: ^0.30.0
         version: 0.30.0
       '@rotorsoft/act-pg':
-        specifier: ^0.14.4
-        version: 0.14.4
+        specifier: ^0.16.0
+        version: 0.16.0
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3152,12 +3152,12 @@ packages:
     resolution: {integrity: sha512-lWAZt/WUyQmO5XOXtV4y5Np4+H4oEPXxQ40yWlg/AiXxmyH16/zq0/lWgTHkNuRYQS2MvyaTEOI78cAC8GAqgw==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act-pg@0.14.4':
-    resolution: {integrity: sha512-/F+88Qc+53mvcXMEtqOCCBWxQH+0UUhhatfd4tALEf9SQI10oe5gt86CieB/9Sfe2mepmSlQlEybVu409DXsHw==}
+  '@rotorsoft/act-pg@0.16.0':
+    resolution: {integrity: sha512-4tqHTcdAPeXzCeG7fQGdb3D0Nq0g4YA18jEtrcmSsh/0o6lEy628z1nejGoBdlhVTI3C+vbC8VAla+Mq/xHM2Q==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act@0.26.1':
-    resolution: {integrity: sha512-QURe24CdJ6wX8vvMQ1OjOg3zYPwrAaq7DETt3o5PF7qOtXWIGdPvsjSIH5Xsvyj/vabaINw+wiDM18KhxV0WeA==}
+  '@rotorsoft/act@0.29.1':
+    resolution: {integrity: sha512-dqg/n/5pTljs8emLXAGFKfeGAjQ11rzcpCz8YMILvVwH2kQAvnZcNQUf9z1cUqeCWkjctEHIqVcdHRGM9Xoi4A==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.30.0':
@@ -12671,15 +12671,15 @@ snapshots:
 
   '@rotorsoft/act-patch@1.0.2': {}
 
-  '@rotorsoft/act-pg@0.14.4':
+  '@rotorsoft/act-pg@0.16.0':
     dependencies:
-      '@rotorsoft/act': 0.26.1
+      '@rotorsoft/act': 0.29.1
       pg: 8.20.0
       zod: 4.3.6
     transitivePeerDependencies:
       - pg-native
 
-  '@rotorsoft/act@0.26.1':
+  '@rotorsoft/act@0.29.1':
     dependencies:
       '@rotorsoft/act-patch': 1.0.2
       zod: 4.3.6
