@@ -201,4 +201,177 @@ describe("sqlite store", () => {
     expect(events.filter((e) => e.name === "incremented").length).toBe(2);
     expect(events.filter((e) => e.name === "decremented").length).toBe(1);
   });
+
+  it("should query with no params", async () => {
+    const count = await store().query(() => {});
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it("should query with non-exact stream pattern (LIKE)", async () => {
+    await store().commit("regex-A", [{ name: "rt", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store().commit("regex-B", [{ name: "rt", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const result: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => result.push(e), { stream: "regex-.*" });
+    expect(result.length).toBe(2);
+    // single-char wildcard via "."
+    const result2: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => result2.push(e), { stream: "regex-." });
+    expect(result2.length).toBe(2);
+  });
+
+  it("should query by correlation", async () => {
+    const correlation = chance.guid();
+    await store().commit("corr-test", [{ name: "ct", data: {} }], {
+      correlation,
+      causation: {},
+    });
+    const result: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => result.push(e), { correlation });
+    expect(result.length).toBe(1);
+  });
+
+  it("should query with before id", async () => {
+    const all: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => all.push(e));
+    const cutoff = all[2].id;
+    const result: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => result.push(e), { before: cutoff });
+    expect(result.length).toBeGreaterThan(0);
+    expect(result.every((e) => e.id < cutoff)).toBe(true);
+  });
+
+  it("should query with after id", async () => {
+    const result: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => result.push(e), { after: 1, limit: 3 });
+    expect(result.length).toBe(3);
+    expect(result.every((e) => e.id > 1)).toBe(true);
+  });
+
+  it("should commit empty events array", async () => {
+    const result = await store().commit("empty-test", [], {
+      correlation: "",
+      causation: {},
+    });
+    expect(result).toEqual([]);
+  });
+
+  it("should re-subscribing existing stream returns 0", async () => {
+    await store().subscribe([{ stream: "resub-test" }]);
+    const { subscribed } = await store().subscribe([{ stream: "resub-test" }]);
+    expect(subscribed).toBe(0);
+  });
+
+  it("should reset empty array", async () => {
+    const count = await store().reset([]);
+    expect(count).toBe(0);
+  });
+
+  it("should reset non-existent streams returns 0", async () => {
+    const count = await store().reset(["does-not-exist-xyz"]);
+    expect(count).toBe(0);
+  });
+
+  it("should truncate with tombstone (no snapshot)", async () => {
+    const stream = "tombstone-test";
+    await store().commit(stream, [{ name: "e1", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const result = await store().truncate([{ stream }]);
+    expect(result.get(stream)?.deleted).toBe(1);
+    expect(result.get(stream)?.committed.name).toBe("__tombstone__");
+  });
+
+  it("should truncate with custom meta", async () => {
+    const stream = "trunc-meta";
+    await store().commit(stream, [{ name: "e", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const meta = {
+      correlation: "X",
+      causation: {
+        action: { stream, name: "n", actor: { id: "1", name: "u" } },
+      },
+    };
+    const result = await store().truncate([{ stream, meta }]);
+    expect(result.get(stream)?.committed.meta.correlation).toBe("X");
+  });
+
+  it("should claim with leading frontier (dual frontiers)", async () => {
+    await store().subscribe([{ stream: "lead-test" }]);
+    await store().commit(
+      "lead-test",
+      [
+        { name: "x", data: {} },
+        { name: "x", data: {} },
+      ],
+      { correlation: "", causation: {} }
+    );
+    const claimed = await store().claim(0, 10, "leader-1", 30000);
+    expect(claimed.length).toBeGreaterThan(0);
+    if (claimed.length)
+      await store().ack(claimed.map((l) => ({ ...l, at: 0 })));
+  });
+
+  it("should not claim blocked streams", async () => {
+    await store().subscribe([{ stream: "blocked-not-claimed" }]);
+    await store().commit("blocked-not-claimed", [{ name: "z", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const claimed = await store().claim(100, 0, "w-block", 30000);
+    const target = claimed.find((l) => l.stream === "blocked-not-claimed");
+    expect(target).toBeDefined();
+    const others = claimed.filter((l) => l.stream !== "blocked-not-claimed");
+    if (others.length) await store().ack(others);
+    await store().block([{ ...target!, error: "boom" }]);
+
+    const claimed2 = await store().claim(100, 100, "w-block-2", 30000);
+    expect(
+      claimed2.find((l) => l.stream === "blocked-not-claimed")
+    ).toBeUndefined();
+    if (claimed2.length) await store().ack(claimed2);
+    await store().reset(["blocked-not-claimed"]);
+  });
+
+  it("should not block a stream leased by a different drainer", async () => {
+    await store().subscribe([{ stream: "block-wrong-drainer" }]);
+    await store().commit("block-wrong-drainer", [{ name: "z", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const claimed = await store().claim(100, 0, "actor-1", 100000);
+    const target = claimed.find((l) => l.stream === "block-wrong-drainer");
+    expect(target).toBeDefined();
+    const others = claimed.filter((l) => l.stream !== "block-wrong-drainer");
+    if (others.length) await store().ack(others);
+
+    const blocked = await store().block([
+      { ...target!, by: "actor-2", error: "wrong drainer" },
+    ]);
+    expect(blocked.length).toBe(0);
+  });
+
+  it("should not ack a lease owned by a different drainer", async () => {
+    await store().subscribe([{ stream: "ack-wrong-drainer" }]);
+    await store().commit("ack-wrong-drainer", [{ name: "z", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const claimed = await store().claim(100, 0, "owner-1", 100000);
+    const target = claimed.find((l) => l.stream === "ack-wrong-drainer");
+    expect(target).toBeDefined();
+    const others = claimed.filter((l) => l.stream !== "ack-wrong-drainer");
+    if (others.length) await store().ack(others);
+
+    const acked = await store().ack([{ ...target!, by: "owner-2", at: 99 }]);
+    expect(acked.length).toBe(0);
+  });
 });

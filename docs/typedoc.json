@@ -3,6 +3,7 @@
     "../libs/act/src/index.ts",
     "../libs/act-patch/src/index.ts",
     "../libs/act-pg/src/index.ts",
+    "../libs/act-sqlite/src/index.ts",
     "../libs/act-sse/src/index.ts"
   ],
   "out": "docs/api",

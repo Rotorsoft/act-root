@@ -42,6 +42,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-sqlite",
+          href: "/docs/api/act-sqlite/src",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-sse",
           href: "/docs/api/act-sse/src",
         },

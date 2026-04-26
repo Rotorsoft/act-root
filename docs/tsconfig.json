@@ -13,6 +13,9 @@
       "@rotorsoft/act-pg": [
         "libs/act-pg/src/index.ts"
       ],
+      "@rotorsoft/act-sqlite": [
+        "libs/act-sqlite/src/index.ts"
+      ],
       "@rotorsoft/act-sse": [
         "libs/act-sse/src/index.ts"
       ]
@@ -22,6 +25,7 @@
     "../libs/act/src/**/*",
     "../libs/act-patch/src/**/*",
     "../libs/act-pg/src/**/*",
+    "../libs/act-sqlite/src/**/*",
     "../libs/act-sse/src/**/*"
   ],
   "exclude": [

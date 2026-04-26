@@ -25,6 +25,7 @@ The event store uses a port/adapter pattern:
 
 - **InMemoryStore** (default) — fast, ephemeral, for development and testing
 - **PostgresStore** (`@rotorsoft/act-pg`) — production-ready with ACID guarantees and connection pooling
+- **SqliteStore** (`@rotorsoft/act-sqlite`) — libSQL-backed adapter for embedded or single-node deployments
 
 ```typescript
 import { store } from "@rotorsoft/act";
@@ -36,6 +37,13 @@ store(new PostgresStore({
   user: "postgres",
   password: "secret",
 }));
+```
+
+```typescript
+import { store } from "@rotorsoft/act";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+store(new SqliteStore({ url: "file:myapp.db" }));
 ```
 
 ### Cache

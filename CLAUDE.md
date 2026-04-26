@@ -13,6 +13,7 @@ This is a pnpm monorepo with two main sections:
 - **`/libs`** - Core framework libraries
   - `@rotorsoft/act` - Core event sourcing framework
   - `@rotorsoft/act-pg` - PostgreSQL adapter for production
+  - `@rotorsoft/act-sqlite` - SQLite adapter (libSQL) for embedded/single-node deployments
   - `@rotorsoft/act-patch` - Immutable deep-merge patch utility
   - `@rotorsoft/act-sse` - Server-Sent Events for incremental state broadcast
 
@@ -368,7 +369,8 @@ The framework uses a port/adapter pattern for persistence and caching via single
 #### Store
 
 - **InMemoryStore** - Default, useful for tests and prototyping
-- **PostgresStore** - Production-ready with atomic claim, snapshots, and connection pooling
+- **PostgresStore** (`@rotorsoft/act-pg`) - Production-ready with atomic claim, snapshots, and connection pooling
+- **SqliteStore** (`@rotorsoft/act-sqlite`) - libSQL-backed adapter for embedded or single-node deployments; serializes writes at the DB level, equivalent to PG's `FOR UPDATE SKIP LOCKED` for single-server
 
 Switch stores using the `store()` singleton:
 
@@ -608,6 +610,10 @@ Events are immutable — their schemas must evolve without breaking historical d
 - **`postgres-store.ts`** - PostgreSQL implementation of Store interface
 - **`types.ts`** - PostgreSQL-specific types and schemas
 
+### SQLite Adapter (`libs/act-sqlite/src`)
+
+- **`SqliteStore.ts`** - libSQL-backed implementation of the Store interface (single-node, embedded)
+
 ### Examples
 
 Each example demonstrates different framework capabilities:
@@ -633,7 +639,7 @@ Each example demonstrates different framework capabilities:
 2. Implement in appropriate module (`state.ts`, `act.ts`, etc.)
 3. Add tests in `__tests__` directory
 4. Update example applications to demonstrate usage
-5. Ensure both InMemoryStore and PostgresStore support the feature
+5. Ensure InMemoryStore, PostgresStore, and SqliteStore all support the feature
 
 ### Documentation Guidelines
 

@@ -137,6 +137,10 @@ store(new PostgresStore({
   schema: "public",
   table: "events",
 }));
+
+// Embedded / single-node: SQLite via libSQL
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+store(new SqliteStore({ url: "file:myapp.db" }));
 ```
 
 ### Cache
