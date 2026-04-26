@@ -260,4 +260,26 @@ describe("Store.reset", () => {
 
     expect(projected).toEqual([7, 8]);
   });
+
+  it("app.reset returns 0 and skips arming the drain flag for unknown streams", async () => {
+    const app = act().withState(Counter).build();
+    const count = await app.reset(["does-not-exist"]);
+    expect(count).toBe(0);
+    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
+      false
+    );
+  });
+
+  it("app.reset does not arm the drain flag when the app has no reactions", async () => {
+    // Static target subscription happens via withProjection, so we can reset
+    // a real stream — but with no reactive events, _needs_drain should stay
+    // false (drain would be a no-op anyway).
+    const app = act().withState(Counter).build();
+    await store().subscribe([{ stream: "no-reactions-proj" }]);
+    const count = await app.reset(["no-reactions-proj"]);
+    expect(count).toBe(1);
+    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
+      false
+    );
+  });
 });
