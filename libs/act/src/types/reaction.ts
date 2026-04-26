@@ -302,7 +302,10 @@ export type Drain<TEvents extends Schemas> = {
  *
  * @property debounceMs - Debounce window in milliseconds (default: 10)
  * @property correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
- * @property maxPasses - Maximum correlate→drain loops (default: 1)
+ * @property maxPasses - Cap on correlate→drain loops (default: `Infinity`).
+ *   Settle exits early as soon as a pass makes no progress (no new
+ *   subscriptions, no acks, no blocks), so the cap only matters in
+ *   pathological cases.
  */
 export type SettleOptions = DrainOptions & {
   readonly debounceMs?: number;

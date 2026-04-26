@@ -103,12 +103,10 @@ describe("Store.reset", () => {
       await new Promise((r) => setTimeout(r, 5));
     }
 
-    // Fix the handler, reset, and re-correlate to trigger drain
+    // Fix the handler and reset — app.reset() raises the drain flag.
     shouldFail = false;
     handler.mockClear();
-    await store().reset(["fail-proj"]);
-    // Emit another event so drain flag is set
-    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.reset(["fail-proj"]);
     const result = await app.drain({ eventLimit: 100 });
 
     expect(handler).toHaveBeenCalled();
@@ -186,5 +184,102 @@ describe("Store.reset", () => {
 
     expect(firstRun).toEqual(secondRun);
     expect(firstRun).toEqual([10, 20]);
+  });
+
+  it("should replay events when drain runs after reset on a settled app", async () => {
+    const stream = nextStream();
+    const projected: number[] = [];
+
+    const CounterProjection = projection("settled-reset-proj")
+      .on({ Incremented })
+      .do(async function project(event) {
+        await Promise.resolve();
+        projected.push(event.data.by);
+      })
+      .build();
+
+    const app = act()
+      .withState(Counter)
+      .withProjection(CounterProjection)
+      .build();
+
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.correlate();
+    // First drain processes events; second drain leaves the orchestrator
+    // fully settled (_needs_drain cleared because nothing left to do).
+    await app.drain({ eventLimit: 100 });
+    await app.drain({ eventLimit: 100 });
+
+    expect(projected).toEqual([1, 2]);
+
+    projected.length = 0;
+    const count = await app.reset(["settled-reset-proj"]);
+    expect(count).toBe(1);
+    const result = await app.drain({ eventLimit: 100 });
+
+    expect(projected).toEqual([1, 2]);
+    expect(result.acked.length).toBe(1);
+  });
+
+  it("should replay events when settle runs after reset on a settled app", async () => {
+    const stream = nextStream();
+    const projected: number[] = [];
+
+    const CounterProjection = projection("settled-reset-settle-proj")
+      .on({ Incremented })
+      .do(async function project(event) {
+        await Promise.resolve();
+        projected.push(event.data.by);
+      })
+      .build();
+
+    const app = act()
+      .withState(Counter)
+      .withProjection(CounterProjection)
+      .build();
+
+    await app.do("increment", { stream, actor }, { by: 7 });
+    await app.do("increment", { stream, actor }, { by: 8 });
+
+    await new Promise<void>((resolve) => {
+      app.on("settled", () => resolve());
+      app.settle();
+    });
+    expect(projected).toEqual([7, 8]);
+    // Second settle drives _needs_drain to false (no work left).
+    await app.drain({ eventLimit: 100 });
+
+    projected.length = 0;
+    await app.reset(["settled-reset-settle-proj"]);
+
+    await new Promise<void>((resolve) => {
+      app.on("settled", () => resolve());
+      app.settle();
+    });
+
+    expect(projected).toEqual([7, 8]);
+  });
+
+  it("app.reset returns 0 and skips arming the drain flag for unknown streams", async () => {
+    const app = act().withState(Counter).build();
+    const count = await app.reset(["does-not-exist"]);
+    expect(count).toBe(0);
+    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
+      false
+    );
+  });
+
+  it("app.reset does not arm the drain flag when the app has no reactions", async () => {
+    // Static target subscription happens via withProjection, so we can reset
+    // a real stream — but with no reactive events, _needs_drain should stay
+    // false (drain would be a no-op anyway).
+    const app = act().withState(Counter).build();
+    await store().subscribe([{ stream: "no-reactions-proj" }]);
+    const count = await app.reset(["no-reactions-proj"]);
+    expect(count).toBe(1);
+    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
+      false
+    );
   });
 });

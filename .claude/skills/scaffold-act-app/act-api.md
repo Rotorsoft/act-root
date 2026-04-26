@@ -199,7 +199,7 @@ app.on("settled", (drain) => {
 app.settle({
   debounceMs: 10,                      // debounce window (default: 10ms)
   correlate: { after: -1, limit: 100 }, // correlate query (default)
-  maxPasses: 1,                         // max correlate→drain loops (default: 1)
+  maxPasses: Infinity,                  // kill-switch cap (default: Infinity)
   streamLimit: 10,                      // passed to drain()
   eventLimit: 100,                      // passed to drain()
 });
@@ -209,6 +209,8 @@ app.settle({
 - **Non-blocking**: `settle()` returns immediately — mutations don't wait for drain
 - **Debounced**: Multiple rapid `app.do()` calls coalesce into one settle cycle (10ms window)
 - **Guarded**: Internal `_settling` flag prevents concurrent settle cycles
+- **Drains to completion**: loops correlate→drain until a pass makes no progress (no new subscriptions, no acks, no blocks). Paginated catch-up after `app.reset(...)` works without a manual loop.
+- **`maxPasses` is a kill-switch**, not a tuning knob — it caps runtime if a reaction handler keeps emitting events that re-trigger itself. Default `Infinity` means the natural exit always wins.
 - **Lifecycle event**: `"settled"` fires only after all correlate/drain iterations finish, so SSE clients see a consistent view
 
 **In tests:** Call `correlate()` + `drain()` directly (synchronous, no debounce):
@@ -223,7 +225,7 @@ it("should process reactions", async () => {
 **In bootstrap:** Wire `app.on("committed", () => app.settle())` before the initial settle. This ensures reaction chains fully propagate — when a reaction produces new events during drain, the `committed` listener triggers another settle cycle to process those events through projections and further reactions. Without this, projection streams lag behind after reaction chains.
 
 ```typescript
-const settleOpts = { maxPasses: 10, streamLimit: 100, eventLimit: 1000 };
+const settleOpts = { streamLimit: 100, eventLimit: 1000 };
 app.on("committed", () => app.settle(settleOpts));
 ```
 
@@ -508,3 +510,42 @@ const result = await app.close([{ stream: "s1" }]);
 expect(result.truncated.has("s1")).toBe(true);
 await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
 ```
+
+## 15. Projection Rebuild — Replay Events Through Updated Projections
+
+When a projection's logic changes, reset its watermark and let `settle()` replay every event through the updated handler.
+
+```typescript
+// 1. Clear the read-model side effects (DB rows, cache, in-memory map)
+await db.delete(items);
+clearItems();
+
+// 2. Reset the projection stream watermark AND arm the orchestrator's drain flag
+await app.reset(["items"]);
+
+// 3. Trigger settle — it loops correlate→drain until caught up, then emits "settled"
+app.settle({ eventLimit: 1000 });
+```
+
+**Always use `app.reset(...)` — never `store().reset(...)` directly.**
+
+Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. After a settled app (no recent commits) has caught up, `_needs_drain === false` and any subsequent `drain()`/`settle()` short-circuits and returns immediately. `store().reset(...)` alone leaves the flag unchanged, so the replay never runs. `app.reset(...)` wraps the store call and arms the flag in one step:
+
+```typescript
+// libs/act/src/act.ts
+async reset(streams: string[]): Promise<number> {
+  const count = await store().reset(streams);
+  if (count > 0 && this._reactive_events.size > 0) {
+    this._needs_drain = true;
+  }
+  return count;
+}
+```
+
+**`settle()` drains to completion by default.** The `maxPasses` cap defaults to `Infinity` — settle exits naturally when a pass makes no progress (no new subscriptions, no acks, no blocks). One `settle()` call fully catches up paginated streams of any length; the cap only acts as a kill-switch for runaway reaction loops.
+
+**Typical production workflow:**
+1. Deploy updated projection code
+2. Clear projected data (truncate read-model table, flush cache)
+3. `await app.reset(["projection-target"])`
+4. `app.settle()` (or wait on `"settled"`) — drives the catch-up to completion

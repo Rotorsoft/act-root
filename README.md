@@ -128,7 +128,7 @@ When `.emits()` declares events, every event gets a default passthrough reducer:
 
 ### Projections Are Disposable
 
-Projections are derived data — you should be able to throw one away and rebuild it from the event log at any time. Reset the watermark with `store().reset(["projection-target"])` and the next `drain()` replays all events from the beginning. No special rebuild API needed — the existing drain machinery handles it.
+Projections are derived data — you should be able to throw one away and rebuild it from the event log at any time. Reset the watermark with `app.reset(["projection-target"])` and the next `app.settle()` replays all events from the beginning. `settle()` loops correlate→drain until a pass makes no progress, so a single call fully catches up paginated streams. `app.reset()` also arms the orchestrator's drain flag, which `store().reset()` alone does not (a settled app would otherwise short-circuit and skip the replay).
 
 ### Snapshots and Cache: Two Layers
 

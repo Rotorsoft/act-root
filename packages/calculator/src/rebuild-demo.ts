@@ -1,15 +1,15 @@
 /**
  * Projection Rebuild Demo
  *
- * Demonstrates how store().reset() enables projection rebuilds:
+ * Demonstrates how app.reset() enables projection rebuilds:
  * 1. Build a counter app with a projection that sums increments
  * 2. Process events through the projection normally
- * 3. Reset the projection watermark with store().reset()
+ * 3. Reset the projection watermark with app.reset()
  * 4. Re-drain to replay all events through the (potentially updated) projection
  *
  * Run: pnpm -F calculator dev:rebuild
  */
-import { act, dispose, projection, state, store } from "@rotorsoft/act";
+import { act, dispose, projection, state } from "@rotorsoft/act";
 import { z } from "zod";
 
 const Incremented = z.object({ by: z.number() });
@@ -67,7 +67,7 @@ async function main() {
   totalEvents = 0;
   totalSum = 0;
 
-  const resetCount = await store().reset(["sum-proj"]);
+  const resetCount = await app.reset(["sum-proj"]);
   console.log(`  Reset ${resetCount} stream(s)`);
 
   // Re-drain replays all events from the beginning
@@ -87,7 +87,7 @@ async function main() {
   console.log(`\n=== Second rebuild (idempotent) ===`);
   totalEvents = 0;
   totalSum = 0;
-  await store().reset(["sum-proj"]);
+  await app.reset(["sum-proj"]);
   await app.drain({ eventLimit: 100 });
   console.log(`  Events re-processed: ${totalEvents}`);
   console.log(`  Sum: ${totalSum}`);

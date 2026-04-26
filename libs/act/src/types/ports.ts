@@ -332,18 +332,24 @@ export interface Store extends Disposable {
    * for replay from the beginning. Also clears retry, blocked, error,
    * and lease state so the streams can be claimed immediately.
    *
-   * Used by `Act.rebuild()` to replay events through updated projections.
+   * **Prefer `Act.reset()` over calling this directly.** This primitive
+   * only resets the store; it does not raise the orchestrator's internal
+   * "needs drain" flag, so a settled `Act` instance will short-circuit and
+   * skip the replay. `Act.reset()` wraps this and arms the flag.
    *
    * @param streams - Stream names to reset
    * @returns Count of streams that were actually reset
    *
    * @example
    * ```typescript
-   * const count = await store().reset(["my-projection"]);
-   * console.log(`Reset ${count} streams for replay`);
+   * // Recommended
+   * await app.reset(["my-projection"]);
+   *
+   * // Low-level (does NOT trigger replay on settled apps)
+   * await store().reset(["my-projection"]);
    * ```
    *
-   * @see {@link Act.rebuild} for the high-level rebuild API
+   * @see {@link Act.reset} for the high-level rebuild API
    */
   reset: (streams: string[]) => Promise<number>;
 
