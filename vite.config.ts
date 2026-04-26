@@ -16,6 +16,10 @@ export default defineConfig({
         __dirname,
         "libs/act-pino/src/index.ts"
       ),
+      "@rotorsoft/act-sqlite": path.resolve(
+        __dirname,
+        "libs/act-sqlite/src/index.ts"
+      ),
       "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
     },
   },

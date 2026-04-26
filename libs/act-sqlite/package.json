@@ -1,0 +1,43 @@
+{
+  "name": "@rotorsoft/act-sqlite",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "act sqlite adapters",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act-sqlite"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/@types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/@types/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types"
+  },
+  "dependencies": {
+    "@rotorsoft/act": "workspace:^",
+    "@libsql/client": "^0.17.2",
+    "zod": "^4.3.6"
+  }
+}
