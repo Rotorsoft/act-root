@@ -95,6 +95,19 @@ store(new PostgresStore({
 
 Install: `pnpm -F @my-app/app add @rotorsoft/act-pg`
 
+## Switch to SQLite (libSQL)
+
+Use `@rotorsoft/act-sqlite` for embedded or single-node deployments. SQLite serializes writes at the database level, giving the same single-server semantics as Postgres' `FOR UPDATE SKIP LOCKED`.
+
+```typescript
+import { store } from "@rotorsoft/act";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+store(new SqliteStore({ url: process.env.SQLITE_URL ?? "file:myapp.db" }));
+```
+
+Install: `pnpm -F @my-app/app add @rotorsoft/act-sqlite`
+
 ## Cache Strategy
 
 Cache is always-on by default with `InMemoryCache` (LRU, maxSize 1000). It stores the latest state checkpoint per stream, eliminating full event replay on every `load()`. Actions update the cache after each successful commit; concurrency errors invalidate stale entries automatically.

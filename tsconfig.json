@@ -11,6 +11,9 @@
       "path": "./libs/act-pg"
     },
     {
+      "path": "./libs/act-sqlite"
+    },
+    {
       "path": "./libs/act-sse"
     }
   ]

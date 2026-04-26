@@ -360,8 +360,11 @@ afterAll(async () => {
 ```typescript
 import { store, cache } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
 
-store(new PostgresStore({ /* config */ }));  // sets the store adapter
+store(new PostgresStore({ /* config */ }));  // distributed / multi-node
+// or
+store(new SqliteStore({ url: "file:myapp.db" }));  // embedded / single-node
 await store().seed();                         // initializes it
 
 // For distributed deployments, replace the cache:

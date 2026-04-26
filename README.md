@@ -18,6 +18,10 @@ The complexity of modern software design often arises from over-engineering abst
 [![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
 
+### [@rotorsoft/act-sqlite](https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite)
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
+
 ### [@rotorsoft/act-pino](https://github.com/rotorsoft/act-root/tree/master/libs/act-pino)
 [![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)

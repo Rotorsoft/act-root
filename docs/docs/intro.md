@@ -61,7 +61,7 @@ console.log(snapshot.state.count); // 5
 Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cache()` port functions:
 
 - **Logger** — `ConsoleLogger` (default) or `PinoLogger` (`@rotorsoft/act-pino`)
-- **Store** — `InMemoryStore` (default) or `PostgresStore` (`@rotorsoft/act-pg`)
+- **Store** — `InMemoryStore` (default), `PostgresStore` (`@rotorsoft/act-pg`), or `SqliteStore` (`@rotorsoft/act-sqlite`)
 - **Cache** — `InMemoryCache` (default, LRU) or custom adapters (e.g., Redis)
 - **Disposal** — `dispose()()` cleans up all registered adapters on shutdown
 
@@ -77,6 +77,7 @@ Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cac
 |---|---|
 | [`@rotorsoft/act`](https://www.npmjs.com/package/@rotorsoft/act) | Core framework |
 | [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) | PostgreSQL store adapter |
+| [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) | SQLite (libSQL) store adapter |
 | [`@rotorsoft/act-pino`](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter |
 | [`@rotorsoft/act-patch`](https://www.npmjs.com/package/@rotorsoft/act-patch) | Immutable deep-merge patch utility |
 | [`@rotorsoft/act-sse`](https://www.npmjs.com/package/@rotorsoft/act-sse) | Server-Sent Events for incremental state broadcast |
