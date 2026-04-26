@@ -226,7 +226,7 @@ The filter eliminates wasted claims — only streams with pending events are ret
 4. **Flag cleared** when drain completes with nothing acked, blocked, or errored, or when claim returns no streams
 5. **Cold start:** flag set in `_init_correlation()` to ensure historical events are processed
 
-Also changed `maxPasses` default from 5 to 1 — most apps need a single correlate→drain pass per settle. Apps with reaction chains can opt into `maxPasses: N`.
+`maxPasses` defaults to `Infinity` and acts as a kill-switch for runaway reaction loops. `settle()` exits naturally when a pass makes no progress (no new subscriptions, no acks, no blocks), so the cap rarely matters in practice — paginated catch-up after `app.reset(...)` works without manual loops.
 
 ### Benchmark (PostgreSQL, local, 18 event types / 7 reactive)
 

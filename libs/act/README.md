@@ -305,7 +305,7 @@ app.on("settled", (drain) => {
 
 Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed streams are re-claimed automatically.
 
-The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), runs correlate→drain (default `maxPasses: 1`), and emits a `"settled"` event when done.
+The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), loops correlate→drain until a pass makes no progress (default `maxPasses: Infinity`, which acts only as a kill-switch for runaway reaction loops), and emits a `"settled"` event when done. A single `settle()` call after `app.reset(...)` fully catches up paginated streams.
 
 **Drain skip optimization:** At build time, Act classifies which event names have registered reactions. When `do()` commits events that have no reactions, `drain()` returns immediately — zero DB round-trips. This eliminates wasted claim/query/ack cycles for high-frequency events that don't need reaction processing. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
 

@@ -679,7 +679,7 @@ async function bootstrap() {
   await initDb();
   await store().seed();
 
-  const settleOpts = { maxPasses: 10, streamLimit: 100, eventLimit: 1000 };
+  const settleOpts = { streamLimit: 100, eventLimit: 1000 };
 
   // Settle after every commit — ensures reaction chains fully propagate
   app.on("committed", () => app.settle(settleOpts));

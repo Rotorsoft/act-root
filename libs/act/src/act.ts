@@ -1036,16 +1036,31 @@ export class Act<
    * `store().reset(...)` alone leaves the flag untouched, so a settled app
    * would short-circuit and skip the replay.
    *
+   * Pair with `app.settle()` (or a single `app.drain()` for small streams).
+   * `settle()` loops correlate→drain until no progress is made, so one call
+   * fully catches up paginated streams without forcing callers to roll
+   * their own loop.
+   *
    * @param streams - Reaction target streams (e.g., projection names) to reset
    * @returns Count of streams that were actually reset
    *
-   * @example Rebuild a projection
+   * @example Rebuild a projection (production)
    * ```typescript
    * await app.reset(["my-projection"]);
-   * await app.drain({ eventLimit: 1000 });   // or app.settle()
+   * await new Promise<void>((resolve) => {
+   *   app.on("settled", () => resolve());
+   *   app.settle({ eventLimit: 1000 });
+   * });
+   * ```
+   *
+   * @example Rebuild a projection (tests / scripts)
+   * ```typescript
+   * await app.reset(["my-projection"]);
+   * await app.drain({ eventLimit: 1000 });   // small streams: one pass is enough
    * ```
    *
    * @see {@link Store.reset} for the underlying store primitive
+   * @see {@link settle} for the debounced full-catch-up loop
    */
   async reset(streams: string[]): Promise<number> {
     const count = await store().reset(streams);
@@ -1251,15 +1266,19 @@ export class Act<
   /**
    * Debounced, non-blocking correlate→drain cycle.
    *
-   * Call this after `app.do()` to schedule a background drain. Multiple rapid
-   * calls within the debounce window are coalesced into a single cycle. Runs
-   * correlate→drain in a loop until the system reaches a consistent state,
-   * then emits the `"settled"` lifecycle event.
+   * Call this after `app.do()` (or `app.reset()`) to schedule a background
+   * drain. Multiple rapid calls within the debounce window are coalesced
+   * into a single cycle. Runs correlate→drain in a loop until a pass makes
+   * no progress — no new subscriptions, no acks, no blocks — then emits
+   * the `"settled"` lifecycle event. This means a single `settle()` call
+   * fully catches up paginated streams (e.g. after `reset()` on a long
+   * projection) without forcing callers to loop.
    *
    * @param options - Settle configuration options
    * @param options.debounceMs - Debounce window in milliseconds (default: 10)
    * @param options.correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
-   * @param options.maxPasses - Maximum correlate→drain loops (default: 1)
+   * @param options.maxPasses - Cap on correlate→drain loops (default: `Infinity`).
+   *   Early-exit on no-progress means the cap only matters in pathological cases.
    * @param options.streamLimit - Maximum streams per drain cycle (default: 10)
    * @param options.eventLimit - Maximum events per stream (default: 10)
    * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
@@ -1281,7 +1300,7 @@ export class Act<
     const {
       debounceMs = 10,
       correlate: correlateQuery = { after: -1, limit: 100 },
-      maxPasses = 1,
+      maxPasses = Infinity,
       ...drainOptions
     } = options;
 
@@ -1294,14 +1313,21 @@ export class Act<
       (async () => {
         await this._init_correlation();
         let lastDrain: Drain<TEvents> | undefined;
+        // Loop correlate→drain until a pass produces no work — this fully
+        // catches up paginated streams (e.g. after `reset()` on a long
+        // projection) without forcing callers to roll their own loop.
+        // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const { subscribed } = await this.correlate({
             ...correlateQuery,
             after: this._correlation_checkpoint,
           });
-          if (subscribed === 0 && i > 0) break;
           lastDrain = await this.drain(drainOptions);
-          if (!lastDrain.acked.length && !lastDrain.blocked.length) break;
+          const made_progress =
+            subscribed > 0 ||
+            lastDrain.acked.length > 0 ||
+            lastDrain.blocked.length > 0;
+          if (!made_progress) break;
         }
         if (lastDrain) this.emit("settled", lastDrain);
       })()

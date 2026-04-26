@@ -441,31 +441,45 @@ describe("act", () => {
       app.off("settled", settledListener);
     });
 
-    it("should break early when correlate returns no subscriptions on second pass", async () => {
+    it("should keep draining when correlate yields no new subs but drain is still acking", async () => {
+      // Regression: previous behavior broke after one pass when correlate
+      // returned 0 subscriptions, even if drain was still paginating work.
+      // That made settle a no-op for catch-up scenarios (e.g. after reset).
       const settledListener = vi.fn();
       app.on("settled", settledListener);
 
-      // Mock correlate: first call returns subscriptions so loop continues,
-      // second call returns 0 → triggers i>0 break
-      let correlateCount = 0;
-      const correlateSpy = vi.spyOn(app, "correlate").mockImplementation(() => {
-        correlateCount++;
-        if (correlateCount === 1)
-          return Promise.resolve({ subscribed: 1, last_id: 0 } as any);
-        return Promise.resolve({ subscribed: 0, last_id: 0 } as any);
-      });
-      // Mock drain to return acked work so the loop doesn't break at line 882
-      const drainSpy = vi.spyOn(app, "drain").mockResolvedValue({
-        fetched: [],
-        leased: [],
-        acked: [{ stream: "x", at: 1, by: "test", retry: 0, lagging: false }],
-        blocked: [],
+      const correlateSpy = vi
+        .spyOn(app, "correlate")
+        .mockResolvedValue({ subscribed: 0, last_id: 0 });
+      // Drain reports work on first 2 passes, then nothing → loop exits.
+      let drainCount = 0;
+      const drainSpy = vi.spyOn(app, "drain").mockImplementation(() => {
+        drainCount++;
+        return Promise.resolve({
+          fetched: [],
+          leased: [],
+          acked:
+            drainCount <= 2
+              ? [
+                  {
+                    stream: "x",
+                    source: "x",
+                    at: drainCount,
+                    by: "t",
+                    retry: 0,
+                    lagging: false,
+                  },
+                ]
+              : [],
+          blocked: [],
+        });
       });
 
-      app.settle({ debounceMs: 1, maxPasses: 5 });
+      app.settle({ debounceMs: 1, maxPasses: 10 });
       await sleep(300);
       expect(settledListener).toHaveBeenCalledTimes(1);
-      expect(correlateCount).toBe(2); // ran 2 passes, broke on second
+      // 2 productive passes + 1 final empty pass that triggers the exit
+      expect(drainCount).toBe(3);
 
       correlateSpy.mockRestore();
       drainSpy.mockRestore();

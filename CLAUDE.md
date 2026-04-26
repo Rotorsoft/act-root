@@ -514,17 +514,22 @@ Projections are derived data — disposable by design. When a projection's logic
 // Reset the projection stream watermark to -1 and arm the drain flag
 await app.reset(["my-projection"]);
 
-// Next drain replays all events through the projection handlers
-await app.drain({ eventLimit: 1000 });   // or app.settle()
+// settle() loops correlate→drain until caught up, then emits "settled"
+await new Promise<void>((resolve) => {
+  app.on("settled", () => resolve());
+  app.settle({ eventLimit: 1000 });
+});
 ```
 
 **Always call `app.reset(...)` — never `store().reset(...)` directly.** Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. A settled app (no recent commits) has `_needs_drain === false`, so `drain()`/`settle()` short-circuit and skip the replay if you reset at the store level. `app.reset(...)` wraps `store().reset(...)` and arms the flag in one call.
+
+**`settle()` drains to completion by default.** It loops correlate→drain until a pass produces no progress (no new subscriptions, no acks, no blocks). `maxPasses` defaults to `Infinity` and only acts as a kill-switch for runaway reaction loops — for ordinary catch-up, the natural exit handles paginated streams of any length. A single `app.settle()` after `app.reset(...)` is enough.
 
 **Typical production workflow:**
 1. Deploy updated projection code
 2. Clear projected data (truncate read-model table, flush cache)
 3. Call `await app.reset(["projection-target"])` to reset watermarks and arm drain
-4. Normal `drain()` or `settle()` replays all events through the updated handlers
+4. Call `app.settle()` once — it drives the catch-up to completion
 
 ### Event Schema Evolution
 
