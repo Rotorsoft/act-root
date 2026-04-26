@@ -1047,10 +1047,7 @@ export class Act<
    * @example Rebuild a projection (production)
    * ```typescript
    * await app.reset(["my-projection"]);
-   * await new Promise<void>((resolve) => {
-   *   app.on("settled", () => resolve());
-   *   app.settle({ eventLimit: 1000 });
-   * });
+   * app.settle({ eventLimit: 1000 });   // emits "settled" when fully replayed
    * ```
    *
    * @example Rebuild a projection (tests / scripts)

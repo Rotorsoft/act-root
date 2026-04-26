@@ -514,11 +514,8 @@ Projections are derived data — disposable by design. When a projection's logic
 // Reset the projection stream watermark to -1 and arm the drain flag
 await app.reset(["my-projection"]);
 
-// settle() loops correlate→drain until caught up, then emits "settled"
-await new Promise<void>((resolve) => {
-  app.on("settled", () => resolve());
-  app.settle({ eventLimit: 1000 });
-});
+// Trigger settle — it loops correlate→drain until caught up, then emits "settled"
+app.settle({ eventLimit: 1000 });
 ```
 
 **Always call `app.reset(...)` — never `store().reset(...)` directly.** Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. A settled app (no recent commits) has `_needs_drain === false`, so `drain()`/`settle()` short-circuit and skip the replay if you reset at the store level. `app.reset(...)` wraps `store().reset(...)` and arms the flag in one call.

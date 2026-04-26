@@ -523,11 +523,8 @@ clearItems();
 // 2. Reset the projection stream watermark AND arm the orchestrator's drain flag
 await app.reset(["items"]);
 
-// 3. settle() loops correlate→drain until caught up, then emits "settled"
-await new Promise<void>((resolve) => {
-  app.on("settled", () => resolve());
-  app.settle({ eventLimit: 1000 });
-});
+// 3. Trigger settle — it loops correlate→drain until caught up, then emits "settled"
+app.settle({ eventLimit: 1000 });
 ```
 
 **Always use `app.reset(...)` — never `store().reset(...)` directly.**
