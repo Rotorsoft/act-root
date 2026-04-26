@@ -641,6 +641,21 @@ Each example demonstrates different framework capabilities:
 4. Update example applications to demonstrate usage
 5. Ensure InMemoryStore, PostgresStore, and SqliteStore all support the feature
 
+### Adding a New Library to `/libs`
+
+When introducing a brand-new package (e.g., `@rotorsoft/act-foo`), seed a baseline tag **before** the first PR merges to `master` — otherwise `semantic-release` defaults the very first release to `1.0.0` (regardless of the version in `package.json`).
+
+```bash
+# After creating the package on a feature branch and BEFORE the first merge:
+git tag @rotorsoft/act-foo-v0.0.0 <commit-on-master-or-pre-feature>
+git push origin @rotorsoft/act-foo-v0.0.0
+```
+
+Also remember to:
+- Add the package name to the `cd` matrix in `.github/workflows/ci-cd.yml`
+- Copy `.releaserc.json` from a sibling lib and update `tagFormat`
+- Wire it into the root `README.md`, `CLAUDE.md`, `docs/sidebars.ts`, `docs/typedoc.json`, `docs/tsconfig.json`, and any relevant skills under `.claude/skills/`
+
 ### Documentation Guidelines
 
 - **README** — shows current patterns and strategies only, not historical benchmarks
