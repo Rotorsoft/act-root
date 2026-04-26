@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v0.30.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.30.0...@rotorsoft/act-v0.30.1) (2026-04-26)
+
+
+### Bug Fixes
+
+* **act:** arm drain flag on reset so settled apps replay ([290fdbc](https://github.com/rotorsoft/act-root/commit/290fdbc4bfbbbda0e4fda9114496bd3e42c771d7))
+* **act:** settle drains to completion by default ([6aa4659](https://github.com/rotorsoft/act-root/commit/6aa46599b8c2fcfa880a599e9605ea3e961c30b5))
+
 # [@rotorsoft/act-v0.30.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.29.1...@rotorsoft/act-v0.30.0) (2026-04-16)
 
 
