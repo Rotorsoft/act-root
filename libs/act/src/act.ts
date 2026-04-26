@@ -1027,6 +1027,35 @@ export class Act<
   }
 
   /**
+   * Reset reaction stream watermarks and request a drain on the next
+   * `drain()` / `settle()` cycle.
+   *
+   * Use this to replay events through projections (or other reaction targets)
+   * after changing handler logic. Equivalent to calling `store().reset(streams)`
+   * directly, but also raises the orchestrator's internal "needs drain" flag —
+   * `store().reset(...)` alone leaves the flag untouched, so a settled app
+   * would short-circuit and skip the replay.
+   *
+   * @param streams - Reaction target streams (e.g., projection names) to reset
+   * @returns Count of streams that were actually reset
+   *
+   * @example Rebuild a projection
+   * ```typescript
+   * await app.reset(["my-projection"]);
+   * await app.drain({ eventLimit: 1000 });   // or app.settle()
+   * ```
+   *
+   * @see {@link Store.reset} for the underlying store primitive
+   */
+  async reset(streams: string[]): Promise<number> {
+    const count = await store().reset(streams);
+    if (count > 0 && this._reactive_events.size > 0) {
+      this._needs_drain = true;
+    }
+    return count;
+  }
+
+  /**
    * Close the books — guard, archive, truncate, and optionally restart streams.
    *
    * Safely removes historical events from the operational store:

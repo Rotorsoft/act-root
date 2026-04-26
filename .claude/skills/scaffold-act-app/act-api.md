@@ -508,3 +508,41 @@ const result = await app.close([{ stream: "s1" }]);
 expect(result.truncated.has("s1")).toBe(true);
 await expect(app.do("increment", { stream: "s1", actor }, { by: 1 })).rejects.toThrow(StreamClosedError);
 ```
+
+## 15. Projection Rebuild — Replay Events Through Updated Projections
+
+When a projection's logic changes, reset its watermark so the next drain replays every event through the updated handler.
+
+```typescript
+// 1. Clear the read-model side effects (DB rows, cache, in-memory map)
+await db.delete(items);
+clearItems();
+
+// 2. Reset the projection stream watermark AND arm the orchestrator's drain flag
+await app.reset(["items"]);
+
+// 3. Drain (or settle) — events replay through the projection
+await app.drain({ eventLimit: 1000 });
+// or: await new Promise(r => app.on("settled", r); app.settle());
+```
+
+**Always use `app.reset(...)` — never `store().reset(...)` directly.**
+
+Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. After a settled app (no recent commits) has caught up, `_needs_drain === false` and any subsequent `drain()`/`settle()` short-circuits and returns immediately. `store().reset(...)` alone leaves the flag unchanged, so the replay never runs. `app.reset(...)` wraps the store call and arms the flag in one step:
+
+```typescript
+// libs/act/src/act.ts
+async reset(streams: string[]): Promise<number> {
+  const count = await store().reset(streams);
+  if (count > 0 && this._reactive_events.size > 0) {
+    this._needs_drain = true;
+  }
+  return count;
+}
+```
+
+**Typical production workflow:**
+1. Deploy updated projection code
+2. Clear projected data (truncate read-model table, flush cache)
+3. `await app.reset(["projection-target"])`
+4. Normal `drain()` or `settle()` cycle replays through the new logic

@@ -508,22 +508,22 @@ Snap writes are fire-and-forget — the cache is updated synchronously within `a
 
 ### Projection Rebuild
 
-Projections are derived data — disposable by design. When a projection's logic changes (new fields, bug fix, different aggregation), reset its watermark with `store().reset()` and let the existing drain machinery replay all events from the beginning:
+Projections are derived data — disposable by design. When a projection's logic changes (new fields, bug fix, different aggregation), reset its watermark with `app.reset(...)` and let the existing drain machinery replay all events from the beginning:
 
 ```typescript
-// Reset the projection stream watermark to -1
-await store().reset(["my-projection"]);
+// Reset the projection stream watermark to -1 and arm the drain flag
+await app.reset(["my-projection"]);
 
 // Next drain replays all events through the projection handlers
-await app.drain({ eventLimit: 1000 });
+await app.drain({ eventLimit: 1000 });   // or app.settle()
 ```
 
-`store().reset(streams)` sets `at = -1`, clears `retry`, `blocked`, `error`, and lease state for the given streams. This makes them eligible for `claim()` from the beginning. The framework's existing drain cycle handles the replay — no special rebuild API is needed.
+**Always call `app.reset(...)` — never `store().reset(...)` directly.** Both reset the watermark, but only `app.reset(...)` raises the orchestrator's internal `_needs_drain` flag. A settled app (no recent commits) has `_needs_drain === false`, so `drain()`/`settle()` short-circuit and skip the replay if you reset at the store level. `app.reset(...)` wraps `store().reset(...)` and arms the flag in one call.
 
 **Typical production workflow:**
 1. Deploy updated projection code
 2. Clear projected data (truncate read-model table, flush cache)
-3. Call `store().reset(["projection-target"])` to reset watermarks
+3. Call `await app.reset(["projection-target"])` to reset watermarks and arm drain
 4. Normal `drain()` or `settle()` replays all events through the updated handlers
 
 ### Event Schema Evolution
