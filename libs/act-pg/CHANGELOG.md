@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.17.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.16.0...@rotorsoft/act-pg-v0.17.0) (2026-04-27)
+
+
+### Features
+
+* **act:** add Store.query_streams for subscription introspection ([508c724](https://github.com/rotorsoft/act-root/commit/508c724a4176750dea5d9356e2e8290496331e61))
+
 # [@rotorsoft/act-pg-v0.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.15.0...@rotorsoft/act-pg-v0.16.0) (2026-04-13)
 
 
