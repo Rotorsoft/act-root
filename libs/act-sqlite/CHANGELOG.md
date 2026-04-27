@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.1.2...@rotorsoft/act-sqlite-v0.1.3) (2026-04-27)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @libsql/client to ^0.17.3 ([e88a32a](https://github.com/rotorsoft/act-root/commit/e88a32aa33e3a59885ae789ea8040d730ef96885))
+
 # [@rotorsoft/act-sqlite-v0.1.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.1.1...@rotorsoft/act-sqlite-v0.1.2) (2026-04-27)
 
 
