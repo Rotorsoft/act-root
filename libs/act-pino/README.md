@@ -1,5 +1,9 @@
 # @rotorsoft/act-pino
 
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Pino logger adapter for the [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event sourcing framework.
 
 Replaces Act's built-in `ConsoleLogger` with [pino](https://getpino.io/) — structured JSON logging, log levels, transports, redaction, and pretty-printing in development.

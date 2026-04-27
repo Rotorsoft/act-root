@@ -2,7 +2,6 @@
 
 [![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
-[![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Incremental state broadcast over SSE for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps. Zero dependencies.
