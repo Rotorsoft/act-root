@@ -225,6 +225,74 @@ describe("sqlite store", () => {
     expect(result2.length).toBe(2);
   });
 
+  it("should query with anchored stream patterns", async () => {
+    await store().commit("anchor-prefix-1", [{ name: "ap", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store().commit("anchor-prefix-2", [{ name: "ap", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store().commit("tail-anchor-suffix", [{ name: "ap", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+
+    // ^prefix.* — starts-with
+    const startsWith: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => startsWith.push(e), {
+      stream: "^anchor-prefix.*",
+    });
+    expect(startsWith.length).toBe(2);
+    expect(startsWith.every((e) => e.stream.startsWith("anchor-prefix"))).toBe(
+      true
+    );
+
+    // .*suffix$ — ends-with
+    const endsWith: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => endsWith.push(e), { stream: ".*suffix$" });
+    expect(endsWith.length).toBe(1);
+    expect(endsWith[0].stream).toBe("tail-anchor-suffix");
+
+    // ^exact$ — exact via regex anchors (without stream_exact)
+    const exact: Committed<Schemas, keyof Schemas>[] = [];
+    await store().query((e) => exact.push(e), {
+      stream: "^anchor-prefix-1$",
+    });
+    expect(exact.length).toBe(1);
+    expect(exact[0].stream).toBe("anchor-prefix-1");
+  });
+
+  it("should claim with regex source patterns (anchored + wildcard)", async () => {
+    await store().commit("src-pat-alpha", [{ name: "sp", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store().commit("src-pat-beta", [{ name: "sp", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    await store().subscribe([
+      { stream: "src-listener", source: "^src-pat-.*" },
+    ]);
+
+    const leases = await store().claim(10, 0, "src-worker", 30000);
+    const target = leases.find((l) => l.stream === "src-listener");
+    expect(target).toBeDefined();
+    expect(target!.source).toBe("^src-pat-.*");
+    if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
+  });
+
+  it("should not claim when source pattern matches no events", async () => {
+    await store().subscribe([
+      { stream: "src-no-match", source: "^never-matches-anything-.*" },
+    ]);
+    const leases = await store().claim(10, 0, "ghost-worker", 30000);
+    expect(leases.find((l) => l.stream === "src-no-match")).toBeUndefined();
+    if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
+  });
+
   it("should query by correlation", async () => {
     const correlation = chance.guid();
     await store().commit("corr-test", [{ name: "ct", data: {} }], {

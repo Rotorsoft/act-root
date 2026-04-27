@@ -23,6 +23,32 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/** Translate a stream filter (regex-shaped or plain substring) into a
+ *  SQL LIKE pattern. Honors `^` / `$` anchors and converts `.*` → `%`,
+ *  `.` → `_`. Unanchored input gets `%` wildcards on both sides.
+ *
+ *  Examples:
+ *  - `^abc$`  → `abc`        (exact)
+ *  - `^abc.*` → `abc%`       (starts-with)
+ *  - `.*abc$` → `%abc`       (ends-with)
+ *  - `abc`    → `%abc%`      (contains)
+ *  - `a.c`    → `%a_c%`      (single-char wildcard, contains)
+ *
+ *  @internal exported for testing
+ */
+export function streamPatternToLike(input: string): string {
+  let s = input;
+  const start = s.startsWith("^");
+  const end = s.endsWith("$");
+  if (start) s = s.slice(1);
+  if (end) s = s.slice(0, -1);
+  s = s.replace(/\.\*/g, "%").replace(/\./g, "_");
+  const out = (start ? "" : "%") + s + (end ? "" : "%");
+  // Collapse adjacent `%` — e.g. `^a.*` would otherwise yield `a%%`.
+  // Same matching semantics, cleaner output.
+  return out.replace(/%+/g, "%");
+}
+
 /**
  * SQLite event store adapter for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act).
  *
@@ -173,12 +199,8 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        // Convert regex-style patterns to SQL LIKE
-        const likePattern = query.stream
-          .replace(/\.\*/g, "%")
-          .replace(/\./g, "_");
         sql += " AND stream LIKE ?";
-        args.push(likePattern);
+        args.push(streamPatternToLike(query.stream));
       }
     }
     if (query?.names) {
@@ -284,10 +306,9 @@ export class SqliteStore implements Store {
 
         let hasEvents: boolean;
         if (source) {
-          const likePattern = source.replace(/\.\*/g, "%").replace(/\./g, "_");
           const check = await tx.execute({
             sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? LIMIT 1`,
-            args: [at, likePattern],
+            args: [at, streamPatternToLike(source)],
           });
           hasEvents = check.rows.length > 0;
         } else {
