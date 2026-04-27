@@ -282,7 +282,7 @@ importers:
   libs/act-sqlite:
     dependencies:
       '@libsql/client':
-        specifier: ^0.17.2
+        specifier: ^0.17.3
         version: 0.17.3
       '@rotorsoft/act':
         specifier: workspace:^
