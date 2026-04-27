@@ -73,6 +73,85 @@ export type TruncateResult = Map<
 >;
 
 /**
+ * Subscription position for a registered stream.
+ *
+ * Streamed by {@link Store.query_streams} to power operational dashboards
+ * (projection lag, blocked subscriptions, in-flight leases). The shape
+ * mirrors what every adapter already tracks on its `streams` table.
+ *
+ * @property stream - The subscription target (projection or reaction stream)
+ * @property source - Optional source stream filter (for reactions)
+ * @property at - Last processed event id watermark (-1 for fresh streams)
+ * @property retry - Current retry counter
+ * @property blocked - True when the stream is blocked by a poison message
+ * @property error - Last error message (empty string when none)
+ * @property leased_by - Current lease holder UUID (when leased)
+ * @property leased_until - Lease expiration timestamp (when leased)
+ */
+export type StreamPosition = {
+  readonly stream: string;
+  readonly source?: string;
+  readonly at: number;
+  readonly retry: number;
+  readonly blocked: boolean;
+  readonly error: string;
+  readonly leased_by?: string;
+  readonly leased_until?: Date;
+};
+
+/**
+ * Filter options for {@link Store.query_streams}.
+ *
+ * Mirrors the {@link Query} pattern used by {@link Store.query} — pass
+ * filters server-side to keep the cost low on large tables (e.g., dynamic
+ * reactions producing one subscription per aggregate).
+ *
+ * **What the store can filter:** the columns it actually persists —
+ * `stream`, `source`, `blocked`. Higher-level classification ("is this a
+ * projection vs a reaction?", "is this a static or dynamic resolver?")
+ * is an orchestrator concern; the streams table doesn't store kinds.
+ * Layer that on top by joining results with `Act`'s built-in registry.
+ *
+ * @property stream - Stream-name filter. By default treated as a regex
+ *   (PG `~`, SQLite/InMemory `LIKE`-translated). Pass `stream_exact: true`
+ *   for exact string equality.
+ * @property stream_exact - Use exact match instead of pattern match for
+ *   `stream`.
+ * @property source - Source-stream filter (regex by default). Useful to
+ *   isolate dynamic-reaction subscriptions tied to a particular aggregate
+ *   stream. Pass `source_exact: true` for exact equality.
+ * @property source_exact - Use exact match instead of pattern match for
+ *   `source`.
+ * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)
+ *   streams. Omit for all.
+ * @property after - Keyset pagination cursor: returns only streams with
+ *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
+ *   the next page.
+ * @property limit - Max rows to return (default: 100).
+ */
+export type QueryStreams = {
+  readonly stream?: string;
+  readonly stream_exact?: boolean;
+  readonly source?: string;
+  readonly source_exact?: boolean;
+  readonly blocked?: boolean;
+  readonly after?: string;
+  readonly limit?: number;
+};
+
+/**
+ * Result of a {@link Store.query_streams} call.
+ *
+ * @property maxEventId - Highest event id in the store (-1 when empty).
+ *   UI uses this to compute lag as `maxEventId - position.at`.
+ * @property count - Number of stream positions delivered to the callback.
+ */
+export type QueryStreamsResult = {
+  readonly maxEventId: number;
+  readonly count: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -374,6 +453,53 @@ export interface Store extends Disposable {
       meta?: EventMeta;
     }>
   ) => Promise<TruncateResult>;
+
+  /**
+   * Streams registered subscription positions to a callback, plus the
+   * highest event id in the store.
+   *
+   * Read-only introspection for operational dashboards (Store /
+   * Subscriptions tab, projection lag, blocked subscriptions). Avoids
+   * forcing apps to open a second connection and run raw SQL against
+   * adapter-specific schemas.
+   *
+   * Mirrors the {@link Store.query} callback pattern: the callback is
+   * invoked once per matching position, allowing large result sets to be
+   * processed without buffering. Results are ordered by `stream` name; use
+   * `query.after` (last seen stream name) for keyset pagination on big
+   * tables (dynamic reactions can produce one subscription per aggregate).
+   *
+   * @param callback - Invoked once per matching {@link StreamPosition}.
+   * @param query - Optional {@link QueryStreams} filter (default `limit: 100`).
+   * @returns `maxEventId` and the `count` of positions emitted.
+   *
+   * @example List blocked streams with their lag
+   * ```typescript
+   * const { maxEventId } = await store().query_streams(
+   *   (s) => console.log(`${s.stream}: lag=${maxEventId - s.at} ${s.error}`),
+   *   { blocked: true, limit: 50 }
+   * );
+   * ```
+   *
+   * @example Page through all positions
+   * ```typescript
+   * let after: string | undefined;
+   * for (;;) {
+   *   const page: StreamPosition[] = [];
+   *   const { count } = await store().query_streams(
+   *     (s) => page.push(s),
+   *     { after, limit: 100 }
+   *   );
+   *   if (!count) break;
+   *   // ... use page ...
+   *   after = page.at(-1)?.stream;
+   * }
+   * ```
+   */
+  query_streams: (
+    callback: (position: StreamPosition) => void,
+    query?: QueryStreams
+  ) => Promise<QueryStreamsResult>;
 }
 
 // ---------------------------------------------------------------------------

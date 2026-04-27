@@ -1,4 +1,4 @@
-import type { Committed, Schemas, Store } from "@rotorsoft/act";
+import type { Committed, Schemas, Store, StreamPosition } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { initTRPC } from "@trpc/server";
 import { createConnection, type Socket } from "net";
@@ -38,20 +38,30 @@ function getStore(): Store {
   return currentStore;
 }
 
-/** Get a raw pg client for streams table queries */
-async function getStreamsClient(): Promise<{ client: pg.Client; fqs: string }> {
-  if (!currentConfig) throw new Error("Not connected to a store");
-  const client = new pg.Client({
-    host: currentConfig.host,
-    port: currentConfig.port,
-    database: currentConfig.database,
-    user: currentConfig.user,
-    password: currentConfig.password,
-    connectionTimeoutMillis: 5000,
-  });
-  await client.connect();
-  const fqs = `"${currentConfig.schema}"."${currentConfig.table}_streams"`;
-  return { client, fqs };
+/** Drain all subscription positions from the store via query_streams pagination. */
+async function loadAllStreamPositions(): Promise<{
+  positions: StreamPosition[];
+  maxEventId: number;
+}> {
+  const s = getStore();
+  const pageSize = 1000;
+  const fetchPage = async (after?: string) => {
+    const page: StreamPosition[] = [];
+    const result = await s.query_streams((p) => page.push(p), {
+      after,
+      limit: pageSize,
+    });
+    return { page, maxEventId: result.maxEventId };
+  };
+
+  const positions: StreamPosition[] = [];
+  let { page, maxEventId } = await fetchPage();
+  positions.push(...page);
+  while (page.length === pageSize) {
+    ({ page, maxEventId } = await fetchPage(page[page.length - 1].stream));
+    positions.push(...page);
+  }
+  return { positions, maxEventId };
 }
 
 // --- Discovery ---
@@ -370,9 +380,7 @@ export const inspectorRouter = t.router({
         const storeConfig = ssl
           ? { ...pgConfig, ssl: { rejectUnauthorized: false } }
           : pgConfig;
-        const newStore = new PostgresStore(
-          storeConfig as Record<string, unknown>
-        );
+        const newStore = new PostgresStore(storeConfig);
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
@@ -540,64 +548,30 @@ export const inspectorRouter = t.router({
         .slice(0, input?.limit ?? 100);
     }),
 
-  /** Get stream processing metadata from the streams table (PG-specific) */
+  /** Get stream processing metadata from the streams table */
   streamMeta: t.procedure.query(async () => {
-    let pgClient: pg.Client | undefined;
     try {
-      const { client, fqs } = await getStreamsClient();
-      pgClient = client;
-      const result = await client.query<{
-        stream: string;
-        source: string | null;
-        at: number;
-        retry: number;
-        blocked: boolean;
-        error: string | null;
-        leased_by: string | null;
-        leased_until: string | null;
-      }>(
-        `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${fqs} ORDER BY stream`
-      );
-      return result.rows;
+      const { positions } = await loadAllStreamPositions();
+      return positions.map((p) => ({
+        stream: p.stream,
+        source: p.source ?? null,
+        at: p.at,
+        retry: p.retry,
+        blocked: p.blocked,
+        error: p.error || null,
+        leased_by: p.leased_by ?? null,
+        leased_until: p.leased_until?.toISOString() ?? null,
+      }));
     } catch {
       return [];
-    } finally {
-      if (pgClient) await pgClient.end();
     }
   }),
 
   /** Get drain status: aggregate health + blocked streams + leases + watermark histogram */
   drainStatus: t.procedure.query(async () => {
-    const s = getStore();
-    let pgClient: pg.Client | undefined;
     try {
-      const { client, fqs } = await getStreamsClient();
-      pgClient = client;
-
-      // Get max event ID
-      const events: AnyEvent[] = [];
-      await s.query<Schemas>(collect(events), {
-        limit: 1,
-        backward: true,
-        with_snaps: true,
-      });
-      const maxEventId = events.length > 0 ? events[0].id : 0;
-
-      // Get all stream rows
-      const result = await client.query<{
-        stream: string;
-        source: string | null;
-        at: number;
-        retry: number;
-        blocked: boolean;
-        error: string | null;
-        leased_by: string | null;
-        leased_until: string | null;
-      }>(
-        `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${fqs} ORDER BY stream`
-      );
-
-      const rows = result.rows;
+      const { positions, maxEventId: rawMax } = await loadAllStreamPositions();
+      const maxEventId = Math.max(0, rawMax);
       const now = new Date();
 
       // Aggregates
@@ -621,31 +595,27 @@ export const inspectorRouter = t.router({
       }> = [];
       const gaps: number[] = [];
 
-      for (const r of rows) {
-        const gap = Math.max(0, maxEventId - r.at);
+      for (const p of positions) {
+        const gap = Math.max(0, maxEventId - p.at);
         gaps.push(gap);
 
-        if (r.blocked) {
+        if (p.blocked) {
           blocked++;
           blockedStreams.push({
-            stream: r.stream,
-            source: r.source,
-            error: r.error,
-            retry: r.retry,
-            at: r.at,
+            stream: p.stream,
+            source: p.source ?? null,
+            error: p.error || null,
+            retry: p.retry,
+            at: p.at,
             gap,
           });
-        } else if (
-          r.leased_by &&
-          r.leased_until &&
-          new Date(r.leased_until) > now
-        ) {
+        } else if (p.leased_by && p.leased_until && p.leased_until > now) {
           leased++;
           activeLeases.push({
-            stream: r.stream,
-            source: r.source,
-            leased_by: r.leased_by,
-            leased_until: r.leased_until,
+            stream: p.stream,
+            source: p.source ?? null,
+            leased_by: p.leased_by,
+            leased_until: p.leased_until.toISOString(),
           });
         } else if (gap > 10) {
           lagging++;
@@ -672,7 +642,7 @@ export const inspectorRouter = t.router({
       }
 
       return {
-        total: rows.length,
+        total: positions.length,
         healthy,
         blocked,
         leased,
@@ -696,8 +666,6 @@ export const inspectorRouter = t.router({
         histogram: [],
         timestamp: new Date().toISOString(),
       };
-    } finally {
-      if (pgClient) await pgClient.end();
     }
   }),
 
@@ -726,14 +694,14 @@ export const inspectorRouter = t.router({
       const header = CSV_COLUMNS.join(",");
       const rows = events.map((e) =>
         CSV_COLUMNS.map((col) => {
-          const val = e[col as keyof typeof e];
+          const val = e[col];
           if (col === "data" || col === "meta")
             return csvEscape(JSON.stringify(val));
           if (val instanceof Date) return csvEscape(val.toISOString());
           return csvEscape(
             typeof val === "object" && val !== null
               ? JSON.stringify(val)
-              : String(val as string | number | boolean)
+              : String(val)
           );
         }).join(",")
       );

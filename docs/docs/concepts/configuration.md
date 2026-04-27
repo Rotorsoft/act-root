@@ -196,8 +196,11 @@ interface Store extends Disposable {
   subscribe(streams): Promise<{ subscribed: number; watermark: number }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<(Lease & { error })[]>;
+  reset(streams): Promise<number>;
+  truncate(targets): Promise<TruncateResult>;
+  query_streams(callback, query?): Promise<{ maxEventId: number; count: number }>;
   dispose(): Promise<void>;
 }
 ```
 
-`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — zero-contention competing consumers where workers never block each other. `subscribe()` registers new streams for reaction processing and returns the count of newly registered streams. Version-based optimistic concurrency must be implemented correctly. See the [PostgresStore source](https://github.com/rotorsoft/act-root/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference.
+`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — zero-contention competing consumers where workers never block each other. `subscribe()` registers new streams for reaction processing and returns the count of newly registered streams. `query_streams()` is read-only introspection over subscription positions — used by operational dashboards (projection lag, blocked subscriptions) without opening a second connection or running raw SQL against the adapter-specific streams table. Version-based optimistic concurrency must be implemented correctly. See the [PostgresStore source](https://github.com/rotorsoft/act-root/blob/master/libs/act-pg/src/PostgresStore.ts) for a production-grade reference.

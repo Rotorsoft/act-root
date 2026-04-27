@@ -16,9 +16,12 @@ import type {
   Lease,
   Message,
   Query,
+  QueryStreams,
+  QueryStreamsResult,
   Schema,
   Schemas,
   Store,
+  StreamPosition,
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
@@ -48,6 +51,26 @@ class InMemoryStream {
 
   get at() {
     return this._at;
+  }
+
+  get retry() {
+    return this._retry;
+  }
+
+  get blocked() {
+    return this._blocked;
+  }
+
+  get error() {
+    return this._error;
+  }
+
+  get leased_by() {
+    return this._leased_by;
+  }
+
+  get leased_until() {
+    return this._leased_until;
   }
 
   /**
@@ -440,6 +463,69 @@ export class InMemoryStore implements Store {
       }
     }
     return count;
+  }
+
+  /**
+   * Streams registered subscription positions to the callback, ordered by
+   * stream name. Returns the highest event id in the store and the count
+   * of positions emitted.
+   */
+  async query_streams(
+    callback: (position: StreamPosition) => void,
+    query?: QueryStreams
+  ): Promise<QueryStreamsResult> {
+    await sleep();
+    const limit = query?.limit ?? 100;
+    const after = query?.after;
+    const blocked = query?.blocked;
+    const streamRe =
+      query?.stream && !query.stream_exact
+        ? new RegExp(`^${query.stream}$`)
+        : undefined;
+    const sourceRe =
+      query?.source && !query.source_exact
+        ? new RegExp(`^${query.source}$`)
+        : undefined;
+
+    const sorted = [...this._streams.values()].sort((a, b) =>
+      a.stream.localeCompare(b.stream)
+    );
+
+    let count = 0;
+    for (const s of sorted) {
+      if (after !== undefined && s.stream <= after) continue;
+      if (query?.stream !== undefined) {
+        if (
+          query.stream_exact
+            ? s.stream !== query.stream
+            : !streamRe!.test(s.stream)
+        )
+          continue;
+      }
+      if (query?.source !== undefined) {
+        if (s.source === undefined) continue;
+        if (
+          query.source_exact
+            ? s.source !== query.source
+            : !sourceRe!.test(s.source)
+        )
+          continue;
+      }
+      if (blocked !== undefined && s.blocked !== blocked) continue;
+      callback({
+        stream: s.stream,
+        source: s.source,
+        at: s.at,
+        retry: s.retry,
+        blocked: s.blocked,
+        error: s.error,
+        leased_by: s.leased_by,
+        leased_until: s.leased_until,
+      });
+      count++;
+      if (count >= limit) break;
+    }
+    return { maxEventId: this._events.length - 1, count };
   }
 
   /**

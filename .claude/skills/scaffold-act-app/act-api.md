@@ -552,3 +552,27 @@ async reset(streams: string[]): Promise<number> {
 2. Clear projected data (truncate read-model table, flush cache)
 3. `await app.reset(["projection-target"])`
 4. `app.settle()` (or wait on `"settled"`) — drives the catch-up to completion
+
+## 16. Subscription Introspection — store().query_streams()
+
+For operational dashboards (projection lag, blocked subscriptions, in-flight leases), use `store().query_streams()` instead of opening a second DB connection or running raw SQL against the adapter-specific streams table. The method is read-only and adapter-agnostic — works against `InMemoryStore`, `SqliteStore`, and `PostgresStore`.
+
+```typescript
+const { maxEventId, count } = await store().query_streams(
+  (position) => {
+    // position: { stream, source?, at, retry, blocked, error, leased_by?, leased_until? }
+    console.log(`${position.stream}: lag=${maxEventId - position.at}`);
+  },
+  {
+    stream: "^projection-",   // regex by default; pass stream_exact: true for equality
+    source: "user-.*",        // same regex/exact convention via source_exact
+    blocked: true,             // restrict to blocked / unblocked / omit for all
+    after: lastSeenStream,     // keyset cursor — pass last entry's stream for next page
+    limit: 100,                // default 100
+  }
+);
+```
+
+**Use the keyset cursor for paging.** Dynamic reactions can register one subscription per aggregate, so the streams table can grow large. The `after` cursor (last seen stream name, lexicographic) is cheap on big tables — no `OFFSET`. To page through all positions, call repeatedly with `after = lastPage.at(-1).stream` until `count < limit`.
+
+**Filter set is intentionally minimal.** Only what the streams table actually persists (`stream`, `source`, `blocked`). Higher-level classification ("is this a projection vs reaction?", "static vs dynamic resolver?") is an orchestrator concern — the table doesn't store kinds. Layer that on top by joining results with the orchestrator's known projections/reactions registry.

@@ -106,10 +106,10 @@ packages/inspector/
 | `stats` | query | Aggregate counts for current filters |
 | `eventNames` | query | Distinct event names for filter dropdown |
 | `streams` | query | Stream list with event counts and versions |
-| `streamMeta` | query | Stream processing metadata from `_streams` table |
+| `streamMeta` | query | Subscription positions from the streams table |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram |
 
 - **Event data**: flows through Act's `Store.query()` interface
-- **Processing metadata**: direct PG access to the `_streams` table via `pg.Client`
+- **Processing metadata**: flows through Act's `Store.query_streams()` interface — adapter-agnostic, no second connection
 - **Store management**: own `PostgresStore` instance (not the Act singleton) — enables reconnecting
 - **Read-only**: no mutations, no replays — pure inspection
