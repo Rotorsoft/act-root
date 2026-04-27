@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.1.3...@rotorsoft/act-sqlite-v0.2.0) (2026-04-27)
+
+
+### Features
+
+* **act:** add Store.query_streams for subscription introspection ([508c724](https://github.com/rotorsoft/act-root/commit/508c724a4176750dea5d9356e2e8290496331e61))
+
 # [@rotorsoft/act-sqlite-v0.1.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.1.2...@rotorsoft/act-sqlite-v0.1.3) (2026-04-27)
 
 
