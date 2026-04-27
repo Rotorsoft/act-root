@@ -710,6 +710,7 @@ interface Store extends Disposable {
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
   truncate(targets: {stream, snapshot?, meta?}[]): Promise<{deleted, committed}>;  // Atomic truncate + seed
+  query_streams(callback, query?): Promise<{maxEventId, count}>;  // Read-only introspection of subscription positions
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```

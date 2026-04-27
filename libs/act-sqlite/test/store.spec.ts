@@ -442,4 +442,122 @@ describe("sqlite store", () => {
     const acked = await store().ack([{ ...target!, by: "owner-2", at: 99 }]);
     expect(acked.length).toBe(0);
   });
+
+  it("should query_streams with filters and pagination", async () => {
+    await store().subscribe([
+      { stream: "qs-projection-tickets" },
+      { stream: "qs-projection-users" },
+      { stream: "qs-stats-user-1", source: "qs-source-1" },
+      { stream: "qs-stats-user-2", source: "qs-source-2" },
+    ]);
+
+    // No filter for the qs- prefix returns all four
+    const all: any[] = [];
+    const result = await store().query_streams((p) => all.push(p), {
+      stream: "^qs-",
+    });
+    expect(result.count).toBe(4);
+    expect(result.maxEventId).toBeGreaterThanOrEqual(0);
+    expect(all.map((p) => p.stream)).toEqual([
+      "qs-projection-tickets",
+      "qs-projection-users",
+      "qs-stats-user-1",
+      "qs-stats-user-2",
+    ]);
+
+    // stream regex (LIKE under the hood)
+    const projections: any[] = [];
+    await store().query_streams((p) => projections.push(p), {
+      stream: "^qs-projection-",
+    });
+    expect(projections).toHaveLength(2);
+
+    // stream_exact
+    const exact: any[] = [];
+    await store().query_streams((p) => exact.push(p), {
+      stream: "qs-stats-user-1",
+      stream_exact: true,
+    });
+    expect(exact).toHaveLength(1);
+    expect(exact[0].source).toBe("qs-source-1");
+
+    // source filter — only rows with source set
+    const dynamics: any[] = [];
+    await store().query_streams((p) => dynamics.push(p), {
+      stream: "^qs-",
+      source: "^qs-source-",
+    });
+    expect(dynamics).toHaveLength(2);
+    expect(dynamics.every((p) => p.source !== undefined)).toBe(true);
+
+    // source_exact filter
+    const exactSource: any[] = [];
+    await store().query_streams((p) => exactSource.push(p), {
+      stream: "^qs-",
+      source: "qs-source-2",
+      source_exact: true,
+    });
+    expect(exactSource).toHaveLength(1);
+    expect(exactSource[0].stream).toBe("qs-stats-user-2");
+
+    // limit + after pagination
+    const page1: any[] = [];
+    await store().query_streams((p) => page1.push(p), {
+      stream: "^qs-",
+      limit: 2,
+    });
+    expect(page1.map((p) => p.stream)).toEqual([
+      "qs-projection-tickets",
+      "qs-projection-users",
+    ]);
+    const page2: any[] = [];
+    await store().query_streams((p) => page2.push(p), {
+      stream: "^qs-",
+      limit: 2,
+      after: page1.at(-1)!.stream,
+    });
+    expect(page2.map((p) => p.stream)).toEqual([
+      "qs-stats-user-1",
+      "qs-stats-user-2",
+    ]);
+
+    // blocked filter — use a non-source projection so claim's source-stream
+    // filter doesn't exclude it
+    await store().commit("qs-projection-tickets", [{ name: "z", data: {} }], {
+      correlation: "",
+      causation: {},
+    });
+    const claimed = await store().claim(100, 0, "qs-worker", 100000);
+    const target = claimed.find((l) => l.stream === "qs-projection-tickets");
+    expect(target).toBeDefined();
+    const others = claimed.filter((l) => l.stream !== "qs-projection-tickets");
+    if (others.length) await store().ack(others);
+    await store().block([{ ...target!, error: "boom" }]);
+
+    const blocked: any[] = [];
+    await store().query_streams((p) => blocked.push(p), {
+      stream: "^qs-",
+      blocked: true,
+    });
+    expect(blocked).toHaveLength(1);
+    expect(blocked[0].stream).toBe("qs-projection-tickets");
+    expect(blocked[0].error).toBe("boom");
+
+    // blocked: false (excludes the blocked stream)
+    const unblocked: any[] = [];
+    await store().query_streams((p) => unblocked.push(p), {
+      stream: "^qs-",
+      blocked: false,
+    });
+    expect(unblocked).toHaveLength(3);
+    expect(
+      unblocked.find((p) => p.stream === "qs-projection-tickets")
+    ).toBeUndefined();
+
+    // No query at all — exercises undefined-query branches
+    const noQuery: any[] = [];
+    const noQueryResult = await store().query_streams((p) => noQuery.push(p));
+    expect(noQueryResult.count).toBeGreaterThan(0);
+    expect(noQueryResult.maxEventId).toBeGreaterThanOrEqual(0);
+  });
 });

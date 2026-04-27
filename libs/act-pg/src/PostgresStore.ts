@@ -5,9 +5,12 @@ import type {
   Logger,
   Message,
   Query,
+  QueryStreams,
+  QueryStreamsResult,
   Schema,
   Schemas,
   Store,
+  StreamPosition,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -700,6 +703,93 @@ export class PostgresStore implements Store {
       [streams]
     );
     return rowCount ?? 0;
+  }
+
+  /**
+   * Streams subscription positions to a callback, ordered by stream name,
+   * along with the highest event id in the store.
+   *
+   * Filters (`stream`, `source`, `blocked`, `after`, `limit`) are applied
+   * server-side. `stream`/`source` are regex by default (`~`), or exact
+   * with `*_exact: true` — same convention as {@link Store.query}.
+   *
+   * @returns `maxEventId` and the `count` of positions emitted.
+   */
+  async query_streams(
+    callback: (position: StreamPosition) => void,
+    query?: QueryStreams
+  ): Promise<QueryStreamsResult> {
+    const limit = query?.limit ?? 100;
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+
+    if (query?.stream !== undefined) {
+      values.push(query.stream);
+      conditions.push(
+        query.stream_exact
+          ? `stream = $${values.length}`
+          : `stream ~ $${values.length}`
+      );
+    }
+    if (query?.source !== undefined) {
+      conditions.push(`source IS NOT NULL`);
+      values.push(query.source);
+      conditions.push(
+        query.source_exact
+          ? `source = $${values.length}`
+          : `source ~ $${values.length}`
+      );
+    }
+    if (query?.blocked !== undefined) {
+      values.push(query.blocked);
+      conditions.push(`blocked = $${values.length}`);
+    }
+    if (query?.after !== undefined) {
+      values.push(query.after);
+      conditions.push(`stream > $${values.length}`);
+    }
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${this._fqs}`;
+    if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
+    values.push(limit);
+    sql += ` ORDER BY stream LIMIT $${values.length}`;
+
+    const client = await this._pool.connect();
+    try {
+      const [streamsResult, maxResult] = await Promise.all([
+        client.query<{
+          stream: string;
+          source: string | null;
+          at: number;
+          retry: number;
+          blocked: boolean;
+          error: string | null;
+          leased_by: string | null;
+          leased_until: Date | null;
+        }>(sql, values),
+        client.query<{ m: number | null }>(
+          `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
+        ),
+      ]);
+
+      let count = 0;
+      for (const row of streamsResult.rows) {
+        callback({
+          stream: row.stream,
+          source: row.source ?? undefined,
+          at: row.at,
+          retry: row.retry,
+          blocked: row.blocked,
+          error: row.error ?? "",
+          leased_by: row.leased_by ?? undefined,
+          leased_until: row.leased_until ?? undefined,
+        });
+        count++;
+      }
+
+      return { maxEventId: Number(maxResult.rows[0].m), count };
+    } finally {
+      client.release();
+    }
   }
 
   /**

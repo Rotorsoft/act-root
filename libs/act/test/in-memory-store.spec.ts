@@ -317,6 +317,110 @@ describe("InMemoryStore", () => {
       expect(claimed2.find((l) => l.stream === "L5")).toBeUndefined();
     });
 
+    it("should query_streams with filters and pagination", async () => {
+      const s = store();
+      // Mix of static targets (no source) and dynamic targets (with source)
+      await s.subscribe([
+        { stream: "projection-tickets" },
+        { stream: "projection-users" },
+        { stream: "stats-user-1", source: "user-1" },
+        { stream: "stats-user-2", source: "user-2" },
+        { stream: "stats-user-3", source: "user-3" },
+      ]);
+      // Commit some events so maxEventId > -1
+      await s.commit(
+        "user-1",
+        [
+          { name: "A", data: {} },
+          { name: "B", data: {} },
+        ],
+        { correlation: "c", causation: {} }
+      );
+
+      // No filter — returns all, ordered by stream name
+      const all: any[] = [];
+      const allResult = await s.query_streams((p) => all.push(p));
+      expect(allResult.count).toBe(5);
+      expect(allResult.maxEventId).toBe(1);
+      expect(all.map((p) => p.stream)).toEqual([
+        "projection-tickets",
+        "projection-users",
+        "stats-user-1",
+        "stats-user-2",
+        "stats-user-3",
+      ]);
+
+      // stream regex filter
+      const projections: any[] = [];
+      await s.query_streams((p) => projections.push(p), {
+        stream: "projection-.*",
+      });
+      expect(projections).toHaveLength(2);
+      expect(projections.every((p) => p.stream.startsWith("projection-"))).toBe(
+        true
+      );
+
+      // stream_exact
+      const exact: any[] = [];
+      await s.query_streams((p) => exact.push(p), {
+        stream: "stats-user-1",
+        stream_exact: true,
+      });
+      expect(exact).toHaveLength(1);
+      expect(exact[0].source).toBe("user-1");
+
+      // source filter — only rows with a source match
+      const dynamics: any[] = [];
+      await s.query_streams((p) => dynamics.push(p), { source: "user-.*" });
+      expect(dynamics).toHaveLength(3);
+      expect(dynamics.every((p) => p.source !== undefined)).toBe(true);
+
+      // source_exact filter
+      const exactSource: any[] = [];
+      await s.query_streams((p) => exactSource.push(p), {
+        source: "user-2",
+        source_exact: true,
+      });
+      expect(exactSource).toHaveLength(1);
+      expect(exactSource[0].stream).toBe("stats-user-2");
+
+      // source_exact with no match drops the row
+      const noMatch: any[] = [];
+      await s.query_streams((p) => noMatch.push(p), {
+        source: "user-99",
+        source_exact: true,
+      });
+      expect(noMatch).toHaveLength(0);
+
+      // limit + after (keyset pagination)
+      const page1: any[] = [];
+      await s.query_streams((p) => page1.push(p), { limit: 2 });
+      expect(page1.map((p) => p.stream)).toEqual([
+        "projection-tickets",
+        "projection-users",
+      ]);
+      const page2: any[] = [];
+      await s.query_streams((p) => page2.push(p), {
+        limit: 2,
+        after: page1.at(-1)!.stream,
+      });
+      expect(page2.map((p) => p.stream)).toEqual([
+        "stats-user-1",
+        "stats-user-2",
+      ]);
+
+      // blocked filter
+      const claimed = await s.claim(1, 0, "w", 100000);
+      await s.block([{ ...claimed[0], error: "boom" }]);
+      const blocked: any[] = [];
+      await s.query_streams((p) => blocked.push(p), { blocked: true });
+      expect(blocked).toHaveLength(1);
+      expect(blocked[0].error).toBe("boom");
+      const unblocked: any[] = [];
+      await s.query_streams((p) => unblocked.push(p), { blocked: false });
+      expect(unblocked).toHaveLength(4);
+    });
+
     it("should not ack with wrong lease holder", async () => {
       const s = store();
       await s.subscribe([{ stream: "L6" }]);

@@ -5,8 +5,11 @@ import type {
   Lease,
   Message,
   Query,
+  QueryStreams,
+  QueryStreamsResult,
   Schemas,
   Store,
+  StreamPosition,
 } from "@rotorsoft/act";
 
 /**
@@ -422,6 +425,70 @@ export class SqliteStore implements Store {
       await tx.rollback();
       throw e;
     }
+  }
+
+  // --- query_streams: read-only introspection with filters ---
+  async query_streams(
+    callback: (position: StreamPosition) => void,
+    query?: QueryStreams
+  ): Promise<QueryStreamsResult> {
+    const limit = query?.limit ?? 100;
+    let sql =
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM streams WHERE 1=1";
+    const args: unknown[] = [];
+
+    if (query?.stream !== undefined) {
+      if (query.stream_exact) {
+        sql += " AND stream = ?";
+        args.push(query.stream);
+      } else {
+        sql += " AND stream LIKE ?";
+        args.push(streamPatternToLike(query.stream));
+      }
+    }
+    if (query?.source !== undefined) {
+      sql += " AND source IS NOT NULL";
+      if (query.source_exact) {
+        sql += " AND source = ?";
+        args.push(query.source);
+      } else {
+        sql += " AND source LIKE ?";
+        args.push(streamPatternToLike(query.source));
+      }
+    }
+    if (query?.blocked !== undefined) {
+      sql += " AND blocked = ?";
+      args.push(query.blocked ? 1 : 0);
+    }
+    if (query?.after !== undefined) {
+      sql += " AND stream > ?";
+      args.push(query.after);
+    }
+    sql += " ORDER BY stream LIMIT ?";
+    args.push(limit);
+
+    const [streamsResult, maxResult] = await Promise.all([
+      this.client.execute({ sql, args: args as any[] }),
+      this.client.execute("SELECT COALESCE(MAX(id), -1) AS m FROM events"),
+    ]);
+
+    let count = 0;
+    for (const row of streamsResult.rows) {
+      const leased_until = row.leased_until as string | null;
+      callback({
+        stream: row.stream as string,
+        source: (row.source as string | null) ?? undefined,
+        at: Number(row.at),
+        retry: Number(row.retry),
+        blocked: Number(row.blocked) === 1,
+        error: row.error as string,
+        leased_by: (row.leased_by as string | null) ?? undefined,
+        leased_until: leased_until ? new Date(leased_until) : undefined,
+      });
+      count++;
+    }
+
+    return { maxEventId: Number(maxResult.rows[0].m), count };
   }
 
   // --- truncate: transactional delete + seed ---
