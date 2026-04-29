@@ -67,6 +67,18 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 
 `Invariant<S>` requires `{ description: string; valid: (state: Readonly<S>, actor?: Actor) => boolean }`. Type `S` with minimal fields (contravariance allows assignment to subtypes).
 
+**When the rule depends on the action payload — throw inside `.emit()`.** Invariants see only `(state, actor)`, so rules combining state with the incoming action data (e.g., "amount + current ≤ cap", "entries non-empty", "rate > 0") can't be expressed as invariants. Throw inside the emit handler instead — the action aborts and no event is committed:
+
+```typescript
+.on({ AddContribution })
+.emit((data, { state }) => {
+  if (state.contributed + data.amount > state.cap) throw new Error("Exceeds cap");
+  return ["ContributionAdded", data];
+})
+```
+
+Keep this validation in the aggregate, not the router. The aggregate is the system of record for its rules — router-level checks are invisible to other callers (CLI, reactions, replays) and let bad events sneak in via internal `app.do()` calls.
+
 ## States
 
 **Deciding when to use `.patch()` vs passthrough:** Most events don't need custom reducers — if the event data shape matches the state fields you want to update, passthrough works (the event data merges into state). Use `.patch()` only when: (1) the event data needs transformation before it becomes state (e.g., computing a derived field), (2) you need to read current state to compute the new value (e.g., incrementing a counter), or (3) the event updates fields not present in the event data (e.g., setting `status: "Closed"` from a `ClosedBy` event). A common AI mistake is adding `.patch()` entries that just return `({ data }) => data` — this is redundant since passthrough is the default.

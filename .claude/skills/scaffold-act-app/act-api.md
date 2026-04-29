@@ -155,6 +155,8 @@ In projections, use `event.created` for the timestamp:
 })
 ```
 
+**Aggregations by business date must read the payload, not `event.created`.** `event.created` is the *insert* time, not the business date. If you backdate, seed historical data, or replay through a reaction that re-emits, `event.created` no longer matches the business date and aggregations land in the wrong bucket (e.g., a Q1 payment seeded today buckets into the current quarter). When designing an event, ask "which dates do consumers need?" — anything other than "the moment it was logged" goes in the payload explicitly. In the aggregator, prefer `data.businessDate ?? event.created`.
+
 ## 6. Resolver Patterns
 
 Every reaction requires a `.to(resolver)` to tell `drain()` which stream to process:
@@ -166,6 +168,20 @@ Every reaction requires a `.to(resolver)` to tell `drain()` which stream to proc
 ```
 
 For fire-and-forget side effects (logging, metrics), use lifecycle events (`app.on("committed", ...)`) instead of reactions.
+
+**Gotcha — don't set per-event `source` in fan-in resolvers.** The `source` field on a resolver becomes a persisted LIKE pattern in the `streams` table. `subscribe()` is `INSERT OR IGNORE` keyed on `target`, so whatever the *first* correlate persists for `source` is what `claim()` keeps using forever — every subsequent subscribe with a different source is a no-op, and `claim()`'s `WHERE stream LIKE persisted_source` filter excludes everyone else's events. The leasing/ordering layer is innocent; the source filter just never widens.
+
+```typescript
+// ❌ Wrong — first source's stream pattern locks the filter forever
+.to((event) => ({ source: event.stream, target: "book-income" }))
+// → row written with source="invoice-A"; payments on invoice-B/-C never match the LIKE filter
+
+// ✅ Right — leave source unset for fan-in
+.to({ target: "book-income" })
+// → source=NULL; drain reads all events in id order; .on("PaymentReceived") filters by name
+```
+
+Set `source` only when you want to genuinely scope drain to a *stable* stream pattern across every firing — e.g., a singleton aggregate's own stream, or a regex like `"invoice-.*"` that's the same on every correlate. For "many sources fan into one consumer," leave `source` unset.
 
 ## 7. Correlate Before Drain — settle() Pattern
 
@@ -268,6 +284,19 @@ export const mustBeOpen: Invariant<{ status: string }> = {
 ```
 
 The `valid` function returns `true` if the rule passes, `false` if violated. When violated, the framework throws an `InvariantError` with the `description`.
+
+**Validation that depends on action data — throw inside `.emit()`.** Invariants only see `(state, actor)`, so they cannot validate rules that combine state with the incoming action payload (e.g., "contribution amount + current ≤ §415(c) cap", "invoice must have at least one entry", "rate must be > 0"). For these, throw inside the emit handler — the action aborts and no event is committed:
+
+```typescript
+.on({ AddContribution })
+.emit((data, { state }) => {
+  const newTotal = state.contributed + data.amount;
+  if (newTotal > state.annualCap) throw new Error(`Exceeds §415(c) cap of ${state.annualCap}`);
+  return ["ContributionAdded", data];
+})
+```
+
+This belongs in the aggregate (not the router/API layer) because the aggregate is the system of record. A router-level check is invisible to other callers (CLI, replays, internal `app.do()` calls) and lets bad events sneak in. Router-level throws are appropriate only for cross-aggregate constraints (need visibility into other streams), external-dependency prereqs (e.g. "no email address — can't send"), or admin-tool guards on destructive operations.
 
 ## 9. Emit Handler Signature
 
