@@ -157,6 +157,143 @@ In projections, use `event.created` for the timestamp:
 
 **Aggregations by business date must read the payload, not `event.created`.** `event.created` is the *insert* time, not the business date. If you backdate, seed historical data, or replay through a reaction that re-emits, `event.created` no longer matches the business date and aggregations land in the wrong bucket (e.g., a Q1 payment seeded today buckets into the current quarter). When designing an event, ask "which dates do consumers need?" — anything other than "the moment it was logged" goes in the payload explicitly. In the aggregator, prefer `data.businessDate ?? event.created`.
 
+## 5c. Events Store Facts, Not Derived Totals
+
+Event payloads describe what *happened* — the inputs, not the resulting totals. Anything calculable from other fields (in the same payload OR by combining payload with prior state) belongs in the patch handler / projection / view, not on the event itself.
+
+**Why:**
+- **Drift** — if rounding or a rule changes, every old event ships the wrong frozen total. Recompute on apply gives one consistent answer everywhere.
+- **Audit honesty** — `amount=$100, taxDeductiblePercent=50%` is two facts; `deductibleAmount=$50` looks like a third independent fact when it's just the first two multiplied.
+- **Replay correctness** — when projections rebuild, they recompute from facts. A stored derived value can't be updated by the rebuild.
+- **Wire/storage size** — sending the full collection (or pre-computed sums) on every adjust is noise.
+
+```typescript
+// ❌ Wrong — `newTotal` is derived from prior state + amount
+export const GrossIncomeUpdated = z.object({
+  amount: z.number(),
+  invoiceStream: z.string(),
+  newTotal: z.number(),  // = state.grossIncome + amount, recompute in patch
+});
+
+// ❌ Wrong — `deductibleAmount` is amount × pct/100
+export const ExpenseAdded = z.object({
+  amount: z.number(),
+  deductibleAmount: z.number(),  // computable from amount + pct
+});
+
+// ❌ Wrong — `totalHours` and `amount` are derived from `entries × rate`
+export const InvoiceCreated = z.object({
+  entries: z.record(z.string(), DayEntry),
+  rate: z.number(),
+  totalHours: z.number(),  // = sum(entries[].hours)
+  amount: z.number(),       // = totalHours × rate
+});
+
+// ✅ Right — facts only
+export const GrossIncomeUpdated = z.object({ amount: z.number(), invoiceStream: z.string() });
+export const ExpenseAdded = z.object({ amount: z.number(), taxDeductiblePercent: z.number() });
+export const InvoiceCreated = z.object({ entries: z.record(z.string(), DayEntry), rate: z.number() });
+
+// Patch handler does the math:
+.patch({
+  GrossIncomeUpdated: ({ data }, s) => ({ grossIncome: s.grossIncome + data.amount }),
+  ExpenseAdded: ({ data }, s) => {
+    const deductibleAmount = data.amount * (data.taxDeductiblePercent / 100);
+    return { expenses: { ...s.expenses, [data.id]: { ...data, deductibleAmount } } };
+  },
+  InvoiceCreated: ({ data }) => {
+    const totalHours = Object.values(data.entries).reduce((sum, e) => sum + e.hours, 0);
+    return { entries: data.entries, totalHours, amount: totalHours * data.rate, /* ... */ };
+  },
+})
+```
+
+The aggregate's `state` schema CAN carry derived caches (e.g. `state.expense.deductibleAmount`) because state is a projection — patch handlers refresh the cache on every apply. **Events themselves stay lean.**
+
+**Collections: send keyed deltas, not the full collection.** When one element of a Record/Array changes, the action and event should carry only that change keyed by id, with a sentinel for deletes. Replacing the whole collection on every update bloats the event log and loses the *intent* of the change.
+
+```typescript
+// ❌ Wrong — sends the whole entries map every time, even when one day changed
+export const AdjustInvoice = z.object({
+  entries: z.record(z.string(), DayEntry).optional(),
+});
+
+// ✅ Right — delta keyed by date; null = delete
+export const AdjustInvoice = z.object({
+  entriesPatch: z.record(z.string(), DayEntry.nullable()).optional(),
+});
+
+// Patch handler merges:
+function applyEntriesPatch(entries, patch) {
+  const next = { ...entries };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === null) delete next[k];
+    else next[k] = v;
+  }
+  return next;
+}
+```
+
+**Projections that need derived totals** can either compute from event facts (when the event has everything — e.g. `InvoiceCreated.entries`) OR `app.load(state, stream)` to read post-apply totals (when the event only carries a delta — e.g. `InvoiceAdjusted`). Lazy-import `app` from bootstrap to avoid circular deps:
+
+```typescript
+.on({ InvoiceAdjusted })
+.do(async function adjusted({ stream, data }) {
+  if (data.entriesPatch || data.rate !== undefined) {
+    const { app } = await import("../bootstrap.js");
+    const { Invoice } = await import("../states/index.js");
+    const snap = await app.load(Invoice, stream);
+    set.hours = snap.state.totalHours;
+    set.amount = snap.state.amount;
+  }
+  // ...
+})
+```
+
+**How to spot it during code review:**
+- Any event field whose value the emit handler computed from other event fields → drop it.
+- Any event field whose value the emit handler computed from `state.X + data.Y` → drop it.
+- Any event payload that includes the full collection when only one element changed → switch to keyed-delta with null-as-delete.
+
+**EXCEPTION: snapshot environmental values that can change over time.** The "events store facts only" rule does NOT mean "drop anything that's technically derivable." If a value comes from outside the aggregate — a config file, a related aggregate's mutable state, an external lookup table — and that source can change between emit and replay, the value must be SNAPSHOTTED on the event. Recomputing on apply would silently rewrite history.
+
+Examples of environmental values to snapshot on the event:
+- **Tax/regulatory rates** — `ratePerMile = getTaxValues(year).mileageRate`. tax-config files get edited (mid-year corrections, year-end updates); old events must keep their original rate.
+- **Client snapshot fields on an invoice** — `clientName`, `clientAddress`, `commuteMiles`, `paymentInstructions`. The Client aggregate is mutable; if you re-derive these at apply time, an old invoice would suddenly show the client's current address, not the address that was on the invoice when sent.
+- **Hourly rate at billing time** — even though `Client.hourlyRate` is queryable, the invoice freezes the rate that was in effect when it was created.
+- **Exchange rates, discount tiers, feature-flag values, plan-tier pricing** at the moment of the action.
+
+```typescript
+// ❌ Wrong — re-lookup at apply time. tax-config can change between
+//    emit and a future replay; a corrected mileage rate would silently
+//    change the deduction on every old event in the log.
+.patch({
+  MileageAdded: ({ data }) => {
+    const rate = getTaxValues(year(data.date)).mileageRate;
+    const deduction = data.miles * rate;
+    // ...
+  },
+})
+
+// ✅ Right — snapshot the rate on the event at emit time
+.on({ AddMileage })
+.emit((data) => {
+  const ratePerMile = getTaxValues(year(data.date)).mileageRate;
+  return ["MileageAdded", { ...data, ratePerMile }];
+})
+.patch({
+  MileageAdded: ({ data }) => {
+    const deduction = data.miles * data.ratePerMile; // uses snapshot
+    // ...
+  },
+})
+```
+
+The decision tree:
+1. Is the value computable from other fields **in the same payload**? → Drop it (e.g. `deductibleAmount = amount × pct`, `totalHours = sum(entries)`).
+2. Is it computable from **prior aggregate state** alone? → Drop it; patch handler does the math (e.g. `newTotal = state.grossIncome + amount`).
+3. Does it require an **external lookup** or another **mutable aggregate**? → Snapshot it on the event.
+
 ## 6. Resolver Patterns
 
 Every reaction requires a `.to(resolver)` to tell `drain()` which stream to process:
