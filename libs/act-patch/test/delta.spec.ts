@@ -175,56 +175,6 @@ describe("delta", () => {
       expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({});
     });
 
-    it("treats ArrayBuffer with byte-equal content as equal", () => {
-      const b1 = new ArrayBuffer(4);
-      const b2 = new ArrayBuffer(4);
-      new Uint8Array(b1).set([1, 2, 3, 4]);
-      new Uint8Array(b2).set([1, 2, 3, 4]);
-      expect(delta<Schema>({ buf: b1 }, { buf: b2 })).toEqual({});
-    });
-
-    it("replaces ArrayBuffer on different bytes", () => {
-      const b1 = new ArrayBuffer(4);
-      const b2 = new ArrayBuffer(4);
-      new Uint8Array(b1).set([1, 2, 3, 4]);
-      new Uint8Array(b2).set([5, 6, 7, 8]);
-      expect(delta<Schema>({ buf: b1 }, { buf: b2 })).toEqual({ buf: b2 });
-    });
-
-    it("replaces ArrayBuffer on different byteLength", () => {
-      const b1 = new ArrayBuffer(8);
-      const b2 = new ArrayBuffer(16);
-      expect(delta<Schema>({ buf: b1 }, { buf: b2 })).toEqual({ buf: b2 });
-    });
-
-    it("treats SharedArrayBuffer with byte-equal content as equal", () => {
-      if (typeof SharedArrayBuffer === "undefined") return;
-      const s1 = new SharedArrayBuffer(4);
-      const s2 = new SharedArrayBuffer(4);
-      new Uint8Array(s1).set([1, 2, 3, 4]);
-      new Uint8Array(s2).set([1, 2, 3, 4]);
-      expect(delta<Schema>({ buf: s1 }, { buf: s2 })).toEqual({});
-    });
-
-    it("treats DataView with same byte content as equal", () => {
-      const buf1 = new ArrayBuffer(4);
-      const buf2 = new ArrayBuffer(4);
-      new Uint8Array(buf1).set([1, 2, 3, 4]);
-      new Uint8Array(buf2).set([1, 2, 3, 4]);
-      const dv1 = new DataView(buf1);
-      const dv2 = new DataView(buf2);
-      expect(delta<Schema>({ view: dv1 }, { view: dv2 })).toEqual({});
-    });
-
-    it("replaces DataView on different bytes", () => {
-      const dv1 = new DataView(new ArrayBuffer(4));
-      const dv2 = new DataView(new ArrayBuffer(4));
-      new Uint8Array(dv2.buffer).set([1, 2, 3, 4]);
-      expect(delta<Schema>({ view: dv1 }, { view: dv2 })).toEqual({
-        view: dv2,
-      });
-    });
-
     it("treats Maps with same entries as equal regardless of order", () => {
       const m1 = new Map([
         ["a", 1],
@@ -262,32 +212,6 @@ describe("delta", () => {
       const s1 = new Set([1, 2]);
       const s2 = new Set([1, 3]);
       expect(delta<Schema>({ data: s1 }, { data: s2 })).toEqual({ data: s2 });
-    });
-
-    it("treats WeakMaps as equal only on reference", () => {
-      const wm = new WeakMap();
-      expect(delta<Schema>({ data: wm }, { data: wm })).toEqual({});
-    });
-
-    it("replaces WeakMaps when references differ", () => {
-      const wm1 = new WeakMap();
-      const wm2 = new WeakMap();
-      expect(delta<Schema>({ data: wm1 }, { data: wm2 })).toEqual({
-        data: wm2,
-      });
-    });
-
-    it("treats WeakSets as equal only on reference", () => {
-      const ws = new WeakSet();
-      expect(delta<Schema>({ data: ws }, { data: ws })).toEqual({});
-    });
-
-    it("replaces WeakSets when references differ", () => {
-      const ws1 = new WeakSet();
-      const ws2 = new WeakSet();
-      expect(delta<Schema>({ data: ws1 }, { data: ws2 })).toEqual({
-        data: ws2,
-      });
     });
   });
 

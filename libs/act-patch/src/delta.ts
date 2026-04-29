@@ -1,7 +1,7 @@
 import type { Patch, Schema } from "./types.js";
 
 /**
- * Deep semantic equality matching `patch`'s replacement rules.
+ * Deep semantic equality matching the types `patch` documents:
  *
  * - Plain objects: recurse field-wise
  * - Arrays / TypedArrays: length + element-wise equal
@@ -9,9 +9,11 @@ import type { Patch, Schema } from "./types.js";
  * - `RegExp`: `source` + `flags` equal
  * - `Map`: size + entries equal (iteration order ignored)
  * - `Set`: size + every member equal (iteration order ignored)
- * - `ArrayBuffer` / `SharedArrayBuffer` / `DataView`: `byteLength` + byte-equal
- * - `WeakMap` / `WeakSet`: reference equality only (not enumerable)
  * - Primitives: `Object.is` (handles `NaN`, `±0` correctly)
+ *
+ * Anything outside this list (e.g. `WeakMap`, `ArrayBuffer`) falls through
+ * to `false` — `delta` will emit a replacement, matching `patch`'s
+ * "replace everything that isn't a plain object" rule.
  */
 const deepEqual = (a: unknown, b: unknown): boolean => {
   if (Object.is(a, b)) return true;
@@ -55,16 +57,14 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
   if (a instanceof Date) return a.getTime() === (b as Date).getTime();
 
   if (a instanceof RegExp) {
-    const rA = a;
     const rB = b as RegExp;
-    return rA.source === rB.source && rA.flags === rB.flags;
+    return a.source === rB.source && a.flags === rB.flags;
   }
 
   if (a instanceof Map) {
-    const mA = a as Map<unknown, unknown>;
     const mB = b as Map<unknown, unknown>;
-    if (mA.size !== mB.size) return false;
-    for (const [k, v] of mA) {
+    if (a.size !== mB.size) return false;
+    for (const [k, v] of a as Map<unknown, unknown>) {
       if (!mB.has(k)) return false;
       if (!deepEqual(v, mB.get(k))) return false;
     }
@@ -72,33 +72,9 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
   }
 
   if (a instanceof Set) {
-    const sA = a as Set<unknown>;
     const sB = b as Set<unknown>;
-    if (sA.size !== sB.size) return false;
-    for (const v of sA) if (!sB.has(v)) return false;
-    return true;
-  }
-
-  if (a instanceof DataView) {
-    const dA = a;
-    const dB = b as DataView;
-    if (dA.byteLength !== dB.byteLength) return false;
-    for (let i = 0; i < dA.byteLength; i++) {
-      if (dA.getUint8(i) !== dB.getUint8(i)) return false;
-    }
-    return true;
-  }
-
-  if (
-    a instanceof ArrayBuffer ||
-    (typeof SharedArrayBuffer !== "undefined" && a instanceof SharedArrayBuffer)
-  ) {
-    const bufA = a as ArrayBuffer;
-    const bufB = b as ArrayBuffer;
-    if (bufA.byteLength !== bufB.byteLength) return false;
-    const uA = new Uint8Array(bufA);
-    const uB = new Uint8Array(bufB);
-    for (let i = 0; i < uA.length; i++) if (uA[i] !== uB[i]) return false;
+    if (a.size !== sB.size) return false;
+    for (const v of a as Set<unknown>) if (!sB.has(v)) return false;
     return true;
   }
 
@@ -117,7 +93,6 @@ const deepEqual = (a: unknown, b: unknown): boolean => {
     return true;
   }
 
-  // WeakMap / WeakSet — only reference equality (handled by Object.is at top)
   return false;
 };
 

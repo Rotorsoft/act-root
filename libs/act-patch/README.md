@@ -132,9 +132,9 @@ Mirrors `patch`'s replacement rules so the round-trip identity holds:
 | `RegExp` | `source` + `flags` equal |
 | `Map` | size + entries equal (iteration order ignored) |
 | `Set` | size + every member equal (iteration order ignored) |
-| `ArrayBuffer` / `SharedArrayBuffer` / `DataView` | `byteLength` + byte-equal |
-| `WeakMap` / `WeakSet` | reference equality only (not enumerable) |
 | Primitives | `Object.is` (handles `NaN`, `±0` correctly) |
+
+Anything outside this list (e.g. `WeakMap`, `ArrayBuffer`, `DataView`) falls through as not-equal — `delta` emits a replacement, matching `patch`'s "replace anything that isn't a plain object" rule.
 
 #### Why use `delta`?
 
