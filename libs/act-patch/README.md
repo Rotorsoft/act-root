@@ -82,6 +82,71 @@ const result = patch(state, {});
 result === state  // true — no work done
 ```
 
+### `delta(before, after) → Patch<S>`
+
+Computes the smallest `Patch<S>` that, when applied to `before` via `patch()`, yields an object semantically equal to `after`. The semantic inverse of `patch()`.
+
+```typescript
+import { delta, patch } from "@rotorsoft/act-patch";
+
+const before = { user: { name: "Alice", age: 30 }, theme: "dark" };
+const after = { user: { name: "Alice", age: 31 }, theme: "dark" };
+
+const d = delta(before, after);
+// → { user: { age: 31 } }
+
+patch(before, d);
+// → { user: { name: "Alice", age: 31 }, theme: "dark" }   (deeply equals `after`)
+```
+
+#### Round-trip identity
+
+```
+patch(before, delta(before, after))  ≡  after        // round-trip
+delta(before, before)                ≡  {}           // idempotent
+```
+
+`patch` and `delta` form a closed bidirectional algebra over `Patch<S>`. Any event whose payload is a `Patch<S>` over an aggregate's state shape can be produced by the caller via `delta` and applied by the patch handler via `patch` — no hand-rolled diff/merge logic needed.
+
+| Direction | Operation |
+|---|---|
+| Forward (event → state) | `state' = patch(state, eventData)` |
+| Inverse (snapshots → event) | `eventData = delta(prevState, nextState)` |
+
+#### Equality semantics
+
+For each key in `before ∪ after`:
+
+- **Key in `before` AND `after`, semantically equal** → omitted
+- **Key in `before` AND `after`, NOT semantically equal** → set to `after[K]` (recurse for plain objects)
+- **Key in `after` only** → set to `after[K]`
+- **Key in `before` only** → set to `null` (delete)
+
+Mirrors `patch`'s replacement rules so the round-trip identity holds:
+
+| Type | Equality |
+|---|---|
+| Plain objects | Recurse field-wise |
+| Arrays / TypedArrays | length + element-wise equal |
+| `Date` | `getTime()` equal |
+| `RegExp` | `source` + `flags` equal |
+| `Map` | size + entries equal (iteration order ignored) |
+| `Set` | size + every member equal (iteration order ignored) |
+| `ArrayBuffer` / `SharedArrayBuffer` / `DataView` | `byteLength` + byte-equal |
+| `WeakMap` / `WeakSet` | reference equality only (not enumerable) |
+| Primitives | `Object.is` (handles `NaN`, `±0` correctly) |
+
+#### Why use `delta`?
+
+Naive diffs have subtle bugs:
+
+- `JSON.stringify(a) !== JSON.stringify(b)` is sensitive to key insertion order
+- `{ drove: false }` vs `{ drove: undefined }` (omitted) compare unequal under `JSON.stringify` but should be equivalent
+- `Date` instances built from different deserialization paths compare unequal by reference even when they represent the same instant
+- Detecting deletions (key in `before`, missing from `after`) is easy to forget and hard to test
+
+`delta` handles all of these correctly and stays consistent with `patch`'s replacement rules.
+
 ### Types
 
 ```typescript
