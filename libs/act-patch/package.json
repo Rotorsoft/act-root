@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-patch",
   "type": "module",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Immutable deep-merge patch utility for act apps",
   "author": "rotorsoft",
   "license": "MIT",

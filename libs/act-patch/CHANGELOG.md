@@ -1,3 +1,15 @@
+# [@rotorsoft/act-patch-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.2...@rotorsoft/act-patch-v1.1.0) (2026-04-30)
+
+
+### Bug Fixes
+
+* **act-patch:** type delta's working object as Record<string, unknown> ([39d8980](https://github.com/rotorsoft/act-root/commit/39d898078544d9975735a9381d7a91587f8a0ee4))
+
+
+### Features
+
+* **act-patch:** add delta(before, after) — inverse of patch ([c324082](https://github.com/rotorsoft/act-root/commit/c324082d391928c0600bfecda55e4d68396d8b7a))
+
 # [@rotorsoft/act-patch-v1.0.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.1...@rotorsoft/act-patch-v1.0.2) (2026-03-14)
 
 
