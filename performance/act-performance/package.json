@@ -15,7 +15,7 @@
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
     "pg": "^8.20.0",
-    "zod": "^4.3.6"
+    "zod": "^4.4.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
