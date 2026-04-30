@@ -115,37 +115,19 @@ delta(before, before)                ≡  {}           // idempotent
 
 #### Equality semantics
 
-For each key in `before ∪ after`:
+`delta` mirrors `patch`'s structural-sharing model — equality is reference-based (`Object.is`), not deep:
 
-- **Key in `before` AND `after`, semantically equal** → omitted
-- **Key in `before` AND `after`, NOT semantically equal** → set to `after[K]` (recurse for plain objects)
-- **Key in `after` only** → set to `after[K]`
-- **Key in `before` only** → set to `null` (delete)
-
-Mirrors `patch`'s replacement rules so the round-trip identity holds:
-
-| Type | Equality |
+| Case | Behavior |
 |---|---|
-| Plain objects | Recurse field-wise |
-| Arrays / TypedArrays | length + element-wise equal |
-| `Date` | `getTime()` equal |
-| `RegExp` | `source` + `flags` equal |
-| `Map` | size + entries equal (iteration order ignored) |
-| `Set` | size + every member equal (iteration order ignored) |
-| Primitives | `Object.is` (handles `NaN`, `±0` correctly) |
+| Same reference (`Object.is`) | omit (mirrors patch's structural sharing) |
+| Both plain objects | recurse (mirrors deep merge) |
+| Different references, any other diff | set to `after[K]` (mirrors wholesale replace) |
+| Key in `before` only | set to `null` (mirrors delete) |
+| Key in `after` only | set to `after[K]` |
 
-Anything outside this list (e.g. `WeakMap`, `ArrayBuffer`, `DataView`) falls through as not-equal — `delta` emits a replacement, matching `patch`'s "replace anything that isn't a plain object" rule.
+Two structurally-equal-but-distinct values (e.g. two `Date` instances with the same `getTime()`, or two arrays with the same elements) emit a replacement — safe for the round-trip identity, just slightly less compact. This matches what `patch` does: it never inspects the contents of non-plain values, it just replaces or shares the reference.
 
-#### Why use `delta`?
-
-Naive diffs have subtle bugs:
-
-- `JSON.stringify(a) !== JSON.stringify(b)` is sensitive to key insertion order
-- `{ drove: false }` vs `{ drove: undefined }` (omitted) compare unequal under `JSON.stringify` but should be equivalent
-- `Date` instances built from different deserialization paths compare unequal by reference even when they represent the same instant
-- Detecting deletions (key in `before`, missing from `after`) is easy to forget and hard to test
-
-`delta` handles all of these correctly and stays consistent with `patch`'s replacement rules.
+`Object.is` handles `NaN === NaN` and distinguishes `+0` from `-0` correctly.
 
 ### Types
 

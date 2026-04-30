@@ -52,6 +52,10 @@ describe("delta", () => {
       const after = {};
       expect(delta<Schema>(before, after)).toEqual({ config: null });
     });
+
+    it("returns {} for deeply-equal-but-distinct plain inputs (recursion bottoms out)", () => {
+      expect(delta<Schema>({ a: { b: 1 } }, { a: { b: 1 } })).toEqual({});
+    });
   });
 
   describe("primitive equality", () => {
@@ -86,132 +90,81 @@ describe("delta", () => {
     });
   });
 
-  describe("array equality", () => {
-    it("treats same-length element-wise equal arrays as no-op", () => {
-      expect(delta<Schema>({ items: [1, 2, 3] }, { items: [1, 2, 3] })).toEqual(
-        {}
-      );
+  describe("non-plain values — reference equality", () => {
+    it("omits same array reference", () => {
+      const items = [1, 2, 3];
+      expect(delta<Schema>({ items }, { items })).toEqual({});
     });
 
-    it("replaces array on different length", () => {
-      expect(delta<Schema>({ items: [1, 2, 3] }, { items: [1, 2] })).toEqual({
-        items: [1, 2],
+    it("replaces array on different reference (even with same content)", () => {
+      const a1 = [1, 2, 3];
+      const a2 = [1, 2, 3];
+      expect(delta<Schema>({ items: a1 }, { items: a2 })).toEqual({
+        items: a2,
       });
     });
 
-    it("replaces array on different element", () => {
-      expect(delta<Schema>({ items: [1, 2, 3] }, { items: [1, 9, 3] })).toEqual(
-        { items: [1, 9, 3] }
-      );
-    });
-
-    it("replaces with empty array", () => {
-      expect(delta<Schema>({ items: [1, 2] }, { items: [] })).toEqual({
-        items: [],
+    it("replaces array on different content", () => {
+      expect(delta<Schema>({ items: [1, 2, 3] }, { items: [4, 5] })).toEqual({
+        items: [4, 5],
       });
     });
 
-    it("treats nested-equal arrays as no-op", () => {
-      const before = { items: [{ x: 1 }, { y: 2 }] };
-      const after = { items: [{ x: 1 }, { y: 2 }] };
-      expect(delta<Schema>(before, after)).toEqual({});
+    it("omits same Date reference", () => {
+      const d = new Date("2024-01-01");
+      expect(delta<Schema>({ created: d }, { created: d })).toEqual({});
     });
-  });
 
-  describe("unmergeable types", () => {
-    it("treats Date instances with same getTime as equal", () => {
+    it("replaces Date on different reference (even with same getTime)", () => {
       const d1 = new Date("2024-01-01");
       const d2 = new Date("2024-01-01");
-      expect(delta<Schema>({ created: d1 }, { created: d2 })).toEqual({});
-    });
-
-    it("replaces Date instances with different getTime", () => {
-      const d1 = new Date("2024-01-01");
-      const d2 = new Date("2025-06-15");
       expect(delta<Schema>({ created: d1 }, { created: d2 })).toEqual({
         created: d2,
       });
     });
 
-    it("treats RegExp with same source+flags as equal", () => {
-      expect(delta<Schema>({ p: /abc/i }, { p: /abc/i })).toEqual({});
+    it("omits same Map reference", () => {
+      const m = new Map([["a", 1]]);
+      expect(delta<Schema>({ data: m }, { data: m })).toEqual({});
     });
 
-    it("replaces RegExp on different source", () => {
-      expect(delta<Schema>({ p: /old/ }, { p: /new/ })).toEqual({ p: /new/ });
+    it("replaces Map on different reference", () => {
+      const m1 = new Map([["a", 1]]);
+      const m2 = new Map([["a", 1]]);
+      expect(delta<Schema>({ data: m1 }, { data: m2 })).toEqual({ data: m2 });
     });
 
-    it("replaces RegExp on different flags", () => {
-      expect(delta<Schema>({ p: /abc/ }, { p: /abc/i })).toEqual({ p: /abc/i });
+    it("omits same Set reference", () => {
+      const s = new Set([1, 2, 3]);
+      expect(delta<Schema>({ data: s }, { data: s })).toEqual({});
     });
 
-    it("treats TypedArrays with same content as equal", () => {
+    it("replaces Set on different reference", () => {
+      const s1 = new Set([1, 2, 3]);
+      const s2 = new Set([1, 2, 3]);
+      expect(delta<Schema>({ data: s1 }, { data: s2 })).toEqual({ data: s2 });
+    });
+
+    it("omits same RegExp reference", () => {
+      const r = /abc/i;
+      expect(delta<Schema>({ p: r }, { p: r })).toEqual({});
+    });
+
+    it("replaces RegExp on different reference", () => {
+      expect(delta<Schema>({ p: /abc/i }, { p: /abc/i })).toEqual({
+        p: /abc/i,
+      });
+    });
+
+    it("omits same TypedArray reference", () => {
+      const a = new Uint8Array([1, 2, 3]);
+      expect(delta<Schema>({ buf: a }, { buf: a })).toEqual({});
+    });
+
+    it("replaces TypedArray on different reference", () => {
       const a1 = new Uint8Array([1, 2, 3]);
       const a2 = new Uint8Array([1, 2, 3]);
-      expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({});
-    });
-
-    it("replaces TypedArrays on different content", () => {
-      const a1 = new Uint8Array([1, 2]);
-      const a2 = new Uint8Array([3, 4]);
       expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({ buf: a2 });
-    });
-
-    it("replaces TypedArrays on different length", () => {
-      const a1 = new Uint8Array([1, 2]);
-      const a2 = new Uint8Array([1, 2, 3]);
-      expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({ buf: a2 });
-    });
-
-    it("treats different TypedArray subtypes as different", () => {
-      const a1 = new Uint8Array([1, 2]);
-      const a2 = new Int8Array([1, 2]);
-      expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({ buf: a2 });
-    });
-
-    it("treats Float TypedArrays with same content as equal", () => {
-      const a1 = new Float64Array([1.5, 2.5]);
-      const a2 = new Float64Array([1.5, 2.5]);
-      expect(delta<Schema>({ buf: a1 }, { buf: a2 })).toEqual({});
-    });
-
-    it("treats Maps with same entries as equal regardless of order", () => {
-      const m1 = new Map([
-        ["a", 1],
-        ["b", 2],
-      ]);
-      const m2 = new Map([
-        ["b", 2],
-        ["a", 1],
-      ]);
-      expect(delta<Schema>({ data: m1 }, { data: m2 })).toEqual({});
-    });
-
-    it("replaces Maps on different size", () => {
-      const m1 = new Map([["a", 1]]);
-      const m2 = new Map([
-        ["a", 1],
-        ["b", 2],
-      ]);
-      expect(delta<Schema>({ data: m1 }, { data: m2 })).toEqual({ data: m2 });
-    });
-
-    it("replaces Maps on different value at same key", () => {
-      const m1 = new Map([["a", 1]]);
-      const m2 = new Map([["a", 2]]);
-      expect(delta<Schema>({ data: m1 }, { data: m2 })).toEqual({ data: m2 });
-    });
-
-    it("treats Sets with same members as equal regardless of order", () => {
-      const s1 = new Set([1, 2, 3]);
-      const s2 = new Set([3, 2, 1]);
-      expect(delta<Schema>({ data: s1 }, { data: s2 })).toEqual({});
-    });
-
-    it("replaces Sets on different members", () => {
-      const s1 = new Set([1, 2]);
-      const s2 = new Set([1, 3]);
-      expect(delta<Schema>({ data: s1 }, { data: s2 })).toEqual({ data: s2 });
     });
   });
 
@@ -220,16 +173,6 @@ describe("delta", () => {
       const x = { a: 1, b: 2 };
       const result = delta(x, x);
       expect(result).toEqual({});
-    });
-
-    it("returns {} for deeply-equal-but-distinct inputs", () => {
-      expect(delta<Schema>({ a: { b: 1 } }, { a: { b: 1 } })).toEqual({});
-    });
-
-    it("returns {} for deeply equal arrays at root via key", () => {
-      expect(delta<Schema>({ list: [{ x: 1 }] }, { list: [{ x: 1 }] })).toEqual(
-        {}
-      );
     });
   });
 
