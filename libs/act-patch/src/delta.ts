@@ -29,7 +29,7 @@ export const delta = <S extends Schema>(
 ): Readonly<Patch<S>> => {
   if (Object.is(before, after)) return {} as Patch<S>;
 
-  const out: Record<string, any> = {};
+  const out: Record<string, unknown> = {};
   const beforeKeys = Object.keys(before);
   const afterKeys = Object.keys(after);
 
@@ -65,5 +65,5 @@ export const delta = <S extends Schema>(
     out[k] = a;
   }
 
-  return out;
+  return out as Patch<S>;
 };
