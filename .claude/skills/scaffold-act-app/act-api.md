@@ -223,16 +223,24 @@ export const AdjustInvoice = z.object({
   entriesPatch: z.record(z.string(), DayEntry.nullable()).optional(),
 });
 
-// Patch handler merges:
-function applyEntriesPatch(entries, patch) {
-  const next = { ...entries };
-  for (const [k, v] of Object.entries(patch)) {
-    if (v === null) delete next[k];
-    else next[k] = v;
-  }
-  return next;
+// Caller computes the delta with `delta(before, after)` and the patch handler
+// applies it with `patch(state, eventData)`. No hand-rolled diff/merge logic.
+import { delta, patch } from "@rotorsoft/act-patch";
+
+const entriesPatch = delta(currentEntries, newEntries);
+if (Object.keys(entriesPatch).length > 0) {
+  await trpc.adjustInvoice.mutate({ stream, entriesPatch });
 }
+
+// Patch handler merges via `patch`:
+.patch({
+  InvoiceAdjusted: ({ data }, s) => ({
+    entries: patch(s.entries, data.entriesPatch ?? {}),
+  }),
+})
 ```
+
+`delta` and `patch` form a closed bidirectional algebra over `Patch<S>`: any event whose payload is a `Patch<S>` over the aggregate's state shape can be produced by the caller via `delta` and applied by the patch handler via `patch`. Naive diffs (`JSON.stringify` comparisons, missed deletions, `Date` reference inequality) are bug-prone — `delta` mirrors `patch`'s replacement rules so the round-trip identity holds: `patch(before, delta(before, after)) ≡ after`.
 
 **Projections that need derived totals** can either compute from event facts (when the event has everything — e.g. `InvoiceCreated.entries`) OR `app.load(state, stream)` to read post-apply totals (when the event only carries a delta — e.g. `InvoiceAdjusted`). Lazy-import `app` from bootstrap to avoid circular deps:
 

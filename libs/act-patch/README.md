@@ -82,6 +82,53 @@ const result = patch(state, {});
 result === state  // true — no work done
 ```
 
+### `delta(before, after) → Patch<S>`
+
+Computes the smallest `Patch<S>` that, when applied to `before` via `patch()`, yields an object semantically equal to `after`. The semantic inverse of `patch()`.
+
+```typescript
+import { delta, patch } from "@rotorsoft/act-patch";
+
+const before = { user: { name: "Alice", age: 30 }, theme: "dark" };
+const after = { user: { name: "Alice", age: 31 }, theme: "dark" };
+
+const d = delta(before, after);
+// → { user: { age: 31 } }
+
+patch(before, d);
+// → { user: { name: "Alice", age: 31 }, theme: "dark" }   (deeply equals `after`)
+```
+
+#### Round-trip identity
+
+```
+patch(before, delta(before, after))  ≡  after        // round-trip
+delta(before, before)                ≡  {}           // idempotent
+```
+
+`patch` and `delta` form a closed bidirectional algebra over `Patch<S>`. Any event whose payload is a `Patch<S>` over an aggregate's state shape can be produced by the caller via `delta` and applied by the patch handler via `patch` — no hand-rolled diff/merge logic needed.
+
+| Direction | Operation |
+|---|---|
+| Forward (event → state) | `state' = patch(state, eventData)` |
+| Inverse (snapshots → event) | `eventData = delta(prevState, nextState)` |
+
+#### Equality semantics
+
+`delta` mirrors `patch`'s structural-sharing model — equality is reference-based (`Object.is`), not deep:
+
+| Case | Behavior |
+|---|---|
+| Same reference (`Object.is`) | omit (mirrors patch's structural sharing) |
+| Both plain objects | recurse (mirrors deep merge) |
+| Different references, any other diff | set to `after[K]` (mirrors wholesale replace) |
+| Key in `before` only | set to `null` (mirrors delete) |
+| Key in `after` only | set to `after[K]` |
+
+Two structurally-equal-but-distinct values (e.g. two `Date` instances with the same `getTime()`, or two arrays with the same elements) emit a replacement — safe for the round-trip identity, just slightly less compact. This matches what `patch` does: it never inspects the contents of non-plain values, it just replaces or shares the reference.
+
+`Object.is` handles `NaN === NaN` and distinguishes `+0` from `-0` correctly.
+
 ### Types
 
 ```typescript
