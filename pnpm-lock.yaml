@@ -524,8 +524,8 @@ importers:
         specifier: ^0.31.0
         version: 0.31.0
       '@rotorsoft/act-pg':
-        specifier: ^0.16.0
-        version: 0.16.0
+        specifier: ^0.17.0
+        version: 0.17.0
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3164,12 +3164,8 @@ packages:
     resolution: {integrity: sha512-lWAZt/WUyQmO5XOXtV4y5Np4+H4oEPXxQ40yWlg/AiXxmyH16/zq0/lWgTHkNuRYQS2MvyaTEOI78cAC8GAqgw==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act-pg@0.16.0':
-    resolution: {integrity: sha512-4tqHTcdAPeXzCeG7fQGdb3D0Nq0g4YA18jEtrcmSsh/0o6lEy628z1nejGoBdlhVTI3C+vbC8VAla+Mq/xHM2Q==}
-    engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act@0.29.1':
-    resolution: {integrity: sha512-dqg/n/5pTljs8emLXAGFKfeGAjQ11rzcpCz8YMILvVwH2kQAvnZcNQUf9z1cUqeCWkjctEHIqVcdHRGM9Xoi4A==}
+  '@rotorsoft/act-pg@0.17.0':
+    resolution: {integrity: sha512-kDZGHxFyg6FmBWd1gJkQpsOKeVjxryYjrGkNyXiNnO0Odzz+NqRzSdv9SYYp9OjwTZST8aASZB1zGI7RgKKEew==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.31.0':
@@ -9113,6 +9109,7 @@ packages:
 
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
   validate-npm-package-license@3.0.4:
@@ -12619,18 +12616,13 @@ snapshots:
 
   '@rotorsoft/act-patch@1.0.2': {}
 
-  '@rotorsoft/act-pg@0.16.0':
+  '@rotorsoft/act-pg@0.17.0':
     dependencies:
-      '@rotorsoft/act': 0.29.1
+      '@rotorsoft/act': 0.31.0
       pg: 8.20.0
       zod: 4.3.6
     transitivePeerDependencies:
       - pg-native
-
-  '@rotorsoft/act@0.29.1':
-    dependencies:
-      '@rotorsoft/act-patch': 1.0.2
-      zod: 4.3.6
 
   '@rotorsoft/act@0.31.0':
     dependencies:
