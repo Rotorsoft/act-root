@@ -18,12 +18,12 @@
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
-    "@docusaurus/core": "^3.10.0",
-    "@docusaurus/faster": "^3.10.0",
-    "@docusaurus/module-type-aliases": "3.10.0",
-    "@docusaurus/preset-classic": "^3.10.0",
-    "@docusaurus/tsconfig": "3.10.0",
-    "@docusaurus/types": "3.10.0",
+    "@docusaurus/core": "^3.10.1",
+    "@docusaurus/faster": "^3.10.1",
+    "@docusaurus/module-type-aliases": "3.10.1",
+    "@docusaurus/preset-classic": "^3.10.1",
+    "@docusaurus/tsconfig": "3.10.1",
+    "@docusaurus/types": "3.10.1",
     "docusaurus-plugin-typedoc": "^1.4.2",
     "typedoc": "^0.28.19",
     "typedoc-plugin-markdown": "^4.11.0",
