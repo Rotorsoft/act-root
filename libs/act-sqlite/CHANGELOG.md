@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.2.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.2.0...@rotorsoft/act-sqlite-v0.2.1) (2026-05-01)
+
+
+### Bug Fixes
+
+* **deps:** update dependency zod to ^4.4.1 ([de538f5](https://github.com/rotorsoft/act-root/commit/de538f5e61a43cbdcb25d07049579d4a0eab0e8a))
+
 # [@rotorsoft/act-sqlite-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.1.3...@rotorsoft/act-sqlite-v0.2.0) (2026-04-27)
 
 
