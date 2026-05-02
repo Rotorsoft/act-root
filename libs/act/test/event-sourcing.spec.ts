@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { action, load, snap } from "../src/event-sourcing.js";
+import { action, load, snap } from "../src/internal/index.js";
 import { dispose, SNAP_EVENT, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 import { Snapshot } from "../src/types/action.js";
@@ -211,6 +211,20 @@ describe("event-sourcing", () => {
         { count: 1 }
       )
     ).rejects.toThrow("Commit failed");
+  });
+
+  it("should commit when all invariants pass", async () => {
+    const passingInvariant = {
+      ...me,
+      given: { increment: [{ valid: () => true, description: "always" }] },
+    };
+    const [snapshot] = await action(
+      passingInvariant,
+      "increment",
+      { stream: "s-pass", actor: { id: "a", name: "a" } },
+      { count: 1 }
+    );
+    expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
   it("should skip validation when flag is true", async () => {
@@ -437,7 +451,7 @@ describe("event-sourcing", () => {
         log: () => fakeLogger,
       });
     });
-    const { snap } = await import("../src/event-sourcing.js");
+    const { snap } = await import("../src/internal/index.js");
     await snap({
       event: {
         id: 1,

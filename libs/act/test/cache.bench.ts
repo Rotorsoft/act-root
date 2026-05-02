@@ -2,7 +2,7 @@
 import { bench, describe } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { action, load } from "../src/event-sourcing.js";
+import { action, load } from "../src/internal/index.js";
 import { dispose, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 

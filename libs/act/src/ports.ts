@@ -6,11 +6,7 @@ import type {
   Cache,
   Disposable,
   Disposer,
-  Fetch,
-  Lease,
   Logger,
-  LogLevel,
-  Schemas,
   Store,
 } from "./types/index.js";
 
@@ -273,78 +269,3 @@ export const SNAP_EVENT = "__snapshot__";
  * @see {@link Act.close} for the close-the-books API
  */
 export const TOMBSTONE_EVENT = "__tombstone__";
-
-// ---------------------------------------------------------------------------
-// Tracer
-// ---------------------------------------------------------------------------
-
-/**
- * Creates a tracer for detailed drain-cycle logging.
- *
- * When `logLevel` is `"trace"`, returns functions that log fetch, correlate,
- * lease, ack, and block operations. At any other level, returns no-op
- * functions to avoid overhead.
- *
- * @param logLevel - Current log level from configuration
- * @returns Object with tracer methods (active or no-op)
- *
- * @internal Used by {@link Act} to instrument drain cycles.
- */
-export function build_tracer(logLevel: LogLevel): {
-  fetched: <E extends Schemas>(fetched: Fetch<E>) => void;
-  correlated: (streams: Array<{ stream: string; source?: string }>) => void;
-  leased: (leases: Lease[]) => void;
-  acked: (leases: Lease[]) => void;
-  blocked: (leases: Array<Lease & { error: string }>) => void;
-} {
-  if (logLevel === "trace") {
-    const logger = log();
-    return {
-      fetched: <E extends Schemas>(fetched: Fetch<E>) => {
-        const data = Object.fromEntries(
-          fetched.map(({ stream, source, events }) => {
-            const key = source ? `${stream}<-${source}` : stream;
-            const value = Object.fromEntries(
-              events.map(({ id, stream, name }) => [id, { [stream]: name }])
-            );
-            return [key, value];
-          })
-        );
-        logger.trace(data, ">> fetch");
-      },
-      correlated: (streams: Array<{ stream: string; source?: string }>) => {
-        const data = streams.map(({ stream }) => stream).join(" ");
-        logger.trace(`>> correlate ${data}`);
-      },
-      leased: (leases: Lease[]) => {
-        const data = Object.fromEntries(
-          leases.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, ">> lease");
-      },
-      acked: (leases: Lease[]) => {
-        const data = Object.fromEntries(
-          leases.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, ">> ack");
-      },
-      blocked: (leases: Array<Lease & { error: string }>) => {
-        const data = Object.fromEntries(
-          leases.map(({ stream, at, retry, error }) => [
-            stream,
-            { at, retry, error },
-          ])
-        );
-        logger.trace(data, ">> block");
-      },
-    };
-  } else {
-    return {
-      fetched: () => {},
-      correlated: () => {},
-      leased: () => {},
-      acked: () => {},
-      blocked: () => {},
-    };
-  }
-}

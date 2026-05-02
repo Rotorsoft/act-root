@@ -2,13 +2,20 @@
  * @module event-sourcing
  * @category Event Sourcing
  *
- * Utilities for event sourcing, snapshotting, and event store interaction.
+ * Pure event-sourcing primitives: `snap` persists state checkpoints, `load`
+ * reconstructs state by replaying events through reducers, and `action`
+ * validates an action, runs invariants, emits events, and commits them
+ * atomically.
+ *
+ * These are the bare implementations — observability is layered on top in
+ * {@link "tracing"} and wired by the orchestrator at construction time.
+ * No tracing imports here, no module-level mutable state.
  */
 
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
-import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "./ports.js";
-import { InvariantError, StreamClosedError } from "./types/errors.js";
+import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { InvariantError, StreamClosedError } from "../types/errors.js";
 import type {
   AsOf,
   Committed,
@@ -19,10 +26,17 @@ import type {
   Snapshot,
   State,
   Target,
-} from "./types/index.js";
-import { validate } from "./utils.js";
+} from "../types/index.js";
+import { validate } from "../utils.js";
 
 const logger = log();
+
+/** @internal */
+export interface EsOps {
+  snap: typeof snap;
+  load: typeof load;
+  action: typeof action;
+}
 
 /**
  * Event sourcing utilities for snapshotting, loading, and committing actions/events.
@@ -47,7 +61,7 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
 ): Promise<void> {
   try {
     const { id, stream, name, meta, version } = snapshot.event!;
-    const snapped = await store().commit(
+    await store().commit(
       stream,
       [{ name: SNAP_EVENT, data: snapshot.state }],
       {
@@ -56,7 +70,6 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
       },
       version // IMPORTANT! - state events are committed right after the snapshot event
     );
-    logger.trace(snapped, "🟠 snap");
   } catch (error) {
     logger.error(error);
   }
@@ -102,7 +115,7 @@ export async function load<
   let snaps = cached?.snaps ?? 0;
   let event: Committed<TEvents, string> | undefined;
 
-  const count = await store().query(
+  await store().query(
     (e) => {
       event = e as Committed<TEvents, string>;
       if (e.name === SNAP_EVENT) {
@@ -122,10 +135,6 @@ export async function load<
     }
   );
 
-  logger.trace(
-    state as object,
-    `🟢 load ${stream}${cached && count === 0 ? " (cached)" : ""}${timeTravel ? " (as-of)" : ""}`
-  );
   return { event, state, patches, snaps };
 }
 
@@ -173,11 +182,6 @@ export async function action<
   if (snapshot.event?.name === TOMBSTONE_EVENT)
     throw new StreamClosedError(stream);
   const expected = expectedVersion ?? snapshot.event?.version;
-
-  logger.trace(
-    payload as object,
-    `🔵 ${stream}.${action as string}${typeof expected === "number" ? `.${expected}` : ""}`
-  );
 
   if (me.given) {
     const invariants = me.given[action] || [];
@@ -230,11 +234,6 @@ export async function action<
         : undefined,
     },
   };
-
-  logger.trace(
-    emitted.map((e) => e.data),
-    `🔴 commit ${stream}.${emitted.map((e) => e.name).join(", ")}`
-  );
 
   let committed;
   try {

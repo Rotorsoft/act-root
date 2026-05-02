@@ -1,15 +1,12 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
-import { config } from "./config.js";
-import * as es from "./event-sourcing.js";
 import {
-  build_tracer,
-  cache,
-  dispose,
-  log,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+  buildDrain,
+  buildEs,
+  type DrainOps,
+  type EsOps,
+} from "./internal/index.js";
+import { cache, dispose, log, store, TOMBSTONE_EVENT } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -34,7 +31,6 @@ import type {
 } from "./types/index.js";
 
 const logger = log();
-const tracer = build_tracer(config().logLevel);
 
 /**
  * @category Orchestrator
@@ -157,13 +153,20 @@ export class Act<
   private readonly _static_targets: Array<{ stream: string; source?: string }>;
   /** Batch handlers for static-target projections (target → handler) */
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
+  /** Event-sourcing handlers, optionally wrapped with trace decorators */
+  private readonly _es: EsOps;
+  /** Correlate/drain pipeline ops, optionally wrapped with trace decorators */
+  private readonly _cd: DrainOps<TEvents>;
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map(),
     batchHandlers: Map<string, BatchHandler<any>> = new Map()
   ) {
-    this._batch_handlers = batchHandlers as Map<string, BatchHandler<TEvents>>;
+    this._batch_handlers = batchHandlers;
+    const level = log().level;
+    this._es = buildEs(level);
+    this._cd = buildDrain<TEvents>(level);
     // Classify resolvers and reactive events at build time
     const statics: Array<{ stream: string; source?: string }> = [];
     for (const [name, register] of Object.entries(this.registry.events)) {
@@ -279,10 +282,10 @@ export class Act<
     reactingTo?: Committed<TEvents, string & keyof TEvents>,
     skipValidation = false
   ) {
-    const snapshots = await es.action(
+    const snapshots = await this._es.action(
       this.registry.actions[action],
       action,
-      target as Target,
+      target,
       payload,
       reactingTo,
       skipValidation
@@ -372,7 +375,7 @@ export class Act<
     } else {
       merged = this._states.get(stateOrName.name) || stateOrName;
     }
-    return await es.load(merged, stream, callback, asOf);
+    return await this._es.load(merged, stream, callback, asOf);
   }
 
   /**
@@ -519,7 +522,7 @@ export class Act<
     // Bind stable methods once; only the do() closure changes per event.
     const doAction = this.do.bind(this);
     const scopedApp: IAct<TEvents, TActions, TActor> = {
-      do: doAction as IAct<TEvents, TActions, TActor>["do"],
+      do: doAction,
       load: this.load.bind(this),
       query: this.query.bind(this),
       query_array: this.query_array.bind(this),
@@ -668,7 +671,7 @@ export class Act<
         const leading = streamLimit - lagging;
 
         // Atomically discover and lease streams (competing consumer pattern)
-        const leased = await store().claim(
+        const leased = await this._cd.claim(
           lagging,
           leading,
           randomUUID(),
@@ -680,17 +683,7 @@ export class Act<
         }
 
         // Fetch events for each leased stream
-        const fetched = await Promise.all(
-          leased.map(async ({ stream, source, at, lagging }) => {
-            const events = await this.query_array({
-              stream: source,
-              after: at,
-              limit: eventLimit,
-            });
-            return { stream, source, at, lagging, events } as const;
-          })
-        );
-        tracer.fetched(fetched);
+        const fetched = await this._cd.fetch(leased, eventLimit);
 
         const payloadsMap = new Map<string, ReactionPayload<TEvents>[]>();
 
@@ -714,10 +707,8 @@ export class Act<
               })
               .map((reaction) => ({ ...reaction, event }));
           });
-          payloadsMap.set(stream, payloads as ReactionPayload<TEvents>[]);
+          payloadsMap.set(stream, payloads);
         });
-
-        tracer.leased(leased);
 
         const handled = await Promise.all(
           leased.map((lease) => {
@@ -747,25 +738,19 @@ export class Act<
         this._drain_lag2lead_ratio =
           total > 0 ? Math.max(0.2, Math.min(0.8, lagging_avg / total)) : 0.5;
 
-        const acked = await store().ack(
+        const acked = await this._cd.ack(
           handled
             .filter(({ error }) => !error)
             .map(({ at, lease }) => ({ ...lease, at }))
         );
-        if (acked.length) {
-          tracer.acked(acked);
-          this.emit("acked", acked);
-        }
+        if (acked.length) this.emit("acked", acked);
 
-        const blocked = await store().block(
+        const blocked = await this._cd.block(
           handled
             .filter(({ block }) => block)
             .map(({ lease, error }) => ({ ...lease, error: error! }))
         );
-        if (blocked.length) {
-          tracer.blocked(blocked);
-          this.emit("blocked", blocked);
-        }
+        if (blocked.length) this.emit("blocked", blocked);
 
         const result = { fetched, leased, acked, blocked };
         // Clear flag when fully caught up (nothing processed, no pending errors)
@@ -898,11 +883,10 @@ export class Act<
         stream,
         source,
       }));
-      const { subscribed } = await store().subscribe(streams);
+      const { subscribed } = await this._cd.subscribe(streams);
       // Advance checkpoint only after subscribe succeeds
       this._correlation_checkpoint = last_id;
       if (subscribed) {
-        tracer.correlated(streams);
         // Track newly subscribed dynamic targets
         for (const { stream } of streams) {
           this._subscribed_statics.add(stream);
@@ -1201,7 +1185,7 @@ export class Act<
         guarded
           .filter((s) => targetMap.get(s)?.restart)
           .map(async (stream) => {
-            const snap = await es.load(mergedState, stream);
+            const snap = await this._es.load(mergedState, stream);
             seedStates.set(stream, snap.state as Schema);
           })
       );
