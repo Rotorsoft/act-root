@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.18.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.0...@rotorsoft/act-pg-v0.18.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* **act-pg:** update test bench import after src/internal move ([935c5b5](https://github.com/rotorsoft/act-root/commit/935c5b5e8e2ef1da391f5f94938c281f0bb63b68))
+
 # [@rotorsoft/act-pg-v0.18.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.17.1...@rotorsoft/act-pg-v0.18.0) (2026-05-02)
 
 
