@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-sqlite",
   "type": "module",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "act sqlite adapters",
   "author": "rotorsoft",
   "license": "MIT",
@@ -36,8 +36,10 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
-    "@rotorsoft/act": "workspace:^",
     "@libsql/client": "^0.17.3",
     "zod": "^4.4.1"
+  },
+  "peerDependencies": {
+    "@rotorsoft/act": ">=0.31.1"
   }
 }

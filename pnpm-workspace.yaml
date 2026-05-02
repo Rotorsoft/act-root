@@ -3,6 +3,7 @@ packages:
   - packages/**
   - docs
   - performance/act-performance
+linkWorkspacePackages: true
 onlyBuiltDependencies:
   - "@swc/core"
   - core-js
