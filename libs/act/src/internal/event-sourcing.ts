@@ -14,8 +14,8 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
-import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "./ports.js";
-import { InvariantError, StreamClosedError } from "./types/errors.js";
+import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { InvariantError, StreamClosedError } from "../types/errors.js";
 import type {
   AsOf,
   Committed,
@@ -26,8 +26,8 @@ import type {
   Snapshot,
   State,
   Target,
-} from "./types/index.js";
-import { validate } from "./utils.js";
+} from "../types/index.js";
+import { validate } from "../utils.js";
 
 const logger = log();
 

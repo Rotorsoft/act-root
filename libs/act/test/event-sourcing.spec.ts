@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { action, load, snap } from "../src/event-sourcing.js";
+import { action, load, snap } from "../src/internal/index.js";
 import { dispose, SNAP_EVENT, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 import { Snapshot } from "../src/types/action.js";
@@ -437,7 +437,7 @@ describe("event-sourcing", () => {
         log: () => fakeLogger,
       });
     });
-    const { snap } = await import("../src/event-sourcing.js");
+    const { snap } = await import("../src/internal/index.js");
     await snap({
       event: {
         id: 1,

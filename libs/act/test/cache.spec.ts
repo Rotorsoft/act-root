@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/InMemoryCache.js";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
-import { action, load } from "../src/event-sourcing.js";
+import { action, load } from "../src/internal/index.js";
 import { cache, dispose, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
 

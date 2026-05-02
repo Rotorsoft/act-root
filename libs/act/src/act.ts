@@ -1,9 +1,12 @@
 import { randomUUID } from "crypto";
 import EventEmitter from "events";
-import { type DrainOps } from "./drain.js";
-import { type EsOps } from "./event-sourcing.js";
+import {
+  buildDrain,
+  buildEs,
+  type DrainOps,
+  type EsOps,
+} from "./internal/index.js";
 import { cache, dispose, log, store, TOMBSTONE_EVENT } from "./ports.js";
-import { buildDrain, buildEs } from "./tracing.js";
 import type {
   Actor,
   AsOf,

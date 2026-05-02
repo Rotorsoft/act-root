@@ -5,7 +5,7 @@
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, registerState } from "./merge.js";
+import { _this_, registerState } from "./internal/index.js";
 import type { Projection } from "./projection-builder.js";
 import type {
   Actor,
@@ -13,7 +13,6 @@ import type {
   EventRegister,
   IAct,
   Reaction,
-  ReactionHandler,
   ReactionOptions,
   ReactionResolver,
   Schema,
@@ -233,7 +232,7 @@ export function slice<
         options?: Partial<ReactionOptions>
       ) => {
         const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-          handler: handler as ReactionHandler<TEvents, TKey, TActions, TActor>,
+          handler: handler,
           resolver: _this_,
           options: {
             blockOnError: options?.blockOnError ?? true,

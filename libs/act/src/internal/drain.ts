@@ -17,8 +17,8 @@
  * construction time. No tracing imports here.
  */
 
-import { store } from "./ports.js";
-import type { Committed, Fetch, Lease, Schemas } from "./types/index.js";
+import { store } from "../ports.js";
+import type { Committed, Fetch, Lease, Schemas } from "../types/index.js";
 
 /** @internal */
 export interface DrainOps<TEvents extends Schemas> {

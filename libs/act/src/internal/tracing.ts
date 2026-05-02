@@ -18,12 +18,12 @@
  * imports tracing primitives.
  */
 
+import { log } from "../ports.js";
+import type { Lease, Schemas } from "../types/index.js";
 import * as drain from "./drain.js";
 import { type DrainOps } from "./drain.js";
 import * as es from "./event-sourcing.js";
 import { type EsOps } from "./event-sourcing.js";
-import { log } from "./ports.js";
-import type { Lease, Schemas } from "./types/index.js";
 
 const logger = log();
 

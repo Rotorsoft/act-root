@@ -5,7 +5,7 @@
  * Fluent builder for composing event-sourced applications.
  */
 import { Act } from "./act.js";
-import { _this_, mergeProjection, registerState } from "./merge.js";
+import { _this_, mergeProjection, registerState } from "./internal/index.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 import type {
@@ -15,7 +15,6 @@ import type {
   EventRegister,
   IAct,
   Reaction,
-  ReactionHandler,
   ReactionOptions,
   ReactionResolver,
   Registry,
@@ -345,12 +344,7 @@ export function act<
           options?: Partial<ReactionOptions>
         ) => {
           const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler: handler as ReactionHandler<
-              TEvents,
-              TKey,
-              TActions,
-              TActor
-            >,
+            handler: handler,
             resolver: _this_,
             options: {
               blockOnError: options?.blockOnError ?? true,

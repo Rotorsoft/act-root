@@ -9,13 +9,12 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { _this_ } from "./merge.js";
+import { _this_ } from "./internal/index.js";
 import type {
   BatchHandler,
   Committed,
   EventRegister,
   Reaction,
-  ReactionHandler,
   ReactionResolver,
   Schema,
   Schemas,
@@ -189,10 +188,7 @@ function _projection<
           ) => Promise<void>
         ) => {
           const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
-            handler: handler as ReactionHandler<
-              TEvents & { [P in TKey]: TData },
-              TKey
-            >,
+            handler: handler,
             resolver: defaultResolver ?? _this_,
             options: {
               blockOnError: true,
