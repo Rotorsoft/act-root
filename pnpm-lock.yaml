@@ -300,8 +300,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.31.0
-        version: 0.31.0
+        specifier: ^0.31.1
+        version: 0.31.1
       '@trpc/server':
         specifier: 11.16.0
         version: 11.16.0(typescript@5.9.3)
@@ -521,8 +521,8 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.31.0
-        version: 0.31.0
+        specifier: ^0.31.1
+        version: 0.31.1
       '@rotorsoft/act-pg':
         specifier: ^0.17.0
         version: 0.17.0
@@ -3160,16 +3160,16 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-patch@1.0.2':
-    resolution: {integrity: sha512-lWAZt/WUyQmO5XOXtV4y5Np4+H4oEPXxQ40yWlg/AiXxmyH16/zq0/lWgTHkNuRYQS2MvyaTEOI78cAC8GAqgw==}
+  '@rotorsoft/act-patch@1.1.0':
+    resolution: {integrity: sha512-nQMyT+VAiZoGWQiVYuL2fAEgGXkY90rUdpxXSpA0TRQ00uNHUQyIVYqc1w2jHyBGXt0sfHpDa7eqUUDIh4dWvA==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act-pg@0.17.0':
     resolution: {integrity: sha512-kDZGHxFyg6FmBWd1gJkQpsOKeVjxryYjrGkNyXiNnO0Odzz+NqRzSdv9SYYp9OjwTZST8aASZB1zGI7RgKKEew==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act@0.31.0':
-    resolution: {integrity: sha512-6S+dNbGbVKooOVYyFrFq0eBVSh1jA3MBQEJewEondjUV4CI7AIu00B8Fh3GId9dkuYALcxhsIQxsZ7zHuFp40w==}
+  '@rotorsoft/act@0.31.1':
+    resolution: {integrity: sha512-0/9ut92d7V/sK9tEe2KTayLpKWP7QBuBq8/HJo9y5KaHlmApZKW1YcZo58feDZkuK/587vnNANZnSKtLm1GaCg==}
     engines: {node: '>=22.18.0'}
 
   '@rspack/binding-darwin-arm64@1.7.11':
@@ -12586,19 +12586,19 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.2':
     optional: true
 
-  '@rotorsoft/act-patch@1.0.2': {}
+  '@rotorsoft/act-patch@1.1.0': {}
 
   '@rotorsoft/act-pg@0.17.0':
     dependencies:
-      '@rotorsoft/act': 0.31.0
+      '@rotorsoft/act': 0.31.1
       pg: 8.20.0
       zod: 4.4.1
     transitivePeerDependencies:
       - pg-native
 
-  '@rotorsoft/act@0.31.0':
+  '@rotorsoft/act@0.31.1':
     dependencies:
-      '@rotorsoft/act-patch': 1.0.2
+      '@rotorsoft/act-patch': 1.1.0
       zod: 4.4.1
 
   '@rspack/binding-darwin-arm64@1.7.11':
