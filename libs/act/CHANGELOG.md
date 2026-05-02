@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.32.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.31.1...@rotorsoft/act-v0.32.0) (2026-05-02)
+
+
+### Features
+
+* **act:** add browser-safe ./types subpath export ([1a0d621](https://github.com/rotorsoft/act-root/commit/1a0d62151a22d717e68da003da453558afc9e187)), closes [#628](https://github.com/rotorsoft/act-root/issues/628)
+
 # [@rotorsoft/act-v0.31.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.31.0...@rotorsoft/act-v0.31.1) (2026-05-01)
 
 
