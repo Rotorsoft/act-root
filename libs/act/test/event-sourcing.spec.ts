@@ -213,6 +213,20 @@ describe("event-sourcing", () => {
     ).rejects.toThrow("Commit failed");
   });
 
+  it("should commit when all invariants pass", async () => {
+    const passingInvariant = {
+      ...me,
+      given: { increment: [{ valid: () => true, description: "always" }] },
+    };
+    const [snapshot] = await action(
+      passingInvariant,
+      "increment",
+      { stream: "s-pass", actor: { id: "a", name: "a" } },
+      { count: 1 }
+    );
+    expect(snapshot.event?.name).toBe("INCREMENT");
+  });
+
   it("should skip validation when flag is true", async () => {
     const validateSpy = vi.spyOn(me.actions.increment, "parse");
     await action(
