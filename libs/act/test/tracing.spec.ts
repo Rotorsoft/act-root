@@ -96,13 +96,15 @@ describe("tracing", () => {
     it("withLoadTrace logs entry without asOf", async () => {
       const { load } = buildEs(withLevel("trace"));
       await load(Counter, "s1");
-      expect(traceSpy).toHaveBeenCalledWith("🟢 load s1");
+      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining("s1"));
     });
 
     it("withLoadTrace logs entry with asOf marker", async () => {
       const { load } = buildEs(withLevel("trace"));
       await load(Counter, "s1", undefined, { before: 9999 });
-      expect(traceSpy).toHaveBeenCalledWith("🟢 load s1 (as-of)");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringContaining("s1 (as-of)")
+      );
     });
 
     it("withActionTrace logs entry and commit when events emitted", async () => {
@@ -110,20 +112,31 @@ describe("tracing", () => {
       const snapshots = await action(Counter, "increment", target("s1"), {
         by: 5,
       });
-      expect(traceSpy).toHaveBeenCalledWith({ by: 5 }, "🔵 s1.increment");
+      // entry log: action payload + colored target body
+      expect(traceSpy).toHaveBeenCalledWith(
+        { by: 5 },
+        expect.stringContaining("s1.increment")
+      );
+      // exit log: committed event data + colored target.event body
       expect(traceSpy).toHaveBeenCalledWith(
         snapshots.map((s) => s.event?.data),
-        expect.stringContaining("🔴 commit s1.")
+        expect.stringContaining("s1.Incremented")
       );
     });
 
     it("withActionTrace skips commit log when nothing emitted", async () => {
       const { action } = buildEs(withLevel("trace"));
       await action(Counter, "noop", target("s2"), {});
-      expect(traceSpy).toHaveBeenCalledWith({}, "🔵 s2.noop");
+      expect(traceSpy).toHaveBeenCalledWith(
+        {},
+        expect.stringContaining("s2.noop")
+      );
+      // No "Incremented" / commit-style call should have fired
       const commitCalls = traceSpy.mock.calls.filter(
         (c: [unknown, unknown]) =>
-          typeof c[1] === "string" && c[1].startsWith("🔴 commit")
+          Array.isArray(c[0]) &&
+          typeof c[1] === "string" &&
+          c[1].includes("s2.")
       );
       expect(commitCalls).toHaveLength(0);
     });
@@ -135,7 +148,9 @@ describe("tracing", () => {
       const { snap } = buildEs(withLevel("trace"));
       await snap(snapshot);
       expect(traceSpy).toHaveBeenCalledWith(
-        `🟠 snap ${snapshot.event!.stream}@${snapshot.event!.version}`
+        expect.stringContaining(
+          `${snapshot.event!.stream}@${snapshot.event!.version}`
+        )
       );
     });
   });
@@ -146,14 +161,25 @@ describe("tracing", () => {
       traceSpy = vi.spyOn(log(), "trace").mockImplementation(() => {});
     });
 
+    // Helper: a trace call with caption substring `>> claimed` etc.
+    // Tests assert the caption substring; in pretty mode the caption is
+    // wrapped in ANSI color codes, but the substring still matches.
+    const calledWithCaption = (substr: string) =>
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.stringContaining(substr)
+      );
+    const noCaptionCall = (substr: string) =>
+      traceSpy.mock.calls.filter(
+        (c: [unknown, unknown]) =>
+          typeof c[1] === "string" && c[1].includes(substr)
+      );
+
     it("withClaimTrace skips log when no leases returned", async () => {
       const { claim } = buildDrain(withLevel("trace"));
       const leased = await claim(1, 1, "by-x", 1000);
       expect(leased).toEqual([]);
-      const leaseCalls = traceSpy.mock.calls.filter(
-        (c: [unknown, unknown]) => c[1] === ">> lease"
-      );
-      expect(leaseCalls).toHaveLength(0);
+      expect(noCaptionCall(">> claimed")).toHaveLength(0);
     });
 
     it("withClaimTrace logs when leases returned", async () => {
@@ -164,7 +190,7 @@ describe("tracing", () => {
       const { claim } = buildDrain(withLevel("trace"));
       const leased = await claim(2, 0, "claim-by", 60_000);
       expect(leased.length).toBeGreaterThan(0);
-      expect(traceSpy).toHaveBeenCalledWith(expect.any(Object), ">> lease");
+      calledWithCaption(">> claimed");
     });
 
     it("withFetchTrace logs stream-only and stream<-source variants", async () => {
@@ -193,17 +219,14 @@ describe("tracing", () => {
         100
       );
       expect(fetched).toHaveLength(2);
-      expect(traceSpy).toHaveBeenCalledWith(expect.any(Object), ">> fetch");
+      calledWithCaption(">> fetched");
     });
 
     it("withAckTrace skips log on empty", async () => {
       const { ack } = buildDrain(withLevel("trace"));
       const result = await ack([]);
       expect(result).toEqual([]);
-      const ackCalls = traceSpy.mock.calls.filter(
-        (c: [unknown, unknown]) => c[1] === ">> ack"
-      );
-      expect(ackCalls).toHaveLength(0);
+      expect(noCaptionCall(">> acked")).toHaveLength(0);
     });
 
     it("withAckTrace logs on non-empty", async () => {
@@ -214,17 +237,14 @@ describe("tracing", () => {
       expect(leased.length).toBeGreaterThan(0);
       const acked = await ack(leased);
       expect(acked.length).toBeGreaterThan(0);
-      expect(traceSpy).toHaveBeenCalledWith(expect.any(Object), ">> ack");
+      calledWithCaption(">> acked");
     });
 
     it("withBlockTrace skips log on empty", async () => {
       const { block } = buildDrain(withLevel("trace"));
       const result = await block([]);
       expect(result).toEqual([]);
-      const blockCalls = traceSpy.mock.calls.filter(
-        (c: [unknown, unknown]) => c[1] === ">> block"
-      );
-      expect(blockCalls).toHaveLength(0);
+      expect(noCaptionCall(">> blocked")).toHaveLength(0);
     });
 
     it("withBlockTrace logs on non-empty", async () => {
@@ -237,7 +257,7 @@ describe("tracing", () => {
       expect(leased.length).toBeGreaterThan(0);
       const blocked = await block(leased.map((l) => ({ ...l, error: "boom" })));
       expect(blocked.length).toBeGreaterThan(0);
-      expect(traceSpy).toHaveBeenCalledWith(expect.any(Object), ">> block");
+      calledWithCaption(">> blocked");
     });
 
     it("withSubscribeTrace skips log when nothing newly subscribed", async () => {
@@ -248,7 +268,7 @@ describe("tracing", () => {
       expect(result.subscribed).toBe(0);
       const corrCalls = traceSpy.mock.calls.filter(
         (c: [unknown, unknown]) =>
-          typeof c[0] === "string" && c[0].startsWith(">> correlate")
+          typeof c[0] === "string" && c[0].includes(">> correlated")
       );
       expect(corrCalls).toHaveLength(0);
     });
@@ -257,7 +277,11 @@ describe("tracing", () => {
       const { subscribe } = buildDrain(withLevel("trace"));
       const result = await subscribe([{ stream: "fresh-stream" }]);
       expect(result.subscribed).toBeGreaterThan(0);
-      expect(traceSpy).toHaveBeenCalledWith(">> correlate fresh-stream");
+      // pretty mode wraps the >> correlated caption in ANSI codes; the
+      // stream name follows after the reset, so match each piece.
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/>> correlated.*fresh-stream/)
+      );
     });
   });
 });
