@@ -266,14 +266,18 @@ export async function action<
   const last = snapshots.at(-1)!;
   const snapped = me.snap && me.snap(last);
 
-  // Update cache with post-commit state (reset patches if snapped)
-  void cache().set<TState>(stream, {
-    state: last.state,
-    version: last.event.version,
-    event_id: last.event.id,
-    patches: snapped ? 0 : last.patches,
-    snaps: snapped ? last.snaps + 1 : last.snaps,
-  });
+  // Update cache with post-commit state (reset patches if snapped).
+  // Fire-and-forget — log but don't fail the action on cache write errors
+  // (e.g., transient network failures in a custom Cache adapter).
+  cache()
+    .set<TState>(stream, {
+      state: last.state,
+      version: last.event.version,
+      event_id: last.event.id,
+      patches: snapped ? 0 : last.patches,
+      snaps: snapped ? last.snaps + 1 : last.snaps,
+    })
+    .catch((err) => log().error(err));
 
   // persist snap to store for cold start durability
   if (snapped) void snap(last);
