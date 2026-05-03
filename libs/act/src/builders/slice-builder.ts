@@ -5,8 +5,7 @@
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, registerState } from "./internal/index.js";
-import type { Projection } from "./projection-builder.js";
+import { _this_, registerState } from "../internal/index.js";
 import type {
   Actor,
   Committed,
@@ -20,7 +19,8 @@ import type {
   Schemas,
   Snapshot,
   State,
-} from "./types/index.js";
+} from "../types/index.js";
+import type { Projection } from "./projection-builder.js";
 
 /**
  * A self-contained functional slice grouping partial states with their

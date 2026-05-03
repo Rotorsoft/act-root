@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { state } from "../src/builders/state-builder.js";
 import { action, load, snap } from "../src/internal/event-sourcing.js";
 import { dispose, SNAP_EVENT, store } from "../src/ports.js";
-import { state } from "../src/state-builder.js";
 import { Snapshot } from "../src/types/action.js";
 import { InvariantError } from "../src/types/errors.js";
 import { ZodEmpty } from "../src/types/schemas.js";

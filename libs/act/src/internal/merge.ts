@@ -5,7 +5,7 @@
  * Shared utilities for merging partial states and projections across builders.
  */
 import { ZodObject, type ZodType } from "zod";
-import type { Projection } from "../projection-builder.js";
+import type { Projection } from "../builders/projection-builder.js";
 import type { Schema, State } from "../types/index.js";
 
 /**

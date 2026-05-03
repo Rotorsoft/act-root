@@ -9,7 +9,7 @@
  * actions, and are pure side-effect handlers routed to a named stream.
  */
 import type { ZodType } from "zod";
-import { _this_ } from "./internal/index.js";
+import { _this_ } from "../internal/index.js";
 import type {
   BatchHandler,
   Committed,
@@ -18,7 +18,7 @@ import type {
   ReactionResolver,
   Schema,
   Schemas,
-} from "./types/index.js";
+} from "../types/index.js";
 
 /**
  * A self-contained projection grouping read-model update handlers.

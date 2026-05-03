@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { state } from "../src/state-builder.js";
+import { state } from "../src/builders/state-builder.js";
 
 const counter = z.object({
   count: z.number(),

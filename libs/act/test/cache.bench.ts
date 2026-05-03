@@ -2,9 +2,9 @@
 import { bench, describe } from "vitest";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { state } from "../src/builders/state-builder.js";
 import { action, load } from "../src/internal/event-sourcing.js";
 import { dispose, store } from "../src/ports.js";
-import { state } from "../src/state-builder.js";
 
 // --- State definitions (one per snap interval) ---
 

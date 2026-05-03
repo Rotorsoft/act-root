@@ -1,9 +1,9 @@
 import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/InMemoryCache.js";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { state } from "../src/builders/state-builder.js";
 import { action, load } from "../src/internal/event-sourcing.js";
 import { cache, dispose, log, store } from "../src/ports.js";
-import { state } from "../src/state-builder.js";
 import type { Cache } from "../src/types/index.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })

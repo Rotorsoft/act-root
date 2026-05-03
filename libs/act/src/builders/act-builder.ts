@@ -4,15 +4,13 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import { Act, type ActOptions } from "./act.js";
+import { Act, type ActOptions } from "../act.js";
 import {
   _this_,
   mergeEventRegister,
   mergeProjection,
   registerState,
-} from "./internal/index.js";
-import type { Projection } from "./projection-builder.js";
-import type { Slice } from "./slice-builder.js";
+} from "../internal/index.js";
 import type {
   Actor,
   BatchHandler,
@@ -28,7 +26,9 @@ import type {
   Schemas,
   Snapshot,
   State,
-} from "./types/index.js";
+} from "../types/index.js";
+import type { Projection } from "./projection-builder.js";
+import type { Slice } from "./slice-builder.js";
 
 /**
  * Registers a projection's batch handler against its target stream, throwing

@@ -17,7 +17,7 @@ import {
   Snapshot,
   State,
   ZodTypes,
-} from "./types/index.js";
+} from "../types/index.js";
 
 /**
  * Builder interface for defining a state with event sourcing.
