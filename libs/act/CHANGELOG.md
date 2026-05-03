@@ -1,3 +1,13 @@
+# [@rotorsoft/act-v0.32.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.3...@rotorsoft/act-v0.32.4) (2026-05-03)
+
+
+### Performance Improvements
+
+* **act:** dedupe static reaction targets at build time ([3e15798](https://github.com/rotorsoft/act-root/commit/3e157981fb79c873b41af50167283e02526f3608))
+* **act:** index drain fetched results by stream once instead of O(L*F) ([b8b842a](https://github.com/rotorsoft/act-root/commit/b8b842a9edc25fd4c38bb6b44b02d81266b33bad))
+* **act:** memoize config() result on first call ([3b894f7](https://github.com/rotorsoft/act-root/commit/3b894f7801b08ff30f059b06caa97ab47e9a83ca))
+* **act:** pre-bind scoped IAct methods once on the Act instance ([9812816](https://github.com/rotorsoft/act-root/commit/9812816e4efd9edc402edb722fed6c11d7a717a2))
+
 # [@rotorsoft/act-v0.32.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.2...@rotorsoft/act-v0.32.3) (2026-05-03)
 
 
