@@ -2,8 +2,9 @@ import { z } from "zod";
 import { InMemoryCache } from "../src/adapters/InMemoryCache.js";
 import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
 import { action, load } from "../src/internal/event-sourcing.js";
-import { cache, dispose, store } from "../src/ports.js";
+import { cache, dispose, log, store } from "../src/ports.js";
 import { state } from "../src/state-builder.js";
+import type { Cache } from "../src/types/index.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -83,5 +84,41 @@ describe("cache integration", () => {
     const c = cache() as InMemoryCache;
     const entry = await c.get("c1");
     expect(entry).toBeUndefined();
+  });
+
+  it("cache.set rejection is logged but does not fail the action", async () => {
+    // Reset singletons so we can inject a failing cache for this test only
+    await dispose()();
+    store(new InMemoryStore());
+    await store().seed();
+
+    const setError = new Error("simulated cache write failure");
+    const failingCache: Cache = {
+      get: () => Promise.resolve(undefined),
+      set: () => Promise.reject(setError),
+      invalidate: () => Promise.resolve(),
+      clear: () => Promise.resolve(),
+      dispose: () => Promise.resolve(),
+    };
+    cache(failingCache);
+
+    const errorSpy = vi.spyOn(log(), "error").mockImplementation(() => {});
+
+    // Action should succeed despite cache.set rejecting
+    const snaps = await action(
+      Counter,
+      "increment",
+      target,
+      { count: 5 },
+      undefined,
+      true
+    );
+    expect(snaps[0].state.count).toBe(5);
+
+    // Flush the fire-and-forget .catch microtask
+    await new Promise((r) => setImmediate(r));
+
+    expect(errorSpy).toHaveBeenCalledWith(setError);
+    errorSpy.mockRestore();
   });
 });
