@@ -66,7 +66,7 @@ export const app = act()
   .on("TodoDeleted")
   .do(projector.projectTodoDeleted)
   .to(projection_resolver)
-  .build(100);
+  .build();
 
 // load test variables
 let drainInterval: ReturnType<typeof setInterval> | undefined = undefined;
