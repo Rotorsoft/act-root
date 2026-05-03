@@ -182,8 +182,10 @@ export class Act<
     this._batch_handlers = batchHandlers;
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
-    // Classify resolvers and reactive events at build time
-    const statics: Array<{ stream: string; source?: string }> = [];
+    // Classify resolvers and reactive events at build time. Static targets
+    // are deduplicated by (target, source) — two reactions to different
+    // events that route to the same projection produce one subscription.
+    const statics = new Map<string, { stream: string; source?: string }>();
     for (const [name, register] of Object.entries(this.registry.events)) {
       if (register.reactions.size > 0) {
         this._reactive_events.add(name);
@@ -192,14 +194,13 @@ export class Act<
         if (typeof reaction.resolver === "function") {
           this._has_dynamic_resolvers = true;
         } else {
-          statics.push({
-            stream: reaction.resolver.target,
-            source: reaction.resolver.source,
-          });
+          const { target, source } = reaction.resolver;
+          const key = `${target}|${source ?? ""}`;
+          if (!statics.has(key)) statics.set(key, { stream: target, source });
         }
       }
     }
-    this._static_targets = statics;
+    this._static_targets = [...statics.values()];
 
     // Build the event-name → owning state index. Duplicate event names are
     // already rejected at registration time (merge.ts), so each entry is
