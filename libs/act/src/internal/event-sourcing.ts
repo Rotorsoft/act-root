@@ -29,8 +29,6 @@ import type {
 } from "../types/index.js";
 import { validate } from "../utils.js";
 
-const logger = log();
-
 /** @internal */
 export interface EsOps {
   snap: typeof snap;
@@ -71,7 +69,7 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
       version // IMPORTANT! - state events are committed right after the snapshot event
     );
   } catch (error) {
-    logger.error(error);
+    log().error(error);
   }
 }
 

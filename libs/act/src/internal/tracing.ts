@@ -18,21 +18,18 @@
  * imports tracing primitives.
  */
 
-import { log } from "../ports.js";
-import type { Lease, Schemas } from "../types/index.js";
+import type { Lease, Logger, Schemas } from "../types/index.js";
 import * as drain from "./drain.js";
 import { type DrainOps } from "./drain.js";
 import * as es from "./event-sourcing.js";
 import { type EsOps } from "./event-sourcing.js";
-
-const logger = log();
 
 // ---------------------------------------------------------------------------
 // Event-sourcing decorators
 // ---------------------------------------------------------------------------
 
 const withSnapTrace =
-  (inner: typeof es.snap): typeof es.snap =>
+  (logger: Logger, inner: typeof es.snap): typeof es.snap =>
   async (snapshot) => {
     logger.trace(
       `🟠 snap ${snapshot.event!.stream}@${snapshot.event!.version}`
@@ -41,14 +38,14 @@ const withSnapTrace =
   };
 
 const withLoadTrace =
-  (inner: typeof es.load): typeof es.load =>
+  (logger: Logger, inner: typeof es.load): typeof es.load =>
   async (me, stream, callback, asOf) => {
     logger.trace(`🟢 load ${stream}${asOf ? " (as-of)" : ""}`);
     return inner(me, stream, callback, asOf);
   };
 
 const withActionTrace =
-  (inner: typeof es.action): typeof es.action =>
+  (logger: Logger, inner: typeof es.action): typeof es.action =>
   async (me, action, target, payload, reactingTo, skipValidation) => {
     logger.trace(payload as object, `🔵 ${target.stream}.${action as string}`);
     const snapshots = await inner(
@@ -77,14 +74,14 @@ const withActionTrace =
  *
  * @internal
  */
-export function buildEs(level: string): EsOps {
-  if (level !== "trace") {
+export function buildEs(logger: Logger): EsOps {
+  if (logger.level !== "trace") {
     return { snap: es.snap, load: es.load, action: es.action };
   }
   return {
-    snap: withSnapTrace(es.snap),
-    load: withLoadTrace(es.load),
-    action: withActionTrace(es.action),
+    snap: withSnapTrace(logger, es.snap),
+    load: withLoadTrace(logger, es.load),
+    action: withActionTrace(logger, es.action),
   };
 }
 
@@ -93,7 +90,10 @@ export function buildEs(level: string): EsOps {
 // ---------------------------------------------------------------------------
 
 const withClaimTrace =
-  <T extends Schemas>(inner: DrainOps<T>["claim"]): DrainOps<T>["claim"] =>
+  <T extends Schemas>(
+    logger: Logger,
+    inner: DrainOps<T>["claim"]
+  ): DrainOps<T>["claim"] =>
   async (lagging, leading, by, millis) => {
     const leased = await inner(lagging, leading, by, millis);
     if (leased.length) {
@@ -106,7 +106,10 @@ const withClaimTrace =
   };
 
 const withFetchTrace =
-  <T extends Schemas>(inner: DrainOps<T>["fetch"]): DrainOps<T>["fetch"] =>
+  <T extends Schemas>(
+    logger: Logger,
+    inner: DrainOps<T>["fetch"]
+  ): DrainOps<T>["fetch"] =>
   async (leased, eventLimit) => {
     const fetched = await inner(leased, eventLimit);
     const data = Object.fromEntries(
@@ -123,7 +126,10 @@ const withFetchTrace =
   };
 
 const withAckTrace =
-  <T extends Schemas>(inner: DrainOps<T>["ack"]): DrainOps<T>["ack"] =>
+  <T extends Schemas>(
+    logger: Logger,
+    inner: DrainOps<T>["ack"]
+  ): DrainOps<T>["ack"] =>
   async (leases) => {
     const acked = await inner(leases);
     if (acked.length) {
@@ -136,7 +142,10 @@ const withAckTrace =
   };
 
 const withBlockTrace =
-  <T extends Schemas>(inner: DrainOps<T>["block"]): DrainOps<T>["block"] =>
+  <T extends Schemas>(
+    logger: Logger,
+    inner: DrainOps<T>["block"]
+  ): DrainOps<T>["block"] =>
   async (leases: Array<Lease & { error: string }>) => {
     const blocked = await inner(leases);
     if (blocked.length) {
@@ -153,6 +162,7 @@ const withBlockTrace =
 
 const withSubscribeTrace =
   <T extends Schemas>(
+    logger: Logger,
     inner: DrainOps<T>["subscribe"]
   ): DrainOps<T>["subscribe"] =>
   async (streams) => {
@@ -171,9 +181,9 @@ const withSubscribeTrace =
  * @internal
  */
 export function buildDrain<TEvents extends Schemas>(
-  level: string
+  logger: Logger
 ): DrainOps<TEvents> {
-  if (level !== "trace") {
+  if (logger.level !== "trace") {
     return {
       claim: drain.claim,
       fetch: drain.fetch,
@@ -183,10 +193,10 @@ export function buildDrain<TEvents extends Schemas>(
     };
   }
   return {
-    claim: withClaimTrace<TEvents>(drain.claim),
-    fetch: withFetchTrace<TEvents>(drain.fetch),
-    ack: withAckTrace<TEvents>(drain.ack),
-    block: withBlockTrace<TEvents>(drain.block),
-    subscribe: withSubscribeTrace<TEvents>(drain.subscribe),
+    claim: withClaimTrace<TEvents>(logger, drain.claim),
+    fetch: withFetchTrace<TEvents>(logger, drain.fetch),
+    ack: withAckTrace<TEvents>(logger, drain.ack),
+    block: withBlockTrace<TEvents>(logger, drain.block),
+    subscribe: withSubscribeTrace<TEvents>(logger, drain.subscribe),
   };
 }
