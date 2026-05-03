@@ -1,20 +1,21 @@
 import { disposeAndExit, log } from "./ports.js";
-const logger = log();
 
-// exit on signals
+// Resolve the logger lazily inside each handler — calling log() here at
+// module load would register the default ConsoleLogger before user code
+// can inject (port singletons are first-call-wins).
 process.once("SIGINT", async (arg?: any) => {
-  logger.info(arg, "SIGINT");
+  log().info(arg, "SIGINT");
   await disposeAndExit("EXIT");
 });
 process.once("SIGTERM", async (arg?: any) => {
-  logger.info(arg, "SIGTERM");
+  log().info(arg, "SIGTERM");
   await disposeAndExit("EXIT");
 });
 process.once("uncaughtException", async (arg?: any) => {
-  logger.error(arg, "Uncaught Exception");
+  log().error(arg, "Uncaught Exception");
   await disposeAndExit("ERROR");
 });
 process.once("unhandledRejection", async (arg?: any) => {
-  logger.error(arg, "Unhandled Rejection");
+  log().error(arg, "Unhandled Rejection");
   await disposeAndExit("ERROR");
 });
