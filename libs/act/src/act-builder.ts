@@ -366,17 +366,15 @@ export function act<
             throw new Error(
               `Reaction handler for "${String(event)}" must be a named function`
             );
+          // Register once with the default _this_ resolver. If `.to()` is
+          // chained next, it patches the same reaction's resolver in place
+          // — no second Map.set() round-trip.
           registry.events[event].reactions.set(handler.name, reaction);
           return {
             ...builder,
             to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              registry.events[event].reactions.set(handler.name, {
-                ...reaction,
-                resolver:
-                  typeof resolver === "string"
-                    ? { target: resolver }
-                    : resolver,
-              });
+              reaction.resolver =
+                typeof resolver === "string" ? { target: resolver } : resolver;
               return builder;
             },
           };

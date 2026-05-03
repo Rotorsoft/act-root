@@ -186,7 +186,13 @@ export type Reaction<
   TActor extends Actor = Actor,
 > = {
   readonly handler: ReactionHandler<TEvents, TKey, TActions, TActor>;
-  readonly resolver: ReactionResolver<TEvents, TKey>;
+  /**
+   * Mutable so the builder's `.do()` → `.to()` chain can patch the resolver
+   * in place (registered once with the default `_this_` resolver in `.do()`,
+   * overwritten in `.to()` if present). After build-time the field is
+   * effectively immutable; runtime consumers only read it.
+   */
+  resolver: ReactionResolver<TEvents, TKey>;
   readonly options: ReactionOptions;
 };
 

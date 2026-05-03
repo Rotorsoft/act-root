@@ -213,13 +213,9 @@ function _projection<
                 | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
                 | string
             ) {
-              register.reactions.set(handler.name, {
-                ...reaction,
-                resolver:
-                  typeof resolver === "string"
-                    ? { target: resolver }
-                    : resolver,
-              });
+              // Patch the same reaction in place — no second Map.set().
+              reaction.resolver =
+                typeof resolver === "string" ? { target: resolver } : resolver;
               return nextBuilder;
             },
           };
