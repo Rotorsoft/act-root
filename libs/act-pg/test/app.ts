@@ -16,7 +16,6 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
 
 export const onIncremented = vi.fn().mockImplementation(async () => {
   await sleep(100);
-  console.log("onIncremented OK");
 });
 export const onDecremented = vi.fn().mockImplementation(async () => {
   await sleep(100);
