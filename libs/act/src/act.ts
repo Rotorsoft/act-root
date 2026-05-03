@@ -1,4 +1,3 @@
-import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import {
   buildDrain,
@@ -8,16 +7,10 @@ import {
   type EsOps,
   type HandleResult,
   LruSet,
+  runCloseCycle,
   runDrainCycle,
 } from "./internal/index.js";
-import {
-  cache,
-  dispose,
-  log,
-  SNAP_EVENT,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { dispose, log, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -1106,189 +1099,18 @@ export class Act<
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
-    const targetMap = new Map(targets.map((t) => [t.stream, t]));
-    const streams = [...targetMap.keys()];
-
-    // 1. Correlate — ensure all dynamic reaction targets are discovered
+    // Correlate first so dynamic reaction targets are discovered before
+    // the safety check examines subscription positions.
     await this.correlate({ limit: 1000 });
 
-    // 2. Find max domain event ID + version per stream (parallel, O(1) each).
-    //    Also capture the latest non-tombstone, non-snapshot event name so
-    //    step 5 can pick the owning state for restart seeding in multi-state
-    //    apps.
-    const streamInfo = new Map<
-      string,
-      { maxId: number; version: number; lastEventName?: string }
-    >();
-    await Promise.all(
-      streams.map(async (s) => {
-        let maxId = -1;
-        let version = -1;
-        let lastEventName: string | undefined;
-        await store().query(
-          (e) => {
-            if (e.name === TOMBSTONE_EVENT) return;
-            // backward iteration: first non-tombstone is the most recent
-            if (maxId === -1) {
-              maxId = e.id;
-              version = e.version;
-            }
-            if (e.name !== SNAP_EVENT && lastEventName === undefined) {
-              lastEventName = e.name;
-            }
-          },
-          // limit: 2 covers the typical snapshot-at-head case (snapshot is
-          // always preceded by the domain event it captured). Streams with
-          // unusual layouts fall back to no-seed via the lookup miss path.
-          { stream: s, stream_exact: true, backward: true, limit: 2 }
-        );
-        if (maxId >= 0) streamInfo.set(s, { maxId, version, lastEventName });
-      })
-    );
-
-    // 3. Safety check — skip entirely when app has no reactions
-    const skipped: string[] = [];
-    let safe: string[];
-
-    if (this._reactive_events.size === 0) {
-      safe = [...streamInfo.keys()];
-    } else {
-      // Read-only probe: query_streams returns subscription positions
-      // without leasing or mutating retry state. claim()+ack() used to
-      // double as a probe, but lease() bumps retry and ack() resets it
-      // to -1 — silently destroying retry state of unrelated reactions.
-      const pendingSet = new Set<string>();
-      await store().query_streams((position) => {
-        const sourceRe = position.source ? RegExp(position.source) : undefined;
-        for (const [stream, info] of streamInfo) {
-          if (
-            (!sourceRe || sourceRe.test(stream)) &&
-            position.at < info.maxId
-          ) {
-            pendingSet.add(stream);
-          }
-        }
-      });
-
-      safe = [];
-      for (const [stream] of streamInfo) {
-        if (pendingSet.has(stream)) {
-          skipped.push(stream);
-        } else {
-          safe.push(stream);
-        }
-      }
-    }
-
-    if (!safe.length) {
-      const result: CloseResult = { truncated: new Map(), skipped };
-      this.emit("closed", result);
-      return result;
-    }
-
-    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
-    //    All guards share a correlation UUID (the close operation ID).
-    const correlation = randomUUID();
-    const guarded: string[] = [];
-    const guardEvents = new Map<string, { id: number; stream: string }>();
-    await Promise.all(
-      safe.map(async (stream) => {
-        try {
-          const info = streamInfo.get(stream)!;
-          const [committed] = await store().commit(
-            stream,
-            [{ name: TOMBSTONE_EVENT, data: {} }],
-            { correlation, causation: {} },
-            info.version
-          );
-          guarded.push(stream);
-          guardEvents.set(stream, { id: committed.id, stream });
-        } catch {
-          skipped.push(stream);
-        }
-      })
-    );
-
-    if (!guarded.length) {
-      const result: CloseResult = { truncated: new Map(), skipped };
-      this.emit("closed", result);
-      return result;
-    }
-
-    // 5. Load final state for restart streams (guarded — no races).
-    //    Pick the owning state per stream from the latest domain event name.
-    //    If no state owns the event (deleted state, schema versioning, etc.),
-    //    log and skip seeding — the stream falls through to a tombstone.
-    const seedStates = new Map<string, Schema>();
-    await Promise.all(
-      guarded
-        .filter((s) => targetMap.get(s)?.restart)
-        .map(async (stream) => {
-          const lastEventName = streamInfo.get(stream)?.lastEventName;
-          const ownerState = lastEventName
-            ? this._event_to_state.get(lastEventName)
-            : undefined;
-          if (!ownerState) {
-            this._logger.error(
-              `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName ?? "<none>"}". ` +
-                `Stream will be tombstoned instead.`
-            );
-            return;
-          }
-          const snap = await this._es.load(ownerState, stream);
-          seedStates.set(stream, snap.state as Schema);
-        })
-    );
-
-    // 6. Archive — per-stream callback while guarded
-    for (const stream of guarded) {
-      const archiveFn = targetMap.get(stream)?.archive;
-      if (archiveFn) await archiveFn();
-    }
-
-    // 7. Truncate + seed — atomic per store transaction.
-    //    Seed meta traces back to the guard tombstone via causation.event.
-    const truncTargets = guarded.map((stream) => {
-      const snapshot = seedStates.get(stream);
-      const guard = guardEvents.get(stream)!;
-      return {
-        stream,
-        snapshot,
-        meta: {
-          correlation,
-          causation: {
-            event: {
-              id: guard.id,
-              name: TOMBSTONE_EVENT,
-              stream: guard.stream,
-            },
-          },
-        },
-      };
+    const result = await runCloseCycle(targets, {
+      reactiveEventsSize: this._reactive_events.size,
+      eventToState: this._event_to_state,
+      load: this._es.load,
+      tombstone: this._es.tombstone,
+      logger: this._logger,
     });
-    const truncated = await store().truncate(truncTargets);
 
-    // 8. Cache invalidate / warm — use real event IDs from committed events
-    await Promise.all(
-      guarded.map(async (stream) => {
-        const entry = truncated.get(stream);
-        const state = seedStates.get(stream);
-        if (state && entry) {
-          await cache().set(stream, {
-            state,
-            version: entry.committed.version,
-            event_id: entry.committed.id,
-            patches: 0,
-            snaps: 1,
-          });
-        } else {
-          await cache().invalidate(stream);
-        }
-      })
-    );
-
-    // 9. Emit lifecycle event
-    const result: CloseResult = { truncated, skipped };
     this.emit("closed", result);
     return result;
   }

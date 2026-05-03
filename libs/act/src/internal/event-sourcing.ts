@@ -38,6 +38,7 @@ export interface EsOps {
   snap: typeof snap;
   load: typeof load;
   action: typeof action;
+  tombstone: typeof tombstone;
 }
 
 /**
@@ -74,6 +75,37 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
     );
   } catch (error) {
     log().error(error);
+  }
+}
+
+/**
+ * Commits a tombstone event with optimistic concurrency, returning the
+ * committed record on success or `undefined` if the stream moved past
+ * `expectedVersion` (concurrent write detected). Other store errors
+ * propagate.
+ *
+ * Used by `close()` to guard a stream while archive/truncate runs:
+ * subsequent `action()` calls see the tombstone at head and reject with
+ * {@link StreamClosedError} until the close completes.
+ *
+ * @internal
+ */
+export async function tombstone(
+  stream: string,
+  expectedVersion: number,
+  correlation: string
+): Promise<Committed<Schemas, keyof Schemas> | undefined> {
+  try {
+    const [committed] = await store().commit(
+      stream,
+      [{ name: TOMBSTONE_EVENT, data: {} }],
+      { correlation, causation: {} },
+      expectedVersion
+    );
+    return committed;
+  } catch (error) {
+    if (error instanceof ConcurrencyError) return undefined;
+    throw error;
   }
 }
 

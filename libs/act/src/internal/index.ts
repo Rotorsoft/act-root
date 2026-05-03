@@ -15,6 +15,7 @@
  *
  * @internal
  */
+export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
 export {
   runDrainCycle,
   type DrainCycle,

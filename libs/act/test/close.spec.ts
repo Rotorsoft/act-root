@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   act,
   cache,
+  ConcurrencyError,
   dispose,
   log,
   SNAP_EVENT,
@@ -385,7 +386,7 @@ describe("close", () => {
     vi.spyOn(store(), "commit").mockImplementation(
       async (stream, msgs, meta, expectedVersion) => {
         if (msgs[0]?.name === TOMBSTONE_EVENT && stream === "race") {
-          throw new Error("ConcurrencyError");
+          throw new ConcurrencyError(stream, 0, msgs, expectedVersion ?? -1);
         }
         return originalCommit(stream, msgs, meta, expectedVersion);
       }
