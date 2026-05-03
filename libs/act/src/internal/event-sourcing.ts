@@ -314,7 +314,10 @@ export async function action<
     })
     .catch((err) => log().error(err));
 
-  // persist snap to store for cold start durability
+  // Persist snap to store for cold-start durability. Fire-and-forget:
+  // snap() has its own try/catch that logs failures, so the rejection
+  // can never escape — `void` is just to silence the floating-promise
+  // lint (action() doesn't await store durability for the snapshot).
   if (snapped) void snap(last);
 
   return snapshots;
