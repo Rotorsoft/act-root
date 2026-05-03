@@ -167,6 +167,12 @@ export class Act<
   private readonly _event_to_state = new Map<string, State<any, any, any>>();
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
+  /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
+   * payload (it captures the triggering event for reactingTo auto-inject). */
+  private readonly _bound_do = this.do.bind(this);
+  private readonly _bound_load = this.load.bind(this);
+  private readonly _bound_query = this.query.bind(this);
+  private readonly _bound_query_array = this.query_array.bind(this);
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -536,14 +542,16 @@ export class Act<
       this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     // Scoped proxy: auto-injects reactingTo when do() is called without it,
-    // maintaining correlation chains by default (see #587).
-    // Bind stable methods once; only the do() closure changes per event.
-    const doAction = this.do.bind(this);
+    // maintaining correlation chains by default (see #587). The non-do
+    // methods are pre-bound on the Act instance and reused across all
+    // handle() calls; only the do() closure varies per payload because it
+    // captures the triggering event.
+    const doAction = this._bound_do;
     const scopedApp: IAct<TEvents, TActions, TActor> = {
       do: doAction,
-      load: this.load.bind(this),
-      query: this.query.bind(this),
-      query_array: this.query_array.bind(this),
+      load: this._bound_load,
+      query: this._bound_query,
+      query_array: this._bound_query_array,
     };
 
     for (const payload of payloads) {
