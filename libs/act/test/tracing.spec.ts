@@ -153,6 +153,29 @@ describe("tracing", () => {
         )
       );
     });
+
+    it("withTombstoneTrace logs stream and version on success", async () => {
+      const { tombstone } = buildEs(withLevel("trace"));
+      const committed = await tombstone("ts-trace", -1, "corr-trace");
+      expect(committed).toBeDefined();
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`ts-trace@${committed!.version}`)
+      );
+    });
+
+    it("withTombstoneTrace skips log on ConcurrencyError (committed undef)", async () => {
+      const { tombstone } = buildEs(withLevel("trace"));
+      await tombstone("ts-trace-race", -1, "corr-trace-1");
+      traceSpy.mockClear();
+      // Second tombstone at same version → ConcurrencyError → returns undefined
+      const second = await tombstone("ts-trace-race", -1, "corr-trace-2");
+      expect(second).toBeUndefined();
+      const tombstoneCalls = traceSpy.mock.calls.filter(
+        (c: [unknown]) =>
+          typeof c[0] === "string" && c[0].includes("ts-trace-race@")
+      );
+      expect(tombstoneCalls).toHaveLength(0);
+    });
   });
 
   describe("drain trace decorators", () => {
