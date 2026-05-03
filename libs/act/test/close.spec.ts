@@ -356,6 +356,27 @@ describe("close", () => {
     expect(skipped).toContain("mix-pending");
   });
 
+  it("should detect pending reactions without calling claim() (read-only probe)", async () => {
+    // close()'s safety check used to call claim()+ack() on every subscribed
+    // stream as a side-effecting probe — claim() bumps retry, ack() resets
+    // it to -1, silently destroying retry state of unrelated reactions.
+    // The fix is to use query_streams() (read-only).
+    await app.do("increment", { stream: "probe-safe", actor }, { by: 1 });
+    await drainAll();
+
+    const claimSpy = vi.spyOn(store(), "claim");
+    const ackSpy = vi.spyOn(store(), "ack");
+
+    const { truncated } = await app.close([{ stream: "probe-safe" }]);
+    expect(truncated.has("probe-safe")).toBe(true);
+
+    expect(claimSpy).not.toHaveBeenCalled();
+    expect(ackSpy).not.toHaveBeenCalled();
+
+    claimSpy.mockRestore();
+    ackSpy.mockRestore();
+  });
+
   it("should skip streams with concurrent writes (ConcurrencyError on guard)", async () => {
     await app.do("increment", { stream: "race", actor }, { by: 1 });
     await drainAll();

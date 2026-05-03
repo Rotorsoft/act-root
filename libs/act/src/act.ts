@@ -1157,18 +1157,22 @@ export class Act<
     if (this._reactive_events.size === 0) {
       safe = [...streamInfo.keys()];
     } else {
+      // Read-only probe: query_streams returns subscription positions
+      // without leasing or mutating retry state. claim()+ack() used to
+      // double as a probe, but lease() bumps retry and ack() resets it
+      // to -1 — silently destroying retry state of unrelated reactions.
       const pendingSet = new Set<string>();
-      const leases = await store().claim(1000, 1000, randomUUID(), 1);
-      if (leases.length) await store().ack(leases);
-
-      for (const lease of leases) {
-        const sourceRe = lease.source ? RegExp(lease.source) : undefined;
+      await store().query_streams((position) => {
+        const sourceRe = position.source ? RegExp(position.source) : undefined;
         for (const [stream, info] of streamInfo) {
-          if ((!sourceRe || sourceRe.test(stream)) && lease.at < info.maxId) {
+          if (
+            (!sourceRe || sourceRe.test(stream)) &&
+            position.at < info.maxId
+          ) {
             pendingSet.add(stream);
           }
         }
-      }
+      });
 
       safe = [];
       for (const [stream] of streamInfo) {
