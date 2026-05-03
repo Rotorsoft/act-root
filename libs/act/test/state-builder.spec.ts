@@ -127,4 +127,53 @@ describe("state-builder", () => {
       expect(machine.name).toBe("Counter");
     });
   });
+
+  // Compile-time evidence that the fluent chain preserves type narrowing
+  // for action payloads, state shape, and emitted event tuples — i.e. the
+  // DevEx experience of using act() doesn't degrade to `any`.
+  describe("type narrowing", () => {
+    it("preserves action payload + state types in .emit handlers", () => {
+      const machine = state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({
+          Incremented: z.object({ by: z.number() }),
+        })
+        .on({ inc: z.object({ amount: z.number() }) })
+        .emit((action, snapshot) => {
+          // Action narrowed to { amount: number }
+          const amount: number = action.amount;
+          // State narrowed to { count: number }
+          const count: number = snapshot.state.count;
+          return ["Incremented", { by: amount + count }];
+        })
+        .build();
+
+      expect(machine.on.inc).toBeDefined();
+    });
+
+    it("rejects unknown action fields at compile time", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({ amount: z.number() }) })
+        .emit((action) => [
+          "Incremented",
+          // @ts-expect-error 'wrongField' not on action's shape
+          { by: action.wrongField },
+        ])
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("rejects unknown event names in .emit at compile time", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({}) })
+        // @ts-expect-error 'NotAnEvent' isn't in .emits()
+        .emit("NotAnEvent")
+        .build();
+      expect(true).toBe(true);
+    });
+  });
 });

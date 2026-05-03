@@ -7,7 +7,6 @@
 import { ZodType } from "zod";
 import {
   ActionHandler,
-  ActionHandlers,
   GivenHandlers,
   Invariant,
   PassthroughPatchHandler,
@@ -462,7 +461,7 @@ export function state<TName extends string, TState extends Schema>(
   const name = keys[0] as TName;
   const stateSchema = (entry as Record<string, ZodType<TState>>)[name];
   return {
-    init(init: () => Readonly<TState>) {
+    init(init) {
       return {
         emits<TEvents extends Schema>(events: ZodTypes<TEvents>) {
           // Default passthrough patches: event data merges into state
@@ -475,8 +474,10 @@ export function state<TName extends string, TState extends Schema>(
             })
           ) as unknown as PatchHandlers<TState, TEvents>;
 
-          // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
-          const builder = action_builder<TState, TEvents, {}, TName>({
+          // Build one mutable state object the action_builder threads
+          // through every fluent call. patch() (if invoked) just mutates
+          // the patch map in place — no re-builder wasted.
+          const internal: State<TState, TEvents, Schemas, TName> = {
             events,
             actions: {},
             state: stateSchema,
@@ -484,20 +485,15 @@ export function state<TName extends string, TState extends Schema>(
             init,
             patch: defaultPatch,
             on: {},
-          });
+          };
+
+          // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
+          const builder = action_builder<TState, TEvents, {}, TName>(internal);
 
           return Object.assign(builder, {
             patch(customPatch: Partial<PatchHandlers<TState, TEvents>>) {
-              // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature
-              return action_builder<TState, TEvents, {}, TName>({
-                events,
-                actions: {},
-                state: stateSchema,
-                name,
-                init,
-                patch: { ...defaultPatch, ...customPatch },
-                on: {},
-              });
+              Object.assign(internal.patch, customPatch);
+              return builder;
             },
           });
         },
@@ -506,6 +502,15 @@ export function state<TName extends string, TState extends Schema>(
   };
 }
 
+/**
+ * Internal action-builder. The runtime object is a single mutable bag —
+ * each fluent call (`on`, `snap`) mutates it and returns the same builder
+ * cast to the widened generic type. Type-level fanout is preserved; the
+ * O(N) `{...state}` spreads per call are not.
+ *
+ * Generics are erased to `Schemas` at runtime — the cast on return narrows
+ * back to the call-site's widened types.
+ */
 function action_builder<
   TState extends Schema,
   TEvents extends Schemas,
@@ -514,7 +519,10 @@ function action_builder<
 >(
   state: State<TState, TEvents, TActions, TName>
 ): ActionBuilder<TState, TEvents, TActions, TName> {
-  return {
+  // The mutable bag — typed loosely since callers narrow on return.
+  const internal = state as unknown as State<TState, TEvents, Schemas, TName>;
+
+  const builder: ActionBuilder<TState, TEvents, TActions, TName> = {
     on<TKey extends string, TNewActions extends Schema>(
       entry: ActionEntry<TKey, TNewActions>
     ) {
@@ -523,23 +531,19 @@ function action_builder<
       const action = keys[0] as TKey;
       const schema = entry[action];
 
-      if (action in state.actions)
+      if (action in internal.actions)
         throw new Error(`Duplicate action "${action}"`);
 
       type MergedActions = TActions & { [P in TKey]: TNewActions };
-      const actions = {
-        ...state.actions,
-        [action]: schema,
-      } as ZodTypes<MergedActions>;
-      const on = { ...state.on } as ActionHandlers<
-        TState,
-        TEvents,
-        MergedActions
-      >;
-      const _given = { ...state.given } as GivenHandlers<TState, MergedActions>;
+      (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
 
       function given(rules: Invariant<TState>[]) {
-        _given[action] = rules;
+        (
+          (internal.given ??= {} as GivenHandlers<TState, Schemas>) as Record<
+            string,
+            Invariant<TState>[]
+          >
+        )[action] = rules;
         return { emit };
       }
 
@@ -550,30 +554,32 @@ function action_builder<
       ) {
         if (typeof handler === "string") {
           const eventName = handler;
-          on[action] = ((payload: any) => [eventName, payload]) as any;
+          (internal.on as Record<string, unknown>)[action] = (payload: any) => [
+            eventName,
+            payload,
+          ];
         } else {
-          on[action] = handler;
+          (internal.on as Record<string, unknown>)[action] = handler;
         }
-        return action_builder<TState, TEvents, MergedActions, TName>({
-          ...state,
-          actions,
-          on,
-          given: _given,
-        });
+        return builder as unknown as ActionBuilder<
+          TState,
+          TEvents,
+          MergedActions,
+          TName
+        >;
       }
 
       return { given, emit };
     },
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
-      return action_builder<TState, TEvents, TActions, TName>({
-        ...state,
-        snap,
-      });
+      internal.snap = snap;
+      return builder;
     },
 
     build(): State<TState, TEvents, TActions, TName> {
-      return state;
+      return internal as unknown as State<TState, TEvents, TActions, TName>;
     },
   };
+  return builder;
 }
