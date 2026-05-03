@@ -83,20 +83,17 @@ describe("act", () => {
 
     // first fully failed
     drained = await app.drain({ leaseMillis: 1 });
-    console.log("first try", drained);
     expect(drained.acked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(2);
 
     // second fully failed (first retry)
     drained = await app.drain({ leaseMillis: 1 });
-    console.log("second try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(0);
     expect(onDecremented).toHaveBeenCalledTimes(3);
 
     // third fully failed (second retry) - should block
     drained = await app.drain({ leaseMillis: 1 });
-    console.log("third try", drained);
     expect(drained.acked.length).toBe(0);
     expect(drained.blocked.length).toBe(1);
     expect(onDecremented).toHaveBeenCalledTimes(4);

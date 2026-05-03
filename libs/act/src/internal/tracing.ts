@@ -8,8 +8,15 @@
  * at well-defined moments — entry points for {@link "event-sourcing"} (`load`,
  * `snap`, `action`) and exit points for the {@link "drain"} pipeline (`claim`,
  * `fetch`, `ack`, `block`, `subscribe`). `action` carries both an entry log
- * (🔵) and a post-commit log (🔴) to preserve the diagnostic value of the
- * historical mid-function trace points.
+ * and a post-commit log to preserve the diagnostic value of the historical
+ * mid-function trace points.
+ *
+ * Output styles:
+ * - **Pretty mode** (`config().env !== "production"`) — event-sourcing logs
+ *   show only the colored target body (color carries the operation/phase),
+ *   drain logs keep a colored caption.
+ * - **Plain mode** (production / log aggregators) — every log gets a textual
+ *   prefix; event-sourcing uses `caption: body`, drain uses `caption body`.
  *
  * The two factories — {@link buildEs} and {@link buildDrain} — let the
  * orchestrator choose bare or traced variants once at `.build()` time based
@@ -17,6 +24,7 @@
  * imports tracing primitives.
  */
 
+import { config } from "../config.js";
 import type { Logger, Schemas } from "../types/index.js";
 import * as drain from "./drain.js";
 import { type DrainOps } from "./drain.js";
@@ -24,6 +32,35 @@ import * as es from "./event-sourcing.js";
 import { type EsOps } from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
+
+const PRETTY = config().env !== "production";
+
+// 256-color codes for distinctive, theme-friendly hues
+const C_BLUE = "\x1b[38;5;39m"; // vivid sky blue (action)
+const C_ORANGE = "\x1b[38;5;208m"; // true orange (committed)
+const C_GREEN = "\x1b[38;5;42m"; // emerald (load)
+const C_MAGENTA = "\x1b[38;5;165m"; // bright magenta (snap)
+const C_DRAIN = "\x1b[38;5;244m"; // muted gray for all drain ops
+const C_RESET = "\x1b[0m";
+
+/**
+ * Format an event-sourcing trace line. Pretty mode renders just the colored
+ * body (the color is the cue for which op/phase fired); plain mode prepends
+ * `caption: ` so log aggregators stay readable without ANSI.
+ */
+const es_caption = (caption: string, color: string, body: string): string =>
+  PRETTY ? `${color}${body}${C_RESET}` : `${caption}: ${body}`;
+
+/**
+ * Format a drain-pipeline caption. Drain logs keep a `>>` marker for easy
+ * spotting in mixed log streams, plus a `caption` (past tense — every drain
+ * trace fires on exit). All drain ops share one color (gray) so the pipeline
+ * reads as a single channel; the caption disambiguates the phase.
+ */
+const drain_caption = (caption: string): string => {
+  const tag = `>> ${caption}`;
+  return PRETTY ? `${C_DRAIN}${tag}${C_RESET}` : tag;
+};
 
 /**
  * Wraps an async function with optional `exit` and `entry` callbacks. Each
@@ -58,11 +95,17 @@ export function buildEs(logger: Logger): EsOps {
   return {
     snap: traced(es.snap, undefined, (snapshot) => {
       logger.trace(
-        `🟠 snap ${snapshot.event!.stream}@${snapshot.event!.version}`
+        es_caption(
+          "snap",
+          C_MAGENTA,
+          `${snapshot.event!.stream}@${snapshot.event!.version}`
+        )
       );
     }),
     load: traced(es.load, undefined, (_me, stream, _cb, asOf) => {
-      logger.trace(`🟢 load ${stream}${asOf ? " (as-of)" : ""}`);
+      logger.trace(
+        es_caption("load", C_GREEN, `${stream}${asOf ? " (as-of)" : ""}`)
+      );
     }),
     action: traced(
       es.action,
@@ -71,14 +114,19 @@ export function buildEs(logger: Logger): EsOps {
         if (committed.length) {
           logger.trace(
             committed.map((s) => s.event!.data),
-            `🔴 commit ${target.stream}.${committed
-              .map((s) => s.event!.name)
-              .join(", ")}`
+            es_caption(
+              "committed",
+              C_ORANGE,
+              `${target.stream}.${committed.map((s) => s.event!.name).join(", ")}`
+            )
           );
         }
       },
       (_me, action, target, payload) => {
-        logger.trace(payload as object, `🔵 ${target.stream}.${action}`);
+        logger.trace(
+          payload as object,
+          es_caption("action", C_BLUE, `${target.stream}.${action}`)
+        );
       }
     ),
   };
@@ -108,7 +156,7 @@ export function buildDrain<TEvents extends Schemas>(
         const data = Object.fromEntries(
           leased.map(({ stream, at, retry }) => [stream, { at, retry }])
         );
-        logger.trace(data, ">> lease");
+        logger.trace(data, drain_caption("claimed"));
       }
     }),
     fetch: traced(drain.fetch<TEvents>, (fetched) => {
@@ -121,14 +169,14 @@ export function buildDrain<TEvents extends Schemas>(
           return [key, value];
         })
       );
-      logger.trace(data, ">> fetch");
+      logger.trace(data, drain_caption("fetched"));
     }),
     ack: traced(drain.ack, (acked) => {
       if (acked.length) {
         const data = Object.fromEntries(
           acked.map(({ stream, at, retry }) => [stream, { at, retry }])
         );
-        logger.trace(data, ">> ack");
+        logger.trace(data, drain_caption("acked"));
       }
     }),
     block: traced(drain.block, (blocked) => {
@@ -139,13 +187,13 @@ export function buildDrain<TEvents extends Schemas>(
             { at, retry, error },
           ])
         );
-        logger.trace(data, ">> block");
+        logger.trace(data, drain_caption("blocked"));
       }
     }),
     subscribe: traced(drain.subscribe, (result, streams) => {
       if (result.subscribed) {
         const data = streams.map(({ stream }) => stream).join(" ");
-        logger.trace(`>> correlate ${data}`);
+        logger.trace(`${drain_caption("correlated")} ${data}`);
       }
     }),
   };

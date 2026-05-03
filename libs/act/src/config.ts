@@ -70,7 +70,7 @@ const { NODE_ENV, LOG_LEVEL, LOG_SINGLE_LINE, SLEEP_MS } = process.env;
 const env = (NODE_ENV || "development") as Environment;
 const logLevel = (LOG_LEVEL ||
   (NODE_ENV === "test"
-    ? "error"
+    ? "fatal"
     : NODE_ENV === "production"
       ? "info"
       : "trace")) as LogLevel;
@@ -78,6 +78,12 @@ const logSingleLine = (LOG_SINGLE_LINE || "true") === "true";
 const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"), 10);
 
 const pkg = getPackage();
+
+// Lazily validated on first call. Cannot run extend() at module load
+// because of a utils.ts <-> config.ts cycle (utils imports config for
+// sleep()'s default). Inputs are frozen after import, so the cached
+// result is stable for the life of the process.
+let _validated: Config | undefined;
 
 /**
  * Gets the current Act Framework configuration.
@@ -139,5 +145,11 @@ const pkg = getPackage();
  * @see {@link Package} for package.json metadata
  */
 export const config = (): Config => {
-  return extend({ ...pkg, env, logLevel, logSingleLine, sleepMs }, BaseSchema);
+  if (!_validated) {
+    _validated = extend(
+      { ...pkg, env, logLevel, logSingleLine, sleepMs },
+      BaseSchema
+    );
+  }
+  return _validated;
 };

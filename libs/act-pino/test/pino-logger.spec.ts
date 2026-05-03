@@ -18,7 +18,7 @@ describe("PinoLogger", () => {
 
   it("creates with default options", () => {
     const logger = new PinoLogger({ pretty: false });
-    expect(logger.level).toBe("error"); // test env default
+    expect(logger.level).toBe("fatal"); // test env default
   });
 
   it("creates with custom level", () => {

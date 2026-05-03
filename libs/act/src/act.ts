@@ -167,6 +167,12 @@ export class Act<
   private readonly _event_to_state = new Map<string, State<any, any, any>>();
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
+  /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
+   * payload (it captures the triggering event for reactingTo auto-inject). */
+  private readonly _bound_do = this.do.bind(this);
+  private readonly _bound_load = this.load.bind(this);
+  private readonly _bound_query = this.query.bind(this);
+  private readonly _bound_query_array = this.query_array.bind(this);
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -176,8 +182,10 @@ export class Act<
     this._batch_handlers = batchHandlers;
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
-    // Classify resolvers and reactive events at build time
-    const statics: Array<{ stream: string; source?: string }> = [];
+    // Classify resolvers and reactive events at build time. Static targets
+    // are deduplicated by (target, source) — two reactions to different
+    // events that route to the same projection produce one subscription.
+    const statics = new Map<string, { stream: string; source?: string }>();
     for (const [name, register] of Object.entries(this.registry.events)) {
       if (register.reactions.size > 0) {
         this._reactive_events.add(name);
@@ -186,14 +194,13 @@ export class Act<
         if (typeof reaction.resolver === "function") {
           this._has_dynamic_resolvers = true;
         } else {
-          statics.push({
-            stream: reaction.resolver.target,
-            source: reaction.resolver.source,
-          });
+          const { target, source } = reaction.resolver;
+          const key = `${target}|${source ?? ""}`;
+          if (!statics.has(key)) statics.set(key, { stream: target, source });
         }
       }
     }
-    this._static_targets = statics;
+    this._static_targets = [...statics.values()];
 
     // Build the event-name → owning state index. Duplicate event names are
     // already rejected at registration time (merge.ts), so each entry is
@@ -536,14 +543,16 @@ export class Act<
       this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     // Scoped proxy: auto-injects reactingTo when do() is called without it,
-    // maintaining correlation chains by default (see #587).
-    // Bind stable methods once; only the do() closure changes per event.
-    const doAction = this.do.bind(this);
+    // maintaining correlation chains by default (see #587). The non-do
+    // methods are pre-bound on the Act instance and reused across all
+    // handle() calls; only the do() closure varies per payload because it
+    // captures the triggering event.
+    const doAction = this._bound_do;
     const scopedApp: IAct<TEvents, TActions, TActor> = {
       do: doAction,
-      load: this.load.bind(this),
-      query: this.query.bind(this),
-      query_array: this.query_array.bind(this),
+      load: this._bound_load,
+      query: this._bound_query,
+      query_array: this._bound_query_array,
     };
 
     for (const payload of payloads) {
@@ -708,7 +717,13 @@ export class Act<
         // Fetch events for each leased stream
         const fetched = await this._cd.fetch(leased, eventLimit);
 
-        const payloadsMap = new Map<string, ReactionPayload<TEvents>[]>();
+        // Build a single index keyed by stream — collapses two passes
+        // (payloadsMap build + per-lease fetched.find) into one Map lookup.
+        type FetchEntry = (typeof fetched)[number];
+        const fetchMap = new Map<
+          string,
+          { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
+        >();
 
         // compute fetch window max event id
         const fetch_window_at = fetched.reduce(
@@ -716,7 +731,8 @@ export class Act<
           0
         );
 
-        fetched.forEach(({ stream, events }) => {
+        for (const f of fetched) {
+          const { stream, events } = f;
           const payloads = events.flatMap((event) => {
             const register = this.registry.events[event.name];
             if (!register) return [];
@@ -730,15 +746,15 @@ export class Act<
               })
               .map((reaction) => ({ ...reaction, event }));
           });
-          payloadsMap.set(stream, payloads);
-        });
+          fetchMap.set(stream, { fetch: f, payloads });
+        }
 
         const handled = await Promise.all(
           leased.map((lease) => {
+            const entry = fetchMap.get(lease.stream);
             // fast-forward watermark using fetched events or window max
-            const streamFetch = fetched.find((f) => f.stream === lease.stream);
-            const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
-            const payloads = payloadsMap.get(lease.stream)!;
+            const at = entry?.fetch.events.at(-1)?.id || fetch_window_at;
+            const payloads = entry?.payloads ?? [];
             const batchHandler = this._batch_handlers.get(lease.stream);
             if (batchHandler && payloads.length > 0) {
               return this.handleBatch({ ...lease, at }, payloads, batchHandler);

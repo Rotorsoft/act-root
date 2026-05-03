@@ -1,4 +1,4 @@
-import { projection } from "@rotorsoft/act";
+import { log, projection } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
 import { db, tickets } from "./drizzle/index.js";
 import {
@@ -25,7 +25,7 @@ export const TicketProjection = projection("tickets")
           ...other,
         })
         .onConflictDoNothing()
-        .then(() => console.log(`${stream} => opened`));
+        .then(() => log().info(`${stream} => opened`));
     })
   .on({ TicketClosed })
     .do(async function closed({ stream, data }) {
@@ -33,7 +33,7 @@ export const TicketProjection = projection("tickets")
         .update(tickets)
         .set(data)
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => closed`));
+        .then(() => log().info(`${stream} => closed`));
     })
   .on({ TicketResolved })
     .do(async function resolved({ stream, data }) {
@@ -41,7 +41,7 @@ export const TicketProjection = projection("tickets")
         .update(tickets)
         .set(data)
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => resolved`));
+        .then(() => log().info(`${stream} => resolved`));
     })
   .on({ MessageAdded })
     .do(async function messageAdded({ stream }) {
@@ -49,7 +49,7 @@ export const TicketProjection = projection("tickets")
         .update(tickets)
         .set({ messages: sql`${tickets.messages} + 1` })
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => messageAdded`));
+        .then(() => log().info(`${stream} => messageAdded`));
     })
   .on({ TicketAssigned })
     .do(async function assigned({ stream, data }) {
@@ -62,7 +62,7 @@ export const TicketProjection = projection("tickets")
           ...other,
         })
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => assigned`));
+        .then(() => log().info(`${stream} => assigned`));
     })
   .on({ TicketEscalated })
     .do(async function escalated({ stream, data }) {
@@ -70,7 +70,7 @@ export const TicketProjection = projection("tickets")
         .update(tickets)
         .set({ escalationId: data.requestId })
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => escalated`));
+        .then(() => log().info(`${stream} => escalated`));
     })
   .on({ TicketReassigned })
     .do(async function reassigned({ stream, data }) {
@@ -83,6 +83,6 @@ export const TicketProjection = projection("tickets")
           ...other,
         })
         .where(eq(tickets.id, stream))
-        .then(() => console.log(`${stream} => reassigned`));
+        .then(() => log().info(`${stream} => reassigned`));
     })
   .build();

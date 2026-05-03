@@ -14,7 +14,7 @@ vi.mock("pino", () => ({
 vi.mock("../src/config.js", () => ({
   config: vi.fn().mockReturnValue({
     env: "development",
-    logLevel: "info",
+    logLevel: "fatal",
     logSingleLine: true,
   }),
 }));

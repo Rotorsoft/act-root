@@ -48,31 +48,6 @@ describe("wolfdesk broken import", () => {
       (s) => s.name === "TicketMessagingSlice"
     );
 
-    console.log(
-      "ops:",
-      ops?.name,
-      "states:",
-      ops?.states.length,
-      "error:",
-      ops?.error
-    );
-    console.log(
-      "creation:",
-      creation?.name,
-      "states:",
-      creation?.states.length,
-      "error:",
-      creation?.error
-    );
-    console.log(
-      "messaging:",
-      messaging?.name,
-      "states:",
-      messaging?.states.length,
-      "error:",
-      messaging?.error
-    );
-
     // All 3 slices visible
     expect(ops).toBeDefined();
     expect(creation).toBeDefined();
@@ -105,31 +80,6 @@ describe("wolfdesk broken import", () => {
     const creation = model.slices.find((s) => s.name === "TicketCreationSlice");
     const messaging = model.slices.find(
       (s) => s.name === "TicketMessagingSlice"
-    );
-
-    console.log(
-      "ops:",
-      ops?.name,
-      "states:",
-      ops?.states.length,
-      "error:",
-      ops?.error
-    );
-    console.log(
-      "creation:",
-      creation?.name,
-      "states:",
-      creation?.states.length,
-      "error:",
-      creation?.error
-    );
-    console.log(
-      "messaging:",
-      messaging?.name,
-      "states:",
-      messaging?.states.length,
-      "error:",
-      messaging?.error
     );
 
     // All 3 slices visible
