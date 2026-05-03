@@ -257,7 +257,7 @@ export const extend = <
   target?: Readonly<T>
 ): Readonly<S & T> => {
   const value = validate("config", source, schema);
-  return Object.assign(target || {}, value) as Readonly<S & T>;
+  return { ...target, ...value } as Readonly<S & T>;
 };
 
 /**

@@ -258,6 +258,19 @@ describe("utils", () => {
       const extended = extend(source, schema);
       expect(extended).toEqual({ key: "value" });
     });
+
+    it("should not mutate the target object across calls", () => {
+      const defaults = { otherKey: 123 };
+      const snapshot = { ...defaults };
+
+      extend({ key: "first" }, schema, defaults);
+      extend({ key: "second" }, schema, defaults);
+
+      // defaults must remain pristine — extend returns a new object,
+      // not a mutated target. Otherwise shared defaults leak across calls.
+      expect(defaults).toEqual(snapshot);
+      expect(defaults).not.toHaveProperty("key");
+    });
   });
 
   it("should resolve sleep with and without ms", async () => {
