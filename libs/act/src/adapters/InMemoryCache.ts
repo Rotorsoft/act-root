@@ -1,9 +1,10 @@
+import { LruMap } from "../internal/lru-map.js";
 import type { Cache, CacheEntry, Schema } from "../types/index.js";
 
 /**
  * In-memory LRU cache for stream snapshots.
  *
- * Uses a `Map` (insertion-ordered) for O(1) get/set with LRU eviction.
+ * Backed by {@link LruMap} for O(1) get/set with LRU eviction.
  * Configurable `maxSize` bounds memory usage.
  *
  * @example
@@ -16,35 +17,26 @@ import type { Cache, CacheEntry, Schema } from "../types/index.js";
  */
 /* eslint-disable @typescript-eslint/require-await -- async interface for Redis-compatibility */
 export class InMemoryCache implements Cache {
-  private readonly _entries = new Map<string, CacheEntry<Schema>>();
-  private readonly _maxSize: number;
+  // CacheEntry<any> lets `get<TState>` and `set<TState>` flow without casts:
+  // any is bidirectionally compatible with the per-call TState binding, while
+  // the public Cache interface still presents a typed surface to callers.
+  private readonly _entries: LruMap<string, CacheEntry<any>>;
 
   constructor(options?: { maxSize?: number }) {
-    this._maxSize = options?.maxSize ?? 1000;
+    this._entries = new LruMap(options?.maxSize ?? 1000);
   }
 
   async get<TState extends Schema>(
     stream: string
   ): Promise<CacheEntry<TState> | undefined> {
-    const entry = this._entries.get(stream);
-    if (!entry) return undefined;
-    // Move to end (most recently used)
-    this._entries.delete(stream);
-    this._entries.set(stream, entry);
-    return entry as CacheEntry<TState>;
+    return this._entries.get(stream);
   }
 
   async set<TState extends Schema>(
     stream: string,
     entry: CacheEntry<TState>
   ): Promise<void> {
-    this._entries.delete(stream);
-    if (this._entries.size >= this._maxSize) {
-      // Evict least recently used (first entry)
-      const first = this._entries.keys().next().value as string;
-      this._entries.delete(first);
-    }
-    this._entries.set(stream, entry as CacheEntry<Schema>);
+    this._entries.set(stream, entry);
   }
 
   async invalidate(stream: string): Promise<void> {

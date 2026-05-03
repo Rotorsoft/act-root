@@ -4,7 +4,7 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import { Act } from "./act.js";
+import { Act, type ActOptions } from "./act.js";
 import { _this_, mergeProjection, registerState } from "./internal/index.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
@@ -190,13 +190,13 @@ export type ActBuilder<
   /**
    * Builds and returns the Act orchestrator instance.
    *
-   * @param drainLimit - Deprecated parameter, no longer used
+   * @param options - Optional runtime overrides (see {@link ActOptions}).
    * @returns The Act orchestrator instance
    *
    * @see {@link Act} for available orchestrator methods
    */
   build: (
-    drainLimit?: number
+    options?: ActOptions
   ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
   /**
    * The registered event schemas and their reaction maps.
@@ -387,7 +387,7 @@ export function act<
           };
         },
       }),
-      build: () => {
+      build: (options?: ActOptions) => {
         for (const proj of pendingProjections) {
           mergeProjection(proj, registry.events as Record<string, any>);
           registerBatchHandler(proj, batchHandlers);
@@ -395,7 +395,8 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          batchHandlers
+          batchHandlers,
+          options
         );
       },
       events: registry.events,

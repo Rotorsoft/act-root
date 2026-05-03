@@ -5,6 +5,7 @@ import {
   buildEs,
   type DrainOps,
   type EsOps,
+  LruSet,
 } from "./internal/index.js";
 import {
   cache,
@@ -65,6 +66,23 @@ import type {
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
  */
+/**
+ * Default LRU cap for the subscribed-streams cache. Apps that mint many
+ * dynamic targets (one per aggregate) should override via
+ * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
+ */
+export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
+/**
+ * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
+ *
+ * @property maxSubscribedStreams - Cap for the LRU set tracking already-
+ *   subscribed reaction streams. Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
+ */
+export type ActOptions = {
+  readonly maxSubscribedStreams?: number;
+};
+
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -85,8 +103,13 @@ export class Act<
    * targets registered at init and dynamic targets discovered by
    * correlate(). correlate() consults this set to avoid re-subscribing
    * known streams.
+   *
+   * Bounded LRU so apps that mint millions of dynamic targets (one per
+   * aggregate) don't grow this unbounded. Eviction costs at most one
+   * redundant store.subscribe() call per evicted-but-still-active stream
+   * (subscribe is idempotent). Cap configurable via {@link ActOptions}.
    */
-  private _subscribed_streams = new Set<string>();
+  private readonly _subscribed_streams: LruSet<string>;
   private _has_dynamic_resolvers = false;
   private _correlation_initialized = false;
   /** Event names with at least one registered reaction (computed at build time) */
@@ -183,9 +206,13 @@ export class Act<
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map(),
-    batchHandlers: Map<string, BatchHandler<any>> = new Map()
+    batchHandlers: Map<string, BatchHandler<any>> = new Map(),
+    options: ActOptions = {}
   ) {
     this._batch_handlers = batchHandlers;
+    this._subscribed_streams = new LruSet(
+      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS
+    );
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
     // Classify resolvers and reactive events at build time. Static targets

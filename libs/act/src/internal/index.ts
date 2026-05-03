@@ -17,5 +17,6 @@
  */
 export { type DrainOps } from "./drain.js";
 export { type EsOps } from "./event-sourcing.js";
+export { LruMap, LruSet } from "./lru-map.js";
 export { _this_, mergeProjection, registerState } from "./merge.js";
 export { buildDrain, buildEs } from "./tracing.js";
