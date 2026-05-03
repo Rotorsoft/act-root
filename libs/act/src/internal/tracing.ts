@@ -35,13 +35,12 @@ type AsyncFn = (...args: any[]) => Promise<any>;
 
 const PRETTY = config().env !== "production";
 
-const C_BLUE = "\x1b[34m";
-const C_GREEN = "\x1b[32m";
-const C_YELLOW = "\x1b[33m";
-const C_CYAN = "\x1b[36m";
-const C_RED = "\x1b[31m";
-const C_GRAY = "\x1b[90m";
-const C_MAGENTA = "\x1b[35m";
+// 256-color codes for distinctive, theme-friendly hues
+const C_BLUE = "\x1b[38;5;39m"; // vivid sky blue (action)
+const C_ORANGE = "\x1b[38;5;208m"; // true orange (committed)
+const C_GREEN = "\x1b[38;5;42m"; // emerald (load)
+const C_MAGENTA = "\x1b[38;5;165m"; // bright magenta (snap)
+const C_DRAIN = "\x1b[38;5;244m"; // muted gray for all drain ops
 const C_RESET = "\x1b[0m";
 
 /**
@@ -55,11 +54,12 @@ const es_caption = (caption: string, color: string, body: string): string =>
 /**
  * Format a drain-pipeline caption. Drain logs keep a `>>` marker for easy
  * spotting in mixed log streams, plus a `caption` (past tense — every drain
- * trace fires on exit). Pretty mode colors the marker+caption block.
+ * trace fires on exit). All drain ops share one color (gray) so the pipeline
+ * reads as a single channel; the caption disambiguates the phase.
  */
-const drain_caption = (caption: string, color: string): string => {
+const drain_caption = (caption: string): string => {
   const tag = `>> ${caption}`;
-  return PRETTY ? `${color}${tag}${C_RESET}` : tag;
+  return PRETTY ? `${C_DRAIN}${tag}${C_RESET}` : tag;
 };
 
 /**
@@ -116,7 +116,7 @@ export function buildEs(logger: Logger): EsOps {
             committed.map((s) => s.event!.data),
             es_caption(
               "committed",
-              C_YELLOW,
+              C_ORANGE,
               `${target.stream}.${committed.map((s) => s.event!.name).join(", ")}`
             )
           );
@@ -156,7 +156,7 @@ export function buildDrain<TEvents extends Schemas>(
         const data = Object.fromEntries(
           leased.map(({ stream, at, retry }) => [stream, { at, retry }])
         );
-        logger.trace(data, drain_caption("claimed", C_CYAN));
+        logger.trace(data, drain_caption("claimed"));
       }
     }),
     fetch: traced(drain.fetch<TEvents>, (fetched) => {
@@ -169,14 +169,14 @@ export function buildDrain<TEvents extends Schemas>(
           return [key, value];
         })
       );
-      logger.trace(data, drain_caption("fetched", C_CYAN));
+      logger.trace(data, drain_caption("fetched"));
     }),
     ack: traced(drain.ack, (acked) => {
       if (acked.length) {
         const data = Object.fromEntries(
           acked.map(({ stream, at, retry }) => [stream, { at, retry }])
         );
-        logger.trace(data, drain_caption("acked", C_GREEN));
+        logger.trace(data, drain_caption("acked"));
       }
     }),
     block: traced(drain.block, (blocked) => {
@@ -187,13 +187,13 @@ export function buildDrain<TEvents extends Schemas>(
             { at, retry, error },
           ])
         );
-        logger.trace(data, drain_caption("blocked", C_RED));
+        logger.trace(data, drain_caption("blocked"));
       }
     }),
     subscribe: traced(drain.subscribe, (result, streams) => {
       if (result.subscribed) {
         const data = streams.map(({ stream }) => stream).join(" ");
-        logger.trace(`${drain_caption("correlated", C_GRAY)} ${data}`);
+        logger.trace(`${drain_caption("correlated")} ${data}`);
       }
     }),
   };
