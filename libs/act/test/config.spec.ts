@@ -33,7 +33,7 @@ describe("config", () => {
     const { config: loadConfig } = await import("../src/config.js");
     const config = loadConfig();
     expect(config.env).toBe("test");
-    expect(config.logLevel).toBe("error");
+    expect(config.logLevel).toBe("fatal");
     expect(config.sleepMs).toBe(0);
   });
 

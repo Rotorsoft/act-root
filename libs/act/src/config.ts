@@ -70,7 +70,7 @@ const { NODE_ENV, LOG_LEVEL, LOG_SINGLE_LINE, SLEEP_MS } = process.env;
 const env = (NODE_ENV || "development") as Environment;
 const logLevel = (LOG_LEVEL ||
   (NODE_ENV === "test"
-    ? "error"
+    ? "fatal"
     : NODE_ENV === "production"
       ? "info"
       : "trace")) as LogLevel;
