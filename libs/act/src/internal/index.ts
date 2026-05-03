@@ -15,6 +15,12 @@
  *
  * @internal
  */
+export {
+  runDrainCycle,
+  type DrainCycle,
+  type HandleResult,
+} from "./drain-cycle.js";
+export { computeLagLeadRatio } from "./drain-ratio.js";
 export { type DrainOps } from "./drain.js";
 export { type EsOps } from "./event-sourcing.js";
 export { LruMap, LruSet } from "./lru-map.js";

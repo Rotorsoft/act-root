@@ -3,9 +3,12 @@ import EventEmitter from "events";
 import {
   buildDrain,
   buildEs,
+  computeLagLeadRatio,
   type DrainOps,
   type EsOps,
+  type HandleResult,
   LruSet,
+  runDrainCycle,
 } from "./internal/index.js";
 import {
   cache,
@@ -73,18 +76,6 @@ import type {
  * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
-
-/**
- * Outcome of processing a single leased stream — produced by `handle` and
- * `handleBatch`, consumed by `drain()` to decide ack vs block.
- */
-type HandleResult = Readonly<{
-  lease: Lease;
-  handled: number;
-  at: number;
-  error?: string;
-  block?: boolean;
-}>;
 
 /**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
@@ -214,6 +205,9 @@ export class Act<
   private readonly _bound_load = this.load.bind(this);
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
+  /** Pre-bound dispatchers handed to runDrainCycle each cycle. */
+  private readonly _bound_handle = this.handle.bind(this);
+  private readonly _bound_handle_batch = this.handleBatch.bind(this);
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -738,115 +732,59 @@ export class Act<
       return { fetched: [], leased: [], acked: [], blocked: [] };
     }
 
-    if (!this._drain_locked) {
-      try {
-        this._drain_locked = true;
-        const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
-        const leading = streamLimit - lagging;
-
-        // Atomically discover and lease streams (competing consumer pattern)
-        const leased = await this._cd.claim(
-          lagging,
-          leading,
-          randomUUID(),
-          leaseMillis
-        );
-        if (!leased.length) {
-          this._needs_drain = false;
-          return { fetched: [], leased: [], acked: [], blocked: [] };
-        }
-
-        // Fetch events for each leased stream
-        const fetched = await this._cd.fetch(leased, eventLimit);
-
-        // Build a single index keyed by stream — collapses two passes
-        // (payloadsMap build + per-lease fetched.find) into one Map lookup.
-        type FetchEntry = (typeof fetched)[number];
-        const fetchMap = new Map<
-          string,
-          { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
-        >();
-
-        // compute fetch window max event id
-        const fetch_window_at = fetched.reduce(
-          (max, { at, events }) => Math.max(max, events.at(-1)?.id || at),
-          0
-        );
-
-        for (const f of fetched) {
-          const { stream, events } = f;
-          const payloads = events.flatMap((event) => {
-            const register = this.registry.events[event.name];
-            if (!register) return [];
-            return [...register.reactions.values()]
-              .filter((reaction) => {
-                const resolved =
-                  typeof reaction.resolver === "function"
-                    ? reaction.resolver(event)
-                    : reaction.resolver;
-                return resolved && resolved.target === stream;
-              })
-              .map((reaction) => ({ ...reaction, event }));
-          });
-          fetchMap.set(stream, { fetch: f, payloads });
-        }
-
-        const handled = await Promise.all(
-          leased.map((lease) => {
-            const entry = fetchMap.get(lease.stream);
-            // fast-forward watermark using fetched events or window max
-            const at = entry?.fetch.events.at(-1)?.id || fetch_window_at;
-            const payloads = entry?.payloads ?? [];
-            const batchHandler = this._batch_handlers.get(lease.stream);
-            if (batchHandler && payloads.length > 0) {
-              return this.handleBatch({ ...lease, at }, payloads, batchHandler);
-            }
-            return this.handle({ ...lease, at }, payloads);
-          })
-        );
-
-        // adaptive drain ratio based on handled events, favors frontier with highest pressure (clamped between 20% and 80%)
-        const [lagging_handled, leading_handled] = handled.reduce(
-          ([lagging_handled, leading_handled], { lease, handled }) => [
-            lagging_handled + (lease.lagging ? handled : 0),
-            leading_handled + (lease.lagging ? 0 : handled),
-          ],
-          [0, 0]
-        );
-        const lagging_avg = lagging > 0 ? lagging_handled / lagging : 0;
-        const leading_avg = leading > 0 ? leading_handled / leading : 0;
-        const total = lagging_avg + leading_avg;
-        this._drain_lag2lead_ratio =
-          total > 0 ? Math.max(0.2, Math.min(0.8, lagging_avg / total)) : 0.5;
-
-        const acked = await this._cd.ack(
-          handled
-            .filter(({ error }) => !error)
-            .map(({ at, lease }) => ({ ...lease, at }))
-        );
-        if (acked.length) this.emit("acked", acked);
-
-        const blocked = await this._cd.block(
-          handled
-            .filter(({ block }) => block)
-            .map(({ lease, error }) => ({ ...lease, error: error! }))
-        );
-        if (blocked.length) this.emit("blocked", blocked);
-
-        const result = { fetched, leased, acked, blocked };
-        // Clear flag when fully caught up (nothing processed, no pending errors)
-        const hasErrors = handled.some(({ error }) => error);
-        if (!acked.length && !blocked.length && !hasErrors)
-          this._needs_drain = false;
-        return result;
-      } catch (error) {
-        this._logger.error(error);
-      } finally {
-        this._drain_locked = false;
-      }
+    if (this._drain_locked) {
+      return { fetched: [], leased: [], acked: [], blocked: [] };
     }
 
-    return { fetched: [], leased: [], acked: [], blocked: [] };
+    try {
+      this._drain_locked = true;
+      const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
+      const leading = streamLimit - lagging;
+
+      const cycle = await runDrainCycle(
+        this._cd,
+        this.registry,
+        this._batch_handlers,
+        this._bound_handle,
+        this._bound_handle_batch,
+        lagging,
+        leading,
+        eventLimit,
+        leaseMillis
+      );
+
+      if (!cycle) {
+        // claim() returned no leases — fully caught up
+        this._needs_drain = false;
+        return { fetched: [], leased: [], acked: [], blocked: [] };
+      }
+
+      const { leased, fetched, handled, acked, blocked } = cycle;
+
+      // Adapt next cycle's frontier split to where the pressure is.
+      this._drain_lag2lead_ratio = computeLagLeadRatio(
+        handled,
+        lagging,
+        leading
+      );
+
+      if (acked.length) this.emit("acked", acked);
+      if (blocked.length) this.emit("blocked", blocked);
+
+      // Clear the drain flag when fully caught up (nothing processed, no
+      // pending errors). Errors keep the flag set so retries flow through
+      // the next drain.
+      const hasErrors = handled.some(({ error }) => error);
+      if (!acked.length && !blocked.length && !hasErrors)
+        this._needs_drain = false;
+
+      return { fetched, leased, acked, blocked };
+    } catch (error) {
+      this._logger.error(error);
+      return { fetched: [], leased: [], acked: [], blocked: [] };
+    } finally {
+      this._drain_locked = false;
+    }
   }
 
   /**
