@@ -80,7 +80,13 @@ export class Act<
   private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _settling = false;
   private _correlation_checkpoint = -1;
-  private _subscribed_statics = new Set<string>();
+  /**
+   * Streams already subscribed via store.subscribe() — both the static
+   * targets registered at init and dynamic targets discovered by
+   * correlate(). correlate() consults this set to avoid re-subscribing
+   * known streams.
+   */
+  private _subscribed_streams = new Set<string>();
   private _has_dynamic_resolvers = false;
   private _correlation_initialized = false;
   /** Event names with at least one registered reaction (computed at build time) */
@@ -869,7 +875,7 @@ export class Act<
     // Cold start: assume drain is needed (historical events may need processing)
     if (this._reactive_events.size > 0) this._needs_drain = true;
     for (const { stream } of this._static_targets) {
-      this._subscribed_statics.add(stream);
+      this._subscribed_streams.add(stream);
     }
   }
 
@@ -899,7 +905,7 @@ export class Act<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed_statics.has(resolved.target)) {
+            if (resolved && !this._subscribed_streams.has(resolved.target)) {
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
                 payloads: [],
@@ -928,7 +934,7 @@ export class Act<
       if (subscribed) {
         // Track newly subscribed dynamic targets
         for (const { stream } of streams) {
-          this._subscribed_statics.add(stream);
+          this._subscribed_streams.add(stream);
         }
       }
       return { subscribed, last_id };
