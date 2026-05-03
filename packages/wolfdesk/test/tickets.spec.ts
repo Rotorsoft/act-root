@@ -70,7 +70,7 @@ describe("tickets", () => {
     expect(ticket?.escalateAfter).toBeDefined();
     expect(ticket?.reassignAfter).toBeDefined();
     // just to check projection while preparing test
-    console.table(ticket);
+    // console.table(ticket); // uncomment to inspect projection state
   });
 
   describe("automations", () => {
@@ -135,7 +135,7 @@ describe("tickets", () => {
       expect(drained.acked.length).toBeGreaterThan(0);
 
       let ticket = await findTicket(t.stream);
-      console.table(ticket);
+      // console.table(ticket); // uncomment to inspect projection state
       expect(ticket?.resolvedById).toBeDefined();
       expect(ticket?.closeAfter).toBe(now.getTime());
 

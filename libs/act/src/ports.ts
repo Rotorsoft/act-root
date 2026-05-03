@@ -75,7 +75,10 @@ export function port<Port extends Disposable>(injector: Injector<Port>) {
     if (!adapters.has(injector.name)) {
       const injected = injector(adapter);
       adapters.set(injector.name, injected);
-      console.log(`[act] + ${injector.name}:${injected.constructor.name}`);
+      // log() is now in adapters (or this IS the log port we just registered),
+      // so the recursive call resolves immediately. Routing through the logger
+      // means level gating (e.g. silenced in tests at fatal) takes effect.
+      log().info(`[act] + ${injector.name}:${injected.constructor.name}`);
     }
     return adapters.get(injector.name) as Port;
   };
@@ -216,7 +219,7 @@ export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   }
   for (const adapter of [...adapters.values()].reverse()) {
     await adapter.dispose();
-    console.log(`[act] - ${adapter.constructor.name}`);
+    log().info(`[act] - ${adapter.constructor.name}`);
   }
   adapters.clear();
   config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
