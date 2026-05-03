@@ -3,6 +3,7 @@ import {
   act,
   cache,
   dispose,
+  log,
   SNAP_EVENT,
   state,
   store,
@@ -153,6 +154,97 @@ describe("close", () => {
     expect(snap.patches).toBe(0);
   });
 
+  it("should restart streams using the state that owns each stream's events (multi-state app)", async () => {
+    const Order = state({
+      Order: z.object({ items: z.array(z.string()), total: z.number() }),
+    })
+      .init(() => ({ items: [], total: 0 }))
+      .emits({
+        ItemAdded: z.object({ item: z.string(), price: z.number() }),
+      })
+      .patch({
+        ItemAdded: ({ data }, s) => ({
+          items: [...s.items, data.item],
+          total: s.total + data.price,
+        }),
+      })
+      .on({ addItem: z.object({ item: z.string(), price: z.number() }) })
+      .emit("ItemAdded")
+      .build();
+
+    const Inventory = state({
+      Inventory: z.object({ stock: z.record(z.string(), z.number()) }),
+    })
+      .init(() => ({ stock: {} }))
+      .emits({ StockSet: z.object({ sku: z.string(), qty: z.number() }) })
+      .patch({
+        StockSet: ({ data }, s) => ({
+          stock: { ...s.stock, [data.sku]: data.qty },
+        }),
+      })
+      .on({ setStock: z.object({ sku: z.string(), qty: z.number() }) })
+      .emit("StockSet")
+      .build();
+
+    const multiApp = act().withState(Order).withState(Inventory).build();
+
+    await multiApp.do(
+      "addItem",
+      { stream: "ms-order-1", actor },
+      { item: "x", price: 5 }
+    );
+    await multiApp.do(
+      "setStock",
+      { stream: "ms-inv-1", actor },
+      { sku: "x", qty: 10 }
+    );
+
+    // Simulate cold cache (LRU eviction, process restart): close() must
+    // replay events from the store through the right state's reducers.
+    await cache().clear();
+
+    await multiApp.close([
+      { stream: "ms-order-1", restart: true },
+      { stream: "ms-inv-1", restart: true },
+    ]);
+
+    // Each stream's seed must reflect the state that owns its events
+    const orderSnap = await multiApp.load(Order, "ms-order-1");
+    expect(orderSnap.state.items).toEqual(["x"]);
+    expect(orderSnap.state.total).toBe(5);
+
+    const invSnap = await multiApp.load(Inventory, "ms-inv-1");
+    expect(invSnap.state.stock).toEqual({ x: 10 });
+  });
+
+  it("should log error and tombstone restart streams whose events have no owning state", async () => {
+    // Use an isolated app with no reactions to bypass the safety-check
+    // wildcard issue (covered by task #10) — focus this test on seed loading.
+    const isolatedApp = act().withState(counter).build();
+
+    // Commit an event under a name that no registered state owns
+    await store().commit(
+      "orphan",
+      [{ name: "UnregisteredEvent", data: { foo: 1 } }],
+      { correlation: "test", causation: {} }
+    );
+
+    const errSpy = vi.spyOn(log(), "error");
+
+    const { truncated } = await isolatedApp.close([
+      { stream: "orphan", restart: true },
+    ]);
+
+    // No state owns "UnregisteredEvent" — restart degrades to tombstone
+    expect(truncated.get("orphan")!.committed.name).toBe(TOMBSTONE_EVENT);
+    expect(errSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Cannot seed restart for "orphan": no registered state owns event "UnregisteredEvent"'
+      )
+    );
+    errSpy.mockRestore();
+  });
+
   it("should handle selective restart (some snapshot, some tombstone)", async () => {
     await app.do("increment", { stream: "sel-a", actor }, { by: 10 });
     await app.do("increment", { stream: "sel-b", actor }, { by: 20 });
@@ -262,6 +354,27 @@ describe("close", () => {
 
     expect(truncated.has("mix-safe")).toBe(true);
     expect(skipped).toContain("mix-pending");
+  });
+
+  it("should detect pending reactions without calling claim() (read-only probe)", async () => {
+    // close()'s safety check used to call claim()+ack() on every subscribed
+    // stream as a side-effecting probe — claim() bumps retry, ack() resets
+    // it to -1, silently destroying retry state of unrelated reactions.
+    // The fix is to use query_streams() (read-only).
+    await app.do("increment", { stream: "probe-safe", actor }, { by: 1 });
+    await drainAll();
+
+    const claimSpy = vi.spyOn(store(), "claim");
+    const ackSpy = vi.spyOn(store(), "ack");
+
+    const { truncated } = await app.close([{ stream: "probe-safe" }]);
+    expect(truncated.has("probe-safe")).toBe(true);
+
+    expect(claimSpy).not.toHaveBeenCalled();
+    expect(ackSpy).not.toHaveBeenCalled();
+
+    claimSpy.mockRestore();
+    ackSpy.mockRestore();
   });
 
   it("should skip streams with concurrent writes (ConcurrencyError on guard)", async () => {

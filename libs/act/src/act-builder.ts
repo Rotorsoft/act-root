@@ -26,6 +26,24 @@ import type {
 } from "./types/index.js";
 
 /**
+ * Registers a projection's batch handler against its target stream, throwing
+ * if a different handler is already registered for the same target. Two
+ * projections silently overwriting each other's batch handlers used to be a
+ * latent footgun.
+ */
+function registerBatchHandler(
+  proj: Projection<any>,
+  batchHandlers: Map<string, BatchHandler<any>>
+): void {
+  if (!proj.batchHandler || !proj.target) return;
+  const existing = batchHandlers.get(proj.target);
+  if (existing && existing !== proj.batchHandler) {
+    throw new Error(`Duplicate batch handler for target "${proj.target}"`);
+  }
+  batchHandlers.set(proj.target, proj.batchHandler);
+}
+
+/**
  * Fluent builder interface for composing event-sourced applications.
  *
  * Provides a chainable API for:
@@ -316,9 +334,7 @@ export function act<
         proj: Projection<TNewEvents>
       ) => {
         mergeProjection(proj, registry.events);
-        if (proj.batchHandler && proj.target) {
-          batchHandlers.set(proj.target, proj.batchHandler);
-        }
+        registerBatchHandler(proj, batchHandlers);
         return act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           states,
           registry,
@@ -374,9 +390,7 @@ export function act<
       build: () => {
         for (const proj of pendingProjections) {
           mergeProjection(proj, registry.events as Record<string, any>);
-          if (proj.batchHandler && proj.target) {
-            batchHandlers.set(proj.target, proj.batchHandler);
-          }
+          registerBatchHandler(proj, batchHandlers);
         }
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,

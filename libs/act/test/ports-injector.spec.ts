@@ -27,9 +27,8 @@ describe("ports-injector", () => {
   describe("port injector", () => {
     it("should inject a default adapter and return the same instance", async () => {
       // Import InMemoryStore dynamically to solve instanceof issue
-      const { InMemoryStore } = await import(
-        "../src/adapters/InMemoryStore.js"
-      );
+      const { InMemoryStore } =
+        await import("../src/adapters/InMemoryStore.js");
       const { store } = await import("../src/ports.js");
       const defaultStore = store();
       expect(defaultStore).toBeInstanceOf(InMemoryStore);
@@ -38,9 +37,8 @@ describe("ports-injector", () => {
     });
 
     it("should allow a specific adapter to be injected", async () => {
-      const { InMemoryStore } = await import(
-        "../src/adapters/InMemoryStore.js"
-      );
+      const { InMemoryStore } =
+        await import("../src/adapters/InMemoryStore.js");
       const { store } = await import("../src/ports.js");
       class CustomStore extends InMemoryStore {}
       const customStore = new CustomStore();
@@ -65,6 +63,24 @@ describe("ports-injector", () => {
       expect(customDisposer).toHaveBeenCalledOnce();
       expect(adapterDisposeSpy).toHaveBeenCalledOnce();
       processExitSpy.mockRestore();
+    });
+
+    it("should call disposers in reverse registration order", async () => {
+      // env=test → disposeAndExit skips process.exit, no spy needed
+      vi.doMock("../src/config.js", () => ({
+        config: vi.fn().mockReturnValue({ env: "test", logLevel: "info" }),
+      }));
+      const { dispose } = await import("../src/ports.js");
+      const order: string[] = [];
+
+      dispose(() => Promise.resolve(void order.push("A")));
+      dispose(() => Promise.resolve(void order.push("B")));
+      const disposeAndExit = dispose(() =>
+        Promise.resolve(void order.push("C"))
+      );
+      await disposeAndExit("EXIT");
+
+      expect(order).toEqual(["C", "B", "A"]);
     });
 
     it("should not exit on error in production", async () => {

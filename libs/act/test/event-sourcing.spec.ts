@@ -408,6 +408,38 @@ describe("event-sourcing", () => {
     );
   });
 
+  it("should warn when load encounters an event not in this state's patch map", async () => {
+    const fakeState = {
+      name: "test",
+      state: ZodEmpty,
+      init: () => ({}),
+      actions: {},
+      events: {},
+      patch: { Known: vi.fn() },
+      on: {},
+    };
+    await store().commit(
+      "stream-with-unknown",
+      [
+        { name: "Known", data: {} },
+        { name: "Unknown", data: {} },
+      ],
+      { correlation: "c", causation: {} }
+    );
+
+    const { log } = await import("../src/ports.js");
+    const warnSpy = vi.spyOn(log(), "warn");
+
+    await load(fakeState, "stream-with-unknown");
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'Skipping unknown event "Unknown" on stream "stream-with-unknown"'
+      )
+    );
+    warnSpy.mockRestore();
+  });
+
   it("should call callback in load and handle patch/snap logic", async () => {
     const state = {
       name: "test",

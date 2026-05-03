@@ -1,4 +1,4 @@
-import { type ZodError, type ZodType, prettifyError } from "zod";
+import { ZodError, type ZodType, prettifyError } from "zod";
 import { config } from "./config.js";
 import { ValidationError } from "./types/index.js";
 
@@ -120,12 +120,8 @@ export const validate = <S>(
   try {
     return schema ? schema.parse(payload) : payload;
   } catch (error) {
-    if (error instanceof Error && error.name === "ZodError") {
-      throw new ValidationError(
-        target,
-        payload,
-        prettifyError(error as ZodError)
-      );
+    if (error instanceof ZodError) {
+      throw new ValidationError(target, payload, prettifyError(error));
     }
     throw new ValidationError(target, payload, error);
   }
@@ -261,7 +257,7 @@ export const extend = <
   target?: Readonly<T>
 ): Readonly<S & T> => {
   const value = validate("config", source, schema);
-  return Object.assign(target || {}, value) as Readonly<S & T>;
+  return { ...target, ...value } as Readonly<S & T>;
 };
 
 /**

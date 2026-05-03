@@ -122,6 +122,14 @@ export async function load<
       } else if (me.patch[e.name]) {
         state = patch(state, me.patch[e.name](event, state));
         patches++;
+      } else if (e.name !== TOMBSTONE_EVENT) {
+        // Unknown event — not in this state's reducer map. Causes:
+        // deleted/renamed event in a versioned schema, load() called with
+        // the wrong state, or stream contamination. Skipping silently
+        // would corrupt replay; warn so the operator can investigate.
+        log().warn(
+          `Skipping unknown event "${String(e.name)}" on stream "${stream}" (id=${e.id}) — no reducer in state "${me.name}"`
+        );
       }
       callback && callback({ event, state, patches, snaps });
     },
