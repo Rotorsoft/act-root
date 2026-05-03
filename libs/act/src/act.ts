@@ -29,6 +29,7 @@ import type {
   Lease,
   Logger,
   Query,
+  ReactionOptions,
   ReactionPayload,
   Registry,
   Schema,
@@ -72,6 +73,18 @@ import type {
  * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
  */
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
+/**
+ * Outcome of processing a single leased stream — produced by `handle` and
+ * `handleBatch`, consumed by `drain()` to decide ack vs block.
+ */
+type HandleResult = Readonly<{
+  lease: Lease;
+  handled: number;
+  at: number;
+  error?: string;
+  block?: boolean;
+}>;
 
 /**
  * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
@@ -540,39 +553,58 @@ export class Act<
   }
 
   /**
-   * Handles leased reactions.
+   * Shared finalization for the two reaction-runner shapes (per-event
+   * `handle` and bulk `handleBatch`). Centralizes the error log, retry-vs-
+   * block decision, and the "error reported only when nothing was handled"
+   * rule that's true in both shapes (in batch mode, `handled` is always 0
+   * on failure, so the rule degenerates to "always reported").
+   */
+  private _finalize(
+    lease: Lease,
+    handled: number,
+    at: number,
+    error: Error | undefined,
+    options: ReactionOptions
+  ): HandleResult {
+    if (!error) return { lease, handled, at };
+    this._logger.error(error);
+    const block = lease.retry >= options.maxRetries && options.blockOnError;
+    if (block)
+      this._logger.error(
+        `Blocking ${lease.stream} after ${lease.retry} retries.`
+      );
+    return {
+      lease,
+      handled,
+      at,
+      error: handled === 0 ? error.message : undefined,
+      block,
+    };
+  }
+
+  /**
+   * Handles leased reactions one event at a time.
    *
-   * This is called by the main `drain` loop after fetching new events.
-   * It handles reactions, supporting retries, blocking, and error handling.
-   *
-   * Each handler receives a scoped `IAct` proxy that auto-injects the
-   * triggering event as `reactingTo` when `do()` is called without it,
-   * maintaining correlation chains by default (#587). Handlers can still
-   * pass an explicit `reactingTo` to override this behavior.
+   * Called by the main `drain` loop after fetching new events. Each handler
+   * receives a scoped `IAct` proxy that auto-injects the triggering event
+   * as `reactingTo` when `do()` is called without it, maintaining
+   * correlation chains by default (#587). Handlers can still pass an
+   * explicit `reactingTo` to override.
    *
    * @internal
-   * @param lease The lease to handle
-   * @param payloads The reactions to handle
-   * @returns The lease with results
    */
   private async handle(
     lease: Lease,
     payloads: ReactionPayload<TEvents>[]
-  ): Promise<{
-    readonly lease: Lease;
-    readonly handled: number;
-    readonly at: number;
-    readonly error?: string;
-    readonly block?: boolean;
-  }> {
+  ): Promise<HandleResult> {
     // no payloads, just advance the lease
     if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
 
     const stream = lease.stream;
-    let at = payloads.at(0)!.event.id,
-      handled = 0;
+    let at = payloads.at(0)!.event.id;
+    let handled = 0;
 
-    lease.retry > 0 &&
+    if (lease.retry > 0)
       this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     // Scoped proxy: auto-injects reactingTo when do() is called without it,
@@ -589,7 +621,7 @@ export class Act<
     };
 
     for (const payload of payloads) {
-      const { event, handler, options } = payload;
+      const { event, handler } = payload;
       scopedApp.do = <TKey extends keyof TActions & string>(
         action: TKey,
         target: Target<TActor>,
@@ -605,27 +637,20 @@ export class Act<
           skipValidation
         );
       try {
-        await handler(event, stream, scopedApp); // the actual reaction
+        await handler(event, stream, scopedApp);
         at = event.id;
         handled++;
       } catch (error) {
-        this._logger.error(error);
-        const block = lease.retry >= options.maxRetries && options.blockOnError;
-        block &&
-          this._logger.error(
-            `Blocking ${stream} after ${lease.retry} retries.`
-          );
-        return {
+        return this._finalize(
           lease,
           handled,
           at,
-          // only report error when nothing was handled
-          error: handled === 0 ? (error as Error).message : undefined,
-          block,
-        };
+          error as Error,
+          payload.options
+        );
       }
     }
-    return { lease, handled, at };
+    return this._finalize(lease, handled, at, undefined, payloads[0].options);
   }
 
   /**
@@ -636,47 +661,32 @@ export class Act<
    * in a single call, enabling bulk DB operations.
    *
    * @internal
-   * @param lease The lease to handle
-   * @param payloads The reactions to handle
-   * @param batchHandler The batch handler for this projection
-   * @returns The lease with results
    */
   private async handleBatch(
     lease: Lease,
     payloads: ReactionPayload<TEvents>[],
     batchHandler: BatchHandler<TEvents>
-  ): Promise<{
-    readonly lease: Lease;
-    readonly handled: number;
-    readonly at: number;
-    readonly error?: string;
-    readonly block?: boolean;
-  }> {
+  ): Promise<HandleResult> {
     const stream = lease.stream;
     const events = payloads.map((p) => p.event);
-    const at = events.at(-1)!.id;
+    const options = payloads[0].options;
 
-    lease.retry > 0 &&
+    if (lease.retry > 0)
       this._logger.warn(
         `Retrying batch ${stream}@${events[0].id} (${lease.retry}).`
       );
 
     try {
       await batchHandler(events, stream);
-      return { lease, handled: events.length, at };
-    } catch (error) {
-      this._logger.error(error);
-      const { options } = payloads[0];
-      const block = lease.retry >= options.maxRetries && options.blockOnError;
-      block &&
-        this._logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
-      return {
+      return this._finalize(
         lease,
-        handled: 0,
-        at: lease.at,
-        error: (error as Error).message,
-        block,
-      };
+        events.length,
+        events.at(-1)!.id,
+        undefined,
+        options
+      );
+    } catch (error) {
+      return this._finalize(lease, 0, lease.at, error as Error, options);
     }
   }
 
