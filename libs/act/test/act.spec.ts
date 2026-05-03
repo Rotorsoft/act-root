@@ -294,7 +294,7 @@ describe("act", () => {
     // Second correlate — same events, target already subscribed
     // Reset checkpoint to force re-scan
     (dynApp as any)._correlation_checkpoint = -1;
-    (dynApp as any)._subscribed_statics.delete("dyn-x");
+    (dynApp as any)._subscribed_streams.delete("dyn-x");
     const r2 = await dynApp.correlate({ limit: 100 });
     expect(r2.subscribed).toBe(0); // already subscribed from r1
   });
@@ -537,15 +537,15 @@ describe("act", () => {
       .to("my-static-target") // static resolver — covers constructor branch
       .build();
 
-    // _static_targets and _subscribed_statics populated at build time
+    // _static_targets and _subscribed_streams populated at build time
     expect((staticApp as any)._static_targets.length).toBe(1);
     expect((staticApp as any)._static_targets[0].stream).toBe(
       "my-static-target"
     );
 
-    // Correlate initializes subscriptions for static targets (covers _subscribed_statics.add)
+    // Correlate initializes subscriptions for static targets (covers _subscribed_streams.add)
     await staticApp.correlate();
-    expect((staticApp as any)._subscribed_statics.has("my-static-target")).toBe(
+    expect((staticApp as any)._subscribed_streams.has("my-static-target")).toBe(
       true
     );
 

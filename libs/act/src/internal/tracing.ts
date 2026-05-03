@@ -90,7 +90,12 @@ const traced = <F extends AsyncFn>(
  */
 export function buildEs(logger: Logger): EsOps {
   if (logger.level !== "trace") {
-    return { snap: es.snap, load: es.load, action: es.action };
+    return {
+      snap: es.snap,
+      load: es.load,
+      action: es.action,
+      tombstone: es.tombstone,
+    };
   }
   return {
     snap: traced(es.snap, undefined, (snapshot) => {
@@ -129,6 +134,12 @@ export function buildEs(logger: Logger): EsOps {
         );
       }
     ),
+    tombstone: traced(es.tombstone, (committed, stream) => {
+      if (committed)
+        logger.trace(
+          es_caption("tombstoned", C_ORANGE, `${stream}@${committed.version}`)
+        );
+    }),
   };
 }
 

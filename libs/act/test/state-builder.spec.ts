@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { state } from "../src/state-builder.js";
+import { state } from "../src/builders/state-builder.js";
 
 const counter = z.object({
   count: z.number(),
@@ -125,6 +125,126 @@ describe("state-builder", () => {
         .build();
 
       expect(machine.name).toBe("Counter");
+    });
+  });
+
+  // Compile-time evidence that the fluent chain preserves type narrowing
+  // for action payloads, state shape, patch handlers, given handlers,
+  // emitted event tuples, and snap callbacks — i.e. the DevEx experience
+  // of using act() doesn't degrade to `any`.
+  describe("type narrowing", () => {
+    it("preserves action payload + state types in .emit handlers", () => {
+      const machine = state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({
+          Incremented: z.object({ by: z.number() }),
+        })
+        .on({ inc: z.object({ amount: z.number() }) })
+        .emit((action, snapshot) => {
+          // Action narrowed to { amount: number }
+          const amount: number = action.amount;
+          // State narrowed to { count: number }
+          const count: number = snapshot.state.count;
+          return ["Incremented", { by: amount + count }];
+        })
+        .build();
+
+      expect(machine.on.inc).toBeDefined();
+    });
+
+    it("preserves event payload + state types in .patch handlers", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .patch({
+          Incremented: (event, s) => {
+            // event.data narrowed to { by: number }
+            const _by: number = event.data.by;
+            // state narrowed to { count: number }
+            const _count: number = s.count;
+            return { count: s.count + event.data.by };
+          },
+        })
+        .on({ inc: z.object({}) })
+        .emit(() => ["Incremented", { by: 1 }])
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("rejects unknown event keys in .patch at compile time", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .patch({
+          // @ts-expect-error 'NotEmitted' isn't in .emits()
+          NotEmitted: () => ({ count: 0 }),
+        })
+        .on({ inc: z.object({}) })
+        .emit(() => ["Incremented", { by: 1 }])
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("preserves state type in .given invariants", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({ amount: z.number() }) })
+        .given([
+          {
+            valid: (s) => {
+              // state narrowed to { count: number }
+              const _count: number = s.count;
+              return _count >= 0;
+            },
+            description: "non-negative",
+          },
+        ])
+        .emit(() => ["Incremented", { by: 1 }])
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("preserves snapshot type in .snap callbacks", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({}) })
+        .emit(() => ["Incremented", { by: 1 }])
+        .snap((snap) => {
+          // snap.state narrowed to { count: number }
+          const _count: number = snap.state.count;
+          // snap.patches is number
+          const _patches: number = snap.patches;
+          return _patches >= 10 && _count > 0;
+        })
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("rejects unknown action fields at compile time", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({ amount: z.number() }) })
+        .emit((action) => [
+          "Incremented",
+          // @ts-expect-error 'wrongField' not on action's shape
+          { by: action.wrongField },
+        ])
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("rejects unknown event names in .emit at compile time", () => {
+      state({ Counter: counter })
+        .init(() => ({ count: 0 }))
+        .emits({ Incremented: z.object({ by: z.number() }) })
+        .on({ inc: z.object({}) })
+        // @ts-expect-error 'NotAnEvent' isn't in .emits()
+        .emit("NotAnEvent")
+        .build();
+      expect(true).toBe(true);
     });
   });
 });

@@ -1,19 +1,16 @@
-import { randomUUID } from "crypto";
 import EventEmitter from "events";
 import {
   buildDrain,
   buildEs,
+  computeLagLeadRatio,
   type DrainOps,
   type EsOps,
+  type HandleResult,
+  LruSet,
+  runCloseCycle,
+  runDrainCycle,
 } from "./internal/index.js";
-import {
-  cache,
-  dispose,
-  log,
-  SNAP_EVENT,
-  store,
-  TOMBSTONE_EVENT,
-} from "./ports.js";
+import { dispose, log, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -28,6 +25,7 @@ import type {
   Lease,
   Logger,
   Query,
+  ReactionOptions,
   ReactionPayload,
   Registry,
   Schema,
@@ -65,6 +63,40 @@ import type {
  * @template TStateMap Map of state names to state schemas
  * @template TActor Actor type extending base Actor
  */
+/**
+ * Default LRU cap for the subscribed-streams cache. Apps that mint many
+ * dynamic targets (one per aggregate) should override via
+ * {@link ActOptions.maxSubscribedStreams} based on expected concurrency.
+ */
+export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
+
+/**
+ * Lifecycle events emitted by {@link Act}, mapped to their payload type.
+ * Drives the typing of `emit` / `on` / `off` — the event-name argument
+ * narrows its payload at the call site.
+ */
+export type ActLifecycleEvents<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  committed: Snapshot<TSchemaReg, TEvents>[];
+  acked: Lease[];
+  blocked: BlockedLease[];
+  settled: Drain<TEvents>;
+  closed: CloseResult;
+};
+
+/**
+ * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
+ *
+ * @property maxSubscribedStreams - Cap for the LRU set tracking already-
+ *   subscribed reaction streams. Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
+ */
+export type ActOptions = {
+  readonly maxSubscribedStreams?: number;
+};
+
 export class Act<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -80,7 +112,18 @@ export class Act<
   private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _settling = false;
   private _correlation_checkpoint = -1;
-  private _subscribed_statics = new Set<string>();
+  /**
+   * Streams already subscribed via store.subscribe() — both the static
+   * targets registered at init and dynamic targets discovered by
+   * correlate(). correlate() consults this set to avoid re-subscribing
+   * known streams.
+   *
+   * Bounded LRU so apps that mint millions of dynamic targets (one per
+   * aggregate) don't grow this unbounded. Eviction costs at most one
+   * redundant store.subscribe() call per evicted-but-still-active stream
+   * (subscribe is idempotent). Cap configurable via {@link ActOptions}.
+   */
+  private readonly _subscribed_streams: LruSet<string>;
   private _has_dynamic_resolvers = false;
   private _correlation_initialized = false;
   /** Event names with at least one registered reaction (computed at build time) */
@@ -89,57 +132,39 @@ export class Act<
   private _needs_drain = false;
 
   /**
-   * Emit a lifecycle event (internal use, but can be used for custom listeners).
-   *
-   * @param event The event name ("committed", "acked",  or "blocked")
-   * @param args The event payload
-   * @returns true if the event had listeners, false otherwise
+   * Emit a lifecycle event. The payload type is inferred from the event name
+   * via {@link ActLifecycleEvents}.
    */
-  emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
-  emit(event: "acked", args: Lease[]): boolean;
-  emit(event: "blocked", args: BlockedLease[]): boolean;
-  emit(event: "settled", args: Drain<TEvents>): boolean;
-  emit(event: "closed", args: CloseResult): boolean;
-  emit(event: string, args: any): boolean {
+  emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+  ): boolean {
     return this._emitter.emit(event, args);
   }
 
   /**
-   * Register a listener for a lifecycle event ("committed", "acked", or "blocked").
-   *
-   * @param event The event name
-   * @param listener The callback function
-   * @returns this (for chaining)
+   * Register a listener for a lifecycle event. The listener receives the
+   * event-specific payload.
    */
-  on(
-    event: "committed",
-    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
-  ): this;
-  on(event: "acked", listener: (args: Lease[]) => void): this;
-  on(event: "blocked", listener: (args: BlockedLease[]) => void): this;
-  on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
-  on(event: "closed", listener: (args: CloseResult) => void): this;
-  on(event: string, listener: (args: any) => void): this {
+  on<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    listener: (
+      args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+    ) => void
+  ): this {
     this._emitter.on(event, listener);
     return this;
   }
 
   /**
-   * Remove a listener for a lifecycle event.
-   *
-   * @param event The event name
-   * @param listener The callback function
-   * @returns this (for chaining)
+   * Remove a previously registered lifecycle listener.
    */
-  off(
-    event: "committed",
-    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
-  ): this;
-  off(event: "acked", listener: (args: Lease[]) => void): this;
-  off(event: "blocked", listener: (args: BlockedLease[]) => void): this;
-  off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
-  off(event: "closed", listener: (args: CloseResult) => void): this;
-  off(event: string, listener: (args: any) => void): this {
+  off<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    listener: (
+      args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+    ) => void
+  ): this {
     this._emitter.off(event, listener);
     return this;
   }
@@ -173,13 +198,20 @@ export class Act<
   private readonly _bound_load = this.load.bind(this);
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
+  /** Pre-bound dispatchers handed to runDrainCycle each cycle. */
+  private readonly _bound_handle = this.handle.bind(this);
+  private readonly _bound_handle_batch = this.handleBatch.bind(this);
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map(),
-    batchHandlers: Map<string, BatchHandler<any>> = new Map()
+    batchHandlers: Map<string, BatchHandler<any>> = new Map(),
+    options: ActOptions = {}
   ) {
     this._batch_handlers = batchHandlers;
+    this._subscribed_streams = new LruSet(
+      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS
+    );
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
     // Classify resolvers and reactive events at build time. Static targets
@@ -507,39 +539,58 @@ export class Act<
   }
 
   /**
-   * Handles leased reactions.
+   * Shared finalization for the two reaction-runner shapes (per-event
+   * `handle` and bulk `handleBatch`). Centralizes the error log, retry-vs-
+   * block decision, and the "error reported only when nothing was handled"
+   * rule that's true in both shapes (in batch mode, `handled` is always 0
+   * on failure, so the rule degenerates to "always reported").
+   */
+  private _finalize(
+    lease: Lease,
+    handled: number,
+    at: number,
+    error: Error | undefined,
+    options: ReactionOptions
+  ): HandleResult {
+    if (!error) return { lease, handled, at };
+    this._logger.error(error);
+    const block = lease.retry >= options.maxRetries && options.blockOnError;
+    if (block)
+      this._logger.error(
+        `Blocking ${lease.stream} after ${lease.retry} retries.`
+      );
+    return {
+      lease,
+      handled,
+      at,
+      error: handled === 0 ? error.message : undefined,
+      block,
+    };
+  }
+
+  /**
+   * Handles leased reactions one event at a time.
    *
-   * This is called by the main `drain` loop after fetching new events.
-   * It handles reactions, supporting retries, blocking, and error handling.
-   *
-   * Each handler receives a scoped `IAct` proxy that auto-injects the
-   * triggering event as `reactingTo` when `do()` is called without it,
-   * maintaining correlation chains by default (#587). Handlers can still
-   * pass an explicit `reactingTo` to override this behavior.
+   * Called by the main `drain` loop after fetching new events. Each handler
+   * receives a scoped `IAct` proxy that auto-injects the triggering event
+   * as `reactingTo` when `do()` is called without it, maintaining
+   * correlation chains by default (#587). Handlers can still pass an
+   * explicit `reactingTo` to override.
    *
    * @internal
-   * @param lease The lease to handle
-   * @param payloads The reactions to handle
-   * @returns The lease with results
    */
   private async handle(
     lease: Lease,
     payloads: ReactionPayload<TEvents>[]
-  ): Promise<{
-    readonly lease: Lease;
-    readonly handled: number;
-    readonly at: number;
-    readonly error?: string;
-    readonly block?: boolean;
-  }> {
+  ): Promise<HandleResult> {
     // no payloads, just advance the lease
     if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
 
     const stream = lease.stream;
-    let at = payloads.at(0)!.event.id,
-      handled = 0;
+    let at = payloads.at(0)!.event.id;
+    let handled = 0;
 
-    lease.retry > 0 &&
+    if (lease.retry > 0)
       this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     // Scoped proxy: auto-injects reactingTo when do() is called without it,
@@ -556,7 +607,7 @@ export class Act<
     };
 
     for (const payload of payloads) {
-      const { event, handler, options } = payload;
+      const { event, handler } = payload;
       scopedApp.do = <TKey extends keyof TActions & string>(
         action: TKey,
         target: Target<TActor>,
@@ -572,27 +623,20 @@ export class Act<
           skipValidation
         );
       try {
-        await handler(event, stream, scopedApp); // the actual reaction
+        await handler(event, stream, scopedApp);
         at = event.id;
         handled++;
       } catch (error) {
-        this._logger.error(error);
-        const block = lease.retry >= options.maxRetries && options.blockOnError;
-        block &&
-          this._logger.error(
-            `Blocking ${stream} after ${lease.retry} retries.`
-          );
-        return {
+        return this._finalize(
           lease,
           handled,
           at,
-          // only report error when nothing was handled
-          error: handled === 0 ? (error as Error).message : undefined,
-          block,
-        };
+          error as Error,
+          payload.options
+        );
       }
     }
-    return { lease, handled, at };
+    return this._finalize(lease, handled, at, undefined, payloads[0].options);
   }
 
   /**
@@ -603,47 +647,32 @@ export class Act<
    * in a single call, enabling bulk DB operations.
    *
    * @internal
-   * @param lease The lease to handle
-   * @param payloads The reactions to handle
-   * @param batchHandler The batch handler for this projection
-   * @returns The lease with results
    */
   private async handleBatch(
     lease: Lease,
     payloads: ReactionPayload<TEvents>[],
     batchHandler: BatchHandler<TEvents>
-  ): Promise<{
-    readonly lease: Lease;
-    readonly handled: number;
-    readonly at: number;
-    readonly error?: string;
-    readonly block?: boolean;
-  }> {
+  ): Promise<HandleResult> {
     const stream = lease.stream;
     const events = payloads.map((p) => p.event);
-    const at = events.at(-1)!.id;
+    const options = payloads[0].options;
 
-    lease.retry > 0 &&
+    if (lease.retry > 0)
       this._logger.warn(
         `Retrying batch ${stream}@${events[0].id} (${lease.retry}).`
       );
 
     try {
       await batchHandler(events, stream);
-      return { lease, handled: events.length, at };
-    } catch (error) {
-      this._logger.error(error);
-      const { options } = payloads[0];
-      const block = lease.retry >= options.maxRetries && options.blockOnError;
-      block &&
-        this._logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
-      return {
+      return this._finalize(
         lease,
-        handled: 0,
-        at: lease.at,
-        error: (error as Error).message,
-        block,
-      };
+        events.length,
+        events.at(-1)!.id,
+        undefined,
+        options
+      );
+    } catch (error) {
+      return this._finalize(lease, 0, lease.at, error as Error, options);
     }
   }
 
@@ -696,115 +725,59 @@ export class Act<
       return { fetched: [], leased: [], acked: [], blocked: [] };
     }
 
-    if (!this._drain_locked) {
-      try {
-        this._drain_locked = true;
-        const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
-        const leading = streamLimit - lagging;
-
-        // Atomically discover and lease streams (competing consumer pattern)
-        const leased = await this._cd.claim(
-          lagging,
-          leading,
-          randomUUID(),
-          leaseMillis
-        );
-        if (!leased.length) {
-          this._needs_drain = false;
-          return { fetched: [], leased: [], acked: [], blocked: [] };
-        }
-
-        // Fetch events for each leased stream
-        const fetched = await this._cd.fetch(leased, eventLimit);
-
-        // Build a single index keyed by stream — collapses two passes
-        // (payloadsMap build + per-lease fetched.find) into one Map lookup.
-        type FetchEntry = (typeof fetched)[number];
-        const fetchMap = new Map<
-          string,
-          { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
-        >();
-
-        // compute fetch window max event id
-        const fetch_window_at = fetched.reduce(
-          (max, { at, events }) => Math.max(max, events.at(-1)?.id || at),
-          0
-        );
-
-        for (const f of fetched) {
-          const { stream, events } = f;
-          const payloads = events.flatMap((event) => {
-            const register = this.registry.events[event.name];
-            if (!register) return [];
-            return [...register.reactions.values()]
-              .filter((reaction) => {
-                const resolved =
-                  typeof reaction.resolver === "function"
-                    ? reaction.resolver(event)
-                    : reaction.resolver;
-                return resolved && resolved.target === stream;
-              })
-              .map((reaction) => ({ ...reaction, event }));
-          });
-          fetchMap.set(stream, { fetch: f, payloads });
-        }
-
-        const handled = await Promise.all(
-          leased.map((lease) => {
-            const entry = fetchMap.get(lease.stream);
-            // fast-forward watermark using fetched events or window max
-            const at = entry?.fetch.events.at(-1)?.id || fetch_window_at;
-            const payloads = entry?.payloads ?? [];
-            const batchHandler = this._batch_handlers.get(lease.stream);
-            if (batchHandler && payloads.length > 0) {
-              return this.handleBatch({ ...lease, at }, payloads, batchHandler);
-            }
-            return this.handle({ ...lease, at }, payloads);
-          })
-        );
-
-        // adaptive drain ratio based on handled events, favors frontier with highest pressure (clamped between 20% and 80%)
-        const [lagging_handled, leading_handled] = handled.reduce(
-          ([lagging_handled, leading_handled], { lease, handled }) => [
-            lagging_handled + (lease.lagging ? handled : 0),
-            leading_handled + (lease.lagging ? 0 : handled),
-          ],
-          [0, 0]
-        );
-        const lagging_avg = lagging > 0 ? lagging_handled / lagging : 0;
-        const leading_avg = leading > 0 ? leading_handled / leading : 0;
-        const total = lagging_avg + leading_avg;
-        this._drain_lag2lead_ratio =
-          total > 0 ? Math.max(0.2, Math.min(0.8, lagging_avg / total)) : 0.5;
-
-        const acked = await this._cd.ack(
-          handled
-            .filter(({ error }) => !error)
-            .map(({ at, lease }) => ({ ...lease, at }))
-        );
-        if (acked.length) this.emit("acked", acked);
-
-        const blocked = await this._cd.block(
-          handled
-            .filter(({ block }) => block)
-            .map(({ lease, error }) => ({ ...lease, error: error! }))
-        );
-        if (blocked.length) this.emit("blocked", blocked);
-
-        const result = { fetched, leased, acked, blocked };
-        // Clear flag when fully caught up (nothing processed, no pending errors)
-        const hasErrors = handled.some(({ error }) => error);
-        if (!acked.length && !blocked.length && !hasErrors)
-          this._needs_drain = false;
-        return result;
-      } catch (error) {
-        this._logger.error(error);
-      } finally {
-        this._drain_locked = false;
-      }
+    if (this._drain_locked) {
+      return { fetched: [], leased: [], acked: [], blocked: [] };
     }
 
-    return { fetched: [], leased: [], acked: [], blocked: [] };
+    try {
+      this._drain_locked = true;
+      const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
+      const leading = streamLimit - lagging;
+
+      const cycle = await runDrainCycle(
+        this._cd,
+        this.registry,
+        this._batch_handlers,
+        this._bound_handle,
+        this._bound_handle_batch,
+        lagging,
+        leading,
+        eventLimit,
+        leaseMillis
+      );
+
+      if (!cycle) {
+        // claim() returned no leases — fully caught up
+        this._needs_drain = false;
+        return { fetched: [], leased: [], acked: [], blocked: [] };
+      }
+
+      const { leased, fetched, handled, acked, blocked } = cycle;
+
+      // Adapt next cycle's frontier split to where the pressure is.
+      this._drain_lag2lead_ratio = computeLagLeadRatio(
+        handled,
+        lagging,
+        leading
+      );
+
+      if (acked.length) this.emit("acked", acked);
+      if (blocked.length) this.emit("blocked", blocked);
+
+      // Clear the drain flag when fully caught up (nothing processed, no
+      // pending errors). Errors keep the flag set so retries flow through
+      // the next drain.
+      const hasErrors = handled.some(({ error }) => error);
+      if (!acked.length && !blocked.length && !hasErrors)
+        this._needs_drain = false;
+
+      return { fetched, leased, acked, blocked };
+    } catch (error) {
+      this._logger.error(error);
+      return { fetched: [], leased: [], acked: [], blocked: [] };
+    } finally {
+      this._drain_locked = false;
+    }
   }
 
   /**
@@ -869,7 +842,7 @@ export class Act<
     // Cold start: assume drain is needed (historical events may need processing)
     if (this._reactive_events.size > 0) this._needs_drain = true;
     for (const { stream } of this._static_targets) {
-      this._subscribed_statics.add(stream);
+      this._subscribed_streams.add(stream);
     }
   }
 
@@ -899,7 +872,7 @@ export class Act<
             // only evaluate dynamic resolvers — statics are subscribed at init
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed_statics.has(resolved.target)) {
+            if (resolved && !this._subscribed_streams.has(resolved.target)) {
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
                 payloads: [],
@@ -928,7 +901,7 @@ export class Act<
       if (subscribed) {
         // Track newly subscribed dynamic targets
         for (const { stream } of streams) {
-          this._subscribed_statics.add(stream);
+          this._subscribed_streams.add(stream);
         }
       }
       return { subscribed, last_id };
@@ -1126,189 +1099,18 @@ export class Act<
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
-    const targetMap = new Map(targets.map((t) => [t.stream, t]));
-    const streams = [...targetMap.keys()];
-
-    // 1. Correlate — ensure all dynamic reaction targets are discovered
+    // Correlate first so dynamic reaction targets are discovered before
+    // the safety check examines subscription positions.
     await this.correlate({ limit: 1000 });
 
-    // 2. Find max domain event ID + version per stream (parallel, O(1) each).
-    //    Also capture the latest non-tombstone, non-snapshot event name so
-    //    step 5 can pick the owning state for restart seeding in multi-state
-    //    apps.
-    const streamInfo = new Map<
-      string,
-      { maxId: number; version: number; lastEventName?: string }
-    >();
-    await Promise.all(
-      streams.map(async (s) => {
-        let maxId = -1;
-        let version = -1;
-        let lastEventName: string | undefined;
-        await store().query(
-          (e) => {
-            if (e.name === TOMBSTONE_EVENT) return;
-            // backward iteration: first non-tombstone is the most recent
-            if (maxId === -1) {
-              maxId = e.id;
-              version = e.version;
-            }
-            if (e.name !== SNAP_EVENT && lastEventName === undefined) {
-              lastEventName = e.name;
-            }
-          },
-          // limit: 2 covers the typical snapshot-at-head case (snapshot is
-          // always preceded by the domain event it captured). Streams with
-          // unusual layouts fall back to no-seed via the lookup miss path.
-          { stream: s, stream_exact: true, backward: true, limit: 2 }
-        );
-        if (maxId >= 0) streamInfo.set(s, { maxId, version, lastEventName });
-      })
-    );
-
-    // 3. Safety check — skip entirely when app has no reactions
-    const skipped: string[] = [];
-    let safe: string[];
-
-    if (this._reactive_events.size === 0) {
-      safe = [...streamInfo.keys()];
-    } else {
-      // Read-only probe: query_streams returns subscription positions
-      // without leasing or mutating retry state. claim()+ack() used to
-      // double as a probe, but lease() bumps retry and ack() resets it
-      // to -1 — silently destroying retry state of unrelated reactions.
-      const pendingSet = new Set<string>();
-      await store().query_streams((position) => {
-        const sourceRe = position.source ? RegExp(position.source) : undefined;
-        for (const [stream, info] of streamInfo) {
-          if (
-            (!sourceRe || sourceRe.test(stream)) &&
-            position.at < info.maxId
-          ) {
-            pendingSet.add(stream);
-          }
-        }
-      });
-
-      safe = [];
-      for (const [stream] of streamInfo) {
-        if (pendingSet.has(stream)) {
-          skipped.push(stream);
-        } else {
-          safe.push(stream);
-        }
-      }
-    }
-
-    if (!safe.length) {
-      const result: CloseResult = { truncated: new Map(), skipped };
-      this.emit("closed", result);
-      return result;
-    }
-
-    // 4. Guard — commit tombstone with expectedVersion to block concurrent writes.
-    //    All guards share a correlation UUID (the close operation ID).
-    const correlation = randomUUID();
-    const guarded: string[] = [];
-    const guardEvents = new Map<string, { id: number; stream: string }>();
-    await Promise.all(
-      safe.map(async (stream) => {
-        try {
-          const info = streamInfo.get(stream)!;
-          const [committed] = await store().commit(
-            stream,
-            [{ name: TOMBSTONE_EVENT, data: {} }],
-            { correlation, causation: {} },
-            info.version
-          );
-          guarded.push(stream);
-          guardEvents.set(stream, { id: committed.id, stream });
-        } catch {
-          skipped.push(stream);
-        }
-      })
-    );
-
-    if (!guarded.length) {
-      const result: CloseResult = { truncated: new Map(), skipped };
-      this.emit("closed", result);
-      return result;
-    }
-
-    // 5. Load final state for restart streams (guarded — no races).
-    //    Pick the owning state per stream from the latest domain event name.
-    //    If no state owns the event (deleted state, schema versioning, etc.),
-    //    log and skip seeding — the stream falls through to a tombstone.
-    const seedStates = new Map<string, Schema>();
-    await Promise.all(
-      guarded
-        .filter((s) => targetMap.get(s)?.restart)
-        .map(async (stream) => {
-          const lastEventName = streamInfo.get(stream)?.lastEventName;
-          const ownerState = lastEventName
-            ? this._event_to_state.get(lastEventName)
-            : undefined;
-          if (!ownerState) {
-            this._logger.error(
-              `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName ?? "<none>"}". ` +
-                `Stream will be tombstoned instead.`
-            );
-            return;
-          }
-          const snap = await this._es.load(ownerState, stream);
-          seedStates.set(stream, snap.state as Schema);
-        })
-    );
-
-    // 6. Archive — per-stream callback while guarded
-    for (const stream of guarded) {
-      const archiveFn = targetMap.get(stream)?.archive;
-      if (archiveFn) await archiveFn();
-    }
-
-    // 7. Truncate + seed — atomic per store transaction.
-    //    Seed meta traces back to the guard tombstone via causation.event.
-    const truncTargets = guarded.map((stream) => {
-      const snapshot = seedStates.get(stream);
-      const guard = guardEvents.get(stream)!;
-      return {
-        stream,
-        snapshot,
-        meta: {
-          correlation,
-          causation: {
-            event: {
-              id: guard.id,
-              name: TOMBSTONE_EVENT,
-              stream: guard.stream,
-            },
-          },
-        },
-      };
+    const result = await runCloseCycle(targets, {
+      reactiveEventsSize: this._reactive_events.size,
+      eventToState: this._event_to_state,
+      load: this._es.load,
+      tombstone: this._es.tombstone,
+      logger: this._logger,
     });
-    const truncated = await store().truncate(truncTargets);
 
-    // 8. Cache invalidate / warm — use real event IDs from committed events
-    await Promise.all(
-      guarded.map(async (stream) => {
-        const entry = truncated.get(stream);
-        const state = seedStates.get(stream);
-        if (state && entry) {
-          await cache().set(stream, {
-            state,
-            version: entry.committed.version,
-            event_id: entry.committed.id,
-            patches: 0,
-            snaps: 1,
-          });
-        } else {
-          await cache().invalidate(stream);
-        }
-      })
-    );
-
-    // 9. Emit lifecycle event
-    const result: CloseResult = { truncated, skipped };
     this.emit("closed", result);
     return result;
   }

@@ -15,7 +15,20 @@
  *
  * @internal
  */
+export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
+export {
+  runDrainCycle,
+  type DrainCycle,
+  type HandleResult,
+} from "./drain-cycle.js";
+export { computeLagLeadRatio } from "./drain-ratio.js";
 export { type DrainOps } from "./drain.js";
 export { type EsOps } from "./event-sourcing.js";
-export { _this_, mergeProjection, registerState } from "./merge.js";
+export { LruMap, LruSet } from "./lru-map.js";
+export {
+  _this_,
+  mergeEventRegister,
+  mergeProjection,
+  registerState,
+} from "./merge.js";
 export { buildDrain, buildEs } from "./tracing.js";

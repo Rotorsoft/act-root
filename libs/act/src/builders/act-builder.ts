@@ -4,10 +4,13 @@
  *
  * Fluent builder for composing event-sourced applications.
  */
-import { Act } from "./act.js";
-import { _this_, mergeProjection, registerState } from "./internal/index.js";
-import type { Projection } from "./projection-builder.js";
-import type { Slice } from "./slice-builder.js";
+import { Act, type ActOptions } from "../act.js";
+import {
+  _this_,
+  mergeEventRegister,
+  mergeProjection,
+  registerState,
+} from "../internal/index.js";
 import type {
   Actor,
   BatchHandler,
@@ -23,7 +26,9 @@ import type {
   Schemas,
   Snapshot,
   State,
-} from "./types/index.js";
+} from "../types/index.js";
+import type { Projection } from "./projection-builder.js";
+import type { Slice } from "./slice-builder.js";
 
 /**
  * Registers a projection's batch handler against its target stream, throwing
@@ -190,13 +195,13 @@ export type ActBuilder<
   /**
    * Builds and returns the Act orchestrator instance.
    *
-   * @param drainLimit - Deprecated parameter, no longer used
+   * @param options - Optional runtime overrides (see {@link ActOptions}).
    * @returns The Act orchestrator instance
    *
    * @see {@link Act} for available orchestrator methods
    */
   build: (
-    drainLimit?: number
+    options?: ActOptions
   ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
   /**
    * The registered event schemas and their reaction maps.
@@ -253,103 +258,49 @@ export function act<
   TActions extends Schemas = {},
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
->(
-  states: Map<string, State<any, any, any>> = new Map(),
-  registry: Registry<TSchemaReg, TEvents, TActions> = {
+>(): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
+  // Mutable runtime state — one set of references shared across the entire
+  // fluent chain. Each `with*` / `on` call mutates these and returns the
+  // same builder cast to the widened generic; type fanout is preserved
+  // through the public type signatures, runtime allocation is not.
+  const states = new Map<string, State<any, any, any>>();
+  const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-  },
-  pendingProjections: Projection<any>[] = [],
-  batchHandlers: Map<string, BatchHandler<any>> = new Map()
-): ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
+  };
+  const pendingProjections: Projection<any>[] = [];
+  const batchHandlers = new Map<string, BatchHandler<any>>();
+
+  // The `as` chain on `self` is the type fanout: each fluent method
+  // mutates state and returns `self` cast to its post-call generic
+  // signature. Internal-only — public types stay narrow.
   const builder: ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> =
     {
-      withState: <
-        TNewState extends Schema,
-        TNewEvents extends Schemas,
-        TNewActions extends Schemas,
-        TNewName extends string = string,
-      >(
-        state: State<TNewState, TNewEvents, TNewActions, TNewName>
-      ) => {
+      withState: (state) => {
         registerState(state, states, registry.actions, registry.events);
-        return act<
-          TSchemaReg & { [K in keyof TNewActions]: TNewState },
-          TEvents & TNewEvents,
-          TActions & TNewActions,
-          TStateMap & { [K in TNewName]: TNewState },
-          TActor
-        >(
-          states,
-          registry as unknown as Registry<
-            TSchemaReg & { [K in keyof TNewActions]: TNewState },
-            TEvents & TNewEvents,
-            TActions & TNewActions
-          >,
-          pendingProjections,
-          batchHandlers
-        );
+        return builder as never;
       },
-      withSlice: <
-        TNewSchemaReg extends SchemaRegister<TNewActions>,
-        TNewEvents extends Schemas,
-        TNewActions extends Schemas,
-        TNewMap extends Record<string, Schema>,
-      >(
-        input: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap>
-      ) => {
+      withSlice: (input) => {
         for (const s of input.states.values()) {
           registerState(s, states, registry.actions, registry.events);
         }
-        for (const eventName of Object.keys(input.events)) {
-          const sliceRegister = input.events[eventName];
-          for (const [name, reaction] of sliceRegister.reactions) {
-            (
-              registry.events as Record<
-                string,
-                { reactions: Map<string, unknown> }
-              >
-            )[eventName].reactions.set(name, reaction);
-          }
-        }
+        mergeEventRegister(registry.events, input.events);
         pendingProjections.push(...input.projections);
-        return act<
-          TSchemaReg & TNewSchemaReg,
-          TEvents & TNewEvents,
-          TActions & TNewActions,
-          TStateMap & TNewMap,
-          TActor
-        >(
-          states,
-          registry as unknown as Registry<
-            TSchemaReg & TNewSchemaReg,
-            TEvents & TNewEvents,
-            TActions & TNewActions
-          >,
-          pendingProjections,
-          batchHandlers
-        );
+        return builder as never;
       },
-      withProjection: <TNewEvents extends Schemas>(
-        proj: Projection<TNewEvents>
-      ) => {
-        mergeProjection(proj, registry.events);
-        registerBatchHandler(proj, batchHandlers);
-        return act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
-          states,
-          registry,
-          pendingProjections,
-          batchHandlers
-        );
+      withProjection: (proj) => {
+        mergeProjection(proj as Projection<any>, registry.events);
+        registerBatchHandler(proj as Projection<any>, batchHandlers);
+        return builder;
       },
-      withActor: <TNewActor extends Actor>() => {
-        return act<TSchemaReg, TEvents, TActions, TStateMap, TNewActor>(
-          states,
-          registry,
-          pendingProjections,
-          batchHandlers
-        );
-      },
+      withActor: <TNewActor extends Actor>() =>
+        builder as unknown as ActBuilder<
+          TSchemaReg,
+          TEvents,
+          TActions,
+          TStateMap,
+          TNewActor
+        >,
       on: <TKey extends keyof TEvents>(event: TKey) => ({
         do: (
           handler: (
@@ -371,23 +322,20 @@ export function act<
             throw new Error(
               `Reaction handler for "${String(event)}" must be a named function`
             );
+          // Register once with the default _this_ resolver. If `.to()` is
+          // chained next, it patches the same reaction's resolver in place
+          // — no second Map.set() round-trip.
           registry.events[event].reactions.set(handler.name, reaction);
-          return {
-            ...builder,
+          return Object.assign(builder, {
             to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              registry.events[event].reactions.set(handler.name, {
-                ...reaction,
-                resolver:
-                  typeof resolver === "string"
-                    ? { target: resolver }
-                    : resolver,
-              });
+              reaction.resolver =
+                typeof resolver === "string" ? { target: resolver } : resolver;
               return builder;
             },
-          };
+          });
         },
       }),
-      build: () => {
+      build: (options?: ActOptions) => {
         for (const proj of pendingProjections) {
           mergeProjection(proj, registry.events as Record<string, any>);
           registerBatchHandler(proj, batchHandlers);
@@ -395,7 +343,8 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          batchHandlers
+          batchHandlers,
+          options
         );
       },
       events: registry.events,

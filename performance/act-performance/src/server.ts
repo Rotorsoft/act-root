@@ -60,7 +60,7 @@ async function main() {
     .on("TodoDeleted")
     .do(projector.projectTodoDeleted)
     .to(projection_resolver)
-    .build(100);
+    .build();
 
   let drainCount = 0;
   let eventCount = 0;
