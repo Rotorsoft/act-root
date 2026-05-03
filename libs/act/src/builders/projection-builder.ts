@@ -152,18 +152,23 @@ export type ProjectionBuilder<
  * @see {@link ProjectionBuilder} for builder methods
  * @see {@link Projection} for the output type
  */
-/** @internal Builds the core builder object (shared between overloads) */
+/**
+ * @internal Build the core builder object (shared between overloads). One
+ * mutable `events` register threaded through every fluent call; .on()
+ * mutates and returns the same builder cast to its widened generic.
+ */
 function _projection<
   TEvents extends Schemas,
   TTarget extends string | undefined,
->(
-  target: TTarget,
-  events: EventRegister<TEvents>
-): ProjectionBuilder<TEvents, TTarget> {
+>(target: TTarget): ProjectionBuilder<TEvents, TTarget> {
+  const events = {} as EventRegister<TEvents>;
   const defaultResolver: { target: string } | undefined =
     typeof target === "string" ? { target } : undefined;
 
-  const base = {
+  // Mutable runtime bag — typed loosely; the public projection() return
+  // type narrows back to the user-facing `ProjectionBuilder<TEvents, TTarget>`.
+
+  const base: any = {
     on: <TKey extends string, TData extends Schema>(
       entry: EventEntry<TKey, TData>
     ) => {
@@ -202,12 +207,12 @@ function _projection<
             );
           register.reactions.set(handler.name, reaction);
 
-          const nextBuilder = _projection<
+          // Same builder, widened generic — no recursive call.
+          const widened = base as unknown as ProjectionBuilder<
             TEvents & { [P in TKey]: TData },
             TTarget
-          >(target, events as EventRegister<TEvents & { [P in TKey]: TData }>);
-          return {
-            ...nextBuilder,
+          >;
+          return Object.assign(widened, {
             to(
               resolver:
                 | ReactionResolver<TEvents & { [P in TKey]: TData }, TKey>
@@ -216,9 +221,9 @@ function _projection<
               // Patch the same reaction in place — no second Map.set().
               reaction.resolver =
                 typeof resolver === "string" ? { target: resolver } : resolver;
-              return nextBuilder;
+              return widened;
             },
-          };
+          });
         },
       };
     },
@@ -232,8 +237,7 @@ function _projection<
 
   // Add .batch() only for static-target projections
   if (typeof target === "string") {
-    return {
-      ...base,
+    return Object.assign(base, {
       batch: (handler: BatchHandler<TEvents>) => ({
         build: () => ({
           _tag: "Projection" as const,
@@ -242,7 +246,7 @@ function _projection<
           batchHandler: handler,
         }),
       }),
-    } as ProjectionBuilder<TEvents, TTarget>;
+    }) as ProjectionBuilder<TEvents, TTarget>;
   }
 
   return base as ProjectionBuilder<TEvents, TTarget>;
@@ -257,8 +261,7 @@ function _projection<
  * @param target - Static target stream for all handlers
  */
 export function projection<TEvents extends Schemas = {}>(
-  target: string,
-  events?: EventRegister<TEvents>
+  target: string
 ): ProjectionBuilder<TEvents, string>;
 /**
  * Creates a new projection builder without a default target.
@@ -266,12 +269,10 @@ export function projection<TEvents extends Schemas = {}>(
  * Use per-handler `.to()` to route events to different streams.
  */
 export function projection<TEvents extends Schemas = {}>(
-  target?: undefined,
-  events?: EventRegister<TEvents>
+  target?: undefined
 ): ProjectionBuilder<TEvents, undefined>;
 export function projection<TEvents extends Schemas = {}>(
-  target?: string,
-  events: EventRegister<TEvents> = {} as EventRegister<TEvents>
+  target?: string
 ): ProjectionBuilder<TEvents, string | undefined> {
-  return _projection(target, events);
+  return _projection<TEvents, string | undefined>(target);
 }

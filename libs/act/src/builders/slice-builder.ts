@@ -176,12 +176,16 @@ export function slice<
   TActions extends Schemas = {},
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
->(
-  states: Map<string, State<any, any, any>> = new Map(),
-  actions: Record<string, any> = {},
-  events: EventRegister<TEvents> = {} as EventRegister<TEvents>,
-  projections: Projection<any>[] = []
-): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
+>(): SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> {
+  // One mutable state shared across the entire fluent chain. Each
+  // `withState` / `withProjection` / `on` call mutates these and returns
+  // the same builder cast to the widened generic; type fanout is preserved
+  // through the public type signatures, runtime allocation is not.
+  const states = new Map<string, State<any, any, any>>();
+  const actions: Record<string, any> = {};
+  const events = {} as EventRegister<TEvents>;
+  const projections: Projection<any>[] = [];
+
   const builder: SliceBuilder<
     TSchemaReg,
     TEvents,
@@ -189,38 +193,13 @@ export function slice<
     TStateMap,
     TActor
   > = {
-    withState: <
-      TNewState extends Schema,
-      TNewEvents extends Schemas,
-      TNewActions extends Schemas,
-      TNewName extends string = string,
-    >(
-      state: State<TNewState, TNewEvents, TNewActions, TNewName>
-    ) => {
+    withState: (state) => {
       registerState(state, states, actions, events as Record<string, unknown>);
-      return slice<
-        TSchemaReg & { [K in keyof TNewActions]: TNewState },
-        TEvents & TNewEvents,
-        TActions & TNewActions,
-        TStateMap & { [K in TNewName]: TNewState },
-        TActor
-      >(
-        states,
-        actions,
-        events as unknown as EventRegister<TEvents & TNewEvents>,
-        projections
-      );
+      return builder as never;
     },
-    withProjection: <TNewEvents extends Schemas>(
-      proj: Projection<TNewEvents>
-    ) => {
-      projections.push(proj);
-      return slice<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
-        states,
-        actions,
-        events,
-        projections
-      );
+    withProjection: (proj) => {
+      projections.push(proj as Projection<any>);
+      return builder;
     },
     on: <TKey extends keyof TEvents>(event: TKey) => ({
       do: (
@@ -247,14 +226,13 @@ export function slice<
         // chained next, it patches the same reaction's resolver in place
         // — no second Map.set() round-trip.
         events[event].reactions.set(handler.name, reaction);
-        return {
-          ...builder,
+        return Object.assign(builder, {
           to(resolver: ReactionResolver<TEvents, TKey> | string) {
             reaction.resolver =
               typeof resolver === "string" ? { target: resolver } : resolver;
             return builder;
           },
-        };
+        });
       },
     }),
     build: () => ({

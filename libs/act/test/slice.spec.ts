@@ -547,4 +547,50 @@ describe("slice", () => {
 
     expect(handler).toHaveBeenCalled();
   });
+
+  // Compile-time evidence that slice() preserves type narrowing for
+  // event names, reaction handler signatures (event/stream/app types),
+  // and resolver callbacks. Inner functions never run — TS checks them.
+  /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await -- type-only narrowing checks */
+  describe("type narrowing", () => {
+    it("narrows event name + handler args in .on().do()", () => {
+      const _check = () => {
+        slice()
+          .withState(PartA)
+          .on("Incremented")
+          .do(async function react(event, _stream, _app) {
+            // event.data narrowed to { by: number }
+            const _by: number = event.data.by;
+            expect(_by).toBeDefined();
+          })
+          .to("counter-target")
+          .build();
+      };
+      expect(typeof _check).toBe("function");
+    });
+
+    it("rejects unknown event names in .on() at compile time", () => {
+      const _check = () => {
+        // @ts-expect-error 'NotEmitted' isn't an event of PartA
+        slice().withState(PartA).on("NotEmitted");
+      };
+      expect(typeof _check).toBe("function");
+    });
+
+    it("narrows event in .to() resolver function", () => {
+      const _check = () => {
+        slice()
+          .withState(PartA)
+          .on("Incremented")
+          .do(async function react() {})
+          .to((event) => {
+            // event.data narrowed to { by: number }
+            const _by: number = event.data.by;
+            return { target: `t-${_by}` };
+          })
+          .build();
+      };
+      expect(typeof _check).toBe("function");
+    });
+  });
 });

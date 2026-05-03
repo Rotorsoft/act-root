@@ -505,4 +505,49 @@ describe("projection", () => {
     expect(events[1].name).toBe("Labeled");
     expect(events[2].name).toBe("Incremented");
   });
+
+  // Compile-time evidence that the fluent chain preserves type narrowing
+  // for handler events and emitted projection schemas — the DevEx surface
+  // doesn't degrade to `any` after the mutable-builder refactor.
+  /* eslint-disable @typescript-eslint/no-unused-expressions, @typescript-eslint/require-await -- type-only narrowing checks */
+  describe("type narrowing", () => {
+    it("preserves event payload type through .on().do()", () => {
+      projection("typed-target")
+        .on({ Incremented })
+        .do(async function check(event) {
+          // event.data narrowed to { by: number }
+          const by: number = event.data.by;
+          expect(by).toBeDefined();
+        })
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("rejects unknown event fields at compile time", () => {
+      projection("typed-target-2")
+        .on({ Incremented })
+        .do(async function check(event) {
+          // @ts-expect-error 'wrongField' not on Incremented's data shape
+          event.data.wrongField;
+        })
+        .build();
+      expect(true).toBe(true);
+    });
+
+    it("only exposes .batch() on static-target projections", () => {
+      // Static target → .batch() is reachable at the type level
+      projection("static-target")
+        .on({ Incremented })
+        .do(async function h() {})
+        .batch(async () => {});
+
+      // No target → no .batch() in the type
+      const noTarget = projection()
+        .on({ Incremented })
+        .do(async function h2() {});
+      // @ts-expect-error '.batch' not in the no-target builder type
+      noTarget.batch;
+      expect(true).toBe(true);
+    });
+  });
 });

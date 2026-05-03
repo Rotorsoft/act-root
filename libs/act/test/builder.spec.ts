@@ -271,4 +271,112 @@ describe("Builder", () => {
       expect(reactionB?.resolver).toStrictEqual({ target: "streamB" });
     }
   });
+
+  // Compile-time evidence that the act() fluent chain preserves type
+  // narrowing for action names, payloads, and event names through every
+  // .withState() / .withSlice() / .on() call. These tests don't assert
+  // runtime behavior — they fail at compile time if narrowing breaks.
+  /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await -- type-only narrowing checks */
+  describe("type narrowing", () => {
+    const Counter = state({ Counter: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({
+        Incremented: z.object({ by: z.number() }),
+      })
+      .patch({
+        Incremented: ({ data }, s) => {
+          // patch handler: event.data narrowed to {by:number},
+          // state narrowed to {count:number}
+          const _by: number = data.by;
+          const _count: number = s.count;
+          return { count: s.count + data.by };
+        },
+      })
+      .on({ increment: z.object({ amount: z.number() }) })
+      .given([
+        // given handler: state narrowed to {count:number}
+        {
+          valid: (s) => s.count >= 0,
+          description: "non-negative",
+        },
+      ])
+      .emit((action) => ["Incremented", { by: action.amount }])
+      .snap((snap) => snap.patches >= 10)
+      .build();
+
+    // Type-only checks: the inner functions are constructed (so TS
+    // checks them) but never invoked, so @ts-expect-error directives
+    // can flag invalid payloads/names without triggering runtime errors.
+
+    it("narrows action.do() payload type at the call site", () => {
+      const _check = () => {
+        const app = act().withState(Counter).build();
+        const actor: Actor = { id: "u", name: "u" };
+        // The 3rd arg is narrowed to {amount:number} from .on({increment:...})
+        void app.do("increment", { stream: "s", actor }, { amount: 5 });
+        // @ts-expect-error 'wrongField' isn't on the increment payload
+        void app.do("increment", { stream: "s", actor }, { wrongField: 5 });
+      };
+      expect(typeof _check).toBe("function");
+    });
+
+    it("rejects unknown action names in app.do() at compile time", () => {
+      const _check = () => {
+        const app = act().withState(A1).build();
+        const actor: Actor = { id: "u", name: "u" };
+        // @ts-expect-error 'NotARegisteredAction' isn't in A1.actions
+        void app.do("NotARegisteredAction", { stream: "s", actor }, {});
+      };
+      expect(typeof _check).toBe("function");
+    });
+
+    it("rejects unknown event names in .on() at compile time", () => {
+      const _check = () => {
+        const builder = act().withState(A1);
+        // @ts-expect-error 'NotAnEvent' isn't in A1.events
+        builder.on("NotAnEvent");
+      };
+      expect(typeof _check).toBe("function");
+    });
+
+    it("narrows reaction handler event + scoped app at the call site", () => {
+      // This builder is constructed but not exercised at runtime — the
+      // narrowing checks happen at compile time through the @ts-expect-error.
+      act()
+        .withState(Counter)
+        .on("Incremented")
+        .do(async function react(event, _stream, _app) {
+          // event.data narrowed to {by:number}
+          const by: number = event.data.by;
+          expect(by).toBeDefined();
+        })
+        .to("counter-target")
+        .build();
+
+      // Compile-time only: scoped app rejects unknown action names.
+      // (Inside a function we never call, so no runtime error.)
+      const _typeCheck = (_event: unknown) =>
+        act()
+          .withState(Counter)
+          .on("Incremented")
+          .do(async function react2(_e, _s, app) {
+            const actor: Actor = { id: "u", name: "u" };
+            // valid action
+            void app.do("increment", { stream: "x", actor }, { amount: 1 });
+            // @ts-expect-error unknown action via scoped app
+            void app.do("nope", { stream: "x", actor }, {});
+          })
+          .to("counter-target");
+
+      expect(true).toBe(true);
+    });
+
+    it("narrows app.load result state shape at the call site", async () => {
+      const app = act().withState(Counter).build();
+      const snap = await app.load(Counter, "s");
+      // snap.state narrowed to {count:number}
+      const _count: number = snap.state.count;
+      expect(_count).toBe(0);
+    });
+  });
 });
