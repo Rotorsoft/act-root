@@ -328,6 +328,54 @@ describe("projection", () => {
     expect(events[0].data).toEqual({ by: 7 });
   });
 
+  it("should throw when two projections register batch handlers for the same target", () => {
+    const batchA = vi.fn().mockResolvedValue(undefined);
+    const batchB = vi.fn().mockResolvedValue(undefined);
+
+    const ProjA = projection("dup-target")
+      .on({ Incremented })
+      .do(async function handleA() {})
+      .batch(batchA)
+      .build();
+
+    const ProjB = projection("dup-target")
+      .on({ Incremented })
+      .do(async function handleB() {})
+      .batch(batchB)
+      .build();
+
+    expect(() =>
+      act().withState(Counter).withProjection(ProjA).withProjection(ProjB)
+    ).toThrow(/dup-target/);
+  });
+
+  it("should throw at build() when a pending slice projection collides with an already-registered batch target", () => {
+    const batchA = vi.fn().mockResolvedValue(undefined);
+    const batchB = vi.fn().mockResolvedValue(undefined);
+
+    const ProjA = projection("dup-target-2")
+      .on({ Incremented })
+      .do(async function handleA2() {})
+      .batch(batchA)
+      .build();
+
+    const ProjB = projection("dup-target-2")
+      .on({ Incremented })
+      .do(async function handleB2() {})
+      .batch(batchB)
+      .build();
+
+    const SliceWithProjB = slice()
+      .withState(Counter)
+      .withProjection(ProjB)
+      .build();
+
+    // Slice's deferred projection is merged at build(), where collision is detected
+    expect(() =>
+      act().withSlice(SliceWithProjB).withProjection(ProjA).build()
+    ).toThrow(/dup-target-2/);
+  });
+
   it("should handle batch error with handled=0 and retry semantics", async () => {
     const stream = nextStream();
     const batchFn = vi.fn().mockRejectedValue(new Error("batch failed"));
