@@ -18,7 +18,13 @@
  */
 
 import { store } from "../ports.js";
-import type { Committed, Fetch, Lease, Schemas } from "../types/index.js";
+import type {
+  BlockedLease,
+  Committed,
+  Fetch,
+  Lease,
+  Schemas,
+} from "../types/index.js";
 
 /** @internal */
 export interface DrainOps<TEvents extends Schemas> {
@@ -55,9 +61,8 @@ export async function fetch<TEvents extends Schemas>(
 
 export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
-export const block = (
-  leases: Array<Lease & { error: string }>
-): Promise<Array<Lease & { error: string }>> => store().block(leases);
+export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
+  store().block(leases);
 
 export const subscribe = (
   streams: Array<{ stream: string; source?: string }>

@@ -11,6 +11,7 @@ import type {
   Actor,
   AsOf,
   BatchHandler,
+  BlockedLease,
   CloseResult,
   CloseTarget,
   Committed,
@@ -89,7 +90,7 @@ export class Act<
    */
   emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
   emit(event: "acked", args: Lease[]): boolean;
-  emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
+  emit(event: "blocked", args: BlockedLease[]): boolean;
   emit(event: "settled", args: Drain<TEvents>): boolean;
   emit(event: "closed", args: CloseResult): boolean;
   emit(event: string, args: any): boolean {
@@ -108,10 +109,7 @@ export class Act<
     listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
   ): this;
   on(event: "acked", listener: (args: Lease[]) => void): this;
-  on(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
+  on(event: "blocked", listener: (args: BlockedLease[]) => void): this;
   on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   on(event: "closed", listener: (args: CloseResult) => void): this;
   on(event: string, listener: (args: any) => void): this {
@@ -131,10 +129,7 @@ export class Act<
     listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
   ): this;
   off(event: "acked", listener: (args: Lease[]) => void): this;
-  off(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
+  off(event: "blocked", listener: (args: BlockedLease[]) => void): this;
   off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   off(event: "closed", listener: (args: CloseResult) => void): this;
   off(event: string, listener: (args: any) => void): this {

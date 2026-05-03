@@ -268,6 +268,13 @@ export type Lease = {
 };
 
 /**
+ * A {@link Lease} augmented with the failure reason that pushed it past
+ * its retry budget. Yielded by {@link Drain.blocked}, emitted on the
+ * `"blocked"` lifecycle event, and accepted by {@link Store.block}.
+ */
+export type BlockedLease = Lease & { readonly error: string };
+
+/**
  * Options for draining events from the store.
  * @property streamLimit - Maximum number of streams to fetch.
  * @property eventLimit - Maximum number of events to fetch per stream.
@@ -290,7 +297,7 @@ export type Drain<TEvents extends Schemas> = {
   readonly fetched: Fetch<TEvents>;
   readonly leased: Lease[];
   readonly acked: Lease[];
-  readonly blocked: Array<Lease & { readonly error: string }>;
+  readonly blocked: BlockedLease[];
 };
 
 /**
