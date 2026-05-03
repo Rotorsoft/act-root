@@ -15,7 +15,11 @@
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import { InvariantError, StreamClosedError } from "../types/errors.js";
+import {
+  ConcurrencyError,
+  InvariantError,
+  StreamClosedError,
+} from "../types/errors.js";
 import type {
   AsOf,
   Committed,
@@ -244,7 +248,7 @@ export async function action<
     );
   } catch (error) {
     // Invalidate cache on concurrency errors — cached state is stale
-    if ((error as { name?: string }).name === "ERR_CONCURRENCY") {
+    if (error instanceof ConcurrencyError) {
       await cache().invalidate(stream);
     }
     throw error;
