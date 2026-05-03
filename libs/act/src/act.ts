@@ -708,7 +708,13 @@ export class Act<
         // Fetch events for each leased stream
         const fetched = await this._cd.fetch(leased, eventLimit);
 
-        const payloadsMap = new Map<string, ReactionPayload<TEvents>[]>();
+        // Build a single index keyed by stream — collapses two passes
+        // (payloadsMap build + per-lease fetched.find) into one Map lookup.
+        type FetchEntry = (typeof fetched)[number];
+        const fetchMap = new Map<
+          string,
+          { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
+        >();
 
         // compute fetch window max event id
         const fetch_window_at = fetched.reduce(
@@ -716,7 +722,8 @@ export class Act<
           0
         );
 
-        fetched.forEach(({ stream, events }) => {
+        for (const f of fetched) {
+          const { stream, events } = f;
           const payloads = events.flatMap((event) => {
             const register = this.registry.events[event.name];
             if (!register) return [];
@@ -730,15 +737,15 @@ export class Act<
               })
               .map((reaction) => ({ ...reaction, event }));
           });
-          payloadsMap.set(stream, payloads);
-        });
+          fetchMap.set(stream, { fetch: f, payloads });
+        }
 
         const handled = await Promise.all(
           leased.map((lease) => {
+            const entry = fetchMap.get(lease.stream);
             // fast-forward watermark using fetched events or window max
-            const streamFetch = fetched.find((f) => f.stream === lease.stream);
-            const at = streamFetch?.events.at(-1)?.id || fetch_window_at;
-            const payloads = payloadsMap.get(lease.stream)!;
+            const at = entry?.fetch.events.at(-1)?.id || fetch_window_at;
+            const payloads = entry?.payloads ?? [];
             const batchHandler = this._batch_handlers.get(lease.stream);
             if (batchHandler && payloads.length > 0) {
               return this.handleBatch({ ...lease, at }, payloads, batchHandler);
