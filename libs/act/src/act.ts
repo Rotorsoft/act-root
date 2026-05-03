@@ -6,7 +6,14 @@ import {
   type DrainOps,
   type EsOps,
 } from "./internal/index.js";
-import { cache, dispose, log, store, TOMBSTONE_EVENT } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  SNAP_EVENT,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -151,6 +158,13 @@ export class Act<
   private readonly _es: EsOps;
   /** Correlate/drain pipeline ops, optionally wrapped with trace decorators */
   private readonly _cd: DrainOps<TEvents>;
+  /**
+   * Event-name → owning state, computed at build time. The duplicate-event
+   * guard in merge.ts ensures one event name maps to at most one state, so
+   * this lookup is unambiguous. Used by `close()` to pick the right reducer
+   * set when seeding a `restart` snapshot in multi-state apps.
+   */
+  private readonly _event_to_state = new Map<string, State<any, any, any>>();
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
 
@@ -180,6 +194,15 @@ export class Act<
       }
     }
     this._static_targets = statics;
+
+    // Build the event-name → owning state index. Duplicate event names are
+    // already rejected at registration time (merge.ts), so each entry is
+    // unambiguous.
+    for (const merged of this._states.values()) {
+      for (const eventName of Object.keys(merged.events)) {
+        this._event_to_state.set(eventName, merged);
+      }
+    }
 
     dispose(() => {
       this._emitter.removeAllListeners();
@@ -1093,22 +1116,37 @@ export class Act<
     // 1. Correlate — ensure all dynamic reaction targets are discovered
     await this.correlate({ limit: 1000 });
 
-    // 2. Find max domain event ID + version per stream (parallel, O(1) each)
-    const streamInfo = new Map<string, { maxId: number; version: number }>();
+    // 2. Find max domain event ID + version per stream (parallel, O(1) each).
+    //    Also capture the latest non-tombstone, non-snapshot event name so
+    //    step 5 can pick the owning state for restart seeding in multi-state
+    //    apps.
+    const streamInfo = new Map<
+      string,
+      { maxId: number; version: number; lastEventName?: string }
+    >();
     await Promise.all(
       streams.map(async (s) => {
         let maxId = -1;
         let version = -1;
+        let lastEventName: string | undefined;
         await store().query(
           (e) => {
-            if (e.name !== TOMBSTONE_EVENT) {
+            if (e.name === TOMBSTONE_EVENT) return;
+            // backward iteration: first non-tombstone is the most recent
+            if (maxId === -1) {
               maxId = e.id;
               version = e.version;
             }
+            if (e.name !== SNAP_EVENT && lastEventName === undefined) {
+              lastEventName = e.name;
+            }
           },
-          { stream: s, stream_exact: true, backward: true, limit: 1 }
+          // limit: 2 covers the typical snapshot-at-head case (snapshot is
+          // always preceded by the domain event it captured). Streams with
+          // unusual layouts fall back to no-seed via the lookup miss path.
+          { stream: s, stream_exact: true, backward: true, limit: 2 }
         );
-        if (maxId >= 0) streamInfo.set(s, { maxId, version });
+        if (maxId >= 0) streamInfo.set(s, { maxId, version, lastEventName });
       })
     );
 
@@ -1177,19 +1215,30 @@ export class Act<
       return result;
     }
 
-    // 5. Load final state for restart streams (guarded — no races)
-    const mergedState = [...this._states.values()][0];
+    // 5. Load final state for restart streams (guarded — no races).
+    //    Pick the owning state per stream from the latest domain event name.
+    //    If no state owns the event (deleted state, schema versioning, etc.),
+    //    log and skip seeding — the stream falls through to a tombstone.
     const seedStates = new Map<string, Schema>();
-    if (mergedState) {
-      await Promise.all(
-        guarded
-          .filter((s) => targetMap.get(s)?.restart)
-          .map(async (stream) => {
-            const snap = await this._es.load(mergedState, stream);
-            seedStates.set(stream, snap.state as Schema);
-          })
-      );
-    }
+    await Promise.all(
+      guarded
+        .filter((s) => targetMap.get(s)?.restart)
+        .map(async (stream) => {
+          const lastEventName = streamInfo.get(stream)?.lastEventName;
+          const ownerState = lastEventName
+            ? this._event_to_state.get(lastEventName)
+            : undefined;
+          if (!ownerState) {
+            this._logger.error(
+              `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName ?? "<none>"}". ` +
+                `Stream will be tombstoned instead.`
+            );
+            return;
+          }
+          const snap = await this._es.load(ownerState, stream);
+          seedStates.set(stream, snap.state as Schema);
+        })
+    );
 
     // 6. Archive — per-stream callback while guarded
     for (const stream of guarded) {
