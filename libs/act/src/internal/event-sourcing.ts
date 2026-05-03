@@ -105,12 +105,7 @@ export async function load<
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
   asOf?: AsOf
 ): Promise<Snapshot<TState, TEvents>> {
-  const timeTravel =
-    asOf &&
-    (asOf.before !== undefined ||
-      asOf.created_before !== undefined ||
-      asOf.created_after !== undefined ||
-      asOf.limit !== undefined);
+  const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
