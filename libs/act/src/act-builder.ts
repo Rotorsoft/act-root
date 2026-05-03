@@ -5,7 +5,12 @@
  * Fluent builder for composing event-sourced applications.
  */
 import { Act, type ActOptions } from "./act.js";
-import { _this_, mergeProjection, registerState } from "./internal/index.js";
+import {
+  _this_,
+  mergeEventRegister,
+  mergeProjection,
+  registerState,
+} from "./internal/index.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 import type {
@@ -301,17 +306,7 @@ export function act<
         for (const s of input.states.values()) {
           registerState(s, states, registry.actions, registry.events);
         }
-        for (const eventName of Object.keys(input.events)) {
-          const sliceRegister = input.events[eventName];
-          for (const [name, reaction] of sliceRegister.reactions) {
-            (
-              registry.events as Record<
-                string,
-                { reactions: Map<string, unknown> }
-              >
-            )[eventName].reactions.set(name, reaction);
-          }
-        }
+        mergeEventRegister(registry.events, input.events);
         pendingProjections.push(...input.projections);
         return act<
           TSchemaReg & TNewSchemaReg,

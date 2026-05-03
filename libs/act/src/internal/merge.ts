@@ -198,6 +198,26 @@ function mergePatches(
 }
 
 /**
+ * Merges reactions from one event register into another. The target is
+ * assumed to already contain entries for every event name in the source
+ * (e.g., act-builder's `.withSlice()` registers the slice's states first,
+ * which seeds the target events). Reaction names collide by `set()`
+ * semantics — last write wins.
+ */
+export function mergeEventRegister(
+  target: Record<string, { reactions: Map<string, unknown> }>,
+  source: Record<string, { reactions: Map<string, unknown> }>
+): void {
+  for (const [eventName, sourceReg] of Object.entries(source)) {
+    const targetReg = target[eventName];
+    if (!targetReg) continue;
+    for (const [name, reaction] of sourceReg.reactions) {
+      targetReg.reactions.set(name, reaction);
+    }
+  }
+}
+
+/**
  * Merges a projection's event schemas and reactions into an event registry,
  * deduplicating reaction names by appending "_p" on collision.
  */
