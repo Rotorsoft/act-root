@@ -71,93 +71,130 @@ export function registerState(
   actions: Record<string, any>,
   events: Record<string, any>
 ): void {
-  if (states.has(state.name)) {
-    // MERGE: same state name - combine events, actions, patches, handlers
-    const existing = states.get(state.name)!;
-    for (const name of Object.keys(state.actions)) {
-      // Same schema reference means the same partial re-registered via another slice
-      if (existing.actions[name] === state.actions[name]) continue;
-      if (actions[name]) throw new Error(`Duplicate action "${name}"`);
-    }
-    for (const name of Object.keys(state.events)) {
-      // Same schema reference means the same partial re-registered via another slice
-      if (existing.events[name] === state.events[name]) continue;
-      // Allow same-name state partials to redeclare the same event
-      // (e.g., a partial that only needs the event name for .on() reactions)
-      if (existing.events[name]) continue;
-      if (events[name]) throw new Error(`Duplicate event "${name}"`);
-    }
-    // Merge patches: only one custom (non-passthrough) patch per event allowed
-    const mergedPatch = { ...existing.patch };
-    for (const name of Object.keys(state.patch)) {
-      const existingP = existing.patch[name];
-      const incomingP = state.patch[name];
-      if (!existingP) {
-        mergedPatch[name] = incomingP;
-      } else {
-        const existingIsDefault = (existingP as any)._passthrough;
-        const incomingIsDefault = (incomingP as any)._passthrough;
-        if (
-          !existingIsDefault &&
-          !incomingIsDefault &&
-          existingP !== incomingP
-        ) {
-          throw new Error(
-            `Duplicate custom patch for event "${name}" in state "${state.name}"`
-          );
-        }
-        // Keep whichever is custom
-        if (existingIsDefault && !incomingIsDefault) {
-          mergedPatch[name] = incomingP;
-        }
-        // else: existing is custom or both are passthrough — keep existing
-      }
-    }
-    const merged = {
-      ...existing,
-      state: mergeSchemas(existing.state, state.state, state.name),
-      init: mergeInits(existing.init, state.init),
-      events: { ...existing.events, ...state.events },
-      actions: { ...existing.actions, ...state.actions },
-      patch: mergedPatch,
-      on: { ...existing.on, ...state.on },
-      given: { ...existing.given, ...state.given },
-      snap:
-        state.snap && existing.snap && state.snap !== existing.snap
-          ? (() => {
-              throw new Error(
-                `Duplicate snap strategy for state "${state.name}"`
-              );
-            })()
-          : state.snap || existing.snap,
-    };
-    states.set(state.name, merged);
-    // Update ALL action->state pointers to the merged object
-    for (const name of Object.keys(merged.actions)) {
-      actions[name] = merged;
-    }
-    for (const name of Object.keys(state.events)) {
-      if (events[name]) continue; // already registered, preserve reactions
-      events[name] = {
-        schema: state.events[name],
-        reactions: new Map(),
-      };
-    }
+  const existing = states.get(state.name);
+  if (existing) {
+    mergeIntoExisting(state, existing, states, actions, events);
   } else {
-    // NEW: register state for the first time
-    states.set(state.name, state);
-    for (const name of Object.keys(state.actions)) {
-      if (actions[name]) throw new Error(`Duplicate action "${name}"`);
-      actions[name] = state;
+    registerNewState(state, states, actions, events);
+  }
+}
+
+/**
+ * Registers a state for the first time. All action/event names must be unique
+ * across the registry; collisions throw.
+ */
+function registerNewState(
+  state: State<any, any, any>,
+  states: Map<string, State<any, any, any>>,
+  actions: Record<string, any>,
+  events: Record<string, any>
+): void {
+  states.set(state.name, state);
+  for (const name of Object.keys(state.actions)) {
+    if (actions[name]) throw new Error(`Duplicate action "${name}"`);
+    actions[name] = state;
+  }
+  for (const name of Object.keys(state.events)) {
+    if (events[name]) throw new Error(`Duplicate event "${name}"`);
+    events[name] = { schema: state.events[name], reactions: new Map() };
+  }
+}
+
+/**
+ * Merges an incoming partial state into an existing same-name state and
+ * updates the action/event registries. Splits into four phases:
+ *   1. validate no cross-state action/event collisions
+ *   2. merge per-event patches (one custom patch per event)
+ *   3. build the merged state and replace it in the states map
+ *   4. update action→state pointers and register new events
+ */
+function mergeIntoExisting(
+  state: State<any, any, any>,
+  existing: State<any, any, any>,
+  states: Map<string, State<any, any, any>>,
+  actions: Record<string, any>,
+  events: Record<string, any>
+): void {
+  // 1. Validate no cross-state collisions for actions/events
+  for (const name of Object.keys(state.actions)) {
+    // Same schema reference means the same partial re-registered via another slice
+    if (existing.actions[name] === state.actions[name]) continue;
+    if (actions[name]) throw new Error(`Duplicate action "${name}"`);
+  }
+  for (const name of Object.keys(state.events)) {
+    // Same schema reference means the same partial re-registered via another slice
+    if (existing.events[name] === state.events[name]) continue;
+    // Allow same-name state partials to redeclare the same event
+    // (e.g., a partial that only needs the event name for .on() reactions)
+    if (existing.events[name]) continue;
+    if (events[name]) throw new Error(`Duplicate event "${name}"`);
+  }
+
+  // 2. Merge patches with custom-vs-passthrough resolution
+  const mergedPatch = mergePatches(existing.patch, state.patch, state.name);
+
+  // 3. Build merged state
+  const merged = {
+    ...existing,
+    state: mergeSchemas(existing.state, state.state, state.name),
+    init: mergeInits(existing.init, state.init),
+    events: { ...existing.events, ...state.events },
+    actions: { ...existing.actions, ...state.actions },
+    patch: mergedPatch,
+    on: { ...existing.on, ...state.on },
+    given: { ...existing.given, ...state.given },
+    snap:
+      state.snap && existing.snap && state.snap !== existing.snap
+        ? (() => {
+            throw new Error(
+              `Duplicate snap strategy for state "${state.name}"`
+            );
+          })()
+        : state.snap || existing.snap,
+  };
+  states.set(state.name, merged);
+
+  // 4. Update action→state pointers; register events not yet seen
+  for (const name of Object.keys(merged.actions)) {
+    actions[name] = merged;
+  }
+  for (const name of Object.keys(state.events)) {
+    if (events[name]) continue; // already registered, preserve reactions
+    events[name] = { schema: state.events[name], reactions: new Map() };
+  }
+}
+
+/**
+ * Merges two patch maps. Only one custom (non-passthrough) patch per event is
+ * allowed; passthroughs always yield to custom reducers, and re-registering
+ * the same custom patch (same reference, e.g. across slices) is a no-op.
+ */
+function mergePatches(
+  existing: Record<string, any>,
+  incoming: Record<string, any>,
+  stateName: string
+): Record<string, any> {
+  const merged = { ...existing };
+  for (const name of Object.keys(incoming)) {
+    const existingP = existing[name];
+    const incomingP = incoming[name];
+    if (!existingP) {
+      merged[name] = incomingP;
+      continue;
     }
-    for (const name of Object.keys(state.events)) {
-      if (events[name]) throw new Error(`Duplicate event "${name}"`);
-      events[name] = {
-        schema: state.events[name],
-        reactions: new Map(),
-      };
+    const existingIsDefault = existingP._passthrough;
+    const incomingIsDefault = incomingP._passthrough;
+    if (!existingIsDefault && !incomingIsDefault && existingP !== incomingP) {
+      throw new Error(
+        `Duplicate custom patch for event "${name}" in state "${stateName}"`
+      );
+    }
+    // Keep whichever is custom; if both passthrough or existing custom, keep existing
+    if (existingIsDefault && !incomingIsDefault) {
+      merged[name] = incomingP;
     }
   }
+  return merged;
 }
 
 /**
