@@ -1,3 +1,17 @@
+# [@rotorsoft/act-v0.32.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.2...@rotorsoft/act-v0.32.3) (2026-05-03)
+
+
+### Bug Fixes
+
+* **act:** detect ZodError by instanceof instead of name string ([22c155f](https://github.com/rotorsoft/act-root/commit/22c155f6216151292b8a04e721537ab204e65d0c))
+* **act:** pass radix 10 to parseInt for SLEEP_MS ([e1973ff](https://github.com/rotorsoft/act-root/commit/e1973ff26a0aa93db700ba7f9a45b40c3f7247e0))
+* **act:** pick the right owning state per stream when seeding close() restart ([b7771cb](https://github.com/rotorsoft/act-root/commit/b7771cbe80c42ac6032eec98f5a5019013cbd2b5))
+* **act:** resolve logger lazily in signals to allow user injection ([9237ee6](https://github.com/rotorsoft/act-root/commit/9237ee645974cf5461c22c8bb432fcc31d5d4329))
+* **act:** run disposers and adapters serially in reverse order ([4e191bb](https://github.com/rotorsoft/act-root/commit/4e191bb8f0843811e77c36b702512745be04acee))
+* **act:** stop mutating target object in extend() ([9beb2c5](https://github.com/rotorsoft/act-root/commit/9beb2c55a680ae994d7e58bd894a3cdd12baaf34))
+* **act:** throw on duplicate batch handlers for the same projection target ([b25fd4e](https://github.com/rotorsoft/act-root/commit/b25fd4e2d3b605063902de80352dd8bb2d14ab1a))
+* **act:** use query_streams for close() pending probe instead of claim+ack ([ee250b1](https://github.com/rotorsoft/act-root/commit/ee250b1057dbce790b6448b5babce36072db65bc))
+
 # [@rotorsoft/act-v0.32.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.1...@rotorsoft/act-v0.32.2) (2026-05-03)
 
 # [@rotorsoft/act-v0.32.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.0...@rotorsoft/act-v0.32.1) (2026-05-02)
