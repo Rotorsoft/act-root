@@ -208,13 +208,16 @@ const disposers: Disposer[] = [];
 export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
   if (code === "ERROR" && config().env === "production") return;
 
-  await Promise.all(disposers.map((disposer) => disposer()));
-  await Promise.all(
-    [...adapters.values()].reverse().map(async (adapter) => {
-      await adapter.dispose();
-      console.log(`[act] - ${adapter.constructor.name}`);
-    })
-  );
+  // Run sequentially in reverse registration order so a disposer can rely on
+  // later-registered disposers (and adapters on later-registered adapters)
+  // having already finished — Promise.all would race them.
+  for (const disposer of [...disposers].reverse()) {
+    await disposer();
+  }
+  for (const adapter of [...adapters.values()].reverse()) {
+    await adapter.dispose();
+    console.log(`[act] - ${adapter.constructor.name}`);
+  }
   adapters.clear();
   config().env !== "test" && process.exit(code === "ERROR" ? 1 : 0);
 }
