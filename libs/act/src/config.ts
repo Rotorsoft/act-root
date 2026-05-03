@@ -75,7 +75,7 @@ const logLevel = (LOG_LEVEL ||
       ? "info"
       : "trace")) as LogLevel;
 const logSingleLine = (LOG_SINGLE_LINE || "true") === "true";
-const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"));
+const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"), 10);
 
 const pkg = getPackage();
 
