@@ -12,7 +12,7 @@ import type { Schema, State } from "../types/index.js";
  * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
  * to find the base type name, e.g. `z.string().optional()` -> `"ZodString"`.
  */
-export function baseTypeName(zodType: ZodType): string {
+function baseTypeName(zodType: ZodType): string {
   let t: any = zodType;
   while (typeof t.unwrap === "function") {
     t = t.unwrap();
@@ -26,7 +26,7 @@ export function baseTypeName(zodType: ZodType): string {
  * error), then merges via `.extend()`. Falls back to keeping existing
  * schema if either is not a ZodObject.
  */
-export function mergeSchemas(
+function mergeSchemas(
   existing: ZodType,
   incoming: ZodType,
   stateName: string
@@ -54,7 +54,7 @@ export function mergeSchemas(
  * Merges two init functions by spreading both results together.
  * Each partial only provides its own defaults.
  */
-export function mergeInits<TState extends Schema>(
+function mergeInits<TState extends Schema>(
   existing: () => Readonly<TState>,
   incoming: () => Readonly<TState>
 ): () => Readonly<TState> {
