@@ -87,6 +87,23 @@ type HandleResult = Readonly<{
 }>;
 
 /**
+ * Lifecycle events emitted by {@link Act}, mapped to their payload type.
+ * Drives the typing of `emit` / `on` / `off` — the event-name argument
+ * narrows its payload at the call site.
+ */
+export type ActLifecycleEvents<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+> = {
+  committed: Snapshot<TSchemaReg, TEvents>[];
+  acked: Lease[];
+  blocked: BlockedLease[];
+  settled: Drain<TEvents>;
+  closed: CloseResult;
+};
+
+/**
  * Options for {@link Act} construction (passed via {@link ActBuilder.build}).
  *
  * @property maxSubscribedStreams - Cap for the LRU set tracking already-
@@ -131,57 +148,39 @@ export class Act<
   private _needs_drain = false;
 
   /**
-   * Emit a lifecycle event (internal use, but can be used for custom listeners).
-   *
-   * @param event The event name ("committed", "acked",  or "blocked")
-   * @param args The event payload
-   * @returns true if the event had listeners, false otherwise
+   * Emit a lifecycle event. The payload type is inferred from the event name
+   * via {@link ActLifecycleEvents}.
    */
-  emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
-  emit(event: "acked", args: Lease[]): boolean;
-  emit(event: "blocked", args: BlockedLease[]): boolean;
-  emit(event: "settled", args: Drain<TEvents>): boolean;
-  emit(event: "closed", args: CloseResult): boolean;
-  emit(event: string, args: any): boolean {
+  emit<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+  ): boolean {
     return this._emitter.emit(event, args);
   }
 
   /**
-   * Register a listener for a lifecycle event ("committed", "acked", or "blocked").
-   *
-   * @param event The event name
-   * @param listener The callback function
-   * @returns this (for chaining)
+   * Register a listener for a lifecycle event. The listener receives the
+   * event-specific payload.
    */
-  on(
-    event: "committed",
-    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
-  ): this;
-  on(event: "acked", listener: (args: Lease[]) => void): this;
-  on(event: "blocked", listener: (args: BlockedLease[]) => void): this;
-  on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
-  on(event: "closed", listener: (args: CloseResult) => void): this;
-  on(event: string, listener: (args: any) => void): this {
+  on<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    listener: (
+      args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+    ) => void
+  ): this {
     this._emitter.on(event, listener);
     return this;
   }
 
   /**
-   * Remove a listener for a lifecycle event.
-   *
-   * @param event The event name
-   * @param listener The callback function
-   * @returns this (for chaining)
+   * Remove a previously registered lifecycle listener.
    */
-  off(
-    event: "committed",
-    listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
-  ): this;
-  off(event: "acked", listener: (args: Lease[]) => void): this;
-  off(event: "blocked", listener: (args: BlockedLease[]) => void): this;
-  off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
-  off(event: "closed", listener: (args: CloseResult) => void): this;
-  off(event: string, listener: (args: any) => void): this {
+  off<E extends keyof ActLifecycleEvents<TSchemaReg, TEvents, TActions>>(
+    event: E,
+    listener: (
+      args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
+    ) => void
+  ): this {
     this._emitter.off(event, listener);
     return this;
   }
