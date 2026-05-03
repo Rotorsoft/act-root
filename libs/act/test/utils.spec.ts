@@ -209,6 +209,32 @@ describe("utils", () => {
       const validated = validate("test", payload);
       expect(validated).toEqual(payload);
     });
+
+    it("should not treat impostor errors named 'ZodError' as Zod errors", () => {
+      class ImpostorError extends Error {
+        constructor() {
+          super("not really a zod error");
+          this.name = "ZodError";
+        }
+      }
+      const fakeSchema = {
+        parse: () => {
+          throw new ImpostorError();
+        },
+      };
+
+      let caught: ValidationError | undefined;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
+        validate("test", { foo: 1 }, fakeSchema as any);
+      } catch (e) {
+        caught = e as ValidationError;
+      }
+
+      expect(caught).toBeInstanceOf(ValidationError);
+      // details should preserve the impostor; it must not be prettified as zod
+      expect(caught?.details).toBeInstanceOf(ImpostorError);
+    });
   });
 
   describe("extend", () => {
