@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { bench, describe } from "vitest";
 import { z } from "zod";
-import { action, load } from "../../act/src/internal/index.js";
+import { action, load } from "../../act/src/internal/event-sourcing.js";
 import { dispose, store } from "../../act/src/ports.js";
 import { state } from "../../act/src/state-builder.js";
 import { PostgresStore } from "../src/PostgresStore.js";

@@ -1,4 +1,5 @@
 import type {
+  BlockedLease,
   Committed,
   EventMeta,
   Lease,
@@ -639,9 +640,7 @@ export class PostgresStore implements Store {
    * @param leases - Leases to block, including lease holder and last error message.
    * @returns Blocked leases.
    */
-  async block(
-    leases: Array<Lease & { error: string }>
-  ): Promise<(Lease & { error: string })[]> {
+  async block(leases: BlockedLease[]): Promise<BlockedLease[]> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");

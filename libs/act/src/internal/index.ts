@@ -8,9 +8,14 @@
  * what lives here is implementation detail used by `Act`, the builders, and
  * the orchestrator's pipelines.
  *
+ * Only symbols actually consumed *outside* `internal/` are re-exported here.
+ * Modules within `internal/` import each other directly by file path, and
+ * tests that need bare ops (e.g., `action`, `load`) likewise import from
+ * the specific source file.
+ *
  * @internal
  */
-export * from "./drain.js";
-export * from "./event-sourcing.js";
-export * from "./merge.js";
-export * from "./tracing.js";
+export { type DrainOps } from "./drain.js";
+export { type EsOps } from "./event-sourcing.js";
+export { _this_, mergeProjection, registerState } from "./merge.js";
+export { buildDrain, buildEs } from "./tracing.js";

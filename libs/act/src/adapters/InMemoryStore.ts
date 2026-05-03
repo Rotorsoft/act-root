@@ -11,6 +11,7 @@
 import { SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
+  BlockedLease,
   Committed,
   EventMeta,
   Lease,
@@ -439,7 +440,7 @@ export class InMemoryStore implements Store {
    * @param leases - Leases to block, including lease holder and last error message.
    * @returns Blocked leases.
    */
-  async block(leases: Array<Lease & { error: string }>) {
+  async block(leases: BlockedLease[]) {
     await sleep();
     return leases
       .map((l) => this._streams.get(l.stream)?.block(l, l.error))

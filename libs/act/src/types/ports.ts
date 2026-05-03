@@ -12,7 +12,7 @@ import type {
   Schema,
   Schemas,
 } from "./action.js";
-import type { Lease } from "./reaction.js";
+import type { BlockedLease, Lease } from "./reaction.js";
 
 /**
  * A function that disposes of a resource asynchronously.
@@ -402,9 +402,7 @@ export interface Store extends Disposable {
    *
    * @see {@link claim} for lease management
    */
-  block: (
-    leases: Array<Lease & { error: string }>
-  ) => Promise<Array<Lease & { error: string }>>;
+  block: (leases: BlockedLease[]) => Promise<BlockedLease[]>;
 
   /**
    * Resets watermarks for the given streams to -1, making them eligible

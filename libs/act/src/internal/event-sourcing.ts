@@ -15,7 +15,11 @@
 import { patch } from "@rotorsoft/act-patch";
 import { randomUUID } from "crypto";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import { InvariantError, StreamClosedError } from "../types/errors.js";
+import {
+  ConcurrencyError,
+  InvariantError,
+  StreamClosedError,
+} from "../types/errors.js";
 import type {
   AsOf,
   Committed,
@@ -28,8 +32,6 @@ import type {
   Target,
 } from "../types/index.js";
 import { validate } from "../utils.js";
-
-const logger = log();
 
 /** @internal */
 export interface EsOps {
@@ -71,7 +73,7 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
       version // IMPORTANT! - state events are committed right after the snapshot event
     );
   } catch (error) {
-    logger.error(error);
+    log().error(error);
   }
 }
 
@@ -103,12 +105,7 @@ export async function load<
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
   asOf?: AsOf
 ): Promise<Snapshot<TState, TEvents>> {
-  const timeTravel =
-    asOf &&
-    (asOf.before !== undefined ||
-      asOf.created_before !== undefined ||
-      asOf.created_after !== undefined ||
-      asOf.limit !== undefined);
+  const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
@@ -246,7 +243,7 @@ export async function action<
     );
   } catch (error) {
     // Invalidate cache on concurrency errors — cached state is stale
-    if ((error as { name?: string }).name === "ERR_CONCURRENCY") {
+    if (error instanceof ConcurrencyError) {
       await cache().invalidate(stream);
     }
     throw error;
@@ -264,14 +261,18 @@ export async function action<
   const last = snapshots.at(-1)!;
   const snapped = me.snap && me.snap(last);
 
-  // Update cache with post-commit state (reset patches if snapped)
-  void cache().set<TState>(stream, {
-    state: last.state,
-    version: last.event.version,
-    event_id: last.event.id,
-    patches: snapped ? 0 : last.patches,
-    snaps: snapped ? last.snaps + 1 : last.snaps,
-  });
+  // Update cache with post-commit state (reset patches if snapped).
+  // Fire-and-forget — log but don't fail the action on cache write errors
+  // (e.g., transient network failures in a custom Cache adapter).
+  cache()
+    .set<TState>(stream, {
+      state: last.state,
+      version: last.event.version,
+      event_id: last.event.id,
+      patches: snapped ? 0 : last.patches,
+      snaps: snapped ? last.snaps + 1 : last.snaps,
+    })
+    .catch((err) => log().error(err));
 
   // persist snap to store for cold start durability
   if (snapped) void snap(last);

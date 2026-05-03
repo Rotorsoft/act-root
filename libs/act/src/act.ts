@@ -11,6 +11,7 @@ import type {
   Actor,
   AsOf,
   BatchHandler,
+  BlockedLease,
   CloseResult,
   CloseTarget,
   Committed,
@@ -18,6 +19,7 @@ import type {
   DrainOptions,
   IAct,
   Lease,
+  Logger,
   Query,
   ReactionPayload,
   Registry,
@@ -29,8 +31,6 @@ import type {
   State,
   Target,
 } from "./types/index.js";
-
-const logger = log();
 
 /**
  * @category Orchestrator
@@ -90,7 +90,7 @@ export class Act<
    */
   emit(event: "committed", args: Snapshot<TSchemaReg, TEvents>[]): boolean;
   emit(event: "acked", args: Lease[]): boolean;
-  emit(event: "blocked", args: Array<Lease & { error: string }>): boolean;
+  emit(event: "blocked", args: BlockedLease[]): boolean;
   emit(event: "settled", args: Drain<TEvents>): boolean;
   emit(event: "closed", args: CloseResult): boolean;
   emit(event: string, args: any): boolean {
@@ -109,10 +109,7 @@ export class Act<
     listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
   ): this;
   on(event: "acked", listener: (args: Lease[]) => void): this;
-  on(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
+  on(event: "blocked", listener: (args: BlockedLease[]) => void): this;
   on(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   on(event: "closed", listener: (args: CloseResult) => void): this;
   on(event: string, listener: (args: any) => void): this {
@@ -132,10 +129,7 @@ export class Act<
     listener: (args: Snapshot<TSchemaReg, TEvents>[]) => void
   ): this;
   off(event: "acked", listener: (args: Lease[]) => void): this;
-  off(
-    event: "blocked",
-    listener: (args: Array<Lease & { error: string }>) => void
-  ): this;
+  off(event: "blocked", listener: (args: BlockedLease[]) => void): this;
   off(event: "settled", listener: (args: Drain<TEvents>) => void): this;
   off(event: "closed", listener: (args: CloseResult) => void): this;
   off(event: string, listener: (args: any) => void): this {
@@ -157,6 +151,8 @@ export class Act<
   private readonly _es: EsOps;
   /** Correlate/drain pipeline ops, optionally wrapped with trace decorators */
   private readonly _cd: DrainOps<TEvents>;
+  /** Logger resolved at construction time (after user port configuration) */
+  private readonly _logger: Logger = log();
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -164,9 +160,8 @@ export class Act<
     batchHandlers: Map<string, BatchHandler<any>> = new Map()
   ) {
     this._batch_handlers = batchHandlers;
-    const level = log().level;
-    this._es = buildEs(level);
-    this._cd = buildDrain<TEvents>(level);
+    this._es = buildEs(this._logger);
+    this._cd = buildDrain<TEvents>(this._logger);
     // Classify resolvers and reactive events at build time
     const statics: Array<{ stream: string; source?: string }> = [];
     for (const [name, register] of Object.entries(this.registry.events)) {
@@ -515,7 +510,7 @@ export class Act<
       handled = 0;
 
     lease.retry > 0 &&
-      logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
+      this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     // Scoped proxy: auto-injects reactingTo when do() is called without it,
     // maintaining correlation chains by default (see #587).
@@ -549,10 +544,12 @@ export class Act<
         at = event.id;
         handled++;
       } catch (error) {
-        logger.error(error);
+        this._logger.error(error);
         const block = lease.retry >= options.maxRetries && options.blockOnError;
         block &&
-          logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
+          this._logger.error(
+            `Blocking ${stream} after ${lease.retry} retries.`
+          );
         return {
           lease,
           handled,
@@ -595,16 +592,19 @@ export class Act<
     const at = events.at(-1)!.id;
 
     lease.retry > 0 &&
-      logger.warn(`Retrying batch ${stream}@${events[0].id} (${lease.retry}).`);
+      this._logger.warn(
+        `Retrying batch ${stream}@${events[0].id} (${lease.retry}).`
+      );
 
     try {
       await batchHandler(events, stream);
       return { lease, handled: events.length, at };
     } catch (error) {
-      logger.error(error);
+      this._logger.error(error);
       const { options } = payloads[0];
       const block = lease.retry >= options.maxRetries && options.blockOnError;
-      block && logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
+      block &&
+        this._logger.error(`Blocking ${stream} after ${lease.retry} retries.`);
       return {
         lease,
         handled: 0,
@@ -759,7 +759,7 @@ export class Act<
           this._needs_drain = false;
         return result;
       } catch (error) {
-        logger.error(error);
+        this._logger.error(error);
       } finally {
         this._drain_locked = false;
       }
@@ -1312,7 +1312,7 @@ export class Act<
         }
         if (lastDrain) this.emit("settled", lastDrain);
       })()
-        .catch((err) => logger.error(err))
+        .catch((err) => this._logger.error(err))
         .finally(() => {
           this._settling = false;
         });

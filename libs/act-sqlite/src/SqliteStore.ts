@@ -1,5 +1,6 @@
 import { createClient, type Client } from "@libsql/client";
 import type {
+  BlockedLease,
   Committed,
   EventMeta,
   Lease,
@@ -386,10 +387,10 @@ export class SqliteStore implements Store {
   }
 
   // --- block: transaction + ownership + idempotent (= PG) ---
-  async block(leases: Array<Lease & { error: string }>) {
+  async block(leases: BlockedLease[]) {
     const tx = await this.client.transaction("write");
     try {
-      const result: Array<Lease & { error: string }> = [];
+      const result: BlockedLease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
           sql: `UPDATE streams SET blocked = 1, error = ?

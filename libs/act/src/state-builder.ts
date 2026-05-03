@@ -10,6 +10,7 @@ import {
   ActionHandlers,
   GivenHandlers,
   Invariant,
+  PassthroughPatchHandler,
   PatchHandlers,
   Schema,
   Schemas,
@@ -467,8 +468,9 @@ export function state<TName extends string, TState extends Schema>(
           // Default passthrough patches: event data merges into state
           const defaultPatch = Object.fromEntries(
             Object.keys(events).map((k) => {
-              const fn = ({ data }: { data: any }) => data;
-              (fn as any)._passthrough = true;
+              const fn = Object.assign(({ data }: { data: any }) => data, {
+                _passthrough: true as const,
+              }) satisfies PassthroughPatchHandler;
               return [k, fn];
             })
           ) as unknown as PatchHandlers<TState, TEvents>;
