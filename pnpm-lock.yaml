@@ -194,8 +194,8 @@ importers:
         specifier: workspace:^
         version: link:../act-patch
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
 
   libs/act-diagram:
     dependencies:
@@ -206,12 +206,12 @@ importers:
         specifier: ^3.35.1
         version: 3.35.1
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@anthropic-ai/sdk':
         specifier: ^0.92.0
-        version: 0.92.0(zod@4.4.1)
+        version: 0.92.0(zod@4.4.2)
       '@tailwindcss/cli':
         specifier: ^4.2.4
         version: 4.2.4
@@ -260,8 +260,8 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@types/pg':
         specifier: ^8.20.0
@@ -288,8 +288,8 @@ importers:
         specifier: '>=0.31.1'
         version: link:../act
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
 
   libs/act-sse:
     dependencies:
@@ -306,8 +306,8 @@ importers:
         specifier: 11.16.0
         version: 11.16.0(typescript@5.9.3)
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@types/node':
         specifier: ^25.6.0
@@ -422,8 +422,8 @@ importers:
         specifier: ^19.2.5
         version: 19.2.5(react@19.2.5)
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.2.4
@@ -486,8 +486,8 @@ importers:
         specifier: ^2.8.6
         version: 2.8.6
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@types/cors':
         specifier: ^2.8.19
@@ -511,8 +511,8 @@ importers:
         specifier: ^0.45.2
         version: 0.45.2(@libsql/client@0.17.3)(@opentelemetry/api@1.9.0)(@types/pg@8.20.0)(pg@8.20.0)
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       drizzle-kit:
         specifier: ^0.31.10
@@ -536,8 +536,8 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
       zod:
-        specifier: ^4.4.1
-        version: 4.4.1
+        specifier: ^4.4.2
+        version: 4.4.2
     devDependencies:
       '@types/express':
         specifier: ^5.0.6
@@ -9400,8 +9400,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@4.4.1:
-    resolution: {integrity: sha512-a6ENMBBGZBsnlSebQ/eKCguSBeGKSf4O7BPnqVPmYGtpBYI7VSqoVqw+QcB7kPRjbqPwhYTpFbVj/RqNz/CT0Q==}
+  zod@4.4.2:
+    resolution: {integrity: sha512-IynmDyxsEsb9RKzO3J9+4SxXnl2FTFSzNBaKKaMV6tsSk0rw9gYw9gs+JFCq/qk2LCZ78KDwyj+Z289TijSkUw==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -9554,11 +9554,11 @@ snapshots:
     dependencies:
       '@algolia/client-common': 5.50.1
 
-  '@anthropic-ai/sdk@0.92.0(zod@4.4.1)':
+  '@anthropic-ai/sdk@0.92.0(zod@4.4.2)':
     dependencies:
       json-schema-to-ts: 3.1.1
     optionalDependencies:
-      zod: 4.4.1
+      zod: 4.4.2
 
   '@babel/code-frame@7.29.0':
     dependencies:
@@ -12592,14 +12592,14 @@ snapshots:
     dependencies:
       '@rotorsoft/act': 0.31.1
       pg: 8.20.0
-      zod: 4.4.1
+      zod: 4.4.2
     transitivePeerDependencies:
       - pg-native
 
   '@rotorsoft/act@0.31.1':
     dependencies:
       '@rotorsoft/act-patch': 1.1.0
-      zod: 4.4.1
+      zod: 4.4.2
 
   '@rspack/binding-darwin-arm64@1.7.11':
     optional: true
@@ -14916,8 +14916,8 @@ snapshots:
       '@babel/parser': 7.29.2
       eslint: 10.3.0(jiti@2.6.1)
       hermes-parser: 0.25.1
-      zod: 4.4.1
-      zod-validation-error: 4.0.2(zod@4.4.1)
+      zod: 4.4.2
+      zod-validation-error: 4.0.2(zod@4.4.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -19508,10 +19508,10 @@ snapshots:
 
   yoctocolors@2.1.2: {}
 
-  zod-validation-error@4.0.2(zod@4.4.1):
+  zod-validation-error@4.0.2(zod@4.4.2):
     dependencies:
-      zod: 4.4.1
+      zod: 4.4.2
 
-  zod@4.4.1: {}
+  zod@4.4.2: {}
 
   zwitch@2.0.4: {}
