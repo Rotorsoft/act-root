@@ -1,4 +1,4 @@
-import { LruMap } from "../internal/lru-map.js";
+import { LruMap } from "../lru-map.js";
 import type { Cache, CacheEntry, Schema } from "../types/index.js";
 
 /**
