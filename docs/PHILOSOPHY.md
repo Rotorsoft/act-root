@@ -4,11 +4,15 @@ The why-this-shape rationale for `@rotorsoft/act`: where the framework's three p
 
 For day-to-day API and configuration, see the project [README](../README.md). For technical decisions and trade-offs, see the [Design Decisions](../README.md#design-decisions) section.
 
-## Timeless Ideas, Modern Context
+## Where this comes from
 
-In the earliest days of computing, the "Actor Model" offered a simple yet powerful mental framework: entities with their own state, processing messages asynchronously. Similarly, event-driven programming showed how reactions to changes could create more dynamic and decoupled systems. Could we take inspiration from the simplicity of the "Actor Model" while integrating modern concepts like "Event Sourcing" and "CQRS" to form the backbone of consistency and integration for the next generation of autonomous systems?
+Act draws from three traditions:
 
-At its core, any software system is a collection of "consistent states" interacting with one another. Each instance has its unique identity, clear boundaries serving as the authority over its data, and a well-defined lifecycle. Examples include a user profile, an order, or an inventory item. While we often call these "entities", "aggregates", or "domain objects", at their essence, they are all distinct islands of state.
+- **DDD aggregates** (Eric Evans, 2003) — the "consistent state with a boundary" idea. Each `state(...)` defines an aggregate: an entity with its own identity, the authority over its data, and a well-defined lifecycle. User profiles, orders, inventory items — distinct islands of state with clear edges.
+- **Event Sourcing** (Greg Young, mid-2000s) — events as the source of truth. State is derived by replaying an immutable event log; the log is the audit trail; replay is what makes time-travel and projection rebuild possible.
+- **CQRS** (also Young) — separate the write path (actions, invariants, commits) from the read path (loads, projections, queries). The framework's `action()` and `load()` are the two halves.
+
+Reactions sit on top of these as event-driven dispatch — close in shape to publish/subscribe, with the drain pipeline as the delivery mechanism.
 
 ## Actions and Reactions: The Lifeblood of a System
 

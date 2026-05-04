@@ -5,7 +5,7 @@ title: Act Framework
 
 # Act Framework
 
-Act is a modern event sourcing + CQRS + Actor Model framework for TypeScript. The core philosophy: any system distills into **Actions → \{State\} ← Reactions**.
+Act is a modern event sourcing + CQRS framework for TypeScript, with first-class support for DDD aggregates and reaction-driven workflows. The core philosophy: any system distills into **Actions → \{State\} ← Reactions**.
 
 ## Purpose & Philosophy
 

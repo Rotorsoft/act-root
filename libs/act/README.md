@@ -4,7 +4,7 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Act](../../README.md) core library - Event Sourcing + CQRS + Actor Model framework for TypeScript.
+[Act](../../README.md) core library — Event Sourcing + CQRS framework for TypeScript, built around DDD aggregates and reaction-driven workflows.
 
 ## Installation
 
