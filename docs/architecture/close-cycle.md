@@ -23,29 +23,29 @@ The operation has six phases, each gating the next. Failures at each phase have 
                       │
                       ▼
           ┌───────────────────────────┐
-          │ Phase 2: Partition by safety │ Skip any stream whose subscribed reactions are still
-          │   query_streams (read-only)  │ behind the head. Those go into `skipped`.
+          │ Phase 2: Safety partition │ Skip any stream whose subscribed reactions are still
+          │   query_streams           │ behind the head. Those go into `skipped`.
           └───────────┬───────────────┘
                       │
                       ▼
           ┌───────────────────────────┐
-          │ Phase 3: Guard with        │ Commit `__tombstone__` with expectedVersion. If the
-          │   tombstones (parallel)    │ stream advanced past our scan (concurrent writer),
-          │                            │ we get ConcurrencyError → that stream goes to skipped.
+          │ Phase 3: Guard with       │ Commit `__tombstone__` with expectedVersion. If the
+          │   tombstones (parallel)   │ stream advanced past our scan (concurrent writer),
+          │                           │ we get ConcurrencyError → that stream goes to skipped.
           └───────────┬───────────────┘
                       │
                       ▼
           ┌───────────────────────────┐
-          │ Phase 4: Load restart      │ For targets with `restart: true`, load the final state
-          │   seeds (parallel)         │ NOW, while the stream is guarded. The owning state is
-          │                            │ derived from the last event's name → registered state.
+          │ Phase 4: Load restart     │ For targets with `restart: true`, load the final state
+          │   seeds (parallel)        │ NOW, while the stream is guarded. The owning state is
+          │                           │ derived from the last event's name → registered state.
           └───────────┬───────────────┘
                       │
                       ▼
           ┌───────────────────────────┐
-          │ Phase 5: Run archive       │ User callback per stream. Sequential: callbacks may
-          │   callbacks (sequential)   │ share resources (S3 client, etc). A failure here
-          │                            │ propagates to the caller; streams remain guarded.
+          │ Phase 5: Run archive      │ User callback per stream. Sequential: callbacks may
+          │   callbacks (sequential)  │ share resources (S3 client, etc). A failure here
+          │                           │ propagates to the caller; streams remain guarded.
           └───────────┬───────────────┘
                       │
                       ▼

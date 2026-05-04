@@ -20,28 +20,28 @@ A long stream needs to be replayed *somewhere*. The cheapest place is RAM (cache
 ## Read path — `load()`
 
 ```
-                          load(state, stream, asOf?)
-                                  │
-              ┌───────────────────┴────────────────────┐
-              │                                         │
-        is asOf set?                              cache.get(stream)
-        (time-travel)                                  │
-              │                                ┌───── hit ──┐
-              ▼                                │            │
-        skip cache                       cached.state    cache miss
-        with_snaps:true                  cached.event_id     │
-        scan from asOf                       │            init state
-              │                              │            with_snaps:true
-              │                       query after        scan from start
-              │                       cached.event_id   (snap if any)
-              │                              │               │
-              ▼                              ▼               ▼
-        replay events ────────►  replay events ────► replay events
-              │                              │               │
-              └─────────────────────► snapshot ◄──────────────┘
-                                          │
-                              (write cache if replayed > 0
-                               and not time-travel)
+                  load(state, stream, asOf?)
+                                │
+              ┌─────────────────┴─────────────────┐
+              │                                   │
+          asOf set?                        cache.get(stream)
+        (time-travel)                             │
+              │                       ┌───────────┴───────────┐
+              │                       │                       │
+              │                      hit                     miss
+              ▼                       ▼                       ▼
+          skip cache              cached.state            init state
+        with_snaps:true          cached.event_id         with_snaps:true
+        scan from asOf           query after             scan from start
+              │                  cached.event_id         (snap if any)
+              │                       │                       │
+              └───────────────────────┼───────────────────────┘
+                                      ▼
+                                replay events
+                                      │
+                                      ▼
+                        (write cache if replayed > 0
+                         and not time-travel)
 ```
 
 Three distinct entry conditions, three different store-query shapes:

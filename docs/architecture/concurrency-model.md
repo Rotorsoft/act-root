@@ -21,7 +21,7 @@ Action commits are append-only and version-checked. Each event in a stream has a
 ```
 caller                  framework                   store
   │  app.do(...)            │                          │
-  │ ─────────────────────► │                          │
+  │ ──────────────────────► │                          │
   │                         │  load() → snapshot.event │
   │                         │  expectedVersion = ev?   │
   │                         │  reduce → emit events    │
@@ -34,7 +34,7 @@ caller                  framework                   store
   │                         │                          │      INSERT events
   │                         │                          │      tx COMMIT
   │                         │  ◄──────────────────────────── return Committed[]
-  │  ◄─────────────────────  │
+  │  ◄───────────────────── │
 ```
 
 If two callers race on the same stream, only one wins. The loser sees `ConcurrencyError` with `expectedVersion` and `lastVersion` (the actual head). Standard pattern is to reload state and retry.
@@ -73,7 +73,7 @@ worker A                  store                     worker B
   │                            │   SKIP LOCKED            │
   │                            │  UPDATE leased_by='A'    │
   │                            │  tx COMMIT               │
-  │  ◄────────────────────────  │                          │
+  │  ◄──────────────────────── │                          │
   │  [streams 1, 3, 5]         │                          │
   │                            │   ◄──────────────────────  claim(by="B")
   │                            │  tx BEGIN                │
@@ -84,7 +84,7 @@ worker A                  store                     worker B
   │                            │                          │  [streams 2, 4]
   │  process events for 1,3,5  │                          │  process events for 2,4
   │  ack(by="A")               │                          │  ack(by="B")
-  │ ─────────────────────────► │  ◄──────────────────────  │
+  │ ─────────────────────────► │  ◄────────────────────── │
 ```
 
 `SKIP LOCKED` is the key: workers never block each other waiting for a lock. If a stream is held by another worker, the polling worker just gets the next available stream. Zero contention, no thundering herd. The trade-off is no fairness guarantees — a worker can repeatedly pick up the "easier" streams and leave the leased ones to time out — but in practice this is desirable (active workers stay active).
@@ -94,14 +94,14 @@ worker A                  store                     worker B
 ```
                    ┌───────────────────────┐
                    │ leased_by=NULL        │
-                   │ at=last_acked_position │  ← steady state
-                   └─────────┬─────────────┘
+                   │ at=last_acked_pos     │  ← steady state
+                   └──────────┬────────────┘
                               │  claim()
                               ▼
                    ┌───────────────────────┐
                    │ leased_by='worker-X'  │
                    │ leased_until=NOW+lease│
-                   └─────────┬─────────────┘
+                   └──────────┬────────────┘
                               │
               ┌──────── ack() ┼ block() ─────┐
               │               │              │
