@@ -167,12 +167,6 @@ export class Act<
     return this;
   }
 
-  /**
-   * Create a new Act orchestrator.
-   *
-   * @param registry The registry of state, event, and action schemas
-   * @param states Map of state names to their (potentially merged) state definitions
-   */
   /** Batch handlers for static-target projections (target → handler) */
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
   /** Event-sourcing handlers, optionally wrapped with trace decorators */
@@ -198,6 +192,17 @@ export class Act<
   private readonly _handle: Handle<TEvents>;
   private readonly _handle_batch: HandleBatch<TEvents>;
 
+  /**
+   * Create a new Act orchestrator. Prefer the {@link act} builder over
+   * direct construction — `act()...build()` wires the registry, merges
+   * partial states, and collects batch handlers from registered slices
+   * and projections in one pass.
+   *
+   * @param registry  Schemas for every event and action across registered states
+   * @param _states   Merged map of state name → state definition
+   * @param batchHandlers Static-target projection batch handlers (target → handler)
+   * @param options   Tuning knobs — see {@link ActOptions}
+   */
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map(),

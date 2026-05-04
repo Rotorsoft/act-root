@@ -26,12 +26,14 @@ export class InMemoryCache implements Cache {
     this._entries = new LruMap(options?.maxSize ?? 1000);
   }
 
+  /** @inheritDoc */
   async get<TState extends Schema>(
     stream: string
   ): Promise<CacheEntry<TState> | undefined> {
     return this._entries.get(stream);
   }
 
+  /** @inheritDoc */
   async set<TState extends Schema>(
     stream: string,
     entry: CacheEntry<TState>
@@ -39,18 +41,22 @@ export class InMemoryCache implements Cache {
     this._entries.set(stream, entry);
   }
 
+  /** @inheritDoc */
   async invalidate(stream: string): Promise<void> {
     this._entries.delete(stream);
   }
 
+  /** @inheritDoc */
   async clear(): Promise<void> {
     this._entries.clear();
   }
 
+  /** @inheritDoc */
   async dispose(): Promise<void> {
     this._entries.clear();
   }
 
+  /** Current number of entries held by the LRU. */
   get size(): number {
     return this._entries.size;
   }

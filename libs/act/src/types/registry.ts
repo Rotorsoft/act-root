@@ -10,7 +10,13 @@ import type { Reaction } from "./reaction.js";
  */
 
 /**
- * Reactions register
+ * Per-event registration: the event's schema plus every reaction
+ * registered against it. Keyed by reaction name within the inner map so
+ * a single event can fan out to multiple handlers (one per slice or
+ * top-level `act().on(...)` call).
+ *
+ * @template TEvents - Event schemas in the domain
+ * @template TKey    - Specific event name within `TEvents`
  */
 export type ReactionsRegister<
   TEvents extends Schemas,
@@ -29,8 +35,11 @@ export type EventRegister<TEvents extends Schemas> = {
 };
 
 /**
- * Maps action names to their schema definitions.
- * @template TSchemaReg - Schema register for actions.
+ * Type-level constraint: every key in the action map must point at a
+ * Zod schema. Used as a constraint on the registry's action half so
+ * downstream types can `infer` payloads safely.
+ *
+ * @template TSchemaReg - Schema register for actions
  */
 export type SchemaRegister<TSchemaReg> = {
   [TKey in keyof TSchemaReg]: Schema;
