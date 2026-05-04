@@ -139,11 +139,13 @@ class InMemoryStream {
   }
 
   /**
-   * Reset this stream's watermark and state for replay.
+   * Reset this stream's watermark and state for replay. The retry counter
+   * resets to -1 to match the constructor + ack() invariant ("released
+   * stream"); the next claim() bumps it to 0 (first attempt).
    */
   reset() {
     this._at = -1;
-    this._retry = 0;
+    this._retry = -1;
     this._blocked = false;
     this._error = "";
     this._leased_by = undefined;
@@ -220,6 +222,20 @@ export class InMemoryStore implements Store {
   private _events: Committed<Schemas, keyof Schemas>[] = [];
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
+  // last committed version per stream — O(1) replacement for filter-on-commit
+  private _streamVersions: Map<string, number> = new Map();
+  // max non-snapshot event id per stream — drives the source-pattern probe in claim()
+  // without scanning the full event log.
+  private _maxEventIdByStream: Map<string, number> = new Map();
+  // global max non-snapshot event id — fast pre-check for source-less streams in claim()
+  private _maxNonSnapEventId = -1;
+
+  private _resetIndexes() {
+    this._events.length = 0;
+    this._streamVersions.clear();
+    this._maxEventIdByStream.clear();
+    this._maxNonSnapEventId = -1;
+  }
 
   /**
    * Dispose of the store and clear all events.
@@ -227,7 +243,7 @@ export class InMemoryStore implements Store {
    */
   async dispose() {
     await sleep();
-    this._events.length = 0;
+    this._resetIndexes();
   }
 
   /**
@@ -244,7 +260,7 @@ export class InMemoryStore implements Store {
    */
   async drop() {
     await sleep();
-    this._events.length = 0;
+    this._resetIndexes();
     this._streams = new Map();
   }
 
@@ -318,22 +334,23 @@ export class InMemoryStore implements Store {
     expectedVersion?: number
   ) {
     await sleep();
-    const instance = this._events.filter((e) => e.stream === stream); // ignore state events, this is a production optimization
+    const currentVersion = this._streamVersions.get(stream) ?? -1;
     if (
       typeof expectedVersion === "number" &&
-      instance.length - 1 !== expectedVersion
+      currentVersion !== expectedVersion
     ) {
       throw new ConcurrencyError(
         stream,
-        instance.length - 1,
+        currentVersion,
         msgs as Message<Schemas, keyof Schemas>[],
         expectedVersion
       );
     }
 
-    let version = instance.length;
-    return msgs.map(({ name, data }) => {
-      const committed: Committed<E, keyof E> = {
+    let version = currentVersion + 1;
+    let lastNonSnapId = -1;
+    const committed = msgs.map(({ name, data }) => {
+      const c: Committed<E, keyof E> = {
         id: this._events.length,
         stream,
         version,
@@ -342,10 +359,19 @@ export class InMemoryStore implements Store {
         data,
         meta,
       };
-      this._events.push(committed as Committed<Schemas, keyof Schemas>);
+      this._events.push(c as Committed<Schemas, keyof Schemas>);
+      if (name !== SNAP_EVENT) lastNonSnapId = c.id;
       version++;
-      return committed;
+      return c;
     });
+    this._streamVersions.set(stream, version - 1);
+    if (lastNonSnapId >= 0) {
+      this._maxEventIdByStream.set(stream, lastNonSnapId);
+      // commit always assigns a fresh id from this._events.length, so any
+      // non-snap commit strictly raises the global max.
+      this._maxNonSnapEventId = lastNonSnapId;
+    }
+    return committed;
   }
 
   /**
@@ -359,16 +385,28 @@ export class InMemoryStore implements Store {
    */
   async claim(lagging: number, leading: number, by: string, millis: number) {
     await sleep();
+    // Cache compiled regexes — multiple subscribed streams typically share the
+    // same source pattern, and the inner loop can run thousands of times per claim.
+    const sourceRegex = new Map<string, RegExp>();
+    const getRegex = (source: string) => {
+      let re = sourceRegex.get(source);
+      if (!re) {
+        re = new RegExp(source);
+        sourceRegex.set(source, re);
+      }
+      return re;
+    };
+    const hasWork = (s: InMemoryStream): boolean => {
+      if (s.at < 0) return true;
+      if (!s.source) return s.at < this._maxNonSnapEventId;
+      const re = getRegex(s.source);
+      for (const [streamName, maxId] of this._maxEventIdByStream) {
+        if (maxId > s.at && re.test(streamName)) return true;
+      }
+      return false;
+    };
     const available = [...this._streams.values()].filter(
-      (s) =>
-        s.is_available &&
-        (s.at < 0 ||
-          this._events.some(
-            (e) =>
-              e.id > s.at &&
-              e.name !== SNAP_EVENT &&
-              (!s.source || RegExp(s.source).test(e.stream))
-          ))
+      (s) => s.is_available && hasWork(s)
     );
     const lag = available
       .sort((a, b) => a.at - b.at)
@@ -551,12 +589,16 @@ export class InMemoryStore implements Store {
       }
     }
     this._events = this._events.filter((e) => !streamSet.has(e.stream));
+    for (const stream of streamSet) {
+      this._streams.delete(stream);
+      this._streamVersions.delete(stream);
+      this._maxEventIdByStream.delete(stream);
+    }
     const result = new Map<
       string,
       { deleted: number; committed: Committed<Schemas, keyof Schemas> }
     >();
     for (const { stream, snapshot, meta } of targets) {
-      this._streams.delete(stream);
       const event: Committed<Schemas, keyof Schemas> = {
         id: this._events.length,
         stream,
@@ -567,11 +609,20 @@ export class InMemoryStore implements Store {
         meta: meta ?? { correlation: "", causation: {} },
       };
       this._events.push(event);
+      this._streamVersions.set(stream, 0);
+      if (event.name !== SNAP_EVENT) {
+        this._maxEventIdByStream.set(stream, event.id);
+      }
       result.set(stream, {
         deleted: deletedCounts.get(stream) ?? 0,
         committed: event,
       });
     }
+    // Recompute global max from the per-stream index — deletions may have
+    // dropped the previous max, while new tombstones may have raised it.
+    let max = -1;
+    for (const id of this._maxEventIdByStream.values()) if (id > max) max = id;
+    this._maxNonSnapEventId = max;
     return result;
   }
 }
