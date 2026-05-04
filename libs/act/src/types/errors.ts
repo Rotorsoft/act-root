@@ -285,9 +285,13 @@ export class ConcurrencyError extends Error {
     /** The version number that was expected */
     public readonly expectedVersion: number
   ) {
+    // Message lists stream + event names only. Payloads remain accessible
+    // via `error.events` for callers who need them — keeping them out of
+    // the message avoids MB-scale strings on contended writes and keeps
+    // potentially-sensitive data out of log streams.
     super(
       `Concurrency error committing "${events
-        .map((e) => `${stream}.${e.name}.${JSON.stringify(e.data)}`)
+        .map((e) => `${stream}.${e.name}`)
         .join(
           ", "
         )}". Expected version ${expectedVersion} but found version ${lastVersion}.`
