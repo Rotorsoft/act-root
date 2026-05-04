@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.3.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.1...@rotorsoft/act-sqlite-v0.3.2) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency zod to ^4.4.2 ([abaa2ee](https://github.com/rotorsoft/act-root/commit/abaa2ee59989073b1bdb67fa1f989e2572fddb04))
+
 # [@rotorsoft/act-sqlite-v0.3.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.0...@rotorsoft/act-sqlite-v0.3.1) (2026-05-03)
 
 # [@rotorsoft/act-sqlite-v0.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.2.1...@rotorsoft/act-sqlite-v0.3.0) (2026-05-02)
