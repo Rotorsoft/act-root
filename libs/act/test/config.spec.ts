@@ -93,4 +93,59 @@ describe("config", () => {
     const config = loadConfig();
     expect(config.logLevel).toBe("trace");
   });
+
+  describe("package.json fallback", () => {
+    it("should fall back to synthetic name/version when package.json read fails", async () => {
+      vi.resetModules();
+      vi.doMock("node:fs", () => ({
+        readFileSync: vi.fn(() => {
+          throw new Error("ENOENT: no such file");
+        }),
+      }));
+      const { config: loadConfig } = await import("../src/config.js");
+      const c = loadConfig();
+      expect(c.name).toBe("act-fallback");
+      expect(c.version).toBe("0.0.0-fallback");
+      vi.doUnmock("node:fs");
+    });
+
+    it("should fall back when package.json is malformed JSON", async () => {
+      vi.resetModules();
+      vi.doMock("node:fs", () => ({
+        readFileSync: vi.fn().mockReturnValue("not valid json {{{"),
+      }));
+      const { config: loadConfig } = await import("../src/config.js");
+      const c = loadConfig();
+      expect(c.name).toBe("act-fallback");
+      vi.doUnmock("node:fs");
+    });
+
+    it("should surface a string thrown during package.json read", async () => {
+      vi.resetModules();
+      vi.doMock("node:fs", () => ({
+        readFileSync: vi.fn(() => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- intentional non-Error throw
+          throw "raw string failure";
+        }),
+      }));
+      const { config: loadConfig } = await import("../src/config.js");
+      const c = loadConfig();
+      expect(c.name).toBe("act-fallback");
+      vi.doUnmock("node:fs");
+    });
+
+    it("should surface a non-Error, non-string thrown value", async () => {
+      vi.resetModules();
+      vi.doMock("node:fs", () => ({
+        readFileSync: vi.fn(() => {
+          // eslint-disable-next-line @typescript-eslint/only-throw-error -- intentional non-Error throw
+          throw 42;
+        }),
+      }));
+      const { config: loadConfig } = await import("../src/config.js");
+      const c = loadConfig();
+      expect(c.name).toBe("act-fallback");
+      vi.doUnmock("node:fs");
+    });
+  });
 });

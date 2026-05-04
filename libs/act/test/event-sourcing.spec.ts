@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import { action, load, snap } from "../src/internal/event-sourcing.js";
 import { dispose, SNAP_EVENT, store } from "../src/ports.js";

@@ -15,7 +15,7 @@
  */
 
 import { randomUUID } from "crypto";
-import { cache, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { cache, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   CloseResult,
   CloseTarget,
@@ -39,11 +39,16 @@ export type CloseCycleDeps = {
   readonly logger: Logger;
 };
 
-/** Per-stream scan result: latest non-tombstone event metadata. */
+/**
+ * Per-stream scan result: latest non-tombstone domain event metadata.
+ * `lastEventName` is always defined — the scan filters tombstones in the
+ * callback and queries without `with_snaps`, so any event reaching the
+ * callback is a domain event whose name we capture alongside id/version.
+ */
 type StreamHead = {
   readonly maxId: number;
   readonly version: number;
-  readonly lastEventName?: string;
+  readonly lastEventName: string;
 };
 
 /**
@@ -56,8 +61,8 @@ export async function runCloseCycle(
   targets: CloseTarget[],
   deps: CloseCycleDeps
 ): Promise<CloseResult> {
-  if (!targets.length) return { truncated: new Map(), skipped: [] };
-
+  // Caller (Act.close) filters empty targets; runCloseCycle assumes at
+  // least one target.
   const targetMap = new Map(targets.map((t) => [t.stream, t]));
   const streams = [...targetMap.keys()];
   const skipped: string[] = [];
@@ -120,23 +125,17 @@ async function scanStreamHeads(
     streams.map(async (s) => {
       let maxId = -1;
       let version = -1;
-      let lastEventName: string | undefined;
+      let lastEventName = "";
       await store().query(
         (e) => {
-          if (e.name === TOMBSTONE_EVENT) return;
           // backward iteration: first non-tombstone is the most recent
-          if (maxId === -1) {
-            maxId = e.id;
-            version = e.version;
-          }
-          if (e.name !== SNAP_EVENT && lastEventName === undefined) {
-            lastEventName = e.name;
-          }
+          // domain event. snaps are filtered server-side (no with_snaps).
+          if (e.name === TOMBSTONE_EVENT || maxId !== -1) return;
+          maxId = e.id;
+          version = e.version;
+          lastEventName = e.name;
         },
-        // limit: 2 covers the typical snapshot-at-head case (snapshot is
-        // always preceded by the domain event it captured). Streams with
-        // unusual layouts fall back to no-seed via the lookup miss path.
-        { stream: s, stream_exact: true, backward: true, limit: 2 }
+        { stream: s, stream_exact: true, backward: true, limit: 1 }
       );
       if (maxId >= 0) out.set(s, { maxId, version, lastEventName });
     })
@@ -224,16 +223,15 @@ async function loadRestartSeeds(
     guarded
       .filter((s) => targetMap.get(s)?.restart)
       .map(async (stream) => {
-        const lastEventName = streamInfo.get(stream)?.lastEventName;
-        const ownerState = lastEventName
-          ? eventToState.get(lastEventName)
-          : undefined;
+        // streamInfo entry is guaranteed (guarded ⊆ streamInfo.keys()).
+        const lastEventName = streamInfo.get(stream)!.lastEventName;
+        const ownerState = eventToState.get(lastEventName);
         if (!ownerState) {
           // No registered state owns the stream's events (deleted state,
           // schema versioning gone wrong, etc.). Tombstone instead of
           // seeding a corrupted snapshot.
           logger.error(
-            `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName ?? "<none>"}". Stream will be tombstoned instead.`
+            `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName}". Stream will be tombstoned instead.`
           );
           return;
         }

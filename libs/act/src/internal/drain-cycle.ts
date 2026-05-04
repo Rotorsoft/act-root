@@ -136,10 +136,12 @@ export async function runDrainCycle<
 
   const handled = await Promise.all(
     leased.map((lease) => {
-      const entry = fetchMap.get(lease.stream);
+      // fetch() returns one entry per leased stream — fetchMap.get is
+      // always defined here (asserted with `!`).
+      const entry = fetchMap.get(lease.stream)!;
       // fast-forward watermark using fetched events or window max
-      const at = entry?.fetch.events.at(-1)?.id || fetch_window_at;
-      const payloads = entry?.payloads ?? [];
+      const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
+      const { payloads } = entry;
       const batchHandler = batchHandlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
         return handleBatch({ ...lease, at }, payloads, batchHandler);

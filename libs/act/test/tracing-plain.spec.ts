@@ -1,0 +1,95 @@
+import { z } from "zod";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
+import { ZodEmpty } from "../src/types/schemas.js";
+
+// Force the tracing module to evaluate PRETTY=false by mocking config()
+// to report production env. This file is isolated from the main tracing
+// spec which exercises pretty mode.
+vi.mock("../src/config.js", () => ({
+  config: vi.fn().mockReturnValue({
+    env: "production",
+    logLevel: "trace",
+    logSingleLine: true,
+    sleepMs: 0,
+  }),
+}));
+
+describe("tracing — plain (production) mode", () => {
+  it("uses 'caption: body' for event-sourcing logs and bare prefix for drain", async () => {
+    // Imports must happen AFTER the doMock above.
+    const { state } = await import("../src/builders/state-builder.js");
+    const { buildEs, buildDrain } = await import("../src/internal/tracing.js");
+    const es = await import("../src/internal/event-sourcing.js");
+    const { log, store } = await import("../src/ports.js");
+
+    store(new InMemoryStore());
+
+    const Counter = state({ Counter: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ Incremented: z.object({ by: z.number() }) })
+      .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.by }) })
+      .on({ increment: z.object({ by: z.number() }) })
+      .emit("Incremented")
+      .on({ noop: ZodEmpty })
+      .emit(() => [])
+      .build();
+
+    const traceSpy = vi.spyOn(log(), "trace").mockImplementation(() => {});
+
+    // Use a Proxy to report level=trace without mutating the real logger.
+    const traceLogger = new Proxy(log(), {
+      get: (target, prop) =>
+        prop === "level"
+          ? "trace"
+          : (target as unknown as Record<PropertyKey, unknown>)[prop],
+    });
+
+    // Event-sourcing trace: `caption: body` (plain mode)
+    const { action, load } = buildEs(traceLogger);
+    await load(Counter, "s-plain");
+    expect(traceSpy).toHaveBeenCalledWith("load: s-plain");
+
+    await action(
+      Counter,
+      "increment",
+      {
+        stream: "s-plain",
+        actor: { id: "u", name: "u" },
+      },
+      { by: 5 }
+    );
+    expect(traceSpy).toHaveBeenCalledWith(
+      { by: 5 },
+      "action: s-plain.increment"
+    );
+    expect(traceSpy).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.stringContaining("committed: s-plain.Incremented")
+    );
+
+    // Drain trace: `>> caption` (no ANSI)
+    const { subscribe } = buildDrain(traceLogger);
+    await subscribe([{ stream: "fresh-plain" }]);
+    expect(traceSpy).toHaveBeenCalledWith(">> correlated fresh-plain");
+
+    // Snap trace
+    const [snapshot] = await es.action(
+      Counter,
+      "increment",
+      { stream: "s-snap-plain", actor: { id: "u", name: "u" } },
+      { by: 1 }
+    );
+    const { snap, tombstone } = buildEs(traceLogger);
+    await snap(snapshot);
+    expect(traceSpy).toHaveBeenCalledWith(
+      `snap: ${snapshot.event!.stream}@${snapshot.event!.version}`
+    );
+
+    // Tombstone trace
+    const committed = await tombstone("ts-plain", -1, "corr-plain");
+    expect(committed).toBeDefined();
+    expect(traceSpy).toHaveBeenCalledWith(
+      `tombstoned: ts-plain@${committed!.version}`
+    );
+  });
+});

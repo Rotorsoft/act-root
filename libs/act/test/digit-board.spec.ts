@@ -1,4 +1,4 @@
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { dispose, store } from "../src/index.js";
 import { actor, app } from "./digit-board.js";
 

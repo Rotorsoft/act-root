@@ -1,6 +1,6 @@
-import { ConsoleLogger } from "./adapters/ConsoleLogger.js";
-import { InMemoryCache } from "./adapters/InMemoryCache.js";
-import { InMemoryStore } from "./adapters/InMemoryStore.js";
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import type {
   Cache,
@@ -209,7 +209,15 @@ const disposers: Disposer[] = [];
  *               `"ERROR"` for abnormal termination (exit 1)
  */
 export async function disposeAndExit(code: ExitCode = "EXIT"): Promise<void> {
-  if (code === "ERROR" && config().env === "production") return;
+  if (code === "ERROR" && config().env === "production") {
+    // Surface the swallow so incident triage can see it. Without this
+    // log the framework looks unresponsive after an uncaught exception
+    // in prod — exactly when operators most need a breadcrumb.
+    log().warn(
+      "disposeAndExit('ERROR') ignored in production — process kept alive"
+    );
+    return;
+  }
 
   // Run sequentially in reverse registration order so a disposer can rely on
   // later-registered disposers (and adapters on later-registered adapters)

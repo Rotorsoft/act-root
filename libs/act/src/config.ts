@@ -8,6 +8,7 @@
  */
 import * as fs from "node:fs";
 import { z } from "zod";
+import { log } from "./ports.js";
 import {
   Environment,
   Environments,
@@ -39,14 +40,44 @@ export const PackageSchema = z.object({
 export type Package = z.infer<typeof PackageSchema>;
 
 /**
- * Loads and parses the local package.json file as a Package object.
- * @returns The parsed and validated package metadata.
+ * Fallback package metadata when `package.json` can't be read at module
+ * load — happens when the framework is consumed from a CWD that doesn't
+ * have one (bundled CLIs, Lambda layers, embedded scripts) or when the
+ * file exists but is malformed.
+ *
+ * The values are deliberately synthetic so callers spot them immediately:
+ * `config().name === "act-fallback"` is a runtime signal that the framework
+ * couldn't load the host project's package.json.
+ *
+ * @internal
+ */
+const FALLBACK_PACKAGE: Package = {
+  name: "act-fallback",
+  version: "0.0.0-fallback",
+  description: "Synthetic fallback — package.json could not be loaded",
+};
+
+/**
+ * Loads and parses the local package.json file as a Package object. On
+ * any read or parse failure, falls back to {@link FALLBACK_PACKAGE} and
+ * stashes the error so {@link config} can surface it on first access —
+ * we can't call `log()` here because the logger port memoizes on first
+ * call and locking it at module load defeats user injection.
+ *
  * @internal
  */
 const getPackage = (): Package => {
-  const pkg = fs.readFileSync("package.json");
-  return JSON.parse(pkg.toString()) as Package;
+  try {
+    const raw = fs.readFileSync("package.json");
+    return JSON.parse(raw.toString()) as Package;
+  } catch (err) {
+    pkgLoadError = err;
+    return FALLBACK_PACKAGE;
+  }
 };
+
+/** Stashed read/parse error from {@link getPackage}, surfaced by config(). */
+let pkgLoadError: unknown;
 
 /**
  * Zod schema for the full Act Framework configuration object.
@@ -150,6 +181,22 @@ export const config = (): Config => {
       { ...pkg, env, logLevel, logSingleLine, sleepMs },
       BaseSchema
     );
+    if (pkgLoadError) {
+      // Surface the fallback once, after _validated is set so the
+      // recursive log() → config() call short-circuits. log() resolves
+      // through the port singleton — respects user injection and level.
+      const msg =
+        pkgLoadError instanceof Error
+          ? pkgLoadError.message
+          : typeof pkgLoadError === "string"
+            ? pkgLoadError
+            : "unknown error";
+      log().warn(
+        `[act] Could not read package.json (${msg}); using synthetic ` +
+          `name="${FALLBACK_PACKAGE.name}" version="${FALLBACK_PACKAGE.version}".`
+      );
+      pkgLoadError = undefined;
+    }
   }
   return _validated;
 };

@@ -1,4 +1,4 @@
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { ConcurrencyError, dispose, SNAP_EVENT, store } from "../src/index.js";
 
 describe("InMemoryStore", () => {
@@ -246,10 +246,34 @@ describe("InMemoryStore", () => {
 
     it("should claim with no streams", async () => {
       const { InMemoryStore } =
-        await import("../src/adapters/InMemoryStore.js");
+        await import("../src/adapters/in-memory-store.js");
       const s = new InMemoryStore();
       const result = await s.claim(1, 1, "actor", 1);
       expect(result).toEqual([]);
+    });
+
+    it("reuses compiled regex across streams sharing the same source", async () => {
+      const s = store();
+      await s.commit("order-1", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      // Two subscribers with the same source pattern.
+      await s.subscribe([
+        { stream: "sub-1", source: "order-.*" },
+        { stream: "sub-2", source: "order-.*" },
+      ]);
+      // Advance their watermarks so hasWork() does not short-circuit on at < 0.
+      const first = await s.claim(2, 0, "actor", 10);
+      await s.ack(first.map((l) => ({ ...l, at: 0 })));
+      // Commit a fresh event so both streams have new work past their watermark.
+      await s.commit("order-1", [{ name: "A", data: {} }], {
+        correlation: "c",
+        causation: {},
+      });
+      // Second claim — both streams compile the same source; the cache reuses the regex.
+      const claimed = await s.claim(2, 0, "actor2", 10000);
+      expect(claimed.length).toBe(2);
     });
 
     it("should not claim blocked streams", async () => {

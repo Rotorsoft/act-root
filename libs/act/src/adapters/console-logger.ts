@@ -1,5 +1,5 @@
 /**
- * @module adapters/ConsoleLogger
+ * @module adapters/console-logger
  *
  * High-performance console logger inspired by pino's design:
  * - Numeric level comparison for O(1) gating
@@ -105,7 +105,7 @@ export class ConsoleLogger implements Logger {
       obj = {};
     } else if (objOrMsg !== null && typeof objOrMsg === "object") {
       message = msg;
-      obj = Object.fromEntries(Object.entries(objOrMsg));
+      obj = { ...(objOrMsg as Record<string, unknown>) };
     } else {
       message = msg;
       obj = { value: objOrMsg };
@@ -114,7 +114,20 @@ export class ConsoleLogger implements Logger {
     const entry = Object.assign({ level, time: Date.now() }, bindings, obj);
     if (message) entry.msg = message;
 
-    process.stdout.write(JSON.stringify(entry) + "\n");
+    let line: string;
+    try {
+      line = JSON.stringify(entry);
+    } catch {
+      // Cyclic or unserializable payload — emit a minimal line rather
+      // than crash the log call site.
+      line = JSON.stringify({
+        level,
+        time: entry.time,
+        msg: message ?? "[unserializable]",
+        unserializable: true,
+      });
+    }
+    process.stdout.write(line + "\n");
   }
 
   private _prettyWrite(

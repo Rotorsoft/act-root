@@ -42,8 +42,10 @@ export class LruMap<K, V> {
   set(key: K, value: V): void {
     this._entries.delete(key);
     if (this._entries.size >= this._maxSize) {
-      const oldest = this._entries.keys().next().value;
-      if (oldest !== undefined) this._entries.delete(oldest);
+      // size >= maxSize ≥ 1 → at least one entry exists → next().value
+      // is the oldest key (asserted with `!`).
+      const oldest = this._entries.keys().next().value!;
+      this._entries.delete(oldest);
     }
     this._entries.set(key, value);
   }
