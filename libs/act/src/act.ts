@@ -465,14 +465,9 @@ export class Act<
    *
    * For small result sets, consider using {@link query_array} instead.
    *
-   * @param query - The query filter
-   * @param query.stream - Filter by stream ID
-   * @param query.name - Filter by event name
-   * @param query.after - Filter events after this event ID
-   * @param query.before - Filter events before this event ID
-   * @param query.created_after - Filter events after this timestamp
-   * @param query.created_before - Filter events before this timestamp
-   * @param query.limit - Maximum number of events to return
+   * @param query - Filter criteria — see {@link Query} for available fields
+   *   (`stream`, `name`, `after`, `before`, `created_after`, `created_before`,
+   *   `limit`, `with_snaps`, `stream_exact`)
    * @param callback - Optional callback invoked for each matching event
    * @returns Object with first event, last event, and total count
    *
@@ -575,10 +570,8 @@ export class Act<
    * Call `correlate()` before `drain()` to discover target streams. For a higher-level
    * API that handles debouncing, correlation, and signaling automatically, use {@link settle}.
    *
-   * @param options - Drain configuration options
-   * @param options.streamLimit - Maximum number of streams to process per cycle (default: 10)
-   * @param options.eventLimit - Maximum events to fetch per stream (default: 10)
-   * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
+   * @param options - Drain configuration — see {@link DrainOptions} for fields
+   *   (`streamLimit`, `eventLimit`, `leaseMillis`).
    * @returns Drain statistics with fetched, leased, acked, and blocked counts
    *
    * @example In tests and scripts
@@ -614,8 +607,8 @@ export class Act<
    * the next drain cycle.
    *
    * @param query - Query filter to scan for new correlations
-   * @param query.after - Start scanning after this event ID (default: -1)
-   * @param query.limit - Maximum events to scan (default: 10)
+   * @param query - Scan filter — see {@link Query} for fields (typically
+   *   `{ after: <event-id>, limit: <count> }`)
    * @returns Object with newly leased streams and last scanned event ID
    *
    * @example Manual correlation
@@ -665,9 +658,8 @@ export class Act<
    *
    * **Note:** Only one correlation worker can run at a time per Act instance.
    *
-   * @param query - Query filter for correlation scans
-   * @param query.after - Initial starting point (default: -1, start from beginning)
-   * @param query.limit - Events to scan per cycle (default: 100)
+   * @param query - Query filter for correlation scans — see {@link Query}
+   *   (typically `{ after: -1, limit: 100 }`)
    * @param frequency - Correlation frequency in milliseconds (default: 10000)
    * @param callback - Optional callback invoked with newly discovered streams
    * @returns `true` if worker started, `false` if already running
@@ -848,14 +840,11 @@ export class Act<
    * fully catches up paginated streams (e.g. after `reset()` on a long
    * projection) without forcing callers to loop.
    *
-   * @param options - Settle configuration options
-   * @param options.debounceMs - Debounce window in milliseconds (default: 10)
-   * @param options.correlate - Query filter for correlation scans (default: `{ after: -1, limit: 100 }`)
-   * @param options.maxPasses - Cap on correlate→drain loops (default: `Infinity`).
-   *   Early-exit on no-progress means the cap only matters in pathological cases.
-   * @param options.streamLimit - Maximum streams per drain cycle (default: 10)
-   * @param options.eventLimit - Maximum events per stream (default: 10)
-   * @param options.leaseMillis - Lease duration in milliseconds (default: 10000)
+   * @param options - Settle configuration — see {@link SettleOptions} for fields:
+   *   `debounceMs` (default 10), `correlate` (default `{ after: -1, limit: 100 }`),
+   *   `maxPasses` (default `Infinity` — kill-switch for runaway loops),
+   *   `streamLimit` (default 10), `eventLimit` (default 10),
+   *   `leaseMillis` (default 10000).
    *
    * @example API mutations
    * ```typescript

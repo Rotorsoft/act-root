@@ -444,12 +444,8 @@ export type InferEvents<
 };
 
 /**
- * Options for closing (archiving and truncating) streams.
- *
- * @see {@link IAct.close} for the close-the-books API
- */
-/**
- * Per-stream options for closing.
+ * Per-stream options for `IAct.close()` — the archive-and-truncate
+ * (or restart-with-snapshot) operation.
  */
 export type CloseTarget = {
   /** Stream name to close */
@@ -464,9 +460,9 @@ export type CloseTarget = {
 };
 
 /**
- * Result of a close operation.
- *
- * @see {@link IAct.close} for the close-the-books API
+ * Result of an `IAct.close()` operation — per-stream truncate outcomes
+ * plus the names of any streams that were skipped (concurrent writes,
+ * pending reactions).
  */
 export type CloseResult = {
   /** Per-stream truncate results (deleted count + committed event) */

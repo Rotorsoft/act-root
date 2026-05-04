@@ -163,7 +163,8 @@ class InMemoryStream {
  * - Demonstrations and examples
  *
  * **Not suitable for production** - all data is lost when the process exits.
- * Use {@link PostgresStore} for production deployments.
+ * Use `PostgresStore` (`@rotorsoft/act-pg`) or `SqliteStore`
+ * (`@rotorsoft/act-sqlite`) for production deployments.
  *
  * The in-memory store provides:
  * - Full {@link Store} interface implementation
@@ -212,7 +213,8 @@ class InMemoryStream {
  * ```
  *
  * @see {@link Store} for the interface definition
- * @see {@link PostgresStore} for production use
+ * @see `PostgresStore` (`@rotorsoft/act-pg`) and `SqliteStore`
+ *   (`@rotorsoft/act-sqlite`) for production use
  * @see {@link store} for injecting stores
  *
  * @category Adapters
