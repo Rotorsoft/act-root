@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v0.33.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.7...@rotorsoft/act-v0.33.0) (2026-05-04)
+
+
+### Features
+
+* **act:** expose cache_hit + replayed + version on Snapshot, surface in load trace ([bbf5ff2](https://github.com/rotorsoft/act-root/commit/bbf5ff2580a895baec542ebc975120319997b72d))
+* **act:** expose settle debounce default via ActOptions.settleDebounceMs ([f58bd03](https://github.com/rotorsoft/act-root/commit/f58bd03de998dc5b94c002745d90c2e6bab80113))
+
 # [@rotorsoft/act-v0.32.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.6...@rotorsoft/act-v0.32.7) (2026-05-04)
 
 
