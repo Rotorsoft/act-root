@@ -14,8 +14,8 @@ Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/pack
 - **Bottom-up model building** — states → slices → act, each level independently validated
 - **IDE-agnostic** — works over props, postMessage, or WebSocket (see [act-nvim](https://github.com/Rotorsoft/act-nvim) for Neovim integration)
 - **Embeddable** — React component for any host (IDE webview, standalone app, docs site)
-- **AI refinement** — optional prompt bar to generate code via a streaming endpoint
-- **100% test coverage** — 315+ tests across all metrics
+- **AI refinement** — optional prompt bar to generate code via a streaming endpoint (see [AI server](#ai-server-optional))
+- **High test coverage** — over 300 tests covering extraction, layout, navigation, and error paths
 
 ## Installation
 
@@ -26,6 +26,12 @@ pnpm add @rotorsoft/act-diagram
 ```
 
 **Peer dependencies:** `react >= 18`, `react-dom >= 18`
+
+The component ships its own stylesheet — import it once at the host's entry point:
+
+```ts
+import "@rotorsoft/act-diagram/styles.css";
+```
 
 ## How It Works
 
@@ -128,7 +134,7 @@ const result = navigateToCode(files, "OpenTicket", "action");
 
 | Component | Props | Description |
 |-----------|-------|-------------|
-| `ActDiagram` | `files?`, `onNavigate?`, `usePostMessage?`, `onAiRequest?`, `generating?` | Standalone wrapper: pipeline + diagram + optional AI bar |
+| `ActDiagram` | `files?`, `onNavigate?(file, line, col, type?)`, `usePostMessage?`, `onAiRequest?`, `generating?` | Standalone wrapper: pipeline + diagram + optional AI bar. `onNavigate`'s 4th argument carries the diagram element type (`state`, `slice`, `event`, …) for callers that want type-aware routing. |
 | `Diagram` | `model`, `warnings`, `onClickElement?`, `onFixWithAi?`, `toolbarExtra?` | Raw SVG diagram with pan/zoom/model tree/warnings |
 | `AiBar` | `onSubmit`, `generating?` | Resizable prompt input with model and token controls |
 | `Logo` | `size?` | Act logo SVG |
@@ -138,17 +144,26 @@ const result = navigateToCode(files, "OpenTicket", "action");
 
 | Function | Signature | Description |
 |----------|-----------|-------------|
-| `extractModel` | `(files: FileTab[]) => { model: DomainModel; error?: string }` | Extract domain model from TypeScript source files |
+| `extractModel` | `(files: FileTab[]) => { model: DomainModel; error?: string }` | Extract domain model from TypeScript source files (orchestrates `topoSort` + `buildModel`) |
+| `buildModel` | `(files: FileTab[]) => ExecuteResult` | Lower-level: transpile + execute one file at a time, returns the merged inventory and per-file errors. Use when you want to drive the pipeline yourself |
 | `validate` | `(model: DomainModel) => ValidationWarning[]` | Validate model for missing emits, etc. |
 | `navigateToCode` | `(files, name, type?, targetFile?) => { file, line, col } \| undefined` | Find source location of a named element |
 | `topoSort` | `(files: FileTab[]) => FileTab[]` | Sort files by import dependency order |
 | `computeLayout` | `(model: DomainModel) => Layout` | Pure layout computation — positions all nodes, edges, and slice boxes |
 | `emptyModel` | `() => DomainModel` | Create an empty domain model |
+| `parseMultiFileResponse` | `(text: string) => FileTab[]` | Parse a multi-file AI response into individual `FileTab`s |
+| `stripFences` | `(text: string) => string` | Strip Markdown code fences from a block — used by the AI pipeline to extract raw code |
+| `deriveProjectName` | `(files: FileTab[]) => string` | Best-effort project name from the file set — used in the AI prompt context |
 
 ### Types
 
 ```typescript
 type FileTab = { path: string; content: string };
+
+type ExecuteResult = {
+  model: DomainModel;
+  errors: Record<string, string>; // keyed by file path
+};
 
 type DomainModel = {
   entries: EntryPoint[];
@@ -156,7 +171,7 @@ type DomainModel = {
   slices: SliceNode[];
   projections: ProjectionNode[];
   reactions: ReactionNode[];
-  orchestrator?: ActNode;
+  orchestrator?: ActNode; // present only after `act()` is composed
 };
 
 type StateNode = { name, varName, events: EventNode[], actions: ActionNode[], file?, line? };
@@ -187,6 +202,20 @@ type DiagramMessage =
   | { type: "aiRequest"; prompt: string; files: FileTab[] };
 ```
 
+## AI server (optional)
+
+The `AiBar` component dispatches refinement prompts to a streaming endpoint. The package ships with a reference server at `src/server/server.ts` (port 4002) that forwards prompts to Anthropic's API:
+
+```sh
+# In one terminal
+ANTHROPIC_API_KEY=sk-ant-... pnpm -F @rotorsoft/act-diagram dev:server
+
+# In your host app, pass onAiRequest to ActDiagram
+<ActDiagram onAiRequest={(prompt, files) => fetch("http://localhost:4002/api/generate", { ... })} />
+```
+
+The reference server is a thin SSE relay — bring your own API key, your own model selection, and your own prompt strategy. AI mode is opt-in: omit `onAiRequest` and the `AiBar` doesn't render.
+
 ## Neovim Integration
 
 See [@rotorsoft/act-nvim](https://github.com/Rotorsoft/act-nvim) — a Neovim plugin that renders act-diagram in the browser with bidirectional navigation, live refresh, and LSP diagnostic forwarding.
@@ -197,7 +226,7 @@ See [@rotorsoft/act-nvim](https://github.com/Rotorsoft/act-nvim) — a Neovim pl
 # Visual dev server with sample diagram
 pnpm -F @rotorsoft/act-diagram dev
 
-# Run tests (315+ tests, 100% coverage)
+# Run the test suite
 pnpm -F @rotorsoft/act-diagram test
 
 # Build library
