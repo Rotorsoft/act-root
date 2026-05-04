@@ -16,6 +16,7 @@
  * @internal
  */
 export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
+export { CorrelateCycle, type StaticTarget } from "./correlate-cycle.js";
 export {
   runDrainCycle,
   type DrainCycle,

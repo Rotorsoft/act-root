@@ -5,13 +5,14 @@ import {
   buildHandle,
   buildHandleBatch,
   computeLagLeadRatio,
+  CorrelateCycle,
   type DrainOps,
   type EsOps,
   type Handle,
   type HandleBatch,
-  LruSet,
   runCloseCycle,
   runDrainCycle,
+  type StaticTarget,
 } from "./internal/index.js";
 import { dispose, log, store } from "./ports.js";
 import type {
@@ -28,7 +29,6 @@ import type {
   Lease,
   Logger,
   Query,
-  ReactionPayload,
   Registry,
   Schema,
   SchemaRegister,
@@ -109,29 +109,14 @@ export class Act<
   private _emitter = new EventEmitter();
   private _drain_locked = false;
   private _drain_lag2lead_ratio = 0.5;
-  private _correlation_timer: ReturnType<typeof setInterval> | undefined =
-    undefined;
   private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _settling = false;
-  private _correlation_checkpoint = -1;
-  /**
-   * Streams already subscribed via store.subscribe() — both the static
-   * targets registered at init and dynamic targets discovered by
-   * correlate(). correlate() consults this set to avoid re-subscribing
-   * known streams.
-   *
-   * Bounded LRU so apps that mint millions of dynamic targets (one per
-   * aggregate) don't grow this unbounded. Eviction costs at most one
-   * redundant store.subscribe() call per evicted-but-still-active stream
-   * (subscribe is idempotent). Cap configurable via {@link ActOptions}.
-   */
-  private readonly _subscribed_streams: LruSet<string>;
-  private _has_dynamic_resolvers = false;
-  private _correlation_initialized = false;
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events = new Set<string>();
   /** Set in do() when a committed event has reactions — cleared by drain() */
   private _needs_drain = false;
+  /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
+  private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -177,8 +162,6 @@ export class Act<
    * @param registry The registry of state, event, and action schemas
    * @param states Map of state names to their (potentially merged) state definitions
    */
-  /** Static resolver targets collected at build time */
-  private readonly _static_targets: Array<{ stream: string; source?: string }>;
   /** Batch handlers for static-target projections (target → handler) */
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
   /** Event-sourcing handlers, optionally wrapped with trace decorators */
@@ -211,9 +194,6 @@ export class Act<
     options: ActOptions = {}
   ) {
     this._batch_handlers = batchHandlers;
-    this._subscribed_streams = new LruSet(
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS
-    );
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
     this._handle = buildHandle<TEvents, TActions, TActor>({
@@ -227,14 +207,15 @@ export class Act<
     // Classify resolvers and reactive events at build time. Static targets
     // are deduplicated by (target, source) — two reactions to different
     // events that route to the same projection produce one subscription.
-    const statics = new Map<string, { stream: string; source?: string }>();
+    const statics = new Map<string, StaticTarget>();
+    let hasDynamicResolvers = false;
     for (const [name, register] of Object.entries(this.registry.events)) {
       if (register.reactions.size > 0) {
         this._reactive_events.add(name);
       }
       for (const reaction of register.reactions.values()) {
         if (typeof reaction.resolver === "function") {
-          this._has_dynamic_resolvers = true;
+          hasDynamicResolvers = true;
         } else {
           const { target, source } = reaction.resolver;
           const key = `${target}|${source ?? ""}`;
@@ -242,7 +223,17 @@ export class Act<
         }
       }
     }
-    this._static_targets = [...statics.values()];
+    this._correlate = new CorrelateCycle(
+      this.registry,
+      [...statics.values()],
+      hasDynamicResolvers,
+      this._cd,
+      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      // Cold start: assume drain is needed (historical events may need processing)
+      () => {
+        if (this._reactive_events.size > 0) this._needs_drain = true;
+      }
+    );
 
     // Build the event-name → owning state index. Duplicate event names are
     // already rejected at registration time (merge.ts), so each entry is
@@ -697,90 +688,10 @@ export class Act<
    * @see {@link start_correlations} for automatic periodic correlation
    * @see {@link stop_correlations} to stop automatic correlation
    */
-  /**
-   * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
-   * - Subscribes static resolver targets (idempotent upsert)
-   * - Populates the subscribed statics set
-   * @internal
-   */
-  private async _init_correlation(): Promise<void> {
-    if (this._correlation_initialized) return;
-    this._correlation_initialized = true;
-
-    // Subscribe static targets + read cold-start checkpoint from watermarks
-    const { watermark } = await store().subscribe(this._static_targets);
-    this._correlation_checkpoint = watermark;
-    // Cold start: assume drain is needed (historical events may need processing)
-    if (this._reactive_events.size > 0) this._needs_drain = true;
-    for (const { stream } of this._static_targets) {
-      this._subscribed_streams.add(stream);
-    }
-  }
-
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    await this._init_correlation();
-
-    // No dynamic resolvers — nothing to discover
-    if (!this._has_dynamic_resolvers)
-      return { subscribed: 0, last_id: this._correlation_checkpoint };
-
-    // Use checkpoint as floor, allow explicit query.after to override upward
-    const after = Math.max(this._correlation_checkpoint, query.after || -1);
-    const correlated = new Map<
-      string,
-      { source?: string; payloads: ReactionPayload<TEvents>[] }
-    >();
-    let last_id = after;
-    await store().query<TEvents>(
-      (event) => {
-        last_id = event.id;
-        const register = this.registry.events[event.name];
-        // skip events with no registered reactions
-        if (register) {
-          for (const reaction of register.reactions.values()) {
-            // only evaluate dynamic resolvers — statics are subscribed at init
-            if (typeof reaction.resolver !== "function") continue;
-            const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed_streams.has(resolved.target)) {
-              const entry = correlated.get(resolved.target) || {
-                source: resolved.source,
-                payloads: [],
-              };
-              entry.payloads.push({
-                ...reaction,
-                source: resolved.source,
-                event,
-              });
-              correlated.set(resolved.target, entry);
-            }
-          }
-        }
-      },
-      { ...query, after }
-    );
-
-    if (correlated.size) {
-      const streams = [...correlated.entries()].map(([stream, { source }]) => ({
-        stream,
-        source,
-      }));
-      const { subscribed } = await this._cd.subscribe(streams);
-      // Advance checkpoint only after subscribe succeeds
-      this._correlation_checkpoint = last_id;
-      if (subscribed) {
-        // Track newly subscribed dynamic targets
-        for (const { stream } of streams) {
-          this._subscribed_streams.add(stream);
-        }
-      }
-      return { subscribed, last_id };
-    }
-    // No streams to subscribe — safe to advance
-    this._correlation_checkpoint = last_id;
-    return { subscribed: 0, last_id };
+    return this._correlate.correlate(query);
   }
 
   /**
@@ -843,19 +754,7 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    if (this._correlation_timer) return false;
-
-    const limit = query.limit || 100;
-    this._correlation_timer = setInterval(
-      () =>
-        this.correlate({ ...query, after: this._correlation_checkpoint, limit })
-          .then((result) => {
-            if (callback && result.subscribed) callback(result.subscribed);
-          })
-          .catch(console.error),
-      frequency
-    );
-    return true;
+    return this._correlate.startPolling(query, frequency, callback);
   }
 
   /**
@@ -876,10 +775,7 @@ export class Act<
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    if (this._correlation_timer) {
-      clearInterval(this._correlation_timer);
-      this._correlation_timer = undefined;
-    }
+    this._correlate.stopPolling();
   }
 
   /**
@@ -1035,7 +931,7 @@ export class Act<
       this._settling = true;
 
       (async () => {
-        await this._init_correlation();
+        await this._correlate.init();
         let lastDrain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
@@ -1044,7 +940,7 @@ export class Act<
         for (let i = 0; i < maxPasses; i++) {
           const { subscribed } = await this.correlate({
             ...correlateQuery,
-            after: this._correlation_checkpoint,
+            after: this._correlate.checkpoint,
           });
           lastDrain = await this.drain(drainOptions);
           const made_progress =

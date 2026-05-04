@@ -293,8 +293,8 @@ describe("act", () => {
     expect(r1.subscribed).toBe(1);
     // Second correlate — same events, target already subscribed
     // Reset checkpoint to force re-scan
-    (dynApp as any)._correlation_checkpoint = -1;
-    (dynApp as any)._subscribed_streams.delete("dyn-x");
+    (dynApp as any)._correlate._checkpoint = -1;
+    (dynApp as any)._correlate._subscribed.delete("dyn-x");
     const r2 = await dynApp.correlate({ limit: 100 });
     expect(r2.subscribed).toBe(0); // already subscribed from r1
   });
@@ -325,11 +325,11 @@ describe("act", () => {
       .mockRejectedValueOnce(new Error("subscribe failed"));
 
     // First correlate should throw — checkpoint must NOT advance
-    const checkpoint = (dynApp as any)._correlation_checkpoint;
+    const checkpoint = (dynApp as any)._correlate._checkpoint;
     await expect(dynApp.correlate({ limit: 100 })).rejects.toThrow(
       "subscribe failed"
     );
-    expect((dynApp as any)._correlation_checkpoint).toBe(checkpoint);
+    expect((dynApp as any)._correlate._checkpoint).toBe(checkpoint);
 
     // Restore subscribe
     subscribeSpy.mockRestore();
@@ -537,17 +537,14 @@ describe("act", () => {
       .to("my-static-target") // static resolver — covers constructor branch
       .build();
 
-    // _static_targets and _subscribed_streams populated at build time
-    expect((staticApp as any)._static_targets.length).toBe(1);
-    expect((staticApp as any)._static_targets[0].stream).toBe(
-      "my-static-target"
-    );
+    // staticTargets and subscribed-streams LRU populated at build time
+    const correlate = (staticApp as any)._correlate;
+    expect(correlate.staticTargets.length).toBe(1);
+    expect(correlate.staticTargets[0].stream).toBe("my-static-target");
 
-    // Correlate initializes subscriptions for static targets (covers _subscribed_streams.add)
+    // Correlate initializes subscriptions for static targets (covers LRU add)
     await staticApp.correlate();
-    expect((staticApp as any)._subscribed_streams.has("my-static-target")).toBe(
-      true
-    );
+    expect(correlate._subscribed.has("my-static-target")).toBe(true);
 
     // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
     await staticApp.do("doStatic", { stream: "static-1", actor }, {});
