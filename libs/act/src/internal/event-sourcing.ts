@@ -195,6 +195,24 @@ export async function load<
     }
   );
 
+  // Populate the cache when this load actually processed events. Without
+  // this, read-heavy paths (UI loops calling load() many times between
+  // commits) miss the cache forever — only action() would ever warm it.
+  // No race-protection re-check needed: the cache is a state checkpoint
+  // at (version, event_id), and any subsequent load queries past
+  // event_id, picks up missed events, and replays — so an "older" cache
+  // write from a concurrent slower load is self-correcting on next access.
+  // Time-travel loads bypass cache entirely and skip this too.
+  if (replayed > 0 && !timeTravel && event) {
+    await cache().set(stream, {
+      state,
+      version,
+      event_id: event.id,
+      patches,
+      snaps,
+    });
+  }
+
   return { event, state, version, patches, snaps, cache_hit, replayed };
 }
 
