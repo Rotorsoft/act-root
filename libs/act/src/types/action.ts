@@ -234,12 +234,39 @@ export type Snapshot<TState extends Schema, TEvents extends Schemas> = {
   readonly state: TState;
   /** Event that created this snapshot (undefined for initial state) */
   readonly event?: Committed<TEvents, keyof TEvents>;
+  /**
+   * Stream head version (sequence number of the last event in the
+   * stream). `-1` for a brand-new stream with no events. Always defined
+   * — populated from the cache on hit-with-no-new-events, from the last
+   * replayed event on cache miss, or from the just-committed event on
+   * snapshots returned by `action()`. Use this instead of
+   * `event?.version` when you need the version even after a cache hit
+   * skipped the event replay entirely.
+   */
+  readonly version: number;
   /** Number of patches applied since last snapshot */
   readonly patches: number;
   /** Number of snapshots taken for this stream */
   readonly snaps: number;
   /** Domain patch applied by this event (undefined for initial/loaded state) */
   readonly patch?: Readonly<Patch<TState>>;
+  /**
+   * `true` when the state was reconstructed from a cached checkpoint
+   * (skipping full event replay). Set by `load()`; propagated unchanged
+   * to every snapshot `action()` returns since they all derive from the
+   * same initial load. Always `false` for time-travel loads, which
+   * bypass the cache by design.
+   */
+  readonly cache_hit: boolean;
+  /**
+   * Number of events processed by the `load()` call that produced this
+   * snapshot — counts every snap and patch event applied past the cache
+   * point. `0` after a cache hit with no new events; equals the event
+   * count from snap/start after a cache miss. Distinct from `patches`,
+   * which is the snap-distance accumulator used by snap policies.
+   * Propagated unchanged by `action()`.
+   */
+  readonly replayed: number;
 };
 
 /**

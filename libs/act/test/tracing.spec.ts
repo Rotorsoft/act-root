@@ -93,17 +93,60 @@ describe("tracing", () => {
       traceSpy = vi.spyOn(log(), "trace").mockImplementation(() => {});
     });
 
-    it("withLoadTrace logs entry without asOf", async () => {
+    it("logs load exit with cache + v + replayed + snaps + patches inline in the body", async () => {
       const { load } = buildEs(withLevel("trace"));
       await load(Counter, "s1");
-      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining("s1"));
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /s1\s.*miss.*v=-?\d+.*replayed=\d+.*snaps=\d+.*patches=\d+/
+        )
+      );
     });
 
-    it("withLoadTrace logs entry with asOf marker", async () => {
+    it("logs as-of details including the active filter fields", async () => {
       const { load } = buildEs(withLevel("trace"));
-      await load(Counter, "s1", undefined, { before: 9999 });
+      await load(Counter, "s1", undefined, { before: 9999, limit: 50 });
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringContaining("s1 (as-of)")
+        expect.stringMatching(
+          /s1 \(as-of before=9999 limit=50\).*miss.*v=-?\d+.*replayed=\d+/
+        )
+      );
+    });
+
+    it("logs as-of created_before/created_after when those filters are set", async () => {
+      const { load } = buildEs(withLevel("trace"));
+      const before = new Date("2026-05-01T00:00:00.000Z");
+      const after = new Date("2026-04-01T00:00:00.000Z");
+      await load(Counter, "s1", undefined, {
+        created_before: before,
+        created_after: after,
+      });
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /created_before=2026-05-01T00:00:00\.000Z.*created_after=2026-04-01T00:00:00\.000Z/
+        )
+      );
+    });
+
+    it("renders bare '(as-of)' marker when an empty asOf object is passed", async () => {
+      const { load } = buildEs(withLevel("trace"));
+      // asOf={} doesn't actually time-travel (load checks
+      // Object.values(asOf).some(...)), but the marker still fires because
+      // the trace decorator only checks `asOf` truthiness.
+      await load(Counter, "s1", undefined, {});
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/s1 \(as-of\)/)
+      );
+    });
+
+    it("reports cache hit on the second load of the same stream", async () => {
+      const { load } = buildEs(withLevel("trace"));
+      // Prime the cache via an action so a checkpoint exists.
+      await es.action(Counter, "increment", target("s-warm"), { by: 1 });
+      traceSpy.mockClear();
+      await load(Counter, "s-warm");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/s-warm\s.*hit/)
       );
     });
 

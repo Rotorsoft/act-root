@@ -142,21 +142,32 @@ export async function load<
 ): Promise<Snapshot<TState, TEvents>> {
   const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
+  const cache_hit = !!cached;
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
+  // version always reflects stream head: starts from the cached version
+  // (or -1 for a fresh stream / cache miss), advances per event seen.
+  let version = cached?.version ?? -1;
+  // replayed counts events processed by THIS load only (snap or patch);
+  // distinct from `patches` (the snap-distance accumulator carried over
+  // from the cache).
+  let replayed = 0;
   let event: Committed<TEvents, string> | undefined;
 
   await store().query(
     (e) => {
       event = e as Committed<TEvents, string>;
+      version = e.version;
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
         snaps++;
         patches = 0;
+        replayed++;
       } else if (me.patch[e.name]) {
         state = patch(state, me.patch[e.name](event, state));
         patches++;
+        replayed++;
       } else if (e.name !== TOMBSTONE_EVENT) {
         // Unknown event — not in this state's reducer map. Causes:
         // deleted/renamed event in a versioned schema, load() called with
@@ -166,7 +177,16 @@ export async function load<
           `Skipping unknown event "${String(e.name)}" on stream "${stream}" (id=${e.id}) — no reducer in state "${me.name}"`
         );
       }
-      callback && callback({ event, state, patches, snaps });
+      callback &&
+        callback({
+          event,
+          state,
+          version,
+          patches,
+          snaps,
+          cache_hit,
+          replayed,
+        });
     },
     {
       stream,
@@ -175,7 +195,7 @@ export async function load<
     }
   );
 
-  return { event, state, patches, snaps };
+  return { event, state, version, patches, snaps, cache_hit, replayed };
 }
 
 /**
@@ -300,7 +320,19 @@ export async function action<
     const p = me.patch[event.name](event, state);
     state = patch(state, p);
     patches++;
-    return { event, state, patches, snaps: snapshot.snaps, patch: p };
+    // cache_hit / replayed propagate from the initial load — these
+    // post-commit snapshots all derive from the same loaded state.
+    // version advances per committed event (each is a new stream head).
+    return {
+      event,
+      state,
+      version: event.version,
+      patches,
+      snaps: snapshot.snaps,
+      patch: p,
+      cache_hit: snapshot.cache_hit,
+      replayed: snapshot.replayed,
+    };
   });
 
   // fire and forget snaps
