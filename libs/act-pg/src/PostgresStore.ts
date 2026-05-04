@@ -31,6 +31,12 @@ types.setTypeParser(types.builtins.JSONB, (val) =>
 type Config = Readonly<{ schema: string; table: string }> & pg.PoolConfig;
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+// PostgreSQL SQLSTATE for `unique_violation` — surfaces when a concurrent
+// commit beats us between the version SELECT and the INSERT, hitting the
+// unique index on (stream, version). Stable across PG versions per the
+// SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
+const PG_UNIQUE_VIOLATION = "23505";
 function assertSafeIdentifier(value: string, label: string) {
   if (!SAFE_IDENTIFIER.test(value))
     throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
@@ -415,8 +421,24 @@ export class PostgresStore implements Store {
           INSERT INTO ${this._fqt}(name, data, stream, version, meta)
           VALUES($1, $2, $3, $4, $5) RETURNING *`;
         const vals = [name, data, stream, version, meta];
-        const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
-        committed.push(rows.at(0)!);
+        try {
+          const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
+          committed.push(rows.at(0)!);
+        } catch (error) {
+          // PG unique-violation on (stream, version) — a concurrent commit
+          // beat us between the version SELECT and this INSERT. Surface as
+          // ConcurrencyError so callers retry on the framework signal
+          // instead of an adapter-specific error.
+          if ((error as { code?: string })?.code === PG_UNIQUE_VIOLATION) {
+            throw new ConcurrencyError(
+              stream,
+              version - 1,
+              msgs as unknown as Message<Schemas, string>[],
+              expectedVersion ?? -1
+            );
+          }
+          throw error;
+        }
       }
 
       await client
