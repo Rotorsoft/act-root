@@ -6,6 +6,62 @@ All PostgreSQL benchmarks run against a local instance on port 5431. Each benchm
 
 ---
 
+## CI regression guard
+
+A small set of hot-path scenarios runs on every PR via `pnpm -F @rotorsoft/act bench:run && pnpm -F @rotorsoft/act bench:check`. The check compares against a checked-in baseline (`libs/act/perf-baseline.json`); a scenario fails CI if its p50 exceeds 1.5× the baseline.
+
+To refresh the baseline (only when the slowdown is intentional):
+
+```bash
+pnpm -F @rotorsoft/act bench:update    # writes perf-baseline.json
+```
+
+…and commit the change in a PR labeled `perf-baseline-update` with rationale in this document.
+
+### Current scenarios + numbers (InMemoryStore, NODE_ENV=test)
+
+| Scenario | p50 | ops/sec | effective |
+|---|---:|---:|---:|
+| `action`: single commit | 2.4 ms | 426 | — |
+| `load`: warm cache hit | 1.2 ms | 848 | — |
+| `load`: cold replay 100 events | 1.2 ms | 821 | — |
+| `action`+`load` roundtrip | 3.7 ms | 273 | — |
+| 50 concurrent commits (different streams) | 3.6 ms / batch | 278 batches/sec | **~13,900 commits/sec** |
+| 20 contended commits (same stream, with retries) | 2.5 ms / batch | 401 batches/sec | **~8,000 commits/sec** |
+
+### How to read these numbers
+
+- **Single-stream throughput** (one user/aggregate at a time): bounded by `action` p50. ~430 commits/sec on InMemoryStore.
+- **Cross-stream throughput** (many independent aggregates): scales with the event loop's parallelism. ~13,900 commits/sec on InMemoryStore at 50-way parallelism.
+- **Same-stream contention** (e.g. multiplayer game shared room): bounded by optimistic-concurrency retries. ~8,000 commits/sec for 20 contending users on InMemoryStore. Real-world stores will be slower (network/disk-bound).
+- **All numbers are InMemoryStore at `NODE_ENV=test`** (sleepMs=0). Production stores trade absolute throughput for durability — see `libs/act-pg/test/*.bench.ts` for Postgres numbers (claim, drain, watermark, contention).
+
+> ⚠ Synthetic upper bounds. Real apps with invariants, multi-event commits, and reactions firing typically see **30–60% of these numbers**. See "Realistic workloads" below for measurements that include those costs.
+
+---
+
+## Realistic workloads
+
+Run with `pnpm -F @rotorsoft/act bench:realistic`. These exercise the full pipeline real apps pay for: payload validation, invariant checking, multi-step workflows, reaction dispatch through `correlate→drain`, and projection updates. Numbers are not in the CI regression guard — they're for capacity planning.
+
+| Scenario | p50 | per-iter | effective |
+|---|---:|---:|---:|
+| Ticket workflow: open → assign → close (3 actions, 3 events, 2 invariants) | 7.2 ms | 138 workflows/sec | **~414 commits/sec** |
+| Calculator session: 10 key presses + projection updating (correlate+drain) | 32.3 ms | 31 sessions/sec | **~310 commits/sec** |
+| Shared inventory: 10 contending reservations (same stream, invariant + retries) | 2.6 ms | 394 batches/sec | **~3,940 commits/sec** |
+
+### Synthetic vs realistic — the gap
+
+| Question | Synthetic upper bound | Realistic |
+|---|---:|---:|
+| Single-stream sequential commits | 430 /sec (`action: single commit`) | 414 /sec (3-step ticket workflow with invariants) |
+| Same-stream contention | 8,000 /sec (no invariants, no reactions) | 3,940 /sec (with `stock > 0` invariant) — **~50%** |
+| Multi-action with reactions firing | not measured (reactions skipped in regression guard) | 310 /sec (10 actions + correlate + drain) — **the drain cost is real** |
+
+**Takeaway:** the regression guard's synthetic numbers are useful for catching framework slowdowns. For capacity planning, use the realistic numbers — particularly the calculator session, since "many actions + projection updating" matches most CRUD-style apps.
+
+---
+
 ## Cache Port (v0.20.0)
 
 **PR:** #460 — Introduced always-on `InMemoryCache` (LRU, maxSize 1000) to eliminate full event replay on `load()`.

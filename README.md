@@ -50,48 +50,15 @@ Event sourcing observatory — connect to any Act PostgreSQL store and inspect e
 
 ## `Actions` -> `{ State }` <- `Reactions`
 
-Looking back at the history of software development, a few fundamental questions arise:
+Any system distills into three things:
 
-- What is the simplest way to think about the systems we build?
-- How do we balance clarity and composability without sacrificing scalability and flexibility?
-- Can we design systems that are easier to reason about while still capable of handling complexity?
+- **State** — the data you care about
+- **Actions** — the changes you want to make to it
+- **Reactions** — what happens as a result
 
-When you break it all down, any system seems to distill into three fundamental concepts:
+Act takes those three primitives seriously: Zod schemas as the source of truth, immutable events as the audit trail, and a built-in pipeline that turns reactions into observable workflows.
 
-- **State**: The data we care about.
-- **Actions**: The changes we want to make.
-- **Reactions**: The things that happen as a result.
-
-## Timeless Ideas, Modern Context
-
-In the earliest days of computing, the "Actor Model" offered a simple yet powerful mental framework: entities with their own state, processing messages asynchronously. Similarly, event-driven programming showed how reactions to changes could create more dynamic and decoupled systems. Could we take inspiration from the simplicity of the "Actor Model" while integrating modern concepts like "Event Sourcing" and "CQRS" to form the backbone of consistency and integration for the next generation of autonomous systems?
-
-At its core, any software system is a collection of "consistent states" interacting with one another. Each instance has its unique identity, clear boundaries serving as the authority over its data, and a well-defined lifecycle. Examples include a user profile, an order, or an inventory item. While we often call these "entities", "aggregates", or "domain objects", at their essence, they are all distinct islands of state.
-
-## Actions and Reactions: The Lifeblood of a System
-
-Actions are the sole mechanism for altering state, ensuring atomic updates and clear audit trails. Actions serve as the catalysts for change within the system, representing the intent of actors, whether users, systems, or agents. To maintain clarity and consistency, actions must explicitly define their inputs and outputs, producing events that signal the changes to the state. By capturing these changes as immutable event streams, the system preserves a complete history, allowing state reconstruction at any point in time.
-
-Reactions, on the other hand, define how the system responds to these changes. They drive downstream updates, trigger additional state modifications, or facilitate integrations with external systems. Reactions play a crucial role in maintaining a loosely coupled system, allowing workflows and behaviors to evolve independently. While an action may target a specific state instance, reactions can scale to address broader concerns, influencing interconnected states across varying scopes and domains, ultimately fostering systemic adaptability.
-
-## A Simplified Flow
-
-1. An **actor** (user or agent) initiates an action to interact with a state instance.
-2. The state instance processes the action, validates it, updates its state, and emits events.
-3. **Agents** react to these events, triggering additional actions or external integrations as needed.
-4. Entire workflows can be tracked and potentially replayed by correlating actions and reactions throughout the system.
-
-## Integration
-
-To tie everything together, this approach requires a robust integration layer to route events reliably and ensure agents stay informed about system changes. A message "broker" serves as the communication backbone, facilitating event-driven interactions across the system. The integration layer must provide several key capabilities:
-
-1. Subscriptions: Agents subscribe to relevant events, enabling them to reactively trigger workflows based on the events they receive. This allows for flexibility in processing and ensures that agents are always in sync with the latest state changes.
-2. Event Delivery: Reliable event queues ensure that events are delivered to the correct agents in a timely and guaranteed manner. This includes mechanisms for retries, ensuring delivery even in the face of failures, and maintaining the correct order of events.
-3. Scalability: As new agents or state instances are introduced, the system can expand without introducing tight dependencies or bottlenecks, enabling efficient handling of growing loads and complex interactions.
-
-## Complexity Emerging from Simplicity
-
-Living systems demonstrate that intricate behaviors and complex structures can emerge from simple, foundational building blocks. This natural principle suggests that advanced systems can be constructed from a few elemental components. The key question is whether focusing on the core concepts of state, actions, and reactions, while layering in reliability and scalability through event-driven design, provides all the essential ingredients needed to build the next generation of software agents.
+→ For the why-this-shape rationale (Actor Model lineage, integration patterns, the emergent-complexity argument), see [docs/PHILOSOPHY.md](./docs/PHILOSOPHY.md).
 
 ## Design Decisions
 
@@ -137,6 +104,8 @@ Projections are derived data — you should be able to throw one away and rebuil
 ### Snapshots and Cache: Two Layers
 
 Cache (in-memory LRU) is checked first on every `load()`, eliminating store round-trips for warm streams. Snapshots (persisted as `__snapshot__` events in the store) are the fallback on cache miss — cold start, LRU eviction, or process restart. Together they keep `load()` fast regardless of stream length.
+
+Every `Snapshot` exposes what just happened on the way to producing it: `cache_hit` (was the read served from cache?), `replayed` (how many events did this load process past the cache point?), and `version` (current head version of the stream). The `load` trace breadcrumb surfaces these inline so operators can see cache effectiveness, replay cost, and stream depth at a glance — see [PERFORMANCE.md](./libs/act/PERFORMANCE.md) for measured throughput numbers.
 
 ### Time-Travel via Query Filters, Not a Separate API
 
@@ -189,6 +158,12 @@ This cleanly separates "has this request been processed?" (API concern with TTL 
 ### Vertical Slices, Not Layers
 
 `slice()` groups a partial state with its reactions into a self-contained feature module. Each slice owns its actions, events, patches, and reaction handlers. Slices compose into the full application via `act().withSlice()`. This keeps related code together instead of scattering it across service/repository/handler layers.
+
+## Quality
+
+- **100% coverage** maintained across statements, branches, functions, and lines for `libs/act` (`pnpm test` runs the full suite with coverage in CI).
+- **Property-based tests** (`fast-check`) cover commit version monotonicity, claim/lease lifecycle correctness, cache/store coherence, correlate→drain delivery exactness, and close idempotency. See [`libs/act/test/property/`](./libs/act/test/property/).
+- **CI perf regression guard** runs a fast bench suite on every PR and fails when any scenario's p50 exceeds 1.5× the checked-in baseline. Numbers, scenarios, and the baseline-update workflow are in [PERFORMANCE.md](./libs/act/PERFORMANCE.md#ci-regression-guard).
 
 ## Quickstart
 
@@ -291,9 +266,12 @@ Any spec format works: event modeling diagrams, event storming boards, JSON conf
 
 ## Documentation
 
-- [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
-- [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro)
-- [Examples](#examples)
+- [API Reference](https://rotorsoft.github.io/act-root/docs/api/) — typedoc-generated, refreshed on every push to `master`
+- [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro) — domain modeling, state management, error handling, real-time
+- [Performance & Benchmarks](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
+- [Philosophy](./docs/PHILOSOPHY.md) — Actor Model lineage, integration patterns, why this shape
+- [The Book](https://payhip.com/b/7ezLy) — Event Sourcing / CQRS / DDD applied end-to-end through a multiplayer Risk game
+- [Examples](#examples) — calculator, WolfDesk ticketing, tRPC integration
 
 ## How to Contribute
 
