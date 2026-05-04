@@ -1,7 +1,6 @@
 ---
 id: architecture
 title: Architecture
-slug: /architecture
 ---
 
 # Architecture

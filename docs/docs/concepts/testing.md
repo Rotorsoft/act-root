@@ -84,7 +84,7 @@ it("should enforce business rules", async () => {
 
 ## Testing Reactions and Projections
 
-Reactions require `correlate()` → `drain()` to process:
+Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire.
 
 ```typescript
 it("should process reactions", async () => {
@@ -99,6 +99,26 @@ it("should process reactions", async () => {
   expect(items[t.stream].name).toBe("Test");
 });
 ```
+
+### `settle()` for chained reactions
+
+For tests that exercise reaction chains (a reaction triggers an action that emits an event that triggers another reaction…), `settle()` runs `correlate → drain` in a loop until a pass produces no progress, then resolves once all the work has drained:
+
+```typescript
+it("processes a multi-hop reaction chain", async () => {
+  const t = target();
+  await app.do("OpenTicket", t, { title: "Bug" });
+
+  await new Promise<void>((resolve) => {
+    app.once("settled", () => resolve());
+    app.settle();
+  });
+
+  // Every reaction in the chain has now run.
+});
+```
+
+`settle()` is the production-friendly entry point — it debounces rapid commits and emits a `"settled"` lifecycle event when all correlate/drain passes are done. In tests, await the event when you need a known-quiet checkpoint.
 
 ### Projection Cleanup
 

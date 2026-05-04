@@ -1,11 +1,11 @@
 ---
 id: configuration
-title: Builders & Adapters
+title: Configuration
 ---
 
-# Builders & Adapters
+# Configuration
 
-Act uses a fluent builder pattern for defining domain logic and a port/adapter pattern for infrastructure concerns.
+Act uses a fluent builder pattern for defining domain logic, a port/adapter pattern for infrastructure (store, cache, logger), and a small set of orchestrator options for tuning correlation and settle behavior. This page covers all three.
 
 ## State Builder
 
