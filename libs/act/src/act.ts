@@ -12,6 +12,7 @@ import {
   type HandleBatch,
   runCloseCycle,
   runDrainCycle,
+  SettleLoop,
   type StaticTarget,
 } from "./internal/index.js";
 import { dispose, log, store } from "./ports.js";
@@ -109,14 +110,14 @@ export class Act<
   private _emitter = new EventEmitter();
   private _drain_locked = false;
   private _drain_lag2lead_ratio = 0.5;
-  private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
-  private _settling = false;
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events = new Set<string>();
   /** Set in do() when a committed event has reactions — cleared by drain() */
   private _needs_drain = false;
   /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
+  /** Debounced correlate→drain catch-up loop. */
+  private readonly _settle: SettleLoop<TEvents>;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -234,6 +235,14 @@ export class Act<
         if (this._reactive_events.size > 0) this._needs_drain = true;
       }
     );
+    this._settle = new SettleLoop<TEvents>({
+      logger: this._logger,
+      init: () => this._correlate.init(),
+      checkpoint: () => this._correlate.checkpoint,
+      correlate: (q) => this.correlate(q),
+      drain: (o) => this.drain(o),
+      onSettled: (drain) => this.emit("settled", drain),
+    });
 
     // Build the event-name → owning state index. Duplicate event names are
     // already rejected at registration time (merge.ts), so each entry is
@@ -784,10 +793,7 @@ export class Act<
    * @see {@link settle}
    */
   stop_settling() {
-    if (this._settle_timer) {
-      clearTimeout(this._settle_timer);
-      this._settle_timer = undefined;
-    }
+    this._settle.stop();
   }
 
   /**
@@ -917,44 +923,6 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
-    const {
-      debounceMs = 10,
-      correlate: correlateQuery = { after: -1, limit: 100 },
-      maxPasses = Infinity,
-      ...drainOptions
-    } = options;
-
-    if (this._settle_timer) clearTimeout(this._settle_timer);
-    this._settle_timer = setTimeout(() => {
-      this._settle_timer = undefined;
-      if (this._settling) return;
-      this._settling = true;
-
-      (async () => {
-        await this._correlate.init();
-        let lastDrain: Drain<TEvents> | undefined;
-        // Loop correlate→drain until a pass produces no work — this fully
-        // catches up paginated streams (e.g. after `reset()` on a long
-        // projection) without forcing callers to roll their own loop.
-        // `maxPasses` caps runtime in pathological cases.
-        for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this.correlate({
-            ...correlateQuery,
-            after: this._correlate.checkpoint,
-          });
-          lastDrain = await this.drain(drainOptions);
-          const made_progress =
-            subscribed > 0 ||
-            lastDrain.acked.length > 0 ||
-            lastDrain.blocked.length > 0;
-          if (!made_progress) break;
-        }
-        if (lastDrain) this.emit("settled", lastDrain);
-      })()
-        .catch((err) => this._logger.error(err))
-        .finally(() => {
-          this._settling = false;
-        });
-    }, debounceMs);
+    this._settle.schedule(options);
   }
 }
