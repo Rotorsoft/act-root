@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.33.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.0...@rotorsoft/act-v0.33.1) (2026-05-04)
+
+
+### Bug Fixes
+
+* **act:** populate cache on load() so read-heavy paths are warm ([da8bb33](https://github.com/rotorsoft/act-root/commit/da8bb33afddc0de1a904f6564b390de38ecce964))
+
 # [@rotorsoft/act-v0.33.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.7...@rotorsoft/act-v0.33.0) (2026-05-04)
 
 
