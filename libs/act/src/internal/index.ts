@@ -19,7 +19,9 @@ export { classifyRegistry, type Classification } from "./build-classify.js";
 export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
 export { CorrelateCycle, type StaticTarget } from "./correlate-cycle.js";
 export {
+  DrainController,
   runDrainCycle,
+  type DrainControllerDeps,
   type DrainCycle,
   type Handle,
   type HandleBatch,

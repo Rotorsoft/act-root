@@ -262,7 +262,7 @@ describe("act", () => {
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
       throw new Error("test");
     });
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedClaim.mockRestore();
@@ -578,7 +578,7 @@ describe("act", () => {
     do {
       d = await app.drain();
     } while (d.acked.length || d.blocked.length);
-    expect((app as any)._needs_drain).toBe(false);
+    expect((app as any)._drain.armed).toBe(false);
   });
 
   it("should clear _needs_drain via handler path when drain finds no matching reactions", async () => {
@@ -597,11 +597,11 @@ describe("act", () => {
     const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
     // Set _needs_drain manually
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const d = await app.drain();
     expect(d.acked.length).toBe(0);
     expect(d.blocked.length).toBe(0);
-    expect((app as any)._needs_drain).toBe(false);
+    expect((app as any)._drain.armed).toBe(false);
     mockClaim.mockRestore();
     mockQuery.mockRestore();
     mockAck.mockRestore();
@@ -670,7 +670,7 @@ describe("act", () => {
     expect((noRxApp as any)._reactive_events.size).toBe(0);
     // correlate inits but does NOT set _needs_drain (no reactive events)
     await noRxApp.correlate();
-    expect((noRxApp as any)._needs_drain).toBe(false);
+    expect((noRxApp as any)._drain.armed).toBe(false);
     // drain skips immediately
     const d = await noRxApp.drain();
     expect(d.fetched.length).toBe(0);
@@ -706,7 +706,7 @@ describe("act", () => {
         return []; // no events for any stream
       });
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const d = await app.drain();
     expect(d.leased.length).toBe(2);
     mockClaim.mockRestore();

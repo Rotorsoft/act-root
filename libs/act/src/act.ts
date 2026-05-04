@@ -5,14 +5,13 @@ import {
   buildHandle,
   buildHandleBatch,
   classifyRegistry,
-  computeLagLeadRatio,
   CorrelateCycle,
+  DrainController,
   type DrainOps,
   type EsOps,
   type Handle,
   type HandleBatch,
   runCloseCycle,
-  runDrainCycle,
   SettleLoop,
 } from "./internal/index.js";
 import { dispose, log, store } from "./ports.js";
@@ -121,12 +120,10 @@ export class Act<
   TActor extends Actor = Actor,
 > implements IAct<TEvents, TActions, TActor> {
   private _emitter = new EventEmitter();
-  private _drain_locked = false;
-  private _drain_lag2lead_ratio = 0.5;
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events: ReadonlySet<string>;
-  /** Set in do() when a committed event has reactions — cleared by drain() */
-  private _needs_drain = false;
+  /** Drain pipeline driver: armed flag, concurrency lock, adaptive ratio. */
+  private readonly _drain: DrainController<TEvents, TActions, TSchemaReg>;
   /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   /** Debounced correlate→drain catch-up loop. */
@@ -224,6 +221,17 @@ export class Act<
     this._reactive_events = reactiveEvents;
     this._event_to_state = eventToState;
 
+    this._drain = new DrainController({
+      logger: this._logger,
+      ops: this._cd,
+      registry: this.registry,
+      batchHandlers: this._batch_handlers,
+      handle: this._handle,
+      handleBatch: this._handle_batch,
+      onAcked: (acked) => this.emit("acked", acked),
+      onBlocked: (blocked) => this.emit("blocked", blocked),
+    });
+
     this._correlate = new CorrelateCycle(
       this.registry,
       staticTargets,
@@ -232,7 +240,7 @@ export class Act<
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       // Cold start: assume drain is needed (historical events may need processing)
       () => {
-        if (this._reactive_events.size > 0) this._needs_drain = true;
+        if (this._reactive_events.size > 0) this._drain.arm();
       }
     );
     this._settle = new SettleLoop<TEvents>(
@@ -351,14 +359,18 @@ export class Act<
       reactingTo,
       skipValidation
     );
-    // Flag drain needed when any committed event has reactions
-    for (const snap of snapshots) {
-      if (
-        snap.event?.name &&
-        this._reactive_events.has(snap.event.name as string)
-      ) {
-        this._needs_drain = true;
-        break;
+    // Arm the drain when any committed event has reactions.
+    // Skip the scan entirely when no event has any reaction (common in
+    // pure-state-machine apps).
+    if (this._reactive_events.size > 0) {
+      for (const snap of snapshots) {
+        if (
+          snap.event?.name &&
+          this._reactive_events.has(snap.event.name as string)
+        ) {
+          this._drain.arm();
+          break;
+        }
       }
     }
     this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
@@ -581,69 +593,8 @@ export class Act<
    * @see {@link correlate} for dynamic stream discovery
    * @see {@link start_correlations} for automatic correlation
    */
-  async drain({
-    streamLimit = 10,
-    eventLimit = 10,
-    leaseMillis = 10_000,
-  }: DrainOptions = {}): Promise<Drain<TEvents>> {
-    // Skip drain when no committed events have registered reactions
-    if (!this._needs_drain) {
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    }
-
-    if (this._drain_locked) {
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    }
-
-    try {
-      this._drain_locked = true;
-      const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
-      const leading = streamLimit - lagging;
-
-      const cycle = await runDrainCycle(
-        this._cd,
-        this.registry,
-        this._batch_handlers,
-        this._handle,
-        this._handle_batch,
-        lagging,
-        leading,
-        eventLimit,
-        leaseMillis
-      );
-
-      if (!cycle) {
-        // claim() returned no leases — fully caught up
-        this._needs_drain = false;
-        return { fetched: [], leased: [], acked: [], blocked: [] };
-      }
-
-      const { leased, fetched, handled, acked, blocked } = cycle;
-
-      // Adapt next cycle's frontier split to where the pressure is.
-      this._drain_lag2lead_ratio = computeLagLeadRatio(
-        handled,
-        lagging,
-        leading
-      );
-
-      if (acked.length) this.emit("acked", acked);
-      if (blocked.length) this.emit("blocked", blocked);
-
-      // Clear the drain flag when fully caught up (nothing processed, no
-      // pending errors). Errors keep the flag set so retries flow through
-      // the next drain.
-      const hasErrors = handled.some(({ error }) => error);
-      if (!acked.length && !blocked.length && !hasErrors)
-        this._needs_drain = false;
-
-      return { fetched, leased, acked, blocked };
-    } catch (error) {
-      this._logger.error(error);
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    } finally {
-      this._drain_locked = false;
-    }
+  async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    return this._drain.drain(options);
   }
 
   /**
@@ -825,9 +776,7 @@ export class Act<
    */
   async reset(streams: string[]): Promise<number> {
     const count = await store().reset(streams);
-    if (count > 0 && this._reactive_events.size > 0) {
-      this._needs_drain = true;
-    }
+    if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
     return count;
   }
 
