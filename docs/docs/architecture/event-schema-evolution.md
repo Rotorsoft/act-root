@@ -1,3 +1,8 @@
+---
+id: event-schema-evolution
+title: Event schema evolution
+---
+
 # Event schema evolution
 
 Events on disk are immutable. State shapes change over time. Reconciling those two facts is what schema evolution is.
@@ -118,7 +123,7 @@ Schema evolution interacts with the cache and snapshot layers:
 
 In practice this means: snapshots are forward-compatible as long as your reducers handle the missing fields. If a v1 snapshot's missing fields would corrupt the v2 reducer, the right move is `app.close({ restart: true })` — load current state via the latest reducers, commit a fresh `__snapshot__` reflecting the current shape, tombstone the historical events.
 
-See `cache-and-snapshots.md` for more on the snapshot lifecycle.
+See [Cache and snapshots](./cache-and-snapshots) for more on the snapshot lifecycle.
 
 ## What to do when
 

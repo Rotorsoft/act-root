@@ -1,3 +1,8 @@
+---
+id: extension-points
+title: Extension points
+---
+
 # Extension points
 
 Three pluggable contracts: `Store`, `Cache`, `Logger`. Each is exposed as a singleton port. A new adapter implements the contract; calling the port with the adapter installs it (first call wins).
@@ -28,7 +33,7 @@ The `dispose()` port collects cleanup callbacks. Adapters' `dispose()` methods a
 
 ## Store contract
 
-The `Store` interface in `libs/act/src/types/index.ts`. The framework needs the store to do **eight** things:
+The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these eleven things:
 
 ```ts
 interface Store extends Disposable {
@@ -109,13 +114,11 @@ For distributed deployments, a Redis-backed adapter is the natural extension. No
 ```ts
 interface Logger extends Disposable {
   level: string;
-  fatal(msgOrObj, msg?: string): void;
-  error(msgOrObj, msg?: string): void;
-  warn(msgOrObj, msg?: string): void;
-  info(msgOrObj, msg?: string): void;
-  debug(msgOrObj, msg?: string): void;
-  trace(msgOrObj, msg?: string): void;
-  child(bindings): Logger;
+  // Each level overloads on (obj, msg?) and (msg) — see ports.ts
+  fatal(obj: unknown, msg?: string): void;
+  fatal(msg: string): void;
+  // ... error, warn, info, debug, trace follow the same pair of overloads
+  child(bindings: Record<string, unknown>): Logger;
 }
 ```
 

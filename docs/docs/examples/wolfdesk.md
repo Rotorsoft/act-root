@@ -57,29 +57,44 @@ Each feature is a self-contained slice with its state and reactions:
 ```typescript
 export const TicketCreationSlice = slice()
   .withState(TicketCreation)
-  .withState(TicketOperations)    // needed for cross-state dispatch
+  .withState(TicketOperations)    // included so the reaction can dispatch AssignTicket
   .on("TicketOpened")
     .do(async function assign(event, _stream, app) {
-      const agent = assignAgent(event.stream, event.data.supportCategoryId, event.data.priority);
-      await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
+      const agent = assignAgent(
+        event.stream,
+        event.data.supportCategoryId,
+        event.data.priority,
+      );
+      await app.do(
+        "AssignTicket",
+        {
+          stream: event.stream,
+          actor: { id: randomUUID(), name: "assign reaction" },
+        },
+        agent,
+      );
     })
   .build();
 ```
 
-The slice includes `TicketOperations` because its reaction needs to dispatch `AssignTicket` (an action on that state).
+The slice declares `TicketOperations` via `.withState()` because its reaction dispatches `AssignTicket` — an action that lives on that partial state. Without that registration, the slice's `app.do("AssignTicket", ...)` call wouldn't typecheck.
 
 ### Cross-Aggregate Reactions
 
-When a ticket is opened, the creation slice automatically assigns an agent by dispatching an action on the operations state:
+When a ticket is opened, the creation slice automatically assigns an agent by dispatching an action on the operations state. Notice the dispatch needs an explicit synthetic actor — reactions are system-driven, not user-driven, so the example mints `{ id: randomUUID(), name: "assign reaction" }` for traceability:
 
 ```typescript
 .on("TicketOpened").do(async function assign(event, _stream, app) {
-  await app.do("AssignTicket", { stream: event.stream, actor }, agent, event);
-  //                                                                  ^^^^^ causation tracking
+  await app.do(
+    "AssignTicket",
+    { stream: event.stream, actor: { id: randomUUID(), name: "assign reaction" } },
+    agent,
+  );
+  // reactingTo is auto-injected — the framework threads `event` into the new
+  // commit's correlation/causation chain. Pass an explicit 4th argument only
+  // when you want to override that default.
 })
 ```
-
-The triggering event is passed as the 4th argument for correlation/causation tracking.
 
 ### Invariants with Actor Context
 

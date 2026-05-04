@@ -30,13 +30,16 @@ const Calculator = state({ Calculator: State })
 
 ### Multiple Event Types from One Action
 
-A single `PressKey` action emits different events based on the key pressed:
+A single `PressKey` action emits different events based on the key pressed. Note the `=` branch reads `snapshot.state.operator` and throws if there's nothing to compute — invariants run before the emit handler, but action-side preconditions on dynamic state can also be enforced inside `.emit()`:
 
 ```typescript
 .on({ PressKey: z.object({ key: z.enum(KEYS) }) })
   .emit(({ key }, { state }) => {
     if (key === ".") return ["DotPressed", {}];
-    if (key === "=") return [["EqualsPressed", {}]];  // array of tuples
+    if (key === "=") {
+      if (!state.operator) throw Error("no operator");
+      return [["EqualsPressed", {}]]; // an array of tuples = multi-event commit
+    }
     return DIGITS.includes(key)
       ? ["DigitPressed", { digit: key }]
       : ["OperatorPressed", { operator: key }];
@@ -52,8 +55,8 @@ Each event type has its own reducer logic:
   DigitPressed: ({ data }, state) => append(state, data.digit),
   OperatorPressed: ({ data }, state) => compute(state, data.operator),
   DotPressed: (_, state) => {
-    const current = state.operator ? state.right : state.left;
-    if (current?.includes(".")) return {};  // no-op
+    const current = state.operator ? state.right || "" : state.left || "";
+    if (current.includes(".")) return {};  // no-op
     return append(state, ".");
   },
   EqualsPressed: (_, state) => compute(state),
