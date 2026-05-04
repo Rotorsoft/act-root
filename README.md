@@ -10,40 +10,23 @@ The complexity of modern software design often arises from over-engineering abst
 
 ## Libraries
 
-### [@rotorsoft/act](https://github.com/rotorsoft/act-root/tree/master/libs/act)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
+### Core
 
-### [@rotorsoft/act-pg](https://github.com/rotorsoft/act-root/tree/master/libs/act-pg)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
+| Package | Description |
+|---|---|
+| **[`@rotorsoft/act`](https://github.com/rotorsoft/act-root/tree/master/libs/act)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act) | The framework. State, actions, reactions, slices, projections — Zod-typed end to end. |
+| **[`@rotorsoft/act-pg`](https://github.com/rotorsoft/act-root/tree/master/libs/act-pg)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg) | PostgreSQL store. Production-ready, atomic stream claiming, snapshots, connection pooling. |
+| **[`@rotorsoft/act-sqlite`](https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite) | libSQL store for embedded or single-node deployments. |
+| **[`@rotorsoft/act-sse`](https://github.com/rotorsoft/act-root/tree/master/libs/act-sse)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse) | Server-Sent Events for incremental state broadcast — live UIs without polling. |
 
-### [@rotorsoft/act-sqlite](https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
+### Supporting libraries & tools
 
-### [@rotorsoft/act-pino](https://github.com/rotorsoft/act-root/tree/master/libs/act-pino)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino)
-
-### [@rotorsoft/act-patch](https://github.com/rotorsoft/act-root/tree/master/libs/act-patch)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-patch.svg)](https://www.npmjs.com/package/@rotorsoft/act-patch)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-patch.svg)](https://www.npmjs.com/package/@rotorsoft/act-patch)
-
-### [@rotorsoft/act-sse](https://github.com/rotorsoft/act-root/tree/master/libs/act-sse)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
-
-### [@rotorsoft/act-diagram](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)
-[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
-[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
-
-## Tools
-
-### [@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)
-
-Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, and drain processing monitor with live polling.
-
+| Package | Description |
+|---|---|
+| **[`@rotorsoft/act-pino`](https://github.com/rotorsoft/act-root/tree/master/libs/act-pino)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg)](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino-based logger adapter for production deployments that want pino's ecosystem. |
+| **[`@rotorsoft/act-patch`](https://github.com/rotorsoft/act-root/tree/master/libs/act-patch)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-patch.svg)](https://www.npmjs.com/package/@rotorsoft/act-patch) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-patch.svg)](https://www.npmjs.com/package/@rotorsoft/act-patch) | Immutable deep-merge patch utility used internally by reducers. |
+| **[`@rotorsoft/act-diagram`](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)**<br>[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram) [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram) | SVG diagram generator — visualize states, slices, and reactions from the registry. |
+| **[`@rotorsoft/act-inspector`](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)** | Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, drain monitor with live polling. |
 
 ---
 
@@ -268,6 +251,7 @@ Any spec format works: event modeling diagrams, event storming boards, JSON conf
 
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/) — typedoc-generated, refreshed on every push to `master`
 - [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro) — domain modeling, state management, error handling, real-time
+- [Architecture](./docs/architecture/) — contributor-facing pages on concurrency, cache/snapshots, correlation+drain, close-cycle, schema evolution, extension points
 - [Performance & Benchmarks](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
 - [Philosophy](./docs/PHILOSOPHY.md) — Actor Model lineage, integration patterns, why this shape
 - [The Book](https://payhip.com/b/7ezLy) — Event Sourcing / CQRS / DDD applied end-to-end through a multiplayer Risk game
