@@ -1,7 +1,7 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
-import path from "path";
-import { fileURLToPath } from "url";
 
 const db_path = path.join(
   path.dirname(fileURLToPath(import.meta.url)),

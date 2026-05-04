@@ -17,18 +17,11 @@
     "isolatedModules": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "types": [
-      "node",
-      "vitest/globals"
-    ],
+    "types": ["node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@rotorsoft/*": [
-        "../libs/*/src/index.ts"
-      ],
-      "@act/*": [
-        "*/src/index.ts"
-      ],
+      "@rotorsoft/*": ["../libs/*/src/index.ts"],
+      "@act/*": ["*/src/index.ts"]
     }
-  },
+  }
 }

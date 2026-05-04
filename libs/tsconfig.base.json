@@ -11,15 +11,10 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": [
-      "node",
-      "vitest/globals"
-    ],
+    "types": ["node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
-      "@rotorsoft/*": [
-        "*/src/index.ts"
-      ]
+      "@rotorsoft/*": ["*/src/index.ts"]
     }
-  },
+  }
 }

@@ -2,7 +2,7 @@
  * Projection table for fast reads.
  * Updated by event handlers.
  */
-import { sleep, type CommittedOf } from "@rotorsoft/act";
+import { type CommittedOf, sleep } from "@rotorsoft/act";
 import { Pool } from "pg";
 import { Events } from "./todo";
 

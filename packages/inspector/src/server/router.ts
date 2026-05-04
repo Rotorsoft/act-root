@@ -1,7 +1,7 @@
+import { createConnection, type Socket } from "node:net";
 import type { Committed, Schemas, Store, StreamPosition } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { initTRPC } from "@trpc/server";
-import { createConnection, type Socket } from "net";
 import pg from "pg";
 import { z } from "zod";
 

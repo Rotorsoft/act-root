@@ -12,12 +12,6 @@
       "path": "../../libs/act-pg"
     }
   ],
-  "include": [
-    "src",
-    "test"
-  ],
-  "exclude": [
-    "dist",
-    "node_modules"
-  ]
+  "include": ["src", "test"],
+  "exclude": ["dist", "node_modules"]
 }

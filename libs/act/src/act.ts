@@ -1,11 +1,11 @@
-import EventEmitter from "events";
+import EventEmitter from "node:events";
 import {
   buildDrain,
   buildEs,
   buildHandle,
   buildHandleBatch,
-  classifyRegistry,
   CorrelateCycle,
+  classifyRegistry,
   DrainController,
   type DrainOps,
   type EsOps,
@@ -118,7 +118,8 @@ export class Act<
   TActions extends Schemas,
   TStateMap extends Record<string, Schema> = Record<string, never>,
   TActor extends Actor = Actor,
-> implements IAct<TEvents, TActions, TActor> {
+> implements IAct<TEvents, TActions, TActor>
+{
   private _emitter = new EventEmitter();
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events: ReadonlySet<string>;
@@ -510,12 +511,12 @@ export class Act<
     last?: Committed<TEvents, keyof TEvents>;
     count: number;
   }> {
-    let first: Committed<TEvents, keyof TEvents> | undefined = undefined,
-      last: Committed<TEvents, keyof TEvents> | undefined = undefined;
+    let first: Committed<TEvents, keyof TEvents> | undefined;
+    let last: Committed<TEvents, keyof TEvents> | undefined;
     const count = await store().query<TEvents>((e) => {
-      !first && (first = e);
+      if (!first) first = e;
       last = e;
-      callback && callback(e);
+      callback?.(e);
     }, query);
     return { first, last, count };
   }

@@ -1,9 +1,9 @@
 import {
   Committed,
   ConcurrencyError,
-  SNAP_EVENT,
-  Schemas,
   dispose,
+  Schemas,
+  SNAP_EVENT,
   sleep,
   store,
 } from "@rotorsoft/act";
@@ -278,9 +278,8 @@ describe("pg store", () => {
 
   it("should cover query branch where rowCount is undefined", async () => {
     const origQuery = (store() as any)._pool.query;
-    (store() as any)._pool.query = function () {
-      return Promise.resolve({ rows: [], rowCount: undefined });
-    };
+    (store() as any)._pool.query = () =>
+      Promise.resolve({ rows: [], rowCount: undefined });
     const count = await store().query(() => {});
     expect(count).toBe(0);
     (store() as any)._pool.query = origQuery;

@@ -14,10 +14,9 @@ export {
   stripFences,
 } from "./client/lib/strip-fences.js";
 export { validate } from "./client/lib/validate.js";
-export { emptyModel } from "./client/types/domain-model.js";
 export type {
-  ActNode,
   ActionNode,
+  ActNode,
   DomainModel,
   EntryPoint,
   EventNode,
@@ -27,6 +26,7 @@ export type {
   StateNode,
   ValidationWarning,
 } from "./client/types/domain-model.js";
+export { emptyModel } from "./client/types/domain-model.js";
 export type { FileTab } from "./client/types/file-tab.js";
 export type { DiagramMessage, HostMessage } from "./client/types/protocol.js";
 // v0.1.1

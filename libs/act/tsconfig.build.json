@@ -4,19 +4,13 @@
     "rootDir": "src",
     "outDir": "dist",
     "declarationDir": "dist/@types",
-    "tsBuildInfoFile": "dist/.tsbuildinfo",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
   "references": [
     {
       "path": "../act-patch/tsconfig.build.json"
     }
   ],
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "test",
-    "dist",
-    "node_modules"
-  ]
+  "include": ["src"],
+  "exclude": ["test", "dist", "node_modules"]
 }

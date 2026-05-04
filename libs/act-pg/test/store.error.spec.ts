@@ -2,9 +2,9 @@ vi.mock("pg", () => {
   const Pool = vi.fn().mockImplementation(function (this: any) {
     return this;
   });
-  Pool.prototype.query = function () {};
-  Pool.prototype.end = function () {};
-  Pool.prototype.connect = function () {};
+  Pool.prototype.query = () => {};
+  Pool.prototype.end = () => {};
+  Pool.prototype.connect = () => {};
   return {
     Pool,
     types: { setTypeParser: vi.fn(), builtins: { JSONB: 0 } },

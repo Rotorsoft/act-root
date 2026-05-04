@@ -10,7 +10,7 @@
  *
  * Run: pnpm -F calculator dev:close
  */
-import { act, dispose, state, StreamClosedError } from "@rotorsoft/act";
+import { act, dispose, StreamClosedError, state } from "@rotorsoft/act";
 import { z } from "zod";
 
 const Incremented = z.object({ by: z.number() });

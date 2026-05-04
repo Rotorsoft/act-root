@@ -34,8 +34,8 @@ describe("projection", () => {
       .build();
 
     expect(p._tag).toBe("Projection");
-    expect(p.events["Incremented"]).toBeDefined();
-    expect(p.events["Incremented"].reactions.size).toBe(1);
+    expect(p.events.Incremented).toBeDefined();
+    expect(p.events.Incremented.reactions.size).toBe(1);
   });
 
   it("should use default target from projection(target)", () => {
@@ -44,7 +44,7 @@ describe("projection", () => {
       .do(async function handleIncremented() {})
       .build();
 
-    const [reaction] = [...p.events["Incremented"].reactions.values()];
+    const [reaction] = [...p.events.Incremented.reactions.values()];
     expect(reaction.resolver).toEqual({ target: "counters" });
   });
 
@@ -54,7 +54,7 @@ describe("projection", () => {
       .do(async function handleIncremented() {})
       .build();
 
-    const [reaction] = [...p.events["Incremented"].reactions.values()];
+    const [reaction] = [...p.events.Incremented.reactions.values()];
     // _this_ is a function resolver
     expect(typeof reaction.resolver).toBe("function");
   });
@@ -66,7 +66,7 @@ describe("projection", () => {
       .to("override-target")
       .build();
 
-    const [reaction] = [...p.events["Incremented"].reactions.values()];
+    const [reaction] = [...p.events.Incremented.reactions.values()];
     expect(reaction.resolver).toEqual({ target: "override-target" });
   });
 
@@ -78,7 +78,7 @@ describe("projection", () => {
       .to(resolver)
       .build();
 
-    const [reaction] = [...p.events["Incremented"].reactions.values()];
+    const [reaction] = [...p.events.Incremented.reactions.values()];
     expect(reaction.resolver).toBe(resolver);
   });
 
@@ -88,7 +88,7 @@ describe("projection", () => {
       .do(async function myHandler() {})
       .build();
 
-    const [name] = [...p.events["Incremented"].reactions.keys()];
+    const [name] = [...p.events.Incremented.reactions.keys()];
     expect(name).toBe("myHandler");
   });
 
@@ -108,10 +108,10 @@ describe("projection", () => {
       .do(async function handleLabeled() {})
       .build();
 
-    expect(p.events["Incremented"]).toBeDefined();
-    expect(p.events["Labeled"]).toBeDefined();
-    expect(p.events["Incremented"].reactions.size).toBe(1);
-    expect(p.events["Labeled"].reactions.size).toBe(1);
+    expect(p.events.Incremented).toBeDefined();
+    expect(p.events.Labeled).toBeDefined();
+    expect(p.events.Incremented.reactions.size).toBe(1);
+    expect(p.events.Labeled.reactions.size).toBe(1);
 
     // Both should inherit the default target
     for (const event of ["Incremented", "Labeled"] as const) {
@@ -184,8 +184,8 @@ describe("projection", () => {
       .to("target-b")
       .build();
 
-    expect(p.events["Incremented"].reactions.size).toBe(2);
-    const names = [...p.events["Incremented"].reactions.keys()];
+    expect(p.events.Incremented.reactions.size).toBe(2);
+    const names = [...p.events.Incremented.reactions.keys()];
     expect(names).toContain("first");
     expect(names).toContain("second");
   });
@@ -208,8 +208,8 @@ describe("projection", () => {
 
     // Runtime still works (constraint is compile-time only)
     const events = app_.registry.events as Record<string, any>;
-    expect(events["ExternalEvent"]).toBeDefined();
-    expect(events["ExternalEvent"].reactions.size).toBe(1);
+    expect(events.ExternalEvent).toBeDefined();
+    expect(events.ExternalEvent.reactions.size).toBe(1);
   });
 
   it("should throw when .on() receives multiple keys", () => {
@@ -228,8 +228,8 @@ describe("projection", () => {
       .on({ Foo })
       .do(async function handleFoo() {});
     expect(b.events).toBeDefined();
-    expect(b.events["Foo"]).toBeDefined();
-    expect(b.events["Foo"].schema).toBeDefined();
+    expect(b.events.Foo).toBeDefined();
+    expect(b.events.Foo.schema).toBeDefined();
   });
 
   // --- Batch projection tests ---

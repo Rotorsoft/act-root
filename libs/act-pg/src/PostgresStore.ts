@@ -15,12 +15,13 @@ import type {
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
+  log,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
-  log,
 } from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
+
 const logger: Logger = log();
 
 const { Pool, types } = pg;
@@ -338,7 +339,7 @@ export class PostgresStore implements Store {
             : `stream ~ $${values.length}`
         );
       }
-      if (names && names.length) {
+      if (names?.length) {
         values.push(names);
         conditions.push(`name = ANY($${values.length})`);
       }

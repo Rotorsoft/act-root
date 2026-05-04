@@ -1,4 +1,4 @@
-import { ZodError, type ZodType, prettifyError } from "zod";
+import { prettifyError, ZodError, type ZodType } from "zod";
 import { config } from "./config.js";
 import { ValidationError } from "./types/index.js";
 

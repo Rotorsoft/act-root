@@ -1,6 +1,6 @@
 import {
-  act,
   Actor,
+  act,
   dispose,
   InvariantError,
   ValidationError,

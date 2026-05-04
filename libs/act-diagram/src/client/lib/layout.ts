@@ -637,7 +637,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       bbox.maxY = Math.max(bbox.maxY, n.pos.y + nh);
     }
     // Fallback if no nodes were placed
-    if (!isFinite(bbox.minY)) {
+    if (!Number.isFinite(bbox.minY)) {
       bbox.minX = sx;
       bbox.minY = 0;
       bbox.maxX = sx + W;

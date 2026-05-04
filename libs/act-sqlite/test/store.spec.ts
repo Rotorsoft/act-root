@@ -1,9 +1,9 @@
 import {
   Committed,
   ConcurrencyError,
-  SNAP_EVENT,
-  Schemas,
   dispose,
+  Schemas,
+  SNAP_EVENT,
   sleep,
   store,
 } from "@rotorsoft/act";
@@ -28,7 +28,7 @@ describe("sqlite store", () => {
   afterAll(async () => {
     await dispose()();
     // Clean up test DB
-    const fs = await import("fs");
+    const fs = await import("node:fs");
     try {
       fs.unlinkSync("test-store.db");
     } catch {

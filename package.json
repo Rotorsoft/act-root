@@ -36,8 +36,9 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm build && npx tsc --noEmit --project tsconfig.eslint.json --jsx react-jsx",
     "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
-    "lint": "eslint '**/*.ts' --ignore-pattern '**/*.d.ts'",
-    "lint:fix": "pnpm lint --fix",
+    "lint": "biome check .",
+    "lint:fix": "biome check . --write",
+    "format": "biome format . --write",
     "prepare": "simple-git-hooks",
     "dev:calculator": "pnpm -F calculator dev",
     "dev:wolfdesk": "pnpm -F wolfdesk dev",
@@ -51,10 +52,9 @@
     "@rotorsoft/act-pg": "workspace:^"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.14",
     "@commitlint/cli": "^20.5.3",
     "@commitlint/config-conventional": "^20.5.3",
-    "@eslint/eslintrc": "^3.3.5",
-    "@eslint/js": "^10.0.1",
     "@fast-check/vitest": "^0.4.1",
     "@semantic-release/changelog": "^6.0.3",
     "@semantic-release/commit-analyzer": "^13.0.1",
@@ -67,17 +67,10 @@
     "@types/chance": "^1.1.8",
     "@types/minimist": "^1.2.5",
     "@types/node": "^25.6.0",
-    "@typescript-eslint/eslint-plugin": "^8.59.1",
-    "@typescript-eslint/parser": "^8.59.1",
     "@vitest/coverage-v8": "^4.1.5",
     "chance": "^1.1.13",
-    "eslint": "^10.3.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-prettier": "^5.5.5",
     "fast-check": "^4.7.0",
     "lint-staged": "^16.4.0",
-    "prettier": "^3.8.3",
-    "prettier-plugin-organize-imports": "^4.3.0",
     "semantic-release": "^25.0.3",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.13.1",
@@ -94,8 +87,8 @@
     "pre-push": "branch=$(git rev-parse --abbrev-ref HEAD); if [ \"$branch\" = \"master\" ]; then pnpm test; fi"
   },
   "lint-staged": {
-    "*.{ts,tsx}": [
-      "eslint --fix"
+    "*.{ts,tsx,js,mjs,json}": [
+      "biome check --write --no-errors-on-unmatched"
     ]
   },
   "pnpm": {

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  MODULES,
   mockAct,
   mockProjection,
   mockSlice,
   mockState,
-  MODULES,
   proxyTarget,
   unknownModuleProxy,
 } from "../src/client/lib/mock-builders.js";

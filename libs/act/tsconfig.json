@@ -1,15 +1,12 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": ".",
+    "rootDir": "."
   },
   "references": [
     {
       "path": "../act-patch/tsconfig.build.json"
     }
   ],
-  "exclude": [
-    "dist",
-    "node_modules"
-  ]
+  "exclude": ["dist", "node_modules"]
 }

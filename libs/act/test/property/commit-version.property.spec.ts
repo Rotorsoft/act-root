@@ -56,7 +56,9 @@ describe("property: commit version invariants", () => {
       // versions are 0, 1, 2, ... contiguous.
       for (const stream of new Set(commits.map((c) => c.stream))) {
         const events = await readEvents(store, stream);
-        events.forEach((e, i) => expect(e.version).toBe(i));
+        events.forEach((e, i) => {
+          expect(e.version).toBe(i);
+        });
       }
     }
   );

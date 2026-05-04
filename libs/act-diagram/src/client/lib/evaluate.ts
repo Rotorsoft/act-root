@@ -192,7 +192,8 @@ function execute(
         // extract Act builder structure. Same trust model as VS Code, Jupyter, or
         // any tool that runs user code. No HTTP input or untrusted data is evaluated.
         // eslint-disable-next-line @typescript-eslint/no-implied-eval
-        const fn = new Function( // lgtm[js/code-injection]
+        const fn = new Function(
+          // lgtm[js/code-injection]
           "require",
           "exports",
           "module",

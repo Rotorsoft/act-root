@@ -52,10 +52,10 @@ const State = z
 
 const round = (n: number): number => Math.round(n * 100) / 100;
 const Operations = {
-  ["+"]: (l: number, r: number): number => round(l + r),
-  ["-"]: (l: number, r: number): number => round(l - r),
-  ["*"]: (l: number, r: number): number => round(l * r),
-  ["/"]: (l: number, r: number): number => round(l / r),
+  "+": (l: number, r: number): number => round(l + r),
+  "-": (l: number, r: number): number => round(l - r),
+  "*": (l: number, r: number): number => round(l * r),
+  "/": (l: number, r: number): number => round(l / r),
 };
 
 const append = (

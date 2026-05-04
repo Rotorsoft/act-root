@@ -1,14 +1,10 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": [
-      "ES2022"
-    ],
-    "rootDir": "src",
+    "lib": ["ES2022"],
+    "rootDir": "src"
   },
-  "include": [
-    "src"
-  ],
+  "include": ["src"],
   "references": [
     {
       "path": "../../libs/act"

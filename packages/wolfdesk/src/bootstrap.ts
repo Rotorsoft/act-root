@@ -1,10 +1,10 @@
 import { act } from "@rotorsoft/act";
-import { TicketProjection } from "./ticket-projections.js";
 import {
   TicketCreationSlice,
   TicketMessagingSlice,
   TicketOpsSlice,
 } from "./ticket.js";
+import { TicketProjection } from "./ticket-projections.js";
 
 export * from "./errors.js";
 export * from "./ticket.js";

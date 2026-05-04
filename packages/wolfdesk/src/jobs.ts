@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { Actor } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
 import { and, isNull, lt } from "drizzle-orm";
 import { app } from "./bootstrap.js";
 import { db, tickets } from "./drizzle/index.js";

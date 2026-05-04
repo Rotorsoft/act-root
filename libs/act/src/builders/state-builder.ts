@@ -4,8 +4,8 @@
  *
  * Fluent interface for defining a strongly-typed state machine using Zod schemas.
  */
-import { ZodType } from "zod";
-import {
+import type { ZodType } from "zod";
+import type {
   ActionHandler,
   GivenHandlers,
   Invariant,
@@ -538,12 +538,8 @@ function action_builder<
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
 
       function given(rules: Invariant<TState>[]) {
-        (
-          (internal.given ??= {} as GivenHandlers<TState, Schemas>) as Record<
-            string,
-            Invariant<TState>[]
-          >
-        )[action] = rules;
+        internal.given ??= {} as GivenHandlers<TState, Schemas>;
+        (internal.given as Record<string, Invariant<TState>[]>)[action] = rules;
         return { emit };
       }
 
