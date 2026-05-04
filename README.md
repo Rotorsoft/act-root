@@ -6,7 +6,9 @@
 
 [![Get the Book](https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge)](https://payhip.com/b/7ezLy)
 
-The complexity of modern software design often arises from over-engineering abstractions and paradigms that, while powerful, can be difficult to grasp and apply coherently. This project is an attempt to distill the basic building blocks of modern software design into a small, simple, and composable library.
+**The event-sourcing framework for TypeScript.**
+
+Most business apps can be modeled with just three primitives: **Actions → \{State\} ← Reactions**. Act wires them together with Zod schemas, an immutable event log, and a built-in pipeline that turns reactions into observable workflows. Drop in Postgres for production, SQLite for embedded, or run in-memory for tests; no external message broker required.
 
 ## Libraries
 
