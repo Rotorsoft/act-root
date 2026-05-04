@@ -100,12 +100,12 @@ it("should process reactions", async () => {
 });
 ```
 
-### `settle()` for chained reactions
+### Awaiting completion with `settle()`
 
-For tests that exercise reaction chains (a reaction triggers an action that emits an event that triggers another reaction…), `settle()` runs `correlate → drain` in a loop until a pass produces no progress, then resolves once all the work has drained:
+`settle()` runs `correlate → drain` in a loop until a pass makes no progress (no new subscriptions, no acks, no blocks), then emits the `"settled"` lifecycle event. It always runs to end — single-hop, multi-hop, or fan-out reactions all drain through the same loop. Since `settle()` itself is debounced and non-blocking (returns immediately), tests that need a known-quiet checkpoint await the event:
 
 ```typescript
-it("processes a multi-hop reaction chain", async () => {
+it("processes all reactions to completion", async () => {
   const t = target();
   await app.do("OpenTicket", t, { title: "Bug" });
 
@@ -114,11 +114,12 @@ it("processes a multi-hop reaction chain", async () => {
     app.settle();
   });
 
-  // Every reaction in the chain has now run.
+  // Framework is idle — every reaction triggered by the OpenTicket
+  // commit has run, including any it triggered transitively.
 });
 ```
 
-`settle()` is the production-friendly entry point — it debounces rapid commits and emits a `"settled"` lifecycle event when all correlate/drain passes are done. In tests, await the event when you need a known-quiet checkpoint.
+Use this whenever you need the framework to be idle before asserting; use the explicit `correlate → drain` pair when you want to drive a single cycle and inspect its result.
 
 ### Projection Cleanup
 
