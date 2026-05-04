@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-Act is an event sourcing + CQRS + Actor Model framework for TypeScript. The core philosophy: any system distills into **Actions → {State} ← Reactions**. This monorepo contains the core framework libraries and example applications demonstrating various complexity levels.
+Act is an event sourcing + CQRS framework for TypeScript, built around DDD aggregates and reaction-driven workflows. The core philosophy: any system distills into **Actions → {State} ← Reactions**. This monorepo contains the core framework libraries and example applications demonstrating various complexity levels.
 
 ## Project Structure
 

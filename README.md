@@ -41,7 +41,7 @@ Any system distills into three things:
 
 Act takes those three primitives seriously: Zod schemas as the source of truth, immutable events as the audit trail, and a built-in pipeline that turns reactions into observable workflows.
 
-→ For the why-this-shape rationale (Actor Model lineage, integration patterns, the emergent-complexity argument), see [docs/PHILOSOPHY.md](./docs/PHILOSOPHY.md).
+→ For the why-this-shape rationale (DDD / Event Sourcing / CQRS lineage, integration patterns, the emergent-complexity argument), see [docs/PHILOSOPHY.md](./docs/PHILOSOPHY.md).
 
 ## Design Decisions
 
@@ -253,7 +253,7 @@ Any spec format works: event modeling diagrams, event storming boards, JSON conf
 - [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro) — domain modeling, state management, error handling, real-time
 - [Architecture](./docs/architecture/) — contributor-facing pages on concurrency, cache/snapshots, correlation+drain, close-cycle, schema evolution, extension points
 - [Performance & Benchmarks](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
-- [Philosophy](./docs/PHILOSOPHY.md) — Actor Model lineage, integration patterns, why this shape
+- [Philosophy](./docs/PHILOSOPHY.md) — DDD / Event Sourcing / CQRS lineage, integration patterns, why this shape
 - [The Book](https://payhip.com/b/7ezLy) — Event Sourcing / CQRS / DDD applied end-to-end through a multiplayer Risk game
 - [Examples](#examples) — calculator, WolfDesk ticketing, tRPC integration
 
