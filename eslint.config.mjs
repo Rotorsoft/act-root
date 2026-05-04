@@ -83,4 +83,31 @@ export default [
       "@typescript-eslint/no-duplicate-type-constituents": "off",
     },
   },
+
+  // Production code outside libs/act/src/internal must reach internals
+  // through the barrel, not by deep import. Tests and benchmarks are
+  // intentionally exempt — white-box specs need bare ops (action, load,
+  // tombstone, computeLagLeadRatio) that aren't on the public surface.
+  {
+    files: ["libs/act/src/**/*.ts"],
+    ignores: ["libs/act/src/internal/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/internal/*",
+                "!**/internal/index",
+                "!**/internal/index.js",
+              ],
+              message:
+                "Import via the internal barrel ('./internal/index.js'), not a deep path. If a symbol you need isn't re-exported, decide whether it should be (add to the barrel) or whether the dependency is misplaced.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

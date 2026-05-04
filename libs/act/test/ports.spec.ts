@@ -42,18 +42,29 @@ describe("exit signal handlers", () => {
   });
 
   it("should not exit in production on error", async () => {
-    process.env.NODE_ENV = "production";
+    // Stub instead of mutating process.env directly — vi.unstubAllEnvs() in
+    // afterEach restores it, otherwise the change leaks into subsequent test
+    // files (config.ts re-evaluates env on import). LOG_LEVEL=fatal silences
+    // the registration info log and the production-ignore warn breadcrumb,
+    // both of which are tested for behavior, not log content.
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("LOG_LEVEL", "fatal");
     const { disposeAndExit } = await import("../src/ports.js");
     await expect(disposeAndExit("ERROR")).resolves.toBeUndefined();
   });
 
   it("should exit with code 1 on error", async () => {
-    process.env.NODE_ENV = "development";
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv("LOG_LEVEL", "fatal");
     const { disposeAndExit } = await import("../src/ports.js");
     const exit = vi
       .spyOn(process, "exit")
       .mockImplementation(() => undefined as never);
     await disposeAndExit("ERROR");
     expect(exit).toHaveBeenCalledWith(1);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 });

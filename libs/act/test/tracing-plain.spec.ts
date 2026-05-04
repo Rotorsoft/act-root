@@ -5,10 +5,15 @@ import { ZodEmpty } from "../src/types/schemas.js";
 // Force the tracing module to evaluate PRETTY=false by mocking config()
 // to report production env. This file is isolated from the main tracing
 // spec which exercises pretty mode.
+//
+// logLevel="fatal" silences port registration info logs at module load.
+// The Proxy below forwards `level === "trace"` to the tracing decorator
+// (which gates on it) while the underlying logger stays at fatal — the
+// trace spy captures calls regardless of the real level.
 vi.mock("../src/config.js", () => ({
   config: vi.fn().mockReturnValue({
     env: "production",
-    logLevel: "trace",
+    logLevel: "fatal",
     logSingleLine: true,
     sleepMs: 0,
   }),
@@ -44,10 +49,13 @@ describe("tracing — plain (production) mode", () => {
           : (target as unknown as Record<PropertyKey, unknown>)[prop],
     });
 
-    // Event-sourcing trace: `caption: body` (plain mode)
+    // Event-sourcing trace: `caption: body` (plain mode). Load fires once
+    // on exit with cache marker + version/replayed/snaps/patches inline.
     const { action, load } = buildEs(traceLogger);
     await load(Counter, "s-plain");
-    expect(traceSpy).toHaveBeenCalledWith("load: s-plain");
+    expect(traceSpy).toHaveBeenCalledWith(
+      "load: s-plain miss v=-1 replayed=0 snaps=0 patches=0"
+    );
 
     await action(
       Counter,

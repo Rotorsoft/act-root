@@ -22,10 +22,12 @@
  * orchestrator choose bare or traced variants once at `.build()` time based
  * on the configured log level. Outside this module, no other source file
  * imports tracing primitives.
+ *
+ * @internal
  */
 
 import { config } from "../config.js";
-import type { Logger, Schemas } from "../types/index.js";
+import type { AsOf, Logger, Schemas } from "../types/index.js";
 import * as drain from "./drain.js";
 import { type DrainOps } from "./drain.js";
 import * as es from "./event-sourcing.js";
@@ -41,6 +43,9 @@ const C_ORANGE = "\x1b[38;5;208m"; // true orange (committed)
 const C_GREEN = "\x1b[38;5;42m"; // emerald (load)
 const C_MAGENTA = "\x1b[38;5;165m"; // bright magenta (snap)
 const C_DRAIN = "\x1b[38;5;244m"; // muted gray for all drain ops
+// load-trace cache marker shades — distinguishable from C_GREEN body color
+const C_HIT = "\x1b[38;5;82m"; // lime — fast path, blends visually
+const C_MISS = "\x1b[38;5;220m"; // amber — non-trivial work happened
 const C_RESET = "\x1b[0m";
 
 /**
@@ -60,6 +65,57 @@ const es_caption = (caption: string, color: string, body: string): string =>
 const drain_caption = (caption: string): string => {
   const tag = `>> ${caption}`;
   return PRETTY ? `${C_DRAIN}${tag}${C_RESET}` : tag;
+};
+
+/**
+ * Format the cache hit/miss marker for the load trace. In pretty mode the
+ * word is colored (lime for hit, amber for miss) and the surrounding
+ * `C_GREEN` body color is restored after — embedded ANSI inside `es_caption`'s
+ * outer wrap. Plain mode returns the bare word.
+ */
+const cache_marker = (hit: boolean): string => {
+  const word = hit ? "hit" : "miss";
+  if (!PRETTY) return word;
+  return `${hit ? C_HIT : C_MISS}${word}${C_RESET}${C_GREEN}`;
+};
+
+/**
+ * Format the load stats (`v=N replayed=N snaps=N patches=N`) for the load
+ * trace. Muted gray in pretty mode so the cache marker reads as the most
+ * important cue; plain mode returns the bare text.
+ *
+ * - `v` — stream head version (the version of the last event applied)
+ * - `replayed` — events processed by THIS load past the cache point
+ * - `snaps` — cumulative snapshots taken on this stream
+ * - `patches` — events since the last snap (snap-policy accumulator)
+ */
+const stats_marker = (
+  version: number,
+  replayed: number,
+  snaps: number,
+  patches: number
+): string => {
+  const text = `v=${version} replayed=${replayed} snaps=${snaps} patches=${patches}`;
+  if (!PRETTY) return text;
+  return `${C_DRAIN}${text}${C_RESET}${C_GREEN}`;
+};
+
+/**
+ * Format the as-of marker for time-travel loads. Surfaces the active filter
+ * fields (before id, created_before/after timestamps, limit) so an operator
+ * can tell at a glance which slice was loaded. Empty `asOf` returns "" —
+ * non-time-travel loads skip the marker entirely.
+ */
+const as_of_marker = (asOf: AsOf | undefined): string => {
+  if (!asOf) return "";
+  const parts: string[] = [];
+  if (asOf.before !== undefined) parts.push(`before=${asOf.before}`);
+  if (asOf.created_before !== undefined)
+    parts.push(`created_before=${asOf.created_before.toISOString()}`);
+  if (asOf.created_after !== undefined)
+    parts.push(`created_after=${asOf.created_after.toISOString()}`);
+  if (asOf.limit !== undefined) parts.push(`limit=${asOf.limit}`);
+  return parts.length ? ` (as-of ${parts.join(" ")})` : " (as-of)";
 };
 
 /**
@@ -107,9 +163,19 @@ export function buildEs(logger: Logger): EsOps {
         )
       );
     }),
-    load: traced(es.load, undefined, (_me, stream, _cb, asOf) => {
+    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
+      const stats = stats_marker(
+        result.version,
+        result.replayed,
+        result.snaps,
+        result.patches
+      );
       logger.trace(
-        es_caption("load", C_GREEN, `${stream}${asOf ? " (as-of)" : ""}`)
+        es_caption(
+          "load",
+          C_GREEN,
+          `${stream}${as_of_marker(asOf)} ${cache_marker(result.cache_hit)} ${stats}`
+        )
       );
     }),
     action: traced(

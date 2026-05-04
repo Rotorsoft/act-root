@@ -1,8 +1,13 @@
 /**
  * @module merge
- * @category Builders
+ * @category Internal
  *
  * Shared utilities for merging partial states and projections across builders.
+ * Lives in `internal/` because the symbols are consumed by the builder layer
+ * (`act-builder`, `slice-builder`, `projection-builder`) but aren't part of
+ * the public package surface.
+ *
+ * @internal
  */
 import { ZodObject, type ZodType } from "zod";
 import type { Projection } from "../builders/projection-builder.js";

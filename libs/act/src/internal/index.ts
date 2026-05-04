@@ -8,27 +8,30 @@
  * what lives here is implementation detail used by `Act`, the builders, and
  * the orchestrator's pipelines.
  *
- * Only symbols actually consumed *outside* `internal/` are re-exported here.
- * Modules within `internal/` import each other directly by file path, and
- * tests that need bare ops (e.g., `action`, `load`) likewise import from
+ * Only symbols actually consumed *via this barrel* from outside `internal/`
+ * are re-exported here. Modules within `internal/` import each other
+ * directly by file path; production code in `adapters/` and tests that
+ * need bare ops (e.g., `action`, `load`, `LruMap`) likewise import from
  * the specific source file.
  *
  * @internal
  */
-export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
+export { classifyRegistry } from "./build-classify.js";
+export { runCloseCycle } from "./close-cycle.js";
+export { CorrelateCycle } from "./correlate-cycle.js";
 export {
-  runDrainCycle,
-  type DrainCycle,
-  type HandleResult,
+  DrainController,
+  type Handle,
+  type HandleBatch,
 } from "./drain-cycle.js";
-export { computeLagLeadRatio } from "./drain-ratio.js";
 export { type DrainOps } from "./drain.js";
 export { type EsOps } from "./event-sourcing.js";
-export { LruMap, LruSet } from "./lru-map.js";
 export {
   _this_,
   mergeEventRegister,
   mergeProjection,
   registerState,
 } from "./merge.js";
+export { buildHandle, buildHandleBatch } from "./reactions.js";
+export { SettleLoop } from "./settle.js";
 export { buildDrain, buildEs } from "./tracing.js";

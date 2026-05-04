@@ -2,13 +2,17 @@ import EventEmitter from "events";
 import {
   buildDrain,
   buildEs,
-  computeLagLeadRatio,
+  buildHandle,
+  buildHandleBatch,
+  classifyRegistry,
+  CorrelateCycle,
+  DrainController,
   type DrainOps,
   type EsOps,
-  type HandleResult,
-  LruSet,
+  type Handle,
+  type HandleBatch,
   runCloseCycle,
-  runDrainCycle,
+  SettleLoop,
 } from "./internal/index.js";
 import { dispose, log, store } from "./ports.js";
 import type {
@@ -25,8 +29,6 @@ import type {
   Lease,
   Logger,
   Query,
-  ReactionOptions,
-  ReactionPayload,
   Registry,
   Schema,
   SchemaRegister,
@@ -71,6 +73,14 @@ import type {
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
+ * Default debounce window (ms) for `settle()` when neither the per-call
+ * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
+ * Coalesces commits in the same tick and small bursts; sub-perceptible
+ * latency on the `"settled"` signal.
+ */
+export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+/**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of `emit` / `on` / `off` — the event-name argument
  * narrows its payload at the call site.
@@ -92,9 +102,14 @@ export type ActLifecycleEvents<
  *
  * @property maxSubscribedStreams - Cap for the LRU set tracking already-
  *   subscribed reaction streams. Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
+ * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
+ *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
+ *   Act instance instead of threading the value through every call site.
+ *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
  */
 export type ActOptions = {
   readonly maxSubscribedStreams?: number;
+  readonly settleDebounceMs?: number;
 };
 
 export class Act<
@@ -105,31 +120,14 @@ export class Act<
   TActor extends Actor = Actor,
 > implements IAct<TEvents, TActions, TActor> {
   private _emitter = new EventEmitter();
-  private _drain_locked = false;
-  private _drain_lag2lead_ratio = 0.5;
-  private _correlation_timer: ReturnType<typeof setInterval> | undefined =
-    undefined;
-  private _settle_timer: ReturnType<typeof setTimeout> | undefined = undefined;
-  private _settling = false;
-  private _correlation_checkpoint = -1;
-  /**
-   * Streams already subscribed via store.subscribe() — both the static
-   * targets registered at init and dynamic targets discovered by
-   * correlate(). correlate() consults this set to avoid re-subscribing
-   * known streams.
-   *
-   * Bounded LRU so apps that mint millions of dynamic targets (one per
-   * aggregate) don't grow this unbounded. Eviction costs at most one
-   * redundant store.subscribe() call per evicted-but-still-active stream
-   * (subscribe is idempotent). Cap configurable via {@link ActOptions}.
-   */
-  private readonly _subscribed_streams: LruSet<string>;
-  private _has_dynamic_resolvers = false;
-  private _correlation_initialized = false;
   /** Event names with at least one registered reaction (computed at build time) */
-  private readonly _reactive_events = new Set<string>();
-  /** Set in do() when a committed event has reactions — cleared by drain() */
-  private _needs_drain = false;
+  private readonly _reactive_events: ReadonlySet<string>;
+  /** Drain pipeline driver: armed flag, concurrency lock, adaptive ratio. */
+  private readonly _drain: DrainController<TEvents, TActions, TSchemaReg>;
+  /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
+  private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
+  /** Debounced correlate→drain catch-up loop. */
+  private readonly _settle: SettleLoop<TEvents>;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -175,8 +173,6 @@ export class Act<
    * @param registry The registry of state, event, and action schemas
    * @param states Map of state names to their (potentially merged) state definitions
    */
-  /** Static resolver targets collected at build time */
-  private readonly _static_targets: Array<{ stream: string; source?: string }>;
   /** Batch handlers for static-target projections (target → handler) */
   private readonly _batch_handlers: Map<string, BatchHandler<TEvents>>;
   /** Event-sourcing handlers, optionally wrapped with trace decorators */
@@ -189,7 +185,7 @@ export class Act<
    * this lookup is unambiguous. Used by `close()` to pick the right reducer
    * set when seeding a `restart` snapshot in multi-state apps.
    */
-  private readonly _event_to_state = new Map<string, State<any, any, any>>();
+  private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
   /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
@@ -198,9 +194,9 @@ export class Act<
   private readonly _bound_load = this.load.bind(this);
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
-  /** Pre-bound dispatchers handed to runDrainCycle each cycle. */
-  private readonly _bound_handle = this.handle.bind(this);
-  private readonly _bound_handle_batch = this.handleBatch.bind(this);
+  /** Reaction dispatchers built once and handed to runDrainCycle each cycle. */
+  private readonly _handle: Handle<TEvents>;
+  private readonly _handle_batch: HandleBatch<TEvents>;
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -209,39 +205,55 @@ export class Act<
     options: ActOptions = {}
   ) {
     this._batch_handlers = batchHandlers;
-    this._subscribed_streams = new LruSet(
-      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS
-    );
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
-    // Classify resolvers and reactive events at build time. Static targets
-    // are deduplicated by (target, source) — two reactions to different
-    // events that route to the same projection produce one subscription.
-    const statics = new Map<string, { stream: string; source?: string }>();
-    for (const [name, register] of Object.entries(this.registry.events)) {
-      if (register.reactions.size > 0) {
-        this._reactive_events.add(name);
-      }
-      for (const reaction of register.reactions.values()) {
-        if (typeof reaction.resolver === "function") {
-          this._has_dynamic_resolvers = true;
-        } else {
-          const { target, source } = reaction.resolver;
-          const key = `${target}|${source ?? ""}`;
-          if (!statics.has(key)) statics.set(key, { stream: target, source });
-        }
-      }
-    }
-    this._static_targets = [...statics.values()];
+    this._handle = buildHandle<TEvents, TActions, TActor>({
+      logger: this._logger,
+      boundDo: this._bound_do,
+      boundLoad: this._bound_load,
+      boundQuery: this._bound_query,
+      boundQueryArray: this._bound_query_array,
+    });
+    this._handle_batch = buildHandleBatch<TEvents>(this._logger);
 
-    // Build the event-name → owning state index. Duplicate event names are
-    // already rejected at registration time (merge.ts), so each entry is
-    // unambiguous.
-    for (const merged of this._states.values()) {
-      for (const eventName of Object.keys(merged.events)) {
-        this._event_to_state.set(eventName, merged);
+    const { staticTargets, hasDynamicResolvers, reactiveEvents, eventToState } =
+      classifyRegistry(this.registry, this._states);
+    this._reactive_events = reactiveEvents;
+    this._event_to_state = eventToState;
+
+    this._drain = new DrainController({
+      logger: this._logger,
+      ops: this._cd,
+      registry: this.registry,
+      batchHandlers: this._batch_handlers,
+      handle: this._handle,
+      handleBatch: this._handle_batch,
+      onAcked: (acked) => this.emit("acked", acked),
+      onBlocked: (blocked) => this.emit("blocked", blocked),
+    });
+
+    this._correlate = new CorrelateCycle(
+      this.registry,
+      staticTargets,
+      hasDynamicResolvers,
+      this._cd,
+      options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
+      // Cold start: assume drain is needed (historical events may need processing)
+      () => {
+        if (this._reactive_events.size > 0) this._drain.arm();
       }
-    }
+    );
+    this._settle = new SettleLoop<TEvents>(
+      {
+        logger: this._logger,
+        init: () => this._correlate.init(),
+        checkpoint: () => this._correlate.checkpoint,
+        correlate: (q) => this.correlate(q),
+        drain: (o) => this.drain(o),
+        onSettled: (drain) => this.emit("settled", drain),
+      },
+      options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
+    );
 
     dispose(() => {
       this._emitter.removeAllListeners();
@@ -347,14 +359,18 @@ export class Act<
       reactingTo,
       skipValidation
     );
-    // Flag drain needed when any committed event has reactions
-    for (const snap of snapshots) {
-      if (
-        snap.event?.name &&
-        this._reactive_events.has(snap.event.name as string)
-      ) {
-        this._needs_drain = true;
-        break;
+    // Arm the drain when any committed event has reactions.
+    // Skip the scan entirely when no event has any reaction (common in
+    // pure-state-machine apps).
+    if (this._reactive_events.size > 0) {
+      for (const snap of snapshots) {
+        if (
+          snap.event?.name &&
+          this._reactive_events.has(snap.event.name as string)
+        ) {
+          this._drain.arm();
+          break;
+        }
       }
     }
     this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
@@ -539,144 +555,6 @@ export class Act<
   }
 
   /**
-   * Shared finalization for the two reaction-runner shapes (per-event
-   * `handle` and bulk `handleBatch`). Centralizes the error log, retry-vs-
-   * block decision, and the "error reported only when nothing was handled"
-   * rule that's true in both shapes (in batch mode, `handled` is always 0
-   * on failure, so the rule degenerates to "always reported").
-   */
-  private _finalize(
-    lease: Lease,
-    handled: number,
-    at: number,
-    error: Error | undefined,
-    options: ReactionOptions
-  ): HandleResult {
-    if (!error) return { lease, handled, at };
-    this._logger.error(error);
-    const block = lease.retry >= options.maxRetries && options.blockOnError;
-    if (block)
-      this._logger.error(
-        `Blocking ${lease.stream} after ${lease.retry} retries.`
-      );
-    return {
-      lease,
-      handled,
-      at,
-      error: handled === 0 ? error.message : undefined,
-      block,
-    };
-  }
-
-  /**
-   * Handles leased reactions one event at a time.
-   *
-   * Called by the main `drain` loop after fetching new events. Each handler
-   * receives a scoped `IAct` proxy that auto-injects the triggering event
-   * as `reactingTo` when `do()` is called without it, maintaining
-   * correlation chains by default (#587). Handlers can still pass an
-   * explicit `reactingTo` to override.
-   *
-   * @internal
-   */
-  private async handle(
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[]
-  ): Promise<HandleResult> {
-    // no payloads, just advance the lease
-    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
-
-    const stream = lease.stream;
-    let at = payloads.at(0)!.event.id;
-    let handled = 0;
-
-    if (lease.retry > 0)
-      this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
-
-    // Scoped proxy: auto-injects reactingTo when do() is called without it,
-    // maintaining correlation chains by default (see #587). The non-do
-    // methods are pre-bound on the Act instance and reused across all
-    // handle() calls; only the do() closure varies per payload because it
-    // captures the triggering event.
-    const doAction = this._bound_do;
-    const scopedApp: IAct<TEvents, TActions, TActor> = {
-      do: doAction,
-      load: this._bound_load,
-      query: this._bound_query,
-      query_array: this._bound_query_array,
-    };
-
-    for (const payload of payloads) {
-      const { event, handler } = payload;
-      scopedApp.do = <TKey extends keyof TActions & string>(
-        action: TKey,
-        target: Target<TActor>,
-        payload: Readonly<TActions[TKey]>,
-        reactingTo?: Committed<Schemas, string>,
-        skipValidation?: boolean
-      ) =>
-        doAction(
-          action,
-          target,
-          payload,
-          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skipValidation
-        );
-      try {
-        await handler(event, stream, scopedApp);
-        at = event.id;
-        handled++;
-      } catch (error) {
-        return this._finalize(
-          lease,
-          handled,
-          at,
-          error as Error,
-          payload.options
-        );
-      }
-    }
-    return this._finalize(lease, handled, at, undefined, payloads[0].options);
-  }
-
-  /**
-   * Handles a batch of events for a projection with a batch handler.
-   *
-   * Called by `drain()` when a leased stream is a static-target projection
-   * with a registered batch handler. All events are passed to the handler
-   * in a single call, enabling bulk DB operations.
-   *
-   * @internal
-   */
-  private async handleBatch(
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[],
-    batchHandler: BatchHandler<TEvents>
-  ): Promise<HandleResult> {
-    const stream = lease.stream;
-    const events = payloads.map((p) => p.event);
-    const options = payloads[0].options;
-
-    if (lease.retry > 0)
-      this._logger.warn(
-        `Retrying batch ${stream}@${events[0].id} (${lease.retry}).`
-      );
-
-    try {
-      await batchHandler(events, stream);
-      return this._finalize(
-        lease,
-        events.length,
-        events.at(-1)!.id,
-        undefined,
-        options
-      );
-    } catch (error) {
-      return this._finalize(lease, 0, lease.at, error as Error, options);
-    }
-  }
-
-  /**
    * Processes pending reactions by draining uncommitted events from the event store.
    *
    * Runs a single drain cycle:
@@ -715,69 +593,8 @@ export class Act<
    * @see {@link correlate} for dynamic stream discovery
    * @see {@link start_correlations} for automatic correlation
    */
-  async drain({
-    streamLimit = 10,
-    eventLimit = 10,
-    leaseMillis = 10_000,
-  }: DrainOptions = {}): Promise<Drain<TEvents>> {
-    // Skip drain when no committed events have registered reactions
-    if (!this._needs_drain) {
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    }
-
-    if (this._drain_locked) {
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    }
-
-    try {
-      this._drain_locked = true;
-      const lagging = Math.ceil(streamLimit * this._drain_lag2lead_ratio);
-      const leading = streamLimit - lagging;
-
-      const cycle = await runDrainCycle(
-        this._cd,
-        this.registry,
-        this._batch_handlers,
-        this._bound_handle,
-        this._bound_handle_batch,
-        lagging,
-        leading,
-        eventLimit,
-        leaseMillis
-      );
-
-      if (!cycle) {
-        // claim() returned no leases — fully caught up
-        this._needs_drain = false;
-        return { fetched: [], leased: [], acked: [], blocked: [] };
-      }
-
-      const { leased, fetched, handled, acked, blocked } = cycle;
-
-      // Adapt next cycle's frontier split to where the pressure is.
-      this._drain_lag2lead_ratio = computeLagLeadRatio(
-        handled,
-        lagging,
-        leading
-      );
-
-      if (acked.length) this.emit("acked", acked);
-      if (blocked.length) this.emit("blocked", blocked);
-
-      // Clear the drain flag when fully caught up (nothing processed, no
-      // pending errors). Errors keep the flag set so retries flow through
-      // the next drain.
-      const hasErrors = handled.some(({ error }) => error);
-      if (!acked.length && !blocked.length && !hasErrors)
-        this._needs_drain = false;
-
-      return { fetched, leased, acked, blocked };
-    } catch (error) {
-      this._logger.error(error);
-      return { fetched: [], leased: [], acked: [], blocked: [] };
-    } finally {
-      this._drain_locked = false;
-    }
+  async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    return this._drain.drain(options);
   }
 
   /**
@@ -825,90 +642,10 @@ export class Act<
    * @see {@link start_correlations} for automatic periodic correlation
    * @see {@link stop_correlations} to stop automatic correlation
    */
-  /**
-   * Initialize correlation state on first call.
-   * - Reads max(at) from store as cold-start checkpoint
-   * - Subscribes static resolver targets (idempotent upsert)
-   * - Populates the subscribed statics set
-   * @internal
-   */
-  private async _init_correlation(): Promise<void> {
-    if (this._correlation_initialized) return;
-    this._correlation_initialized = true;
-
-    // Subscribe static targets + read cold-start checkpoint from watermarks
-    const { watermark } = await store().subscribe(this._static_targets);
-    this._correlation_checkpoint = watermark;
-    // Cold start: assume drain is needed (historical events may need processing)
-    if (this._reactive_events.size > 0) this._needs_drain = true;
-    for (const { stream } of this._static_targets) {
-      this._subscribed_streams.add(stream);
-    }
-  }
-
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    await this._init_correlation();
-
-    // No dynamic resolvers — nothing to discover
-    if (!this._has_dynamic_resolvers)
-      return { subscribed: 0, last_id: this._correlation_checkpoint };
-
-    // Use checkpoint as floor, allow explicit query.after to override upward
-    const after = Math.max(this._correlation_checkpoint, query.after || -1);
-    const correlated = new Map<
-      string,
-      { source?: string; payloads: ReactionPayload<TEvents>[] }
-    >();
-    let last_id = after;
-    await store().query<TEvents>(
-      (event) => {
-        last_id = event.id;
-        const register = this.registry.events[event.name];
-        // skip events with no registered reactions
-        if (register) {
-          for (const reaction of register.reactions.values()) {
-            // only evaluate dynamic resolvers — statics are subscribed at init
-            if (typeof reaction.resolver !== "function") continue;
-            const resolved = reaction.resolver(event);
-            if (resolved && !this._subscribed_streams.has(resolved.target)) {
-              const entry = correlated.get(resolved.target) || {
-                source: resolved.source,
-                payloads: [],
-              };
-              entry.payloads.push({
-                ...reaction,
-                source: resolved.source,
-                event,
-              });
-              correlated.set(resolved.target, entry);
-            }
-          }
-        }
-      },
-      { ...query, after }
-    );
-
-    if (correlated.size) {
-      const streams = [...correlated.entries()].map(([stream, { source }]) => ({
-        stream,
-        source,
-      }));
-      const { subscribed } = await this._cd.subscribe(streams);
-      // Advance checkpoint only after subscribe succeeds
-      this._correlation_checkpoint = last_id;
-      if (subscribed) {
-        // Track newly subscribed dynamic targets
-        for (const { stream } of streams) {
-          this._subscribed_streams.add(stream);
-        }
-      }
-      return { subscribed, last_id };
-    }
-    // No streams to subscribe — safe to advance
-    this._correlation_checkpoint = last_id;
-    return { subscribed: 0, last_id };
+    return this._correlate.correlate(query);
   }
 
   /**
@@ -971,19 +708,7 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    if (this._correlation_timer) return false;
-
-    const limit = query.limit || 100;
-    this._correlation_timer = setInterval(
-      () =>
-        this.correlate({ ...query, after: this._correlation_checkpoint, limit })
-          .then((result) => {
-            if (callback && result.subscribed) callback(result.subscribed);
-          })
-          .catch(console.error),
-      frequency
-    );
-    return true;
+    return this._correlate.startPolling(query, frequency, callback);
   }
 
   /**
@@ -1004,10 +729,7 @@ export class Act<
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    if (this._correlation_timer) {
-      clearInterval(this._correlation_timer);
-      this._correlation_timer = undefined;
-    }
+    this._correlate.stopPolling();
   }
 
   /**
@@ -1016,10 +738,7 @@ export class Act<
    * @see {@link settle}
    */
   stop_settling() {
-    if (this._settle_timer) {
-      clearTimeout(this._settle_timer);
-      this._settle_timer = undefined;
-    }
+    this._settle.stop();
   }
 
   /**
@@ -1057,9 +776,7 @@ export class Act<
    */
   async reset(streams: string[]): Promise<number> {
     const count = await store().reset(streams);
-    if (count > 0 && this._reactive_events.size > 0) {
-      this._needs_drain = true;
-    }
+    if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
     return count;
   }
 
@@ -1149,44 +866,6 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
-    const {
-      debounceMs = 10,
-      correlate: correlateQuery = { after: -1, limit: 100 },
-      maxPasses = Infinity,
-      ...drainOptions
-    } = options;
-
-    if (this._settle_timer) clearTimeout(this._settle_timer);
-    this._settle_timer = setTimeout(() => {
-      this._settle_timer = undefined;
-      if (this._settling) return;
-      this._settling = true;
-
-      (async () => {
-        await this._init_correlation();
-        let lastDrain: Drain<TEvents> | undefined;
-        // Loop correlate→drain until a pass produces no work — this fully
-        // catches up paginated streams (e.g. after `reset()` on a long
-        // projection) without forcing callers to roll their own loop.
-        // `maxPasses` caps runtime in pathological cases.
-        for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this.correlate({
-            ...correlateQuery,
-            after: this._correlation_checkpoint,
-          });
-          lastDrain = await this.drain(drainOptions);
-          const made_progress =
-            subscribed > 0 ||
-            lastDrain.acked.length > 0 ||
-            lastDrain.blocked.length > 0;
-          if (!made_progress) break;
-        }
-        if (lastDrain) this.emit("settled", lastDrain);
-      })()
-        .catch((err) => this._logger.error(err))
-        .finally(() => {
-          this._settling = false;
-        });
-    }, debounceMs);
+    this._settle.schedule(options);
   }
 }

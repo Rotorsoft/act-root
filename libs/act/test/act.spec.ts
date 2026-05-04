@@ -262,7 +262,7 @@ describe("act", () => {
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
       throw new Error("test");
     });
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedClaim.mockRestore();
@@ -293,8 +293,8 @@ describe("act", () => {
     expect(r1.subscribed).toBe(1);
     // Second correlate — same events, target already subscribed
     // Reset checkpoint to force re-scan
-    (dynApp as any)._correlation_checkpoint = -1;
-    (dynApp as any)._subscribed_streams.delete("dyn-x");
+    (dynApp as any)._correlate._checkpoint = -1;
+    (dynApp as any)._correlate._subscribed.delete("dyn-x");
     const r2 = await dynApp.correlate({ limit: 100 });
     expect(r2.subscribed).toBe(0); // already subscribed from r1
   });
@@ -325,11 +325,11 @@ describe("act", () => {
       .mockRejectedValueOnce(new Error("subscribe failed"));
 
     // First correlate should throw — checkpoint must NOT advance
-    const checkpoint = (dynApp as any)._correlation_checkpoint;
+    const checkpoint = (dynApp as any)._correlate._checkpoint;
     await expect(dynApp.correlate({ limit: 100 })).rejects.toThrow(
       "subscribe failed"
     );
-    expect((dynApp as any)._correlation_checkpoint).toBe(checkpoint);
+    expect((dynApp as any)._correlate._checkpoint).toBe(checkpoint);
 
     // Restore subscribe
     subscribeSpy.mockRestore();
@@ -425,6 +425,24 @@ describe("act", () => {
       app.stop_settling(); // cancels before it fires
       await sleep(600);
       // no error, no settle cycle ran
+    });
+
+    it("uses ActOptions.settleDebounceMs as default when settle() is called with no options", async () => {
+      const customApp = act().withState(counter).build({ settleDebounceMs: 5 });
+      const settledListener = vi.fn();
+      customApp.on("settled", settledListener);
+
+      await customApp.do(
+        "increment",
+        { stream: "default-debounce", actor },
+        {}
+      );
+      // No debounceMs passed — should use the 5ms default from ActOptions
+      customApp.settle();
+      await sleep(150);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+
+      customApp.off("settled", settledListener);
     });
 
     it("should not emit settled when maxPasses is 0", async () => {
@@ -537,17 +555,14 @@ describe("act", () => {
       .to("my-static-target") // static resolver — covers constructor branch
       .build();
 
-    // _static_targets and _subscribed_streams populated at build time
-    expect((staticApp as any)._static_targets.length).toBe(1);
-    expect((staticApp as any)._static_targets[0].stream).toBe(
-      "my-static-target"
-    );
+    // staticTargets and subscribed-streams LRU populated at build time
+    const correlate = (staticApp as any)._correlate;
+    expect(correlate.staticTargets.length).toBe(1);
+    expect(correlate.staticTargets[0].stream).toBe("my-static-target");
 
-    // Correlate initializes subscriptions for static targets (covers _subscribed_streams.add)
+    // Correlate initializes subscriptions for static targets (covers LRU add)
     await staticApp.correlate();
-    expect((staticApp as any)._subscribed_streams.has("my-static-target")).toBe(
-      true
-    );
+    expect(correlate._subscribed.has("my-static-target")).toBe(true);
 
     // Commit + drain with static resolver — covers the non-function branch in drain's payload filter
     await staticApp.do("doStatic", { stream: "static-1", actor }, {});
@@ -563,7 +578,7 @@ describe("act", () => {
     do {
       d = await app.drain();
     } while (d.acked.length || d.blocked.length);
-    expect((app as any)._needs_drain).toBe(false);
+    expect((app as any)._drain.armed).toBe(false);
   });
 
   it("should clear _needs_drain via handler path when drain finds no matching reactions", async () => {
@@ -582,11 +597,11 @@ describe("act", () => {
     const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
     // Set _needs_drain manually
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const d = await app.drain();
     expect(d.acked.length).toBe(0);
     expect(d.blocked.length).toBe(0);
-    expect((app as any)._needs_drain).toBe(false);
+    expect((app as any)._drain.armed).toBe(false);
     mockClaim.mockRestore();
     mockQuery.mockRestore();
     mockAck.mockRestore();
@@ -655,7 +670,7 @@ describe("act", () => {
     expect((noRxApp as any)._reactive_events.size).toBe(0);
     // correlate inits but does NOT set _needs_drain (no reactive events)
     await noRxApp.correlate();
-    expect((noRxApp as any)._needs_drain).toBe(false);
+    expect((noRxApp as any)._drain.armed).toBe(false);
     // drain skips immediately
     const d = await noRxApp.drain();
     expect(d.fetched.length).toBe(0);
@@ -691,7 +706,7 @@ describe("act", () => {
         return []; // no events for any stream
       });
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
-    (app as any)._needs_drain = true;
+    (app as any)._drain.arm();
     const d = await app.drain();
     expect(d.leased.length).toBe(2);
     mockClaim.mockRestore();

@@ -66,9 +66,11 @@ describe("ports-injector", () => {
     });
 
     it("should call disposers in reverse registration order", async () => {
-      // env=test → disposeAndExit skips process.exit, no spy needed
+      // env=test → disposeAndExit skips process.exit, no spy needed.
+      // logLevel=fatal silences the port registration info log emitted
+      // when adapters first resolve.
       vi.doMock("../src/config.js", () => ({
-        config: vi.fn().mockReturnValue({ env: "test", logLevel: "info" }),
+        config: vi.fn().mockReturnValue({ env: "test", logLevel: "fatal" }),
       }));
       const { dispose } = await import("../src/ports.js");
       const order: string[] = [];
@@ -84,10 +86,14 @@ describe("ports-injector", () => {
     });
 
     it("should not exit on error in production", async () => {
+      // Mock config to return production+info. logLevel is "fatal" so the
+      // registration info log and the disposeAndExit warn log are both gated
+      // (this test asserts behavior, not log content — the production-only
+      // warn breadcrumb is exercised separately in ports.spec.ts).
       vi.doMock("../src/config.js", () => ({
         config: vi
           .fn()
-          .mockReturnValue({ env: "production", logLevel: "info" }),
+          .mockReturnValue({ env: "production", logLevel: "fatal" }),
       }));
       const { dispose } = await import("../src/ports.js");
       const disposeAndExit = dispose();

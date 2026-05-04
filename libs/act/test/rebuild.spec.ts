@@ -265,9 +265,9 @@ describe("Store.reset", () => {
     const app = act().withState(Counter).build();
     const count = await app.reset(["does-not-exist"]);
     expect(count).toBe(0);
-    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
-      false
-    );
+    expect(
+      (app as unknown as { _drain: { armed: boolean } })._drain.armed
+    ).toBe(false);
   });
 
   it("app.reset does not arm the drain flag when the app has no reactions", async () => {
@@ -278,8 +278,8 @@ describe("Store.reset", () => {
     await store().subscribe([{ stream: "no-reactions-proj" }]);
     const count = await app.reset(["no-reactions-proj"]);
     expect(count).toBe(1);
-    expect((app as unknown as { _needs_drain: boolean })._needs_drain).toBe(
-      false
-    );
+    expect(
+      (app as unknown as { _drain: { armed: boolean } })._drain.armed
+    ).toBe(false);
   });
 });

@@ -67,6 +67,9 @@ describe("event-sourcing", () => {
         state: {},
         patches: 0,
         snaps: 0,
+        version: 1,
+        cache_hit: false,
+        replayed: 0,
       })
     ).resolves.toBeUndefined();
   });
@@ -83,6 +86,9 @@ describe("event-sourcing", () => {
       state: { count: 1 },
       patches: 1,
       snaps: 0,
+      version: 1,
+      cache_hit: false,
+      replayed: 0,
     });
     const events: any[] = [];
     await store().query((e) => events.push(e), { with_snaps: true });
@@ -374,6 +380,9 @@ describe("event-sourcing", () => {
       state: { count: 1 },
       patches: 1,
       snaps: 0,
+      version: 1,
+      cache_hit: false,
+      replayed: 0,
     };
     // snap swallows errors — should not propagate
     await expect(snap(snapshot)).resolves.toBeUndefined();
@@ -497,6 +506,9 @@ describe("event-sourcing", () => {
       state: {},
       patches: 0,
       snaps: 0,
+      version: 1,
+      cache_hit: false,
+      replayed: 0,
     });
     expect(fakeLogger.error).toHaveBeenCalled();
   });
