@@ -121,7 +121,8 @@ CreateItem: authedProcedure
   .mutation(async ({ input, ctx }) => {
     try {
       const snaps = await app.do("CreateItem", { stream: id, actor: ctx.actor }, input);
-      app.settle();
+      // settle runs automatically — wired at bootstrap via
+      // app.on("committed", () => app.settle())
       return { success: true, id };
     } catch (error) {
       if (error.message === Errors.ValidationError) {

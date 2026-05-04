@@ -163,12 +163,12 @@ Correlation enables dynamic stream discovery:
 5. **Ack/Block** — release successful claims or block failed streams
 
 ```typescript
-// In tests
+// In tests — explicit, deterministic
 await app.correlate();
 await app.drain();
 
-// In production — debounced, non-blocking
-app.settle();
+// In production — wire settle() to the "committed" lifecycle event
+app.on("committed", () => app.settle());
 ```
 
 ### Dual-Frontier Strategy
@@ -182,16 +182,22 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 ### settle()
 
-The recommended production pattern. Debounces rapid commits, runs correlate→drain in a loop until the system is consistent, then emits a `"settled"` lifecycle event:
+The recommended production pattern. `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event. The canonical wiring is to subscribe to `"committed"` once at bootstrap and let it trigger automatically — actions never call `settle()` directly:
 
 ```typescript
-await app.do("CreateItem", target, input);
-app.settle();  // non-blocking, returns immediately
+// At app bootstrap — wire once
+app.on("committed", () => app.settle());
 
+// Optional: react to the completion signal
 app.on("settled", (drain) => {
   // notify SSE clients, invalidate caches, etc.
 });
+
+// Now actions just commit; settle() handles the rest
+await app.do("CreateItem", target, input);
 ```
+
+`drain()` only processes one level per call. `settle()` is the loop that follows reaction chains to completion in production. In tests, prefer the explicit `correlate → drain` pair so cycle counts are deterministic.
 
 ### Lifecycle Events
 

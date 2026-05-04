@@ -80,9 +80,8 @@ const patches = snaps
 
 // 3. Publish — sends a version-keyed PatchMessage to all subscribers
 broadcast.publish(streamId, state, patches);
-
-// 4. Continue with reactions
-app.settle();
+// Reactions drain automatically if you've wired
+// app.on("committed", () => app.settle()) at bootstrap.
 ```
 
 `publish()` writes the new state to the LRU cache (so reconnects can read it) and pushes a `PatchMessage<AppState>` to subscribers. The keys of the message are absolute event versions (`baseV + 1`, `baseV + 2`, …), so subscribers can apply them directly to their cached state without computing offsets.
