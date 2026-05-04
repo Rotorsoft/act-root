@@ -190,4 +190,27 @@ describe("ConsoleLogger", () => {
       await expect(logger.dispose()).resolves.toBeUndefined();
     });
   });
+
+  describe("cyclic payload", () => {
+    it("json mode emits a minimal line instead of crashing", () => {
+      const logger = new ConsoleLogger({ level: "trace", pretty: false });
+      const cyclic: Record<string, unknown> = { name: "loop" };
+      cyclic.self = cyclic;
+      logger.info(cyclic, "cycle test");
+      expect(output).toHaveLength(1);
+      const parsed = JSON.parse(output[0]) as Record<string, unknown>;
+      expect(parsed.unserializable).toBe(true);
+      expect(parsed.msg).toBe("cycle test");
+    });
+
+    it("json mode falls back to a placeholder msg when none was provided", () => {
+      const logger = new ConsoleLogger({ level: "trace", pretty: false });
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      logger.info(cyclic);
+      const parsed = JSON.parse(output[0]) as Record<string, unknown>;
+      expect(parsed.unserializable).toBe(true);
+      expect(parsed.msg).toBe("[unserializable]");
+    });
+  });
 });
