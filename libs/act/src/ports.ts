@@ -26,7 +26,10 @@ import type {
  */
 
 /**
- * List of exit codes for process termination.
+ * List of exit codes for process termination. Consumed by signal handlers
+ * and {@link disposeAndExit}; not part of the user-facing surface.
+ *
+ * @internal
  */
 export const ExitCodes = ["ERROR", "EXIT"] as const;
 
@@ -35,6 +38,8 @@ export const ExitCodes = ["ERROR", "EXIT"] as const;
  *
  * - `"ERROR"` — abnormal termination (uncaught exception, unhandled rejection)
  * - `"EXIT"` — clean shutdown (SIGINT, SIGTERM, or manual trigger)
+ *
+ * @internal
  */
 export type ExitCode = (typeof ExitCodes)[number];
 

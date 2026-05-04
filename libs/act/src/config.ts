@@ -36,6 +36,8 @@ export const PackageSchema = z.object({
 
 /**
  * Type representing the validated package.json metadata.
+ *
+ * @internal
  */
 export type Package = z.infer<typeof PackageSchema>;
 
