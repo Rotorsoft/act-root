@@ -80,8 +80,10 @@ export class ConsoleLogger implements Logger {
     this.trace = threshold <= 10 ? write.bind(this, "trace", 10) : noop;
   }
 
+  /** No-op — `console.log` has no resources to release. */
   async dispose(): Promise<void> {}
 
+  /** @inheritDoc */
   child(bindings: Record<string, unknown>): Logger {
     return new ConsoleLogger({
       level: this.level,
