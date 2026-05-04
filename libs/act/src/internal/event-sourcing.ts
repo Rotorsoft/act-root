@@ -259,8 +259,8 @@ export async function action<
       action: {
         name: action as string,
         ...target,
-        // payload: TODO: flag to include action payload in metadata
-        // not included by default to avoid large payloads
+        // payload intentionally omitted: it can be large or contain PII,
+        // and callers correlate via the correlation id when they need it.
       },
       event: reactingTo
         ? {
@@ -278,7 +278,10 @@ export async function action<
       stream,
       emitted,
       meta,
-      // TODO: review reactions not enforcing expected version
+      // Reactions skip optimistic concurrency: they always append against the
+      // current head. Stream leasing already serializes concurrent reactions,
+      // and forcing version checks here would turn ordinary catch-up into
+      // spurious retries.
       reactingTo ? undefined : expected
     );
   } catch (error) {
