@@ -22,6 +22,19 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: "category",
+      label: "Architecture",
+      link: { type: "doc", id: "architecture/architecture" },
+      items: [
+        "architecture/concurrency-model",
+        "architecture/cache-and-snapshots",
+        "architecture/correlation-and-drain",
+        "architecture/close-cycle",
+        "architecture/event-schema-evolution",
+        "architecture/extension-points",
+      ],
+    },
+    {
+      type: "category",
       label: "API Reference",
       collapsed: false,
       items: [

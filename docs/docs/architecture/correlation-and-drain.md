@@ -1,3 +1,8 @@
+---
+id: correlation-and-drain
+title: Correlation and drain
+---
+
 # Correlation and drain
 
 How reactions actually fire. Two cooperating subsystems with a shared goal: deliver every reactive event to its handler, exactly once, eventually. Different concerns:
@@ -141,7 +146,7 @@ A naive drain would query the store on every call. For apps where most actions d
 - `do()` sets `_armed = true` if any committed event is in `reactiveEvents`
 - `reset()` sets `_armed = true` if there are any reactive events
 - `correlate.init()` sets `_armed = true` on cold start (might have historical reactive events to process)
-- `drain()` clears `_armed` when a cycle settles with no acks, no blocks, no errors
+- `drain()` clears `_armed` in two cases: `claim()` returned no leases (fully caught up), or the cycle finished with no acks, no blocks, no errors
 
 When `_armed` is false, `drain()` returns immediately without issuing `claim`. Three round trips saved per call (`claim`, `query`, `ack`). Cold start: armed by `correlate.init()` so historical events are picked up on first drain.
 

@@ -1,3 +1,8 @@
+---
+id: concurrency-model
+title: Concurrency model
+---
+
 # Concurrency model
 
 Two distinct concurrency primitives, used at different layers for different problems. Conflating them is the most common source of confusion when reading the framework's source.
@@ -133,7 +138,7 @@ A common confusion: "If I commit while another worker holds a lease, does my com
 
 **No.** Stream leasing locks the row in the `streams` table (which tracks reaction watermarks). Commits write to the `events` table and check the `(stream, version)` index. Different rows, different locks. A commit and a reaction lease can be active on the same stream concurrently.
 
-Real interaction surfaces in the close-the-books flow (`close-cycle.md`), where the close operation must coordinate both: tombstone the stream (write a guard event via `commit`), then verify no leases are held (lease lifecycle).
+Real interaction surfaces in the close-the-books flow ([Close cycle](./close-cycle)), where the close operation must coordinate both: tombstone the stream (write a guard event via `commit`), then verify no leases are held (lease lifecycle).
 
 ## Observability
 
