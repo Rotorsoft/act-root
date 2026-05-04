@@ -74,6 +74,14 @@ import type {
 export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 
 /**
+ * Default debounce window (ms) for `settle()` when neither the per-call
+ * `SettleOptions.debounceMs` nor `ActOptions.settleDebounceMs` is set.
+ * Coalesces commits in the same tick and small bursts; sub-perceptible
+ * latency on the `"settled"` signal.
+ */
+export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+/**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of `emit` / `on` / `off` — the event-name argument
  * narrows its payload at the call site.
@@ -95,9 +103,14 @@ export type ActLifecycleEvents<
  *
  * @property maxSubscribedStreams - Cap for the LRU set tracking already-
  *   subscribed reaction streams. Default: {@link DEFAULT_MAX_SUBSCRIBED_STREAMS}.
+ * @property settleDebounceMs - Debounce window (ms) used by `settle()` when
+ *   the caller doesn't pass `SettleOptions.debounceMs`. Tune this once per
+ *   Act instance instead of threading the value through every call site.
+ *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
  */
 export type ActOptions = {
   readonly maxSubscribedStreams?: number;
+  readonly settleDebounceMs?: number;
 };
 
 export class Act<
@@ -235,14 +248,17 @@ export class Act<
         if (this._reactive_events.size > 0) this._needs_drain = true;
       }
     );
-    this._settle = new SettleLoop<TEvents>({
-      logger: this._logger,
-      init: () => this._correlate.init(),
-      checkpoint: () => this._correlate.checkpoint,
-      correlate: (q) => this.correlate(q),
-      drain: (o) => this.drain(o),
-      onSettled: (drain) => this.emit("settled", drain),
-    });
+    this._settle = new SettleLoop<TEvents>(
+      {
+        logger: this._logger,
+        init: () => this._correlate.init(),
+        checkpoint: () => this._correlate.checkpoint,
+        correlate: (q) => this.correlate(q),
+        drain: (o) => this.drain(o),
+        onSettled: (drain) => this.emit("settled", drain),
+      },
+      options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
+    );
 
     // Build the event-name → owning state index. Duplicate event names are
     // already rejected at registration time (merge.ts), so each entry is

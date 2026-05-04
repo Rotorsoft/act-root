@@ -427,6 +427,24 @@ describe("act", () => {
       // no error, no settle cycle ran
     });
 
+    it("uses ActOptions.settleDebounceMs as default when settle() is called with no options", async () => {
+      const customApp = act().withState(counter).build({ settleDebounceMs: 5 });
+      const settledListener = vi.fn();
+      customApp.on("settled", settledListener);
+
+      await customApp.do(
+        "increment",
+        { stream: "default-debounce", actor },
+        {}
+      );
+      // No debounceMs passed — should use the 5ms default from ActOptions
+      customApp.settle();
+      await sleep(150);
+      expect(settledListener).toHaveBeenCalledTimes(1);
+
+      customApp.off("settled", settledListener);
+    });
+
     it("should not emit settled when maxPasses is 0", async () => {
       const settledListener = vi.fn();
       app.on("settled", settledListener);

@@ -50,7 +50,11 @@ export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
 
-  constructor(private readonly deps: SettleDeps<TEvents>) {}
+  constructor(
+    private readonly deps: SettleDeps<TEvents>,
+    /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
+    private readonly defaultDebounceMs: number
+  ) {}
 
   /**
    * Schedule a settle pass. Multiple calls inside the debounce window
@@ -61,7 +65,7 @@ export class SettleLoop<TEvents extends Schemas> {
    */
   schedule(options: SettleOptions = {}): void {
     const {
-      debounceMs = 10,
+      debounceMs = this.defaultDebounceMs,
       correlate: correlateQuery = { after: -1, limit: 100 },
       maxPasses = Infinity,
       ...drainOptions
