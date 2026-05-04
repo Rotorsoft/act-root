@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.5...@rotorsoft/act-diagram-v0.3.6) (2026-05-04)
+
+
+### Bug Fixes
+
+* **deps:** update dependency zod to ^4.4.2 ([abaa2ee](https://github.com/rotorsoft/act-root/commit/abaa2ee59989073b1bdb67fa1f989e2572fddb04))
+
 # [@rotorsoft/act-diagram-v0.3.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.4...@rotorsoft/act-diagram-v0.3.5) (2026-05-03)
 
 # [@rotorsoft/act-diagram-v0.3.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.3...@rotorsoft/act-diagram-v0.3.4) (2026-05-01)
