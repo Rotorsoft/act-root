@@ -5,47 +5,48 @@ title: Real-Time with SSE
 
 # Real-Time with act-sse
 
-`@rotorsoft/act-sse` provides incremental state broadcast over Server-Sent Events. Instead of sending the full state on every change, it computes RFC 6902 JSON Patches and sends only the diff.
+`@rotorsoft/act-sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
 
-```
+```bash
 npm install @rotorsoft/act-sse
 ```
 
 ## Architecture
 
 ```
-app.do() → snap
-    │
-    ▼
-deriveState(snap)              ← app-specific (overlay presence, etc.)
-state._v = snap.event.version  ← event store version = single source of truth
-    │
-    ▼
-broadcast.publish(streamId, state)
-    │
-    ├── compare(prev, state) → RFC 6902 ops
-    ├── ops ≤ threshold  → PatchMessage  { _type: "patch", _baseV, _v, _patch }
-    ├── ops > threshold  → FullStateMessage { _type: "full", _v, ...state }
-    └── push to all SSE subscribers
-    │
-    ▼
-Client: applyBroadcastMessage(msg, cached)
-    │
-    ├── full   → accept if _v ≥ cachedV
-    ├── patch  → apply if _baseV === cachedV
-    ├── stale  → skip (client already ahead)
-    └── behind → invalidate + refetch (client missed a version)
+   app.do() → snapshots (each carries its domain patch)
+       │
+       ▼
+   deriveState(snap)              ← app-specific (overlay presence, etc.)
+   state._v = snap.event.version  ← event store version = single source of truth
+       │
+       ▼
+   broadcast.publish(streamId, state, patches)
+       │
+       ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2, ... }
+       └── push to all SSE subscribers
+       │
+       ▼
+   Client: applyPatchMessage(msg, cached)
+       │
+       ├── contiguous → deep-merge patches in version order
+       ├── stale      → skip (client already ahead)
+       └── behind     → resync (client missed versions)
 ```
 
-## Server-Side Setup
+## The version contract
+
+`_v` on every state object is always `snap.event.version` — the event store's monotonic stream version. There is no separate counter, no clock-based ordering. The event store is the single source of truth for ordering; the broadcast layer is just a fan-out.
+
+## Server-side
 
 ### BroadcastChannel
 
-Manages per-stream subscriber sets and an LRU state cache:
+Manages per-stream subscriber sets and an LRU state cache for reconnects:
 
 ```typescript
-import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-sse";
-import type { BroadcastState } from "@rotorsoft/act-sse";
+import { BroadcastChannel } from "@rotorsoft/act-sse";
+import type { BroadcastState, PatchMessage } from "@rotorsoft/act-sse";
 
 type AppState = BroadcastState & {
   // your domain state fields
@@ -54,73 +55,100 @@ type AppState = BroadcastState & {
 };
 
 const broadcast = new BroadcastChannel<AppState>({
-  maxPatchOps: 50,   // fall back to full state above this
-  cacheSize: 50,     // LRU cache entries
+  cacheSize: 50, // LRU entries; default 50
 });
 ```
 
-### PresenceTracker
+### Broadcasting a commit
 
-Ref-counted online status per stream per identity, supporting multi-tab scenarios:
-
-```typescript
-const presence = new PresenceTracker();
-
-// On client connect
-presence.add(streamId, identityId);
-
-// On client disconnect
-presence.remove(streamId, identityId);
-
-// Check who's online
-const online = presence.getOnline(streamId); // Set<string>
-```
-
-### Broadcasting State
-
-Create a single broadcast function used by all code paths that call `app.do()`:
+After every `app.do()`, forward each emitted snapshot's domain patch:
 
 ```typescript
-function broadcastState(streamId: string, snap: Snap) {
-  const state: AppState = {
-    ...snap.state,
-    _v: snap.event!.version,  // MUST use event store version
-  };
-  const withPresence = applyPresence(state, streamId);
-  broadcast.publish(streamId, withPresence);
-}
-
-// After every mutation
 const snaps = await app.do("CreateItem", target, input);
-const snap = snaps[snaps.length - 1];
-broadcastState(streamId, snap);
+const last = snaps.at(-1)!;
+
+// 1. Derive the broadcast view (typically snap.state plus overlays)
+const state: AppState = {
+  ...last.state,
+  _v: last.event!.version, // MUST come from event.version
+};
+
+// 2. Collect each emitted snapshot's patch, in commit order
+const patches = snaps
+  .map((s) => s.patch)
+  .filter(Boolean) as Partial<AppState>[];
+
+// 3. Publish — sends a version-keyed PatchMessage to all subscribers
+broadcast.publish(streamId, state, patches);
+
+// 4. Continue with reactions
 app.settle();
 ```
 
-### SSE Subscription (tRPC)
+`publish()` writes the new state to the LRU cache (so reconnects can read it) and pushes a `PatchMessage<AppState>` to subscribers. The keys of the message are absolute event versions (`baseV + 1`, `baseV + 2`, …), so subscribers can apply them directly to their cached state without computing offsets.
+
+### Overlays (non-event state changes)
+
+Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `publishOverlay()`:
 
 ```typescript
-onStateChange: publicProcedure
+broadcast.publishOverlay(streamId, {
+  onlineUsers: presence.getOnline(streamId),
+});
+```
+
+This applies the overlay to the cached state, leaves `_v` unchanged, and emits a single-key patch message at the cached version.
+
+### Presence
+
+`PresenceTracker` is a ref-counted online-status tracker designed for multi-tab clients (each tab opens its own SSE; `add` / `remove` maintain a per-identity counter):
+
+```typescript
+import { PresenceTracker } from "@rotorsoft/act-sse";
+
+const presence = new PresenceTracker();
+
+// On SSE connect
+presence.add(streamId, identityId);
+
+// On SSE disconnect
+presence.remove(streamId, identityId);
+
+// Query
+presence.getOnline(streamId); // Set<string>
+presence.isOnline(streamId, identityId); // boolean
+```
+
+### tRPC subscription
+
+`act-sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
+
+```typescript
+import type { PatchMessage } from "@rotorsoft/act-sse";
+
+type Envelope<S> =
+  | { kind: "snap"; state: S }
+  | { kind: "patch"; msg: PatchMessage<S> };
+
+export const onStateChange = publicProcedure
   .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
   .subscription(async function* ({ input, signal }) {
     const { streamId, identityId } = input;
     let resolve: (() => void) | null = null;
-    let pending: BroadcastMessage<AppState> | null = null;
+    let pending: PatchMessage<AppState> | null = null;
 
     const cleanup = broadcast.subscribe(streamId, (msg) => {
       pending = msg;
-      if (resolve) { resolve(); resolve = null; }
+      resolve?.();
+      resolve = null;
     });
 
-    if (identityId) {
-      presence.add(streamId, identityId);
-      broadcastPresenceChange(streamId);
-    }
+    if (identityId) presence.add(streamId, identityId);
 
     try {
-      // Yield current state on connect
+      // Initial snapshot for first paint
       const cached = broadcast.getState(streamId);
-      if (cached) yield { _type: "full" as const, ...cached };
+      if (cached) yield { kind: "snap", state: cached } satisfies Envelope<AppState>;
 
       while (!signal?.aborted) {
         if (!pending) {
@@ -130,60 +158,68 @@ onStateChange: publicProcedure
           });
         }
         if (signal?.aborted) break;
-        if (pending) { const msg = pending; pending = null; yield msg; }
+        if (pending) {
+          const msg = pending;
+          pending = null;
+          yield { kind: "patch", msg } satisfies Envelope<AppState>;
+        }
       }
     } finally {
       cleanup();
-      if (identityId) {
-        presence.remove(streamId, identityId);
-        broadcastPresenceChange(streamId);
-      }
+      if (identityId) presence.remove(streamId, identityId);
     }
-  }),
+  });
 ```
 
-## Client-Side Patch Application
+## Client-side
+
+### applyPatchMessage
 
 ```typescript
-import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+import { applyPatchMessage } from "@rotorsoft/act-sse";
 
-// In SSE onData handler (React Query)
-onData: (msg) => {
+onData: (env) => {
+  if (env.kind === "snap") {
+    utils.getState.setData({ streamId }, env.state);
+    return;
+  }
   const cached = utils.getState.getData({ streamId });
-  const result = applyBroadcastMessage(msg, cached);
+  const result = applyPatchMessage(env.msg, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
-  } else if (result.reason === "behind" || result.reason === "patch-failed") {
-    utils.getState.invalidate({ streamId }); // trigger full refetch
+  } else if (result.reason === "behind") {
+    utils.getState.invalidate({ streamId }); // missed versions — refetch
   }
-  // "stale" → no-op (client already has newer state)
-}
+  // "stale" → no-op; the cache is already past these versions
+};
 ```
 
-### Version Logic
+`applyPatchMessage(msg, cached)` returns `{ ok: true, state } | { ok: false, reason: "stale" | "behind" }`:
 
-- **Stale** — all patches older than cached version → no-op (client ahead, mutation response arrived first)
-- **Behind** — gap between cached version and first patch → trigger full refetch
-- **Contiguous** — apply patches in order, updating `_v` to final patch version
+- **Contiguous** — `min(msg.keys)` is exactly `cachedV + 1`. Apply patches in version order via the deep-merge from `@rotorsoft/act-patch`; final `_v` = `max(msg.keys)`.
+- **Stale** — `max(msg.keys) <= cachedV`. The client is already ahead (e.g., a mutation response landed before the SSE patch arrived). No-op.
+- **Behind** — `min(msg.keys) > cachedV + 1`. The client missed versions and must resync via a full refetch.
 
-## Key Rules
+## Key rules
 
-1. **`_v` is always `snap.event.version`** — the event store's monotonic stream version is the single source of truth
-2. **Single broadcast function** — all `app.do()` paths funnel through one function
-3. **Snapshots for hot path, projections for reads** — never broadcast from projection state (risk of double-apply)
-4. **Presence is an overlay** — use `publishOverlay()` for non-event state changes (connect/disconnect)
+1. **`_v` is `snap.event.version`** — the event store's stream version is the single source of truth. Never invent a version.
+2. **One broadcast function** — every code path that calls `app.do()` should funnel through the same publish helper. Multiple publish sites with different state shapes is how double-apply bugs start.
+3. **Broadcast from snapshots, not projections** — projections are eventually consistent and may lag. Broadcast from the snapshots returned by `app.do()`.
+4. **Presence is an overlay, not an event** — use `publishOverlay()` so connect/disconnect doesn't pollute the event log.
 
-## The Double-Apply Bug
+## The double-apply bug
 
-If a projection falls back to the broadcast cache on a miss, it reads state that already has event patches applied. The projection then re-applies those same patches, corrupting counters and indices.
+If a projection falls back to the broadcast cache on a miss, it reads state that already has event patches applied. Re-applying those same patches corrupts counters and indices.
 
 ```typescript
 // BUG — broadcast cache holds post-event snapshots
 let state = projCache.get(id) ?? broadcast.getState(id); // ← already patched!
-mutator(state); // patches applied twice
+mutator(state); // patches applied a second time
 
-// FIX — fall back to DB only
-let state = projCache.get(id) ?? await db.select(id) ?? defaultState();
+// FIX — fall back to durable storage only
+let state = projCache.get(id) ?? (await db.select(id)) ?? defaultState();
 mutator(state);
 ```
+
+The broadcast cache exists for *reconnect seeding* and for `publishOverlay()`'s read-modify-write. Everything else should go through the database.
