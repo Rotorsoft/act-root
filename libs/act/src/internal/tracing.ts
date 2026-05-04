@@ -22,6 +22,8 @@
  * orchestrator choose bare or traced variants once at `.build()` time based
  * on the configured log level. Outside this module, no other source file
  * imports tracing primitives.
+ *
+ * @internal
  */
 
 import { config } from "../config.js";

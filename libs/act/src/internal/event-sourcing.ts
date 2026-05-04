@@ -1,15 +1,18 @@
 /**
  * @module event-sourcing
- * @category Event Sourcing
+ * @category Internal
  *
  * Pure event-sourcing primitives: `snap` persists state checkpoints, `load`
  * reconstructs state by replaying events through reducers, and `action`
  * validates an action, runs invariants, emits events, and commits them
- * atomically.
+ * atomically. `tombstone` commits the close-the-books guard with optimistic
+ * concurrency.
  *
  * These are the bare implementations — observability is layered on top in
  * {@link "tracing"} and wired by the orchestrator at construction time.
  * No tracing imports here, no module-level mutable state.
+ *
+ * @internal
  */
 
 import { patch } from "@rotorsoft/act-patch";

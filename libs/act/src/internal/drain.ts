@@ -15,6 +15,8 @@
  * mirroring the shape of {@link "event-sourcing"}. Trace decoration is
  * layered on top in {@link "tracing"} and selected by the orchestrator at
  * construction time. No tracing imports here.
+ *
+ * @internal
  */
 
 import { store } from "../ports.js";
