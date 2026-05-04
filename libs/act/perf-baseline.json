@@ -1,0 +1,54 @@
+{
+  "results": [
+    {
+      "name": "action: single commit",
+      "samples": 200,
+      "p50_ms": 2.3756,
+      "p95_ms": 2.5362,
+      "mean_ms": 2.3467,
+      "ops_per_sec": 426
+    },
+    {
+      "name": "load: warm cache hit",
+      "samples": 500,
+      "p50_ms": 1.2036,
+      "p95_ms": 1.2695,
+      "mean_ms": 1.1794,
+      "ops_per_sec": 848
+    },
+    {
+      "name": "load: cold replay 100 events",
+      "samples": 100,
+      "p50_ms": 1.2202,
+      "p95_ms": 1.3184,
+      "mean_ms": 1.2187,
+      "ops_per_sec": 821
+    },
+    {
+      "name": "action+load roundtrip",
+      "samples": 200,
+      "p50_ms": 3.6514,
+      "p95_ms": 3.8575,
+      "mean_ms": 3.568,
+      "ops_per_sec": 280
+    },
+    {
+      "name": "commits: 50 concurrent (different streams)",
+      "samples": 50,
+      "p50_ms": 4.8969,
+      "p95_ms": 5.5856,
+      "mean_ms": 4.7801,
+      "ops_per_sec": 209,
+      "effective_per_sec": 10450
+    },
+    {
+      "name": "commits: 20 contended (same stream, with retries)",
+      "samples": 30,
+      "p50_ms": 2.5849,
+      "p95_ms": 3.0118,
+      "mean_ms": 2.5625,
+      "ops_per_sec": 390,
+      "effective_per_sec": 7800
+    }
+  ]
+}

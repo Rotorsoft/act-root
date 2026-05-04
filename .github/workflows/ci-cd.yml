@@ -48,6 +48,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # Perf regression guard. Compares a fresh bench run against the
+      # checked-in baseline; fails if any scenario's p50 exceeds 1.5× baseline.
+      # To refresh: `pnpm -F @rotorsoft/act bench:update` in a PR labeled
+      # `perf-baseline-update` with rationale in PERFORMANCE.md.
+      - run: pnpm -F @rotorsoft/act bench:run
+      - run: pnpm -F @rotorsoft/act bench:check
+
       - uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}

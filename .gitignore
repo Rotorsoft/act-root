@@ -8,3 +8,5 @@ local.db*
 test-store.db*
 .DS_Store
 *.tsbuildinfo
+# Perf bench output is per-run; baseline is checked in.
+libs/act/perf-result.json
