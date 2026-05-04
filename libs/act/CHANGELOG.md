@@ -1,3 +1,16 @@
+# [@rotorsoft/act-v0.32.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.5...@rotorsoft/act-v0.32.6) (2026-05-04)
+
+
+### Bug Fixes
+
+* **act:** drop payloads from ConcurrencyError message ([4dfabd8](https://github.com/rotorsoft/act-root/commit/4dfabd8d845ffa283e51f1bcd231be58cec53aee))
+* **act:** guard ConsoleLogger json mode against cyclic payloads ([034d61f](https://github.com/rotorsoft/act-root/commit/034d61fd67376f44b75f3ec109127b7b4750b3a4))
+
+
+### Performance Improvements
+
+* **act:** index streams for O(1) commit and O(streams) claim in InMemoryStore ([aedae51](https://github.com/rotorsoft/act-root/commit/aedae51aa98c3d87992ef10a633cd01d70fb9968))
+
 # [@rotorsoft/act-v0.32.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.4...@rotorsoft/act-v0.32.5) (2026-05-03)
 
 # [@rotorsoft/act-v0.32.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.32.3...@rotorsoft/act-v0.32.4) (2026-05-03)
