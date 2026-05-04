@@ -5,16 +5,16 @@ title: Act Framework
 
 # Act Framework
 
-Act is a modern event sourcing + CQRS framework for TypeScript, with first-class support for DDD aggregates and reaction-driven workflows. The core philosophy: any system distills into **Actions → \{State\} ← Reactions**.
+**The event-sourcing framework for TypeScript.**
 
-## Purpose & Philosophy
+Most business apps can be modeled with just three primitives: **Actions → \{State\} ← Reactions**. Act wires them together with Zod schemas, an immutable event log, and a built-in pipeline that turns reactions into observable workflows. Drop in Postgres for production, SQLite for embedded, or run in-memory for tests; no external message broker required.
 
-Act makes event-sourced, reactive architectures accessible and productive for TypeScript developers. It provides a minimal, functional core for modeling your domain as state machines, capturing every change as an immutable event, and reacting to those changes in a scalable, testable way.
+## What you get
 
 - **Simplicity** — focus on state, actions, and reactions without boilerplate or code generation
-- **Type Safety** — TypeScript and Zod for compile-time guarantees and runtime validation
+- **Type safety** — TypeScript and Zod for compile-time guarantees and runtime validation
 - **Composability** — build complex workflows by composing small, testable state machines
-- **Auditability** — every state change is an event, enabling time travel, debugging, and compliance
+- **Auditability** — every state change is an event, enabling time-travel, debugging, and compliance
 - **Adaptability** — swap storage backends, integrate external systems, scale from in-memory to production
 
 ## Quick Start
@@ -52,7 +52,7 @@ console.log(snapshot.state.count); // 5
 ### Builders
 
 - **`state()`** — define state machines with actions, events, invariants, and snapshots
-- **`projection()`** — read-model updaters that react to events
+- **`projection()`** — read-model updaters that react to events (with optional `.batch()` for high-throughput replay)
 - **`slice()`** — vertical feature modules grouping states, projections, and scoped reactions
 - **`act()`** — orchestrator that composes states, slices, and projections into an application
 
@@ -70,17 +70,27 @@ Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cac
 - **Correlation** — dynamic stream discovery via reaction resolvers
 - **Drain** — leasing-based reaction processing with dual-frontier strategy
 - **Settle** — debounced, non-blocking correlate→drain loop for production
+- **Time-travel** — `load()` accepts an `asOf` filter to reconstruct historical state
+- **Close the books** — `app.close()` archives, tombstones, or restarts streams
 
 ## Packages
 
+### Core
+
 | Package | Description |
 |---|---|
-| [`@rotorsoft/act`](https://www.npmjs.com/package/@rotorsoft/act) | Core framework |
+| [`@rotorsoft/act`](https://www.npmjs.com/package/@rotorsoft/act) | The framework |
 | [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) | PostgreSQL store adapter |
 | [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) | SQLite (libSQL) store adapter |
-| [`@rotorsoft/act-pino`](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter |
 | [`@rotorsoft/act-patch`](https://www.npmjs.com/package/@rotorsoft/act-patch) | Immutable deep-merge patch utility |
+
+### Supporting
+
+| Package | Description |
+|---|---|
 | [`@rotorsoft/act-sse`](https://www.npmjs.com/package/@rotorsoft/act-sse) | Server-Sent Events for incremental state broadcast |
+| [`@rotorsoft/act-pino`](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter |
+| [`@rotorsoft/act-diagram`](https://www.npmjs.com/package/@rotorsoft/act-diagram) | SVG diagram generator |
 
 ## Requirements
 

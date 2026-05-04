@@ -84,7 +84,7 @@ it("should enforce business rules", async () => {
 
 ## Testing Reactions and Projections
 
-Reactions require `correlate()` → `drain()` to process:
+Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire.
 
 ```typescript
 it("should process reactions", async () => {
@@ -99,6 +99,8 @@ it("should process reactions", async () => {
   expect(items[t.stream].name).toBe("Test");
 });
 ```
+
+For multi-hop reaction chains, repeat `correlate → drain` until a pass produces no work. `settle()` exists for production (debounced, non-blocking), but tests stick to the explicit pair to keep the cycle count deterministic and assertions easy to time.
 
 ### Projection Cleanup
 
