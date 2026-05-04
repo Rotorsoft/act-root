@@ -62,6 +62,32 @@ Run with `pnpm -F @rotorsoft/act bench:realistic`. These exercise the full pipel
 
 ---
 
+## Postgres stress test
+
+Multi-process stress harness against a real Postgres instance. Different from the InMemoryStore guards above: this exercises true OS-level concurrency, real `FOR UPDATE SKIP LOCKED` semantics, and adapter-specific failure modes the in-process tests can't reach.
+
+Runs on every push to `master` (and weekly via cron) via [`.github/workflows/stress.yml`](../../.github/workflows/stress.yml). Results post to the workflow run's Job Summary so they're one click from any GitHub user.
+
+To run locally:
+
+```bash
+docker run -d --name pg-stress -p 5431:5432 -e POSTGRES_PASSWORD=postgres postgres:17-alpine
+pnpm -F @rotorsoft/act-pg stress
+```
+
+### Scenarios
+
+| Scenario | Workers | What it stresses | Invariants asserted |
+|---|---:|---|---|
+| `commit-storm` | 8 | High commit rate across non-overlapping streams | Per-stream versions strictly monotonic from 0; no duplicates; total events = sum of worker successes |
+| `same-stream` | 8 | All workers race on one stream with retries | Versions monotonic; no duplicates at same version; every commit eventually lands via `ConcurrencyError` retries |
+| `drain-under-churn` | 4 + 4 | Half committing while half drain via `claim/ack` | Versions monotonic; no duplicates; no leases held past lease window; total drained = total committed |
+| `killed-worker` | 6 + 2 | 2 workers `process.exit(1)` mid-commit | Versions monotonic; no duplicates; no stuck leases; surviving workers continue cleanly |
+
+Latest results land in the workflow Summary. The harness found and forced a fix for one race in this PR: `PostgresStore.commit` now converts PG unique-violations on `(stream, version)` into `ConcurrencyError` so callers retry on the framework signal rather than an adapter-specific error.
+
+---
+
 ## Cache Port (v0.20.0)
 
 **PR:** #460 — Introduced always-on `InMemoryCache` (LRU, maxSize 1000) to eliminate full event replay on `load()`.

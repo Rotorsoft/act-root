@@ -33,7 +33,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
-    "build": "pnpm clean && tsup && pnpm types"
+    "build": "pnpm clean && tsup && pnpm types",
+    "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {
     "pg": "^8.20.0",

@@ -1,0 +1,83 @@
+name: Stress (Postgres)
+
+# Multi-process Postgres stress harness. Real concurrency, real PG, real
+# workers. Catches lease/commit/drain race bugs that single-process tests
+# cannot. Reports to the run's Job Summary so results are one click away
+# from any GitHub user.
+#
+# Triggers:
+#   - push to master   (block on regressions)
+#   - manual dispatch  (operator-driven verification)
+#   - weekly cron      (long-tail flake detection)
+#
+# Not run on PRs by default — multi-process timing varies enough across
+# runners that PR-level signal is noise. On-demand only.
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "libs/act/**"
+      - "libs/act-pg/**"
+      - ".github/workflows/stress.yml"
+  workflow_dispatch:
+  schedule:
+    # Sundays at 03:00 UTC
+    - cron: "0 3 * * 0"
+
+env:
+  SKIP_SIMPLE_GIT_HOOKS: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  stress:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - run: pnpm install
+      # Workers import `@rotorsoft/act` and `@rotorsoft/act-pg` via the
+      # workspace symlinks; build them so the published-shape resolution
+      # works (PostgresStore imports `@rotorsoft/act` by package name).
+      - run: pnpm -F @rotorsoft/act-patch build
+      - run: pnpm -F @rotorsoft/act build
+      - run: pnpm -F @rotorsoft/act-pg build
+
+      - name: Run stress suite
+        env:
+          NODE_ENV: test
+          LOG_LEVEL: fatal
+        run: pnpm -F @rotorsoft/act-pg stress | tee stress-report.md
+
+      - name: Post report to Job Summary
+        if: always()
+        run: cat stress-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-report
+          path: stress-report.md
