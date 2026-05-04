@@ -5,7 +5,7 @@ title: Error Handling
 
 # Error Handling
 
-Act defines three primary error types. Each signals a different class of problem with a distinct resolution strategy.
+Act defines four primary error types. Each signals a different class of problem with a distinct resolution strategy.
 
 ## ValidationError
 
@@ -79,6 +79,24 @@ async function withRetry(action, target, payload, maxRetries = 3) {
 }
 ```
 
+## StreamClosedError
+
+Thrown when an action targets a stream that has been permanently closed (its head event is a `__tombstone__`). See [Close cycle](../architecture/close-cycle) for how a stream gets tombstoned.
+
+```typescript
+import { StreamClosedError } from "@rotorsoft/act";
+
+try {
+  await app.do("AddNote", target, { text: "..." });
+} catch (error) {
+  if (error instanceof StreamClosedError) {
+    console.error(`Stream ${error.stream} is closed`);
+  }
+}
+```
+
+**Resolution:** Closed streams are terminal. To re-open one, call `app.close([{ stream, restart: true }])` — that seeds a fresh `__snapshot__` and the stream accepts actions again.
+
 ## Error Constants
 
 For string-based error matching (e.g., in tRPC error handlers):
@@ -86,9 +104,10 @@ For string-based error matching (e.g., in tRPC error handlers):
 ```typescript
 import { Errors } from "@rotorsoft/act";
 
-// Errors.ValidationError  = "ERR_VALIDATION"
-// Errors.InvariantError   = "ERR_INVARIANT"
-// Errors.ConcurrencyError = "ERR_CONCURRENCY"
+// Errors.ValidationError    = "ERR_VALIDATION"
+// Errors.InvariantError     = "ERR_INVARIANT"
+// Errors.ConcurrencyError   = "ERR_CONCURRENCY"
+// Errors.StreamClosedError  = "ERR_STREAM_CLOSED"
 ```
 
 ## Production Error Handling
@@ -121,7 +140,7 @@ CreateItem: authedProcedure
 
 ## Blocked Streams
 
-When a reaction handler fails repeatedly, the stream is blocked after exceeding `maxRetries` (default: 3). Blocked streams are excluded from `poll()` and won't be processed until manually unblocked.
+When a reaction handler fails repeatedly, the stream is blocked after exceeding `maxRetries`. Blocked streams stay out of `claim()` results, so subsequent drain cycles skip them — they need an explicit `app.reset([stream])` (or external unblock) to start processing again.
 
 Monitor blocked streams via the `"blocked"` lifecycle event:
 
@@ -134,10 +153,17 @@ app.on("blocked", (blocked) => {
 });
 ```
 
-Reaction options can be configured per handler:
+### Per-reaction options
+
+Each reaction handler accepts options that control retry and blocking behaviour:
 
 ```typescript
 .on("OrderPlaced")
   .do(handler, { maxRetries: 5, blockOnError: true })
   .to(resolver)
 ```
+
+- **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments `retry_count`; the next `claim()` picks the stream up again with the same events.
+- **`blockOnError`** (default `true`) — once `retry_count` exceeds `maxRetries`, the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
+
+Set `maxRetries: 0` for handlers that should never retry — typically those that already implement their own dead-letter strategy.

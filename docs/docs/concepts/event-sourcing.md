@@ -58,6 +58,33 @@ import { cache } from "@rotorsoft/act";
 cache(new RedisCache({ url: "redis://localhost:6379" }));
 ```
 
+### Time-travel queries
+
+`load()` accepts an optional `asOf` argument for reading historical state. The framework bypasses the cache, replays events from the start with snapshots, and applies the cutoff filters:
+
+```typescript
+// Snapshot just before event id 5000
+await app.load(Counter, "counter-1", undefined, { before: 5000 });
+
+// Snapshot at a specific timestamp (exclusive)
+await app.load(
+  Counter,
+  "counter-1",
+  undefined,
+  { created_before: new Date("2026-01-01") },
+);
+
+// Replay with a callback to inspect each intermediate state
+await app.load(
+  Counter,
+  "counter-1",
+  (snap) => console.log(snap.event?.id, snap.state),
+  { before: 5000 },
+);
+```
+
+`AsOf = Pick<Query, "before" | "created_before" | "created_after" | "limit">`. Time-travel is read-only — `action()` always operates on current state.
+
 ### Logger
 
 Logging follows the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production and colorized output in development. For pino, inject `PinoLogger` from `@rotorsoft/act-pino`:
@@ -172,6 +199,46 @@ app.on("settled", (drain) => {
 - `app.on("acked", ...)` — observe acknowledged reactions
 - `app.on("blocked", ...)` — catch reaction processing failures
 - `app.on("settled", ...)` — react when `settle()` completes
+- `app.on("closed", ...)` — observe results of `close()` operations (`{ truncated, skipped }`)
+
+## Projection Rebuild
+
+Projections are derived data — disposable by design. To replay a projection from scratch (after a code change, schema fix, or new aggregation):
+
+```typescript
+// 1. Reset the projection's reaction watermarks AND arm the drain flag
+await app.reset(["my-projection"]);
+
+// 2. settle loops correlate→drain until caught up, then emits "settled"
+app.settle({ eventLimit: 1000 });
+```
+
+Always go through `app.reset(...)` rather than `store().reset(...)` directly — the orchestrator's internal `_armed` flag has to be raised, otherwise a settled app short-circuits and skips the replay.
+
+## Closing the Books
+
+`app.close([targets])` is the event-sourcing equivalent of "closing the books" in accounting: archive the detail, then truncate the operational store. Each target chooses between *tombstone* (permanent close) and *restart* (seed a fresh `__snapshot__` and keep accepting actions):
+
+```typescript
+const result = await app.close([
+  {
+    stream: "order-123",
+    archive: async () => {
+      const events = await app.query_array({ stream: "order-123", stream_exact: true });
+      await s3.putObject({ Key: "order-123.json", Body: JSON.stringify(events) });
+    },
+  },
+  {
+    stream: "counter-1",
+    restart: true, // keep the stream alive with a snapshot of final state
+  },
+]);
+
+// result.truncated: Map<stream, { deleted, committed }>
+// result.skipped:   string[]   — streams with pending reactions or concurrent writers
+```
+
+After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent `app.do()`. Restarted streams are reseeded and continue normally. See [Close cycle](../architecture/close-cycle) for the full phase-by-phase semantics.
 
 ## Testing
 

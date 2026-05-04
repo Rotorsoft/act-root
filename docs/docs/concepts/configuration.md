@@ -39,6 +39,31 @@ const CounterProjection = projection("counters")
   .build();
 ```
 
+### Batched replay
+
+For high-throughput rebuilds (e.g. catching up after a long downtime, or projecting onto a fresh read model), define a `.batch(handler)` that processes every event for a stream in a single transaction. When defined, `.batch()` is *always* called instead of the per-event `.do()` handlers.
+
+```typescript
+const TicketProjection = projection("tickets")
+  .on({ TicketOpened: TicketOpenedSchema })
+    .do(async ({ stream, data }) => { /* per-event fallback */ })
+  .on({ TicketClosed: TicketClosedSchema })
+    .do(async ({ stream, data }) => { /* per-event fallback */ })
+  .batch(async (events, stream) => {
+    await db.transaction(async (tx) => {
+      for (const e of events) {
+        switch (e.name) {
+          case "TicketOpened":  /* bulk insert */ break;
+          case "TicketClosed":  /* bulk update */ break;
+        }
+      }
+    });
+  })
+  .build();
+```
+
+`.batch()` is only available on static-target projections (`projection("target")`). The events array is a discriminated union, so a `switch (e.name)` narrows both the name and `data`.
+
 ## Slice Builder
 
 Vertical feature modules grouping states, projections, and reactions:
@@ -71,6 +96,22 @@ const app = act()
     .to(resolver)
   .build();
 ```
+
+### Act options
+
+`act().build(options?)` accepts a small `ActOptions` object for tuning the orchestrator:
+
+```typescript
+const app = act()
+  .withState(Counter)
+  .build({
+    maxSubscribedStreams: 5_000, // default 1000
+    settleDebounceMs: 25,        // default 10
+  });
+```
+
+- **`maxSubscribedStreams`** (default `1000`) — cap for the LRU set tracking already-subscribed reaction targets. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call.
+- **`settleDebounceMs`** (default `10`) — debounce window used by `settle()` when no per-call `debounceMs` is given. Coalesces commits in the same tick into a single correlate→drain pass. Lower for tight tests; raise for bursty production traffic.
 
 ## Port/Adapter Pattern
 

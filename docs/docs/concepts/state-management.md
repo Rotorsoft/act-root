@@ -33,7 +33,10 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 - **`.emits()`** declares events with passthrough reducers by default (`({ data }) => data`)
 - **`.patch()`** overrides only events that need custom reducers
 - **`.emit("EventName")`** passes the action payload through directly as event data
-- **`.emit((action, snapshot, target) => [name, data])`** for computed event data
+- **`.emit((action, snapshot, target) => [name, data])`** for computed event data. The handler receives:
+  - `action` — the validated action payload
+  - `snapshot` — the current state snapshot (`{ state, version, event, ... }`)
+  - `target` — the dispatch target (`{ stream, actor }`), useful when the actor or stream id needs to flow into the event
 
 ### Partial States
 
@@ -133,13 +136,18 @@ const TicketSlice = slice()
   .withProjection(TicketProjection)
   .on("TicketOpened")
     .do(async (event, stream, app) => {
-      await app.do("AssignTicket", target, payload, event);
+      // reactingTo is auto-injected — no need to pass `event` explicitly
+      await app.do("AssignTicket", { stream: event.stream, actor }, payload);
     })
     .to((event) => ({ target: event.stream }))
   .build();
 ```
 
-Slice handlers receive `(event, stream, app)` where `app` implements `IAct` (do, load, query, query_array).
+Slice handlers receive `(event, stream, app)` where `app` implements `IAct` (`do`, `load`, `query`, `query_array`).
+
+### Auto-injected `reactingTo`
+
+When a slice handler calls `app.do()` without an explicit fourth argument, the framework automatically threads the triggering event in as `reactingTo`, propagating the correlation chain (`correlation` and `causation.event`) through the new commit. Pass an explicit fourth argument only if you want to override that default — e.g., to attribute a side-effect commit to a different upstream event.
 
 ## Act Orchestrator
 
@@ -152,9 +160,28 @@ const app = act()
   .withProjection(AuditProjection)
   .build();
 
-await app.do("increment", { stream: "counter1", actor }, { by: 5 });
+const snaps = await app.do("increment", { stream: "counter1", actor }, { by: 5 });
 const snapshot = await app.load(Counter, "counter1");
 ```
+
+### Snapshot shape
+
+Both `app.do()` (returns one snapshot per emitted event) and `app.load()` (returns one snapshot for the latest replayed state) yield objects of this shape:
+
+```typescript
+type Snapshot<TState> = {
+  state: TState;       // current state after this event
+  version: number;     // 0-indexed stream version
+  event?: Committed;   // the event that produced this state (undefined on init)
+  patch?: Partial<TState>; // the diff applied by this event's reducer
+  patches: number;     // events since last __snapshot__
+  snaps: number;       // total __snapshot__ events seen on this stream
+  cache_hit: boolean;  // true when load() served from cache without store I/O
+  replayed: number;    // events processed past the cache point (0 on a warm hit)
+};
+```
+
+`patches` and `snaps` drive the `.snap()` predicate; `cache_hit` and `replayed` show in the trace breadcrumbs and tell you whether the load round-tripped to the store.
 
 ## Utility Types
 
