@@ -15,6 +15,7 @@
  *
  * @internal
  */
+export { classifyRegistry, type Classification } from "./build-classify.js";
 export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
 export { CorrelateCycle, type StaticTarget } from "./correlate-cycle.js";
 export {

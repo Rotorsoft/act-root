@@ -4,6 +4,7 @@ import {
   buildEs,
   buildHandle,
   buildHandleBatch,
+  classifyRegistry,
   computeLagLeadRatio,
   CorrelateCycle,
   type DrainOps,
@@ -13,7 +14,6 @@ import {
   runCloseCycle,
   runDrainCycle,
   SettleLoop,
-  type StaticTarget,
 } from "./internal/index.js";
 import { dispose, log, store } from "./ports.js";
 import type {
@@ -124,7 +124,7 @@ export class Act<
   private _drain_locked = false;
   private _drain_lag2lead_ratio = 0.5;
   /** Event names with at least one registered reaction (computed at build time) */
-  private readonly _reactive_events = new Set<string>();
+  private readonly _reactive_events: ReadonlySet<string>;
   /** Set in do() when a committed event has reactions — cleared by drain() */
   private _needs_drain = false;
   /** Correlation state machine: lazy init, dynamic-resolver scan, periodic worker. */
@@ -188,7 +188,7 @@ export class Act<
    * this lookup is unambiguous. Used by `close()` to pick the right reducer
    * set when seeding a `restart` snapshot in multi-state apps.
    */
-  private readonly _event_to_state = new Map<string, State<any, any, any>>();
+  private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
   /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
@@ -218,28 +218,15 @@ export class Act<
       boundQueryArray: this._bound_query_array,
     });
     this._handle_batch = buildHandleBatch<TEvents>(this._logger);
-    // Classify resolvers and reactive events at build time. Static targets
-    // are deduplicated by (target, source) — two reactions to different
-    // events that route to the same projection produce one subscription.
-    const statics = new Map<string, StaticTarget>();
-    let hasDynamicResolvers = false;
-    for (const [name, register] of Object.entries(this.registry.events)) {
-      if (register.reactions.size > 0) {
-        this._reactive_events.add(name);
-      }
-      for (const reaction of register.reactions.values()) {
-        if (typeof reaction.resolver === "function") {
-          hasDynamicResolvers = true;
-        } else {
-          const { target, source } = reaction.resolver;
-          const key = `${target}|${source ?? ""}`;
-          if (!statics.has(key)) statics.set(key, { stream: target, source });
-        }
-      }
-    }
+
+    const { staticTargets, hasDynamicResolvers, reactiveEvents, eventToState } =
+      classifyRegistry(this.registry, this._states);
+    this._reactive_events = reactiveEvents;
+    this._event_to_state = eventToState;
+
     this._correlate = new CorrelateCycle(
       this.registry,
-      [...statics.values()],
+      staticTargets,
       hasDynamicResolvers,
       this._cd,
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
@@ -259,15 +246,6 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
-
-    // Build the event-name → owning state index. Duplicate event names are
-    // already rejected at registration time (merge.ts), so each entry is
-    // unambiguous.
-    for (const merged of this._states.values()) {
-      for (const eventName of Object.keys(merged.events)) {
-        this._event_to_state.set(eventName, merged);
-      }
-    }
 
     dispose(() => {
       this._emitter.removeAllListeners();
