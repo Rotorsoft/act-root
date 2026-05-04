@@ -2,10 +2,13 @@ import EventEmitter from "events";
 import {
   buildDrain,
   buildEs,
+  buildHandle,
+  buildHandleBatch,
   computeLagLeadRatio,
   type DrainOps,
   type EsOps,
-  type HandleResult,
+  type Handle,
+  type HandleBatch,
   LruSet,
   runCloseCycle,
   runDrainCycle,
@@ -25,7 +28,6 @@ import type {
   Lease,
   Logger,
   Query,
-  ReactionOptions,
   ReactionPayload,
   Registry,
   Schema,
@@ -198,9 +200,9 @@ export class Act<
   private readonly _bound_load = this.load.bind(this);
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
-  /** Pre-bound dispatchers handed to runDrainCycle each cycle. */
-  private readonly _bound_handle = this.handle.bind(this);
-  private readonly _bound_handle_batch = this.handleBatch.bind(this);
+  /** Reaction dispatchers built once and handed to runDrainCycle each cycle. */
+  private readonly _handle: Handle<TEvents>;
+  private readonly _handle_batch: HandleBatch<TEvents>;
 
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
@@ -214,6 +216,14 @@ export class Act<
     );
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
+    this._handle = buildHandle<TEvents, TActions, TActor>({
+      logger: this._logger,
+      boundDo: this._bound_do,
+      boundLoad: this._bound_load,
+      boundQuery: this._bound_query,
+      boundQueryArray: this._bound_query_array,
+    });
+    this._handle_batch = buildHandleBatch<TEvents>(this._logger);
     // Classify resolvers and reactive events at build time. Static targets
     // are deduplicated by (target, source) — two reactions to different
     // events that route to the same projection produce one subscription.
@@ -539,144 +549,6 @@ export class Act<
   }
 
   /**
-   * Shared finalization for the two reaction-runner shapes (per-event
-   * `handle` and bulk `handleBatch`). Centralizes the error log, retry-vs-
-   * block decision, and the "error reported only when nothing was handled"
-   * rule that's true in both shapes (in batch mode, `handled` is always 0
-   * on failure, so the rule degenerates to "always reported").
-   */
-  private _finalize(
-    lease: Lease,
-    handled: number,
-    at: number,
-    error: Error | undefined,
-    options: ReactionOptions
-  ): HandleResult {
-    if (!error) return { lease, handled, at };
-    this._logger.error(error);
-    const block = lease.retry >= options.maxRetries && options.blockOnError;
-    if (block)
-      this._logger.error(
-        `Blocking ${lease.stream} after ${lease.retry} retries.`
-      );
-    return {
-      lease,
-      handled,
-      at,
-      error: handled === 0 ? error.message : undefined,
-      block,
-    };
-  }
-
-  /**
-   * Handles leased reactions one event at a time.
-   *
-   * Called by the main `drain` loop after fetching new events. Each handler
-   * receives a scoped `IAct` proxy that auto-injects the triggering event
-   * as `reactingTo` when `do()` is called without it, maintaining
-   * correlation chains by default (#587). Handlers can still pass an
-   * explicit `reactingTo` to override.
-   *
-   * @internal
-   */
-  private async handle(
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[]
-  ): Promise<HandleResult> {
-    // no payloads, just advance the lease
-    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
-
-    const stream = lease.stream;
-    let at = payloads.at(0)!.event.id;
-    let handled = 0;
-
-    if (lease.retry > 0)
-      this._logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
-
-    // Scoped proxy: auto-injects reactingTo when do() is called without it,
-    // maintaining correlation chains by default (see #587). The non-do
-    // methods are pre-bound on the Act instance and reused across all
-    // handle() calls; only the do() closure varies per payload because it
-    // captures the triggering event.
-    const doAction = this._bound_do;
-    const scopedApp: IAct<TEvents, TActions, TActor> = {
-      do: doAction,
-      load: this._bound_load,
-      query: this._bound_query,
-      query_array: this._bound_query_array,
-    };
-
-    for (const payload of payloads) {
-      const { event, handler } = payload;
-      scopedApp.do = <TKey extends keyof TActions & string>(
-        action: TKey,
-        target: Target<TActor>,
-        payload: Readonly<TActions[TKey]>,
-        reactingTo?: Committed<Schemas, string>,
-        skipValidation?: boolean
-      ) =>
-        doAction(
-          action,
-          target,
-          payload,
-          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skipValidation
-        );
-      try {
-        await handler(event, stream, scopedApp);
-        at = event.id;
-        handled++;
-      } catch (error) {
-        return this._finalize(
-          lease,
-          handled,
-          at,
-          error as Error,
-          payload.options
-        );
-      }
-    }
-    return this._finalize(lease, handled, at, undefined, payloads[0].options);
-  }
-
-  /**
-   * Handles a batch of events for a projection with a batch handler.
-   *
-   * Called by `drain()` when a leased stream is a static-target projection
-   * with a registered batch handler. All events are passed to the handler
-   * in a single call, enabling bulk DB operations.
-   *
-   * @internal
-   */
-  private async handleBatch(
-    lease: Lease,
-    payloads: ReactionPayload<TEvents>[],
-    batchHandler: BatchHandler<TEvents>
-  ): Promise<HandleResult> {
-    const stream = lease.stream;
-    const events = payloads.map((p) => p.event);
-    const options = payloads[0].options;
-
-    if (lease.retry > 0)
-      this._logger.warn(
-        `Retrying batch ${stream}@${events[0].id} (${lease.retry}).`
-      );
-
-    try {
-      await batchHandler(events, stream);
-      return this._finalize(
-        lease,
-        events.length,
-        events.at(-1)!.id,
-        undefined,
-        options
-      );
-    } catch (error) {
-      return this._finalize(lease, 0, lease.at, error as Error, options);
-    }
-  }
-
-  /**
    * Processes pending reactions by draining uncommitted events from the event store.
    *
    * Runs a single drain cycle:
@@ -738,8 +610,8 @@ export class Act<
         this._cd,
         this.registry,
         this._batch_handlers,
-        this._bound_handle,
-        this._bound_handle_batch,
+        this._handle,
+        this._handle_batch,
         lagging,
         leading,
         eventLimit,

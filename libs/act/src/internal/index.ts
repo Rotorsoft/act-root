@@ -19,6 +19,8 @@ export { runCloseCycle, type CloseCycleDeps } from "./close-cycle.js";
 export {
   runDrainCycle,
   type DrainCycle,
+  type Handle,
+  type HandleBatch,
   type HandleResult,
 } from "./drain-cycle.js";
 export { computeLagLeadRatio } from "./drain-ratio.js";
@@ -31,4 +33,5 @@ export {
   mergeProjection,
   registerState,
 } from "./merge.js";
+export { buildHandle, buildHandleBatch } from "./reactions.js";
 export { buildDrain, buildEs } from "./tracing.js";
