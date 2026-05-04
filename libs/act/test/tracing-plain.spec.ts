@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 
 // Force the tracing module to evaluate PRETTY=false by mocking config()

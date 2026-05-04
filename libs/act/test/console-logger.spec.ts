@@ -1,4 +1,4 @@
-import { ConsoleLogger } from "../src/adapters/ConsoleLogger.js";
+import { ConsoleLogger } from "../src/adapters/console-logger.js";
 
 describe("ConsoleLogger", () => {
   let output: string[];

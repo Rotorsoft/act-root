@@ -1,3 +1,3 @@
-export { ConsoleLogger } from "./ConsoleLogger.js";
-export { InMemoryCache } from "./InMemoryCache.js";
-export { InMemoryStore } from "./InMemoryStore.js";
+export { ConsoleLogger } from "./console-logger.js";
+export { InMemoryCache } from "./in-memory-cache.js";
+export { InMemoryStore } from "./in-memory-store.js";

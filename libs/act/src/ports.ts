@@ -1,6 +1,6 @@
-import { ConsoleLogger } from "./adapters/ConsoleLogger.js";
-import { InMemoryCache } from "./adapters/InMemoryCache.js";
-import { InMemoryStore } from "./adapters/InMemoryStore.js";
+import { ConsoleLogger } from "./adapters/console-logger.js";
+import { InMemoryCache } from "./adapters/in-memory-cache.js";
+import { InMemoryStore } from "./adapters/in-memory-store.js";
 import { config } from "./config.js";
 import type {
   Cache,

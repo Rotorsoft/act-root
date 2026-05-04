@@ -1,4 +1,4 @@
-import { InMemoryCache } from "../src/adapters/InMemoryCache.js";
+import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 
 describe("InMemoryCache", () => {
   let cache: InMemoryCache;

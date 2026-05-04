@@ -1,4 +1,4 @@
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { ConcurrencyError, dispose, SNAP_EVENT, store } from "../src/index.js";
 
 describe("InMemoryStore", () => {
@@ -246,7 +246,7 @@ describe("InMemoryStore", () => {
 
     it("should claim with no streams", async () => {
       const { InMemoryStore } =
-        await import("../src/adapters/InMemoryStore.js");
+        await import("../src/adapters/in-memory-store.js");
       const s = new InMemoryStore();
       const result = await s.claim(1, 1, "actor", 1);
       expect(result).toEqual([]);

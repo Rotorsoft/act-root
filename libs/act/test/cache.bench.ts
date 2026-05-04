@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { bench, describe } from "vitest";
 import { z } from "zod";
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import { action, load } from "../src/internal/event-sourcing.js";
 import { dispose, store } from "../src/ports.js";

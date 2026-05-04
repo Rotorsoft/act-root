@@ -1,4 +1,4 @@
-import { InMemoryStore } from "../src/adapters/InMemoryStore.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { tombstone } from "../src/internal/event-sourcing.js";
 import { dispose, store } from "../src/ports.js";
 
