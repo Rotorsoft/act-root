@@ -100,6 +100,25 @@ describe("property: cache/store coherence", () => {
     expect(after.state).toEqual(before.state); // store is unchanged
   });
 
+  test.prop([fc.array(incArb, { minLength: 1, maxLength: 15 })], {
+    numRuns: 50,
+  })(
+    "load() populates the cache — subsequent read on same stream is a hit",
+    async (ops) => {
+      const { stream, by } = ops[0];
+      await action(Counter, "inc", target(stream), { by });
+      // Clear cache so the first load is a miss; that miss should warm
+      // the cache so the second load is a hit.
+      await cache().clear();
+      const first = await load(Counter, stream);
+      expect(first.cache_hit).toBe(false);
+      const second = await load(Counter, stream);
+      expect(second.cache_hit).toBe(true);
+      expect(second.state).toEqual(first.state);
+      expect(second.version).toBe(first.version);
+    }
+  );
+
   test.prop([fc.array(incArb, { minLength: 0, maxLength: 25 })], {
     numRuns: 50,
   })("version equals the head event's version", async (ops) => {
