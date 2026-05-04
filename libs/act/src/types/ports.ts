@@ -262,12 +262,9 @@ export interface Store extends Disposable {
    *
    * @template E - Event schemas
    * @param callback - Function invoked for each matching event
-   * @param query - Optional filter criteria
-   * @param query.stream - Filter by stream ID
-   * @param query.name - Filter by event name
-   * @param query.after - Return events after this ID
-   * @param query.before - Return events before this ID
-   * @param query.limit - Maximum number of events to return
+   * @param query - Optional filter criteria — see {@link Query} for fields
+   *   (`stream`, `name`, `after`, `before`, `created_after`, `created_before`,
+   *   `limit`, `with_snaps`, `stream_exact`).
    * @returns Total number of events processed
    *
    * @example Query all events for a stream
@@ -291,8 +288,9 @@ export interface Store extends Disposable {
   /**
    * Atomically discovers and leases streams for reaction processing.
    *
-   * Combines {@link poll} and {@link lease} into a single operation, eliminating
-   * the race condition where another worker can grab a stream between poll and lease.
+   * Atomically discovers a stream and acquires a lease in one round-trip,
+   * eliminating the race that exists when discovery and locking are separate
+   * calls (a competing worker can grab the stream between the two).
    *
    * PostgresStore uses `FOR UPDATE SKIP LOCKED` for zero-contention competing
    * consumer semantics — workers never block each other, each grabbing different
@@ -426,7 +424,8 @@ export interface Store extends Disposable {
    * await store().reset(["my-projection"]);
    * ```
    *
-   * @see {@link Act.reset} for the high-level rebuild API
+   * @see {@link Act.reset} for the high-level rebuild API that wraps
+   *   this primitive and arms the orchestrator's drain flag
    */
   reset: (streams: string[]) => Promise<number>;
 
@@ -442,7 +441,9 @@ export interface Store extends Disposable {
    * @param targets - Streams to truncate with optional snapshot state and meta
    * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event
    *
-   * @see {@link Act.close} for the high-level close-the-books API
+   * @see {@link Act.close} for the high-level close-the-books API that
+   *   orchestrates safety checks, archive callbacks, and atomic
+   *   truncate+seed
    */
   truncate: (
     targets: Array<{

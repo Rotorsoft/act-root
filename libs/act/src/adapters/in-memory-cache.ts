@@ -4,7 +4,7 @@ import type { Cache, CacheEntry, Schema } from "../types/index.js";
 /**
  * In-memory LRU cache for stream snapshots.
  *
- * Backed by {@link LruMap} for O(1) get/set with LRU eviction.
+ * Backed by an internal `LruMap` for O(1) get/set with LRU eviction.
  * Configurable `maxSize` bounds memory usage.
  *
  * @example

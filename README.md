@@ -2,9 +2,18 @@
 [![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
 ![Repo Size](https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square)
 
-[![Landing Page](./assets/landing.png)](https://rotorsoft.github.io/act-root/)
-
-[![Get the Book](https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge)](https://payhip.com/b/7ezLy)
+<table>
+  <tr>
+    <td valign="top">
+      <a href="https://rotorsoft.github.io/act-root/"><img src="./assets/landing.png" alt="Landing Page"></a>
+    </td>
+    <td valign="top" align="center">
+      <a href="https://payhip.com/b/7ezLy"><img src="./assets/cover.jpg" alt="Book Cover" width="280"></a>
+      <br/><br/>
+      <a href="https://payhip.com/b/7ezLy"><img src="https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge" alt="Get the Book"></a>
+    </td>
+  </tr>
+</table>
 
 **The event-sourcing framework for TypeScript.**
 

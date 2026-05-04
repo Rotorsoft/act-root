@@ -175,7 +175,6 @@ let _validated: Config | undefined;
  * ```
  *
  * @see {@link Config} for configuration type
- * @see {@link Package} for package.json metadata
  */
 export const config = (): Config => {
   if (!_validated) {

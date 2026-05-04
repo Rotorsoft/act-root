@@ -13,5 +13,8 @@
   "categorizeByGroup": true,
   "plugin": [
     "typedoc-plugin-markdown"
-  ]
+  ],
+  "validation": {
+    "invalidLink": false
+  }
 }
