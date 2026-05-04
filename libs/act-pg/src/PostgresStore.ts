@@ -154,8 +154,8 @@ const DEFAULT_CONFIG: Config = {
  * ```
  *
  * @see {@link Store} for the interface definition
- * @see `InMemoryStore` (`@rotorsoft/act`) for development/testing
- * @see `store()` (`@rotorsoft/act`) for injecting stores
+ * @see {@link InMemoryStore} for development/testing
+ * @see {@link store} for injecting stores
  * @see {@link https://node-postgres.com/ | node-postgres documentation}
  *
  * @category Adapters

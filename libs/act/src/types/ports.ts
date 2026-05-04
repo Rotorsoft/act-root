@@ -183,8 +183,8 @@ export type QueryStreamsResult = {
  *   .build();
  * ```
  *
- * @see `InMemoryStore` (default) and `PostgresStore` / `SqliteStore`
- *   for production implementations
+ * @see {@link InMemoryStore} for the default implementation
+ * @see {@link PostgresStore} for the PostgreSQL implementation
  */
 export interface Store extends Disposable {
   /**
@@ -424,8 +424,8 @@ export interface Store extends Disposable {
    * await store().reset(["my-projection"]);
    * ```
    *
-   * @see The orchestrator's `Act.reset()` wraps this primitive and
-   *   arms the drain flag — see `@rotorsoft/act` for the high-level API
+   * @see {@link Act.reset} for the high-level rebuild API that wraps
+   *   this primitive and arms the orchestrator's drain flag
    */
   reset: (streams: string[]) => Promise<number>;
 
@@ -441,9 +441,9 @@ export interface Store extends Disposable {
    * @param targets - Streams to truncate with optional snapshot state and meta
    * @returns Map keyed by stream name, each entry with `deleted` count and `committed` event
    *
-   * @see The orchestrator's `Act.close()` wraps this primitive and
+   * @see {@link Act.close} for the high-level close-the-books API that
    *   orchestrates safety checks, archive callbacks, and atomic
-   *   truncate+seed — see `@rotorsoft/act` for the high-level API
+   *   truncate+seed
    */
   truncate: (
     targets: Array<{
