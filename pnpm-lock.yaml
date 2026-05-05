@@ -488,8 +488,8 @@ importers:
         specifier: ^0.31.1
         version: 0.31.1
       '@rotorsoft/act-pg':
-        specifier: ^0.17.0
-        version: 0.17.0
+        specifier: ^0.17.1
+        version: 0.17.1
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3127,8 +3127,8 @@ packages:
     resolution: {integrity: sha512-nQMyT+VAiZoGWQiVYuL2fAEgGXkY90rUdpxXSpA0TRQ00uNHUQyIVYqc1w2jHyBGXt0sfHpDa7eqUUDIh4dWvA==}
     engines: {node: '>=22.18.0'}
 
-  '@rotorsoft/act-pg@0.17.0':
-    resolution: {integrity: sha512-kDZGHxFyg6FmBWd1gJkQpsOKeVjxryYjrGkNyXiNnO0Odzz+NqRzSdv9SYYp9OjwTZST8aASZB1zGI7RgKKEew==}
+  '@rotorsoft/act-pg@0.17.1':
+    resolution: {integrity: sha512-aX3fEz/H7sgoQi9oN4yiJjUl97fUO5fnnz/ydI7fAuOH6xrlKfUEmLHSJd7vxjOUdF502o6L5SuG/NGvERvpUg==}
     engines: {node: '>=22.18.0'}
 
   '@rotorsoft/act@0.31.1':
@@ -12284,7 +12284,7 @@ snapshots:
 
   '@rotorsoft/act-patch@1.1.0': {}
 
-  '@rotorsoft/act-pg@0.17.0':
+  '@rotorsoft/act-pg@0.17.1':
     dependencies:
       '@rotorsoft/act': 0.31.1
       pg: 8.20.0
