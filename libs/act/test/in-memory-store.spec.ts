@@ -245,8 +245,9 @@ describe("InMemoryStore", () => {
     });
 
     it("should claim with no streams", async () => {
-      const { InMemoryStore } =
-        await import("../src/adapters/in-memory-store.js");
+      const { InMemoryStore } = await import(
+        "../src/adapters/in-memory-store.js"
+      );
       const s = new InMemoryStore();
       const result = await s.claim(1, 1, "actor", 1);
       expect(result).toEqual([]);

@@ -76,7 +76,7 @@ const adapters = new Map<string, Disposable>();
  * ```
  */
 export function port<Port extends Disposable>(injector: Injector<Port>) {
-  return function (adapter?: Port): Port {
+  return (adapter?: Port): Port => {
     if (!adapters.has(injector.name)) {
       const injected = injector(adapter);
       adapters.set(injector.name, injected);

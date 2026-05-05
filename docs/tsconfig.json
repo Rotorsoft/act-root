@@ -4,21 +4,11 @@
   "compilerOptions": {
     "baseUrl": "..",
     "paths": {
-      "@rotorsoft/act": [
-        "libs/act/src/index.ts"
-      ],
-      "@rotorsoft/act-patch": [
-        "libs/act-patch/src/index.ts"
-      ],
-      "@rotorsoft/act-pg": [
-        "libs/act-pg/src/index.ts"
-      ],
-      "@rotorsoft/act-sqlite": [
-        "libs/act-sqlite/src/index.ts"
-      ],
-      "@rotorsoft/act-sse": [
-        "libs/act-sse/src/index.ts"
-      ]
+      "@rotorsoft/act": ["libs/act/src/index.ts"],
+      "@rotorsoft/act-patch": ["libs/act-patch/src/index.ts"],
+      "@rotorsoft/act-pg": ["libs/act-pg/src/index.ts"],
+      "@rotorsoft/act-sqlite": ["libs/act-sqlite/src/index.ts"],
+      "@rotorsoft/act-sse": ["libs/act-sse/src/index.ts"]
     }
   },
   "include": [
@@ -28,7 +18,5 @@
     "../libs/act-sqlite/src/**/*",
     "../libs/act-sse/src/**/*"
   ],
-  "exclude": [
-    "../packages/**"
-  ]
+  "exclude": ["../packages/**"]
 }

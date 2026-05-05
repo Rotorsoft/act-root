@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, type Actor, dispose, state, ZodEmpty } from "../src/index.js";
+import { type Actor, act, dispose, state, ZodEmpty } from "../src/index.js";
 
 const A1 = state({ A1: z.object({}) })
   .init(() => ({}))

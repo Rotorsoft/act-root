@@ -1,7 +1,6 @@
-export { emptyModel } from "./domain-model.js";
 export type {
-  ActNode,
   ActionNode,
+  ActNode,
   DomainModel,
   EntryPoint,
   EventNode,
@@ -11,5 +10,6 @@ export type {
   StateNode,
   ValidationWarning,
 } from "./domain-model.js";
+export { emptyModel } from "./domain-model.js";
 export type { FileTab } from "./file-tab.js";
 export type { DiagramMessage, HostMessage } from "./protocol.js";

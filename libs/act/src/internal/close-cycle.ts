@@ -14,7 +14,7 @@
  * @internal
  */
 
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import { cache, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   CloseResult,

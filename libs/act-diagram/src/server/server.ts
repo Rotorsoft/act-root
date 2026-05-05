@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "fs";
-import { createServer } from "http";
+import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { streamGenerate } from "./ai.js";
 
 // Load .env file if present (tsx doesn't always forward --env-file to Node)

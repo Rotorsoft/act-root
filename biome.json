@@ -1,0 +1,111 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**/*.ts",
+      "**/*.json",
+      "**/biome.json",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/coverage",
+      "!**/build",
+      "!**/.docusaurus",
+      "!**/*.d.ts",
+      "!docs/docs/api",
+      "!docs/api",
+      "!docs/static",
+      "!docs/build",
+      "!**/.postgres",
+      "!**/drizzle/meta",
+      "!.vscode",
+      "!pnpm-lock.yaml"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "jsxQuoteStyle": "double",
+      "semicolons": "always",
+      "trailingCommas": "es5",
+      "bracketSpacing": true,
+      "arrowParentheses": "always"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "complexity": {
+        "noBannedTypes": "off",
+        "noUselessLoneBlockStatements": "off"
+      },
+      "suspicious": {
+        "noExplicitAny": "off",
+        "noUnsafeDeclarationMerging": "off",
+        "noAssignInExpressions": "off",
+        "noImplicitAnyLet": "off",
+        "noConfusingVoidType": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useImportType": "off",
+        "useTemplate": "off",
+        "noParameterAssign": "off"
+      },
+      "correctness": {
+        "noUnusedVariables": {
+          "level": "error",
+          "options": {
+            "ignoreRestSiblings": true
+          }
+        }
+      }
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["libs/act/src/**/*.ts", "!libs/act/src/internal/**"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": [
+                      "**/internal/*",
+                      "!**/internal/index",
+                      "!**/internal/index.js"
+                    ],
+                    "message": "Import via the internal barrel ('./internal/index.js'), not a deep path."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

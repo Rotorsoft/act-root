@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   computeLayout,
-  W,
   type Layout,
   type N,
+  W,
 } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 

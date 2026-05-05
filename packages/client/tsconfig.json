@@ -1,16 +1,10 @@
 {
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
-    "lib": [
-      "DOM",
-      "DOM.Iterable",
-      "ES6"
-    ],
-    "noFallthroughCasesInSwitch": true,
+    "lib": ["DOM", "DOM.Iterable", "ES6"],
+    "noFallthroughCasesInSwitch": true
   },
-  "include": [
-    "src"
-  ],
+  "include": ["src"],
   "references": [
     {
       "path": "../../libs/act"
@@ -20,6 +14,6 @@
     },
     {
       "path": "../calculator"
-    },
+    }
   ]
 }

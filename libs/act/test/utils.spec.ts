@@ -4,8 +4,8 @@ import {
   config,
   extend,
   sleep,
-  validate,
   ValidationError,
+  validate,
 } from "../src/index.js";
 
 describe("utils", () => {

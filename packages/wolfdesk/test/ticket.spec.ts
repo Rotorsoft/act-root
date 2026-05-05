@@ -35,7 +35,7 @@ describe("ticket without reactions", () => {
     const [s] = await addMessage(t, "first message", to);
     const message = Object.values(s.state.messages).at(-1);
     expect(message?.from).toEqual(t.actor?.id);
-    messageId = message!.messageId!;
+    messageId = message!.messageId;
 
     await requestTicketEscalation(t);
     await escalateTicket(t);

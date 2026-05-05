@@ -5,6 +5,16 @@ const sidebars: SidebarsConfig = {
     "intro",
     {
       type: "category",
+      label: "Guides",
+      collapsed: false,
+      items: [
+        "guides/getting-started",
+        "guides/projections-to-database",
+        "guides/production-checklist",
+      ],
+    },
+    {
+      type: "category",
       label: "Concepts",
       items: [
         "concepts/state-management",

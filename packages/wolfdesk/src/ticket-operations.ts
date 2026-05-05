@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
 import * as errors from "./errors.js";
 import {
   AssignTicket,
@@ -95,7 +95,8 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
 // prettier-ignore
 export const TicketOpsSlice = slice()
   .withState(TicketOperations)
-  .on("TicketEscalationRequested").do(async function escalate(event, _stream, app) {
+  .on("TicketEscalationRequested")
+  .do(async function escalate(event, _stream, app) {
     await app.do(
       "EscalateTicket",
       {

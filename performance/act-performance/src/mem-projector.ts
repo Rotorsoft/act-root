@@ -2,7 +2,7 @@
  * Projection table for fast reads.
  * Updated by event handlers.
  */
-import { sleep, store, type CommittedOf } from "@rotorsoft/act";
+import { type CommittedOf, sleep, store } from "@rotorsoft/act";
 import { Events, TodoState } from "./todo";
 
 export function create() {

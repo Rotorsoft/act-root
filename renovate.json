@@ -7,29 +7,20 @@
     ":enableVulnerabilityAlerts"
   ],
   "dependencyDashboard": true,
-  "enabledManagers": [
-    "npm",
-    "github-actions"
-  ],
+  "enabledManagers": ["npm", "github-actions"],
   "packageRules": [
     {
       "groupName": "Types packages",
-      "matchPackageNames": [
-        "/^@types//"
-      ]
+      "matchPackageNames": ["/^@types//"]
     },
     {
-      "matchDepTypes": [
-        "devDependencies"
-      ],
+      "matchDepTypes": ["devDependencies"],
       "groupName": "Dev dependencies"
     }
   ],
   "lockFileMaintenance": {
     "enabled": true,
-    "schedule": [
-      "before 3am on monday"
-    ]
+    "schedule": ["before 3am on monday"]
   },
   "rangeStrategy": "bump"
 }

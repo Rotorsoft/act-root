@@ -1,6 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { act, type Committed, type Schemas, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
-import { randomUUID } from "crypto";
 import express from "express";
 import { create as pgProjector } from "./pg-projector.js";
 import { ConvergenceState, updateStats } from "./stats.js";
@@ -87,8 +87,8 @@ async function main() {
   // POST /todos
   app.post("/todos", async (req, res) => {
     try {
-      const actorId = req.headers["authorization"]
-        ? req.headers["authorization"].replace("Bearer ", "")
+      const actorId = req.headers.authorization
+        ? req.headers.authorization.replace("Bearer ", "")
         : "system";
       const stream = "todo-" + randomUUID();
       const [snap] = await actApp.do(
@@ -112,8 +112,8 @@ async function main() {
   // PUT /todos/:stream
   app.put("/todos/:stream", async (req, res) => {
     try {
-      const actorId = req.headers["authorization"]
-        ? req.headers["authorization"].replace("Bearer ", "")
+      const actorId = req.headers.authorization
+        ? req.headers.authorization.replace("Bearer ", "")
         : "system";
       await actApp.do(
         "update",
@@ -130,8 +130,8 @@ async function main() {
   // DELETE /todos/:stream
   app.delete("/todos/:stream", async (req, res) => {
     try {
-      const actorId = req.headers["authorization"]
-        ? req.headers["authorization"].replace("Bearer ", "")
+      const actorId = req.headers.authorization
+        ? req.headers.authorization.replace("Bearer ", "")
         : "system";
       await actApp.do(
         "delete",

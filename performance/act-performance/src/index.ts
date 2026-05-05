@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   act,
   type Committed,
@@ -6,7 +7,6 @@ import {
   store,
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
-import { randomUUID } from "crypto";
 import { create as memProjector } from "./mem-projector";
 import { create as pgProjector } from "./pg-projector";
 import { updateStats } from "./stats";
@@ -69,7 +69,7 @@ export const app = act()
   .build();
 
 // load test variables
-let drainInterval: ReturnType<typeof setInterval> | undefined = undefined;
+let drainInterval: ReturnType<typeof setInterval> | undefined;
 let lastDrain = Date.now();
 let eventCount = 0;
 let drainCount = 0;

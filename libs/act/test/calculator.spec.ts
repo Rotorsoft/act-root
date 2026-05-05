@@ -1,4 +1,4 @@
-import { act, Actor, Committed, dispose, sleep, store } from "@rotorsoft/act";
+import { Actor, act, Committed, dispose, sleep, store } from "@rotorsoft/act";
 import { Calculator } from "./calculator.js";
 
 describe("calculator lifecycle", () => {

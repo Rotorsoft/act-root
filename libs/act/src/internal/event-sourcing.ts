@@ -15,8 +15,8 @@
  * @internal
  */
 
+import { randomUUID } from "node:crypto";
 import { patch } from "@rotorsoft/act-patch";
-import { randomUUID } from "crypto";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
   ConcurrencyError,
@@ -177,16 +177,15 @@ export async function load<
           `Skipping unknown event "${String(e.name)}" on stream "${stream}" (id=${e.id}) — no reducer in state "${me.name}"`
         );
       }
-      callback &&
-        callback({
-          event,
-          state,
-          version,
-          patches,
-          snaps,
-          cache_hit,
-          replayed,
-        });
+      callback?.({
+        event,
+        state,
+        version,
+        patches,
+        snaps,
+        cache_hit,
+        replayed,
+      });
     },
     {
       stream,
@@ -313,7 +312,7 @@ export async function action<
     },
   };
 
-  let committed;
+  let committed: Committed<TEvents, keyof TEvents>[];
   try {
     committed = await store().commit(
       stream,
@@ -355,7 +354,7 @@ export async function action<
 
   // fire and forget snaps
   const last = snapshots.at(-1)!;
-  const snapped = me.snap && me.snap(last);
+  const snapped = me.snap?.(last);
 
   // Update cache with post-commit state (reset patches if snapped).
   // Fire-and-forget — log but don't fail the action on cache write errors

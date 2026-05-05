@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { slice, state } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
 import * as errors from "./errors.js";
 import {
   CloseTicket,
@@ -69,7 +69,8 @@ export const TicketCreationSlice = slice()
   .withState(TicketCreation)
   .withState(TicketOperations)
 
-  .on("TicketOpened").do(async function assign(event, _stream, app) {
+  .on("TicketOpened")
+  .do(async function assign(event, _stream, app) {
     const agent = assignAgent(
       event.stream,
       event.data.supportCategoryId,

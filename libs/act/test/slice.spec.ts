@@ -53,15 +53,15 @@ describe("slice", () => {
     expect(s._tag).toBe("Slice");
     expect(s.states.size).toBe(1);
     expect(s.states.has("Thing")).toBe(true);
-    expect(s.events["Incremented"]).toBeDefined();
-    expect(s.events["Incremented"].reactions.size).toBe(0);
+    expect(s.events.Incremented).toBeDefined();
+    expect(s.events.Incremented.reactions.size).toBe(0);
   });
 
   it("should register scoped reactions via .on().do()", () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const s = slice().withState(PartA).on("Incremented").do(handler).build();
 
-    expect(s.events["Incremented"].reactions.size).toBe(1);
+    expect(s.events.Incremented.reactions.size).toBe(1);
   });
 
   it("should throw for anonymous handlers", () => {
@@ -82,7 +82,7 @@ describe("slice", () => {
       .to("target-stream")
       .build();
 
-    expect(s.events["Incremented"].reactions.size).toBe(1);
+    expect(s.events.Incremented.reactions.size).toBe(1);
   });
 
   it("should register scoped reactions via .on().do().to() with function resolver", () => {
@@ -95,7 +95,7 @@ describe("slice", () => {
       .to(resolver)
       .build();
 
-    expect(s.events["Incremented"].reactions.size).toBe(1);
+    expect(s.events.Incremented.reactions.size).toBe(1);
   });
 
   it("should merge act().withState(Slice) states and reactions into act registry", async () => {
@@ -324,8 +324,8 @@ describe("slice", () => {
     const b = slice().withState(PartA);
     // The events property should exist and have the event register
     expect(b.events).toBeDefined();
-    expect(b.events["Incremented"]).toBeDefined();
-    expect(b.events["Incremented"].schema).toBeDefined();
+    expect(b.events.Incremented).toBeDefined();
+    expect(b.events.Incremented.schema).toBeDefined();
   });
 
   it("should compose slices that share the same state", async () => {
@@ -364,8 +364,8 @@ describe("slice", () => {
     const s = slice().withState(PartA).withState(PartB).build();
 
     expect(s.states.size).toBe(1); // both are "Thing", merged
-    expect(s.events["Incremented"]).toBeDefined();
-    expect(s.events["Labeled"]).toBeDefined();
+    expect(s.events.Incremented).toBeDefined();
+    expect(s.events.Labeled).toBeDefined();
 
     // Compose into act and verify it works
     const app = act().withSlice(s).build();
@@ -471,7 +471,7 @@ describe("slice", () => {
     expect(receivedEvent.data).toEqual({ by: 1 });
     expect(receivedStream).toBe("counters");
     // The handler's declared parameter count is 2 (no dispatcher)
-    const [reaction] = [...proj.events["Incremented"].reactions.values()];
+    const [reaction] = [...proj.events.Incremented.reactions.values()];
     expect(reaction.handler.length).toBe(2);
   });
 
@@ -498,7 +498,7 @@ describe("slice", () => {
     const events = app.registry.events as Record<string, any>;
 
     // Both should be registered — projection handler deduped with "_p" suffix
-    const names = [...events["Incremented"].reactions.keys()];
+    const names = [...events.Incremented.reactions.keys()];
     expect(names).toContain("myHandler");
     expect(names).toContain("myHandler_p");
   });

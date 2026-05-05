@@ -15,7 +15,7 @@
  * @internal
  */
 
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import type {
   BatchHandler,
   BlockedLease,
@@ -29,8 +29,8 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
-import { computeLagLeadRatio } from "./drain-ratio.js";
 import type { DrainOps } from "./drain.js";
+import { computeLagLeadRatio } from "./drain-ratio.js";
 
 /**
  * Outcome of processing a single leased stream — produced by Act's `handle`

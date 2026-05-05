@@ -3,8 +3,5 @@
   "compilerOptions": {
     "rootDir": "."
   },
-  "exclude": [
-    "dist",
-    "node_modules"
-  ]
+  "exclude": ["dist", "node_modules"]
 }

@@ -8,12 +8,8 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "paths": {
-      "@rotorsoft/act": [
-        "../../libs/act/src/index.ts"
-      ],
-      "@rotorsoft/act-pg": [
-        "../../libs/act-pg/src/index.ts"
-      ]
+      "@rotorsoft/act": ["../../libs/act/src/index.ts"],
+      "@rotorsoft/act-pg": ["../../libs/act-pg/src/index.ts"]
     }
   },
   "references": [

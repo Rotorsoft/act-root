@@ -1,12 +1,12 @@
+import { randomUUID } from "node:crypto";
 import {
-  act,
   Actor,
+  act,
   config,
   InvariantError,
   sleep,
   state,
 } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
 import { z } from "zod";
 import { Calculator, DIGITS, KEYS } from "./calculator.js";
 

@@ -3,12 +3,12 @@ import {
   computeLayout,
   GAP,
   H,
+  type Layout,
   MARGIN,
+  type N,
   STATE_H,
   STATE_W,
   W,
-  type Layout,
-  type N,
 } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 

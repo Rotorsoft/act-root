@@ -1,5 +1,5 @@
+import { randomUUID } from "node:crypto";
 import { InvariantError, slice, state } from "@rotorsoft/act";
-import { randomUUID } from "crypto";
 import * as errors from "./errors.js";
 import {
   AcknowledgeMessage,
@@ -76,7 +76,8 @@ export const TicketMessaging = state({ Ticket: TicketMessagingState })
 export const TicketMessagingSlice = slice()
   .withState(TicketMessaging)
 
-  .on("MessageAdded").do(async function deliver(event, _stream, app) {
+  .on("MessageAdded")
+  .do(async function deliver(event, _stream, app) {
     await deliverMessage(event.data);
     await app.do(
       "MarkMessageDelivered",

@@ -38,8 +38,8 @@
  */
 
 export { patch } from "@rotorsoft/act-patch";
-export { applyPatchMessage } from "./apply-patch.js";
 export type { ApplyResult } from "./apply-patch.js";
+export { applyPatchMessage } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
 export { PresenceTracker } from "./presence.js";
 export { StateCache } from "./state-cache.js";

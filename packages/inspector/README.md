@@ -2,6 +2,8 @@
 
 Event sourcing observatory for the Act framework. Connect to any Act PostgreSQL store and inspect, query, and visualize events in real time.
 
+> Workspace package, not a published library. Run via `pnpm dev:inspector` from the monorepo root. PostgreSQL only — `SqliteStore` is not supported by the inspector.
+
 ## Quickstart
 
 ```bash
@@ -37,6 +39,9 @@ Connection names are derived from the discovered `schema.table` (e.g., `act.wolf
 | Password | `postgres`  |
 | Schema   | `public`    |
 | Table    | `events`    |
+| SSL      | `false`     |
+
+When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }` — suitable for self-signed certs on managed Postgres providers.
 
 ## Features
 
@@ -86,7 +91,7 @@ packages/inspector/
 │       ├── App.tsx      # Root with navigation history
 │       ├── trpc.ts      # tRPC client
 │       ├── stores/      # URL-synced filter state
-│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, FilterBar, StatsBar, EventRow, JsonViewer, Logo
+│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, BackupRestore, FilterBar, StatsBar, EventRow, JsonViewer, Logo
 │       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor
 ├── public/              # favicon.svg
 ├── index.html
@@ -108,8 +113,10 @@ packages/inspector/
 | `streams` | query | Stream list with event counts and versions |
 | `streamMeta` | query | Subscription positions from the streams table |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram |
+| `backup` | mutation | Stream the events table to CSV for archival |
+| `restore` | mutation | Truncate + re-import events from a CSV — destructive, gated by an explicit confirmation |
 
 - **Event data**: flows through Act's `Store.query()` interface
 - **Processing metadata**: flows through Act's `Store.query_streams()` interface — adapter-agnostic, no second connection
 - **Store management**: own `PostgresStore` instance (not the Act singleton) — enables reconnecting
-- **Read-only**: no mutations, no replays — pure inspection
+- **Mostly read-only**: every view above is non-destructive. The two exceptions are `backup` (streams the events table out to CSV) and `restore` (truncates then re-imports a CSV — guarded by an explicit confirmation in the UI).

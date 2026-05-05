@@ -27,8 +27,9 @@ describe("ports-injector", () => {
   describe("port injector", () => {
     it("should inject a default adapter and return the same instance", async () => {
       // Import InMemoryStore dynamically to solve instanceof issue
-      const { InMemoryStore } =
-        await import("../src/adapters/in-memory-store.js");
+      const { InMemoryStore } = await import(
+        "../src/adapters/in-memory-store.js"
+      );
       const { store } = await import("../src/ports.js");
       const defaultStore = store();
       expect(defaultStore).toBeInstanceOf(InMemoryStore);
@@ -37,8 +38,9 @@ describe("ports-injector", () => {
     });
 
     it("should allow a specific adapter to be injected", async () => {
-      const { InMemoryStore } =
-        await import("../src/adapters/in-memory-store.js");
+      const { InMemoryStore } = await import(
+        "../src/adapters/in-memory-store.js"
+      );
       const { store } = await import("../src/ports.js");
       class CustomStore extends InMemoryStore {}
       const customStore = new CustomStore();
