@@ -84,7 +84,7 @@ function fixupReactions(
   if (!src) return;
   const doRe =
     /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(?:\w+\.)?(\w+))?/g;
-  let dm;
+  let dm: RegExpExecArray | null;
   while ((dm = doRe.exec(src)) !== null) {
     const eventName = dm[1];
     const handlerName = dm[2] || dm[3];

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
+import type { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import { action, load } from "../src/internal/event-sourcing.js";

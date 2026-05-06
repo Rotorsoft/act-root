@@ -4,7 +4,7 @@ import {
   createTRPCReact,
   httpLink,
 } from "@trpc/react-query";
-import { type InspectorRouter } from "../server/router.js";
+import type { InspectorRouter } from "../server/router.js";
 
 export const trpc: CreateTRPCReact<InspectorRouter, unknown> =
   createTRPCReact<InspectorRouter>();

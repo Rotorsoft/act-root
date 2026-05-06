@@ -55,14 +55,14 @@
         "noExplicitAny": "off",
         "noUnsafeDeclarationMerging": "off",
         "noAssignInExpressions": "off",
-        "noImplicitAnyLet": "off",
-        "noConfusingVoidType": "off"
+        "noConfusingVoidType": "off",
+        "noConsole": "error"
       },
       "style": {
         "noNonNullAssertion": "off",
-        "useImportType": "off",
         "useTemplate": "off",
-        "noParameterAssign": "off"
+        "useImportType": "error",
+        "noParameterAssign": "error"
       },
       "correctness": {
         "noUnusedVariables": {
@@ -71,6 +71,9 @@
             "ignoreRestSiblings": true
           }
         }
+      },
+      "performance": {
+        "noAccumulatingSpread": "warn"
       }
     }
   },
@@ -83,6 +86,24 @@
     }
   },
   "overrides": [
+    {
+      "includes": [
+        "**/__tests__/**",
+        "**/test/**",
+        "**/scripts/**",
+        "**/*.bench.ts",
+        "packages/**",
+        "performance/**",
+        "libs/act-diagram/src/server/**"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
     {
       "includes": ["libs/act/src/**/*.ts", "!libs/act/src/internal/**"],
       "linter": {

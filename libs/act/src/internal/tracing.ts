@@ -28,10 +28,10 @@
 
 import { config } from "../config.js";
 import type { AsOf, Logger, Schemas } from "../types/index.js";
+import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
-import { type DrainOps } from "./drain.js";
+import type { EsOps } from "./event-sourcing.js";
 import * as es from "./event-sourcing.js";
-import { type EsOps } from "./event-sourcing.js";
 
 type AsyncFn = (...args: any[]) => Promise<any>;
 

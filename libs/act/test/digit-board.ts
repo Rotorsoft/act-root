@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  Actor,
+  type Actor,
   act,
   config,
   InvariantError,

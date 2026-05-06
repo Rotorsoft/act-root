@@ -1,7 +1,7 @@
 import type { Patch } from "@rotorsoft/act-patch";
-import { ZodType, z } from "zod";
+import type { ZodType, z } from "zod";
 import type { TruncateResult } from "./ports.js";
-import {
+import type {
   ActorSchema,
   CausationEventSchema,
   CommittedMetaSchema,

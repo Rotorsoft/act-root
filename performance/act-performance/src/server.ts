@@ -3,7 +3,7 @@ import { act, type Committed, type Schemas, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import express from "express";
 import { create as pgProjector } from "./pg-projector.js";
-import { ConvergenceState, updateStats } from "./stats.js";
+import { type ConvergenceState, updateStats } from "./stats.js";
 import { Todo } from "./todo.js";
 
 const PORT = Number(process.env.PORT) || 3000;

@@ -3,7 +3,7 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import { action, load, snap } from "../src/internal/event-sourcing.js";
 import { dispose, SNAP_EVENT, store } from "../src/ports.js";
-import { Snapshot } from "../src/types/action.js";
+import type { Snapshot } from "../src/types/action.js";
 import { InvariantError } from "../src/types/errors.js";
 import { ZodEmpty } from "../src/types/schemas.js";
 

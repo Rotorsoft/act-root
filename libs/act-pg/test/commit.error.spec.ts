@@ -1,5 +1,10 @@
-import { Committed, ConcurrencyError, dispose, Schemas } from "@rotorsoft/act";
-import { Pool, QueryResult } from "pg";
+import {
+  type Committed,
+  ConcurrencyError,
+  dispose,
+  type Schemas,
+} from "@rotorsoft/act";
+import { Pool, type QueryResult } from "pg";
 import { PostgresStore } from "../src/index.js";
 
 const query = (

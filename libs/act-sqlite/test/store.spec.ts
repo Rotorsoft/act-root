@@ -1,8 +1,8 @@
 import {
-  Committed,
+  type Committed,
   ConcurrencyError,
   dispose,
-  Schemas,
+  type Schemas,
   SNAP_EVENT,
   sleep,
   store,

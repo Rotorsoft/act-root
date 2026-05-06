@@ -19,7 +19,7 @@
  * @internal
  */
 
-import { ConcurrencyError, dispose, Schemas, store } from "@rotorsoft/act";
+import { ConcurrencyError, dispose, type Schemas, store } from "@rotorsoft/act";
 import { PostgresStore } from "../../src/index.js";
 
 const PG_CONFIG = {

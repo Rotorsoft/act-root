@@ -1,4 +1,4 @@
-import { type CalculatorRouter } from "@act/calculator";
+import type { CalculatorRouter } from "@act/calculator";
 import { QueryClient } from "@tanstack/react-query";
 import {
   type CreateTRPCReact,

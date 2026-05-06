@@ -1,5 +1,5 @@
-import { z } from "zod";
-import { Message } from "../schemas/index.js";
+import type { z } from "zod";
+import type { Message } from "../schemas/index.js";
 
 export const deliverMessage = (
   message: z.infer<typeof Message>

@@ -1,4 +1,4 @@
-import { type Target } from "@rotorsoft/act";
+import type { Target } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { app } from "../src/bootstrap.js";
 import { Priority } from "../src/schemas/index.js";

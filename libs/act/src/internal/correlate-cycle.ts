@@ -15,7 +15,7 @@
  */
 
 import { LruSet } from "../lru-map.js";
-import { store } from "../ports.js";
+import { log, store } from "../ports.js";
 import type {
   Query,
   ReactionPayload,
@@ -159,8 +159,8 @@ export class CorrelateCycle<
 
   /**
    * Start a periodic correlation worker. Returns false if one is already
-   * running. Errors from `correlate()` are sent to `console.error` (matches
-   * pre-extraction behavior; the timer keeps running on failure).
+   * running. Errors from `correlate()` are routed through `log()` so they
+   * land in the configured logger (the timer keeps running on failure).
    */
   startPolling(
     query: Query = {},
@@ -176,7 +176,7 @@ export class CorrelateCycle<
           .then((result) => {
             if (callback && result.subscribed) callback(result.subscribed);
           })
-          .catch(console.error),
+          .catch((err) => log().error(err)),
       frequency
     );
     return true;
