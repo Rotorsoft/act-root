@@ -1,4 +1,4 @@
-import { type Invariant } from "@rotorsoft/act";
+import type { Invariant } from "@rotorsoft/act";
 
 export const mustBeOpen: Invariant<{
   productId: string;

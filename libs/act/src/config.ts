@@ -10,9 +10,9 @@ import * as fs from "node:fs";
 import { z } from "zod";
 import { log } from "./ports.js";
 import {
-  Environment,
+  type Environment,
   Environments,
-  LogLevel,
+  type LogLevel,
   LogLevels,
 } from "./types/index.js";
 import { extend } from "./utils.js";

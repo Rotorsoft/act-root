@@ -11,7 +11,7 @@ import { create as memProjector } from "./mem-projector";
 import { create as pgProjector } from "./pg-projector";
 import { updateStats } from "./stats";
 import { Todo } from "./todo";
-import { LoadTestOptions } from "./types";
+import type { LoadTestOptions } from "./types";
 
 // maps a todo-UUID stream to a bucket of N+1 streams
 function target(stream: string, N: number) {

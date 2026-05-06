@@ -36,10 +36,10 @@ describe("close", () => {
 
   async function drainAll() {
     await app.correlate();
-    let d;
-    do {
+    let d = await app.drain();
+    while (d.acked.length) {
       d = await app.drain();
-    } while (d.acked.length);
+    }
   }
 
   beforeEach(async () => {

@@ -3,7 +3,7 @@
  * Updated by event handlers.
  */
 import { type CommittedOf, sleep, store } from "@rotorsoft/act";
-import { Events, TodoState } from "./todo";
+import type { Events, TodoState } from "./todo";
 
 export function create() {
   const todos = new Map<string, TodoState>();

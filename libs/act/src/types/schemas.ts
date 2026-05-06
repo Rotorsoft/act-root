@@ -1,4 +1,4 @@
-import { ZodObject, ZodRawShape, z } from "zod";
+import { type ZodObject, type ZodRawShape, z } from "zod";
 
 /**
  * @packageDocumentation

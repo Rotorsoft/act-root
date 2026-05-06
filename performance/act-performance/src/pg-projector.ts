@@ -4,7 +4,7 @@
  */
 import { type CommittedOf, sleep } from "@rotorsoft/act";
 import { Pool } from "pg";
-import { Events } from "./todo";
+import type { Events } from "./todo";
 
 export function create(connectionString?: string) {
   const pool = new Pool({

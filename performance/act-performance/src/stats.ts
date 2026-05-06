@@ -1,4 +1,4 @@
-import { Drain, Schemas } from "@rotorsoft/act";
+import type { Drain, Schemas } from "@rotorsoft/act";
 import Table from "cli-table3";
 
 export interface ConvergenceState {

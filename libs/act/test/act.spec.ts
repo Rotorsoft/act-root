@@ -113,10 +113,10 @@ describe("act", () => {
     await app.do("add", { stream: "s2", actor }, {});
     await app.correlate();
     // Drain until nothing left (InMemoryStore may need multiple passes)
-    let d;
-    do {
+    let d = await app.drain();
+    while (d.acked.length || d.blocked.length) {
       d = await app.drain();
-    } while (d.acked.length || d.blocked.length);
+    }
 
     // Now _needs_drain is false. Non-reactive event should NOT set it.
     await app.do("ignore2", { stream: "s2", actor }, {});
@@ -574,10 +574,10 @@ describe("act", () => {
   it("should clear _needs_drain when drain processes events with no results", async () => {
     await app.do("increment", { stream: "clear-flag", actor }, {});
     await app.correlate();
-    let d;
-    do {
+    let d = await app.drain();
+    while (d.acked.length || d.blocked.length) {
       d = await app.drain();
-    } while (d.acked.length || d.blocked.length);
+    }
     expect((app as any)._drain.armed).toBe(false);
   });
 

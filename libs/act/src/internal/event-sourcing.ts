@@ -251,7 +251,7 @@ export async function action<
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
-  payload = skipValidation
+  const validated = skipValidation
     ? payload
     : validate(action as string, payload, me.actions[action]);
 
@@ -266,7 +266,7 @@ export async function action<
       if (!valid(snapshot.state, actor))
         throw new InvariantError(
           action,
-          payload,
+          validated,
           target,
           snapshot,
           description
@@ -274,7 +274,7 @@ export async function action<
     });
   }
 
-  const result = me.on[action](payload, snapshot, target);
+  const result = me.on[action](validated, snapshot, target);
   if (!result) return [snapshot];
 
   // An empty array means no events were emitted

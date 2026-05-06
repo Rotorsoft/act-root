@@ -1,4 +1,4 @@
-import { act, Target } from "@rotorsoft/act";
+import { act, type Target } from "@rotorsoft/act";
 import { initTRPC } from "@trpc/server";
 import { Calculator } from "./calculator.js";
 

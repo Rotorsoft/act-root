@@ -163,7 +163,7 @@ function execute(
       // Pre-scan: capture slice variable names before eval
       const sliceNamesInAct: string[] = [];
       const wsRe = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
-      let wsm;
+      let wsm: RegExpExecArray | null;
       const codeOnly = stripNonCode(js);
       while ((wsm = wsRe.exec(codeOnly)) !== null) {
         if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);

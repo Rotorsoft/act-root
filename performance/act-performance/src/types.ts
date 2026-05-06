@@ -1,5 +1,5 @@
-import { CommittedOf } from "@rotorsoft/act";
-import { Events, TodoState } from "./todo";
+import type { CommittedOf } from "@rotorsoft/act";
+import type { Events, TodoState } from "./todo";
 
 export type LoadTestOptions = {
   maxEvents: number;

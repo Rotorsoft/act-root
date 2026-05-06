@@ -1,5 +1,5 @@
 import {
-  Actor,
+  type Actor,
   act,
   dispose,
   InvariantError,

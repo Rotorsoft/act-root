@@ -20,7 +20,7 @@ export function topoSort(tsFiles: FileTab[]): FileTab[] {
     deps.set(key, fileDeps);
 
     const fromRe = /from\s+["']([^"']+)["']/g;
-    let m;
+    let m: RegExpExecArray | null;
     while ((m = fromRe.exec(f.content)) !== null) {
       const imp = m[1];
       const resolved = resolve(imp, key, byKey);

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { Actor, Committed, Schemas, sleep, store } from "@rotorsoft/act";
+import {
+  type Actor,
+  type Committed,
+  type Schemas,
+  sleep,
+  store,
+} from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { app } from "./bootstrap.js";
