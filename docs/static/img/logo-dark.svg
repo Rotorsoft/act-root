@@ -2,6 +2,6 @@
   <text x="60" y="46" text-anchor="middle"
         font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'JetBrains Mono', 'Fira Mono', monospace"
         font-weight="900" font-size="48" letter-spacing="-3">
-    <tspan fill="#3bb0ff">A</tspan><tspan fill="#ffb300">c</tspan><tspan fill="#43a047">t</tspan>
+    <tspan fill="#5cc6ff">A</tspan><tspan fill="#ffc733">c</tspan><tspan fill="#7ed487">t</tspan>
   </text>
 </svg>
