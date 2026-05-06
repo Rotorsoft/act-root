@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.33.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.1...@rotorsoft/act-v0.33.2) (2026-05-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency zod to ^4.4.3 ([84c5bc7](https://github.com/rotorsoft/act-root/commit/84c5bc77bd55edb427f202ce43acf38878c23003))
+
 # [@rotorsoft/act-v0.33.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.0...@rotorsoft/act-v0.33.1) (2026-05-04)
 
 
