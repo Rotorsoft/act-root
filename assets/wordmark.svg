@@ -1,0 +1,45 @@
+<svg width="600" height="400" viewBox="0 0 600 400" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Act — Fluent Event Sourcing for TypeScript">
+  <defs>
+    <linearGradient id="panelBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e1117"/>
+      <stop offset="100%" stop-color="#141821"/>
+    </linearGradient>
+    <linearGradient id="brandGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#3bb0ff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.4" r="0.7">
+      <stop offset="0%" stop-color="#7c5cff" stop-opacity="0.15"/>
+      <stop offset="55%" stop-color="#3bb0ff" stop-opacity="0.05"/>
+      <stop offset="100%" stop-color="#7c5cff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="600" height="400" rx="20" fill="url(#panelBg)"/>
+  <ellipse cx="300" cy="160" rx="380" ry="200" fill="url(#glow)"/>
+
+  <text x="300" y="220" text-anchor="middle"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'JetBrains Mono', monospace"
+        font-weight="900" font-size="200" letter-spacing="-12">
+    <tspan fill="#5cc6ff">A</tspan><tspan fill="#ffc733">c</tspan><tspan fill="#7ed487">t</tspan>
+  </text>
+
+  <text x="300" y="280" text-anchor="middle"
+        font-family="ui-monospace, 'SF Mono', Menlo, Consolas, 'JetBrains Mono', monospace"
+        font-size="22" font-weight="700" fill="url(#brandGrad)" letter-spacing="0.5">
+    Fluent Event Sourcing
+  </text>
+  <text x="300" y="308" text-anchor="middle"
+        font-family="-apple-system, system-ui, 'Segoe UI', Roboto, sans-serif"
+        font-size="15" font-weight="500" fill="#8a93a4">
+    for TypeScript
+  </text>
+
+  <g transform="translate(160, 360)" opacity="0.7">
+    <line x1="0" y1="0" x2="280" y2="0" stroke="#5b6478" stroke-width="1" stroke-dasharray="3 6"/>
+    <circle cx="0" cy="0" r="4" fill="#3bb0ff"/>
+    <circle cx="93" cy="0" r="4" fill="#7c5cff"/>
+    <circle cx="187" cy="0" r="4" fill="#5b6478"/>
+    <circle cx="280" cy="0" r="4" fill="#5b6478"/>
+  </g>
+</svg>

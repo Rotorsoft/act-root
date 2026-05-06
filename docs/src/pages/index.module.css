@@ -1,0 +1,536 @@
+/* Homepage — TanStack-inspired sections */
+
+.main {
+  --hero-max: 1100px;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+.section {
+  max-width: var(--hero-max);
+  margin: 0 auto;
+  padding: 4rem 1.5rem;
+}
+
+.sectionHeader {
+  text-align: center;
+  max-width: 720px;
+  margin: 0 auto 2.5rem;
+}
+
+.sectionTitle {
+  font-size: clamp(1.6rem, 2.6vw, 2.2rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.6rem;
+  line-height: 1.15;
+}
+
+.sectionSub {
+  color: var(--act-text-muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ---------- Hero ---------- */
+.hero {
+  position: relative;
+  isolation: isolate;
+  padding: 4.5rem 1.5rem 3rem;
+  overflow: hidden;
+}
+
+.heroGlow {
+  position: absolute;
+  inset: -10% -20% auto -20%;
+  height: 600px;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(620px 340px at 35% 35%, rgba(59, 176, 255, 0.12), transparent 65%),
+    radial-gradient(700px 380px at 65% 55%, rgba(124, 92, 255, 0.10), transparent 65%);
+  filter: blur(24px);
+  opacity: 0.7;
+}
+
+[data-theme="light"] .heroGlow {
+  opacity: 0.4;
+}
+
+.heroInner {
+  max-width: 920px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55em;
+  padding: 0.4em 0.9em;
+  border-radius: 999px;
+  border: 1px solid var(--act-border-strong);
+  background: var(--act-surface-1);
+  color: var(--act-text-muted);
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-family: var(--ifm-font-family-monospace);
+  letter-spacing: 0.01em;
+  margin-bottom: 1.6rem;
+  backdrop-filter: blur(8px);
+}
+
+.heroBadgeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--act-cyan);
+  opacity: 0.9;
+}
+
+.heroWordmark {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 900;
+  font-size: clamp(4.5rem, 11vw, 8.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.07em;
+  margin: 0 0 0.8rem;
+}
+
+.heroT {
+  display: inline-block;
+  will-change: transform;
+}
+
+.heroTAnimate {
+  animation: heroDropT 1.1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes heroDropT {
+  0% { transform: rotate(-30deg); }
+  60% { transform: rotate(18deg); }
+  80% { transform: rotate(-8deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.heroTagline {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: clamp(1.2rem, 2.4vw, 1.7rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 1.1rem;
+}
+
+.heroLede {
+  max-width: 640px;
+  margin: 0 auto 2rem;
+  color: var(--act-text-muted);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
+.heroCtas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  justify-content: center;
+  margin-bottom: 2rem;
+}
+
+.heroCta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  text-decoration: none;
+}
+.heroCta:hover {
+  text-decoration: none;
+}
+
+.heroCtaBook {
+  background: var(--act-surface-2);
+  color: var(--ifm-font-color-base);
+  border: 1px solid var(--act-border-strong);
+  font-weight: 600;
+}
+.heroCtaBook:hover {
+  border-color: var(--act-amber);
+  color: var(--ifm-font-color-base);
+  transform: translateY(-1px);
+}
+
+.heroPills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.heroPill {
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 0.35em 0.8em;
+  border-radius: 999px;
+  border: 1px solid var(--act-border);
+  background: var(--act-surface-2);
+  color: var(--act-text-muted);
+}
+
+/* ---------- Quickstart card ---------- */
+.quickstartCard {
+  max-width: 820px;
+  margin: 0 auto;
+  background: var(--act-surface-1);
+  border: 1px solid var(--act-border);
+  border-radius: 18px;
+  padding: 2rem 2rem 1.75rem;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 50px -24px rgba(15, 23, 42, 0.35);
+}
+
+.qsStep {
+  display: flex;
+  align-items: center;
+  gap: 0.7em;
+  margin: 1.4rem 0 0.6rem;
+}
+.qsStep:first-child { margin-top: 0; }
+
+.qsStepNum {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: var(--act-grad);
+  color: white;
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 700;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.qsStepLabel {
+  font-family: var(--ifm-font-family-monospace);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: -0.005em;
+}
+
+.qsRunHint {
+  color: var(--act-text-muted);
+  font-size: 0.95rem;
+  margin: 0.2rem 0 1.4rem 2.3rem;
+}
+
+.qsCta {
+  align-self: flex-start;
+}
+
+/* ---------- Sandbox cards ---------- */
+.sandboxCard {
+  background: var(--act-surface-1);
+  border: 1px solid var(--act-border);
+  border-radius: 18px;
+  padding: 1.75rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 12px 32px -20px rgba(15, 23, 42, 0.25);
+}
+
+.sandboxHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  margin-bottom: 1.1rem;
+}
+
+.sandboxIcon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--act-grad-soft);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--act-cyan);
+}
+.sandboxIcon svg { width: 18px; height: 18px; }
+
+.sandboxTitle {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.2rem;
+}
+
+.sandboxBlurb {
+  margin: 0;
+  color: var(--act-text-muted);
+  font-size: 0.92rem;
+}
+
+.sandboxFrameWrap {
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--act-border);
+  background: #0b0e15;
+}
+
+.sandboxFrame {
+  width: 100%;
+  height: 540px;
+  border: 0;
+  display: block;
+}
+
+.sandboxPoster {
+  width: 100%;
+  height: 540px;
+  border: 0;
+  margin: 0;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  background:
+    radial-gradient(420px 220px at 50% 40%, rgba(124, 92, 255, 0.10), transparent 70%),
+    var(--act-surface-2);
+  color: var(--ifm-color-primary);
+  cursor: pointer;
+  font-family: var(--ifm-font-family-monospace);
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.sandboxPoster:hover,
+.sandboxPoster:focus-visible {
+  outline: none;
+  color: var(--act-violet);
+  background:
+    radial-gradient(480px 260px at 50% 40%, rgba(124, 92, 255, 0.16), transparent 70%),
+    var(--act-surface-2);
+}
+.sandboxPosterIcon {
+  display: inline-flex;
+  width: 72px;
+  height: 72px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: var(--act-grad-soft);
+  border: 1px solid var(--act-border-strong);
+  margin-bottom: 0.4rem;
+}
+.sandboxPosterIcon svg {
+  margin-left: 4px;
+}
+.sandboxPosterTitle {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.sandboxPosterHint {
+  font-family: var(--ifm-font-family-base);
+  font-size: 0.88rem;
+  color: var(--act-text-muted);
+}
+
+.sandboxLinks {
+  display: flex;
+  justify-content: center;
+  gap: 1.4rem;
+  margin-top: 0.9rem;
+  font-size: 0.85rem;
+}
+.sandboxLinks a {
+  color: var(--act-text-muted);
+  text-decoration: none;
+}
+.sandboxLinks a:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: underline;
+}
+
+/* ---------- Composition patterns ---------- */
+.patternsPanel {
+  max-width: 920px;
+  margin: 0 auto;
+  background: var(--act-surface-1);
+  border: 1px solid var(--act-border);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 12px 32px -20px rgba(15, 23, 42, 0.25);
+}
+
+.patternsTabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem 0.75rem 0;
+  border-bottom: 1px solid var(--act-border);
+  overflow-x: auto;
+  background: var(--act-surface-2);
+}
+
+.patternsTab {
+  background: none;
+  border: none;
+  color: var(--act-text-muted);
+  font-family: var(--ifm-font-family-monospace);
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 0.7em 1em;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+  white-space: nowrap;
+  border-radius: 8px 8px 0 0;
+}
+.patternsTab:hover {
+  color: var(--ifm-color-primary);
+}
+.patternsTabActive {
+  color: var(--ifm-color-primary);
+  border-bottom-color: var(--ifm-color-primary);
+  background: var(--act-surface-1);
+}
+
+.patternsBody {
+  padding: 1.75rem 1.75rem 1.4rem;
+}
+
+.patternsHeading {
+  color: var(--ifm-color-primary);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.patternsBlurb {
+  color: var(--act-text-muted);
+  font-size: 0.96rem;
+  line-height: 1.65;
+  margin: 0 0 1rem;
+}
+
+.patternsNote {
+  color: var(--act-green);
+  font-size: 0.82rem;
+  font-family: var(--ifm-font-family-monospace);
+  margin: 0.6rem 0 0;
+  opacity: 0.9;
+}
+
+[data-theme="dark"] .patternsNote {
+  color: #6ad27a;
+}
+
+/* ---------- Features grid ---------- */
+.featureGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.featureCard {
+  background: var(--act-surface-1);
+  border: 1px solid var(--act-border);
+  border-radius: 16px;
+  padding: 1.4rem 1.5rem;
+  transition:
+    transform 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
+}
+.featureCard:hover {
+  transform: translateY(-2px);
+  border-color: var(--act-border-strong);
+  box-shadow: 0 12px 28px -20px rgba(15, 23, 42, 0.35);
+}
+
+.featureIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: var(--act-grad-soft);
+  color: var(--act-cyan);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.9rem;
+}
+.featureIcon svg { width: 22px; height: 22px; }
+
+.featureTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.4rem;
+}
+
+.featureBody {
+  color: var(--act-text-muted);
+  font-size: 0.95rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* ---------- Final CTA ---------- */
+.finalCta {
+  padding: 5rem 1.5rem 6rem;
+}
+
+.finalCtaInner {
+  max-width: 760px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 3rem 2rem;
+  background: var(--act-surface-1);
+  border: 1px solid var(--act-border-strong);
+  border-radius: 20px;
+  position: relative;
+  overflow: hidden;
+}
+
+.finalCtaTitle {
+  font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.8rem;
+}
+
+.finalCtaBody {
+  color: var(--act-text-muted);
+  font-size: 1.05rem;
+  line-height: 1.6;
+  margin: 0 0 1.5rem;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 700px) {
+  .section {
+    padding: 3rem 1rem;
+  }
+  .hero {
+    padding: 3rem 1rem 2rem;
+  }
+  .quickstartCard,
+  .sandboxCard,
+  .patternsBody {
+    padding: 1.25rem;
+  }
+  .sandboxFrame {
+    height: 420px;
+  }
+  .heroCtas {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

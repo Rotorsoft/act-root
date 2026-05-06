@@ -4,8 +4,13 @@
 
 <table>
   <tr>
-    <td valign="top">
-      <a href="https://rotorsoft.github.io/act-root/"><img src="./assets/landing.png" alt="Landing Page"></a>
+    <td valign="top" align="center">
+      <a href="https://rotorsoft.github.io/act-root/">
+        <img src="./assets/wordmark.svg" alt="Act — Fluent Event Sourcing for TypeScript" width="480">
+      </a>
+      <br/><br/>
+      <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
+      <a href="https://rotorsoft.github.io/act-root/"><img src="https://img.shields.io/badge/Documentation-7c5cff?style=for-the-badge&labelColor=11141b" alt="Documentation"></a>
     </td>
     <td valign="top" align="center">
       <a href="https://payhip.com/b/7ezLy"><img src="./assets/cover.jpg" alt="Book Cover" width="280"></a>

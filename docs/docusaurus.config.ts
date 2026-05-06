@@ -7,7 +7,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 const config: Config = {
   title: "Act",
   tagline: "Fluent Event Sourcing for TypeScript",
-  favicon: "img/favicon.ico",
+  favicon: "img/favicon.svg",
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -41,6 +41,31 @@ const config: Config = {
     locales: ["en"],
   },
 
+  headTags: [
+    {
+      tagName: "link",
+      attributes: {
+        rel: "preconnect",
+        href: "https://fonts.googleapis.com",
+      },
+    },
+    {
+      tagName: "link",
+      attributes: {
+        rel: "preconnect",
+        href: "https://fonts.gstatic.com",
+        crossorigin: "anonymous",
+      },
+    },
+    {
+      tagName: "link",
+      attributes: {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap",
+      },
+    },
+  ],
+
   presets: [
     [
       "classic",
@@ -58,13 +83,39 @@ const config: Config = {
   ],
 
   themeConfig: {
-    image: "img/logo.svg",
+    image: "img/og-image.png",
+    colorMode: {
+      defaultMode: "dark",
+      respectPrefersColorScheme: true,
+    },
+    metadata: [
+      {
+        name: "description",
+        content:
+          "Act — TypeScript-first event sourcing framework. Fluent, composable state machines with reactions, projections, and built-in adapters for Postgres and SQLite.",
+      },
+      {
+        name: "keywords",
+        content:
+          "event sourcing, typescript, cqrs, ddd, state machines, postgres, sqlite, zod",
+      },
+      { name: "twitter:card", content: "summary_large_image" },
+    ],
+    announcementBar: {
+      id: "act-book-2026",
+      content:
+        '<strong>📖 New:</strong> Read the <a target="_blank" rel="noopener noreferrer" href="https://payhip.com/b/7ezLy">Act book</a> — a hands-on guide to functional event sourcing in TypeScript.',
+      backgroundColor: "transparent",
+      textColor: "var(--ifm-navbar-link-color)",
+      isCloseable: true,
+    },
     navbar: {
-      title: "Act",
+      hideOnScroll: false,
       logo: {
-        alt: "Act Logo",
+        alt: "Act",
         src: "img/logo.svg",
-        href: "https://rotorsoft.github.io/act-root/",
+        srcDark: "img/logo-dark.svg",
+        href: "/",
       },
       items: [
         {
@@ -74,39 +125,97 @@ const config: Config = {
           label: "Docs",
         },
         {
-          href: "https://github.com/rotorsoft/act-root",
-          label: "GitHub",
+          to: "/docs/examples/calculator",
+          position: "left",
+          label: "Examples",
+        },
+        {
+          to: "/docs/architecture",
+          position: "left",
+          label: "Architecture",
+        },
+        {
+          href: "https://payhip.com/b/7ezLy",
+          label: "Book",
           position: "right",
+        },
+        {
+          href: "https://github.com/rotorsoft/act-root",
+          position: "right",
+          className: "navbar-icon-link navbar-icon-github",
+          "aria-label": "GitHub repository",
         },
       ],
     },
     footer: {
       style: "dark",
+      logo: {
+        alt: "Act Logo",
+        src: "img/logo-dark.svg",
+        width: 36,
+        height: 36,
+      },
       links: [
         {
-          title: "Docs",
+          title: "Learn",
+          items: [
+            { label: "Introduction", to: "/docs/intro" },
+            { label: "Getting started", to: "/docs/guides/getting-started" },
+            { label: "Architecture", to: "/docs/architecture" },
+          ],
+        },
+        {
+          title: "Examples",
+          items: [
+            { label: "Calculator", to: "/docs/examples/calculator" },
+            { label: "WolfDesk", to: "/docs/examples/wolfdesk" },
+          ],
+        },
+        {
+          title: "Packages",
           items: [
             {
-              label: "Introduction",
-              to: "/docs/intro",
+              label: "@rotorsoft/act",
+              href: "https://www.npmjs.com/package/@rotorsoft/act",
+            },
+            {
+              label: "@rotorsoft/act-pg",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-pg",
+            },
+            {
+              label: "@rotorsoft/act-sqlite",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-sqlite",
+            },
+            {
+              label: "@rotorsoft/act-sse",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-sse",
             },
           ],
         },
         {
-          title: "More",
+          title: "Community",
           items: [
+            { label: "GitHub", href: "https://github.com/rotorsoft/act-root" },
             {
-              label: "GitHub",
-              href: "https://github.com/rotorsoft/act-root",
+              label: "Issues",
+              href: "https://github.com/rotorsoft/act-root/issues",
             },
+            { label: "Book", href: "https://payhip.com/b/7ezLy" },
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} Rotorsoft. Built with Docusaurus.`,
+      copyright: `Copyright © ${new Date().getFullYear()} Rotorsoft · Built with Docusaurus`,
     },
     prism: {
-      theme: prismThemes.github,
-      darkTheme: prismThemes.dracula,
+      theme: prismThemes.oneLight,
+      darkTheme: prismThemes.oneDark,
+      additionalLanguages: ["bash", "json", "typescript", "tsx"],
+    },
+    docs: {
+      sidebar: {
+        hideable: true,
+        autoCollapseCategories: false,
+      },
     },
   } satisfies Preset.ThemeConfig,
 };
