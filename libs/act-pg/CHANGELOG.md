@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.18.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.4...@rotorsoft/act-pg-v0.18.5) (2026-05-06)
+
+
+### Bug Fixes
+
+* **deps:** update dependency zod to ^4.4.3 ([84c5bc7](https://github.com/rotorsoft/act-root/commit/84c5bc77bd55edb427f202ce43acf38878c23003))
+
 # [@rotorsoft/act-pg-v0.18.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.3...@rotorsoft/act-pg-v0.18.4) (2026-05-04)
 
 
