@@ -6,7 +6,7 @@
       <img src="https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square" alt="Repo Size">
       <br/><br/>
       <a href="https://rotorsoft.github.io/act-root/">
-        <img src="./assets/wordmark.svg" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
+        <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
       </a>
       <br/><br/>
       <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
