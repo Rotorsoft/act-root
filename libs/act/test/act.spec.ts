@@ -1,5 +1,13 @@
 import { z } from "zod";
-import { act, dispose, sleep, state, store, ZodEmpty } from "../src/index.js";
+import {
+  act,
+  dispose,
+  log,
+  sleep,
+  state,
+  store,
+  ZodEmpty,
+} from "../src/index.js";
 
 describe("act", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -167,6 +175,45 @@ describe("act", () => {
     await sleep(100);
     app.stop_correlations();
     expect(callback).toHaveBeenCalled();
+  });
+
+  it("should log errors thrown by correlate inside the polling worker", async () => {
+    // App with a dynamic resolver so correlate() calls store().query()
+    const s = state({ PollErr: z.object({ n: z.number() }) })
+      .init(() => ({ n: 0 }))
+      .emits({ PollErrEvt: ZodEmpty })
+      .patch({ PollErrEvt: () => ({}) })
+      .on({ doPollErr: ZodEmpty })
+      .emit(() => ["PollErrEvt", {}])
+      .build();
+
+    const errApp = act()
+      .withState(s)
+      .on("PollErrEvt")
+      .do(function handlePollErrEvt() {
+        return Promise.resolve();
+      })
+      .to((event) => ({ target: `poll-${event.stream}` }))
+      .build();
+
+    await errApp.do("doPollErr", { stream: "p1", actor }, {});
+
+    const querySpy = vi
+      .spyOn(store(), "query")
+      .mockRejectedValue(new Error("query exploded"));
+    const errorSpy = vi.spyOn(log(), "error").mockImplementation(() => {});
+
+    const started = errApp.start_correlations({}, 10);
+    expect(started).toBe(true);
+    await sleep(50);
+    errApp.stop_correlations();
+
+    expect(errorSpy).toHaveBeenCalled();
+    const arg = errorSpy.mock.calls[0]?.[0] as unknown as Error;
+    expect(arg.message).toBe("query exploded");
+
+    querySpy.mockRestore();
+    errorSpy.mockRestore();
   });
 
   it("should correlate when event has reactions", async () => {
