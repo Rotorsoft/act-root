@@ -7,7 +7,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 const config: Config = {
   title: "Act",
   tagline: "Fluent Event Sourcing for TypeScript",
-  favicon: "img/favicon.svg",
+  favicon: "img/favicon.ico",
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -113,8 +113,8 @@ const config: Config = {
       hideOnScroll: false,
       logo: {
         alt: "Act",
-        src: "img/logo.svg",
-        srcDark: "img/logo-dark.svg",
+        src: "img/logo.png",
+        srcDark: "img/logo-dark.png",
         href: "/",
       },
       items: [
@@ -151,7 +151,7 @@ const config: Config = {
       style: "dark",
       logo: {
         alt: "Act Logo",
-        src: "img/logo-dark.svg",
+        src: "img/logo-dark.png",
         width: 36,
         height: 36,
       },

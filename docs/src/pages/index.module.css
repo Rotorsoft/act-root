@@ -89,13 +89,28 @@
   opacity: 0.9;
 }
 
+.heroBrand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(0.5rem, 1.5vw, 1.25rem);
+  margin: 0 0 0.8rem;
+}
+
+.heroIcon {
+  height: clamp(4rem, 10vw, 7.5rem);
+  width: auto;
+  flex-shrink: 0;
+  display: block;
+}
+
 .heroWordmark {
   font-family: var(--ifm-font-family-monospace);
   font-weight: 900;
   font-size: clamp(4.5rem, 11vw, 8.5rem);
   line-height: 0.95;
   letter-spacing: -0.07em;
-  margin: 0 0 0.8rem;
+  margin: 0;
 }
 
 .heroT {

@@ -117,21 +117,31 @@ For multi-instance deployments, swap the in-memory `Map` for Redis. The point is
 
 ## 6. Graceful shutdown
 
-On SIGTERM, Act's port adapters need a chance to close cleanly: PG pool drains, log flushes, in-flight drain cycles finish. Wire `dispose()` to your process signals:
+Signal handling is built in. Importing the framework registers `process.once` handlers for `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`, all routed through `disposeAndExit`. You don't bind signal handlers yourself — register the cleanup that's specific to your application:
 
 ```typescript
 import { dispose } from "@rotorsoft/act";
 
-const shutdown = dispose(async () => {
-  // Your own cleanup, e.g. close HTTP server
+dispose(async () => {
   await httpServer.close();
 });
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+dispose(async () => {
+  await redis.quit();
+});
 ```
 
-`dispose()` returns a function that, when called, runs registered disposers in reverse registration order and then closes each port adapter. The signature is curried so you can call `dispose()(reason)` to trigger shutdown manually.
+When a signal fires, the shutdown sequence runs in this order: custom disposers in reverse registration order, then port adapters (logger, store, cache) in reverse registration order, then `process.exit`. Reverse order matters — the HTTP server stops accepting connections before the store closes, so an in-flight request can still finish its commit.
+
+`dispose()` called with no argument returns the trigger function, useful for manual shutdown or tests:
+
+```typescript
+afterAll(async () => {
+  await dispose()();
+});
+```
+
+In production, `disposeAndExit("ERROR")` from an uncaught promise is deliberately suppressed (logged as a warning, process kept alive) so a transient failure in a non-critical path doesn't kill the service. SIGINT/SIGTERM still exit cleanly.
 
 ## 7. Logging
 

@@ -1,19 +1,19 @@
-![Build Status](https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master)
-[![Coverage Status](https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master)](https://coveralls.io/github/Rotorsoft/act-root?branch=master)
-![Repo Size](https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square)
-
-<table>
+<table width="100%">
   <tr>
-    <td valign="top" align="center">
+    <td width="62%" valign="top" align="center">
+      <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
+      <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
+      <img src="https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square" alt="Repo Size">
+      <br/><br/>
       <a href="https://rotorsoft.github.io/act-root/">
-        <img src="./assets/wordmark.svg" alt="Act — Fluent Event Sourcing for TypeScript" width="480">
+        <img src="./assets/wordmark.svg" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
       </a>
       <br/><br/>
       <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
       <a href="https://rotorsoft.github.io/act-root/"><img src="https://img.shields.io/badge/Documentation-7c5cff?style=for-the-badge&labelColor=11141b" alt="Documentation"></a>
     </td>
-    <td valign="top" align="center">
-      <a href="https://payhip.com/b/7ezLy"><img src="./assets/cover.jpg" alt="Book Cover" width="280"></a>
+    <td width="38%" valign="top" align="center">
+      <a href="https://payhip.com/b/7ezLy"><img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%"></a>
       <br/><br/>
       <a href="https://payhip.com/b/7ezLy"><img src="https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge" alt="Get the Book"></a>
     </td>

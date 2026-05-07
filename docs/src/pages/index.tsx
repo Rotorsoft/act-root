@@ -4,6 +4,7 @@ import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import BrowserOnly from "@docusaurus/BrowserOnly";
 import Layout from "@theme/Layout";
 import CodeBlock from "@theme/CodeBlock";
+import type { JSX } from "react";
 import { useEffect, useState } from "react";
 import styles from "./index.module.css";
 
@@ -227,13 +228,21 @@ function Hero() {
           v0.x &middot; TypeScript-first event sourcing
         </div>
 
-        <h1 className={styles.heroWordmark} aria-label="Act">
-          <span style={{ color: "var(--act-cyan)" }}>A</span>
-          <span style={{ color: "var(--act-amber)" }}>c</span>
-          <span className={styles.heroT} style={{ color: "var(--act-green)" }}>
-            t
-          </span>
-        </h1>
+        <div className={styles.heroBrand}>
+          <img
+            className={styles.heroIcon}
+            src={useBaseUrl("/img/logo-dark.png")}
+            alt=""
+            aria-hidden="true"
+          />
+          <h1 className={styles.heroWordmark} aria-label="Act">
+            <span style={{ color: "var(--act-cyan)" }}>A</span>
+            <span style={{ color: "var(--act-amber)" }}>c</span>
+            <span className={styles.heroT} style={{ color: "var(--act-green)" }}>
+              t
+            </span>
+          </h1>
+        </div>
 
         <p className={styles.heroTagline}>
           <span className="act-gradient-text">Fluent event sourcing</span> for TypeScript

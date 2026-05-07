@@ -143,13 +143,13 @@ div[class^="announcementBar"] a {
   margin-right: 1rem;
 }
 .navbar__logo {
-  height: 28px;
+  height: 44px;
   width: auto;
   display: flex;
   align-items: center;
 }
 .navbar__logo img {
-  height: 28px;
+  height: 44px;
   width: auto;
 }
 .navbar__link {
