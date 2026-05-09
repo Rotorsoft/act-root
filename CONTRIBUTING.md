@@ -56,3 +56,12 @@ Each issue should include:
 - Benchmarks must show real improvement in the specific scenario being fixed
 - Multiple optimizations in one ticket need multiple benchmarks
 - Document the pattern, not just the code — explain why it works
+
+## Dependency Updates
+
+This repo uses **Renovate** for version updates and **Dependabot for security alerts only**. There is no `.github/dependabot.yml` — please don't open Dependabot version-update PRs; Renovate already handles them.
+
+- **Direct deps** — Renovate opens PRs grouped by `Types packages` and `Dev dependencies`. Patch updates auto-merge; minor/major need review.
+- **Lockfile maintenance** — runs weekly (Mon < 03:00 UTC) to refresh transitive resolutions.
+- **Stuck transitive vulnerabilities** — when a transitive dep can't be lifted by Renovate (the parent hasn't released, or the resolution graph won't bump), pin it via `pnpm.overrides` in the root `package.json`. Use a version-range key so the override is scoped to the vulnerable range only.
+- **Vulnerability alerts** — Dependabot security alerts are enabled. Triage promptly; fix via Renovate PR, manual `pnpm update`, or a `pnpm.overrides` entry depending on where the vuln sits in the tree.
