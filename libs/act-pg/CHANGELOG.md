@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.18.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.5...@rotorsoft/act-pg-v0.18.6) (2026-05-09)
+
+
+### Bug Fixes
+
+* **builders:** split .emit() overloads + zod as peer dep ([b766671](https://github.com/rotorsoft/act-root/commit/b76667124752d9dbc5e34e1508d3628f8eb6112d))
+
 # [@rotorsoft/act-pg-v0.18.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.4...@rotorsoft/act-pg-v0.18.5) (2026-05-06)
 
 
