@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.7...@rotorsoft/act-diagram-v0.3.8) (2026-05-09)
+
+
+### Bug Fixes
+
+* **builders:** split .emit() overloads + zod as peer dep ([b766671](https://github.com/rotorsoft/act-root/commit/b76667124752d9dbc5e34e1508d3628f8eb6112d))
+
 # [@rotorsoft/act-diagram-v0.3.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.6...@rotorsoft/act-diagram-v0.3.7) (2026-05-06)
 
 
