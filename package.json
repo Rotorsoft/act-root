@@ -101,7 +101,7 @@
       "minimatch@<3.1.4": ">=10.2.5",
       "serialize-javascript": ">=7.0.5",
       "svgo": ">=4.0.1",
-      "brace-expansion@<5.0.5": ">=5.0.5",
+      "brace-expansion@<5.0.5": ">=5.0.6",
       "node-forge@<1.4.0": ">=1.4.0",
       "body-parser@<1.21.3": ">=2.2.2",
       "ajv@>=7.0.0-alpha.0 <8.18.0": ">=8.20.0",
