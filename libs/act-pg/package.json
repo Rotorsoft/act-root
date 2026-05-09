@@ -37,11 +37,11 @@
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {
-    "pg": "^8.20.0",
-    "zod": "^4.4.3"
+    "pg": "^8.20.0"
   },
   "peerDependencies": {
-    "@rotorsoft/act": ">=0.31.1"
+    "@rotorsoft/act": ">=0.31.1",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/pg": "^8.20.0"

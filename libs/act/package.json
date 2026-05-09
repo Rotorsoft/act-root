@@ -44,7 +44,9 @@
     "bench:realistic": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/realistic-bench.ts > realistic-result.json"
   },
   "dependencies": {
-    "@rotorsoft/act-patch": "workspace:^",
+    "@rotorsoft/act-patch": "workspace:^"
+  },
+  "peerDependencies": {
     "zod": "^4.4.3"
   }
 }

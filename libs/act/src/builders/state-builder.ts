@@ -227,29 +227,48 @@ export type ActionBuilder<
        * .emit("TicketAssigned")
        * ```
        */
-      emit: (
-        handler:
-          | ActionHandler<TState, TEvents, { [P in TKey]: TNewActions }, TKey>
-          | (keyof TEvents & string)
-      ) => ActionBuilder<
-        TState,
-        TEvents,
-        TActions & { [P in TKey]: TNewActions },
-        TName
-      >;
+      emit: {
+        /** Custom handler — receives `(action, snapshot)` and returns one
+         *  or more `[EventName, data]` tuples (or `undefined`). */
+        (
+          handler: ActionHandler<
+            TState,
+            TEvents,
+            { [P in TKey]: TNewActions },
+            TKey
+          >
+        ): ActionBuilder<
+          TState,
+          TEvents,
+          TActions & { [P in TKey]: TNewActions },
+          TName
+        >;
+        /** Passthrough — the action payload becomes the event data
+         *  directly. Must reference an event declared in `.emits()`. */
+        (
+          eventName: keyof TEvents & string
+        ): ActionBuilder<
+          TState,
+          TEvents,
+          TActions & { [P in TKey]: TNewActions },
+          TName
+        >;
+      };
     };
     /**
-     * Defines the action handler that emits events.
+     * Defines the action handler that emits events. Same two overloads as
+     * the post-`.given()` form above:
      *
-     * The handler receives the action payload and current state snapshot,
-     * and must return one or more events to emit. Return a single event as
-     * `["EventName", data]` or multiple events as an array of event tuples.
+     * - **Function** — receives `(action, snapshot)` and returns one or
+     *   more `[EventName, data]` tuples (or `undefined`).
+     * - **String** — passthrough: the action payload becomes the event
+     *   data directly. Must reference an event declared in `.emits()`.
      *
-     * Pass a string event name for passthrough: the action payload becomes
-     * the event data directly.
-     *
-     * @param handler - Function that returns events to emit, or event name string for passthrough
-     * @returns The ActionBuilder for chaining more actions
+     * The two overloads are kept separate (rather than merged into a
+     * `handler | string` union) so that TS contextual typing of the
+     * function alternative isn't degraded by considering the string
+     * branch — under the union form `TState` could collapse to its
+     * `Schema` constraint inside the callback.
      *
      * @example Passthrough (action payload = event data)
      * ```typescript
@@ -269,16 +288,29 @@ export type ActionBuilder<
      * ])
      * ```
      */
-    emit: (
-      handler:
-        | ActionHandler<TState, TEvents, { [P in TKey]: TNewActions }, TKey>
-        | (keyof TEvents & string)
-    ) => ActionBuilder<
-      TState,
-      TEvents,
-      TActions & { [P in TKey]: TNewActions },
-      TName
-    >;
+    emit: {
+      (
+        handler: ActionHandler<
+          TState,
+          TEvents,
+          { [P in TKey]: TNewActions },
+          TKey
+        >
+      ): ActionBuilder<
+        TState,
+        TEvents,
+        TActions & { [P in TKey]: TNewActions },
+        TName
+      >;
+      (
+        eventName: keyof TEvents & string
+      ): ActionBuilder<
+        TState,
+        TEvents,
+        TActions & { [P in TKey]: TNewActions },
+        TName
+      >;
+    };
   };
   /**
    * Defines a snapshotting strategy to optimize state reconstruction.
