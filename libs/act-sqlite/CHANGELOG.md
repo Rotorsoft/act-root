@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.3.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.3...@rotorsoft/act-sqlite-v0.3.4) (2026-05-09)
+
+
+### Bug Fixes
+
+* **builders:** split .emit() overloads + zod as peer dep ([b766671](https://github.com/rotorsoft/act-root/commit/b76667124752d9dbc5e34e1508d3628f8eb6112d))
+
 # [@rotorsoft/act-sqlite-v0.3.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.2...@rotorsoft/act-sqlite-v0.3.3) (2026-05-06)
 
 
