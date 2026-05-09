@@ -48,6 +48,31 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # Render the v8 coverage summary as a markdown table in the PR/run
+      # summary. `json-summary` reporter is enabled in vite.config.ts.
+      - name: Coverage summary
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const f = "coverage/coverage-summary.json";
+            if (!fs.existsSync(f)) { console.log("No coverage summary found"); process.exit(0); }
+            const t = JSON.parse(fs.readFileSync(f, "utf8")).total;
+            const row = (label, m) => `| ${label} | ${m.pct.toFixed(2)}% | ${m.covered}/${m.total} |`;
+            const md = [
+              "## Coverage",
+              "",
+              "| Metric | % | Covered / Total |",
+              "|---|---:|---:|",
+              row("Statements", t.statements),
+              row("Branches",   t.branches),
+              row("Functions",  t.functions),
+              row("Lines",      t.lines),
+              "",
+            ].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, md + "\n");
+          '
+
       # Perf regression guard. Compares a fresh bench run against the
       # checked-in baseline; fails if any scenario's p50 exceeds 1.5× baseline.
       # To refresh: `pnpm -F @rotorsoft/act bench:update` in a PR labeled
@@ -59,14 +84,52 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  cd:
+      # Hand the built libs off to the CD matrix so each release job
+      # doesn't have to rebuild the dependency tree from scratch.
+      # `pnpm typecheck` runs `pnpm build` internally, so the dist files
+      # already exist at this point.
+      - if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: act-libs-dist
+          path: libs/*/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  # Detect which libs actually changed in this push. Lets the CD matrix
+  # skip release jobs for untouched libs (semantic-release is a no-op
+  # in that case anyway, but skipping the whole job saves install +
+  # checkout + node setup overhead — meaningful when most pushes only
+  # touch one or two libs).
+  changed-libs:
     if: github.ref == 'refs/heads/master'
     needs: ci
     runs-on: ubuntu-latest
+    outputs:
+      libs: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            act-patch:   ['libs/act-patch/**']
+            act:         ['libs/act/**']
+            act-sse:     ['libs/act-sse/**']
+            act-pg:      ['libs/act-pg/**']
+            act-sqlite:  ['libs/act-sqlite/**']
+            act-pino:    ['libs/act-pino/**']
+            act-diagram: ['libs/act-diagram/**']
+
+  cd:
+    if: github.ref == 'refs/heads/master' && needs.changed-libs.outputs.libs != '[]'
+    needs: [ci, changed-libs]
+    runs-on: ubuntu-latest
     strategy:
       max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
+      fail-fast: false
       matrix:
-        lib: [act-patch, act, act-sse, act-pg, act-sqlite, act-pino, act-diagram]
+        lib: ${{ fromJson(needs.changed-libs.outputs.libs) }}
 
     steps:
       - uses: actions/checkout@v6
@@ -82,7 +145,15 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: pnpm install
-      - run: pnpm -F @rotorsoft/${{ matrix.lib }}... build
+
+      # Restore the dist files built during CI — semantic-release
+      # publishes whatever sits in `libs/<lib>/dist/`, so we don't need
+      # to rebuild here. Default download path is the workspace root,
+      # which matches the workspace-relative paths the artifact was
+      # uploaded with (`libs/*/dist`).
+      - uses: actions/download-artifact@v4
+        with:
+          name: act-libs-dist
 
       - name: configure git
         run: |
