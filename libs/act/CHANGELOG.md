@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.33.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.2...@rotorsoft/act-v0.33.3) (2026-05-09)
+
+
+### Bug Fixes
+
+* **builders:** split .emit() overloads + zod as peer dep ([b766671](https://github.com/rotorsoft/act-root/commit/b76667124752d9dbc5e34e1508d3628f8eb6112d))
+
 # [@rotorsoft/act-v0.33.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.1...@rotorsoft/act-v0.33.2) (2026-05-06)
 
 
