@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v0.4.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.4.0...@rotorsoft/act-pino-v0.4.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **ci:** rebuild dist in CD instead of relying on broken artifact ([992a334](https://github.com/rotorsoft/act-root/commit/992a334fa356b98ec6dbbb34674318f77e067f78))
+
 # [@rotorsoft/act-pino-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.3.1...@rotorsoft/act-pino-v0.4.0) (2026-05-10)
 
 
