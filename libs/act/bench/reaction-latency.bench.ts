@@ -18,7 +18,7 @@
  * report p50/p95/p99. Numbers feed `libs/act/PERFORMANCE.md`.
  *
  * **Adapter coverage:** InMemoryStore here. PostgresStore latency
- * lives in `libs/act-pg/test/notify-perf.bench.ts` (cross-process)
+ * lives in `libs/act-pg/bench/notify-perf.bench.ts` (cross-process)
  * and the act-pg single-process variant gets added once we have a
  * stable single-process baseline.
  *

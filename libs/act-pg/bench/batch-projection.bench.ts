@@ -5,7 +5,7 @@
  * Per-event handlers each perform a real PG upsert; the batch handler
  * wraps all upserts in a single PG transaction.
  *
- * Run: pnpm vitest bench libs/act-pg/test/batch-projection.bench.ts
+ * Run: pnpm vitest bench libs/act-pg/bench/batch-projection.bench.ts
  */
 import { act, dispose, projection, state, store } from "@rotorsoft/act";
 import pg from "pg";

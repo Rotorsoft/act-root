@@ -33,7 +33,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
-    "build": "pnpm clean && tsup && pnpm types"
+    "build": "pnpm clean && tsup && pnpm types",
+    "bench:micro": "vitest bench --run"
   },
   "dependencies": {}
 }

@@ -201,7 +201,7 @@ A **partial document** recursively merged into the target. Closest to Act's appr
 
 ## Benchmarks
 
-Run with `npx vitest bench libs/act-patch/test/patch.bench.ts`.
+Run with `npx vitest bench libs/act-patch/bench/patch.bench.ts`.
 
 ### Act Patch vs JSON Patch (RFC 6902) vs JSON Merge Patch (RFC 7396)
 
