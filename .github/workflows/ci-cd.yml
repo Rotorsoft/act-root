@@ -89,7 +89,7 @@ jobs:
       # `pnpm typecheck` runs `pnpm build` internally, so the dist files
       # already exist at this point.
       - if: github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: act-libs-dist
           path: libs/*/dist
@@ -109,7 +109,7 @@ jobs:
       libs: ${{ steps.filter.outputs.changes }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
@@ -151,7 +151,7 @@ jobs:
       # to rebuild here. Default download path is the workspace root,
       # which matches the workspace-relative paths the artifact was
       # uploaded with (`libs/*/dist`).
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           name: act-libs-dist
 
