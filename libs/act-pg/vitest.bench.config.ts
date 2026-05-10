@@ -1,20 +1,24 @@
 /**
- * Vitest config for `*.bench.ts` files. The default test run uses the
- * standard `*.{test,spec}.ts` glob — bench files are excluded so the
- * docker round-trip cost stays out of normal CI cycles. Invoke this
- * config explicitly to record performance numbers for `PERFORMANCE.md`:
+ * Vitest config for spec-shaped scenario benchmarks under `bench/`.
+ * Microbenchmarks (files with `bench()` blocks) sit in the same
+ * directory and run via `pnpm bench:micro` (vitest bench mode); they
+ * are excluded from this run because `vitest run` can't invoke
+ * `bench()`.
  *
- *   pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts
+ * Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts`
  */
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Spec-shaped `.bench.ts` files use `it()` + assertions and report
-    // numbers via `console.table`. The legacy `*.bench.ts` files in
-    // this directory are vitest-bench-mode files (`bench(...)`, run
-    // via `vitest bench`), so they're excluded from this run.
-    include: ["test/notify-perf.bench.ts", "test/priority-claim.bench.ts"],
+    // Spec-shaped benches use `it()` + assertions and report numbers
+    // via `console.table`. Listed individually so the microbench
+    // files in the same `bench/` directory aren't picked up.
+    include: [
+      "bench/notify-perf.bench.ts",
+      "bench/priority-claim.bench.ts",
+      "bench/reaction-latency.bench.ts",
+    ],
     globals: true,
   },
 });

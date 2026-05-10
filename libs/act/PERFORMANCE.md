@@ -34,7 +34,7 @@ pnpm -F @rotorsoft/act bench:update    # writes perf-baseline.json
 - **Single-stream throughput** (one user/aggregate at a time): bounded by `action` p50. ~430 commits/sec on InMemoryStore.
 - **Cross-stream throughput** (many independent aggregates): scales with the event loop's parallelism. ~13,900 commits/sec on InMemoryStore at 50-way parallelism.
 - **Same-stream contention** (e.g. multiplayer game shared room): bounded by optimistic-concurrency retries. ~8,000 commits/sec for 20 contending users on InMemoryStore. Real-world stores will be slower (network/disk-bound).
-- **All numbers are InMemoryStore at `NODE_ENV=test`** (sleepMs=0). Production stores trade absolute throughput for durability — see `libs/act-pg/test/*.bench.ts` for Postgres numbers (claim, drain, watermark, contention).
+- **All numbers are InMemoryStore at `NODE_ENV=test`** (sleepMs=0). Production stores trade absolute throughput for durability — see `libs/act-pg/bench/*.bench.ts` for Postgres numbers (claim, drain, watermark, contention).
 
 > ⚠ Synthetic upper bounds. Real apps with invariants, multi-event commits, and reactions firing typically see **30–60% of these numbers**. See "Realistic workloads" below for measurements that include those costs.
 
@@ -411,5 +411,66 @@ Consistent ~19x improvement across event counts. The speedup comes from eliminat
 | `BatchHandler<TEvents>` | Type for batch handler functions |
 | `Projection.target` | Static target string, exposed on the Projection type |
 | `Projection.batchHandler` | Optional batch handler, exposed on the Projection type |
+
+## Reaction latency (ACT-103)
+
+How long does it take for a reaction to fire after `app.do()`? Architects evaluating Act for time-sensitive workflows ask this first; this section answers it for the single-process case. Cross-process latency (writer and reader on different boxes, both on PG) is in [`@rotorsoft/act-pg/PERFORMANCE.md`](../act-pg/PERFORMANCE.md).
+
+### Methodology
+
+Three steady-state scenarios. Each one wires up a single reaction whose handler records `performance.now() - committedAt` per event. Commits are spread across 256 source streams to avoid serialized contention on a single stream's version.
+
+| Scenario | Driver | Notes |
+| --- | --- | --- |
+| **idle** | one commit at a time, await reaction, repeat | Measures the floor — settle debounce + correlate + drain + handler |
+| **low** | 100 commits/sec sustained for 3 s | Realistic interactive workload |
+| **high** | 1000 commits/sec sustained for 3 s | Stress test — reveals where InMemory saturates |
+
+Settle runs on every `committed` event with `debounceMs: 0` so the reaction wake-up follows the local fast path (`do() → arm drain → settle`).
+
+Run: `pnpm -F @rotorsoft/act exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts`
+
+### Results — InMemoryStore (single process)
+
+Numbers below are from a single run on macOS 25.4 (Apple Silicon), no other load. Variance ±20 % — the order-of-magnitude is the meaningful thing.
+
+| Scenario | p50 | p95 | p99 | Notes |
+| --- | --- | --- | --- | --- |
+| **idle** | 7 ms | 8 ms | 8 ms | Floor ≈ settle debounce + drain cycle |
+| **low (100/s)** | 8 ms | 12 ms | 14 ms | Within striking distance of idle |
+| **high (1000/s)** | ~1.8 s | ~3.0 s | ~3.0 s | InMemory single-threaded drain saturates — reactions queue |
+
+### Results — PostgresStore (single process)
+
+Same scenarios, same hardware, against the docker PG instance on
+`localhost:5431`. Variance is higher than InMemory because PG round-trips
+add their own jitter (autovacuum, OS scheduling, transient disk I/O).
+
+Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts`
+
+| Scenario | p50 | p95 | p99 | Notes |
+| --- | --- | --- | --- | --- |
+| **idle** | 4 ms | 20 ms | 500 ms | p50 close to InMemory; tail dominated by single PG outliers (small sample) |
+| **low (100/s)** | 10 ms | 22 ms | 70 ms | PG roundtrip ~5 ms baked into commit + drain |
+| **high (1000/s)** | ~125 ms | ~1.2 s | ~1.5 s | Saturates faster than InMemory — PG ack overhead under concurrent commits |
+
+**Reading the PG tail.** The idle p99 of ~500 ms is a single PG-side outlier (autovacuum kicking in, transient lock wait, etc.) magnified by the small sample count (~50–80 events). p50 is the meaningful stat for steady-state planning; p99 carries operator-facing tail-risk weight only at higher commit volumes. The framework-side regression bound asserts on p50 < 50 ms for that reason.
+
+### Reading
+
+1. **The floor is ~10 ms.** Settle is debounced (default 10 ms) and drain claims one batch per cycle. For interactive workloads (≤ 100 commits/sec on InMemory), latency stays close to the floor.
+2. **InMemory saturates around 200 commits/sec sustained.** The 1000/sec scenario clearly shows the system can't keep up — every event waits 1–3 s in the settle queue. This is where multi-process scale-out (PG + workers) becomes structurally necessary, not just nice-to-have.
+3. **Hardware-dependent.** Re-run the script on your target hardware before quoting numbers in production planning. The script is deterministic and self-contained.
+
+### When to switch from InMemory to PG (single process)
+
+The InMemory adapter optimizes for development feedback loops — fast cold-start, no schema, no docker. For production-grade single-process workloads:
+
+- **At ≤ 100 commits/sec**: InMemory is fine if you accept ephemeral state (no persistence across process restart). Most apps need PG for durability anyway, so the latency comparison is moot.
+- **At > 100 commits/sec sustained**: PG with single-process settle still saturates similarly because the bottleneck is the framework's drain cycle, not the store. Bigger throughput needs horizontal scale-out — see [`@rotorsoft/act-pg/PERFORMANCE.md`](../act-pg/PERFORMANCE.md) on cross-process notify and ACT-102 priority lanes.
+
+### Out of scope
+
+- **Browser → server → reaction round-trip** — that's an app-level concern (network, framework, etc.), not framework latency.
 
 No Store interface changes. Batching is handled entirely at the Act orchestrator level.

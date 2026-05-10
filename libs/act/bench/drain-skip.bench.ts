@@ -29,7 +29,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 const app = act()
   .withState(Counter)
   .on("Incremented")
-  .do(async () => {})
+  .do(async function noopHandler() {})
   .build();
 
 const actor = { id: "bench", name: "bench" };

@@ -5,7 +5,7 @@
  * have registered reactions (lifecycle events). The remaining 11 are
  * high-frequency operational events that should skip drain entirely.
  *
- * Run: pnpm vitest bench libs/act-pg/test/drain-skip.bench.ts --run
+ * Run: pnpm vitest bench libs/act-pg/bench/drain-skip.bench.ts --run
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { afterAll, beforeAll, bench, describe } from "vitest";

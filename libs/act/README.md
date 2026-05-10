@@ -74,6 +74,11 @@ const app = act().withSlice(CounterSlice).build();
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
 - [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
 
+## Performance
+
+- [PERFORMANCE.md](./PERFORMANCE.md) — historical optimizations, batched projection replay, and the **[Reaction latency](./PERFORMANCE.md#reaction-latency-act-103)** section answering "how long from `do()` to reaction firing?"
+- [BENCH.md](../../BENCH.md) — index of every benchmark in the workspace with run commands and current numbers.
+
 ---
 
 ## Event Store

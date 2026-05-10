@@ -34,6 +34,8 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
+    "bench:micro": "vitest bench --run",
+    "bench:scenarios": "vitest run --config vitest.bench.config.ts",
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {

@@ -80,6 +80,35 @@ jobs:
       - run: pnpm -F @rotorsoft/act bench:run
       - run: pnpm -F @rotorsoft/act bench:check
 
+      # Scenario benchmarks (Shape C). Each one has a built-in
+      # regression assertion, so a real perf regression breaks the
+      # build. The captured stdout ends up in the workflow's step
+      # summary so reviewers see the numbers without scrolling logs.
+      - name: bench:scenarios
+        run: |
+          set -o pipefail
+          pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
+      - name: Append scenario bench results to step summary
+        if: always()
+        run: |
+          {
+            echo "## Scenario benchmark results"
+            echo ""
+            echo '```'
+            # Extract the console.table blocks from the captured run.
+            # Falls back to the full log if no tables are detected.
+            if grep -q "===.*===" bench-scenarios.log 2>/dev/null; then
+              awk '/^===/,/^└/' bench-scenarios.log
+            else
+              tail -n 80 bench-scenarios.log
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Coveralls upload is best-effort. Outages have blocked merges on
+      # master before — we'd rather lose a coverage badge than lose a
+      # release. `continue-on-error: true` lets the rest of the pipeline
+      # advance regardless of coveralls availability.
       - uses: coverallsapp/github-action@v2
         continue-on-error: true
         with:

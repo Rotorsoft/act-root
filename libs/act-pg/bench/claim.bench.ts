@@ -4,7 +4,7 @@
  * Measures drain throughput at different stream counts to validate
  * the competing consumer pattern (FOR UPDATE SKIP LOCKED).
  *
- * Run: vitest bench libs/act-pg/test/claim.bench.ts
+ * Run: vitest bench libs/act-pg/bench/claim.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { bench, describe } from "vitest";
