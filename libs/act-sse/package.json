@@ -3,6 +3,13 @@
   "type": "module",
   "version": "1.2.1",
   "description": "Incremental state broadcast over SSE for act apps",
+  "keywords": [
+    "typescript",
+    "sse",
+    "server-sent-events",
+    "real-time",
+    "eventsource"
+  ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {

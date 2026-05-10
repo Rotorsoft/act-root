@@ -5,7 +5,7 @@
  * 2. Dynamic checkpoint: large history, scan from checkpoint vs from 0
  * 3. Cold-start: first correlate after bootstrap
  *
- * Run: npx tsx libs/act-pg/scripts/correlate-checkpoint.bench.ts
+ * Run: npx tsx libs/act-pg/scripts/correlate-checkpoint.ts
  */
 import { act, state, store, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";

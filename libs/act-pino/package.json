@@ -3,6 +3,12 @@
   "type": "module",
   "version": "0.3.1",
   "description": "Pino logger adapter for @rotorsoft/act",
+  "keywords": [
+    "typescript",
+    "pino",
+    "logger",
+    "adapter"
+  ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {

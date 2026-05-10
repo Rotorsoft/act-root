@@ -5,7 +5,7 @@
  * have registered reactions (lifecycle events). The remaining 11 are
  * high-frequency operational events that should skip drain entirely.
  *
- * Run: pnpm vitest bench libs/act-pg/bench/drain-skip.bench.ts --run
+ * Run: pnpm bench:micro libs/act-pg/bench/drain-skip.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { afterAll, beforeAll, bench, describe } from "vitest";
@@ -84,19 +84,19 @@ const Entity = state({
 const app = act()
   .withState(Entity)
   .on("Created")
-  .do(async () => {})
+  .do(async function onCreated() {})
   .on("MemberAdded")
-  .do(async () => {})
+  .do(async function onMemberAdded() {})
   .on("Started")
-  .do(async () => {})
+  .do(async function onStarted() {})
   .on("MemberRemoved")
-  .do(async () => {})
+  .do(async function onMemberRemoved() {})
   .on("Completed")
-  .do(async () => {})
+  .do(async function onCompleted() {})
   .on("Archived")
-  .do(async () => {})
+  .do(async function onArchived() {})
   .on("Deleted")
-  .do(async () => {})
+  .do(async function onDeleted() {})
   .build();
 
 const actor = { id: "bench", name: "bench" };

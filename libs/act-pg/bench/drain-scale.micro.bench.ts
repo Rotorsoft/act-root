@@ -4,7 +4,7 @@
  * Tests atomic claim vs two-phase poll→lease at scale with multiple
  * concurrent drain workers competing for streams.
  *
- * Run: vitest bench libs/act-pg/bench/drain-scale.bench.ts
+ * Run: pnpm bench:micro libs/act-pg/bench/drain-scale.micro.bench.ts
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { bench, describe } from "vitest";

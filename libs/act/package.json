@@ -3,6 +3,15 @@
   "type": "module",
   "version": "0.35.0",
   "description": "act core library",
+  "keywords": [
+    "typescript",
+    "event-sourcing",
+    "cqrs",
+    "ddd",
+    "framework",
+    "actor",
+    "agent"
+  ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {
@@ -38,9 +47,6 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
-    "bench:micro": "vitest bench --run",
-    "bench:scenarios": "vitest run --config vitest.bench.config.ts",
-    "bench:latency": "vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts",
     "bench:run": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-result.json",
     "bench:check": "tsx scripts/perf-check.ts",
     "bench:update": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-baseline.json",

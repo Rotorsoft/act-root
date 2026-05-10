@@ -1,30 +1,38 @@
 /**
- * ACT-103 — single-process commit→reaction latency on PostgreSQL.
+ * ACT-103 — single-process commit→reaction latency.
  *
- * Mirrors `libs/act/bench/reaction-latency.bench.ts` (InMemoryStore)
- * with the PG adapter swapped in. Same three steady-state scenarios
- * — idle / low / high — same recorder, same percentile reporting.
+ * Question: "from `app.do()` to the reaction handler firing, how long?"
+ * Architects evaluating Act for time-sensitive workflows ask this
+ * first, and PERFORMANCE.md should answer it in writing.
  *
- * **Scope.** Single-process: writer and reader live on the same Act
- * instance, so notify wake-up is irrelevant — local commits arm the
- * drain via `do()` directly. Cross-process latency (writer and
- * reader on separate processes, with and without notify) lives in
- * `bench/notify-perf.bench.ts`.
+ * Three steady-state scenarios per adapter:
+ *   - **idle**: one commit at a time, reaction fires, repeat. Measures
+ *     the floor — settle debounce + correlate + drain + handler.
+ *   - **low**: 100 commits/sec sustained for ~3 s. Realistic
+ *     interactive workload.
+ *   - **high**: 1000 commits/sec sustained for ~3 s. Stress test —
+ *     reveals where the framework saturates on InMemory and how the
+ *     PG adapter copes with a busy commit pipeline.
  *
- * Filename uses `.bench.ts` so the default `vitest run` glob skips
- * it. Invoke explicitly:
+ * For each scenario we record commit→reaction latency per event and
+ * report p50/p95/p99. Numbers feed `libs/act/PERFORMANCE.md`.
  *
- *   pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts
+ * **Adapter coverage:** InMemoryStore here. PostgresStore latency
+ * lives in `libs/act-pg/bench/notify-perf.scenario.bench.ts`
+ * (cross-process) and `libs/act-pg/bench/reaction-latency.scenario.bench.ts`
+ * (single-process).
+ *
+ * Run:
+ *
+ *   pnpm bench:scenarios libs/act/bench/reaction-latency.scenario.bench.ts
  */
-
-import type { ReactionHandler } from "@rotorsoft/act";
-import { act, dispose, state, store } from "@rotorsoft/act";
 import { z } from "zod";
-import { PostgresStore } from "../src/postgres-store.js";
+import { InMemoryStore } from "../src/adapters/in-memory-store.js";
+import { act } from "../src/builders/act-builder.js";
+import { state } from "../src/builders/state-builder.js";
+import { dispose, store } from "../src/ports.js";
+import type { ReactionHandler } from "../src/types/index.js";
 
-const PORT = 5431;
-const SCHEMA = "act_latency_bench";
-const TABLE = "events";
 const ACTOR = { id: "bench", name: "bench" };
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
@@ -37,7 +45,9 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 type LatencyRecorder = {
   start: (id: string) => void;
   finish: (id: string) => void;
+  /** Snapshot of collected samples without consuming them. */
   snapshot: () => number[];
+  /** Take the samples and reset the buffer. */
   drain: () => number[];
 };
 
@@ -66,10 +76,13 @@ function pct(samples: number[], p: number) {
   ];
 }
 
-async function buildApp(rec: LatencyRecorder) {
-  store(new PostgresStore({ port: PORT, schema: SCHEMA, table: TABLE }));
-  await store().drop();
-  await store().seed();
+/**
+ * Build an Act instance with a `Tick` reaction whose handler records
+ * the per-event latency. Returns the wired components plus the
+ * recorder so callers can inspect samples.
+ */
+function buildApp(rec: LatencyRecorder) {
+  store(new InMemoryStore());
 
   const handler: ReactionHandler<{ Tick: { id: string } }, "Tick"> = async (
     event
@@ -91,46 +104,27 @@ async function buildApp(rec: LatencyRecorder) {
   return app;
 }
 
+/**
+ * Drive a steady-state commit rate for `durationMs` and return the
+ * collected latency samples. `commitsPerSec === 0` means one-at-a-time
+ * (the idle floor) — wait for each reaction before issuing the next.
+ */
 async function runScenario(
   commitsPerSec: number,
   durationMs: number
-): Promise<{ samples: number[]; commits: number }> {
+): Promise<{ samples: number[]; commits: number; capturedFraction: number }> {
   const rec = recorder();
-  const app = await buildApp(rec);
+  const app = buildApp(rec);
   let commits = 0;
 
-  // Spread commits across many source streams to avoid serialized
-  // contention on a single stream's version. With one stream and a
-  // high commit rate, every commit races the prior one for
-  // expectedVersion — measuring contention, not latency.
-  // For the idle scenario (one commit at a time) a single source is
-  // fine — no concurrency, no version contention — and lets one
-  // warmup pre-pay the connection + dynamic-resolver subscribe cost
-  // up front.
-  const STREAM_COUNT = commitsPerSec === 0 ? 1 : 256;
-  const nextStream = (i: number) => `src-${i % STREAM_COUNT}`;
-
-  // Warm-up: the first commit on a fresh source stream pays for PG
-  // connection setup, the initial correlate scan, and registering
-  // the dynamic-resolver target. Pre-pay each source once, drain
-  // the samples, and start the timed window from a steady state.
-  for (let i = 0; i < STREAM_COUNT; i++) {
-    await app.do(
-      "tick",
-      { stream: nextStream(i), actor: ACTOR },
-      { id: `warmup-${i}` }
-    );
-  }
-  const warmupDeadline = performance.now() + 2000;
-  while (
-    rec.snapshot().length < STREAM_COUNT &&
-    performance.now() < warmupDeadline
-  ) {
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  rec.drain();
-
   try {
+    // Spread commits across many source streams to avoid serialized
+    // contention on a single stream's version. With one stream and
+    // 1000 commits/sec, every commit races the prior one for
+    // expectedVersion — measuring contention, not latency.
+    const STREAM_COUNT = 256;
+    const nextStream = (i: number) => `src-${i % STREAM_COUNT}`;
+
     if (commitsPerSec === 0) {
       // Idle scenario — strictly one commit at a time. Wait for the
       // reaction to land before issuing the next so the measurement
@@ -147,7 +141,10 @@ async function runScenario(
           { id }
         );
         commits++;
-        const deadline = performance.now() + 500;
+        // Wait until the reaction handler has appended a new
+        // sample. Settle is debounced at 0ms so the handler
+        // typically fires within a few ms.
+        const deadline = performance.now() + 200;
         while (
           rec.snapshot().length === samplesBefore &&
           performance.now() < deadline
@@ -156,6 +153,9 @@ async function runScenario(
         }
       }
     } else {
+      // Steady-state — fire commits at a fixed rate, round-robin
+      // across source streams. Reactions land asynchronously; the
+      // recorder collects whatever drains through during the window.
       const intervalMs = 1000 / commitsPerSec;
       const start = performance.now();
       const inFlight: Promise<unknown>[] = [];
@@ -165,17 +165,23 @@ async function runScenario(
         inFlight.push(
           app
             .do("tick", { stream: nextStream(commits), actor: ACTOR }, { id })
+            // Treat concurrency races as best-effort — the latency
+            // sample is dropped (the recorder never sees a finish).
             .catch(() => undefined)
         );
         commits++;
         await new Promise((r) => setTimeout(r, intervalMs));
       }
+      // Let the in-flight commits finish + reactions drain.
       await Promise.allSettled(inFlight);
-      // Trailing window for reactions to drain — PG roundtrips need
-      // more headroom than InMemory.
-      await new Promise((r) => setTimeout(r, 1500));
+      await new Promise((r) => setTimeout(r, 500));
     }
-    return { samples: rec.drain(), commits };
+    const samples = rec.drain();
+    return {
+      samples,
+      commits,
+      capturedFraction: samples.length / Math.max(1, commits),
+    };
   } finally {
     app.stop_correlations();
     app.stop_settling();
@@ -193,7 +199,7 @@ const SCENARIOS: ReadonlyArray<{
   { name: "high (1000/s)", rate: 1000, durationMs: 3000 },
 ];
 
-describe("ACT-103 commit→reaction latency (PostgresStore single-process)", () => {
+describe("ACT-103 commit→reaction latency (InMemoryStore)", () => {
   it("p50/p95/p99 across idle / low / high steady-state rates", async () => {
     const results: Record<string, Record<string, string>> = {};
 
@@ -207,21 +213,15 @@ describe("ACT-103 commit→reaction latency (PostgresStore single-process)", () 
     }
 
     // eslint-disable-next-line no-console
-    console.log(
-      "\n=== ACT-103 commit→reaction latency (PostgresStore single-process) ==="
-    );
+    console.log("\n=== ACT-103 commit→reaction latency (InMemoryStore) ===");
     // eslint-disable-next-line no-console
     console.table(results);
 
-    // Regression bound: idle p50 (median) must stay under a generous
-    // ceiling. We assert on p50 rather than p99 because the idle
-    // scenario's small sample count (~50 events) makes p99 highly
-    // sensitive to single PG-side outliers (autovacuum, transient
-    // I/O, etc.). p50 is stable across runs and catches genuine
-    // framework regressions; tail variance lives in the reported
-    // table for operators who need it.
-    const idleResults = await runScenario(0, 1500);
-    const idleP50 = pct(idleResults.samples, 50);
-    expect(idleP50).toBeLessThan(50);
-  }, 90_000);
+    // Regression bound: the idle p99 must stay under a generous
+    // ceiling. Picked at 5× the empirical floor — anything that
+    // crosses it is a real regression in the do→settle→drain path.
+    const idleResults = await runScenario(0, 1000);
+    const idleP99 = pct(idleResults.samples, 99);
+    expect(idleP99).toBeLessThan(50);
+  }, 60_000);
 });

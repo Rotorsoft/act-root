@@ -2,7 +2,15 @@
   "name": "@rotorsoft/act-diagram",
   "type": "module",
   "version": "0.3.8",
-  "description": "Act domain model diagram — extract, visualize, and navigate Act event-sourced models",
+  "description": "Act domain model diagram \u2014 extract, visualize, and navigate Act event-sourced models",
+  "keywords": [
+    "typescript",
+    "event-sourcing",
+    "mermaid",
+    "diagram",
+    "visualization",
+    "documentation"
+  ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {

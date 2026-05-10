@@ -13,11 +13,11 @@
  *     released and reactions driven by an explicit
  *     `setInterval(correlate→drain, …)` pump.
  *
- * Filename uses `.bench.ts` so the default `vitest run` include pattern
- * (`*.{test,spec}.ts`) skips it — the docker round-trip cost doesn't
- * inflate ordinary CI runtime. Numbers feed `PERFORMANCE.md`.
+ * Suffix `.scenario.bench.ts` keeps it outside the unit-test glob
+ * (`*.{test,spec}.ts`) — the docker round-trip cost doesn't inflate
+ * ordinary CI runtime. Numbers feed `PERFORMANCE.md`.
  *
- * Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts`
+ * Run: `pnpm bench:scenarios libs/act-pg/bench/notify-perf.scenario.bench.ts`
  */
 import {
   act,

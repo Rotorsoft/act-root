@@ -5,7 +5,7 @@
  * Without filtering, claim returns caught-up streams that waste
  * drain cycles. With filtering, claim returns only active streams.
  *
- * Run: npx tsx libs/act-pg/scripts/watermark-claim.bench.ts
+ * Run: npx tsx libs/act-pg/scripts/watermark-claim.ts
  */
 import { act, state, store, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";

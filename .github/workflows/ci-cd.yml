@@ -96,9 +96,16 @@ jobs:
             echo ""
             echo '```'
             # Extract the console.table blocks from the captured run.
-            # Falls back to the full log if no tables are detected.
-            if grep -q "===.*===" bench-scenarios.log 2>/dev/null; then
-              awk '/^===/,/^└/' bench-scenarios.log
+            # Scenario benches print `=== <header> ===` then the table;
+            # the closing `└` line is the bottom corner of the table.
+            # Single-process vitest keeps output prefix-free, so the
+            # match is purely structural.
+            if grep -qE '=== .+ ===' bench-scenarios.log 2>/dev/null; then
+              awk '
+                /=== .+ ===/    { printing=1 }
+                printing        { print }
+                /└/ && printing { printing=0; print "" }
+              ' bench-scenarios.log
             else
               tail -n 80 bench-scenarios.log
             fi

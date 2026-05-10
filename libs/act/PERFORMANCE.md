@@ -34,7 +34,7 @@ pnpm -F @rotorsoft/act bench:update    # writes perf-baseline.json
 - **Single-stream throughput** (one user/aggregate at a time): bounded by `action` p50. ~430 commits/sec on InMemoryStore.
 - **Cross-stream throughput** (many independent aggregates): scales with the event loop's parallelism. ~13,900 commits/sec on InMemoryStore at 50-way parallelism.
 - **Same-stream contention** (e.g. multiplayer game shared room): bounded by optimistic-concurrency retries. ~8,000 commits/sec for 20 contending users on InMemoryStore. Real-world stores will be slower (network/disk-bound).
-- **All numbers are InMemoryStore at `NODE_ENV=test`** (sleepMs=0). Production stores trade absolute throughput for durability — see `libs/act-pg/bench/*.bench.ts` for Postgres numbers (claim, drain, watermark, contention).
+- **All numbers are InMemoryStore at `NODE_ENV=test`** (sleepMs=0). Production stores trade absolute throughput for durability — see `libs/act-pg/bench/*.{micro,scenario}.bench.ts` for Postgres numbers (claim, drain, watermark, contention).
 
 > ⚠ Synthetic upper bounds. Real apps with invariants, multi-event commits, and reactions firing typically see **30–60% of these numbers**. See "Realistic workloads" below for measurements that include those costs.
 
@@ -428,7 +428,7 @@ Three steady-state scenarios. Each one wires up a single reaction whose handler 
 
 Settle runs on every `committed` event with `debounceMs: 0` so the reaction wake-up follows the local fast path (`do() → arm drain → settle`).
 
-Run: `pnpm -F @rotorsoft/act exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts`
+Run: `pnpm bench:scenarios libs/act/bench/reaction-latency.scenario.bench.ts`
 
 ### Results — InMemoryStore (single process)
 
@@ -446,7 +446,7 @@ Same scenarios, same hardware, against the docker PG instance on
 `localhost:5431`. Variance is higher than InMemory because PG round-trips
 add their own jitter (autovacuum, OS scheduling, transient disk I/O).
 
-Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts`
+Run: `pnpm bench:scenarios libs/act-pg/bench/reaction-latency.scenario.bench.ts`
 
 | Scenario | p50 | p95 | p99 | Notes |
 | --- | --- | --- | --- | --- |

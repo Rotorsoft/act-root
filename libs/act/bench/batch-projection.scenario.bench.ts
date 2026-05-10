@@ -61,7 +61,7 @@ describe("batch projection benchmark", () => {
         await store().drop();
         const perEventProj = projection("pe")
           .on({ Incremented })
-          .do(async () => {
+          .do(async function perEventApply() {
             await simulateDBWrite();
           })
           .build();
@@ -81,10 +81,10 @@ describe("batch projection benchmark", () => {
         await store().drop();
         const batchedProj = projection("ba")
           .on({ Incremented })
-          .do(async () => {
+          .do(async function batchedApplyFallback() {
             await simulateDBWrite();
           })
-          .batch(async () => {
+          .batch(async function batchedApply() {
             await simulateDBWrite();
           })
           .build();

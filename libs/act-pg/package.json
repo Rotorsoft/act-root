@@ -3,6 +3,13 @@
   "type": "module",
   "version": "0.20.0",
   "description": "act pg adapters",
+  "keywords": [
+    "typescript",
+    "event-sourcing",
+    "postgres",
+    "event-store",
+    "listen-notify"
+  ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {
@@ -34,8 +41,6 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
-    "bench:micro": "vitest bench --run",
-    "bench:scenarios": "vitest run --config vitest.bench.config.ts",
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {

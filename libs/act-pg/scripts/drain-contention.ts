@@ -5,7 +5,7 @@
  * Each instance has its own _drain_locked mutex, so concurrent drains
  * truly compete through PG's FOR UPDATE SKIP LOCKED.
  *
- * Run: npx tsx libs/act-pg/scripts/drain-contention.bench.ts
+ * Run: npx tsx libs/act-pg/scripts/drain-contention.ts
  */
 import { act, state, store, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";

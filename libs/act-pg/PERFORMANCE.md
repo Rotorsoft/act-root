@@ -116,7 +116,7 @@ Each arm runs to total completion. We capture two timestamps:
 - **TTF (time-to-finish)** for the priority target.
 - **Total drain** time for *all* 50 targets to finish.
 
-Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts test/priority-claim.bench.ts`
+Run: `pnpm bench:scenarios libs/act-pg/bench/priority-claim.scenario.bench.ts`
 
 ### Results — three back-to-back runs
 
