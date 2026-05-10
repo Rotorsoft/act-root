@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   BlockedLease,
   Committed,
@@ -5,12 +6,14 @@ import type {
   Lease,
   Logger,
   Message,
+  NotifyDisposer,
   Query,
   QueryStreams,
   QueryStreamsResult,
   Schema,
   Schemas,
   Store,
+  StoreNotification,
   StreamPosition,
 } from "@rotorsoft/act";
 import {
@@ -29,7 +32,35 @@ types.setTypeParser(types.builtins.JSONB, (val) =>
   JSON.parse(val, dateReviver)
 );
 
-type Config = Readonly<{ schema: string; table: string }> & pg.PoolConfig;
+type Config = Readonly<{
+  schema: string;
+  table: string;
+  /**
+   * Opt in to cross-process commit notifications via `LISTEN`/`NOTIFY`.
+   * Optional — defaults to `false` so existing callers keep their
+   * current behavior. Setting it to `true` is the only behavior change
+   * an upgrading deployment needs to make to enable cross-process
+   * reaction wakeup.
+   *
+   * When `true`:
+   * - `commit()` issues `pg_notify` after each successful insert.
+   * - `notify(handler)` checks out a dedicated long-lived `LISTEN`
+   *   client from the pool and delivers cross-process notifications.
+   *
+   * When `false` (default):
+   * - `commit()` skips the notify SQL entirely — zero per-write
+   *   overhead.
+   * - The `notify` method is **not present on the instance**, so the
+   *   orchestrator's `if (store.notify)` auto-wire short-circuits and
+   *   no LISTEN client is allocated.
+   *
+   * Single-instance deployments should leave this off. Multi-process
+   * deployments that need sub-poll reaction latency turn it on
+   * **on every store instance** (writers and listeners both).
+   */
+  notify?: boolean;
+}> &
+  pg.PoolConfig;
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -38,6 +69,19 @@ const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 // unique index on (stream, version). Stable across PG versions per the
 // SQL standard. See: https://www.postgresql.org/docs/current/errcodes-appendix.html
 const PG_UNIQUE_VIOLATION = "23505";
+
+// Channel-name prefix for cross-process commit notifications. The
+// effective channel is namespaced per `(schema, table)` so two
+// PostgresStores pointed at distinct event tables in the same database
+// don't cross-talk. PG channel names are case-folded unless quoted; we
+// stick to lowercase identifiers so a future `LISTEN act_commit_*` from
+// any client (psql, scripts, alternative consumers) matches without
+// surprises.
+const NOTIFY_CHANNEL_PREFIX = "act_commit";
+
+function notifyChannel(schema: string, table: string): string {
+  return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
+}
 function assertSafeIdentifier(value: string, label: string) {
   if (!SAFE_IDENTIFIER.test(value))
     throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
@@ -51,6 +95,7 @@ const DEFAULT_CONFIG: Config = {
   password: "postgres",
   schema: "public",
   table: "events",
+  notify: false,
 };
 
 /**
@@ -166,6 +211,41 @@ export class PostgresStore implements Store {
   readonly config: Config;
   private _fqt: string;
   private _fqs: string;
+  /**
+   * Per-instance writer identifier embedded in every NOTIFY payload. The
+   * `notify()` LISTEN handler skips payloads where `by === this._by`,
+   * giving the `"notified"` lifecycle event a clean cross-process
+   * semantic — local commits never echo back through this channel.
+   */
+  private readonly _by: string = randomUUID();
+  /**
+   * Effective NOTIFY channel for this store. Computed from `(schema,
+   * table)` at construction so multiple stores in the same database
+   * stay isolated.
+   */
+  private readonly _channel: string;
+  /** Active LISTEN client (one per `notify()` subscription). */
+  private _listenClient: pg.PoolClient | undefined;
+  /**
+   * Notification listener attached to the active LISTEN client. Tracked
+   * separately so the re-subscribe / dispose paths can detach it before
+   * destroying the client — without this, a pool that reused the
+   * connection would re-fire the stale handler.
+   */
+  private _listenHandler: ((msg: pg.Notification) => void) | undefined;
+  /**
+   * Cross-process commit subscription. **Present only when
+   * `config.notify === true`** — the orchestrator's auto-wire path
+   * checks `if (store.notify)`, so omitting the method keeps
+   * single-instance deployments free of any LISTEN/NOTIFY overhead
+   * (no dedicated client, no per-commit `pg_notify`).
+   *
+   * @see {@link Config.notify} for the rationale and the multi-process
+   *   contract.
+   */
+  notify?: (
+    handler: (notification: StoreNotification) => void
+  ) => Promise<NotifyDisposer>;
 
   /**
    * Create a new PostgresStore instance.
@@ -179,14 +259,45 @@ export class PostgresStore implements Store {
     this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
+    this._channel = notifyChannel(this.config.schema, this.config.table);
+    // Attach the notify subscriber only when the user opted in. With
+    // notify off, `this.notify` is `undefined`, the orchestrator skips
+    // its auto-wire, and no LISTEN client is ever allocated.
+    if (this.config.notify) {
+      this.notify = this._subscribeNotifications.bind(this);
+    }
   }
 
   /**
    * Dispose of the store and close all database connections.
+   * Releases any active LISTEN client first so the pool can drain cleanly.
    * @returns Promise that resolves when all connections are closed
    */
   async dispose() {
+    await this._teardownListen();
     await this._pool.end();
+  }
+
+  /**
+   * Tear down the active LISTEN subscription if any: detach the
+   * notification listener, run UNLISTEN, and destroy the dedicated
+   * client (do not return it to the pool — its listener is removed but
+   * destroying belt-and-braces guards against any future change in
+   * pg-pool semantics that could re-issue a half-clean client).
+   */
+  private async _teardownListen() {
+    if (!this._listenClient) return;
+    // _listenHandler is set in lockstep with _listenClient in notify(),
+    // so if the client is present, the handler is too.
+    this._listenClient.removeListener("notification", this._listenHandler!);
+    this._listenHandler = undefined;
+    try {
+      await this._listenClient.query(`UNLISTEN ${this._channel}`);
+    } catch {
+      // best-effort — pool end (or destroy) tears the connection down
+    }
+    this._listenClient.release(true);
+    this._listenClient = undefined;
   }
 
   /**
@@ -442,26 +553,29 @@ export class PostgresStore implements Store {
         }
       }
 
-      await client
-        .query(
-          `
-            NOTIFY "${this.config.table}", '${JSON.stringify({
-              operation: "INSERT",
-              id: committed[0].name,
-              position: committed[0].id,
-            })}';
-            COMMIT;
-            `
-        )
-        .catch((error) => {
-          logger.error(error);
-          throw new ConcurrencyError(
-            stream,
-            version,
-            msgs as unknown as Message<Schemas, string>[],
-            expectedVersion || -1
-          );
+      // One NOTIFY per commit transaction, payload carries the full event
+      // batch so listeners reason about atomic groups (matches reaction
+      // semantics in the rest of the framework). `by` lets other
+      // PostgresStore instances self-filter their own writes — see
+      // `_subscribeNotifications()`. PG NOTIFY payloads cap at 8000
+      // bytes; for typical commits (1–10 events) this is comfortably
+      // under, and the polling fallback path handles the rare overflow
+      // case correctly. Skipped entirely when `config.notify === false`
+      // (the default) so single-instance deployments pay zero
+      // per-write overhead.
+      if (this.config.notify) {
+        const payload = JSON.stringify({
+          stream,
+          events: committed.map((c) => ({ id: c.id, name: c.name as string })),
+          by: this._by,
         });
+        await client.query(`SELECT pg_notify($1, $2)`, [
+          this._channel,
+          payload,
+        ]);
+      }
+
+      await client.query("COMMIT");
       return committed;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -812,6 +926,114 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Implementation of the optional `Store.notify` hook. Bound onto
+   * `this.notify` in the constructor when `config.notify === true`,
+   * left detached otherwise — see {@link Config.notify}.
+   *
+   * Checks out a dedicated long-lived client from the pool, runs
+   * `LISTEN act_commit_<schema>_<table>`, and parses each incoming
+   * notification payload. The handler is invoked exactly once per
+   * **remote** commit — payloads originating from this same store
+   * instance (matched by the per-instance `_by` UUID) are silently
+   * skipped, giving callers a clean cross-process semantic.
+   *
+   * Multiple subscriptions on the same store instance are not supported —
+   * this method releases any prior LISTEN client before opening a new one.
+   * The returned disposer cleanly UNLISTENs and releases the dedicated
+   * client; pool disposal also tears the subscription down as a safety
+   * net.
+   *
+   * @param handler Called for each cross-process commit notification.
+   * @returns Disposer that releases the LISTEN client.
+   */
+  private async _subscribeNotifications(
+    handler: (notification: StoreNotification) => void
+  ): Promise<NotifyDisposer> {
+    // Close any prior subscription so callers don't silently double-listen.
+    await this._teardownListen();
+
+    const client = await this._pool.connect();
+    const onNotification = (msg: pg.Notification) => {
+      // Channel filter: this client only `LISTEN`s on `this._channel`,
+      // but pg-pool can in theory deliver buffered notifications when a
+      // connection is reused — guard rather than trust.
+      if (msg.channel !== this._channel) return;
+      if (!msg.payload) return;
+      let parsed: {
+        stream?: unknown;
+        events?: unknown;
+        by?: unknown;
+      };
+      try {
+        parsed = JSON.parse(msg.payload);
+      } catch (err) {
+        // A malformed payload is a bug somewhere upstream — log and skip
+        // instead of tearing down the listener.
+        logger.error(
+          { err, payload: msg.payload },
+          "act_commit: malformed payload, skipping"
+        );
+        return;
+      }
+      // Self-filter: skip notifications that originated from this same
+      // store instance. This is what gives `notified` its cross-process
+      // semantic — local commits already arm the drain via `do()`.
+      if (parsed.by === this._by) return;
+      if (typeof parsed.stream !== "string" || !Array.isArray(parsed.events)) {
+        logger.error(
+          { payload: msg.payload },
+          "act_commit: payload missing required fields, skipping"
+        );
+        return;
+      }
+      const events: Array<{ id: number; name: string }> = [];
+      for (const raw of parsed.events) {
+        if (
+          raw &&
+          typeof raw === "object" &&
+          typeof (raw as { id?: unknown }).id === "number" &&
+          typeof (raw as { name?: unknown }).name === "string"
+        ) {
+          events.push({
+            id: (raw as { id: number }).id,
+            name: (raw as { name: string }).name,
+          });
+        }
+      }
+      if (events.length === 0) return;
+      // Adapter-level robustness: a throwing handler must not tear
+      // down the dedicated LISTEN client. The orchestrator wraps its
+      // own `notified` emit + drain wakeup separately
+      // (`Act._wireNotify`) — defense in depth, with each layer
+      // protecting its own resources. Direct callers of
+      // `store.notify(handler)` (tests, custom integrations) inherit
+      // the adapter wrap.
+      try {
+        handler({ stream: parsed.stream, events });
+      } catch (err) {
+        logger.error(err, "act_commit: handler threw, listener preserved");
+      }
+    };
+    client.on("notification", onNotification);
+    try {
+      await client.query(`LISTEN ${this._channel}`);
+    } catch (err) {
+      client.removeListener("notification", onNotification);
+      client.release(true);
+      throw err;
+    }
+    this._listenClient = client;
+    this._listenHandler = onNotification;
+
+    return async () => {
+      // No-op when this disposer is stale (a later notify() call already
+      // tore the subscription down).
+      if (this._listenClient !== client) return;
+      await this._teardownListen();
+    };
   }
 
   /**

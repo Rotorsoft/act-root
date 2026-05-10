@@ -194,4 +194,83 @@ describe("PostgresStore", () => {
       ).resolves.toEqual([]);
     });
   });
+
+  describe("notify", () => {
+    // The notify subscription is opt-in via `notify: true` in the
+    // store config — without it, `store.notify` is undefined and the
+    // orchestrator never wires LISTEN/NOTIFY.
+    let notifyStore: PostgresStore;
+    beforeEach(() => {
+      notifyStore = new PostgresStore({
+        port: 5431,
+        table: "store_error_test",
+        notify: true,
+      });
+    });
+
+    it("is undefined when config.notify is false", () => {
+      expect(store.notify).toBeUndefined();
+      expect(notifyStore.notify).toBeTypeOf("function");
+    });
+
+    it("ignores notifications on a different channel", async () => {
+      // Hold the registered `notification` listener so we can call it
+      // directly with a synthetic message — pg-pool can in theory
+      // deliver buffered notifications from a reused client even after
+      // we've LISTEN'd a fresh channel.
+      let captured: ((msg: any) => void) | undefined;
+      const client = {
+        query: vi.fn().mockResolvedValue({}),
+        on: vi.fn((event: string, fn: any) => {
+          if (event === "notification") captured = fn;
+        }),
+        removeListener: vi.fn(),
+        release: vi.fn(),
+      };
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        client
+      );
+      const handler = vi.fn();
+      await notifyStore.notify!(handler);
+      expect(captured).toBeTypeOf("function");
+      // Synthetic message on a foreign channel — must be ignored.
+      captured!({ channel: "some_other_channel", payload: "{}" });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("releases the listen client when LISTEN throws", async () => {
+      // Successful connect, but LISTEN fails — exercises the clean-up
+      // branch in `notify()` that detaches the listener and destroys
+      // the client before rethrowing. Without this branch, a bad LISTEN
+      // would leak a connection from the pool.
+      const release = vi.fn();
+      const on = vi.fn();
+      const removeListener = vi.fn();
+      const client = {
+        query: vi
+          .fn()
+          .mockImplementationOnce(() =>
+            Promise.reject(new Error("listen fail"))
+          ),
+        on,
+        removeListener,
+        release,
+      };
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        client
+      );
+      await expect(notifyStore.notify!(() => {})).rejects.toThrow(
+        "listen fail"
+      );
+      // Listener attached then detached; client released with destroy=true.
+      expect(on).toHaveBeenCalledWith("notification", expect.any(Function));
+      expect(removeListener).toHaveBeenCalledWith(
+        "notification",
+        expect.any(Function)
+      );
+      expect(release).toHaveBeenCalledWith(true);
+    });
+  });
 });

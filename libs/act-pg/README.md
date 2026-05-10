@@ -97,8 +97,47 @@ if (process.env.NODE_ENV === "production") {
 - **Connection Pooling** - Uses [node-postgres](https://node-postgres.com/) Pool for efficient connection management
 - **Atomic Stream Claiming** - Zero-contention competing consumers via `FOR UPDATE SKIP LOCKED`
 - **Auto Schema Setup** - `seed()` creates all required tables, indexes, and schema
-- **NOTIFY/LISTEN** - Real-time event notifications via PostgreSQL channels
+- **Cross-Process `LISTEN`/`NOTIFY`** (opt-in) - Set `notify: true` to wake `settle()` immediately on remote commits — no polling lag for horizontally-scaled deployments. Off by default. See [PERFORMANCE.md](./PERFORMANCE.md) for the latency benchmark.
 - **Multi-Tenant** - Isolate tenants using separate schemas
+
+## Cross-Process Reactions (opt-in)
+
+For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook via `LISTEN`/`NOTIFY` so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay.
+
+**Opt-in via the `notify: true` config flag.** The cost (per-commit `pg_notify`, dedicated `LISTEN` client per process) is wasted in single-instance deployments, so it defaults to **off** — existing callers see zero behavior change after upgrading. Multi-process apps that need sub-poll wakeup enable it on every store instance involved (writers and listeners both):
+
+```ts
+import { act, store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+const config = { schema: "myapp", table: "events", notify: true };
+
+// Worker A (writer)
+store(new PostgresStore(config));
+const app = act().withState(Order).build();
+await app.do("placeOrder", { stream: "order-1", actor }, payload);
+
+// Worker B (reactions, separate process / pod / box)
+store(new PostgresStore(config));   // same DB, same opt-in
+const app = act()
+  .withState(Order)
+  .on("OrderPlaced").do(reduceInventory).to("inventory-1")
+  .build();
+// On Worker A's commit, Worker B wakes within ~10 ms (vs. polling: ≥ poll interval).
+// Optional: tap the lifecycle event for fan-out.
+app.on("notified", (n) => sse.broadcast(n));
+```
+
+When `notify: true`:
+- `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per transaction with the full event batch as a JSON payload.
+- The orchestrator auto-subscribes once at `build()` (one dedicated PG client per process — size your pool accordingly).
+- The store self-filters its own commits (per-instance UUID in the payload), so the `notified` lifecycle event surfaces only **cross-process** activity. Local commits already arm drain via `do()`.
+
+When `notify: false` (the default): `commit()` skips the `pg_notify` SQL entirely, and `notify` is undefined on the store instance — the orchestrator's auto-wire short-circuits, no LISTEN client is allocated.
+
+`notify` is a hint, not a contract: lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
+
+**Build-time contract:** call `store(adapter)` *before* `act()...build()`. The orchestrator binds notify to whichever store is current at construction; late injection won't take effect.
 
 ## Database Schema
 

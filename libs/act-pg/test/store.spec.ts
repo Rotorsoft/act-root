@@ -10,7 +10,14 @@ import {
 import { Chance } from "chance";
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
-import { actor, app, onDecremented, onIncremented } from "./app.js";
+import {
+  actor,
+  app,
+  buildApp,
+  onDecremented,
+  onIncremented,
+  setApp,
+} from "./app.js";
 
 const chance = new Chance();
 const a1 = chance.guid();
@@ -33,6 +40,9 @@ describe("pg store", () => {
     );
     await store().drop();
     await store().seed();
+    // Build the orchestrator AFTER injecting the store — the notify
+    // wiring binds at construction, so late injection wouldn't take.
+    setApp(buildApp());
   });
 
   afterAll(async () => {

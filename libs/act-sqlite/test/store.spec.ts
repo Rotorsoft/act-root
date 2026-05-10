@@ -9,7 +9,7 @@ import {
 } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { SqliteStore } from "../src/index.js";
-import { actor, app } from "./app.js";
+import { actor, app, buildApp, setApp } from "./app.js";
 
 const chance = new Chance();
 const a1 = chance.guid();
@@ -23,6 +23,9 @@ describe("sqlite store", () => {
     store(new SqliteStore({ url: "file:test-store.db" }));
     await store().drop();
     await store().seed();
+    // Build orchestrator AFTER injecting the store (notify wiring binds
+    // at construction; late injection wouldn't take).
+    setApp(buildApp());
   });
 
   afterAll(async () => {

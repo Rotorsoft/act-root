@@ -62,6 +62,13 @@ export function streamPatternToLike(input: string): string {
  * model is equivalent to PostgreSQL's `FOR UPDATE SKIP LOCKED` for
  * single-server deployments.
  *
+ * **`Store.notify` is intentionally not implemented.** The notify hook is
+ * a cross-process wake-up signal that lets a horizontally-scaled Act
+ * deployment wake `settle()` immediately on remote commits. SQLite is
+ * single-node by design — there is no remote writer to be notified of —
+ * so the {@link Act} orchestrator falls back to the existing
+ * debounce/poll path, which is correct for this topology.
+ *
  * @example
  * ```typescript
  * import { store } from "@rotorsoft/act";
