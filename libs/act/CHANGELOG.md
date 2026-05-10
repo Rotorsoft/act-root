@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v0.35.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.34.0...@rotorsoft/act-v0.35.0) (2026-05-10)
+
+
+### Features
+
+* **act-pg:** add PG single-process reaction latency bench (ACT-103) ([8554f57](https://github.com/rotorsoft/act-root/commit/8554f5782ef0b8905e39171e3711934a5960e03a))
+* **act:** per-stream reaction priority lanes (ACT-102) ([c08f18a](https://github.com/rotorsoft/act-root/commit/c08f18a05bbf478c4e0128dbd175897bb18dd701))
+* **act:** reaction latency bench + workspace bench unification (ACT-103) ([79d419d](https://github.com/rotorsoft/act-root/commit/79d419dbee73dc0fbda65599e4f687362471aecd))
+
 # [@rotorsoft/act-v0.34.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.33.3...@rotorsoft/act-v0.34.0) (2026-05-10)
 
 
