@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.1.0...@rotorsoft/act-patch-v1.2.0) (2026-05-10)
+
+
+### Features
+
+* **act:** reaction latency bench + workspace bench unification (ACT-103) ([79d419d](https://github.com/rotorsoft/act-root/commit/79d419dbee73dc0fbda65599e4f687362471aecd))
+
 # [@rotorsoft/act-patch-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.0.2...@rotorsoft/act-patch-v1.1.0) (2026-04-30)
 
 
