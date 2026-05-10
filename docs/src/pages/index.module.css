@@ -33,6 +33,14 @@
   margin: 0;
 }
 
+.sectionNote {
+  color: var(--act-text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0.5rem 0 0;
+  opacity: 0.75;
+}
+
 /* ---------- Hero ---------- */
 .hero {
   position: relative;

@@ -414,6 +414,11 @@ function Sandboxes() {
                 Two interactive sandboxes — explore event sourcing fundamentals and Act's
                 adaptive dual-frontier drain.
               </p>
+              <p className={styles.sectionNote}>
+                StackBlitz fetches the project from GitHub on each click. If the
+                sandbox stalls on "Downloading from GitHub…" the first time,
+                refresh once and it loads from the warm cache.
+              </p>
             </div>
 
             <Sandbox
