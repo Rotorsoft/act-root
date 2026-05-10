@@ -52,7 +52,7 @@
     "@rotorsoft/act-pg": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.14",
+    "@biomejs/biome": "^2.4.15",
     "@commitlint/cli": "^20.5.3",
     "@commitlint/config-conventional": "^20.5.3",
     "@fast-check/vitest": "^0.4.1",
