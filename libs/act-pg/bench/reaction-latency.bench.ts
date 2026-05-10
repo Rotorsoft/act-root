@@ -20,7 +20,7 @@
 import type { ReactionHandler } from "@rotorsoft/act";
 import { act, dispose, state, store } from "@rotorsoft/act";
 import { z } from "zod";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const PORT = 5431;
 const SCHEMA = "act_latency_bench";

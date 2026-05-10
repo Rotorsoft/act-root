@@ -1,4 +1,4 @@
-import { PinoLogger } from "../src/PinoLogger.js";
+import { PinoLogger } from "../src/pino-logger.js";
 
 describe("PinoLogger", () => {
   let output: string[];

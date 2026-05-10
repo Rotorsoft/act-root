@@ -29,11 +29,16 @@ import type { DrainOps } from "./drain.js";
  * Static resolver target collected at build time. Subscribed once during
  * init; never re-evaluated.
  *
+ * @property priority - Scheduling priority for the resolved target stream.
+ *   Combined with peers via `max()` at build time when multiple reactions
+ *   target the same stream — see `build-classify.ts`.
+ *
  * @internal
  */
 export type StaticTarget = {
   readonly stream: string;
   readonly source?: string;
+  readonly priority?: number;
 };
 
 /**
@@ -105,7 +110,11 @@ export class CorrelateCycle<
     const after = Math.max(this._checkpoint, query.after || -1);
     const correlated = new Map<
       string,
-      { source?: string; payloads: ReactionPayload<TEvents>[] }
+      {
+        source?: string;
+        priority: number;
+        payloads: ReactionPayload<TEvents>[];
+      }
     >();
     let last_id = after;
     await store().query<TEvents>(
@@ -119,10 +128,18 @@ export class CorrelateCycle<
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
             if (resolved && !this._subscribed.has(resolved.target)) {
+              const incomingPriority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
+                priority: incomingPriority,
                 payloads: [],
               };
+              // Multiple reactions targeting the same stream within a
+              // single correlate scan — keep the max priority so the
+              // highest-priority reaction sets the lane (matches the
+              // subscribe-side `max()` invariant).
+              if (incomingPriority > entry.priority)
+                entry.priority = incomingPriority;
               entry.payloads.push({
                 ...reaction,
                 source: resolved.source,
@@ -137,10 +154,13 @@ export class CorrelateCycle<
     );
 
     if (correlated.size) {
-      const streams = [...correlated.entries()].map(([stream, { source }]) => ({
-        stream,
-        source,
-      }));
+      const streams = [...correlated.entries()].map(
+        ([stream, { source, priority }]) => ({
+          stream,
+          source,
+          priority,
+        })
+      );
       const { subscribed } = await this.cd.subscribe(streams);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;

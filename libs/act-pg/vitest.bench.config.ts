@@ -14,7 +14,11 @@ export default defineConfig({
     // Spec-shaped benches use `it()` + assertions and report numbers
     // via `console.table`. Listed individually so the microbench
     // files in the same `bench/` directory aren't picked up.
-    include: ["bench/notify-perf.bench.ts", "bench/reaction-latency.bench.ts"],
+    include: [
+      "bench/notify-perf.bench.ts",
+      "bench/priority-claim.bench.ts",
+      "bench/reaction-latency.bench.ts",
+    ],
     globals: true,
   },
 });

@@ -342,6 +342,28 @@ Stores **self-filter** their own commits (per-instance UUID in the payload) so t
 
 `notify` is a hint, not a contract: if the store doesn't implement it, or a notification is dropped, the existing debounce/poll path still drains correctly. Build-time contract: inject the configured store via `store(adapter)` *before* `act()...build()` — wiring binds at construction.
 
+### Reaction Priority Lanes (ACT-102)
+
+When the worker is saturated (more lagging streams than `streamLimit` per cycle), priority biases which lagging stream gets the lease first:
+
+```ts
+.on("OrderConfirmed")
+  .do(sendCriticalNotification)
+  .to({ target: "notifications-out", priority: 10 })  // jumps the lagging queue
+```
+
+`claim()`'s lagging frontier orders by `priority DESC, at ASC`. Default priority is `0` — apps that don't opt in see no behavior change. **Per-stream event ordering is unchanged** — priority only biases *which streams claim() picks first*, never reorders events within a stream.
+
+Operators can override scheduling at runtime with `app.prioritize(filter, n)`. Filter shape mirrors `query_streams` (regex on `stream`/`source`, exact-match flags, `blocked` state). Sets the priority outright, ignoring the build-time max invariant — so it can decrease too:
+
+```ts
+await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
+await app.prioritize({ source: "^audit-" }, -5);
+await app.prioritize({}, 0);   // reset all to default
+```
+
+Only meaningful under saturation. With `streamLimit` ≥ candidate streams every cycle, every stream gets a slot every cycle and priority never binds. See [`@rotorsoft/act-pg/PERFORMANCE.md`](../act-pg/PERFORMANCE.md) for the ~11× speedup benchmark on tied-watermark replays under heavy contention.
+
 ## Dual-Frontier Drain
 
 In event-sourced systems, consumers often subscribe to multiple event streams that advance at different rates: some produce bursts of events, while others stay idle for long periods. New streams can also be discovered while processing events from existing streams.

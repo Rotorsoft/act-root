@@ -4,7 +4,7 @@ import { z } from "zod";
 import { state } from "../../act/src/builders/state-builder.js";
 import { action, load } from "../../act/src/internal/event-sourcing.js";
 import { dispose, store } from "../../act/src/ports.js";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))

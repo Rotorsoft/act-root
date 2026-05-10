@@ -10,7 +10,7 @@
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { afterAll, beforeAll, bench, describe } from "vitest";
 import { z } from "zod";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 // Simulate an entity with lifecycle + operational events
 const Entity = state({

@@ -296,6 +296,25 @@ app.on("notified", (n) => sse.broadcast(n));
 const events = await app.query_array({ stream: "my-stream" });
 ```
 
+### Reaction priority lanes
+
+For saturated workers (lots of cold replays competing for limited drain slots), tag urgent reactions with a priority on the resolver target — the lagging frontier orders by `priority DESC, at ASC` so high-priority streams win lease slots first:
+
+```ts
+.on("OrderConfirmed")
+  .do(sendCriticalNotification)
+  .to({ target: "notifications-out", priority: 10 })
+```
+
+For runtime overrides (boosting / dropping a specific replay), use `app.prioritize(filter, n)`:
+
+```ts
+await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
+await app.prioritize({}, 0); // reset all to default
+```
+
+Priority is irrelevant when the worker isn't saturated — every stream gets claimed every cycle. Only opt in if you have a real backlog scenario where urgent replays compete with bulk ones for the same lagging-frontier slots. Per-stream event ordering is unchanged regardless.
+
 Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose framework logging (uses pino).
 
 ## Real-Time Application Patterns
