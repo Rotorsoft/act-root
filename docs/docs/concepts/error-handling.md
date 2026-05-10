@@ -154,6 +154,42 @@ app.on("blocked", (blocked) => {
 });
 ```
 
+## Debugging
+
+When something doesn't behave as expected, three knobs cover most cases.
+
+**Verbose logging.** Set `LOG_LEVEL=debug` (or `trace`) before starting the process. The `trace` level wires breadcrumb logs into the load/action/drain hot paths via the `tracing` module:
+
+```bash
+LOG_LEVEL=trace pnpm dev
+```
+
+**Lifecycle event subscriptions.** Every Act instance emits a fixed set of lifecycle events; subscribe in dev to see what the framework is doing:
+
+```ts
+app.on("committed", (events) => console.log("committed", events.map(e => e.name)));
+app.on("acked", (leases) => console.log("acked", leases));
+app.on("blocked", (blocked) => console.error("blocked", blocked));
+app.on("settled", (drain) => console.log("settled", drain));
+app.on("closed", (result) => console.log("closed", result));
+app.on("notified", (n) => console.log("cross-process commit", n));  // PostgresStore notify only
+```
+
+**Direct event inspection.** Bypass cache and reducers and look at what's actually in the store:
+
+```ts
+// All events on a stream (regex match by default)
+const events = await app.query_array({ stream: "order-123" });
+
+// Exact-string stream match — what load() uses internally
+const exact = await app.query_array({ stream: "order-123", stream_exact: true });
+
+// Time-travel: state as of a specific event id (see Cache and snapshots)
+const snap = await app.load(Order, "order-123", undefined, { before: 5000 });
+```
+
+For introspecting reaction watermarks (per-stream `at`, `retry`, `blocked`, `leased_by`/`leased_until`) without taking a lease, use `store().query_streams(...)`. The `act-inspector` tool is built on this primitive.
+
 ### Per-reaction options
 
 Each reaction handler accepts options that control retry and blocking behaviour:

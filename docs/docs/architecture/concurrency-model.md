@@ -149,6 +149,20 @@ Both primitives surface in the trace breadcrumb stream:
 
 For a stuck stream, query `store.query_streams` directly — it returns the per-stream `at`, `retry`, `blocked`, and `leased_by/leased_until` without taking a lease. The act-inspector tool is built on this primitive.
 
+## Why no framework-level request deduplication
+
+Optimistic concurrency catches *stream-version* conflicts. It does **not** catch the case where a client retries a network-failed `POST` and the same intent commits twice. That's request-level idempotency, and the framework deliberately leaves it to the API edge (see [Idempotency at the API edge](../guides/production-checklist#5-idempotency-at-the-api-edge)).
+
+A "use the action's correlation id as a dedup key" hook was evaluated and rejected. Five reasons:
+
+1. **TOCTOU races.** Two concurrent retries with the same key both pass the existence check before either commits. Either you add a distributed lock around the check (re-introducing the contention you were trying to avoid), or two events land. The API-edge cache sidesteps this by returning the *previous response* on duplicate keys without re-running the action.
+2. **Semantic overloading.** `correlation` is a trace id that propagates through reactions. Reusing it as an idempotency key conflates two unrelated concerns — and means a downstream reaction that emits its own action with the same correlation id (the default) would be silently deduped against the original.
+3. **Cross-action collisions.** A correlation id can drive multiple actions in a single workflow (`OpenTicket` → `AssignTicket`). If "saw this key before" gates the second action, the workflow stalls silently.
+4. **State drift.** The natural dedup behaviour is "return current state on duplicate." But current state may have advanced past the original commit's view — clients consuming the response would see different state for the "same" request depending on retry timing.
+5. **No TTL in an immutable log.** Correlation ids written to events live forever. A dedup table inside the event log can't expire entries without rewriting history. An external cache with a TTL is the natural fit, and that's what the API-edge pattern uses.
+
+**Resolution:** keep the event log purely about *what happened*, and put "have I seen this request before?" in middleware where it can be cached, TTL'd, and shared across instances via Redis without touching the durable record. The production checklist shows the recommended tRPC middleware shape.
+
 ## Pointers
 
 - `libs/act/src/internal/event-sourcing.ts` — `action()` and the `expectedVersion` check
