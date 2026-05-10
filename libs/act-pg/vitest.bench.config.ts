@@ -10,11 +10,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    // Only the notify-perf bench is shaped as a vitest spec (it uses
-    // `it()` and asserts a regression bound). The other `.bench.ts`
-    // files in this directory are vitest-bench-mode files (run via
-    // `vitest bench`), so they're excluded from this run.
-    include: ["test/notify-perf.bench.ts"],
+    // Spec-shaped `.bench.ts` files use `it()` + assertions and report
+    // numbers via `console.table`. The legacy `*.bench.ts` files in
+    // this directory are vitest-bench-mode files (`bench(...)`, run
+    // via `vitest bench`), so they're excluded from this run.
+    include: ["test/notify-perf.bench.ts", "test/priority-claim.bench.ts"],
     globals: true,
   },
 });

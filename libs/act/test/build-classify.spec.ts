@@ -76,7 +76,9 @@ describe("classifyRegistry", () => {
     };
     const c = classifyRegistry(app.registry, app._states);
 
-    expect(c.staticTargets).toEqual([{ stream: "dest", source: undefined }]);
+    expect(c.staticTargets).toEqual([
+      { stream: "dest", source: undefined, priority: 0 },
+    ]);
     expect(c.hasDynamicResolvers).toBe(false);
     expect(c.reactiveEvents.has("Incremented")).toBe(true);
     expect(c.reactiveEvents.has("Decremented")).toBe(true);

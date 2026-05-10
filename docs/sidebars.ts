@@ -39,6 +39,7 @@ const sidebars: SidebarsConfig = {
         "architecture/cache-and-snapshots",
         "architecture/correlation-and-drain",
         "architecture/cross-process-reactions",
+        "architecture/priority-lanes",
         "architecture/close-cycle",
         "architecture/event-schema-evolution",
         "architecture/extension-points",

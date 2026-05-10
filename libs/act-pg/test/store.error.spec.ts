@@ -16,7 +16,7 @@ vi.mock("pg", () => {
 });
 
 import * as pg from "pg";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const makeClient = (queryMock: any) => ({
   query: queryMock,
@@ -151,6 +151,7 @@ describe("PostgresStore", () => {
             .fn()
             .mockResolvedValueOnce({}) // BEGIN
             .mockResolvedValueOnce({ rowCount: undefined }) // INSERT
+            .mockResolvedValueOnce({ rowCount: 0 }) // priority UPDATE (ACT-102)
             .mockResolvedValueOnce({ rows: [{ max: 42 }] }) // SELECT MAX(at)
             .mockResolvedValueOnce({}) // COMMIT
         )
@@ -271,6 +272,17 @@ describe("PostgresStore", () => {
         expect.any(Function)
       );
       expect(release).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe("prioritize", () => {
+    it("returns 0 when rowCount is undefined (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.prioritize({}, 5);
+      expect(result).toBe(0);
     });
   });
 });

@@ -16,6 +16,7 @@ import type {
   EventMeta,
   Lease,
   Message,
+  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
@@ -37,11 +38,35 @@ class InMemoryStream {
   private _error = "";
   private _leased_by: string | undefined = undefined;
   private _leased_until: Date | undefined = undefined;
+  private _priority = 0;
 
   constructor(
     readonly stream: string,
-    readonly source: string | undefined
-  ) {}
+    readonly source: string | undefined,
+    priority = 0
+  ) {
+    this._priority = priority;
+  }
+
+  get priority() {
+    return this._priority;
+  }
+
+  /**
+   * Bump the priority via {@link subscribe}: keeps the maximum across
+   * reactions so the highest-priority registrant wins.
+   */
+  bumpPriority(priority: number) {
+    if (priority > this._priority) this._priority = priority;
+  }
+
+  /**
+   * Set the priority outright via {@link prioritize}: operator
+   * runtime override that ignores the build-time `max()` invariant.
+   */
+  setPriority(priority: number) {
+    this._priority = priority;
+  }
 
   get is_available() {
     return (
@@ -414,8 +439,12 @@ export class InMemoryStore implements Store {
     const available = [...this._streams.values()].filter(
       (s) => s.is_available && hasWork(s)
     );
+    // Lagging frontier orders by priority DESC (higher first), then by
+    // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
+    // — see `libs/act-pg/PERFORMANCE.md` for the benchmark that
+    // motivated the priority dimension.
     const lag = available
-      .sort((a, b) => a.at - b.at)
+      .sort((a, b) => b.priority - a.priority || a.at - b.at)
       .slice(0, lagging)
       .map((s) => ({
         stream: s.stream,
@@ -448,16 +477,25 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Registers streams for event processing.
-   * @param streams - Streams to register with optional source.
+   * Registers streams for event processing. When the same stream is
+   * resubscribed with a different priority, the **maximum** wins — so
+   * the highest-priority registered reaction sets the scheduling lane.
+   * Use {@link prioritize} for operator runtime overrides.
+   *
+   * @param streams - Streams to register with optional source + priority.
    * @returns subscribed count and current max watermark.
    */
-  async subscribe(streams: Array<{ stream: string; source?: string }>) {
+  async subscribe(
+    streams: Array<{ stream: string; source?: string; priority?: number }>
+  ) {
     await sleep();
     let subscribed = 0;
-    for (const { stream, source } of streams) {
-      if (!this._streams.has(stream)) {
-        this._streams.set(stream, new InMemoryStream(stream, source));
+    for (const { stream, source, priority = 0 } of streams) {
+      const existing = this._streams.get(stream);
+      if (existing) {
+        existing.bumpPriority(priority);
+      } else {
+        this._streams.set(stream, new InMemoryStream(stream, source, priority));
         subscribed++;
       }
     }
@@ -504,6 +542,54 @@ export class InMemoryStore implements Store {
       const s = this._streams.get(name);
       if (s) {
         s.reset();
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Bulk-update priority of streams matching `filter`. Mirrors
+   * {@link query_streams}'s filter semantics — see {@link Store.prioritize}.
+   * Unlike {@link subscribe} (which keeps `max()` of registered
+   * priorities), this sets the priority outright — operator override
+   * for the build-time scheduling policy.
+   *
+   * @returns Count of streams whose priority changed.
+   */
+  async prioritize(filter: PrioritizeFilter, priority: number) {
+    await sleep();
+    const streamRe =
+      filter.stream && !filter.stream_exact
+        ? new RegExp(`^${filter.stream}$`)
+        : undefined;
+    const sourceRe =
+      filter.source && !filter.source_exact
+        ? new RegExp(`^${filter.source}$`)
+        : undefined;
+    let count = 0;
+    for (const s of this._streams.values()) {
+      if (filter.stream !== undefined) {
+        if (
+          filter.stream_exact
+            ? s.stream !== filter.stream
+            : !streamRe!.test(s.stream)
+        )
+          continue;
+      }
+      if (filter.source !== undefined) {
+        if (s.source === undefined) continue;
+        if (
+          filter.source_exact
+            ? s.source !== filter.source
+            : !sourceRe!.test(s.source)
+        )
+          continue;
+      }
+      if (filter.blocked !== undefined && s.blocked !== filter.blocked)
+        continue;
+      if (s.priority !== priority) {
+        s.setPriority(priority);
         count++;
       }
     }
@@ -564,6 +650,7 @@ export class InMemoryStore implements Store {
         retry: s.retry,
         blocked: s.blocked,
         error: s.error,
+        priority: s.priority,
         leased_by: s.leased_by,
         leased_until: s.leased_until,
       });

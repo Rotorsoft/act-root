@@ -28,6 +28,7 @@ import type {
   IAct,
   Lease,
   Logger,
+  PrioritizeFilter,
   Query,
   Registry,
   Schema,
@@ -866,6 +867,51 @@ export class Act<
     const count = await store().reset(streams);
     if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
     return count;
+  }
+
+  /**
+   * Bulk-update scheduling priority for streams matching `filter`.
+   *
+   * Operator-grade override of the `claim()` lagging-frontier
+   * ordering (ACT-102). Useful when a long-running replay needs to
+   * jump ahead of other lagging streams, or when a no-longer-urgent
+   * job should yield slots back to the rest. Build-time priorities
+   * (set via the resolver's `priority` field) are subject to a
+   * `max()` invariant across reactions; this API ignores that and
+   * sets the priority outright on every matching row.
+   *
+   * Filter shape mirrors {@link query} / {@link Store.query_streams}:
+   * `stream` / `source` are regex by default, exact with the
+   * `*_exact` flags; `blocked` restricts to blocked or unblocked
+   * rows. **An empty filter (`{}`) updates every registered stream.**
+   *
+   * @param filter - Selection criteria (regex by default).
+   * @param priority - New priority value. Set as-is — no clamp.
+   * @returns Count of streams whose priority changed.
+   *
+   * @example Boost a specific projection mid-replay
+   * ```typescript
+   * await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
+   * ```
+   *
+   * @example Drop all audit projections to background
+   * ```typescript
+   * await app.prioritize({ source: "^audit-" }, -5);
+   * ```
+   *
+   * @example Reset everyone to default
+   * ```typescript
+   * await app.prioritize({}, 0);
+   * ```
+   *
+   * @see {@link Store.prioritize} for the underlying primitive
+   * @see {@link claim} for how priority biases scheduling
+   */
+  async prioritize(
+    filter: PrioritizeFilter,
+    priority: number
+  ): Promise<number> {
+    return store().prioritize(filter, priority);
   }
 
   /**

@@ -8,7 +8,7 @@
  */
 import { act, dispose, state, store, ZodEmpty } from "@rotorsoft/act";
 import { bench, describe } from "vitest";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))

@@ -559,6 +559,7 @@ export const inspectorRouter = t.router({
         retry: p.retry,
         blocked: p.blocked,
         error: p.error || null,
+        priority: p.priority,
         leased_by: p.leased_by ?? null,
         leased_until: p.leased_until?.toISOString() ?? null,
       }));
@@ -586,18 +587,27 @@ export const inspectorRouter = t.router({
         retry: number;
         at: number;
         gap: number;
+        priority: number;
       }> = [];
       const activeLeases: Array<{
         stream: string;
         source: string | null;
         leased_by: string;
         leased_until: string;
+        priority: number;
       }> = [];
       const gaps: number[] = [];
+      // Streams per priority lane — operators want a quick read of
+      // "how many things are at priority > 0 right now."
+      const priorityCounts = new Map<number, number>();
 
       for (const p of positions) {
         const gap = Math.max(0, maxEventId - p.at);
         gaps.push(gap);
+        priorityCounts.set(
+          p.priority,
+          (priorityCounts.get(p.priority) ?? 0) + 1
+        );
 
         if (p.blocked) {
           blocked++;
@@ -608,6 +618,7 @@ export const inspectorRouter = t.router({
             retry: p.retry,
             at: p.at,
             gap,
+            priority: p.priority,
           });
         } else if (p.leased_by && p.leased_until && p.leased_until > now) {
           leased++;
@@ -616,6 +627,7 @@ export const inspectorRouter = t.router({
             source: p.source ?? null,
             leased_by: p.leased_by,
             leased_until: p.leased_until.toISOString(),
+            priority: p.priority,
           });
         } else if (gap > 10) {
           lagging++;
@@ -651,6 +663,11 @@ export const inspectorRouter = t.router({
         blockedStreams: blockedStreams.sort((a, b) => b.gap - a.gap),
         activeLeases,
         histogram: buckets,
+        // Sorted highest-priority first so a UI can spot non-default
+        // lanes at a glance.
+        priorityCounts: [...priorityCounts.entries()]
+          .sort((a, b) => b[0] - a[0])
+          .map(([priority, count]) => ({ priority, count })),
         timestamp: new Date().toISOString(),
       };
     } catch {
@@ -664,6 +681,7 @@ export const inspectorRouter = t.router({
         blockedStreams: [],
         activeLeases: [],
         histogram: [],
+        priorityCounts: [],
         timestamp: new Date().toISOString(),
       };
     }

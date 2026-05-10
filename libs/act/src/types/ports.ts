@@ -119,6 +119,8 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property error - Last error message (empty string when none)
  * @property leased_by - Current lease holder UUID (when leased)
  * @property leased_until - Lease expiration timestamp (when leased)
+ * @property priority - Scheduling priority (default 0). Biases the
+ *   lagging-frontier `claim()` ordering — see {@link Store.prioritize}.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -127,6 +129,7 @@ export type StreamPosition = {
   readonly retry: number;
   readonly blocked: boolean;
   readonly error: string;
+  readonly priority: number;
   readonly leased_by?: string;
   readonly leased_until?: Date;
 };
@@ -182,6 +185,27 @@ export type QueryStreamsResult = {
   readonly maxEventId: number;
   readonly count: number;
 };
+
+/**
+ * Filter for {@link Store.prioritize} bulk priority updates.
+ *
+ * Same shape as {@link QueryStreams} but without pagination — bulk
+ * UPDATEs don't paginate. Empty filter (`{}`) updates **every**
+ * registered stream.
+ *
+ * @property stream - Stream-name filter (regex by default; `stream_exact`
+ *   for equality).
+ * @property stream_exact - Exact-match instead of regex.
+ * @property source - Source-stream filter (regex by default;
+ *   `source_exact` for equality).
+ * @property source_exact - Exact-match instead of regex.
+ * @property blocked - Restrict to blocked / unblocked streams. Omit
+ *   for both.
+ */
+export type PrioritizeFilter = Pick<
+  QueryStreams,
+  "stream" | "stream_exact" | "source" | "source_exact" | "blocked"
+>;
 
 /**
  * Interface for event store implementations.
@@ -371,14 +395,27 @@ export interface Store extends Disposable {
    * ```typescript
    * const { subscribed, watermark } = await store().subscribe([
    *   { stream: "stats-user-1", source: "user-1" },
-   *   { stream: "stats-user-2", source: "user-2" },
+   *   { stream: "stats-user-2", source: "user-2", priority: 10 },
    * ]);
    * ```
    *
    * @see {@link claim} for discovering and leasing registered streams
+   * @see {@link prioritize} for changing priority after subscription
    */
   subscribe: (
-    streams: Array<{ stream: string; source?: string }>
+    streams: Array<{
+      stream: string;
+      source?: string;
+      /**
+       * Optional scheduling priority for the lagging-frontier
+       * `claim()` ordering. Default `0`. When the same stream is
+       * subscribed by multiple reactions with different priorities,
+       * implementations must keep the **maximum** so the highest-
+       * priority reaction wins. Use {@link prioritize} for runtime
+       * overrides that ignore this max — operator-driven changes.
+       */
+      priority?: number;
+    }>
   ) => Promise<{ subscribed: number; watermark: number }>;
 
   /**
@@ -460,6 +497,47 @@ export interface Store extends Disposable {
    *   this primitive and arms the orchestrator's drain flag
    */
   reset: (streams: string[]) => Promise<number>;
+
+  /**
+   * Bulk-update the scheduling priority of streams matching a filter.
+   *
+   * Used by {@link Act.prioritize} for operator runtime control over
+   * lagging-frontier `claim()` ordering. Unlike {@link subscribe},
+   * which keeps the per-stream priority at the `max()` of all
+   * registered reactions targeting that stream, `prioritize` sets the
+   * priority **directly** to `priority` for matching rows — letting
+   * operators override the build-time scheduling policy.
+   *
+   * Filter semantics mirror {@link query_streams}: `stream`/`source`
+   * are regex by default, exact with the `*_exact` flags. `blocked`
+   * restricts to blocked or unblocked rows. Omitted fields don't
+   * filter. An **empty filter** (`{}`) updates every registered
+   * stream — useful for "reset all priorities to N" but a footgun
+   * otherwise.
+   *
+   * @param filter - {@link PrioritizeFilter} selecting which streams
+   *   to update. Required (use `{}` to target all).
+   * @param priority - New priority value. Set as-is — no `max()`,
+   *   no clamp.
+   * @returns Count of streams whose priority was changed.
+   *
+   * @example Boost a specific replay
+   * ```typescript
+   * await store().prioritize(
+   *   { stream: "^projection-orders$", stream_exact: false },
+   *   10
+   * );
+   * ```
+   *
+   * @example De-prioritize all background projections
+   * ```typescript
+   * await store().prioritize({ source: "^audit-" }, -5);
+   * ```
+   *
+   * @see {@link Act.prioritize} for the orchestrator-level wrapper
+   * @see {@link claim} for how priority biases stream scheduling
+   */
+  prioritize: (filter: PrioritizeFilter, priority: number) => Promise<number>;
 
   /**
    * Atomically truncates streams and seeds each with a final event.

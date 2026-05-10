@@ -301,6 +301,37 @@ When the store's `notify` flag is left at the default (`false`), `commit()` skip
 
 See `libs/act-pg/PERFORMANCE.md` for the cross-process commit→reaction latency benchmark.
 
+### Reaction Priority Lanes (ACT-102)
+
+Under saturation (more candidate streams than `streamLimit` per drain cycle), the lagging-frontier `claim()` ordering has to choose which behind streams to lease first. By default it picks the most-behind watermark, with PG's physical-row order breaking ties — undefined behavior for tied watermarks (cold replays).
+
+`.to({ target, priority: n })` on a reaction biases that ordering. The lagging CTE becomes `ORDER BY priority DESC, at ASC` so a higher-priority stream wins lease slots before its peers under contention. Default priority is `0` — behavior unchanged for apps that don't opt in.
+
+```typescript
+.on("OrderConfirmed")
+  .do(sendCriticalNotification)
+  .to({ target: "notifications-out", priority: 10 })  // jumps the lagging queue
+```
+
+Build-time invariant: when multiple reactions target the same stream with different priorities, the **maximum** wins (the highest-priority registrant sets the lane). Same applies at `subscribe()` time.
+
+**`app.prioritize(filter, n)`** — operator runtime override. Bulk-update the priority of streams matching a filter (regex on `stream`/`source`, exact-match flags, `blocked` state). Sets the value as-is, ignoring the build-time `max()` invariant — so operators can *decrease* priority too:
+
+```typescript
+// Boost a specific projection's replay
+await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
+
+// Drop background audit jobs to the back of the queue
+await app.prioritize({ source: "^audit-" }, -5);
+
+// Reset everyone to default
+await app.prioritize({}, 0);
+```
+
+**Per-stream ordering invariant is inviolate.** Priority biases *which streams claim() picks first*. Within a stream, events still drain in `id` order — ACT-102 explicitly does not reorder events on a single stream. That's a foundational ES guarantee.
+
+**Where it bites:** only under saturation. With `streamLimit` ≥ candidate streams every cycle, every stream gets claimed every cycle and priority is irrelevant. The ~11× speedup measured in `libs/act-pg/PERFORMANCE.md` is for tied-watermark replays under heavy contention.
+
 ### Time-Travel Queries
 
 `load()` accepts an optional `asOf` parameter (`AsOf = Pick<Query, "before" | "created_before" | "created_after" | "limit">`) to load state at a specific point in time:
@@ -742,6 +773,7 @@ interface Store extends Disposable {
   ack(leases): Promise<Lease[]>;                  // Release successful leases
   block(leases): Promise<(Lease & { error })[]>;  // Block failed streams
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
+  prioritize(filter, priority): Promise<number>;  // Bulk priority update with PrioritizeFilter
   truncate(targets: {stream, snapshot?, meta?}[]): Promise<{deleted, committed}>;  // Atomic truncate + seed
   query_streams(callback, query?): Promise<{maxEventId, count}>;  // Read-only introspection of subscription positions
   notify?(handler): NotifyDisposer | Promise<NotifyDisposer>;  // Optional: cross-process commit notifications
@@ -749,7 +781,11 @@ interface Store extends Disposable {
 }
 ```
 
-`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This eliminates the race between discovery and locking that existed with the previous poll/lease two-step. `subscribe()` registers new streams for reaction processing (upserts into the streams table) and returns the count of newly registered streams. Version-based optimistic concurrency must be implemented correctly.
+`claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This eliminates the race between discovery and locking that existed with the previous poll/lease two-step. The lagging-frontier orders by `priority DESC, at ASC` (ACT-102) so adapters need an index that matches that key prefix.
+
+`subscribe()` registers new streams for reaction processing (upserts into the streams table). The entry shape is `{stream, source?, priority?}`; when re-subscribed with a higher priority, the implementation must keep the **maximum** so the highest-priority registered reaction wins the scheduling lane. Operator runtime overrides go through `prioritize()` instead, which sets the value as-is and ignores the max invariant. Returns count of *newly registered* streams (priority bumps on existing rows are not counted).
+
+Version-based optimistic concurrency must be implemented correctly.
 
 `notify()` is optional. When implemented, the orchestrator auto-wires it at build time and routes notifications to `settle()` for sub-poll cross-process reaction wakeup. Implementations **must self-filter their own commits** (carry a per-instance UUID in the payload, skip on receive) — the `notified` lifecycle event surfaces only cross-process activity. Treat `notify` as a hint: lost notifications fall back to the debounce/poll path, so correctness is not on the line. See `libs/act-pg/PERFORMANCE.md` for the latency benchmark.
 

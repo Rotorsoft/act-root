@@ -1,4 +1,4 @@
-import { streamPatternToLike } from "../src/SqliteStore.js";
+import { streamPatternToLike } from "../src/sqlite-store.js";
 
 describe("streamPatternToLike", () => {
   describe("anchors", () => {
