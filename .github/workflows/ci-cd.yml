@@ -85,6 +85,13 @@ jobs:
       # build. The captured stdout ends up in the workflow's step
       # summary so reviewers see the numbers without scrolling logs.
       - name: bench:scenarios
+        env:
+          # vitest/node emit ANSI color codes even when stdout is piped,
+          # which renders as `␛[32m'…'␛[39m` garbage inside the markdown
+          # code block we append to the step summary. NO_COLOR disables
+          # color emission at the Node level.
+          NO_COLOR: "1"
+          FORCE_COLOR: "0"
         run: |
           set -o pipefail
           pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
@@ -99,13 +106,15 @@ jobs:
             # Scenario benches print `=== <header> ===` then the table;
             # the closing `└` line is the bottom corner of the table.
             # Single-process vitest keeps output prefix-free, so the
-            # match is purely structural.
+            # match is purely structural. `sed` strips any stray ANSI
+            # escapes that slipped past NO_COLOR (belt and suspenders).
             if grep -qE '=== .+ ===' bench-scenarios.log 2>/dev/null; then
               awk '
                 /=== .+ ===/    { printing=1 }
                 printing        { print }
                 /└/ && printing { printing=0; print "" }
-              ' bench-scenarios.log
+              ' bench-scenarios.log \
+              | sed -E $'s/\x1b\\[[0-9;]*m//g'
             else
               tail -n 80 bench-scenarios.log
             fi
