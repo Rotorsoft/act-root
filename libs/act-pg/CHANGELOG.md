@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.20.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.20.0...@rotorsoft/act-pg-v0.20.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* unify workspace bench config + repair CI bench summary + npm keywords ([56b192c](https://github.com/rotorsoft/act-root/commit/56b192c1bd6d217a76099c7d185d0620d908edc0))
+
 # [@rotorsoft/act-pg-v0.20.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.19.0...@rotorsoft/act-pg-v0.20.0) (2026-05-10)
 
 
