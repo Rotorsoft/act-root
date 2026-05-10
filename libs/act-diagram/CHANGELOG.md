@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.8...@rotorsoft/act-diagram-v0.3.9) (2026-05-10)
+
+
+### Bug Fixes
+
+* unify workspace bench config + repair CI bench summary + npm keywords ([56b192c](https://github.com/rotorsoft/act-root/commit/56b192c1bd6d217a76099c7d185d0620d908edc0))
+
 # [@rotorsoft/act-diagram-v0.3.8](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.7...@rotorsoft/act-diagram-v0.3.8) (2026-05-09)
 
 
