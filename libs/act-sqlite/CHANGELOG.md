@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.4...@rotorsoft/act-sqlite-v0.4.0) (2026-05-10)
+
+
+### Features
+
+* **act:** add Store.notify hook for cross-process drain wakeup (ACT-101) ([f1f40cf](https://github.com/rotorsoft/act-root/commit/f1f40cf608ba107c88bd0a0144c49af2ece47fe7))
+
 # [@rotorsoft/act-sqlite-v0.3.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.3...@rotorsoft/act-sqlite-v0.3.4) (2026-05-09)
 
 
