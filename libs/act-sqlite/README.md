@@ -110,6 +110,10 @@ SQLite serializes all write transactions at the database level. This means:
 
 For multi-server deployments requiring distributed stream processing, use [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) instead.
 
+## What's *not* implemented
+
+- **`Store.notify`** is intentionally absent. The notify hook is a cross-process wake-up signal that lets a horizontally-scaled Act deployment skip the polling lag on remote commits. SQLite is single-node by design — there's no remote writer to be notified of — so the {@link Act} orchestrator falls back to the existing debounce/poll path, which is correct for this topology. If you outgrow that, switch to `@rotorsoft/act-pg`.
+
 ## SQLite vs PostgreSQL
 
 | Feature | act-sqlite | act-pg |

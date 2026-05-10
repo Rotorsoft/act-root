@@ -73,6 +73,38 @@ export type TruncateResult = Map<
 >;
 
 /**
+ * Payload delivered by {@link Store.notify} when a **different process**
+ * commits one or more events to the same backing store.
+ *
+ * Notifications are emitted **per commit transaction**, not per event —
+ * a single commit of N events produces one notification carrying all N
+ * `events`. This matches transactional semantics, minimizes wire wakeups,
+ * and lets handlers reason about atomic batches.
+ *
+ * Stores that implement `notify` self-filter their own commits — handlers
+ * receive notifications only for cross-process activity. This is the signal
+ * that lets a horizontally-scaled Act deployment wake `settle()` immediately
+ * on remote commits, instead of waiting for the next poll/debounce cycle.
+ *
+ * @property stream - Stream that was committed to
+ * @property events - Events in this commit (id + name), in commit order
+ */
+export type StoreNotification = {
+  readonly stream: string;
+  readonly events: ReadonlyArray<{
+    readonly id: number;
+    readonly name: string;
+  }>;
+};
+
+/**
+ * Disposer returned by {@link Store.notify} subscriptions. Releases the
+ * underlying listener (e.g., the dedicated PG `LISTEN` client). May be
+ * synchronous or asynchronous — callers should `await` either way.
+ */
+export type NotifyDisposer = () => void | Promise<void>;
+
+/**
  * Subscription position for a registered stream.
  *
  * Streamed by {@link Store.query_streams} to power operational dashboards
@@ -499,6 +531,41 @@ export interface Store extends Disposable {
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
   ) => Promise<QueryStreamsResult>;
+
+  /**
+   * Optional cross-process commit notifications.
+   *
+   * When implemented, the {@link Act} orchestrator subscribes once at build
+   * time and routes notifications to wake `settle()` automatically — so a
+   * remote worker's commit triggers reactions on this process without
+   * waiting for the debounce/poll cycle. Subscribers also receive each
+   * notification on the `"notified"` lifecycle event for fan-out
+   * (SSE pushes, audit logs, dashboards).
+   *
+   * **Self-filtering contract:** implementations must skip their own
+   * commits. The handler fires only for commits originating from a
+   * **different process** writing to the same backing store. This keeps
+   * the local fast path (`do()` already arms drain) free of duplicate
+   * wake-ups and gives `"notified"` a clean cross-process semantic.
+   *
+   * **Hint, not a contract:** the orchestrator never depends on `notify`
+   * for correctness. If absent, dropped, or the store omits it, the
+   * existing debounce/poll path still drains correctly — `notify` only
+   * lowers cross-process p99 reaction latency.
+   *
+   * Adapter status (Act 0.x):
+   * - {@link PostgresStore}: implemented via `LISTEN`/`NOTIFY` on the
+   *   `act_commit` channel
+   * - {@link InMemoryStore}: not implemented (single-process — no remote
+   *   writers exist)
+   * - `SqliteStore`: not implemented (single-node by design)
+   *
+   * @param handler Callback invoked once per remote commit
+   * @returns Disposer releasing the underlying listener
+   */
+  notify?: (
+    handler: (notification: StoreNotification) => void
+  ) => NotifyDisposer | Promise<NotifyDisposer>;
 }
 
 // ---------------------------------------------------------------------------

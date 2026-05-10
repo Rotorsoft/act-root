@@ -172,6 +172,12 @@ class InMemoryStream {
  * - Snapshot support
  * - Fast performance (no I/O overhead)
  *
+ * **`Store.notify` is intentionally not implemented.** The notify hook is a
+ * cross-process wake-up signal — local commits already arm the drain via
+ * `do()`. An in-memory store is single-process by definition, so there is
+ * no remote writer to be notified of. The {@link Act} orchestrator
+ * detects the absence and falls back to the existing debounce/poll path.
+ *
  * @example Using in tests
  * ```typescript
  * import { store } from "@rotorsoft/act";

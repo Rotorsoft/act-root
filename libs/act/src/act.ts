@@ -36,6 +36,7 @@ import type {
   SettleOptions,
   Snapshot,
   State,
+  StoreNotification,
   Target,
 } from "./types/index.js";
 
@@ -95,6 +96,20 @@ export type ActLifecycleEvents<
   blocked: BlockedLease[];
   settled: Drain<TEvents>;
   closed: CloseResult;
+  /**
+   * A **different process** committed an event to the same backing store.
+   *
+   * Fires only when the configured store implements
+   * {@link Store.notify} and there is at least one registered reaction.
+   * The orchestrator uses the same signal internally to wake `settle()`
+   * — listeners get the raw payload for SSE fan-out, dashboards, and
+   * audit logs.
+   *
+   * Local commits do *not* fire `notified` (use `committed` for those):
+   * stores self-filter their own writes so this channel has a clean
+   * cross-process semantic.
+   */
+  notified: StoreNotification;
 };
 
 /**
@@ -129,6 +144,22 @@ export class Act<
   private readonly _correlate: CorrelateCycle<TSchemaReg, TEvents, TActions>;
   /** Debounced correlate→drain catch-up loop. */
   private readonly _settle: SettleLoop<TEvents>;
+  /**
+   * Disposer for the cross-process notify subscription, set up eagerly
+   * during construction. Held as a promise because the subscription
+   * itself may be async (the PG adapter checks out a dedicated client
+   * and runs `LISTEN` before resolving). Resolves to `undefined` when
+   * the store doesn't implement `notify` or there are no registered
+   * reactions.
+   *
+   * **Contract:** the configured store must be injected via
+   * {@link store}`(adapter)` *before* calling `act()...build()`. The
+   * orchestrator wires notify against whatever store is current at
+   * construction time — late injection after build is unsupported.
+   */
+  private readonly _notify_disposer: Promise<
+    (() => void | Promise<void>) | undefined
+  >;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -261,12 +292,57 @@ export class Act<
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
 
-    dispose(() => {
+    // Auto-wire cross-process notifications when the configured store
+    // supports them and there is at least one reaction to wake. Stores
+    // self-filter their own commits, so the handler fires only for remote
+    // writers — the local fast path inside `do()` already arms the drain.
+    //
+    // Contract: callers must inject the store via `store(adapter)` BEFORE
+    // calling `build()`. The wiring binds to whatever store is current at
+    // construction; late injection won't take effect.
+    this._notify_disposer = this._wireNotify();
+
+    dispose(async () => {
       this._emitter.removeAllListeners();
       this.stop_correlations();
       this.stop_settling();
-      return Promise.resolve();
+      // `_wireNotify` swallows subscription errors and resolves to
+      // `undefined`, so this promise never rejects.
+      const disposer = await this._notify_disposer;
+      if (disposer) await disposer();
     });
+  }
+
+  /**
+   * Subscribe to {@link Store.notify} when both the store and the
+   * registry support it. Returns the disposer (or `undefined` when no
+   * subscription was made). Errors during subscription are logged but
+   * never thrown — `notify` is a hint, not a contract.
+   */
+  private async _wireNotify(): Promise<
+    (() => void | Promise<void>) | undefined
+  > {
+    if (this._reactive_events.size === 0) return undefined;
+    const s = store();
+    if (!s.notify) return undefined;
+    try {
+      return await s.notify((notification) => {
+        this.emit("notified", notification);
+        // Wake once per commit when at least one event has a local
+        // reaction. Avoids spurious wake-ups for remote commits
+        // belonging to bounded contexts this process doesn't react to.
+        const hasReactive = notification.events.some((e) =>
+          this._reactive_events.has(e.name)
+        );
+        if (hasReactive) {
+          this._drain.arm();
+          this._settle.schedule({ debounceMs: 0 });
+        }
+      });
+    } catch (err) {
+      this._logger.error(err, "Store.notify subscription failed");
+      return undefined;
+    }
   }
 
   /**

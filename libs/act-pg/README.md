@@ -97,8 +97,40 @@ if (process.env.NODE_ENV === "production") {
 - **Connection Pooling** - Uses [node-postgres](https://node-postgres.com/) Pool for efficient connection management
 - **Atomic Stream Claiming** - Zero-contention competing consumers via `FOR UPDATE SKIP LOCKED`
 - **Auto Schema Setup** - `seed()` creates all required tables, indexes, and schema
-- **NOTIFY/LISTEN** - Real-time event notifications via PostgreSQL channels
+- **Cross-Process `LISTEN`/`NOTIFY`** - Auto-wired `Store.notify` wakes `settle()` on remote commits — no polling lag for horizontally-scaled deployments. See [PERFORMANCE.md](./PERFORMANCE.md) for the latency benchmark.
 - **Multi-Tenant** - Isolate tenants using separate schemas
+
+## Cross-Process Reactions
+
+For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay.
+
+```ts
+import { act, store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+// Worker A (writer)
+store(new PostgresStore({ schema: "myapp", table: "events" }));
+const app = act().withState(Order).build();
+await app.do("placeOrder", { stream: "order-1", actor }, payload);
+
+// Worker B (reactions, separate process / pod / box)
+store(new PostgresStore({ schema: "myapp", table: "events" }));  // same DB
+const app = act()
+  .withState(Order)
+  .on("OrderPlaced").do(reduceInventory).to("inventory-1")
+  .build();
+// On Worker A's commit, Worker B wakes within ~10 ms (vs. polling: ≥ poll interval).
+// Optional: tap the lifecycle event for fan-out.
+app.on("notified", (n) => sse.broadcast(n));
+```
+
+Auto-wiring details:
+- `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per transaction with the full event batch as a JSON payload.
+- The orchestrator subscribes once at `build()` (one dedicated PG client per process — size your pool accordingly).
+- The store self-filters its own commits (per-instance UUID in the payload), so the `notified` lifecycle event surfaces only **cross-process** activity. Local commits already arm drain via `do()`.
+- Hint, not a contract: lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
+
+**Build-time contract:** call `store(adapter)` *before* `act()...build()`. The orchestrator binds notify to whichever store is current at construction; late injection won't take effect.
 
 ## Database Schema
 

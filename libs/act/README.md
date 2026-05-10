@@ -309,9 +309,32 @@ The `settle()` method is the recommended production pattern — it debounces rap
 
 **Batched projection replay:** Static-target projections can register a `.batch()` handler that receives all events in a single call, enabling bulk DB operations in one transaction. When defined, the batch handler replaces individual `.do()` handlers during drain — reducing N DB writes to 1. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
 
-### Real-Time Notifications
+### Cross-Process Reactions (`Store.notify`)
 
-When using the PostgreSQL backend, the store emits `NOTIFY` events on each commit, enabling consumers to react immediately via `LISTEN` rather than polling. This reduces latency and unnecessary database queries in production deployments.
+When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the polling/debounce path, which floors reaction latency at the poll interval. For lower latency, the configured store can implement the optional `Store.notify(handler)` hook; the orchestrator subscribes once at `build()` and wakes `settle()` immediately on remote commits.
+
+```ts
+// Auto-wired — users do nothing extra
+store(new PostgresStore({...}));     // PG implements notify via LISTEN/NOTIFY
+const app = act()
+  .withState(Order)
+  .on("OrderPlaced").do(reduceInventory).to("inventory")
+  .build();
+// Worker B wakes within ~10 ms of Worker A's commit (vs. polling: ≥ poll interval).
+
+// Optional: tap the lifecycle event for fan-out (SSE, dashboards, audit)
+app.on("notified", (n) => sse.broadcast(n));
+```
+
+Adapter status:
+
+- `PostgresStore` (`@rotorsoft/act-pg`) — implemented via `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel.
+- `InMemoryStore` — not implemented; single-process, no remote writers.
+- `SqliteStore` (`@rotorsoft/act-sqlite`) — not implemented; single-node by design.
+
+Stores **self-filter** their own commits (per-instance UUID in the payload) so the `"notified"` lifecycle event surfaces only **cross-process** activity. Local commits already arm drain via `do()` — the notify path stays out of the local fast path.
+
+`notify` is a hint, not a contract: if the store doesn't implement it, or a notification is dropped, the existing debounce/poll path still drains correctly. Build-time contract: inject the configured store via `store(adapter)` *before* `act()...build()` — wiring binds at construction.
 
 ## Dual-Frontier Drain
 

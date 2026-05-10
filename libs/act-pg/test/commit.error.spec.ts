@@ -10,8 +10,11 @@ import { PostgresStore } from "../src/index.js";
 const query = (
   sql: string
 ): Promise<QueryResult<Committed<Schemas, keyof Schemas>>> => {
-  const commit = sql.indexOf("COMMIT");
-  if (commit > 0) return Promise.reject(Error("mocked commit error"));
+  // The post-INSERT path issues `SELECT pg_notify(...)` and then a
+  // standalone `COMMIT`. Match either to simulate a failure on the
+  // commit-side of the transaction.
+  if (sql.includes("COMMIT") || sql.includes("pg_notify"))
+    return Promise.reject(Error("mocked commit error"));
 
   return Promise.resolve({
     rowCount: 1,

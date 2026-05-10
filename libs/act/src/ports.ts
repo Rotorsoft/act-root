@@ -170,7 +170,7 @@ export const log = port(function log(adapter?: Logger) {
  * @see {@link Store} for the interface contract
  * @see {@link InMemoryStore} for the default implementation
  */
-export const store = port(function store(adapter?: Store) {
+export const store = port(function store(adapter?: Store): Store {
   return adapter || new InMemoryStore();
 });
 

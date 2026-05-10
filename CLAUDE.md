@@ -268,6 +268,34 @@ await app.drain({ streamLimit: 100, eventLimit: 1000 });
 app.settle();
 ```
 
+**Build-time contract:** inject the configured store via `store(adapter)` *before* calling `act()...build()`. The orchestrator wires cross-process notifications (see "Cross-Process Reactions" below) at construction against whatever store is current — late injection won't take effect.
+
+### Cross-Process Reactions (`Store.notify`)
+
+When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the existing poll/debounce path (`start_correlations`, `settle()` on a timer). For lower latency, implement `Store.notify(handler)` on the adapter; the orchestrator subscribes once at build time and wakes `settle()` immediately on remote commits.
+
+```typescript
+// Auto-wired — users do nothing extra
+store(new PostgresStore(...));     // PG implements notify via LISTEN/NOTIFY
+const app = act()
+  .withState(Order)
+  .on("OrderPlaced").do(handleOrder).to("inventory")
+  .build();
+// On any remote commit of OrderPlaced, settle() fires immediately on this process.
+
+// Optional: subscribe to the lifecycle event for fan-out
+app.on("notified", (n) => sse.broadcast(n));
+```
+
+**Adapter status:**
+- `PostgresStore` — implemented via `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`); `commit()` issues one NOTIFY per commit transaction with all events.
+- `InMemoryStore` — not implemented. Single-process by definition; no remote writers exist.
+- `SqliteStore` — not implemented. Single-node by design.
+
+**Self-filtering:** stores embed a per-instance `_by` UUID in NOTIFY payloads and skip their own. The `notified` lifecycle event therefore only fires for **cross-process** activity — local commits already arm drain via `do()`. Hint, not a contract: if the store doesn't implement `notify` or a notification is lost, the existing debounce/poll path still drains correctly.
+
+See `libs/act-pg/PERFORMANCE.md` for the cross-process commit→reaction latency benchmark.
+
 ### Time-Travel Queries
 
 `load()` accepts an optional `asOf` parameter (`AsOf = Pick<Query, "before" | "created_before" | "created_after" | "limit">`) to load state at a specific point in time:
@@ -711,11 +739,14 @@ interface Store extends Disposable {
   reset(streams): Promise<number>;                // Reset watermarks for projection rebuild
   truncate(targets: {stream, snapshot?, meta?}[]): Promise<{deleted, committed}>;  // Atomic truncate + seed
   query_streams(callback, query?): Promise<{maxEventId, count}>;  // Read-only introspection of subscription positions
+  notify?(handler): NotifyDisposer | Promise<NotifyDisposer>;  // Optional: cross-process commit notifications
   dispose(): Promise<void>;                       // Cleanup resources
 }
 ```
 
 `claim()` atomically discovers and locks streams for processing using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This eliminates the race between discovery and locking that existed with the previous poll/lease two-step. `subscribe()` registers new streams for reaction processing (upserts into the streams table) and returns the count of newly registered streams. Version-based optimistic concurrency must be implemented correctly.
+
+`notify()` is optional. When implemented, the orchestrator auto-wires it at build time and routes notifications to `settle()` for sub-poll cross-process reaction wakeup. Implementations **must self-filter their own commits** (carry a per-instance UUID in the payload, skip on receive) — the `notified` lifecycle event surfaces only cross-process activity. Treat `notify` as a hint: lost notifications fall back to the debounce/poll path, so correctness is not on the line. See `libs/act-pg/PERFORMANCE.md` for the latency benchmark.
 
 ## Cache Interface Contract
 
@@ -758,6 +789,7 @@ The default `InMemoryCache` is an LRU cache with configurable `maxSize` (default
 - Use `app.on("settled", ...)` to react when `settle()` completes all correlate/drain passes
 - Use `app.on("blocked", ...)` to catch reaction processing failures
 - Use `app.on("closed", ...)` to observe close-the-books operations
+- Use `app.on("notified", ...)` to observe cross-process commits (only fires when the configured store implements `Store.notify` — e.g., `PostgresStore`)
 - Use `app.load(State, stream, undefined, { before: eventId })` for time-travel queries (see `AsOf` type)
 - Query events directly: `await app.query_array({ stream: "mystream" })`
 - Query with exact stream match: `await app.query_array({ stream: "mystream", stream_exact: true })` — by default, `stream` uses regex matching; `stream_exact: true` uses exact string equality. `load()` always uses exact match internally.

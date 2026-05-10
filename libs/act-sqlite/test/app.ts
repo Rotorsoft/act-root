@@ -20,40 +20,53 @@ const counter = state({ Counter: z.object({ count: z.number() }) })
   .emit(() => ["decremented", {}])
   .build();
 
-export const onIncremented = vi.fn().mockImplementation(async () => {
-  await sleep(100);
-});
-export const onDecremented = vi.fn().mockImplementation(async () => {
-  await sleep(100);
-  throw new Error("onDecremented failed");
-});
+// Explicit type annotation needed because tsc declaration emit otherwise
+// references the private `@vitest/spy` path; declaring the surface as the
+// orchestrator's `ReactionHandler` keeps the .d.ts portable.
+type AnyReaction = ReactionHandler<
+  {
+    incremented: Record<string, never>;
+    decremented: Record<string, never>;
+  },
+  "incremented" | "decremented"
+>;
 
-export const app = act()
-  .withState(counter)
-  .on("incremented")
-  .do(
-    onIncremented as ReactionHandler<
-      {
-        incremented: Record<string, never>;
-        decremented: Record<string, never>;
-      },
-      "incremented"
-    >
-  )
-  .on("decremented")
-  .do(
-    onDecremented as ReactionHandler<
-      {
-        incremented: Record<string, never>;
-        decremented: Record<string, never>;
-      },
-      "decremented"
-    >,
-    {
-      maxRetries: 2,
-      blockOnError: true,
-    }
-  )
-  .build();
+export const onIncremented: AnyReaction = vi
+  .fn()
+  .mockImplementation(async () => {
+    await sleep(100);
+  });
+export const onDecremented: AnyReaction = vi
+  .fn()
+  .mockImplementation(async () => {
+    await sleep(100);
+    throw new Error("onDecremented failed");
+  });
+
+/**
+ * Build the test app on demand — `act()...build()` wires the orchestrator
+ * against whichever store is current, so tests must call this *after*
+ * injecting their `SqliteStore` via `store(adapter)`.
+ */
+export function buildApp() {
+  return act()
+    .withState(counter)
+    .on("incremented")
+    .do(onIncremented)
+    .on("decremented")
+    .do(onDecremented, { maxRetries: 2, blockOnError: true })
+    .build();
+}
+
+/**
+ * Late-bound alias populated by the test's `beforeAll`. Exported so spec
+ * files can keep their existing `app.do(...)` ergonomics — but the
+ * binding is filled only after the store has been injected.
+ */
+export let app: ReturnType<typeof buildApp>;
+
+export function setApp(instance: ReturnType<typeof buildApp>) {
+  app = instance;
+}
 
 export const actor = { id: "a", name: "a" };

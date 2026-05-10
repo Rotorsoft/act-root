@@ -283,6 +283,14 @@ app.on("settled", (drain) => { /* notify SSE clients, update caches */ });
 // Catch reaction failures
 app.on("blocked", (leases) => { /* alert on blocked streams */ });
 
+// Cross-process visibility: another process committed to the same store.
+// Only fires when the configured store implements Store.notify
+// (PostgresStore does; InMemoryStore and SqliteStore don't — they're
+// single-process / single-node by design). Auto-wired at build time;
+// users do nothing extra. The orchestrator already wakes settle()
+// internally on the same signal — this listener is for fan-out.
+app.on("notified", (n) => sse.broadcast(n));
+
 // Query events directly
 const events = await app.query_array({ stream: "my-stream" });
 ```
