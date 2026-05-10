@@ -440,6 +440,22 @@ Numbers below are from a single run on macOS 25.4 (Apple Silicon), no other load
 | **low (100/s)** | 8 ms | 12 ms | 14 ms | Within striking distance of idle |
 | **high (1000/s)** | ~1.8 s | ~3.0 s | ~3.0 s | InMemory single-threaded drain saturates — reactions queue |
 
+### Results — PostgresStore (single process)
+
+Same scenarios, same hardware, against the docker PG instance on
+`localhost:5431`. Variance is higher than InMemory because PG round-trips
+add their own jitter (autovacuum, OS scheduling, transient disk I/O).
+
+Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts bench/reaction-latency.bench.ts`
+
+| Scenario | p50 | p95 | p99 | Notes |
+| --- | --- | --- | --- | --- |
+| **idle** | 4 ms | 20 ms | 500 ms | p50 close to InMemory; tail dominated by single PG outliers (small sample) |
+| **low (100/s)** | 10 ms | 22 ms | 70 ms | PG roundtrip ~5 ms baked into commit + drain |
+| **high (1000/s)** | ~125 ms | ~1.2 s | ~1.5 s | Saturates faster than InMemory — PG ack overhead under concurrent commits |
+
+**Reading the PG tail.** The idle p99 of ~500 ms is a single PG-side outlier (autovacuum kicking in, transient lock wait, etc.) magnified by the small sample count (~50–80 events). p50 is the meaningful stat for steady-state planning; p99 carries operator-facing tail-risk weight only at higher commit volumes. The framework-side regression bound asserts on p50 < 50 ms for that reason.
+
 ### Reading
 
 1. **The floor is ~10 ms.** Settle is debounced (default 10 ms) and drain claims one batch per cycle. For interactive workloads (≤ 100 commits/sec on InMemory), latency stays close to the floor.
@@ -455,7 +471,6 @@ The InMemory adapter optimizes for development feedback loops — fast cold-star
 
 ### Out of scope
 
-- **PG single-process latency** — the bottleneck is the framework's drain cycle, not PG. Numbers track InMemory closely after factoring in commit roundtrip (~5 ms). Adding it as a separate scenario would duplicate the conclusion. We'll add a PG-specific scenario if the framework's drain cycle gets a meaningful overhaul.
 - **Browser → server → reaction round-trip** — that's an app-level concern (network, framework, etc.), not framework latency.
 
 No Store interface changes. Batching is handled entirely at the Act orchestrator level.

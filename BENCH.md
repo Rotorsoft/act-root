@@ -46,6 +46,7 @@ Both run in parallel across packages with `--aggregate-output` for clean logs.
 | `bench/drain-skip.bench.ts` | A | drain after non-reactive event (skip optimization) on PG | PG-specific skip validation. |
 | `bench/batch-projection.bench.ts` | A | per-event vs batched drain on PG with real `INSERT ... ON CONFLICT` | Documents the ~19× speedup from batched transactions. |
 | `bench/notify-perf.bench.ts` | C | cross-process commit→reaction latency, notify vs polling | **ACT-101**. Built-in regression bound: notify p99 < polling p99. See [`act-pg/PERFORMANCE.md`](./libs/act-pg/PERFORMANCE.md#act-101--cross-process-commitreaction-latency-listennotify-wakeup). |
+| `bench/reaction-latency.bench.ts` | C | single-process commit→reaction latency on PG, idle / 100 per sec / 1000 per sec | **ACT-103**. Built-in regression bound: idle p50 < 50 ms. Numbers in [`libs/act/PERFORMANCE.md`](./libs/act/PERFORMANCE.md#reaction-latency-act-103). |
 | `scripts/correlate-checkpoint.bench.ts` | B | three sub-benchmarks for the correlate checkpoint optimization | Validates [correlate-checkpoint](./libs/act/PERFORMANCE.md#correlation-checkpoint--static-resolver-optimization-v0220) deltas. |
 | `scripts/drain-contention.bench.ts` | B | many workers × many streams, measuring waste/throughput | Operational research. |
 | `scripts/watermark-claim.bench.ts` | B | claim performance with many subscribed streams | Validates [watermark-aware claim filtering](./libs/act/PERFORMANCE.md#watermark-aware-claim-filtering-v0230). |
