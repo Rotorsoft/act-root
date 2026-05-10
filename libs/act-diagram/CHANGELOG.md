@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v0.3.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.9...@rotorsoft/act-diagram-v0.3.10) (2026-05-10)
+
+
+### Bug Fixes
+
+* **ci:** rebuild dist in CD instead of relying on broken artifact ([992a334](https://github.com/rotorsoft/act-root/commit/992a334fa356b98ec6dbbb34674318f77e067f78))
+
 # [@rotorsoft/act-diagram-v0.3.9](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.8...@rotorsoft/act-diagram-v0.3.9) (2026-05-10)
 
 
