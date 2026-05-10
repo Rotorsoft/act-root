@@ -311,11 +311,12 @@ The `settle()` method is the recommended production pattern — it debounces rap
 
 ### Cross-Process Reactions (`Store.notify`)
 
-When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the polling/debounce path, which floors reaction latency at the poll interval. For lower latency, the configured store can implement the optional `Store.notify(handler)` hook; the orchestrator subscribes once at `build()` and wakes `settle()` immediately on remote commits.
+When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the polling/debounce path, which floors reaction latency at the poll interval. For lower latency, the configured store can implement the optional `Store.notify(handler)` hook; the orchestrator auto-wires the subscription at `build()` and wakes `settle()` immediately on remote commits.
+
+**Opt-in at the adapter level.** The cost (per-commit notification, dedicated DB connection per process) is wasted in single-instance deployments, so adapters default to off. Multi-process apps that need sub-poll wakeup enable it explicitly on every store instance:
 
 ```ts
-// Auto-wired — users do nothing extra
-store(new PostgresStore({...}));     // PG implements notify via LISTEN/NOTIFY
+store(new PostgresStore({ ..., notify: true }));   // opt in
 const app = act()
   .withState(Order)
   .on("OrderPlaced").do(reduceInventory).to("inventory")

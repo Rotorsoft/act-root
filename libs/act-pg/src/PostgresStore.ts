@@ -32,7 +32,35 @@ types.setTypeParser(types.builtins.JSONB, (val) =>
   JSON.parse(val, dateReviver)
 );
 
-type Config = Readonly<{ schema: string; table: string }> & pg.PoolConfig;
+type Config = Readonly<{
+  schema: string;
+  table: string;
+  /**
+   * Opt in to cross-process commit notifications via `LISTEN`/`NOTIFY`.
+   * Optional — defaults to `false` so existing callers keep their
+   * current behavior. Setting it to `true` is the only behavior change
+   * an upgrading deployment needs to make to enable cross-process
+   * reaction wakeup.
+   *
+   * When `true`:
+   * - `commit()` issues `pg_notify` after each successful insert.
+   * - `notify(handler)` checks out a dedicated long-lived `LISTEN`
+   *   client from the pool and delivers cross-process notifications.
+   *
+   * When `false` (default):
+   * - `commit()` skips the notify SQL entirely — zero per-write
+   *   overhead.
+   * - The `notify` method is **not present on the instance**, so the
+   *   orchestrator's `if (store.notify)` auto-wire short-circuits and
+   *   no LISTEN client is allocated.
+   *
+   * Single-instance deployments should leave this off. Multi-process
+   * deployments that need sub-poll reaction latency turn it on
+   * **on every store instance** (writers and listeners both).
+   */
+  notify?: boolean;
+}> &
+  pg.PoolConfig;
 
 const SAFE_IDENTIFIER = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
@@ -67,6 +95,7 @@ const DEFAULT_CONFIG: Config = {
   password: "postgres",
   schema: "public",
   table: "events",
+  notify: false,
 };
 
 /**
@@ -204,6 +233,19 @@ export class PostgresStore implements Store {
    * connection would re-fire the stale handler.
    */
   private _listenHandler: ((msg: pg.Notification) => void) | undefined;
+  /**
+   * Cross-process commit subscription. **Present only when
+   * `config.notify === true`** — the orchestrator's auto-wire path
+   * checks `if (store.notify)`, so omitting the method keeps
+   * single-instance deployments free of any LISTEN/NOTIFY overhead
+   * (no dedicated client, no per-commit `pg_notify`).
+   *
+   * @see {@link Config.notify} for the rationale and the multi-process
+   *   contract.
+   */
+  notify?: (
+    handler: (notification: StoreNotification) => void
+  ) => Promise<NotifyDisposer>;
 
   /**
    * Create a new PostgresStore instance.
@@ -218,6 +260,12 @@ export class PostgresStore implements Store {
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
     this._channel = notifyChannel(this.config.schema, this.config.table);
+    // Attach the notify subscriber only when the user opted in. With
+    // notify off, `this.notify` is `undefined`, the orchestrator skips
+    // its auto-wire, and no LISTEN client is ever allocated.
+    if (this.config.notify) {
+      this.notify = this._subscribeNotifications.bind(this);
+    }
   }
 
   /**
@@ -509,15 +557,23 @@ export class PostgresStore implements Store {
       // batch so listeners reason about atomic groups (matches reaction
       // semantics in the rest of the framework). `by` lets other
       // PostgresStore instances self-filter their own writes — see
-      // `notify()`. PG NOTIFY payloads cap at 8000 bytes; for typical
-      // commits (1–10 events) this is comfortably under, and the polling
-      // fallback path handles the rare overflow case correctly.
-      const payload = JSON.stringify({
-        stream,
-        events: committed.map((c) => ({ id: c.id, name: c.name as string })),
-        by: this._by,
-      });
-      await client.query(`SELECT pg_notify($1, $2)`, [this._channel, payload]);
+      // `_subscribeNotifications()`. PG NOTIFY payloads cap at 8000
+      // bytes; for typical commits (1–10 events) this is comfortably
+      // under, and the polling fallback path handles the rare overflow
+      // case correctly. Skipped entirely when `config.notify === false`
+      // (the default) so single-instance deployments pay zero
+      // per-write overhead.
+      if (this.config.notify) {
+        const payload = JSON.stringify({
+          stream,
+          events: committed.map((c) => ({ id: c.id, name: c.name as string })),
+          by: this._by,
+        });
+        await client.query(`SELECT pg_notify($1, $2)`, [
+          this._channel,
+          payload,
+        ]);
+      }
 
       await client.query("COMMIT");
       return committed;
@@ -873,15 +929,16 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Subscribes to cross-process commit notifications via PostgreSQL
-   * `LISTEN`/`NOTIFY`.
+   * Implementation of the optional `Store.notify` hook. Bound onto
+   * `this.notify` in the constructor when `config.notify === true`,
+   * left detached otherwise — see {@link Config.notify}.
    *
    * Checks out a dedicated long-lived client from the pool, runs
-   * `LISTEN act_commit`, and parses each incoming notification payload.
-   * The handler is invoked exactly once per **remote** commit — payloads
-   * originating from this same store instance (matched by the per-instance
-   * `_by` UUID) are silently skipped, giving callers a clean
-   * cross-process semantic.
+   * `LISTEN act_commit_<schema>_<table>`, and parses each incoming
+   * notification payload. The handler is invoked exactly once per
+   * **remote** commit — payloads originating from this same store
+   * instance (matched by the per-instance `_by` UUID) are silently
+   * skipped, giving callers a clean cross-process semantic.
    *
    * Multiple subscriptions on the same store instance are not supported —
    * this method releases any prior LISTEN client before opening a new one.
@@ -892,7 +949,7 @@ export class PostgresStore implements Store {
    * @param handler Called for each cross-process commit notification.
    * @returns Disposer that releases the LISTEN client.
    */
-  async notify(
+  private async _subscribeNotifications(
     handler: (notification: StoreNotification) => void
   ): Promise<NotifyDisposer> {
     // Close any prior subscription so callers don't silently double-listen.

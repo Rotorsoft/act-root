@@ -268,15 +268,18 @@ await app.drain({ streamLimit: 100, eventLimit: 1000 });
 app.settle();
 ```
 
-**Build-time contract:** inject the configured store via `store(adapter)` *before* calling `act()...build()`. The orchestrator wires cross-process notifications (see "Cross-Process Reactions" below) at construction against whatever store is current — late injection won't take effect.
+**Build-time contract:** when using cross-process notifications (see below), inject the configured store via `store(adapter)` *before* calling `act()...build()`. The orchestrator wires the notify subscription at construction against whatever store is current — late injection won't take effect.
 
 ### Cross-Process Reactions (`Store.notify`)
 
-When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the existing poll/debounce path (`start_correlations`, `settle()` on a timer). For lower latency, implement `Store.notify(handler)` on the adapter; the orchestrator subscribes once at build time and wakes `settle()` immediately on remote commits.
+When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the existing poll/debounce path (`start_correlations`, `settle()` on a timer). For lower latency, the configured store can implement the optional `Store.notify(handler)` hook; the orchestrator auto-wires the subscription at build time and wakes `settle()` immediately on remote commits.
+
+**Opt-in at the adapter level.** The cost (per-commit `pg_notify`, dedicated `LISTEN` client per process) is wasted in single-instance deployments, so adapters default to **off**. Enable explicitly on every store instance involved (writers and listeners both):
 
 ```typescript
-// Auto-wired — users do nothing extra
-store(new PostgresStore(...));     // PG implements notify via LISTEN/NOTIFY
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+store(new PostgresStore({ /* ... */, notify: true }));   // ← opt in
 const app = act()
   .withState(Order)
   .on("OrderPlaced").do(handleOrder).to("inventory")
@@ -286,6 +289,8 @@ const app = act()
 // Optional: subscribe to the lifecycle event for fan-out
 app.on("notified", (n) => sse.broadcast(n));
 ```
+
+When the store's `notify` flag is left at the default (`false`), `commit()` skips the `pg_notify` SQL entirely and the store's `notify` method is left undefined — the orchestrator's auto-wire `if (store.notify)` short-circuits, so no LISTEN client is ever allocated. Existing callers see zero behavior change.
 
 **Adapter status:**
 - `PostgresStore` — implemented via `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`); `commit()` issues one NOTIFY per commit transaction with all events.

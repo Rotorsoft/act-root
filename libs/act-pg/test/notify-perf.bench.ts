@@ -17,7 +17,7 @@
  * (`*.{test,spec}.ts`) skips it — the docker round-trip cost doesn't
  * inflate ordinary CI runtime. Numbers feed `PERFORMANCE.md`.
  *
- * Run: `pnpm -F @rotorsoft/act-pg exec vitest run --include test/notify-perf.bench.ts`
+ * Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts`
  */
 import {
   act,
@@ -77,7 +77,18 @@ function pct(samples: number[], p: number) {
 }
 
 async function setupReader(notifyEnabled: boolean, rec: LatencyRecorder) {
-  store(new PostgresStore({ port: PORT, schema: SCHEMA, table: TABLE }));
+  // notify path requires the store to opt in on both sides; the
+  // polling baseline still uses notify=true on the writer so the
+  // comparison isolates the wakeup mechanism (LISTEN vs poll), not
+  // whether NOTIFYs are emitted.
+  store(
+    new PostgresStore({
+      port: PORT,
+      schema: SCHEMA,
+      table: TABLE,
+      notify: true,
+    })
+  );
   await store().drop();
   await store().seed();
 
@@ -130,6 +141,7 @@ async function runScenario(
     port: PORT,
     schema: SCHEMA,
     table: TABLE,
+    notify: true,
   });
 
   try {

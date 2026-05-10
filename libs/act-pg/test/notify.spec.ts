@@ -37,8 +37,20 @@ describe("PostgresStore.notify", () => {
     // One writer creates the schema/table; both stores point at the same
     // backing physical store but use different per-instance `_by` UUIDs,
     // simulating two processes.
-    writer = new PostgresStore({ port: PORT, schema: SCHEMA, table: TABLE });
-    listener = new PostgresStore({ port: PORT, schema: SCHEMA, table: TABLE });
+    // Enable cross-process notifications on both stores — the default
+    // is opt-out (no `pg_notify` per commit, no `notify` method).
+    writer = new PostgresStore({
+      port: PORT,
+      schema: SCHEMA,
+      table: TABLE,
+      notify: true,
+    });
+    listener = new PostgresStore({
+      port: PORT,
+      schema: SCHEMA,
+      table: TABLE,
+      notify: true,
+    });
     await writer.drop();
     await writer.seed();
   });
@@ -50,7 +62,7 @@ describe("PostgresStore.notify", () => {
 
   it("delivers a notification when a different store commits", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     await writer.commit("stream-A", [{ name: "EventX", data: { v: 1 } }], {
       correlation: "c",
@@ -72,7 +84,7 @@ describe("PostgresStore.notify", () => {
     // its own NOTIFY because the LISTEN handler skips payloads where
     // by === this._by.
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     await listener.commit("stream-self", [{ name: "SelfEvent", data: {} }], {
       correlation: "c",
@@ -88,7 +100,7 @@ describe("PostgresStore.notify", () => {
 
   it("delivers the full event batch in a single notification", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     await writer.commit(
       "stream-batch",
@@ -114,7 +126,7 @@ describe("PostgresStore.notify", () => {
 
   it("disposer stops further deliveries", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
     await dispose();
 
     await writer.commit(
@@ -131,9 +143,9 @@ describe("PostgresStore.notify", () => {
     const firstSeen: any[] = [];
     const secondSeen: any[] = [];
 
-    const firstDispose = await listener.notify((n) => firstSeen.push(n));
+    const firstDispose = await listener.notify!((n) => firstSeen.push(n));
     // Re-subscribe — should release the prior LISTEN client and start fresh.
-    const secondDispose = await listener.notify((n) => secondSeen.push(n));
+    const secondDispose = await listener.notify!((n) => secondSeen.push(n));
 
     await writer.commit("stream-rewire", [{ name: "Rewired", data: {} }], {
       correlation: "c",
@@ -151,7 +163,7 @@ describe("PostgresStore.notify", () => {
 
   it("survives malformed payloads on the channel without tearing down", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     // Inject a raw NOTIFY with a non-JSON payload via the writer's pool.
     // Use the same namespaced channel the writer/listener pair uses.
@@ -177,7 +189,7 @@ describe("PostgresStore.notify", () => {
 
   it("ignores NOTIFYs with no payload", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     const channel = (writer as any)._channel as string;
     const rawClient = await (writer as any)._pool.connect();
@@ -204,7 +216,7 @@ describe("PostgresStore.notify", () => {
 
   it("skips JSON payloads missing required fields", async () => {
     const received: any[] = [];
-    const dispose = await listener.notify((n) => received.push(n));
+    const dispose = await listener.notify!((n) => received.push(n));
 
     const channel = (writer as any)._channel as string;
     const rawClient = await (writer as any)._pool.connect();
@@ -256,15 +268,58 @@ describe("PostgresStore.notify", () => {
       port: PORT,
       schema: SCHEMA,
       table: "notify_listen_fail",
+      notify: true,
     });
     await broken.dispose();
-    await expect(broken.notify(() => {})).rejects.toBeDefined();
+    await expect(broken.notify!(() => {})).rejects.toBeDefined();
+  });
+
+  it("notify is undefined when config.notify is false (the default)", async () => {
+    // Default opt-out keeps the LISTEN path entirely off — the
+    // orchestrator's `if (store.notify)` short-circuits and no
+    // dedicated client is allocated.
+    const optedOut = new PostgresStore({
+      port: PORT,
+      schema: SCHEMA,
+      table: "notify_optout_test",
+    });
+    try {
+      expect(optedOut.notify).toBeUndefined();
+    } finally {
+      await optedOut.dispose();
+    }
+  });
+
+  it("commit() skips pg_notify when config.notify is false", async () => {
+    // Spin up a writer without notify and a listener with notify on the
+    // same channel — confirm nothing is delivered. This is the proof
+    // that opt-out actually saves the per-write `pg_notify`.
+    const optOutWriter = new PostgresStore({
+      port: PORT,
+      schema: SCHEMA,
+      table: TABLE,
+      // notify omitted → defaults false
+    });
+    const received: any[] = [];
+    const dispose = await listener.notify!((n) => received.push(n));
+    try {
+      await optOutWriter.commit(
+        "stream-no-notify",
+        [{ name: "Quiet", data: {} }],
+        { correlation: "c", causation: {} }
+      );
+      await sleep(200);
+      expect(received).toHaveLength(0);
+    } finally {
+      await dispose();
+      await optOutWriter.dispose();
+    }
   });
 
   it("survives a handler that throws — listener stays connected", async () => {
     const received: any[] = [];
     let throwOnce = true;
-    const dispose = await listener.notify((n) => {
+    const dispose = await listener.notify!((n) => {
       if (throwOnce) {
         throwOnce = false;
         throw new Error("handler boom");

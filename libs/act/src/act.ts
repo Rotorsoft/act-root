@@ -293,13 +293,18 @@ export class Act<
     );
 
     // Auto-wire cross-process notifications when the configured store
-    // supports them and there is at least one reaction to wake. Stores
-    // self-filter their own commits, so the handler fires only for remote
-    // writers — the local fast path inside `do()` already arms the drain.
+    // exposes `Store.notify`. Adapters that opt out (PostgresStore with
+    // `notify: false` — the default — or stores that don't support
+    // notifications at all like InMemoryStore/SqliteStore) leave the
+    // method undefined, and the orchestrator skips subscription with
+    // zero overhead. Stores self-filter their own commits, so the
+    // handler fires only for remote writers — the local fast path
+    // inside `do()` already arms the drain.
     //
-    // Contract: callers must inject the store via `store(adapter)` BEFORE
-    // calling `build()`. The wiring binds to whatever store is current at
-    // construction; late injection won't take effect.
+    // Build-time contract: callers must inject the store via
+    // `store(adapter)` BEFORE calling `build()`. The wiring binds to
+    // whatever store is current at construction; late injection won't
+    // take effect.
     this._notify_disposer = this._wireNotify();
 
     dispose(async () => {

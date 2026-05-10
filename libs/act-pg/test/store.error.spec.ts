@@ -196,6 +196,23 @@ describe("PostgresStore", () => {
   });
 
   describe("notify", () => {
+    // The notify subscription is opt-in via `notify: true` in the
+    // store config — without it, `store.notify` is undefined and the
+    // orchestrator never wires LISTEN/NOTIFY.
+    let notifyStore: PostgresStore;
+    beforeEach(() => {
+      notifyStore = new PostgresStore({
+        port: 5431,
+        table: "store_error_test",
+        notify: true,
+      });
+    });
+
+    it("is undefined when config.notify is false", () => {
+      expect(store.notify).toBeUndefined();
+      expect(notifyStore.notify).toBeTypeOf("function");
+    });
+
     it("ignores notifications on a different channel", async () => {
       // Hold the registered `notification` listener so we can call it
       // directly with a synthetic message — pg-pool can in theory
@@ -215,7 +232,7 @@ describe("PostgresStore", () => {
         client
       );
       const handler = vi.fn();
-      await store.notify(handler);
+      await notifyStore.notify!(handler);
       expect(captured).toBeTypeOf("function");
       // Synthetic message on a foreign channel — must be ignored.
       captured!({ channel: "some_other_channel", payload: "{}" });
@@ -244,7 +261,9 @@ describe("PostgresStore", () => {
         // @ts-expect-error mock
         client
       );
-      await expect(store.notify(() => {})).rejects.toThrow("listen fail");
+      await expect(notifyStore.notify!(() => {})).rejects.toThrow(
+        "listen fail"
+      );
       // Listener attached then detached; client released with destroy=true.
       expect(on).toHaveBeenCalledWith("notification", expect.any(Function));
       expect(removeListener).toHaveBeenCalledWith(

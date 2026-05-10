@@ -20,7 +20,9 @@ another node, so it has to poll.
 (`act_commit_<schema>_<table>`). `commit()` issues one `NOTIFY` per
 commit transaction with the full event batch as a JSON payload.
 Subscribers get sub-poll wake-up; the orchestrator wires this in
-automatically, so users don't change a line of code to opt in.
+automatically when the store opts in via `notify: true`. Default is
+off — single-instance deployments pay zero overhead and existing
+callers see no behavior change after upgrading.
 
 Self-filter via a per-instance `_by` UUID embedded in the payload —
 a store instance never receives its own commits, keeping the
@@ -43,7 +45,7 @@ Two modes:
 - **polling**: notify subscription is torn down; reactions are driven
   by `setInterval(() => correlate() + drain(), 50ms)`.
 
-Run: `RUN_NOTIFY_REPORT=1 pnpm -F @rotorsoft/act-pg exec vitest run test/notify-perf.spec.ts`
+Run: `pnpm -F @rotorsoft/act-pg exec vitest run --config vitest.bench.config.ts`
 
 ### Results
 
@@ -70,7 +72,10 @@ default `start_correlations` 10 s interval, the gap blows out to
 process holds one extra connection for the lifetime of the
 subscription. For deployments running hundreds of stateless Act
 processes against one PG, this is the budgeting line item to mind —
-size the connection pool accordingly.
+size the connection pool accordingly. There's also one extra
+`pg_notify` SQL per commit on every writer that opted in. Both are
+why the flag defaults off — `PostgresStore({ notify: true })` is the
+explicit opt-in for multi-process deployments.
 
 The wakeup is a hint, not a contract. Lost notifications (network
 hiccup, pool exhaustion) are tolerated — the existing debounce/poll

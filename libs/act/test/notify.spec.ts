@@ -68,11 +68,16 @@ async function buildAppWithNotifyStore(
       .do(async function noopReaction() {})
       .to("counter-projection");
   }
+  // The fake store above has a `notify` method assigned, so the
+  // orchestrator auto-wires unconditionally. Real adapters control
+  // overhead at the store-config level (e.g., `PostgresStore({ notify:
+  // true })` enables LISTEN/NOTIFY; `false` leaves the method
+  // undefined).
   const app = builder.build();
 
-  // Notify wiring is eager (kicked off in the constructor) but the
-  // subscription itself is async — yield once so the wire promise
-  // resolves before tests inspect captured state.
+  // Wiring is kicked off in the constructor but the subscription
+  // itself is async — yield once so the wire promise resolves before
+  // tests inspect captured state.
   await new Promise((r) => setImmediate(r));
 
   return {

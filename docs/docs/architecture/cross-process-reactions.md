@@ -40,15 +40,15 @@ type StoreNotification = {
 };
 ```
 
-When present, the orchestrator subscribes once at `build()` time and routes notifications to wake `settle()` automatically. **Users opt in with zero code** — same `act()...build()` call as a single-process app.
+When present, the orchestrator subscribes once at `build()` time and routes notifications to wake `settle()` automatically. The hook is **opt-in at the adapter level** — `PostgresStore` defaults `notify: false` so single-instance deployments pay zero overhead. Multi-process apps enable it explicitly:
 
 ```ts
-store(new PostgresStore({...}));     // PG implements notify
+store(new PostgresStore({ /* ... */, notify: true }));   // ← opt in
 const app = act()
   .withState(Order)
   .on("OrderPlaced").do(reduceInventory).to("inventory")
   .build();
-// Done. Cross-process commits wake reactions on this process.
+// Cross-process commits wake reactions on this process.
 ```
 
 Optionally, the user can also subscribe to the `notified` lifecycle event for SSE fan-out, dashboards, or audit:
@@ -70,7 +70,7 @@ The alternative (broadcast everything, let the consumer filter) was rejected as 
 
 | Adapter | `notify` | Why |
 | --- | --- | --- |
-| `PostgresStore` | implemented | `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`). One NOTIFY per commit transaction with the full event batch as JSON payload. |
+| `PostgresStore` | implemented (opt-in via `notify: true`) | `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel (`act_commit_<schema>_<table>`). One NOTIFY per commit transaction with the full event batch as JSON payload. Default off — single-instance deployments pay zero overhead, existing callers keep their current behavior on upgrade. |
 | `InMemoryStore` | not implemented | Single-process by definition — there is no remote writer. |
 | `SqliteStore` | not implemented | Single-node by design. Use `@rotorsoft/act-pg` for multi-process. |
 
