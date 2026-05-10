@@ -1004,12 +1004,16 @@ export class PostgresStore implements Store {
         }
       }
       if (events.length === 0) return;
+      // Adapter-level robustness: a throwing handler must not tear
+      // down the dedicated LISTEN client. The orchestrator wraps its
+      // own `notified` emit + drain wakeup separately
+      // (`Act._wireNotify`) — defense in depth, with each layer
+      // protecting its own resources. Direct callers of
+      // `store.notify(handler)` (tests, custom integrations) inherit
+      // the adapter wrap.
       try {
         handler({ stream: parsed.stream, events });
       } catch (err) {
-        // Never let a handler error tear the listener down — the user
-        // gets the same async error semantics as any other lifecycle
-        // listener.
         logger.error(err, "act_commit: handler threw, listener preserved");
       }
     };

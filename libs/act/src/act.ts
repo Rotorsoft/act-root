@@ -332,16 +332,25 @@ export class Act<
     if (!s.notify) return undefined;
     try {
       return await s.notify((notification) => {
-        this.emit("notified", notification);
-        // Wake once per commit when at least one event has a local
-        // reaction. Avoids spurious wake-ups for remote commits
-        // belonging to bounded contexts this process doesn't react to.
-        const hasReactive = notification.events.some((e) =>
-          this._reactive_events.has(e.name)
-        );
-        if (hasReactive) {
-          this._drain.arm();
-          this._settle.schedule({ debounceMs: 0 });
+        // Generic concerns (lifecycle emit, drain wakeup, listener
+        // error containment) live here so adapters only have to
+        // handle their own wire format. Errors in user-registered
+        // `notified` listeners or in our own bookkeeping are logged
+        // and swallowed — the store's listener stays alive.
+        try {
+          this.emit("notified", notification);
+          // Wake once per commit when at least one event has a local
+          // reaction. Avoids spurious wake-ups for remote commits
+          // belonging to bounded contexts this process doesn't react to.
+          const hasReactive = notification.events.some((e) =>
+            this._reactive_events.has(e.name)
+          );
+          if (hasReactive) {
+            this._drain.arm();
+            this._settle.schedule({ debounceMs: 0 });
+          }
+        } catch (err) {
+          this._logger.error(err, "notified handler threw");
         }
       });
     } catch (err) {

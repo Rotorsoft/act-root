@@ -140,6 +140,24 @@ describe("Act ↔ Store.notify auto-wiring", () => {
     expect(settled).toHaveBeenCalled();
   });
 
+  it("contains errors thrown by user 'notified' listeners", async () => {
+    // The orchestrator wraps `emit` + drain wakeup in a try/catch so a
+    // bad user listener can't tear down the wiring. The drain wakeup
+    // for *this* notification is also lost (the throw shortcuts the
+    // settle schedule call), but the listener stays alive for future
+    // notifications.
+    const { app, capturedHandler } = await buildAppWithNotifyStore();
+    app.on("notified", () => {
+      throw new Error("user listener boom");
+    });
+    expect(() =>
+      capturedHandler()!({
+        stream: "remote-stream",
+        events: [{ id: 1, name: "Pressed" }],
+      })
+    ).not.toThrow();
+  });
+
   it("does not wake when no event in the batch is reactive", async () => {
     const { app, capturedHandler } = await buildAppWithNotifyStore();
     const settled = vi.fn();
