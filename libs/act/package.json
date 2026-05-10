@@ -19,6 +19,10 @@
     "url": "git+https://github.com/rotorsoft/act-root.git",
     "directory": "libs/act"
   },
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act#readme",
+  "bugs": {
+    "url": "https://github.com/rotorsoft/act-root/issues"
+  },
   "files": [
     "dist"
   ],

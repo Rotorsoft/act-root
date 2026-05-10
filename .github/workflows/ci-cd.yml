@@ -130,18 +130,6 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Hand the built libs off to the CD matrix so each release job
-      # doesn't have to rebuild the dependency tree from scratch.
-      # `pnpm typecheck` runs `pnpm build` internally, so the dist files
-      # already exist at this point.
-      - if: github.ref == 'refs/heads/master'
-        uses: actions/upload-artifact@v7
-        with:
-          name: act-libs-dist
-          path: libs/*/dist
-          if-no-files-found: error
-          retention-days: 1
-
   # Detect which libs actually changed in this push. Lets the CD matrix
   # skip release jobs for untouched libs (semantic-release is a no-op
   # in that case anyway, but skipping the whole job saves install +
@@ -192,14 +180,15 @@ jobs:
 
       - run: pnpm install
 
-      # Restore the dist files built during CI — semantic-release
-      # publishes whatever sits in `libs/<lib>/dist/`, so we don't need
-      # to rebuild here. Default download path is the workspace root,
-      # which matches the workspace-relative paths the artifact was
-      # uploaded with (`libs/*/dist`).
-      - uses: actions/download-artifact@v7
-        with:
-          name: act-libs-dist
+      # Build everything from source. We used to ship a `libs/*/dist`
+      # artifact from CI and download it here, but `actions/upload-artifact`
+      # strips the longest common ancestor (`libs/`), so the dist files
+      # landed at `<root>/<lib>/dist` instead of `<root>/libs/<lib>/dist`
+      # — and `pnpm publish` shipped 11 versions across 7 libs with no
+      # `dist/` at all (LICENSE + README + package.json only). Rebuilding
+      # here costs ~30s per matrix job and removes the whole class of
+      # bug. `pnpm -r build` respects topological order.
+      - run: pnpm build
 
       - name: configure git
         run: |
