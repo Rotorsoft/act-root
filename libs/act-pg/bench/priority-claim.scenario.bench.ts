@@ -391,8 +391,15 @@ describe("ACT-102 priority-aware claim vs dual-frontier baseline", () => {
       // eslint-disable-next-line no-console
       console.log(
         "\n=== ACT-102 priority-aware claim vs dual-frontier baseline ===" +
+          "\nProves:   priority-tagged streams reach time-to-first-event much sooner" +
+          "\n          without starving others or ballooning total drain." +
           `\nWorkload: ${SOURCE_EVENTS} events × ${TARGET_STREAMS} targets, ` +
-          `streamLimit=${STREAM_LIMIT}, eventLimit=${EVENT_LIMIT}`
+          `streamLimit=${STREAM_LIMIT}, eventLimit=${EVENT_LIMIT}` +
+          "\nAsserts:  priority TTF ≤ baseline TTF; total drain < baseline × 1.25" +
+          "\nReads:    priority-aware row should show smaller priority TTF (faster)," +
+          "\n          comparable total drain, smaller others-median-@TTF" +
+          "\n          (priority skipped ahead), and matching others-median-@end" +
+          "\n          (no starvation)."
       );
       // eslint-disable-next-line no-console
       console.table({

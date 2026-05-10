@@ -180,7 +180,12 @@ describe("ACT-101 cross-process commit→reaction latency", () => {
     const notifyKey = `notify (n=${notifySamples.length})`;
     const pollKey = `polling (n=${pollSamples.length})`;
     // eslint-disable-next-line no-console
-    console.log("\n=== ACT-101 cross-process commit→reaction latency ===");
+    console.log(
+      "\n=== ACT-101 cross-process commit→reaction latency ===" +
+        "\nProves:  LISTEN/NOTIFY wake-up beats polling on tail latency when" +
+        "\n         writer and reader are in separate processes." +
+        "\nAsserts: notify p99 < polling p99 (lower ms = faster on every column)"
+    );
     // eslint-disable-next-line no-console
     console.table({
       [notifyKey]: {
