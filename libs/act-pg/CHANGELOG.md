@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.19.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.6...@rotorsoft/act-pg-v0.19.0) (2026-05-10)
+
+
+### Features
+
+* **act:** add Store.notify hook for cross-process drain wakeup (ACT-101) ([f1f40cf](https://github.com/rotorsoft/act-root/commit/f1f40cf608ba107c88bd0a0144c49af2ece47fe7))
+
 # [@rotorsoft/act-pg-v0.18.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.18.5...@rotorsoft/act-pg-v0.18.6) (2026-05-09)
 
 
