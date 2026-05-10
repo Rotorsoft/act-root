@@ -1,3 +1,15 @@
+# [@rotorsoft/act-sqlite-v0.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.4.0...@rotorsoft/act-sqlite-v0.5.0) (2026-05-10)
+
+
+### Bug Fixes
+
+* unify workspace bench config + repair CI bench summary + npm keywords ([56b192c](https://github.com/rotorsoft/act-root/commit/56b192c1bd6d217a76099c7d185d0620d908edc0))
+
+
+### Features
+
+* **act:** per-stream reaction priority lanes (ACT-102) ([c08f18a](https://github.com/rotorsoft/act-root/commit/c08f18a05bbf478c4e0128dbd175897bb18dd701))
+
 # [@rotorsoft/act-sqlite-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.3.4...@rotorsoft/act-sqlite-v0.4.0) (2026-05-10)
 
 
