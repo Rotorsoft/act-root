@@ -28,7 +28,7 @@ import {
   ZodEmpty,
 } from "@rotorsoft/act";
 import { z } from "zod";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const PORT = 5431;
 const SCHEMA = "schema_notify_bench";

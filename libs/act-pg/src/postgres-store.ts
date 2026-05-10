@@ -7,6 +7,7 @@ import type {
   Logger,
   Message,
   NotifyDisposer,
+  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
@@ -357,14 +358,30 @@ export class PostgresStore implements Store {
           blocked boolean NOT NULL DEFAULT false,
           error text,
           leased_by text,
-          leased_until timestamptz
+          leased_until timestamptz,
+          priority int NOT NULL DEFAULT 0
         ) TABLESPACE pg_default;`
       );
-
-      // Index for fetching streams
+      // Migration for tables created before priority lanes (ACT-102).
+      // `ADD COLUMN IF NOT EXISTS` is a no-op when the column is
+      // already present, so this is safe on every seed call.
       await client.query(
-        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_fetch_ix" 
-        ON ${this._fqs} (blocked, at);`
+        `ALTER TABLE ${this._fqs}
+         ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;`
+      );
+
+      // Composite index for `claim()` — `(blocked, priority DESC, at)`
+      // matches the lagging-frontier ORDER BY exactly so the planner
+      // can serve the lag CTE from the index without a sort. The
+      // `_streams_fetch_ix` index is dropped because the new one
+      // supersedes it (`(blocked, at)` is a prefix of the new key
+      // when the planner reads `priority` as fixed).
+      await client.query(
+        `DROP INDEX IF EXISTS "${this.config.schema}"."${this.config.table}_streams_fetch_ix"`
+      );
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_claim_ix"
+        ON ${this._fqs} (blocked, priority DESC, at);`
       );
 
       await client.query("COMMIT");
@@ -618,7 +635,7 @@ export class PostgresStore implements Store {
         `
         WITH
         available AS (
-          SELECT stream, source, at
+          SELECT stream, source, at, priority
           FROM ${this._fqs} s
           WHERE blocked = false
             AND (leased_by IS NULL OR leased_until <= NOW())
@@ -631,10 +648,14 @@ export class PostgresStore implements Store {
             ))
           FOR UPDATE SKIP LOCKED
         ),
+        -- Priority lanes (ACT-102): higher priority first, then
+        -- lagging-watermark order. With everyone at priority=0 the
+        -- ORDER BY collapses to plain at ASC so existing workloads
+        -- see no behavior change.
         lag AS (
           SELECT stream, source, at, TRUE AS lagging
           FROM available
-          ORDER BY at ASC
+          ORDER BY priority DESC, at ASC
           LIMIT $1
         ),
         lead AS (
@@ -686,23 +707,42 @@ export class PostgresStore implements Store {
    * @returns subscribed count and current max watermark.
    */
   async subscribe(
-    streams: Array<{ stream: string; source?: string }>
+    streams: Array<{ stream: string; source?: string; priority?: number }>
   ): Promise<{ subscribed: number; watermark: number }> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
-        const { rowCount } = await client.query(
+        // Two statements to keep `subscribed` meaning "newly
+        // registered streams" (not "rows touched"):
+        //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
+        //  2. UPDATE priority on the existing rows whose new value is
+        //     higher than the stored one (ACT-102: keep the max so the
+        //     highest-priority registered reaction wins). Operator
+        //     overrides (which may *decrease*) go through `prioritize()`.
+        const { rowCount: inserted } = await client.query(
           `
-          INSERT INTO ${this._fqs} (stream, source)
-          SELECT s->>'stream', s->>'source'
+          INSERT INTO ${this._fqs} (stream, source, priority)
+          SELECT s->>'stream',
+                 s->>'source',
+                 COALESCE((s->>'priority')::int, 0)
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           `,
           [JSON.stringify(streams)]
         );
-        subscribed = rowCount ?? 0;
+        subscribed = inserted ?? 0;
+        await client.query(
+          `
+          UPDATE ${this._fqs} t
+          SET priority = COALESCE((s->>'priority')::int, 0)
+          FROM jsonb_array_elements($1::jsonb) AS s
+          WHERE t.stream = s->>'stream'
+            AND COALESCE((s->>'priority')::int, 0) > t.priority
+          `,
+          [JSON.stringify(streams)]
+        );
       }
       const { rows } = await client.query<{ max: number | null }>(
         `SELECT COALESCE(MAX(at), -1) AS max FROM ${this._fqs}`
@@ -842,6 +882,53 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Bulk-update priority of streams matching `filter` (ACT-102).
+   *
+   * Filter semantics mirror {@link query_streams}: regex on `stream` /
+   * `source` by default, exact match with the `_exact` flags,
+   * `blocked` restricts to blocked or unblocked rows. Empty filter
+   * (`{}`) updates every registered stream.
+   *
+   * Unlike {@link subscribe} (which keeps `max()` of registered
+   * priorities), this sets the priority outright — operator override
+   * for the build-time scheduling policy.
+   *
+   * @returns Count of streams whose priority changed.
+   */
+  async prioritize(
+    filter: PrioritizeFilter,
+    priority: number
+  ): Promise<number> {
+    const conditions: string[] = ["priority <> $1"];
+    const values: unknown[] = [priority];
+
+    if (filter.stream !== undefined) {
+      values.push(filter.stream);
+      conditions.push(
+        filter.stream_exact
+          ? `stream = $${values.length}`
+          : `stream ~ $${values.length}`
+      );
+    }
+    if (filter.source !== undefined) {
+      conditions.push(`source IS NOT NULL`);
+      values.push(filter.source);
+      conditions.push(
+        filter.source_exact
+          ? `source = $${values.length}`
+          : `source ~ $${values.length}`
+      );
+    }
+    if (filter.blocked !== undefined) {
+      values.push(filter.blocked);
+      conditions.push(`blocked = $${values.length}`);
+    }
+    const sql = `UPDATE ${this._fqs} SET priority = $1 WHERE ${conditions.join(" AND ")}`;
+    const { rowCount } = await this._pool.query(sql, values);
+    return rowCount ?? 0;
+  }
+
+  /**
    * Streams subscription positions to a callback, ordered by stream name,
    * along with the highest event id in the store.
    *
@@ -884,7 +971,7 @@ export class PostgresStore implements Store {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
-    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM ${this._fqs}`;
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority FROM ${this._fqs}`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
@@ -901,6 +988,7 @@ export class PostgresStore implements Store {
           error: string | null;
           leased_by: string | null;
           leased_until: Date | null;
+          priority: number;
         }>(sql, values),
         client.query<{ m: number | null }>(
           `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
@@ -916,6 +1004,7 @@ export class PostgresStore implements Store {
           retry: row.retry,
           blocked: row.blocked,
           error: row.error ?? "",
+          priority: row.priority,
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
         });

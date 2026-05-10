@@ -29,7 +29,7 @@
 import { randomUUID } from "node:crypto";
 import { sleep } from "@rotorsoft/act";
 import { Pool } from "pg";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const PORT = 5431;
 const SCHEMA = "act_priority_bench";

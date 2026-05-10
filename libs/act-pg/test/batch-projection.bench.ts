@@ -11,7 +11,7 @@ import { act, dispose, projection, state, store } from "@rotorsoft/act";
 import pg from "pg";
 import { afterAll, beforeAll, bench, describe } from "vitest";
 import { z } from "zod";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const Incremented = z.object({ by: z.number() });
 

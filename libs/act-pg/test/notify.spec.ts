@@ -4,7 +4,7 @@
  * isolated schema per file to avoid interfering with the wider PG suite.
  */
 import { sleep } from "@rotorsoft/act";
-import { PostgresStore } from "../src/PostgresStore.js";
+import { PostgresStore } from "../src/postgres-store.js";
 
 const PORT = 5431;
 const SCHEMA = "schema_notify_test";

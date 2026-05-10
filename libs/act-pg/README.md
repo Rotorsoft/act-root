@@ -157,6 +157,9 @@ Calling `seed()` creates two tables:
 - `at` - last processed event position
 - `leased_by` / `leased_until` - distributed processing claim info
 - `blocked` / `error` - error tracking for failed streams
+- `priority` - scheduling priority (default 0; higher wins lagging-frontier ties — see [Priority lanes](https://rotorsoft.github.io/act-root/docs/architecture/priority-lanes))
+
+The `priority` column is added by `seed()` via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so existing tables migrate transparently. A composite index on `(blocked, priority DESC, at)` supports the saturated-claim ORDER BY without a sort step.
 
 ## Competing Consumer Pattern
 

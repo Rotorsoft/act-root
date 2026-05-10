@@ -68,7 +68,8 @@ export type ReactionHandler<
  * - **Dynamic**: Determine target based on event data at runtime
  *
  * Resolvers can also specify source streams for optimization, allowing the drain
- * process to efficiently fetch only relevant events.
+ * process to efficiently fetch only relevant events. An optional `priority`
+ * biases the lagging-frontier `claim()` ordering — see {@link Resolved.priority}.
  *
  * @template TEvents - Event schemas
  * @template TKey - Event name
@@ -101,16 +102,43 @@ export type ReactionHandler<
  *   }))
  * ```
  *
+ * @example With priority (saturated worker scheduling)
+ * ```typescript
+ * .on("OrderConfirmed")
+ *   .do(sendCriticalNotification)
+ *   .to({ target: "notifications-out", priority: 10 })
+ * ```
+ *
  * @see {@link Reaction} for complete reaction configuration
+ * @see {@link Resolved} for the resolved-target shape
  */
 export type ReactionResolver<
   TEvents extends Schemas,
   TKey extends keyof TEvents,
 > =
-  | { target: string; source?: string } // static
-  | ((
-      event: Committed<TEvents, TKey>
-    ) => { target: string; source?: string } | undefined); // dynamic
+  | Resolved // static
+  | ((event: Committed<TEvents, TKey>) => Resolved | undefined); // dynamic
+
+/**
+ * Resolver output shape — what `.to(...)` returns for a static or dynamic
+ * resolver.
+ *
+ * @property target - Stream name that processes this reaction
+ * @property source - Optional source-stream filter for fetch optimization
+ * @property priority - Optional scheduling hint. The lagging-frontier
+ *   `claim()` orders streams by `priority DESC, at ASC`, so a higher value
+ *   makes the stream win lease slots ahead of equal-watermark peers under
+ *   saturation. Default `0` — behavior identical to current dual-frontier.
+ *   Only meaningful when `streamLimit` is binding (more candidate streams
+ *   than the worker can claim per cycle); idle systems are unaffected.
+ *   See `libs/act-pg/PERFORMANCE.md` for the benchmark that motivated this
+ *   knob.
+ */
+export type Resolved = {
+  readonly target: string;
+  readonly source?: string;
+  readonly priority?: number;
+};
 
 /**
  * Options for reaction processing.

@@ -5,6 +5,7 @@ import type {
   EventMeta,
   Lease,
   Message,
+  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
@@ -118,9 +119,23 @@ export class SqliteStore implements Store {
         blocked INTEGER NOT NULL DEFAULT 0,
         error TEXT NOT NULL DEFAULT '',
         leased_by TEXT,
-        leased_until TEXT
+        leased_until TEXT,
+        priority INTEGER NOT NULL DEFAULT 0
       )
     `);
+    // Migration for tables created before priority lanes (ACT-102).
+    // libSQL surfaces "duplicate column" as an error, hence the
+    // try/swallow — this mirrors PG's `ADD COLUMN IF NOT EXISTS`.
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
+      );
+    } catch {
+      // already present
+    }
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
+    );
   }
 
   async drop() {
@@ -268,17 +283,29 @@ export class SqliteStore implements Store {
     return count;
   }
 
-  // --- subscribe: idempotent INSERT OR IGNORE (= PG ON CONFLICT DO NOTHING) ---
-  async subscribe(streams: Array<{ stream: string; source?: string }>) {
+  // --- subscribe: idempotent INSERT OR IGNORE (= PG ON CONFLICT DO NOTHING)
+  //     plus a UPDATE pass to keep the *max* priority across reactions
+  //     targeting the same stream (ACT-102). Operator overrides go
+  //     through `prioritize()` instead.
+  async subscribe(
+    streams: Array<{ stream: string; source?: string; priority?: number }>
+  ) {
     const tx = await this.client.transaction("write");
     try {
       let subscribed = 0;
-      for (const { stream, source } of streams) {
-        const result = await tx.execute({
-          sql: "INSERT OR IGNORE INTO streams (stream, source) VALUES (?, ?)",
-          args: [stream, source ?? null],
+      for (const { stream, source, priority = 0 } of streams) {
+        const inserted = await tx.execute({
+          sql: "INSERT OR IGNORE INTO streams (stream, source, priority) VALUES (?, ?, ?)",
+          args: [stream, source ?? null, priority],
         });
-        if (result.rowsAffected > 0) subscribed++;
+        if (inserted.rowsAffected > 0) {
+          subscribed++;
+        } else if (priority > 0) {
+          await tx.execute({
+            sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
+            args: [priority, stream, priority],
+          });
+        }
       }
       const wm = await tx.execute(
         "SELECT COALESCE(MAX(at), -1) as w FROM streams"
@@ -299,9 +326,9 @@ export class SqliteStore implements Store {
       const now = new Date().toISOString();
 
       const result = await tx.execute({
-        sql: `SELECT stream, source, at FROM streams
+        sql: `SELECT stream, source, at, priority FROM streams
               WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
-              ORDER BY at ASC`,
+              ORDER BY priority DESC, at ASC`,
         args: [now],
       });
 
@@ -309,6 +336,7 @@ export class SqliteStore implements Store {
         stream: string;
         source: string | undefined;
         at: number;
+        priority: number;
       }[] = [];
       for (const row of result.rows) {
         const stream = row.stream as string;
@@ -331,11 +359,19 @@ export class SqliteStore implements Store {
         }
 
         if (hasEvents) {
-          candidates.push({ stream, source: source ?? undefined, at });
+          candidates.push({
+            stream,
+            source: source ?? undefined,
+            at,
+            priority: Number(row.priority),
+          });
         }
       }
 
-      // Dual frontier: lagging (oldest first) + leading (newest first)
+      // Dual frontier: lagging (priority DESC, watermark ASC — ACT-102)
+      // + leading (newest first). The candidates list arrives sorted
+      // by `priority DESC, at ASC` from the SELECT above, so the
+      // `slice(0, lagging)` already does the right thing.
       const lag = candidates.slice(0, lagging);
       const lead = [...candidates]
         .sort((a, b) => b.at - a.at)
@@ -442,7 +478,7 @@ export class SqliteStore implements Store {
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
     let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until FROM streams WHERE 1=1";
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority FROM streams WHERE 1=1";
     const args: unknown[] = [];
 
     if (query?.stream !== undefined) {
@@ -490,6 +526,7 @@ export class SqliteStore implements Store {
         retry: Number(row.retry),
         blocked: Number(row.blocked) === 1,
         error: row.error as string,
+        priority: Number(row.priority),
         leased_by: (row.leased_by as string | null) ?? undefined,
         leased_until: leased_until ? new Date(leased_until) : undefined,
       });
@@ -497,6 +534,45 @@ export class SqliteStore implements Store {
     }
 
     return { maxEventId: Number(maxResult.rows[0].m), count };
+  }
+
+  // --- prioritize: bulk priority update with filter (ACT-102) ---
+  async prioritize(
+    filter: PrioritizeFilter,
+    priority: number
+  ): Promise<number> {
+    // libSQL `?` placeholders are positional and NOT reusable, so we
+    // bind `priority` twice: once for SET, once for the no-op skip
+    // in WHERE.
+    const args: unknown[] = [priority, priority];
+    const conditions: string[] = ["priority <> ?"];
+
+    if (filter.stream !== undefined) {
+      if (filter.stream_exact) {
+        conditions.push("stream = ?");
+        args.push(filter.stream);
+      } else {
+        conditions.push("stream LIKE ?");
+        args.push(streamPatternToLike(filter.stream));
+      }
+    }
+    if (filter.source !== undefined) {
+      conditions.push("source IS NOT NULL");
+      if (filter.source_exact) {
+        conditions.push("source = ?");
+        args.push(filter.source);
+      } else {
+        conditions.push("source LIKE ?");
+        args.push(streamPatternToLike(filter.source));
+      }
+    }
+    if (filter.blocked !== undefined) {
+      conditions.push("blocked = ?");
+      args.push(filter.blocked ? 1 : 0);
+    }
+    const sql = `UPDATE streams SET priority = ? WHERE ${conditions.join(" AND ")}`;
+    const result = await this.client.execute({ sql, args: args as any[] });
+    return result.rowsAffected;
   }
 
   // --- truncate: transactional delete + seed ---
