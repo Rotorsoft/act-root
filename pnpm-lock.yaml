@@ -244,7 +244,7 @@ importers:
   libs/act-pg:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=0.31.1'
+        specifier: '>=0.35.2'
         version: link:../act
       pg:
         specifier: ^8.20.0
@@ -260,7 +260,7 @@ importers:
   libs/act-pino:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=0.31.1'
+        specifier: '>=0.35.2'
         version: link:../act
       pino:
         specifier: ^10.3.1
@@ -275,7 +275,7 @@ importers:
         specifier: ^0.17.3
         version: 0.17.3
       '@rotorsoft/act':
-        specifier: '>=0.31.1'
+        specifier: '>=0.35.2'
         version: link:../act
       zod:
         specifier: ^4.4.3

@@ -51,7 +51,7 @@
     "pg": "^8.20.0"
   },
   "peerDependencies": {
-    "@rotorsoft/act": ">=0.31.1",
+    "@rotorsoft/act": ">=0.35.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
