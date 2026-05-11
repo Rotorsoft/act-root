@@ -6,6 +6,8 @@
 
 PostgreSQL event store adapter for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). Provides persistent, production-ready event storage with ACID guarantees, connection pooling, and distributed stream processing.
 
+> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
 ## Installation
 
 ```sh

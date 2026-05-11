@@ -8,6 +8,8 @@ Pino logger adapter for the [@rotorsoft/act](https://www.npmjs.com/package/@roto
 
 Replaces Act's built-in `ConsoleLogger` with [pino](https://getpino.io/) — structured JSON logging, log levels, transports, redaction, and pretty-printing in development.
 
+> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
 ## Install
 
 ```bash

@@ -6,6 +6,8 @@
 
 Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps. Extracts states, actions, events, reactions, slices, and projections from TypeScript source code and renders them as an interactive SVG.
 
+> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). The diagram **output shape** (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
 ## Features
 
 - **Real-time visualization** — SVG diagram updates as source files change

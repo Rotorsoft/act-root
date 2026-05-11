@@ -53,6 +53,7 @@ pnpm -F shared drizzle:migrate   # migrations (also auto-run before tests)
 - Events are immutable — never mutate event data; evolve via [versioned event names](docs/docs/architecture/event-schema-evolution.md)
 - All actions need actor context (`{ id, name }`)
 - ESM only (`"type": "module"`, `.js` import extensions)
+- Public API stability is governed by [STABILITY.md](STABILITY.md) — read before changing any builder API, `IAct` method, `Store`/`Cache` contract, lifecycle event, or public type export
 
 ## Commit Message Format
 
