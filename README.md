@@ -322,7 +322,7 @@ Open an issue or join the discussion on [GitHub Discussions](https://github.com/
 ## Versioning
 
 This project follows [Semantic Versioning (SemVer)](https://semver.org/).  
-See [CHANGELOG.md](./CHANGELOG.md) for release notes and breaking changes.
+See [STABILITY.md](./STABILITY.md) for the stability charter — what semver protects and what it doesn't — and [CHANGELOG.md](./CHANGELOG.md) for release notes and breaking changes.
 
 ## Examples
 

@@ -6,6 +6,8 @@
 
 [Act](../../README.md) core library — Event Sourcing + CQRS framework for TypeScript, built around DDD aggregates and reaction-driven workflows.
 
+> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
 ## Installation
 
 ```sh

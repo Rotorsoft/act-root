@@ -8,6 +8,8 @@ Incremental state broadcast over SSE for [@rotorsoft/act](https://www.npmjs.com/
 
 Instead of sending full aggregate state after each action, `act-sse` forwards the domain patches that event handlers already compute — sending only what changed as version-keyed partials.
 
+> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
 ## Installation
 
 ```sh
