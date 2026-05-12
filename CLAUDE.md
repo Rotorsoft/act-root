@@ -111,6 +111,7 @@ These are easy to get subtly wrong. Read the linked docs before editing related 
 - **Projection rebuild:** always `app.reset(targets)`, never `store().reset(targets)` directly. Only `app.reset` raises the orchestrator's drain-armed flag — without it, a settled app short-circuits and skips the replay. See [event-sourcing.md § Projection Rebuild](docs/docs/concepts/event-sourcing.md).
 - **Reactions auto-inject `reactingTo`:** inside a slice handler, `app.do(...)` automatically threads the triggering event as `reactingTo`. Pass an explicit fourth argument only when overriding. See [state-management.md § Auto-injected `reactingTo`](docs/docs/concepts/state-management.md).
 - **Single-key records:** `state({})`, `.on({})`, `.emits({})` accept exactly one key. Multi-key throws at runtime.
+- **Cross-slice event schemas:** when two same-name state partials declare the same event in `.emits({...})`, both must reference the **same Zod schema instance**. The merge throws on different references — extract shared event schemas to a module (`export const TicketOpened = z.object({...})`) and import in every slice that declares them. See [state-management.md § Cross-slice event schemas](docs/docs/concepts/state-management.md).
 - **Tests:** `store().seed()` in `beforeEach`; `dispose()()` in `afterAll`. In tests, prefer the explicit `await app.correlate(); await app.drain();` pair over `settle()` so cycle counts are deterministic.
 
 ## Code Organization (pointers, not duplication)
