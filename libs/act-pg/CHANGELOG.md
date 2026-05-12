@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v0.21.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.20.2...@rotorsoft/act-pg-v0.21.0) (2026-05-12)
+
+
+### Features
+
+* **act:** test helpers — sandbox + fixture for parallel-safe per-test isolation (ACT-503) ([ea38cf5](https://github.com/rotorsoft/act-root/commit/ea38cf5136417531f5cc46313e8c4a587221958e))
+
 # [@rotorsoft/act-pg-v0.20.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.20.1...@rotorsoft/act-pg-v0.20.2) (2026-05-10)
 
 
