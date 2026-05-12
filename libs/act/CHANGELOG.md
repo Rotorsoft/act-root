@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.36.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.35.2...@rotorsoft/act-v0.36.0) (2026-05-12)
+
+
+### Features
+
+* **act:** enforce reference identity for cross-slice event schemas (ACT-401) ([ae135db](https://github.com/rotorsoft/act-root/commit/ae135db52b9b82943791e8b5e7f3858af223bb42))
+
 # [@rotorsoft/act-v0.35.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.35.1...@rotorsoft/act-v0.35.2) (2026-05-10)
 
 
