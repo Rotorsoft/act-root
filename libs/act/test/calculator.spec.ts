@@ -1,11 +1,5 @@
-import {
-  type Actor,
-  act,
-  type Committed,
-  dispose,
-  sleep,
-  store,
-} from "@rotorsoft/act";
+import { type Actor, act, type Committed, sleep } from "@rotorsoft/act";
+import { sandbox } from "../src/test/index.js";
 import { Calculator } from "./calculator.js";
 
 describe("calculator lifecycle", () => {
@@ -21,17 +15,15 @@ describe("calculator lifecycle", () => {
   let midpoint: Date = new Date();
 
   const builder = act().withState(Calculator);
-  const app = builder.build();
+  let ctx: Awaited<
+    ReturnType<typeof sandbox<ReturnType<typeof builder.build>>>
+  >;
+  let app: typeof ctx.app;
 
   beforeAll(async () => {
-    await store().seed();
-  });
+    ctx = await sandbox(builder);
+    app = ctx.app;
 
-  afterAll(async () => {
-    await dispose()();
-  });
-
-  it("should compute results", async () => {
     await app.do("PressKey", { stream, actor: actor_x }, { key: "-" });
     await app.do("PressKey", { stream, actor: actor_x }, { key: "1" });
     await app.do("PressKey", { stream, actor: actor_x }, { key: "2" });
@@ -63,6 +55,10 @@ describe("calculator lifecycle", () => {
     correlation = result.event!.meta.correlation;
   });
 
+  afterAll(async () => {
+    await ctx.dispose();
+  });
+
   it("should load the state", async () => {
     const snapshot = await app.load(Calculator, stream);
     expect(snapshot).toMatchObject(expected);
@@ -88,7 +84,6 @@ describe("calculator lifecycle", () => {
       { stream, with_snaps: true },
       (e) => events.push(e)
     );
-    // console.table(events);
     expect(events.length).toBe(19);
     expect(count).toBe(19);
     expect(first).toMatchObject({

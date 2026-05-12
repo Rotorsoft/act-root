@@ -7,25 +7,110 @@ title: Testing
 
 Act is designed for testability. The in-memory defaults (InMemoryStore, InMemoryCache) make tests fast and isolated with zero infrastructure.
 
-## Test Setup
+## The canonical pattern — `fixture` and `sandbox`
+
+Reach for the helpers from `@rotorsoft/act/test` first. They build on `ActOptions.scoped` (ACT-501) so every test gets its own `{ store, cache }` bag — no singleton contention, parallel-safe with `it.concurrent`.
 
 ```typescript
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { store, dispose, type Target } from "@rotorsoft/act";
-import { app, Counter } from "../src/index.js";
+import { act, type Target } from "@rotorsoft/act";
+import { fixture } from "@rotorsoft/act/test";
+import { Counter } from "../src/index.js";
 
 const actor = { id: "user-1", name: "Test" };
 const target = (stream = crypto.randomUUID()): Target => ({ stream, actor });
 
+// Build the blueprint once at module scope — same builder, N tests.
+const test = fixture(act().withState(Counter));
+
 describe("Counter", () => {
+  test("should increment", async ({ app }) => {
+    const t = target();
+    await app.do("increment", t, { by: 5 });
+
+    const snap = await app.load(Counter, t.stream);
+    expect(snap.state.count).toBe(5);
+  });
+});
+```
+
+No `beforeEach(store().seed())`, no `afterAll(dispose()())` — vitest's fixture lifecycle wires construction and teardown for you.
+
+### Two helpers, one abstraction
+
+| Helper | Returns | When to reach for it |
+|---|---|---|
+| `fixture(builder, options?)` | A vitest `test` with an `app` fixture | The 90% case: one isolated Act per test, declarative, auto-cleanup |
+| `sandbox(builder, options?)` | `Promise<{ app, store, cache, dispose }>` | The escape hatch: multi-Act tests, `beforeAll`-shared setup, direct access to the store/cache handles |
+
+`fixture` is built on top of `sandbox`. Use `fixture` unless you need imperative control.
+
+### `sandbox` for tests that need two Acts or shared setup
+
+```typescript
+import { sandbox } from "@rotorsoft/act/test";
+
+it("two scoped Acts in one test — no cross-talk", async () => {
+  const a = await sandbox(act().withState(Counter));
+  const b = await sandbox(act().withState(Counter));
+
+  await a.app.do("increment", { stream: "c", actor }, { by: 10 });
+  await b.app.do("increment", { stream: "c", actor }, { by: 3 });
+
+  expect((await a.app.load(Counter, "c")).state.count).toBe(10);
+  expect((await b.app.load(Counter, "c")).state.count).toBe(3);
+
+  await a.dispose();
+  await b.dispose();
+});
+```
+
+For PG- or SQLite-backed tests, pass a custom store factory:
+
+```typescript
+const test = fixture(builder, {
+  store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
+});
+```
+
+Each test gets its own per-schema PG store, and `dispose` tears down the pool.
+
+### Parallel-safe `test.concurrent`
+
+Because each fixture instance gets its own store and cache, `test.concurrent` is safe out of the box:
+
+```typescript
+const test = fixture(builder);
+
+test.concurrent("A", async ({ app }) => {
+  await app.do("increment", { stream: "x", actor }, { by: 10 });
+  expect((await app.load(Counter, "x")).state.count).toBe(10);
+});
+
+test.concurrent("B", async ({ app }) => {
+  await app.do("increment", { stream: "x", actor }, { by: 99 });
+  expect((await app.load(Counter, "x")).state.count).toBe(99);
+});
+```
+
+No singleton contention; both tests can run interleaved on the same worker.
+
+## Legacy pattern (singleton store, singleton dispose)
+
+Tests that predate the `fixture` / `sandbox` helpers use the singleton store directly. The pattern still works and is the only option for tests that exercise the singleton port mechanism itself (e.g., `ports.spec.ts`, `cache.spec.ts`):
+
+```typescript
+import { store, dispose } from "@rotorsoft/act";
+
+describe("Counter (legacy)", () => {
   beforeEach(async () => {
     await store().seed();       // reset event store
-    // clearItems();            // reset in-memory projections if any
   });
 
   afterAll(async () => {
-    await dispose()();          // clean up all adapters (store, cache, etc.)
+    await dispose()();          // tear down singletons
   });
+
+  it("...", async () => { /* ... */ });
 });
 ```
 

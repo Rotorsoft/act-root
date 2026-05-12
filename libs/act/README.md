@@ -399,6 +399,27 @@ await apps.get("tenant_a")!.do("place", target, payload);
 
 Both `store` and `cache` are required together — sharing a single cache across distinct stores would collide on stream-keyed entries. ALS overhead is essentially zero (~65 ns per `store()` read, scoped or not; no measurable difference in `app.do()` / `app.load()` throughput). See [PERFORMANCE.md § Per-Act scoped ports](./PERFORMANCE.md) for the bench and [`docs/architecture/extension-points.md`](../../docs/docs/architecture/extension-points.md) for the full pattern (use cases, contracts, caveats).
 
+### Testing (ACT-503)
+
+`@rotorsoft/act/test` exposes two thin helpers built on `ActOptions.scoped` for parallel-safe per-test isolation:
+
+```ts
+import { fixture, sandbox } from "@rotorsoft/act/test";
+
+// Common case — vitest fixture, auto-cleanup, supports test.concurrent
+const test = fixture(act().withState(Counter));
+test("increments", async ({ app }) => {
+  await app.do("increment", { stream: "c", actor }, { by: 1 });
+});
+
+// Escape hatch — explicit lifecycle, multi-Act, beforeAll-shared, PG factory
+const { app, store, cache, dispose } = await sandbox(builder, {
+  store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
+});
+```
+
+See [`docs/concepts/testing.md`](../../docs/docs/concepts/testing.md) for the canonical pattern.
+
 ## Dual-Frontier Drain
 
 In event-sourced systems, consumers often subscribe to multiple event streams that advance at different rates: some produce bursts of events, while others stay idle for long periods. New streams can also be discovered while processing events from existing streams.

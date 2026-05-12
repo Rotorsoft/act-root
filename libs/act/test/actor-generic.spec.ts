@@ -1,13 +1,10 @@
 import { z } from "zod";
-import { act, dispose, state, store } from "../src/index.js";
+import { act, state } from "../src/index.js";
+import { sandbox } from "../src/test/index.js";
 
 type MyActor = { id: string; name: string; role: string; tenantId: string };
 
 describe("actor generic", () => {
-  afterAll(async () => {
-    await dispose()();
-  });
-
   const Counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ Incremented: z.object({ by: z.number() }) })
@@ -18,12 +15,10 @@ describe("actor generic", () => {
     .emit("Incremented")
     .build();
 
-  beforeEach(async () => {
-    await store().seed();
-  });
-
   it("should accept richer actor in app.do() via .withActor()", async () => {
-    const app = act().withActor<MyActor>().withState(Counter).build();
+    const { app, dispose } = await sandbox(
+      act().withActor<MyActor>().withState(Counter)
+    );
 
     const target = {
       stream: "counter-1",
@@ -31,10 +26,14 @@ describe("actor generic", () => {
     };
     const snaps = await app.do("increment", target, { by: 5 });
     expect(snaps[0].state.count).toBe(5);
+
+    await dispose();
   });
 
   it("should preserve extra actor fields in event metadata via .loose()", async () => {
-    const app = act().withActor<MyActor>().withState(Counter).build();
+    const { app, dispose } = await sandbox(
+      act().withActor<MyActor>().withState(Counter)
+    );
 
     const target = {
       stream: "counter-2",
@@ -48,13 +47,14 @@ describe("actor generic", () => {
     expect(actor).toBeDefined();
     expect(actor!.id).toBe("2");
     expect(actor!.name).toBe("Bob");
-    // Extra fields preserved thanks to .loose() on ActorSchema
     expect((actor as any).role).toBe("user");
     expect((actor as any).tenantId).toBe("t2");
+
+    await dispose();
   });
 
   it("should work with default actor (no .withActor())", async () => {
-    const app = act().withState(Counter).build();
+    const { app, dispose } = await sandbox(act().withState(Counter));
 
     const target = {
       stream: "counter-3",
@@ -62,6 +62,8 @@ describe("actor generic", () => {
     };
     const snaps = await app.do("increment", target, { by: 1 });
     expect(snaps[0].state.count).toBe(1);
+
+    await dispose();
   });
 
   it("should type-check .withActor() reactions with typed IAct", async () => {
@@ -70,20 +72,23 @@ describe("actor generic", () => {
       actor: { id: "sys", name: "System", role: "system", tenantId: "t0" },
     };
 
-    const app = act()
-      .withActor<MyActor>()
-      .withState(Counter)
-      .on("Incremented")
-      .do(async function onIncremented(_event, _stream, dispatcher) {
-        await dispatcher.do("increment", reactionTarget, { by: 1 });
-      })
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withActor<MyActor>()
+        .withState(Counter)
+        .on("Incremented")
+        .do(async function onIncremented(_event, _stream, dispatcher) {
+          await dispatcher.do("increment", reactionTarget, { by: 1 });
+        })
+    );
 
     const target = {
       stream: "counter-5",
       actor: { id: "1", name: "Alice", role: "admin", tenantId: "t1" },
     };
     await app.do("increment", target, { by: 10 });
-    expect(true).toBe(true); // Compiles and runs
+    expect(true).toBe(true);
+
+    await dispose();
   });
 });
