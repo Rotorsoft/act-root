@@ -286,6 +286,29 @@ export async function action<
     ? (result as Emitted<TEvents>[]) // array of tuples
     : ([result] as Emitted<TEvents>[]); // single tuple
 
+  // ACT-403: warn once per process per event name when a dynamic
+  // `.emit((a) => ["X", ...])` produces a deprecated event. Static
+  // `.emit("X")` is already caught at build time by act-builder; this
+  // is the runtime safety net for the dynamic form, which the static
+  // checker can't inspect. The `_warned` set lives on the state so
+  // multiple Act instances over the same merged state share idempotency.
+  const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
+  if (deprecated && deprecated.size > 0) {
+    const me_ = me as { _warned?: Set<string> };
+    const warned = me_._warned ?? (me_._warned = new Set<string>());
+    for (const [name] of tuples) {
+      const evt = name as string;
+      if (deprecated.has(evt) && !warned.has(evt)) {
+        warned.add(evt);
+        log().warn(
+          `Action "${String(action)}" emitted deprecated event "${evt}". ` +
+            `A newer version exists in the registry — update the action's ` +
+            `.emit() to target the current version. (warned once per process)`
+        );
+      }
+    }
+  }
+
   const emitted = tuples.map(([name, data]) => ({
     name,
     data: skipValidation

@@ -27,6 +27,10 @@ export {
 } from "./drain-cycle.js";
 export type { EsOps } from "./event-sourcing.js";
 export {
+  currentVersionOf,
+  deprecatedEventNames,
+} from "./event-versions.js";
+export {
   _this_,
   mergeEventRegister,
   mergeProjection,
