@@ -20,7 +20,40 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  # One paths-filter pass produces two signals:
+  #   - `src-changed`: any `libs/*/src/**` touched → run unit + bench tests.
+  #     Pure docs/CHANGELOG/PERFORMANCE updates inside a lib don't trip this.
+  #   - `libs`: which lib directories changed at all → CD matrix entries.
+  #     semantic-release still has the final say (a `docs:` commit produces
+  #     no release), so this is just an upper bound on which jobs to spin up.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      src-changed: ${{ steps.src.outputs.src }}
+      libs: ${{ steps.libs.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: src
+        with:
+          filters: |
+            src:
+              - 'libs/*/src/**'
+      - uses: dorny/paths-filter@v4
+        id: libs
+        with:
+          filters: |
+            act-patch:   ['libs/act-patch/**']
+            act:         ['libs/act/**']
+            act-sse:     ['libs/act-sse/**']
+            act-pg:      ['libs/act-pg/**']
+            act-sqlite:  ['libs/act-sqlite/**']
+            act-pino:    ['libs/act-pino/**']
+            act-diagram: ['libs/act-diagram/**']
+
   ci:
+    needs: changes
+    if: needs.changes.outputs.src-changed == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -130,40 +163,25 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # Detect which libs actually changed in this push. Lets the CD matrix
-  # skip release jobs for untouched libs (semantic-release is a no-op
-  # in that case anyway, but skipping the whole job saves install +
-  # checkout + node setup overhead — meaningful when most pushes only
-  # touch one or two libs).
-  changed-libs:
-    if: github.ref == 'refs/heads/master'
-    needs: ci
-    runs-on: ubuntu-latest
-    outputs:
-      libs: ${{ steps.filter.outputs.changes }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v4
-        id: filter
-        with:
-          filters: |
-            act-patch:   ['libs/act-patch/**']
-            act:         ['libs/act/**']
-            act-sse:     ['libs/act-sse/**']
-            act-pg:      ['libs/act-pg/**']
-            act-sqlite:  ['libs/act-sqlite/**']
-            act-pino:    ['libs/act-pino/**']
-            act-diagram: ['libs/act-diagram/**']
-
   cd:
-    if: github.ref == 'refs/heads/master' && needs.changed-libs.outputs.libs != '[]'
-    needs: [ci, changed-libs]
+    # Run on master when at least one lib directory changed, regardless of
+    # whether CI ran. `ci` skips on pure docs/CHANGELOG updates inside libs
+    # — semantic-release-monorepo decides on its own whether a release is
+    # warranted, so a skipped CI still gets us a clean no-op CD when the
+    # commit type isn't releasable. `always()` is required because `needs:`
+    # by default treats a skipped upstream as a block.
+    if: |
+      always() &&
+      github.ref == 'refs/heads/master' &&
+      needs.changes.outputs.libs != '[]' &&
+      (needs.ci.result == 'success' || needs.ci.result == 'skipped')
+    needs: [changes, ci]
     runs-on: ubuntu-latest
     strategy:
       max-parallel: 1 # prevents concurrent pull/push conflicts on main branch
       fail-fast: false
       matrix:
-        lib: ${{ fromJson(needs.changed-libs.outputs.libs) }}
+        lib: ${{ fromJson(needs.changes.outputs.libs) }}
 
     steps:
       - uses: actions/checkout@v6
