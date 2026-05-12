@@ -20,6 +20,10 @@ export default defineConfig({
         __dirname,
         "libs/act-sqlite/src/index.ts"
       ),
+      "@rotorsoft/act/test": path.resolve(
+        __dirname,
+        "libs/act/src/test/index.ts"
+      ),
       "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
     },
   },

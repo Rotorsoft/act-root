@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { act, state, ZodEmpty } from "../src/index.js";
+import { sandbox } from "../src/test/index.js";
 
 describe("partial-state", () => {
   const schema = z.object({
@@ -33,13 +34,18 @@ describe("partial-state", () => {
 
   const actor = { id: "a", name: "a" };
 
-  it("should merge two partials with the same name", () => {
-    const app = act().withState(PartA).withState(PartB).build();
+  it("should merge two partials with the same name", async () => {
+    const { app, dispose } = await sandbox(
+      act().withState(PartA).withState(PartB)
+    );
     expect(app).toBeDefined();
+    await dispose();
   });
 
   it("should execute actions from both partials", async () => {
-    const app = act().withState(PartA).withState(PartB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartA).withState(PartB)
+    );
 
     await app.do("increment", { stream: "s1", actor }, { by: 3 });
     await app.do("setLabel", { stream: "s1", actor }, { label: "hello" });
@@ -47,10 +53,14 @@ describe("partial-state", () => {
     const snap = await app.load(PartA, "s1");
     expect(snap.state.count).toBe(3);
     expect(snap.state.label).toBe("hello");
+
+    await dispose();
   });
 
   it("should reconstruct state from events across all partials", async () => {
-    const app = act().withState(PartA).withState(PartB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartA).withState(PartB)
+    );
 
     await app.do("increment", { stream: "s2", actor }, { by: 1 });
     await app.do("setLabel", { stream: "s2", actor }, { label: "first" });
@@ -60,6 +70,8 @@ describe("partial-state", () => {
     const snap = await app.load(PartA, "s2");
     expect(snap.state.count).toBe(3);
     expect(snap.state.label).toBe("second");
+
+    await dispose();
   });
 
   it("should throw on duplicate action across partials", () => {
@@ -77,8 +89,6 @@ describe("partial-state", () => {
   });
 
   it("should throw on conflicting custom patches for same event across partials", () => {
-    // Share the `Incremented` schema with PartA (ACT-401 reference
-    // identity); the test concern is *patch* divergence.
     const DupEvent = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ Incremented })
@@ -96,14 +106,15 @@ describe("partial-state", () => {
     const onIncremented = vi.fn().mockResolvedValue(undefined);
     const onLabeled = vi.fn().mockResolvedValue(undefined);
 
-    const app = act()
-      .withState(PartA)
-      .on("Incremented")
-      .do(onIncremented)
-      .withState(PartB)
-      .on("Labeled")
-      .do(onLabeled)
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(PartA)
+        .on("Incremented")
+        .do(onIncremented)
+        .withState(PartB)
+        .on("Labeled")
+        .do(onLabeled)
+    );
 
     await app.do("increment", { stream: "s3", actor }, { by: 1 });
     await app.do("setLabel", { stream: "s3", actor }, { label: "test" });
@@ -112,9 +123,11 @@ describe("partial-state", () => {
 
     expect(onIncremented).toHaveBeenCalled();
     expect(onLabeled).toHaveBeenCalled();
+
+    await dispose();
   });
 
-  it("should preserve snap from partial that defines it", () => {
+  it("should preserve snap from partial that defines it", async () => {
     const WithSnap = state({ Snapped: schema })
       .init(() => ({ count: 0, label: "" }))
       .emits({ X: ZodEmpty })
@@ -132,9 +145,11 @@ describe("partial-state", () => {
       .emit(() => ["Y", {}])
       .build();
 
-    // snap from first partial should survive merge
-    const app = act().withState(WithSnap).withState(WithoutSnap).build();
+    const { app, dispose } = await sandbox(
+      act().withState(WithSnap).withState(WithoutSnap)
+    );
     expect(app).toBeDefined();
+    await dispose();
   });
 
   it("should throw on conflicting snap strategies", () => {
@@ -170,14 +185,18 @@ describe("partial-state", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const app = act().withState(counter).build();
+    const { app, dispose } = await sandbox(act().withState(counter));
     await app.do("increment", { stream: "compat1", actor }, {});
     const snap = await app.load(counter, "compat1");
     expect(snap.state.count).toBe(1);
+
+    await dispose();
   });
 
   it("should load merged state by name", async () => {
-    const app = act().withState(PartA).withState(PartB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartA).withState(PartB)
+    );
 
     await app.do("increment", { stream: "n1", actor }, { by: 7 });
     await app.do("setLabel", { stream: "n1", actor }, { label: "byname" });
@@ -185,14 +204,17 @@ describe("partial-state", () => {
     const snap = await app.load("Thing", "n1");
     expect(snap.state.count).toBe(7);
     expect(snap.state.label).toBe("byname");
+
+    await dispose();
   });
 
   it("should throw when loading unknown state by name", async () => {
-    const app = act().withState(PartA).build();
+    const { app, dispose } = await sandbox(act().withState(PartA));
     // @ts-expect-error "Unknown" is not a registered state name
     await expect(app.load("Unknown", "s1")).rejects.toThrow(
       'State "Unknown" not found'
     );
+    await dispose();
   });
 
   it("should merge partial schemas with non-overlapping fields", async () => {
@@ -212,7 +234,9 @@ describe("partial-state", () => {
       .emit((a) => ["Named", { label: a.label }])
       .build();
 
-    const app = act().withState(PartialA).withState(PartialB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartialA).withState(PartialB)
+    );
 
     await app.do("setCount", { stream: "m1", actor }, { n: 42 });
     await app.do("setName", { stream: "m1", actor }, { label: "hello" });
@@ -220,6 +244,8 @@ describe("partial-state", () => {
     const snap = await app.load("Merged", "m1");
     expect(snap.state.count).toBe(42);
     expect(snap.state.label).toBe("hello");
+
+    await dispose();
   });
 
   it("should merge init functions from partials", async () => {
@@ -239,11 +265,15 @@ describe("partial-state", () => {
       .emit(() => ["B", {}])
       .build();
 
-    const app = act().withState(PartialA).withState(PartialB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartialA).withState(PartialB)
+    );
     await app.do("doA", { stream: "i1", actor }, {});
     const snap = await app.load("InitMerge", "i1");
     expect(snap.state.x).toBe(10);
     expect(snap.state.y).toBe("default");
+
+    await dispose();
   });
 
   it("should allow overlapping keys with same base type", () => {
@@ -265,7 +295,6 @@ describe("partial-state", () => {
       .emit(() => ["Y", {}])
       .build();
 
-    // Same base type (ZodString) - should not throw
     expect(() => act().withState(PartialA).withState(PartialB)).not.toThrow();
   });
 
@@ -308,7 +337,9 @@ describe("partial-state", () => {
       .emit((a) => ["Tagged", { tag: a.tag }])
       .build();
 
-    const app = act().withState(PartialA).withState(PartialB).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartialA).withState(PartialB)
+    );
     await app.do("add", { stream: "c1", actor }, { n: 1 });
     await app.do("tag", { stream: "c1", actor }, { tag: "a" });
     await app.do("add", { stream: "c1", actor }, { n: 2 });
@@ -317,6 +348,8 @@ describe("partial-state", () => {
     const snap = await app.load("Cross", "c1");
     expect(snap.state.total).toBe(3);
     expect(snap.state.tag).toBe("b");
+
+    await dispose();
   });
 
   it("should not conflict on optional wrapping of same base type", () => {
@@ -342,13 +375,9 @@ describe("partial-state", () => {
   });
 
   describe("patch merge priority (passthrough vs custom)", () => {
-    // Shared event schema for cross-partial reuse (ACT-401 reference
-    // identity). These tests assert *patch* resolution, not schema
-    // identity, so the event schema is hoisted to a single instance.
     const ListArchived = z.object({ reason: z.string() });
 
     it("should keep custom patch when existing is passthrough", async () => {
-      // AutoArchive partial defines a custom patch for ListArchived
       const AutoArchive = state({
         TodoList: z.object({ status: z.string() }),
       })
@@ -361,33 +390,31 @@ describe("partial-state", () => {
         .emit((a) => ["ListArchived", { reason: a.reason }])
         .build();
 
-      // Audit partial redeclares ListArchived with passthrough (just needs the event registered)
       const Audit = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
         .emits({ ListArchived })
-        // no .patch() — passthrough is the default
         .on({ auditList: z.object({ note: z.string() }) })
         .emit(() => ["ListArchived", { reason: "audit" }])
         .build();
 
-      // Custom registered first, passthrough second — custom must win
-      const app = act().withState(AutoArchive).withState(Audit).build();
+      const { app, dispose } = await sandbox(
+        act().withState(AutoArchive).withState(Audit)
+      );
       await app.do("archiveList", { stream: "t1", actor }, { reason: "done" });
       const snap = await app.load("TodoList", "t1");
       expect(snap.state.status).toBe("archived");
+
+      await dispose();
     });
 
     it("should keep custom patch when incoming is passthrough (reverse order)", async () => {
-      // Passthrough partial registered first
       const Audit = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
         .emits({ ListArchived })
-        // passthrough default
         .on({ auditList: z.object({ note: z.string() }) })
         .emit(() => ["ListArchived", { reason: "audit" }])
         .build();
 
-      // Custom patch registered second — must still win
       const AutoArchive = state({
         TodoList: z.object({ status: z.string() }),
       })
@@ -400,10 +427,14 @@ describe("partial-state", () => {
         .emit((a) => ["ListArchived", { reason: a.reason }])
         .build();
 
-      const app = act().withState(Audit).withState(AutoArchive).build();
+      const { app, dispose } = await sandbox(
+        act().withState(Audit).withState(AutoArchive)
+      );
       await app.do("archiveList", { stream: "t2", actor }, { reason: "done" });
       const snap = await app.load("TodoList", "t2");
       expect(snap.state.status).toBe("archived");
+
+      await dispose();
     });
 
     it("should allow same function reference (re-registration from another slice)", () => {
@@ -419,7 +450,7 @@ describe("partial-state", () => {
       const PartB = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
         .emits({ ListArchived })
-        .patch({ ListArchived: customPatch }) // same function reference
+        .patch({ ListArchived: customPatch })
         .on({ archiveB: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])
         .build();
@@ -442,7 +473,6 @@ describe("partial-state", () => {
         .emit("Done")
         .build();
 
-      // PartB is a partial of TodoList but declares "Shared" which belongs to Other
       const PartB = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
         .emits({ Shared: z.object({}) })
@@ -467,7 +497,7 @@ describe("partial-state", () => {
       const PartB = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
         .emits({ ListArchived })
-        .patch({ ListArchived: () => ({ status: "deleted" }) }) // different custom patch
+        .patch({ ListArchived: () => ({ status: "deleted" }) })
         .on({ archiveB: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])
         .build();
@@ -500,14 +530,15 @@ describe("partial-state", () => {
       .emit(() => ["Attempted", {}])
       .build();
 
-    const app = act()
-      .withState(PartWithInvariant)
-      .withState(PartWithGuardedAction)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartWithInvariant).withState(PartWithGuardedAction)
+    );
 
     await app.do("lock", { stream: "g1", actor }, {});
     await expect(
       app.do("attempt", { stream: "g1", actor }, {})
     ).rejects.toThrow("Must not be locked");
+
+    await dispose();
   });
 });

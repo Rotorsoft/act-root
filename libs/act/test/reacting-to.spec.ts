@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { act, dispose, state, store } from "../src/index.js";
+import { act, state } from "../src/index.js";
+import { sandbox } from "../src/test/index.js";
 
 /**
  * Tests for auto-injection of reactingTo in reaction handlers (#587).
@@ -10,14 +11,6 @@ import { act, dispose, state, store } from "../src/index.js";
  */
 describe("auto-inject reactingTo (#587)", () => {
   const actor = { id: "a", name: "a" };
-
-  beforeEach(async () => {
-    await store().seed();
-  });
-
-  afterAll(async () => {
-    await dispose()();
-  });
 
   it("should auto-inject reactingTo when handler omits it", async () => {
     const Source = state({ Source: z.object({ v: z.number() }) })
@@ -35,31 +28,31 @@ describe("auto-inject reactingTo (#587)", () => {
       .emit("Received")
       .build();
 
-    const app_ = act()
-      .withState(Source)
-      .withState(Sink)
-      .on("Triggered")
-      .do(async function onTriggered(event, _stream, app) {
-        // NOT passing reactingTo — framework should auto-inject it
-        await app.do(
-          "receive",
-          { stream: "sink-1", actor: { id: "sys", name: "system" } },
-          { val: event.data.val }
-        );
-      })
-      .to((event) => ({ target: `sink-${event.stream}` }))
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered")
+        .do(async function onTriggered(event, _stream, app) {
+          // NOT passing reactingTo — framework should auto-inject it
+          await app.do(
+            "receive",
+            { stream: "sink-1", actor: { id: "sys", name: "system" } },
+            { val: event.data.val }
+          );
+        })
+        .to((event) => ({ target: `sink-${event.stream}` }))
+    );
 
-    await app_.do("trigger", { stream: "src-1", actor }, { val: 42 });
-    await app_.correlate();
-    await app_.drain();
+    await app.do("trigger", { stream: "src-1", actor }, { val: 42 });
+    await app.correlate();
+    await app.drain();
 
-    // Verify the Received event on the sink stream has correct correlation
-    const srcEvents = await app_.query_array({
+    const srcEvents = await app.query_array({
       stream: "src-1",
       stream_exact: true,
     });
-    const sinkEvents = await app_.query_array({
+    const sinkEvents = await app.query_array({
       stream: "sink-1",
       stream_exact: true,
     });
@@ -68,16 +61,16 @@ describe("auto-inject reactingTo (#587)", () => {
     const receivedEvent = sinkEvents.find((e) => e.name === "Received")!;
 
     expect(receivedEvent).toBeDefined();
-    // Correlation chain should be maintained
     expect(receivedEvent.meta.correlation).toBe(
       triggeredEvent.meta.correlation
     );
-    // Causation should point back to the triggering event
     expect(receivedEvent.meta.causation.event).toEqual({
       id: triggeredEvent.id,
       name: "Triggered",
       stream: "src-1",
     });
+
+    await dispose();
   });
 
   it("should respect explicit reactingTo when provided", async () => {
@@ -98,40 +91,41 @@ describe("auto-inject reactingTo (#587)", () => {
 
     const customCorrelation = "custom-correlation-id";
 
-    const app_ = act()
-      .withState(Source)
-      .withState(Sink)
-      .on("Triggered2")
-      .do(async function onTriggered2(event, _stream, app) {
-        // Explicitly passing a custom reactingTo — should NOT be overridden
-        const fakeEvent = {
-          ...event,
-          meta: { correlation: customCorrelation, causation: {} },
-        };
-        await app.do(
-          "receive2",
-          { stream: "sink2-1", actor: { id: "sys", name: "system" } },
-          { val: event.data.val },
-          fakeEvent
-        );
-      })
-      .to((event) => ({ target: `sink2-${event.stream}` }))
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Source)
+        .withState(Sink)
+        .on("Triggered2")
+        .do(async function onTriggered2(event, _stream, app) {
+          const fakeEvent = {
+            ...event,
+            meta: { correlation: customCorrelation, causation: {} },
+          };
+          await app.do(
+            "receive2",
+            { stream: "sink2-1", actor: { id: "sys", name: "system" } },
+            { val: event.data.val },
+            fakeEvent
+          );
+        })
+        .to((event) => ({ target: `sink2-${event.stream}` }))
+    );
 
-    await app_.do("trigger2", { stream: "src2-1", actor }, { val: 99 });
-    await app_.correlate();
-    const drained = await app_.drain();
+    await app.do("trigger2", { stream: "src2-1", actor }, { val: 99 });
+    await app.correlate();
+    const drained = await app.drain();
     expect(drained.acked.length).toBeGreaterThan(0);
 
-    const sinkEvents = await app_.query_array({
+    const sinkEvents = await app.query_array({
       stream: "sink2-1",
       stream_exact: true,
     });
     const receivedEvent = sinkEvents.find((e) => e.name === "Received2")!;
 
     expect(receivedEvent).toBeDefined();
-    // Should use the explicitly provided correlation, not the auto-injected one
     expect(receivedEvent.meta.correlation).toBe(customCorrelation);
+
+    await dispose();
   });
 
   it("should propagate correlation across multi-step reaction chains", async () => {
@@ -158,45 +152,43 @@ describe("auto-inject reactingTo (#587)", () => {
       .emit("Completed")
       .build();
 
-    const app_ = act()
-      .withState(Step1)
-      .withState(Step2)
-      .withState(Step3)
-      // Step 1 → Step 2 (no explicit reactingTo)
-      .on("Started")
-      .do(async function onStarted(event, _stream, app) {
-        await app.do(
-          "forward",
-          { stream: "step2-1", actor: { id: "sys", name: "system" } },
-          { val: event.data.val }
-        );
-      })
-      .to(() => ({ target: "step2-1" }))
-      // Step 2 → Step 3 (no explicit reactingTo)
-      .on("Forwarded")
-      .do(async function onForwarded(event, _stream, app) {
-        await app.do(
-          "complete",
-          { stream: "step3-1", actor: { id: "sys", name: "system" } },
-          { val: event.data.val }
-        );
-      })
-      .to(() => ({ target: "step3-1" }))
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Step1)
+        .withState(Step2)
+        .withState(Step3)
+        .on("Started")
+        .do(async function onStarted(event, _stream, app) {
+          await app.do(
+            "forward",
+            { stream: "step2-1", actor: { id: "sys", name: "system" } },
+            { val: event.data.val }
+          );
+        })
+        .to(() => ({ target: "step2-1" }))
+        .on("Forwarded")
+        .do(async function onForwarded(event, _stream, app) {
+          await app.do(
+            "complete",
+            { stream: "step3-1", actor: { id: "sys", name: "system" } },
+            { val: event.data.val }
+          );
+        })
+        .to(() => ({ target: "step3-1" }))
+    );
 
-    await app_.do("start", { stream: "step1-1", actor }, { val: 7 });
+    await app.do("start", { stream: "step1-1", actor }, { val: 7 });
 
-    // Multiple correlate→drain passes to propagate through the chain
     for (let i = 0; i < 3; i++) {
-      await app_.correlate();
-      await app_.drain();
+      await app.correlate();
+      await app.drain();
     }
 
-    const step1Events = await app_.query_array({
+    const step1Events = await app.query_array({
       stream: "step1-1",
       stream_exact: true,
     });
-    const step3Events = await app_.query_array({
+    const step3Events = await app.query_array({
       stream: "step3-1",
       stream_exact: true,
     });
@@ -205,8 +197,9 @@ describe("auto-inject reactingTo (#587)", () => {
     const completedEvent = step3Events.find((e) => e.name === "Completed")!;
 
     expect(completedEvent).toBeDefined();
-    // The entire chain should share the same correlation ID
     expect(completedEvent.meta.correlation).toBe(startedEvent.meta.correlation);
+
+    await dispose();
   });
 
   it("should not affect load, query, and query_array on scoped app", async () => {
@@ -222,28 +215,33 @@ describe("auto-inject reactingTo (#587)", () => {
     let queryResult: any;
     let queryArrayResult: any;
 
-    const app_ = act()
-      .withState(Counter)
-      .on("Counted")
-      .do(async function onCounted(_event, _stream, app) {
-        // Verify all IAct methods work on the scoped proxy
-        loadResult = await app.load(Counter, "ctr-1");
-        queryResult = await app.query({ stream: "ctr-1", stream_exact: true });
-        queryArrayResult = await app.query_array({
-          stream: "ctr-1",
-          stream_exact: true,
-        });
-      })
-      .to(() => ({ target: "reaction-ctr" }))
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Counter)
+        .on("Counted")
+        .do(async function onCounted(_event, _stream, app) {
+          loadResult = await app.load(Counter, "ctr-1");
+          queryResult = await app.query({
+            stream: "ctr-1",
+            stream_exact: true,
+          });
+          queryArrayResult = await app.query_array({
+            stream: "ctr-1",
+            stream_exact: true,
+          });
+        })
+        .to(() => ({ target: "reaction-ctr" }))
+    );
 
-    await app_.do("count", { stream: "ctr-1", actor }, { n: 5 });
-    await app_.correlate();
-    await app_.drain();
+    await app.do("count", { stream: "ctr-1", actor }, { n: 5 });
+    await app.correlate();
+    await app.drain();
 
     expect(loadResult).toBeDefined();
     expect(loadResult.state.count).toBe(5);
     expect(queryResult.count).toBeGreaterThan(0);
     expect(queryArrayResult.length).toBeGreaterThan(0);
+
+    await dispose();
   });
 });

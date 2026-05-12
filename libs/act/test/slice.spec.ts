@@ -1,22 +1,8 @@
 import { z } from "zod";
-import {
-  act,
-  dispose,
-  projection,
-  slice,
-  state,
-  store,
-  ZodEmpty,
-} from "../src/index.js";
+import { act, projection, slice, state, ZodEmpty } from "../src/index.js";
+import { sandbox } from "../src/test/index.js";
 
 describe("slice", () => {
-  beforeEach(async () => {
-    await store().drop();
-  });
-
-  afterAll(async () => {
-    await dispose()();
-  });
   const schema = z.object({
     count: z.number(),
     label: z.string(),
@@ -44,7 +30,6 @@ describe("slice", () => {
 
   const actor = { id: "a", name: "a" };
 
-  // Use unique stream prefixes per test to avoid InMemoryStore collisions
   let streamId = 0;
   const nextStream = () => `slice-test-${++streamId}`;
 
@@ -108,7 +93,9 @@ describe("slice", () => {
       .do(onIncremented)
       .build();
 
-    const app = act().withSlice(ThingSlice).withState(PartB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(ThingSlice).withState(PartB)
+    );
 
     await app.do("increment", { stream, actor }, { by: 3 });
     await app.do("setLabel", { stream, actor }, { label: "hello" });
@@ -119,6 +106,8 @@ describe("slice", () => {
     expect(snap.state.count).toBe(3);
     expect(snap.state.label).toBe("hello");
     expect(onIncremented).toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should compose multiple slices into act", async () => {
@@ -134,7 +123,9 @@ describe("slice", () => {
 
     const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
-    const app = act().withSlice(SliceA).withSlice(SliceB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(SliceA).withSlice(SliceB)
+    );
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.do("setLabel", { stream, actor }, { label: "test" });
@@ -147,6 +138,8 @@ describe("slice", () => {
     const snap = await app.load("Thing", stream);
     expect(snap.state.count).toBe(1);
     expect(snap.state.label).toBe("test");
+
+    await dispose();
   });
 
   it("should merge same-name partial states across slices at act level", async () => {
@@ -171,7 +164,9 @@ describe("slice", () => {
     const SliceA = slice().withState(CountA).build();
     const SliceB = slice().withState(CountB).build();
 
-    const app = act().withSlice(SliceA).withSlice(SliceB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(SliceA).withSlice(SliceB)
+    );
 
     await app.do("add", { stream, actor }, { n: 5 });
     await app.do("tag", { stream, actor }, { tag: "merged" });
@@ -179,6 +174,8 @@ describe("slice", () => {
     const snap = await app.load("Counter", stream);
     expect(snap.state.total).toBe(5);
     expect(snap.state.tag).toBe("merged");
+
+    await dispose();
   });
 
   it("should detect duplicate actions across slices", () => {
@@ -231,15 +228,8 @@ describe("slice", () => {
     );
   });
 
-  // ACT-401: cross-slice event contract check via reference identity.
-  // Same-name state partials in different slices may redeclare the
-  // same event name (e.g. one slice produces, another reacts), but
-  // they MUST point at the same Zod schema instance. Different
-  // references = silent contract drift the type system can't see.
   describe("cross-slice event contract (ACT-401)", () => {
     it("allows same-name state partials that share the schema reference", () => {
-      // Shared schema constant in a real codebase — extracted to its
-      // own module and imported into every slice that declares it.
       const Counted = z.object({ n: z.number() });
 
       const CountA = state({ Counter: z.object({ total: z.number() }) })
@@ -252,7 +242,7 @@ describe("slice", () => {
 
       const CountB = state({ Counter: z.object({ tag: z.string() }) })
         .init(() => ({ tag: "" }))
-        .emits({ Counted }) // same reference — fine
+        .emits({ Counted })
         .build();
 
       const SliceA = slice().withState(CountA).build();
@@ -262,9 +252,6 @@ describe("slice", () => {
     });
 
     it("throws when same-name state partials use different schema references for the same event", () => {
-      // Two inline declarations — structurally identical, but
-      // different JS references. This is the silent-drift case the
-      // check catches at build time.
       const CountA = state({ Counter: z.object({ total: z.number() }) })
         .init(() => ({ total: 0 }))
         .emits({ Counted: z.object({ n: z.number() }) })
@@ -275,7 +262,7 @@ describe("slice", () => {
 
       const CountB = state({ Counter: z.object({ tag: z.string() }) })
         .init(() => ({ tag: "" }))
-        .emits({ Counted: z.object({ n: z.number() }) }) // structurally same, different ref
+        .emits({ Counted: z.object({ n: z.number() }) })
         .build();
 
       const SliceA = slice().withState(CountA).build();
@@ -297,7 +284,7 @@ describe("slice", () => {
 
       const B = state({ Thing: z.object({ b: z.number() }) })
         .init(() => ({ b: 0 }))
-        .emits({ Pinged: z.object({ at: z.number() }) }) // different ref
+        .emits({ Pinged: z.object({ at: z.number() }) })
         .build();
 
       const SliceA = slice().withState(A).build();
@@ -309,9 +296,6 @@ describe("slice", () => {
     });
 
     it("throws on structurally-divergent schemas with the same name", () => {
-      // Schemas that aren't even structurally compatible. The check
-      // doesn't compare shape — it just enforces reference identity.
-      // Structural divergence is caught as a side effect.
       const A = state({ Order: z.object({ id: z.string() }) })
         .init(() => ({ id: "" }))
         .emits({ OrderPaid: z.object({ amount: z.number().positive() }) })
@@ -322,7 +306,7 @@ describe("slice", () => {
 
       const B = state({ Order: z.object({ note: z.string() }) })
         .init(() => ({ note: "" }))
-        .emits({ OrderPaid: z.object({ amount: z.string() }) }) // diverged: string vs number
+        .emits({ OrderPaid: z.object({ amount: z.string() }) })
         .build();
 
       const SliceA = slice().withState(A).build();
@@ -356,20 +340,22 @@ describe("slice", () => {
     const CounterSlice = slice().withState(Counter).build();
     const LoggerSlice = slice().withState(Logger).build();
 
-    // Cross-slice reaction: react to Counter event at act level
     const crossHandler = vi.fn().mockResolvedValue(undefined);
-    const app = act()
-      .withSlice(CounterSlice)
-      .withSlice(LoggerSlice)
-      .on("Counted")
-      .do(crossHandler)
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withSlice(CounterSlice)
+        .withSlice(LoggerSlice)
+        .on("Counted")
+        .do(crossHandler)
+    );
 
     await app.do("count", { stream, actor }, { n: 1 });
     await app.correlate();
     await app.drain();
 
     expect(crossHandler).toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should still support act().withState(State) (backward compat)", async () => {
@@ -383,10 +369,12 @@ describe("slice", () => {
       .emit(() => ["incremented", {}])
       .build();
 
-    const app = act().withState(counter).build();
+    const { app, dispose } = await sandbox(act().withState(counter));
     await app.do("increment", { stream, actor }, {});
     const snap = await app.load(counter, stream);
     expect(snap.state.count).toBe(1);
+
+    await dispose();
   });
 
   it("should support mixing slices and direct states in act()", async () => {
@@ -411,8 +399,9 @@ describe("slice", () => {
 
     const CounterSlice = slice().withState(Counter).build();
 
-    // Mix: slice + direct state
-    const app = act().withSlice(CounterSlice).withState(Logger).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(CounterSlice).withState(Logger)
+    );
 
     await app.do("count", { stream: counterStream, actor }, { n: 5 });
     await app.do("log", { stream: logStream, actor }, {});
@@ -421,11 +410,12 @@ describe("slice", () => {
     const logSnap = await app.load(Logger, logStream);
     expect(counterSnap.state.count).toBe(5);
     expect(logSnap.state.entries).toBe(1);
+
+    await dispose();
   });
 
   it("should expose .events on slice builder for AsCommitted typing", () => {
     const b = slice().withState(PartA);
-    // The events property should exist and have the event register
     expect(b.events).toBeDefined();
     expect(b.events.Incremented).toBeDefined();
     expect(b.events.Incremented.schema).toBeDefined();
@@ -436,7 +426,6 @@ describe("slice", () => {
     const onIncremented = vi.fn().mockResolvedValue(undefined);
     const onLabeled = vi.fn().mockResolvedValue(undefined);
 
-    // SliceA includes both PartA and PartB so its handler can dispatch setLabel
     const SliceA = slice()
       .withState(PartA)
       .withState(PartB)
@@ -444,10 +433,11 @@ describe("slice", () => {
       .do(onIncremented)
       .build();
 
-    // SliceB also includes PartB (shared state) — no conflict at composition
     const SliceB = slice().withState(PartB).on("Labeled").do(onLabeled).build();
 
-    const app = act().withSlice(SliceA).withSlice(SliceB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(SliceA).withSlice(SliceB)
+    );
 
     await app.do("increment", { stream, actor }, { by: 7 });
     await app.do("setLabel", { stream, actor }, { label: "shared" });
@@ -460,24 +450,27 @@ describe("slice", () => {
     const snap = await app.load("Thing", stream);
     expect(snap.state.count).toBe(7);
     expect(snap.state.label).toBe("shared");
+
+    await dispose();
   });
 
   it("should merge multiple partials within a single slice", async () => {
     const stream = nextStream();
     const s = slice().withState(PartA).withState(PartB).build();
 
-    expect(s.states.size).toBe(1); // both are "Thing", merged
+    expect(s.states.size).toBe(1);
     expect(s.events.Incremented).toBeDefined();
     expect(s.events.Labeled).toBeDefined();
 
-    // Compose into act and verify it works
-    const app = act().withSlice(s).build();
+    const { app, dispose } = await sandbox(act().withSlice(s));
     await app.do("increment", { stream, actor }, { by: 2 });
     await app.do("setLabel", { stream, actor }, { label: "merged" });
 
     const snap = await app.load("Thing", stream);
     expect(snap.state.count).toBe(2);
     expect(snap.state.label).toBe("merged");
+
+    await dispose();
   });
 
   // --- Embedded projection tests ---
@@ -510,13 +503,17 @@ describe("slice", () => {
       .build();
 
     const ThingSlice = slice().withState(PartA).withProjection(proj).build();
-    const app = act().withSlice(ThingSlice).withState(PartB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(ThingSlice).withState(PartB)
+    );
 
     await app.do("increment", { stream, actor }, { by: 7 });
     await app.correlate();
     await app.drain();
 
     expect(projected).toHaveBeenCalledWith({ by: 7 });
+
+    await dispose();
   });
 
   it("should fire both slice reactions and embedded projection handlers", async () => {
@@ -537,7 +534,7 @@ describe("slice", () => {
       .do(sliceHandler)
       .build();
 
-    const app = act().withSlice(ThingSlice).build();
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
@@ -546,6 +543,8 @@ describe("slice", () => {
 
     expect(sliceHandler).toHaveBeenCalled();
     expect(projHandler).toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should not pass dispatcher to embedded projection handlers", async () => {
@@ -564,21 +563,21 @@ describe("slice", () => {
       .build();
 
     const ThingSlice = slice().withState(PartA).withProjection(proj).build();
-    const app = act().withSlice(ThingSlice).build();
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.correlate();
     await app.drain();
 
-    // Projection handler received correct args
     expect(receivedEvent.data).toEqual({ by: 1 });
     expect(receivedStream).toBe("counters");
-    // The handler's declared parameter count is 2 (no dispatcher)
     const [reaction] = [...proj.events.Incremented.reactions.values()];
     expect(reaction.handler.length).toBe(2);
+
+    await dispose();
   });
 
-  it("should deduplicate names when projection and slice have same handler name", () => {
+  it("should deduplicate names when projection and slice have same handler name", async () => {
     const Incremented = z.object({ by: z.number() });
     const projHandler = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(projHandler, "name", { value: "myHandler" });
@@ -587,7 +586,6 @@ describe("slice", () => {
       .do(projHandler)
       .build();
 
-    // Slice reaction with same handler name
     const sliceHandler = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(sliceHandler, "name", { value: "myHandler" });
     const ThingSlice = slice()
@@ -597,13 +595,14 @@ describe("slice", () => {
       .do(sliceHandler)
       .build();
 
-    const app = act().withSlice(ThingSlice).build();
+    const { app, dispose } = await sandbox(act().withSlice(ThingSlice));
     const events = app.registry.events as Record<string, any>;
 
-    // Both should be registered — projection handler deduped with "_p" suffix
     const names = [...events.Incremented.reactions.keys()];
     expect(names).toContain("myHandler");
     expect(names).toContain("myHandler_p");
+
+    await dispose();
   });
 
   it("should compose multiple slices with embedded projections", async () => {
@@ -615,13 +614,14 @@ describe("slice", () => {
     const Labeled = z.object({ label: z.string() });
 
     const ProjA = projection("counters").on({ Incremented }).do(projA).build();
-
     const ProjB = projection("labels").on({ Labeled }).do(projB).build();
 
     const SliceA = slice().withState(PartA).withProjection(ProjA).build();
     const SliceB = slice().withState(PartB).withProjection(ProjB).build();
 
-    const app = act().withSlice(SliceA).withSlice(SliceB).build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(SliceA).withSlice(SliceB)
+    );
 
     await app.do("increment", { stream, actor }, { by: 1 });
     await app.do("setLabel", { stream, actor }, { label: "test" });
@@ -630,6 +630,8 @@ describe("slice", () => {
 
     expect(projA).toHaveBeenCalled();
     expect(projB).toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should still support standalone act().withProjection(projection) (backward compat)", async () => {
@@ -642,18 +644,19 @@ describe("slice", () => {
       .do(handler)
       .build();
 
-    const app = act().withState(PartA).withProjection(StandaloneProj).build();
+    const { app, dispose } = await sandbox(
+      act().withState(PartA).withProjection(StandaloneProj)
+    );
 
     await app.do("increment", { stream, actor }, { by: 5 });
     await app.correlate();
     await app.drain();
 
     expect(handler).toHaveBeenCalled();
+
+    await dispose();
   });
 
-  // Compile-time evidence that slice() preserves type narrowing for
-  // event names, reaction handler signatures (event/stream/app types),
-  // and resolver callbacks. Inner functions never run — TS checks them.
   /* eslint-disable @typescript-eslint/no-unused-vars, @typescript-eslint/require-await -- type-only narrowing checks */
   describe("type narrowing", () => {
     it("narrows event name + handler args in .on().do()", () => {
@@ -662,7 +665,6 @@ describe("slice", () => {
           .withState(PartA)
           .on("Incremented")
           .do(async function react(event, _stream, _app) {
-            // event.data narrowed to { by: number }
             const _by: number = event.data.by;
             expect(_by).toBeDefined();
           })
@@ -687,7 +689,6 @@ describe("slice", () => {
           .on("Incremented")
           .do(async function react() {})
           .to((event) => {
-            // event.data narrowed to { by: number }
             const _by: number = event.data.by;
             return { target: `t-${_by}` };
           })

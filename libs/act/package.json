@@ -39,6 +39,11 @@
       "types": "./dist/@types/types/index.d.ts",
       "import": "./dist/types/index.js",
       "require": "./dist/types/index.cjs"
+    },
+    "./test": {
+      "types": "./dist/@types/test/index.d.ts",
+      "import": "./dist/test/index.js",
+      "require": "./dist/test/index.cjs"
     }
   },
   "engines": {

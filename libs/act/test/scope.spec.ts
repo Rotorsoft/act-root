@@ -2,9 +2,8 @@
 // through AsyncLocalStorage so internal `store()`/`cache()` resolve to the
 // per-Act ports transparently. Adapters are unchanged.
 import { z } from "zod";
-import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
-import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, dispose, projection, state, store } from "../src/index.js";
+import { fixture, sandbox } from "../src/test/index.js";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
@@ -17,136 +16,74 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .build();
 
 const actor = { id: "a", name: "a" };
+const counterBuilder = act().withState(Counter);
+
+const counterTest = fixture(counterBuilder);
 
 describe("scoped ports (ACT-501)", () => {
-  beforeEach(async () => {
-    await store().drop();
-  });
-
-  afterAll(async () => {
-    await dispose()();
-  });
-
   it("two Acts with their own scoped ports — no cross-talk", async () => {
-    const storeA = new InMemoryStore();
-    const storeB = new InMemoryStore();
-    const cacheA = new InMemoryCache();
-    const cacheB = new InMemoryCache();
-    await storeA.seed();
-    await storeB.seed();
+    const a = await sandbox(counterBuilder);
+    const b = await sandbox(counterBuilder);
 
-    const tenantA = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeA, cache: cacheA } });
-    const tenantB = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeB, cache: cacheB } });
+    await a.app.do("increment", { stream: "c-1", actor }, { by: 10 });
+    await b.app.do("increment", { stream: "c-1", actor }, { by: 3 });
 
-    await tenantA.do("increment", { stream: "c-1", actor }, { by: 10 });
-    await tenantB.do("increment", { stream: "c-1", actor }, { by: 3 });
+    expect((await a.app.load("Counter", "c-1")).state.count).toBe(10);
+    expect((await b.app.load("Counter", "c-1")).state.count).toBe(3);
 
-    const a = await tenantA.load("Counter", "c-1");
-    const b = await tenantB.load("Counter", "c-1");
-
-    expect(a.state.count).toBe(10);
-    expect(b.state.count).toBe(3);
-
-    const eventsA = await tenantA.query_array({ stream: "c-1" });
-    const eventsB = await tenantB.query_array({ stream: "c-1" });
+    const eventsA = await a.app.query_array({ stream: "c-1" });
+    const eventsB = await b.app.query_array({ stream: "c-1" });
     expect(eventsA).toHaveLength(1);
     expect(eventsB).toHaveLength(1);
     expect((eventsA[0].data as { by: number }).by).toBe(10);
     expect((eventsB[0].data as { by: number }).by).toBe(3);
 
-    await storeA.dispose();
-    await storeB.dispose();
-    await cacheA.dispose();
-    await cacheB.dispose();
-  });
-
-  it("default Act uses the singletons (backward compat)", async () => {
-    const app = act().withState(Counter).build();
-    await app.do("increment", { stream: "c-1", actor }, { by: 5 });
-
-    const snap = await app.load("Counter", "c-1");
-    expect(snap.state.count).toBe(5);
-
-    const events: unknown[] = [];
-    await store().query((e) => events.push(e), { stream: "c-1" });
-    expect(events).toHaveLength(1);
+    await a.dispose();
+    await b.dispose();
   });
 
   it("scoped cache keeps per-Act snapshots isolated", async () => {
-    const storeA = new InMemoryStore();
-    const storeB = new InMemoryStore();
-    const cacheA = new InMemoryCache();
-    const cacheB = new InMemoryCache();
-    await storeA.seed();
-    await storeB.seed();
+    const a = await sandbox(counterBuilder);
+    const b = await sandbox(counterBuilder);
 
-    const a = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeA, cache: cacheA } });
-    const b = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeB, cache: cacheB } });
+    await a.app.do("increment", { stream: "c-1", actor }, { by: 100 });
+    await b.app.do("increment", { stream: "c-1", actor }, { by: 7 });
 
-    await a.do("increment", { stream: "c-1", actor }, { by: 100 });
-    await b.do("increment", { stream: "c-1", actor }, { by: 7 });
+    expect((await a.app.load("Counter", "c-1")).state.count).toBe(100);
+    expect((await b.app.load("Counter", "c-1")).state.count).toBe(7);
 
-    expect((await a.load("Counter", "c-1")).state.count).toBe(100);
-    expect((await b.load("Counter", "c-1")).state.count).toBe(7);
-
-    await storeA.dispose();
-    await storeB.dispose();
-    await cacheA.dispose();
-    await cacheB.dispose();
+    await a.dispose();
+    await b.dispose();
   });
 
-  it("invalidates the scoped cache on concurrency error", async () => {
-    const tenantStore = new InMemoryStore();
-    const tenantCache = new InMemoryCache();
-    await tenantStore.seed();
-    const tenant = act()
-      .withState(Counter)
-      .build({ scoped: { store: tenantStore, cache: tenantCache } });
+  counterTest(
+    "invalidates the scoped cache on concurrency error",
+    async ({ app }) => {
+      await app.do("increment", { stream: "race-1", actor }, { by: 1 });
 
-    await tenant.do("increment", { stream: "race-1", actor }, { by: 1 });
+      // Force a concurrency conflict via stale expectedVersion.
+      await expect(
+        app.do(
+          "increment",
+          { stream: "race-1", actor, expectedVersion: -1 },
+          { by: 99 }
+        )
+      ).rejects.toThrow();
 
-    // Force a concurrency conflict via stale expectedVersion.
-    await expect(
-      tenant.do(
-        "increment",
-        { stream: "race-1", actor, expectedVersion: -1 },
-        { by: 99 }
-      )
-    ).rejects.toThrow();
-
-    const after = await tenant.load("Counter", "race-1");
-    expect(after.state.count).toBe(1);
-
-    await tenantStore.dispose();
-    await tenantCache.dispose();
-  });
+      // Cache invalidated cleanly — subsequent load returns post-commit
+      // state.
+      const after = await app.load("Counter", "race-1");
+      expect(after.state.count).toBe(1);
+    }
+  );
 
   it("interleaved concurrent calls keep their own scopes", async () => {
     // ALS guarantees: a Promise spawned inside scoped.run() keeps its
     // bag across every await it encounters, regardless of what other
     // scopes are running concurrently. This is the property that makes
     // the design useful for multi-tenant work in one process.
-    const storeA = new InMemoryStore();
-    const storeB = new InMemoryStore();
-    const cacheA = new InMemoryCache();
-    const cacheB = new InMemoryCache();
-    await storeA.seed();
-    await storeB.seed();
-
-    const tenantA = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeA, cache: cacheA } });
-    const tenantB = act()
-      .withState(Counter)
-      .build({ scoped: { store: storeB, cache: cacheB } });
+    const a = await sandbox(counterBuilder);
+    const b = await sandbox(counterBuilder);
 
     // Fire interleaved actions across both tenants in flight at once,
     // using a unique stream per call so the test isolates ALS context
@@ -154,38 +91,32 @@ describe("scoped ports (ACT-501)", () => {
     // stream.
     const work: Promise<unknown>[] = [];
     for (let i = 0; i < 50; i++) {
-      work.push(
-        tenantA.do("increment", { stream: `a-${i}`, actor }, { by: 1 })
-      );
-      work.push(
-        tenantB.do("increment", { stream: `b-${i}`, actor }, { by: 2 })
-      );
+      work.push(a.app.do("increment", { stream: `a-${i}`, actor }, { by: 1 }));
+      work.push(b.app.do("increment", { stream: `b-${i}`, actor }, { by: 2 }));
     }
     await Promise.all(work);
 
     let sumA = 0;
     let sumB = 0;
     for (let i = 0; i < 50; i++) {
-      sumA += (await tenantA.load("Counter", `a-${i}`)).state.count;
-      sumB += (await tenantB.load("Counter", `b-${i}`)).state.count;
+      sumA += (await a.app.load("Counter", `a-${i}`)).state.count;
+      sumB += (await b.app.load("Counter", `b-${i}`)).state.count;
     }
     expect(sumA).toBe(50);
     expect(sumB).toBe(100);
 
-    // Cross-leak check: tenantA's streams must NOT show up in tenantB's
-    // store, and vice versa. If ALS leaked, the wrong store would be
-    // committed against.
+    // Cross-leak check: a's streams must NOT show up in b's store, and
+    // vice versa. If ALS leaked, the wrong store would be committed
+    // against.
     expect(
-      (await tenantA.query_array({ stream: "b-0", stream_exact: true })).length
+      (await a.app.query_array({ stream: "b-0", stream_exact: true })).length
     ).toBe(0);
     expect(
-      (await tenantB.query_array({ stream: "a-0", stream_exact: true })).length
+      (await b.app.query_array({ stream: "a-0", stream_exact: true })).length
     ).toBe(0);
 
-    await storeA.dispose();
-    await storeB.dispose();
-    await cacheA.dispose();
-    await cacheB.dispose();
+    await a.dispose();
+    await b.dispose();
   });
 
   it("reactions inside a scoped Act commit to the scoped store", async () => {
@@ -208,31 +139,26 @@ describe("scoped ports (ACT-501)", () => {
       .emit((a) => ["Mirrored", { n: a.n }])
       .build();
 
-    const tenantStore = new InMemoryStore();
-    const tenantCache = new InMemoryCache();
-    await tenantStore.seed();
-
-    const tenant = act()
+    const reflectBuilder = act()
       .withState(Source)
       .withState(Mirror)
       .on("Sourced")
-      .do(async function reflect(event, _stream, app) {
-        await app.do(
+      .do(async function reflect(event, _stream, a) {
+        await a.do(
           "mirror",
           { stream: "mirror-1", actor },
           { n: event.data.n }
         );
       })
-      .to(() => ({ target: "mirror-1" }))
-      .build({ scoped: { store: tenantStore, cache: tenantCache } });
+      .to(() => ({ target: "mirror-1" }));
 
-    await tenant.do("source", { stream: "source-1", actor }, { n: 7 });
-    await tenant.correlate();
-    await tenant.drain();
+    const { app, dispose } = await sandbox(reflectBuilder);
 
-    // Both the source AND the mirror event must live in the scoped store
-    // — never in the singleton.
-    const mirror = await tenant.load("Mirror", "mirror-1");
+    await app.do("source", { stream: "source-1", actor }, { n: 7 });
+    await app.correlate();
+    await app.drain();
+
+    const mirror = await app.load("Mirror", "mirror-1");
     expect(mirror.state.n).toBe(7);
 
     // The singleton store stays empty for these streams.
@@ -242,8 +168,7 @@ describe("scoped ports (ACT-501)", () => {
     });
     expect(singletonEvents).toHaveLength(0);
 
-    await tenantStore.dispose();
-    await tenantCache.dispose();
+    await dispose();
   });
 
   it("settle() preserves the scope across the setTimeout boundary", async () => {
@@ -267,38 +192,33 @@ describe("scoped ports (ACT-501)", () => {
       .emit((a) => ["Mirrored", { n: a.n }])
       .build();
 
-    const tenantStore = new InMemoryStore();
-    const tenantCache = new InMemoryCache();
-    await tenantStore.seed();
-
-    const tenant = act()
+    const settleBuilder = act()
       .withState(Source)
       .withState(Mirror)
       .on("Sourced")
-      .do(async function reflect(event, _stream, app) {
-        await app.do(
+      .do(async function reflectSettle(event, _stream, a) {
+        await a.do(
           "mirror",
           { stream: "mirror-1", actor },
           { n: event.data.n }
         );
       })
-      .to(() => ({ target: "mirror-1" }))
-      .build({ scoped: { store: tenantStore, cache: tenantCache } });
+      .to(() => ({ target: "mirror-1" }));
+
+    const { app, dispose } = await sandbox(settleBuilder);
 
     const settled = new Promise<void>((resolve) =>
-      tenant.on("settled", () => resolve())
+      app.on("settled", () => resolve())
     );
 
-    await tenant.do("source", { stream: "source-1", actor }, { n: 11 });
-    tenant.settle({ debounceMs: 0 });
+    await app.do("source", { stream: "source-1", actor }, { n: 11 });
+    app.settle({ debounceMs: 0 });
     await settled;
 
-    const mirror = await tenant.load("Mirror", "mirror-1");
+    const mirror = await app.load("Mirror", "mirror-1");
     expect(mirror.state.n).toBe(11);
 
-    tenant.stop_settling();
-    await tenantStore.dispose();
-    await tenantCache.dispose();
+    await dispose();
   });
 
   it("one builder, N tenants — build() is reusable", async () => {
@@ -325,16 +245,13 @@ describe("scoped ports (ACT-501)", () => {
       tenantBuilder.events.Incremented?.reactions.size ?? 0;
 
     const tenants = ["t1", "t2", "t3"];
-    const apps = new Map<string, ReturnType<typeof tenantBuilder.build>>();
-    const stores: InMemoryStore[] = [];
-    const caches: InMemoryCache[] = [];
+    type TenantApp = ReturnType<typeof tenantBuilder.build>;
+    const ctxs = new Map<
+      string,
+      Awaited<ReturnType<typeof sandbox<TenantApp>>>
+    >();
     for (const t of tenants) {
-      const s = new InMemoryStore();
-      const c = new InMemoryCache();
-      await s.seed();
-      stores.push(s);
-      caches.push(c);
-      apps.set(t, tenantBuilder.build({ scoped: { store: s, cache: c } }));
+      ctxs.set(t, await sandbox(tenantBuilder));
     }
 
     // No reaction accumulation after N builds.
@@ -346,15 +263,15 @@ describe("scoped ports (ACT-501)", () => {
     }
 
     // Each tenant works against its own ports.
-    for (const [t, app] of apps) {
-      await app.do(
+    for (const [t, ctx] of ctxs) {
+      await ctx.app.do(
         "increment",
         { stream: `${t}-counter`, actor },
         { by: tenants.indexOf(t) + 1 }
       );
-      await app.correlate();
-      await app.drain();
-      const snap = await app.load("Counter", `${t}-counter`);
+      await ctx.app.correlate();
+      await ctx.app.drain();
+      const snap = await ctx.app.load("Counter", `${t}-counter`);
       expect(snap.state.count).toBe(tenants.indexOf(t) + 1);
     }
 
@@ -362,7 +279,31 @@ describe("scoped ports (ACT-501)", () => {
     // merged-once reaction is what's running (not a duplicated stack).
     expect(invocations).toBe(tenants.length);
 
-    for (const s of stores) await s.dispose();
-    for (const c of caches) await c.dispose();
+    for (const ctx of ctxs.values()) await ctx.dispose();
+  });
+});
+
+describe("ACT-501 singleton backward compat", () => {
+  // Intentionally touches the singleton — verifies the unscoped path
+  // still routes through `store()` / `cache()` and that the
+  // `store(adapter)` injection flow remains valid for existing apps.
+  beforeEach(async () => {
+    await store().drop();
+  });
+
+  afterAll(async () => {
+    await dispose()();
+  });
+
+  it("default Act uses the singletons", async () => {
+    const app = act().withState(Counter).build();
+    await app.do("increment", { stream: "c-1", actor }, { by: 5 });
+
+    const snap = await app.load("Counter", "c-1");
+    expect(snap.state.count).toBe(5);
+
+    const events: unknown[] = [];
+    await store().query((e) => events.push(e), { stream: "c-1" });
+    expect(events).toHaveLength(1);
   });
 });

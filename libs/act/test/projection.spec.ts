@@ -1,15 +1,8 @@
 import { z } from "zod";
-import { act, dispose, projection, slice, state, store } from "../src/index.js";
+import { act, projection, slice, state } from "../src/index.js";
+import { sandbox } from "../src/test/index.js";
 
 describe("projection", () => {
-  beforeEach(async () => {
-    await store().drop();
-  });
-
-  afterAll(async () => {
-    await dispose()();
-  });
-
   const actor = { id: "a", name: "a" };
   let streamId = 0;
   const nextStream = () => `proj-test-${++streamId}`;
@@ -55,7 +48,6 @@ describe("projection", () => {
       .build();
 
     const [reaction] = [...p.events.Incremented.reactions.values()];
-    // _this_ is a function resolver
     expect(typeof reaction.resolver).toBe("function");
   });
 
@@ -113,7 +105,6 @@ describe("projection", () => {
     expect(p.events.Incremented.reactions.size).toBe(1);
     expect(p.events.Labeled.reactions.size).toBe(1);
 
-    // Both should inherit the default target
     for (const event of ["Incremented", "Labeled"] as const) {
       const [reaction] = [...p.events[event].reactions.values()];
       expect(reaction.resolver).toEqual({ target: "read-model" });
@@ -132,16 +123,17 @@ describe("projection", () => {
       })
       .build();
 
-    const app_ = act()
-      .withState(Counter)
-      .withProjection(CounterProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(CounterProjection)
+    );
 
-    await app_.do("increment", { stream, actor }, { by: 5 });
-    await app_.correlate();
-    await app_.drain();
+    await app.do("increment", { stream, actor }, { by: 5 });
+    await app.correlate();
+    await app.drain();
 
     expect(projected).toHaveBeenCalledWith({ by: 5 });
+
+    await dispose();
   });
 
   it("should merge projection into act() alongside slices", async () => {
@@ -160,18 +152,19 @@ describe("projection", () => {
       .do(projHandler)
       .build();
 
-    const app_ = act()
-      .withSlice(CounterSlice)
-      .withProjection(CounterProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withSlice(CounterSlice).withProjection(CounterProjection)
+    );
 
-    await app_.do("increment", { stream, actor }, { by: 3 });
-    await app_.correlate();
-    await app_.drain();
-    await app_.drain();
+    await app.do("increment", { stream, actor }, { by: 3 });
+    await app.correlate();
+    await app.drain();
+    await app.drain();
 
     expect(sliceHandler).toHaveBeenCalled();
     expect(projHandler).toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should register multiple handlers for the same event", () => {
@@ -190,7 +183,7 @@ describe("projection", () => {
     expect(names).toContain("second");
   });
 
-  it("should reject projection with events not in registered states", () => {
+  it("should reject projection with events not in registered states", async () => {
     const handler = vi.fn().mockResolvedValue(undefined);
     const ExternalEvent = z.object({ source: z.string() });
 
@@ -199,17 +192,19 @@ describe("projection", () => {
       .do(handler)
       .build();
 
-    // Projection events must be a subset of app's state events
-    const app_ = act()
-      .withState(Counter)
-      // @ts-expect-error - ExternalEvent is not in Counter's events
-      .withProjection(ExternalProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act()
+        .withState(Counter)
+        // @ts-expect-error - ExternalEvent is not in Counter's events
+        .withProjection(ExternalProjection)
+    );
 
     // Runtime still works (constraint is compile-time only)
-    const events = app_.registry.events as Record<string, any>;
+    const events = app.registry.events as Record<string, any>;
     expect(events.ExternalEvent).toBeDefined();
     expect(events.ExternalEvent.reactions.size).toBe(1);
+
+    await dispose();
   });
 
   it("should throw when .on() receives multiple keys", () => {
@@ -278,19 +273,16 @@ describe("projection", () => {
       .batch(batchFn)
       .build();
 
-    const app_ = act()
-      .withState(Counter)
-      .withProjection(BatchProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(BatchProjection)
+    );
 
-    // Emit multiple events
-    await app_.do("increment", { stream, actor }, { by: 1 });
-    await app_.do("increment", { stream, actor }, { by: 2 });
-    await app_.do("increment", { stream, actor }, { by: 3 });
-    await app_.correlate();
-    await app_.drain({ eventLimit: 100 });
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.do("increment", { stream, actor }, { by: 3 });
+    await app.correlate();
+    await app.drain({ eventLimit: 100 });
 
-    // Batch handler called once with all events
     expect(batchFn).toHaveBeenCalledTimes(1);
     const [events, target] = batchFn.mock.calls[0];
     expect(target).toBe("batch-proj");
@@ -299,8 +291,9 @@ describe("projection", () => {
     expect(events[1].data).toEqual({ by: 2 });
     expect(events[2].data).toEqual({ by: 3 });
 
-    // Single handler NOT called (batch takes over)
     expect(singleHandler).not.toHaveBeenCalled();
+
+    await dispose();
   });
 
   it("should call batch handler even for a single event", async () => {
@@ -313,19 +306,20 @@ describe("projection", () => {
       .batch(batchFn)
       .build();
 
-    const app_ = act()
-      .withState(Counter)
-      .withProjection(BatchProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(BatchProjection)
+    );
 
-    await app_.do("increment", { stream, actor }, { by: 7 });
-    await app_.correlate();
-    await app_.drain({ eventLimit: 100 });
+    await app.do("increment", { stream, actor }, { by: 7 });
+    await app.correlate();
+    await app.drain({ eventLimit: 100 });
 
     expect(batchFn).toHaveBeenCalledTimes(1);
     const [events] = batchFn.mock.calls[0];
     expect(events).toHaveLength(1);
     expect(events[0].data).toEqual({ by: 7 });
+
+    await dispose();
   });
 
   it("should throw when two projections register batch handlers for the same target", () => {
@@ -370,7 +364,6 @@ describe("projection", () => {
       .withProjection(ProjB)
       .build();
 
-    // Slice's deferred projection is merged at build(), where collision is detected
     expect(() =>
       act().withSlice(SliceWithProjB).withProjection(ProjA).build()
     ).toThrow(/dup-target-2/);
@@ -386,18 +379,18 @@ describe("projection", () => {
       .batch(batchFn)
       .build();
 
-    const app_ = act()
-      .withState(Counter)
-      .withProjection(BatchProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(BatchProjection)
+    );
 
-    await app_.do("increment", { stream, actor }, { by: 1 });
-    await app_.correlate();
-    const result = await app_.drain({ eventLimit: 100 });
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.correlate();
+    const result = await app.drain({ eventLimit: 100 });
 
-    // Batch failed — nothing acked, error reported
     expect(result.acked).toHaveLength(0);
     expect(batchFn).toHaveBeenCalledTimes(1);
+
+    await dispose();
   });
 
   it("should block batch projection after max retries", async () => {
@@ -411,26 +404,24 @@ describe("projection", () => {
       .build();
 
     const blocked: Array<{ stream: string; error: string }> = [];
-    const app_ = act()
-      .withState(Counter)
-      .withProjection(BatchProjection)
-      .build();
-    app_.on("blocked", (b) => blocked.push(...b));
+    const { app, dispose } = await sandbox(
+      act().withState(Counter).withProjection(BatchProjection)
+    );
+    app.on("blocked", (b) => blocked.push(...b));
 
-    await app_.do("increment", { stream, actor }, { by: 1 });
-    await app_.correlate();
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.correlate();
 
-    // Drain with very short lease so retries happen immediately
     // retry increments on each claim: 0→fail, 1→fail, 2→fail, 3→block
     for (let i = 0; i < 5; i++) {
-      await app_.drain({ eventLimit: 100, leaseMillis: 1 });
-      // Wait for lease to expire between retries
+      await app.drain({ eventLimit: 100, leaseMillis: 1 });
       await new Promise((r) => setTimeout(r, 5));
     }
 
-    // Should have blocked after retries exhausted
     expect(blocked.length).toBeGreaterThanOrEqual(1);
     expect(blocked[0].error).toBe("permanent failure");
+
+    await dispose();
   });
 
   it("should use batch handler from projection embedded in slice", async () => {
@@ -448,16 +439,18 @@ describe("projection", () => {
       .withProjection(BatchProjection)
       .build();
 
-    const app_ = act().withSlice(CounterSlice).build();
+    const { app, dispose } = await sandbox(act().withSlice(CounterSlice));
 
-    await app_.do("increment", { stream, actor }, { by: 4 });
-    await app_.correlate();
-    await app_.drain({ eventLimit: 100 });
+    await app.do("increment", { stream, actor }, { by: 4 });
+    await app.correlate();
+    await app.drain({ eventLimit: 100 });
 
     expect(batchFn).toHaveBeenCalledTimes(1);
     const [events] = batchFn.mock.calls[0];
     expect(events).toHaveLength(1);
     expect(events[0].data).toEqual({ by: 4 });
+
+    await dispose();
   });
 
   it("should handle mixed event types in batch handler", async () => {
@@ -487,16 +480,15 @@ describe("projection", () => {
       .batch(batchFn)
       .build();
 
-    const app_ = act()
-      .withState(Widget)
-      .withProjection(MixedProjection)
-      .build();
+    const { app, dispose } = await sandbox(
+      act().withState(Widget).withProjection(MixedProjection)
+    );
 
-    await app_.do("increment", { stream, actor }, { by: 1 });
-    await app_.do("label", { stream, actor }, { label: "hello" });
-    await app_.do("increment", { stream, actor }, { by: 2 });
-    await app_.correlate();
-    await app_.drain({ eventLimit: 100 });
+    await app.do("increment", { stream, actor }, { by: 1 });
+    await app.do("label", { stream, actor }, { label: "hello" });
+    await app.do("increment", { stream, actor }, { by: 2 });
+    await app.correlate();
+    await app.drain({ eventLimit: 100 });
 
     expect(batchFn).toHaveBeenCalledTimes(1);
     const [events] = batchFn.mock.calls[0];
@@ -504,18 +496,16 @@ describe("projection", () => {
     expect(events[0].name).toBe("Incremented");
     expect(events[1].name).toBe("Labeled");
     expect(events[2].name).toBe("Incremented");
+
+    await dispose();
   });
 
-  // Compile-time evidence that the fluent chain preserves type narrowing
-  // for handler events and emitted projection schemas — the DevEx surface
-  // doesn't degrade to `any` after the mutable-builder refactor.
   /* eslint-disable @typescript-eslint/no-unused-expressions, @typescript-eslint/require-await -- type-only narrowing checks */
   describe("type narrowing", () => {
     it("preserves event payload type through .on().do()", () => {
       projection("typed-target")
         .on({ Incremented })
         .do(async function check(event) {
-          // event.data narrowed to { by: number }
           const by: number = event.data.by;
           expect(by).toBeDefined();
         })
@@ -535,13 +525,11 @@ describe("projection", () => {
     });
 
     it("only exposes .batch() on static-target projections", () => {
-      // Static target → .batch() is reachable at the type level
       projection("static-target")
         .on({ Incremented })
         .do(async function h() {})
         .batch(async () => {});
 
-      // No target → no .batch() in the type
       const noTarget = projection()
         .on({ Incremented })
         .do(async function h2() {});

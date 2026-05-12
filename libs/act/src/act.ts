@@ -315,15 +315,35 @@ export class Act<
     // take effect. Scoped Acts bind against their own store.
     this._notify_disposer = this._wireNotify(options.scoped?.store ?? store());
 
-    dispose(async () => {
-      this._emitter.removeAllListeners();
-      this.stop_correlations();
-      this.stop_settling();
-      // `_wireNotify` swallows subscription errors and resolves to
-      // `undefined`, so this promise never rejects.
-      const disposer = await this._notify_disposer;
-      if (disposer) await disposer();
-    });
+    dispose(() => this.shutdown());
+  }
+
+  /** True after the first `shutdown()` call. Guards idempotency. */
+  private _shutdown_promise: Promise<void> | undefined;
+
+  /**
+   * Per-instance teardown: remove lifecycle listeners, stop the
+   * correlation worker, cancel any pending settle cycle, and tear
+   * down the cross-process notify subscription.
+   *
+   * Idempotent — repeated calls return the same promise. Registered
+   * automatically with the global `dispose()` registry at construction,
+   * so process-wide `dispose()()` covers it; test helpers (or operators
+   * that mint short-lived Acts) call it explicitly for prompt cleanup.
+   */
+  shutdown(): Promise<void> {
+    if (!this._shutdown_promise) {
+      this._shutdown_promise = (async () => {
+        this._emitter.removeAllListeners();
+        this.stop_correlations();
+        this.stop_settling();
+        // `_wireNotify` swallows subscription errors and resolves to
+        // `undefined`, so this promise never rejects.
+        const disposer = await this._notify_disposer;
+        if (disposer) await disposer();
+      })();
+    }
+    return this._shutdown_promise;
   }
 
   /**
