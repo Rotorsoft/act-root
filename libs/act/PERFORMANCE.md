@@ -503,3 +503,51 @@ Run: `pnpm bench:micro libs/act/bench/deprecation-check.micro.bench.ts`
 ### No CI regression baseline
 
 The cost is below measurement noise — pinning a regression bound would be pinning noise. The check is structurally O(1) per emit and the bench is here to document the empirical floor, not to gate CI.
+
+## Per-Act scoped ports (ACT-501)
+
+[`ActOptions.scoped`](../../docs/docs/architecture/extension-points.md#scoped-ports-per-act) lets an Act use its own `{ store, cache }` instead of the singletons. The framework threads the bag via `AsyncLocalStorage` so internal `store()`/`cache()` calls resolve transparently. Two concerns to quantify:
+
+1. **Per-call port read.** `store()` now does `scoped.getStore()?.store ?? _store()` on every lookup. Does the ALS check tax the hot path?
+2. **Method-level wrap.** Public Act methods wrap their body in `scoped.run({store, cache}, fn)` when the Act is scoped, no-op otherwise. Does the wrap cost show up end-to-end?
+
+Run: `pnpm bench:micro libs/act/bench/scope-overhead.micro.bench.ts`
+
+### Port getter — one `scoped.getStore()` read
+
+| Config | hz | mean | rme |
+|---|---:|---:|---:|
+| `store()` — no active scope (falls through to singleton) | 14.82M | 67 ns | ±0.04% |
+| `store()` — inside `scoped.run()` (returns scoped bag) | 15.11M | 66 ns | ±0.25% |
+| `cache()` — no active scope | 15.32M | 65 ns | ±0.05% |
+| `cache()` — inside `scoped.run()` | 15.10M | 66 ns | ±0.18% |
+
+**Within ±1%.** Modern Node's `AsyncLocalStorage.getStore()` is essentially a property read off the current async resource — the overlay is invisible against the cost of the getter itself.
+
+### `app.do()` — end-to-end wrap cost
+
+| Config | hz | mean | rme |
+|---|---:|---:|---:|
+| Unscoped Act (no-op wrap: `(fn) => fn()`) | 425.13 | 2.35 ms | ±0.58% |
+| Scoped Act (real wrap: `scoped.run(bag, fn)`) | 427.47 | 2.34 ms | ±0.60% |
+
+**1.01×.** The action pipeline (validate, load, patch, commit, cache) dwarfs the wrap by four orders of magnitude. The `scoped.run` binding is free at this granularity.
+
+### `app.load()` — read-heavy path
+
+| Config | hz | mean | rme |
+|---|---:|---:|---:|
+| Unscoped Act | 844.60 | 1.18 ms | ±0.76% |
+| Scoped Act | 844.78 | 1.18 ms | ±0.90% |
+
+**1.00×.** Load reads `store()` and `cache()` multiple times per call — maximum exposure to the overlay — and still shows no movement.
+
+### Why it's free
+
+- **`AsyncLocalStorage` in Node ≥ 16 reads from the active `AsyncResource`'s storage map** — a single property lookup, not a context-tree walk.
+- **The wrap is per-method, not per-port-read.** One `scoped.run` per `app.do()` / `app.load()` call vs. potentially many internal port lookups inside it; amortizes to nothing.
+- **No async-hook side effects.** `AsyncLocalStorage` no longer enables async_hooks process-wide in modern Node — only the storage is hooked.
+
+### No CI regression baseline
+
+Same reasoning as ACT-403: the cost is below measurement noise, so a baseline would pin noise. Bench retained as evidence that the overlay is structurally free.

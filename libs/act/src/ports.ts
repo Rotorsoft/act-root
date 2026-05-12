@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ConsoleLogger } from "./adapters/console-logger.js";
 import { InMemoryCache } from "./adapters/in-memory-cache.js";
 import { InMemoryStore } from "./adapters/in-memory-store.js";
@@ -9,6 +10,15 @@ import type {
   Logger,
   Store,
 } from "./types/index.js";
+
+/** Per-Act ports bag (ACT-501). Both required together — a shared cache across stores would collide on stream keys. */
+export type Scoped = {
+  readonly store: Store;
+  readonly cache: Cache;
+};
+
+/** AsyncLocalStorage carrying the active Act's ports. Internal — not re-exported. */
+export const scoped = new AsyncLocalStorage<Scoped>();
 
 /**
  * Port/adapter infrastructure for the Act framework.
@@ -170,9 +180,15 @@ export const log = port(function log(adapter?: Logger) {
  * @see {@link Store} for the interface contract
  * @see {@link InMemoryStore} for the default implementation
  */
-export const store = port(function store(adapter?: Store): Store {
-  return adapter || new InMemoryStore();
+// ALS check lives outside `port()` — its cache fires only once, so the
+// per-call branch on a scoped Act has to be in the public wrapper.
+const _store = port(function store(adapter?: Store): Store {
+  return adapter ?? new InMemoryStore();
 });
+
+export const store = ((adapter?: Store): Store => {
+  return scoped.getStore()?.store ?? _store(adapter);
+}) as (adapter?: Store) => Store;
 
 /**
  * Gets or injects the singleton cache.
@@ -187,9 +203,13 @@ export const store = port(function store(adapter?: Store): Store {
  * @see {@link Cache} for the interface contract
  * @see {@link InMemoryCache} for the default implementation
  */
-export const cache = port(function cache(adapter?: Cache) {
-  return adapter || new InMemoryCache();
+const _cache = port(function cache(adapter?: Cache) {
+  return adapter ?? new InMemoryCache();
 });
+
+export const cache = ((adapter?: Cache): Cache => {
+  return scoped.getStore()?.cache ?? _cache(adapter);
+}) as (adapter?: Cache) => Cache;
 
 // ---------------------------------------------------------------------------
 // Disposal
