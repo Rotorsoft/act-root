@@ -582,10 +582,16 @@ function action_builder<
       ) {
         if (typeof handler === "string") {
           const eventName = handler;
-          (internal.on as Record<string, unknown>)[action] = (payload: any) => [
-            eventName,
-            payload,
-          ];
+          // Tag the synthetic function with the static event name so
+          // the act-builder can detect emissions of deprecated events
+          // at build time (ACT-403). Dynamic forms — where the
+          // returned event name is computed inside the user's
+          // function — can't be inspected statically; they're caught
+          // by the runtime warning in event-sourcing.ts.
+          const emitFn = Object.assign((payload: any) => [eventName, payload], {
+            _staticEmit: eventName,
+          });
+          (internal.on as Record<string, unknown>)[action] = emitFn;
         } else {
           (internal.on as Record<string, unknown>)[action] = handler;
         }

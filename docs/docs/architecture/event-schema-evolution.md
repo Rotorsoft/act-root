@@ -137,8 +137,44 @@ See [Cache and snapshots](./cache-and-snapshots) for more on the snapshot lifecy
 | Combine two events into one | New combined event name; v1 reducers stay (history doesn't change); going forward emit only v2 |
 | Split one event into many | New event names; v1 reducer maps old event to compound state changes; going forward emit the new ones |
 
+## The versioning convention is the deprecation signal (ACT-403)
+
+After a schema migration, `OrderPlaced` and `OrderPlaced_v2` both live in the registry — but only `OrderPlaced_v2` should be emitted by new actions. The framework enforces that at build time by reading the `_v<digits>` convention.
+
+**The rule:** within a state's events, group by base name; for any group with ≥ 2 members, the highest version is *current*, all lower versions are *deprecated*. Adding `OrderPlaced_v2` to `.emits({...})` automatically marks `OrderPlaced` as deprecated — there's no `.deprecate(...)` API, no metadata to maintain, no marker to forget. The naming convention is the marker.
+
+**Enforcement:**
+
+- **Build-time throw** when a static `.emit("OrderPlaced")` call targets a deprecated event:
+  ```
+  Action "openTicket" in state "Ticket" emits deprecated event "OrderPlaced".
+  A newer version exists: "OrderPlaced_v2". Update the .emit() call to target the
+  current version. The reducer (.patch) for "OrderPlaced" stays as-is — historical
+  events still need it.
+  ```
+
+  This catches the forgotten `.emit()` call after a migration. The `app.build()` call refuses to construct the orchestrator until the static targets are fixed.
+
+- **Runtime warning** when a dynamic `.emit((a) => ["OrderPlaced", ...])` produces a deprecated event name at commit time. Static analysis can't see inside arbitrary functions, so this is the safety net. The warning is routed through the `Logger` port and idempotent — one warning per event name per process, regardless of how many actions hit the path.
+
+- **`.patch()` reducer path stays silent forever.** Replay of historical events must not warn, because the reducer is required for the lifetime of the system. Deprecation is for *emission*, not *reduction*.
+
+**Edge cases:**
+
+- **Gaps allowed.** `{Foo, Foo_v3}` (no `Foo_v2`) → `Foo` is deprecated, `Foo_v3` is current. The framework picks the highest version regardless of contiguity.
+- **`_v1` is a literal name.** Version suffixes start at 2 (the base is implicitly v1). If you name an event `Foo_v1`, it's treated as a distinct event with no grouping. Don't use this — write `Foo` for the v1 of an event.
+- **Single-version events.** No `_v<n>` siblings means no deprecation; `OrderPaid` standing alone is just an event.
+
+**Why this works for rolling deploys:**
+
+Old instances built before the migration already emit the legacy event name and run fine — their build was clean at startup. New instances build with both schemas registered and refuse to start if any static `.emit("Foo")` remains in the new code. Each build is atomic; the deploy is rolling. There's no in-between state where the framework can't decide.
+
+**No opt-out flag.** A `--allow-deprecated-emit` knob would invite developers to silence the throw instead of fixing the call site. The fix is mechanical (one-character rename to the current version); the throw is the forcing function.
+
 ## Pointers
 
 - `libs/act/src/types/action.ts` — `EventRegister`, `PatchHandlers` — type-level shape that drives this
 - `libs/act/src/internal/event-sourcing.ts` — `load()` — reads `me.patch[e.name]`; missing reducer logs a warning rather than silently corrupting state
 - `libs/act/src/internal/merge.ts` — duplicate-event-name guard at slice composition time (one canonical reducer per event)
+- `libs/act/src/internal/event-versions.ts` — `_v<digits>` parser; `deprecatedEventNames()` + `currentVersionOf()` helpers
+- `libs/act/src/builders/act-builder.ts` — build-time scan of `state.on[action]._staticEmit` markers; throws on emission of a deprecated event

@@ -474,3 +474,32 @@ The InMemory adapter optimizes for development feedback loops — fast cold-star
 - **Browser → server → reaction round-trip** — that's an app-level concern (network, framework, etc.), not framework latency.
 
 No Store interface changes. Batching is handled entirely at the Act orchestrator level.
+
+---
+
+## Auto-deprecation runtime cost (ACT-403)
+
+The framework reads the `_v<digits>` versioning convention from the merged event registry and auto-marks legacy versions as deprecated (see [event-schema-evolution.md](../../docs/docs/architecture/event-schema-evolution.md)). The runtime piece is a single check in `action()` after the event tuples are computed: if `me._deprecated` is non-empty, scan the emitted names against the Set; warn once per name per process if any match.
+
+The concern: this check runs on every `app.do()` call. Quantify the cost.
+
+Run: `pnpm bench:micro libs/act/bench/deprecation-check.micro.bench.ts`
+
+### Benchmark
+
+| Config | hz | mean | rme |
+|---|---:|---:|---:|
+| No deprecation in registry | 425.11 | 2.35 ms | ±0.64% |
+| With deprecation in registry (emits current version) | 423.15 | 2.36 ms | ±0.58% |
+
+**1.00× — statistically indistinguishable.** The 0.5% delta sits inside the measurement noise (rme ±0.58–0.64%). The "with deprecation" config exercises the actual check (`Set.has` lookup for the emitted event name) and still doesn't move the needle.
+
+### Why it's free
+
+- **Common case bails on the first read.** Most production states have no `_v<n>` siblings, so `me._deprecated` is `undefined` → one property read + one truthy check → branch out before any loop or Set work. Zero ops per call.
+- **Active deprecation path is two Set lookups.** When the state DOES carry a non-empty `_deprecated` set, the per-emit cost is one `deprecated.has(name)` + (on hit) one `warned.has(name)`. Both are O(1). The Zod validation that runs immediately after is dramatically more expensive — this check is rounding error.
+- **Warning is idempotent.** Once an event name has been warned about, the `warned.has` check short-circuits and no logger call fires. Steady-state cost after first warn = same two Set lookups, no I/O.
+
+### No CI regression baseline
+
+The cost is below measurement noise — pinning a regression bound would be pinning noise. The check is structurally O(1) per emit and the bench is here to document the empirical floor, not to gate CI.
