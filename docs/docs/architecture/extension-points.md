@@ -159,6 +159,94 @@ await app.do("...", target, payload);
 
 If any port is left to default, the framework wires the in-memory implementation for that port. Useful for tests; deliberate for production.
 
+## Scoped ports (per-Act)
+
+The singleton path covers the common case: one Act instance per process, one store, one cache. When you need more than one Act in the same process — each with its own store and/or cache — pass an `ActOptions.scoped` bag at build time:
+
+```ts
+import { act, InMemoryCache } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+const tenantApp = act()
+  .withState(...)
+  .build({
+    scoped: {
+      store: new PostgresStore({ schema: "tenant_a" }),
+      cache: new InMemoryCache({ maxSize: 5000 }),
+    },
+  });
+```
+
+The framework threads the bag through `AsyncLocalStorage` and wraps every public Act method (`do`, `load`, `query`, `drain`, `settle`, `close`, ...) so internal `store()`/`cache()` calls resolve to the scoped ports transparently. Adapters are unchanged. Both `store` and `cache` are required together — sharing a single cache across two distinct stores would collide on stream-keyed entries.
+
+### The shared-builder pattern (multi-tenant, A/B testing)
+
+For more than a couple of Acts — multi-tenant SaaS, parallel test workers, side-by-side store experiments — hold the builder in a constant and call `.build({ scoped: ... })` once per tenant. The builder is reusable: the first build performs one-time work (projection merge, deprecation scan, startup advisory) and subsequent builds reuse the merged registry to produce independent Acts.
+
+```ts
+import { act, InMemoryCache, projection, state } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+// Compose the blueprint once — no `.build()` yet.
+const tenantBuilder = act()
+  .withState(Order)
+  .withState(Customer)
+  .withProjection(OrderProjection)
+  .on("OrderPlaced").do(reduceInventory).to("inventory");
+
+// One Act per tenant, each with its own store + cache.
+const apps = new Map<string, ReturnType<typeof tenantBuilder.build>>();
+for (const tenant of tenants) {
+  apps.set(
+    tenant,
+    tenantBuilder.build({
+      scoped: {
+        store: new PostgresStore({ schema: tenant }),
+        cache: new InMemoryCache({ maxSize: 5000 }),
+      },
+    })
+  );
+}
+
+// New tenants signing up mid-process can call `.build()` lazily too.
+function onTenantSignup(tenant: string) {
+  apps.set(
+    tenant,
+    tenantBuilder.build({
+      scoped: {
+        store: new PostgresStore({ schema: tenant }),
+        cache: new InMemoryCache({ maxSize: 5000 }),
+      },
+    })
+  );
+}
+```
+
+The per-Act mutable state (drain controller, correlate cycle, settle loop, notify subscription, lifecycle emitter) is constructed fresh on every `.build()`. The shared blueprint (registry, states map, batch handlers, deprecation set) is read-only post-build and is passed by reference to each Act — multi-tenant memory cost is dominated by the per-Act mutable state, not by N copies of the registry.
+
+A/B store experiments are the same pattern with `tenants` replaced by the experiment arms — `apps.set("control", build({scoped: oldStore + oldCache}))` and `apps.set("candidate", build({scoped: newStore + newCache}))`.
+
+### When this is necessary
+
+Concrete scenarios:
+
+- **Multi-tenant SaaS in one process.** Each tenant gets a dedicated store (e.g., per-schema `PostgresStore` on a shared host, or one DB per tenant) and a dedicated cache. The application code stays singleton-style — no parameter threading — because internals read `store()`/`cache()` and the ALS context dispatches to the right tenant on every call.
+- **Parallel test workers in one process.** Vitest's `--threads=false` worker model and integration tests that want strict isolation without spinning up a process per test. Each test builds its own Act with a fresh `InMemoryStore` + `InMemoryCache`, and concurrent test bodies don't leak through the singleton.
+- **Hybrid storage per bounded context.** A monolith where the "orders" context lives in Postgres but "audit" lives in SQLite (or vice versa). Each bounded context gets its own Act bound to its own backing store. Reactions across contexts go through whatever cross-process mechanism the operator wires (HTTP, message bus, or `Store.notify` if both speak the same protocol).
+- **Side-by-side store experiments.** Running an existing Act on `PostgresStore` and a candidate Act on a new adapter in parallel to compare correctness or performance under live traffic — both pinned to the same process so they see the same input stream.
+
+### When *not* to use it
+
+- **Single-tenant single-store apps.** Use the singleton path. The scoped overlay is invisible against everyday work but it still adds an `AsyncLocalStorage.run()` wrap on every method call; there's no reason to opt in if you don't need isolation.
+- **Different *defaults* on the same store.** If the goal is just "use a different cache size" or "use a different log level," configure that via the adapter constructor on the singleton path. Scoped ports are for distinct adapter instances.
+
+### Contracts and caveats
+
+- **Notify subscriptions bind to the scoped store at construction.** `Store.notify` is wired once per Act, against `options.scoped.store` when scoped or the singleton otherwise. Same as the singleton case: late injection after `build()` doesn't take effect.
+- **Lifecycle is the operator's.** Scoped adapters are *not* registered with the framework's `dispose()` registry. You own them — dispose them explicitly (or wrap your own `dispose()` callback that does). The singleton registry only tracks adapters installed via `store(adapter)` / `cache(adapter)` / `log(adapter)`.
+- **Logger stays singleton.** `ActOptions.scoped` doesn't include a logger; all Acts in a process share `log()`. Per-Act logger overrides aren't required by current scenarios — add via child binding (`log().child({ tenant: ... })`) at the call site if you need correlation.
+- **Performance.** ALS adds no measurable overhead in modern Node — the port getter is ~65 ns whether scoped or not, and `app.do()` / `app.load()` show no difference between scoped and unscoped Acts. See [`libs/act/PERFORMANCE.md` § Per-Act scoped ports](../../../libs/act/PERFORMANCE.md).
+
 ## Pointers
 
 - `libs/act/src/ports.ts` — `port()` factory and the three default ports

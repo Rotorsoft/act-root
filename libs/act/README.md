@@ -366,6 +366,39 @@ await app.prioritize({}, 0);   // reset all to default
 
 Only meaningful under saturation. With `streamLimit` ≥ candidate streams every cycle, every stream gets a slot every cycle and priority never binds. See [`@rotorsoft/act-pg/PERFORMANCE.md`](../act-pg/PERFORMANCE.md) for the ~11× speedup benchmark on tied-watermark replays under heavy contention.
 
+### Per-Act Scoped Ports (ACT-501)
+
+The singleton `store()` / `cache()` ports cover the common case: one Act per process. When you need multiple Acts in the same process — multi-tenant SaaS, parallel test workers, side-by-side store experiments — pass `ActOptions.scoped` at build time and the framework routes that Act's internal port reads to its own bag via `AsyncLocalStorage`. Adapters are unchanged.
+
+Hold the builder in a constant and call `.build()` once per tenant. The first build runs the one-time projection merge + deprecation scan; subsequent builds reuse the merged registry:
+
+```ts
+import { act, InMemoryCache } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+const tenantBuilder = act()
+  .withState(Order)
+  .withProjection(OrderProjection)
+  .on("OrderPlaced").do(reduceInventory).to("inventory");
+
+const apps = new Map<string, ReturnType<typeof tenantBuilder.build>>();
+for (const tenant of tenants) {
+  apps.set(
+    tenant,
+    tenantBuilder.build({
+      scoped: {
+        store: new PostgresStore({ schema: tenant }),
+        cache: new InMemoryCache({ maxSize: 5000 }),
+      },
+    })
+  );
+}
+
+await apps.get("tenant_a")!.do("place", target, payload);
+```
+
+Both `store` and `cache` are required together — sharing a single cache across distinct stores would collide on stream-keyed entries. ALS overhead is essentially zero (~65 ns per `store()` read, scoped or not; no measurable difference in `app.do()` / `app.load()` throughput). See [PERFORMANCE.md § Per-Act scoped ports](./PERFORMANCE.md) for the bench and [`docs/architecture/extension-points.md`](../../docs/docs/architecture/extension-points.md) for the full pattern (use cases, contracts, caveats).
+
 ## Dual-Frontier Drain
 
 In event-sourced systems, consumers often subscribe to multiple event streams that advance at different rates: some produce bursts of events, while others stay idle for long periods. New streams can also be discovered while processing events from existing streams.

@@ -274,6 +274,72 @@ export function act<
   const pendingProjections: Projection<any>[] = [];
   const batchHandlers = new Map<string, BatchHandler<any>>();
 
+  // Set on the first `.build()` call. Lets the same builder produce
+  // many Acts (multi-tenant / A-B testing patterns) without re-merging
+  // projections or re-logging the deprecation advisory.
+  let _built = false;
+
+  // ACT-403: auto-deprecation enforcement. Groups each state's events
+  // by base name + `_v<digits>`; the highest version is current, all
+  // lower ones are deprecated. Stashes the deprecation set on the
+  // state so `event-sourcing.ts` can warn at runtime for dynamic
+  // emits. Scans static `.emit("X")` markers across every state and
+  // throws if any target a deprecated event — the only legitimate use
+  // of a deprecated event is on the reduce path. Finally, surfaces a
+  // one-line startup advisory so operators can see "your app has
+  // legacy events kept for the read path, here's where they live."
+  const finalizeDeprecations = () => {
+    const deprecationSummary: Array<{
+      stateName: string;
+      deprecated: string;
+      current: string;
+    }> = [];
+    for (const state of states.values()) {
+      const eventNames = Object.keys(state.events);
+      const deprecated = deprecatedEventNames(eventNames);
+      if (deprecated.size === 0) continue;
+      (state as { _deprecated?: Set<string> })._deprecated = deprecated;
+      for (const name of deprecated) {
+        // `currentVersionOf` is guaranteed non-undefined here — `name`
+        // is in `deprecated`, which by construction means a higher-
+        // versioned sibling exists in the same group.
+        const current = currentVersionOf(name, eventNames) as string;
+        deprecationSummary.push({
+          stateName: state.name,
+          deprecated: name,
+          current,
+        });
+      }
+      for (const [actionName, handler] of Object.entries(state.on)) {
+        const staticTarget = (handler as { _staticEmit?: string } | undefined)
+          ?._staticEmit;
+        if (staticTarget && deprecated.has(staticTarget)) {
+          const current = currentVersionOf(staticTarget, eventNames);
+          throw new Error(
+            `Action "${actionName}" in state "${state.name}" emits deprecated event "${staticTarget}". ` +
+              `A newer version exists: "${current}". Update the .emit() call ` +
+              `to target the current version. The reducer (.patch) for ` +
+              `"${staticTarget}" stays as-is — historical events still need it.`
+          );
+        }
+      }
+    }
+    if (deprecationSummary.length > 0) {
+      const list = deprecationSummary
+        .map(
+          (d) =>
+            `"${d.deprecated}" (current: "${d.current}", state: "${d.stateName}")`
+        )
+        .join(", ");
+      log().info(
+        `Act registered ${deprecationSummary.length} deprecated event(s): ${list}. ` +
+          `These are legacy versions kept for the read path. Consider truncating ` +
+          `closed streams via app.close() when feasible to reduce historical event load. ` +
+          `See docs/docs/architecture/event-schema-evolution.md.`
+      );
+    }
+  };
+
   // The `as` chain on `self` is the type fanout: each fluent method
   // mutates state and returns `self` cast to its post-call generic
   // signature. Internal-only — public types stay narrow.
@@ -339,72 +405,21 @@ export function act<
         },
       }),
       build: (options?: ActOptions) => {
-        for (const proj of pendingProjections) {
-          mergeProjection(proj, registry.events as Record<string, any>);
-          registerBatchHandler(proj, batchHandlers);
-        }
-
-        // ACT-403: auto-deprecation enforcement.
-        // Group each state's events by base name + `_v<digits>`; the
-        // highest version is current, all lower ones are deprecated.
-        // Stash the deprecation set on the state so the commit path
-        // (event-sourcing.ts) can warn at runtime for dynamic emits.
-        // Then scan static `.emit("X")` markers across every state
-        // and throw if any target a deprecated event — the only
-        // legitimate use of a deprecated event is on the reduce path.
-        // Finally, surface a one-line startup advisory so operators
-        // can see "your app has legacy events kept for the read path,
-        // here's where they live, here's how to clean up."
-        const deprecationSummary: Array<{
-          stateName: string;
-          deprecated: string;
-          current: string;
-        }> = [];
-        for (const state of states.values()) {
-          const eventNames = Object.keys(state.events);
-          const deprecated = deprecatedEventNames(eventNames);
-          if (deprecated.size === 0) continue;
-          (state as { _deprecated?: Set<string> })._deprecated = deprecated;
-          for (const name of deprecated) {
-            // `currentVersionOf` is guaranteed non-undefined here —
-            // `name` is in `deprecated`, which by construction means
-            // a higher-versioned sibling exists in the same group.
-            // Both helpers share the same group definition.
-            const current = currentVersionOf(name, eventNames) as string;
-            deprecationSummary.push({
-              stateName: state.name,
-              deprecated: name,
-              current,
-            });
+        // One-time finalize: merge pending projections and run the
+        // deprecation scan + advisory log exactly once. Calling
+        // `.build({scoped: ...})` repeatedly (e.g., per tenant) is
+        // supported — see extension-points.md § Scoped ports. Without
+        // this guard, `mergeProjection` would re-add reactions to the
+        // shared registry on every call (accumulating `_p`/`_p_p`
+        // dedupe suffixes), and the deprecation advisory would log on
+        // every tenant.
+        if (!_built) {
+          for (const proj of pendingProjections) {
+            mergeProjection(proj, registry.events as Record<string, any>);
+            registerBatchHandler(proj, batchHandlers);
           }
-          for (const [actionName, handler] of Object.entries(state.on)) {
-            const staticTarget = (
-              handler as { _staticEmit?: string } | undefined
-            )?._staticEmit;
-            if (staticTarget && deprecated.has(staticTarget)) {
-              const current = currentVersionOf(staticTarget, eventNames);
-              throw new Error(
-                `Action "${actionName}" in state "${state.name}" emits deprecated event "${staticTarget}". ` +
-                  `A newer version exists: "${current}". Update the .emit() call ` +
-                  `to target the current version. The reducer (.patch) for ` +
-                  `"${staticTarget}" stays as-is — historical events still need it.`
-              );
-            }
-          }
-        }
-        if (deprecationSummary.length > 0) {
-          const list = deprecationSummary
-            .map(
-              (d) =>
-                `"${d.deprecated}" (current: "${d.current}", state: "${d.stateName}")`
-            )
-            .join(", ");
-          log().info(
-            `Act registered ${deprecationSummary.length} deprecated event(s): ${list}. ` +
-              `These are legacy versions kept for the read path. Consider truncating ` +
-              `closed streams via app.close() when feasible to reduce historical event load. ` +
-              `See docs/docs/architecture/event-schema-evolution.md.`
-          );
+          finalizeDeprecations();
+          _built = true;
         }
 
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(

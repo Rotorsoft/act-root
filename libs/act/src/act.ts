@@ -14,7 +14,7 @@ import {
   runCloseCycle,
   SettleLoop,
 } from "./internal/index.js";
-import { dispose, log, store } from "./ports.js";
+import { dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -37,6 +37,7 @@ import type {
   SettleOptions,
   Snapshot,
   State,
+  Store,
   StoreNotification,
   Target,
 } from "./types/index.js";
@@ -126,6 +127,14 @@ export type ActLifecycleEvents<
 export type ActOptions = {
   readonly maxSubscribedStreams?: number;
   readonly settleDebounceMs?: number;
+  /**
+   * Per-Act ports (ACT-501). When set, this Act runs against the
+   * provided store + cache instead of the singletons — threaded via
+   * AsyncLocalStorage so internals are unchanged. Both are required
+   * together (a shared cache across distinct stores would collide on
+   * stream keys). Omit for the singleton path.
+   */
+  readonly scoped?: Scoped;
 };
 
 export class Act<
@@ -215,6 +224,11 @@ export class Act<
   private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
+  /** Wraps a public-method body so internal `store()`/`cache()` resolve to the
+   * per-Act ports (ACT-501). No-op when the Act is unscoped — so the singleton
+   * path keeps reading fresh `store()`/`cache()` per call, which matters for
+   * tests that dispose and re-seed mid-suite. */
+  private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
    * payload (it captures the triggering event for reactingTo auto-inject). */
   private readonly _bound_do = this.do.bind(this);
@@ -243,6 +257,9 @@ export class Act<
     options: ActOptions = {}
   ) {
     this._batch_handlers = batchHandlers;
+    this._scoped = options.scoped
+      ? (fn) => scoped.run(options.scoped!, fn)
+      : (fn) => fn();
     this._es = buildEs(this._logger);
     this._cd = buildDrain<TEvents>(this._logger);
     this._handle = buildHandle<TEvents, TActions, TActor>({
@@ -293,20 +310,10 @@ export class Act<
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
 
-    // Auto-wire cross-process notifications when the configured store
-    // exposes `Store.notify`. Adapters that opt out (PostgresStore with
-    // `notify: false` — the default — or stores that don't support
-    // notifications at all like InMemoryStore/SqliteStore) leave the
-    // method undefined, and the orchestrator skips subscription with
-    // zero overhead. Stores self-filter their own commits, so the
-    // handler fires only for remote writers — the local fast path
-    // inside `do()` already arms the drain.
-    //
-    // Build-time contract: callers must inject the store via
-    // `store(adapter)` BEFORE calling `build()`. The wiring binds to
-    // whatever store is current at construction; late injection won't
-    // take effect.
-    this._notify_disposer = this._wireNotify();
+    // Auto-wire cross-process notify when the store supports it. Bound at
+    // construction time — late `store(adapter)` injection after build won't
+    // take effect. Scoped Acts bind against their own store.
+    this._notify_disposer = this._wireNotify(options.scoped?.store ?? store());
 
     dispose(async () => {
       this._emitter.removeAllListeners();
@@ -325,11 +332,10 @@ export class Act<
    * subscription was made). Errors during subscription are logged but
    * never thrown — `notify` is a hint, not a contract.
    */
-  private async _wireNotify(): Promise<
-    (() => void | Promise<void>) | undefined
-  > {
+  private async _wireNotify(
+    s: Store
+  ): Promise<(() => void | Promise<void>) | undefined> {
     if (this._reactive_events.size === 0) return undefined;
-    const s = store();
     if (!s.notify) return undefined;
     try {
       return await s.notify((notification) => {
@@ -448,30 +454,32 @@ export class Act<
     reactingTo?: Committed<TEvents, string & keyof TEvents>,
     skipValidation = false
   ) {
-    const snapshots = await this._es.action(
-      this.registry.actions[action],
-      action,
-      target,
-      payload,
-      reactingTo,
-      skipValidation
-    );
-    // Arm the drain when any committed event has reactions.
-    // Skip the scan entirely when no event has any reaction (common in
-    // pure-state-machine apps).
-    if (this._reactive_events.size > 0) {
-      for (const snap of snapshots) {
-        if (
-          snap.event?.name &&
-          this._reactive_events.has(snap.event.name as string)
-        ) {
-          this._drain.arm();
-          break;
+    return this._scoped(async () => {
+      const snapshots = await this._es.action(
+        this.registry.actions[action],
+        action,
+        target,
+        payload,
+        reactingTo,
+        skipValidation
+      );
+      // Arm the drain when any committed event has reactions.
+      // Skip the scan entirely when no event has any reaction (common in
+      // pure-state-machine apps).
+      if (this._reactive_events.size > 0) {
+        for (const snap of snapshots) {
+          if (
+            snap.event?.name &&
+            this._reactive_events.has(snap.event.name as string)
+          ) {
+            this._drain.arm();
+            break;
+          }
         }
       }
-    }
-    this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
-    return snapshots;
+      this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
+      return snapshots;
+    });
   }
 
   /**
@@ -537,15 +545,17 @@ export class Act<
     callback?: (snapshot: Snapshot<any, any>) => void,
     asOf?: AsOf
   ): Promise<Snapshot<any, any>> {
-    let merged: State<any, any, any>;
-    if (typeof stateOrName === "string") {
-      const found = this._states.get(stateOrName);
-      if (!found) throw new Error(`State "${stateOrName}" not found`);
-      merged = found;
-    } else {
-      merged = this._states.get(stateOrName.name) || stateOrName;
-    }
-    return await this._es.load(merged, stream, callback, asOf);
+    return this._scoped(async () => {
+      let merged: State<any, any, any>;
+      if (typeof stateOrName === "string") {
+        const found = this._states.get(stateOrName);
+        if (!found) throw new Error(`State "${stateOrName}" not found`);
+        merged = found;
+      } else {
+        merged = this._states.get(stateOrName.name) || stateOrName;
+      }
+      return await this._es.load(merged, stream, callback, asOf);
+    });
   }
 
   /**
@@ -602,14 +612,16 @@ export class Act<
     last?: Committed<TEvents, keyof TEvents>;
     count: number;
   }> {
-    let first: Committed<TEvents, keyof TEvents> | undefined;
-    let last: Committed<TEvents, keyof TEvents> | undefined;
-    const count = await store().query<TEvents>((e) => {
-      if (!first) first = e;
-      last = e;
-      callback?.(e);
-    }, query);
-    return { first, last, count };
+    return this._scoped(async () => {
+      let first: Committed<TEvents, keyof TEvents> | undefined;
+      let last: Committed<TEvents, keyof TEvents> | undefined;
+      const count = await store().query<TEvents>((e) => {
+        if (!first) first = e;
+        last = e;
+        callback?.(e);
+      }, query);
+      return { first, last, count };
+    });
   }
 
   /**
@@ -641,9 +653,11 @@ export class Act<
   async query_array(
     query: Query
   ): Promise<Committed<TEvents, keyof TEvents>[]> {
-    const events: Committed<TEvents, keyof TEvents>[] = [];
-    await store().query<TEvents>((e) => events.push(e), query);
-    return events;
+    return this._scoped(async () => {
+      const events: Committed<TEvents, keyof TEvents>[] = [];
+      await store().query<TEvents>((e) => events.push(e), query);
+      return events;
+    });
   }
 
   /**
@@ -684,7 +698,7 @@ export class Act<
    * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
-    return this._drain.drain(options);
+    return this._scoped(() => this._drain.drain(options));
   }
 
   /**
@@ -735,7 +749,7 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
-    return this._correlate.correlate(query);
+    return this._scoped(() => this._correlate.correlate(query));
   }
 
   /**
@@ -864,9 +878,11 @@ export class Act<
    * @see {@link settle} for the debounced full-catch-up loop
    */
   async reset(streams: string[]): Promise<number> {
-    const count = await store().reset(streams);
-    if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
-    return count;
+    return this._scoped(async () => {
+      const count = await store().reset(streams);
+      if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
+      return count;
+    });
   }
 
   /**
@@ -911,7 +927,7 @@ export class Act<
     filter: PrioritizeFilter,
     priority: number
   ): Promise<number> {
-    return store().prioritize(filter, priority);
+    return this._scoped(() => store().prioritize(filter, priority));
   }
 
   /**
@@ -950,20 +966,22 @@ export class Act<
   async close(targets: CloseTarget[]): Promise<CloseResult> {
     if (!targets.length) return { truncated: new Map(), skipped: [] };
 
-    // Correlate first so dynamic reaction targets are discovered before
-    // the safety check examines subscription positions.
-    await this.correlate({ limit: 1000 });
+    return this._scoped(async () => {
+      // Correlate first so dynamic reaction targets are discovered before
+      // the safety check examines subscription positions.
+      await this.correlate({ limit: 1000 });
 
-    const result = await runCloseCycle(targets, {
-      reactiveEventsSize: this._reactive_events.size,
-      eventToState: this._event_to_state,
-      load: this._es.load,
-      tombstone: this._es.tombstone,
-      logger: this._logger,
+      const result = await runCloseCycle(targets, {
+        reactiveEventsSize: this._reactive_events.size,
+        eventToState: this._event_to_state,
+        load: this._es.load,
+        tombstone: this._es.tombstone,
+        logger: this._logger,
+      });
+
+      this.emit("closed", result);
+      return result;
     });
-
-    this.emit("closed", result);
-    return result;
   }
 
   /**
