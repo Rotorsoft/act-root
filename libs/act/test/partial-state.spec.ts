@@ -7,9 +7,13 @@ describe("partial-state", () => {
     label: z.string(),
   });
 
+  // Cross-slice event schemas are reference-identity checked (ACT-401).
+  // Hoist any event schema shared between partials to a single instance.
+  const Incremented = z.object({ by: z.number() });
+
   const PartA = state({ Thing: schema })
     .init(() => ({ count: 0, label: "" }))
-    .emits({ Incremented: z.object({ by: z.number() }) })
+    .emits({ Incremented })
     .patch({
       Incremented: (event, state) => ({ count: state.count + event.data.by }),
     })
@@ -73,9 +77,11 @@ describe("partial-state", () => {
   });
 
   it("should throw on conflicting custom patches for same event across partials", () => {
+    // Share the `Incremented` schema with PartA (ACT-401 reference
+    // identity); the test concern is *patch* divergence.
     const DupEvent = state({ Thing: schema })
       .init(() => ({ count: 0, label: "" }))
-      .emits({ Incremented: z.object({ by: z.number() }) })
+      .emits({ Incremented })
       .patch({ Incremented: () => ({}) })
       .on({ other: ZodEmpty })
       .emit(() => ["Incremented", { by: 0 }])
@@ -336,13 +342,18 @@ describe("partial-state", () => {
   });
 
   describe("patch merge priority (passthrough vs custom)", () => {
+    // Shared event schema for cross-partial reuse (ACT-401 reference
+    // identity). These tests assert *patch* resolution, not schema
+    // identity, so the event schema is hoisted to a single instance.
+    const ListArchived = z.object({ reason: z.string() });
+
     it("should keep custom patch when existing is passthrough", async () => {
       // AutoArchive partial defines a custom patch for ListArchived
       const AutoArchive = state({
         TodoList: z.object({ status: z.string() }),
       })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({
           ListArchived: () => ({ status: "archived" }),
         })
@@ -353,7 +364,7 @@ describe("partial-state", () => {
       // Audit partial redeclares ListArchived with passthrough (just needs the event registered)
       const Audit = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         // no .patch() — passthrough is the default
         .on({ auditList: z.object({ note: z.string() }) })
         .emit(() => ["ListArchived", { reason: "audit" }])
@@ -370,7 +381,7 @@ describe("partial-state", () => {
       // Passthrough partial registered first
       const Audit = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         // passthrough default
         .on({ auditList: z.object({ note: z.string() }) })
         .emit(() => ["ListArchived", { reason: "audit" }])
@@ -381,7 +392,7 @@ describe("partial-state", () => {
         TodoList: z.object({ status: z.string() }),
       })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({
           ListArchived: () => ({ status: "archived" }),
         })
@@ -399,7 +410,7 @@ describe("partial-state", () => {
       const customPatch = () => ({ status: "archived" });
       const PartA = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({ ListArchived: customPatch })
         .on({ archiveA: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])
@@ -407,7 +418,7 @@ describe("partial-state", () => {
 
       const PartB = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({ ListArchived: customPatch }) // same function reference
         .on({ archiveB: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])
@@ -447,7 +458,7 @@ describe("partial-state", () => {
     it("should throw on two different custom patches for the same event", () => {
       const PartA = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({ ListArchived: () => ({ status: "archived" }) })
         .on({ archiveA: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])
@@ -455,7 +466,7 @@ describe("partial-state", () => {
 
       const PartB = state({ TodoList: z.object({ status: z.string() }) })
         .init(() => ({ status: "active" }))
-        .emits({ ListArchived: z.object({ reason: z.string() }) })
+        .emits({ ListArchived })
         .patch({ ListArchived: () => ({ status: "deleted" }) }) // different custom patch
         .on({ archiveB: z.object({ reason: z.string() }) })
         .emit((a) => ["ListArchived", { reason: a.reason }])

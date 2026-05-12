@@ -231,6 +231,109 @@ describe("slice", () => {
     );
   });
 
+  // ACT-401: cross-slice event contract check via reference identity.
+  // Same-name state partials in different slices may redeclare the
+  // same event name (e.g. one slice produces, another reacts), but
+  // they MUST point at the same Zod schema instance. Different
+  // references = silent contract drift the type system can't see.
+  describe("cross-slice event contract (ACT-401)", () => {
+    it("allows same-name state partials that share the schema reference", () => {
+      // Shared schema constant in a real codebase — extracted to its
+      // own module and imported into every slice that declares it.
+      const Counted = z.object({ n: z.number() });
+
+      const CountA = state({ Counter: z.object({ total: z.number() }) })
+        .init(() => ({ total: 0 }))
+        .emits({ Counted })
+        .patch({ Counted: (e, s) => ({ total: s.total + e.data.n }) })
+        .on({ count: z.object({ n: z.number() }) })
+        .emit((a) => ["Counted", { n: a.n }])
+        .build();
+
+      const CountB = state({ Counter: z.object({ tag: z.string() }) })
+        .init(() => ({ tag: "" }))
+        .emits({ Counted }) // same reference — fine
+        .build();
+
+      const SliceA = slice().withState(CountA).build();
+      const SliceB = slice().withState(CountB).build();
+
+      expect(() => act().withSlice(SliceA).withSlice(SliceB)).not.toThrow();
+    });
+
+    it("throws when same-name state partials use different schema references for the same event", () => {
+      // Two inline declarations — structurally identical, but
+      // different JS references. This is the silent-drift case the
+      // check catches at build time.
+      const CountA = state({ Counter: z.object({ total: z.number() }) })
+        .init(() => ({ total: 0 }))
+        .emits({ Counted: z.object({ n: z.number() }) })
+        .patch({ Counted: (e, s) => ({ total: s.total + e.data.n }) })
+        .on({ count: z.object({ n: z.number() }) })
+        .emit((a) => ["Counted", { n: a.n }])
+        .build();
+
+      const CountB = state({ Counter: z.object({ tag: z.string() }) })
+        .init(() => ({ tag: "" }))
+        .emits({ Counted: z.object({ n: z.number() }) }) // structurally same, different ref
+        .build();
+
+      const SliceA = slice().withState(CountA).build();
+      const SliceB = slice().withState(CountB).build();
+
+      expect(() => act().withSlice(SliceA).withSlice(SliceB)).toThrow(
+        /Event "Counted" in state "Counter" is declared with different Zod schemas across slices/
+      );
+    });
+
+    it("error message points the developer at the shared-schema fix", () => {
+      const A = state({ Thing: z.object({ a: z.number() }) })
+        .init(() => ({ a: 0 }))
+        .emits({ Pinged: z.object({ at: z.number() }) })
+        .patch({ Pinged: (_, s) => s })
+        .on({ ping: z.object({ at: z.number() }) })
+        .emit((a) => ["Pinged", { at: a.at }])
+        .build();
+
+      const B = state({ Thing: z.object({ b: z.number() }) })
+        .init(() => ({ b: 0 }))
+        .emits({ Pinged: z.object({ at: z.number() }) }) // different ref
+        .build();
+
+      const SliceA = slice().withState(A).build();
+      const SliceB = slice().withState(B).build();
+
+      expect(() => act().withSlice(SliceA).withSlice(SliceB)).toThrow(
+        /extract a shared schema.*export const Pinged.*import it in every slice/s
+      );
+    });
+
+    it("throws on structurally-divergent schemas with the same name", () => {
+      // Schemas that aren't even structurally compatible. The check
+      // doesn't compare shape — it just enforces reference identity.
+      // Structural divergence is caught as a side effect.
+      const A = state({ Order: z.object({ id: z.string() }) })
+        .init(() => ({ id: "" }))
+        .emits({ OrderPaid: z.object({ amount: z.number().positive() }) })
+        .patch({ OrderPaid: (_, s) => s })
+        .on({ pay: z.object({ amount: z.number().positive() }) })
+        .emit((a) => ["OrderPaid", { amount: a.amount }])
+        .build();
+
+      const B = state({ Order: z.object({ note: z.string() }) })
+        .init(() => ({ note: "" }))
+        .emits({ OrderPaid: z.object({ amount: z.string() }) }) // diverged: string vs number
+        .build();
+
+      const SliceA = slice().withState(A).build();
+      const SliceB = slice().withState(B).build();
+
+      expect(() => act().withSlice(SliceA).withSlice(SliceB)).toThrow(
+        /Event "OrderPaid".*different Zod schemas/
+      );
+    });
+  });
+
   it("should support cross-slice reactions at the act level", async () => {
     const stream = nextStream();
 

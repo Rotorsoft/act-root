@@ -67,6 +67,42 @@ const TicketOperations = state({ Ticket: z.object({ status: z.string() }) })
 
 This means a partial can redeclare an event in `.emits()` (to react to it via `.on()`) without overwriting the custom reducer from the partial that owns the event.
 
+### Cross-slice event schemas — reference identity
+
+When a partial redeclares an event so it can `.on()` it (or for a slice that reacts to events owned by another slice), the **Zod schema in both partials must be the same JS reference**. The merge throws at build time if two partials declare the same event with different schema instances — silent contract drift is the failure mode this rule prevents.
+
+```typescript
+// events/ticket.ts — single source of truth for the shared schema
+import { z } from "zod";
+
+export const TicketOpened = z.object({ title: z.string() });
+
+// slice A — owns the event
+import { TicketOpened } from "./events/ticket.js";
+
+const TicketCreation = state({ Ticket: TicketState })
+  .init(() => ({ title: "" }))
+  .emits({ TicketOpened })  // ← shorthand: { TicketOpened: TicketOpened }
+  .patch({ TicketOpened: (e, s) => ({ ...s, title: e.data.title }) })
+  // ...
+  .build();
+
+// slice B — reacts to the event; same reference, no schema redeclaration
+import { TicketOpened } from "./events/ticket.js";
+
+const TicketAudit = state({ Ticket: AuditState })
+  .init(() => ({ auditedAt: 0 }))
+  .emits({ TicketOpened })  // ← same reference, no drift possible
+  // ...
+  .build();
+```
+
+Inlining the schema in each partial — `.emits({ TicketOpened: z.object({...}) })` in slice A and a separate `z.object({...})` in slice B — produces two different references with potentially-different shapes, refinements, or enum constraints that TypeScript can't detect. The merge throws with a message that names the event, the state, and the fix:
+
+> Event "TicketOpened" in state "Ticket" is declared with different Zod schemas across slices. Cross-slice event schemas must reference the same instance — extract a shared schema (e.g. `export const TicketOpened = z.object({ ... })` in a shared module) and import it in every slice that declares it.
+
+Cross-state collisions (two slices declaring the same event name in *different* state names) still throw `Duplicate event` regardless of reference, because the same event name can only be owned by one state.
+
 ## Invariants
 
 Business rules enforced before actions execute:

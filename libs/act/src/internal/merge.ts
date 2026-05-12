@@ -129,9 +129,20 @@ function mergeIntoExisting(
   for (const name of Object.keys(state.events)) {
     // Same schema reference means the same partial re-registered via another slice
     if (existing.events[name] === state.events[name]) continue;
-    // Allow same-name state partials to redeclare the same event
-    // (e.g., a partial that only needs the event name for .on() reactions)
-    if (existing.events[name]) continue;
+    // Same event name registered in a same-name state partial with a
+    // different Zod schema reference — silent contract drift that the
+    // type system can't catch (structurally compatible shapes flow
+    // through TS even when refinements/enums/literals disagree).
+    // Reference identity is the rule: cross-slice event schemas must
+    // come from a single shared instance.
+    if (existing.events[name]) {
+      throw new Error(
+        `Event "${name}" in state "${state.name}" is declared with different Zod schemas across slices. ` +
+          `Cross-slice event schemas must reference the same instance — ` +
+          `extract a shared schema (e.g. \`export const ${name} = z.object({ ... })\` in a shared module) ` +
+          `and import it in every slice that declares it.`
+      );
+    }
     if (events[name]) throw new Error(`Duplicate event "${name}"`);
   }
 

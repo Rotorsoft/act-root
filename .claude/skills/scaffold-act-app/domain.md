@@ -113,6 +113,20 @@ export const Item = state({ Item: ItemState })
 
 **Partial states**: Multiple states sharing the same name (e.g., `state({ Ticket: PartialA })` and `state({ Ticket: PartialB })`) merge automatically in slices/act. When a partial redeclares an event in `.emits()` without a `.patch()`, it gets a passthrough reducer that yields to any custom reducer from another partial. Two different custom patches for the same event throw at build time.
 
+**Shared event schemas across partials**: when two partials of the same state declare the same event name in `.emits({...})`, both must reference the **same Zod schema instance** — different references throw at build time (ACT-401). Extract any cross-partial event schema to a shared module and import it in every partial that declares it:
+
+```typescript
+// schemas/events.ts
+export const TicketOpened = z.object({ title: z.string() });
+
+// each partial
+import { TicketOpened } from "./schemas/events.js";
+state({ Ticket: PartialA }).emits({ TicketOpened })  // shorthand
+state({ Ticket: PartialB }).emits({ TicketOpened })  // same reference, no drift
+```
+
+This is the canonical pattern for cross-slice events. Inlining the schema (`emits({ TicketOpened: z.object({...}) })`) in each partial produces silent contract drift the type system can't see.
+
 ## Slices with Co-located Projections
 
 **When to use a slice vs a standalone reaction at the act level:** Use slices when the reaction is part of a feature's vertical slice — it naturally groups with the state it modifies. Use act-level reactions (`.on("Event").do(handler)`) only for cross-cutting concerns that don't belong to any single feature (e.g., global audit logging). In practice, almost all reactions belong in slices.
@@ -123,7 +137,7 @@ export const Item = state({ Item: ItemState })
 - **One slice per reaction flow** — when reaction chains grow, each serial chain (event → reaction → action → state → event → reaction → …) lives in its own slice. A long serial chain stays in one slice when there is no fan-out at any junction point.
 - **Slices are minimal and self-contained** — each slice includes only the state it owns. It defines its own actions, events, patches, reactions, and projections.
 - **Single state schema, multiple partials** — one Zod schema defines the full state shape. Each slice declares a partial via `state({ Name: Schema })` with its own `.init()`, `.emits()`, `.patch()`, and `.on()`. The framework merges partials at build time.
-- **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, it redeclares the event in `.emits()` so `.on("EventName")` compiles. The passthrough default is discarded in favor of the custom reducer from the owning partial.
+- **Redeclare trigger events via `.emits()`** — when a slice reacts to an event it doesn't produce, it redeclares the event in `.emits()` so `.on("EventName")` compiles. The passthrough default is discarded in favor of the custom reducer from the owning partial. **The redeclaration must reuse the original Zod schema reference** — extract it to a shared module and import it (build throws on different references; ACT-401).
 - **One custom patch per event enforced at build time** — conflicting custom patches throw. Passthroughs always yield to custom reducers.
 - **Serial chains connect slices** — when one slice's output event is another's input with no other subscribers, they can be merged into a single slice.
 
