@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.37.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.36.0...@rotorsoft/act-v0.37.0) (2026-05-12)
+
+
+### Features
+
+* **act:** auto-deprecate legacy event versions via _v<n> convention (ACT-403) ([7f6fca6](https://github.com/rotorsoft/act-root/commit/7f6fca6b4dbb9ab11b408ae8fc590b7a2dd09e36))
+
 # [@rotorsoft/act-v0.36.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.35.2...@rotorsoft/act-v0.36.0) (2026-05-12)
 
 
