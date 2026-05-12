@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.38.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.37.0...@rotorsoft/act-v0.38.0) (2026-05-12)
+
+
+### Features
+
+* **act:** per-Act scoped ports via ActOptions.scoped (ACT-501) ([2042ad8](https://github.com/rotorsoft/act-root/commit/2042ad8414a6a2351d7f96fc99082c04c6fc2064))
+
 # [@rotorsoft/act-v0.37.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.36.0...@rotorsoft/act-v0.37.0) (2026-05-12)
 
 
