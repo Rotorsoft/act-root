@@ -11,3 +11,4 @@ test-store.db*
 # Perf bench output is per-run; baseline is checked in.
 libs/act/perf-result.json
 libs/act/realistic-result.json
+package-lock.json
