@@ -2,6 +2,7 @@
   <tr>
     <td width="62%" valign="top" align="center">
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
+      <a href="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml/badge.svg?branch=master" alt="Store Conformance"></a>
       <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
       <img src="https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square" alt="Repo Size">
       <br/><br/>
