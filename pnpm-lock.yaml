@@ -496,8 +496,8 @@ importers:
         specifier: ^0.35.2
         version: 0.35.2(zod@4.4.3)
       '@rotorsoft/act-pg':
-        specifier: ^0.20.2
-        version: 0.20.2(@rotorsoft/act@0.35.2(zod@4.4.3))(zod@4.4.3)
+        specifier: ^0.21.0
+        version: link:../../libs/act-pg
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3134,13 +3134,6 @@ packages:
   '@rotorsoft/act-patch@1.2.2':
     resolution: {integrity: sha512-qqFHW/1P7R0WNSXIDLmzGtNkJIFt967dc9AmcMqgiTlVBhrPgQQgO9Htdy9m5vf/29ZOZnyWSGnN7Yl74Ra9Og==}
     engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act-pg@0.20.2':
-    resolution: {integrity: sha512-yDf5r7kbeFPBmUbI+OjdHG+WjtbcTRGYr8f7RYyJpdRQNo2Jc3gQLGqCmcQsgnNSaabvELR+q0ooI1/UbtFzcQ==}
-    engines: {node: '>=22.18.0'}
-    peerDependencies:
-      '@rotorsoft/act': '>=0.31.1'
-      zod: ^4.4.3
 
   '@rotorsoft/act@0.35.2':
     resolution: {integrity: sha512-cEheK5ABgy1LV5wadNzyGx48U3669lqFnWkrSr29NVaoW+GuyIoypgxTpaJGuS5s+3SwyWJGRI1bft3SW7JSwg==}
@@ -12300,14 +12293,6 @@ snapshots:
     optional: true
 
   '@rotorsoft/act-patch@1.2.2': {}
-
-  '@rotorsoft/act-pg@0.20.2(@rotorsoft/act@0.35.2(zod@4.4.3))(zod@4.4.3)':
-    dependencies:
-      '@rotorsoft/act': 0.35.2(zod@4.4.3)
-      pg: 8.20.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - pg-native
 
   '@rotorsoft/act@0.35.2(zod@4.4.3)':
     dependencies:
