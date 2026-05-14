@@ -138,6 +138,15 @@ Source-of-truth for what lives where:
 - Keep state machines focused; split concerns into separate slices
 - Adding a feature to core: update `libs/act/src/types/`, implement, test, demo in an example, ensure all three stores (InMemory/Postgres/Sqlite) support it
 - Adding a new `/libs` package: see [contributing-new-package.md](docs/docs/guides/contributing-new-package.md) — **seed a baseline tag before the first merge** or semantic-release defaults to `1.0.0`
+- **Respecting the stability charter.** The public API is covered by [STABILITY.md](STABILITY.md). Before changing any of the surfaces below, decide whether the change is **additive** (new optional method, new optional field, new event name) or **breaking** (rename, removal, narrowed type, changed semantics). Additive changes are fine in any release; breaking changes require a `BREAKING CHANGE:` commit footer that drives a major version bump and a written migration note in `RELEASE_NOTES_*.md` or the changelog. If you're not sure which category your change falls into, stop and ask. Files holding charter-covered surface:
+  - `libs/act/src/builders/{act,state,slice,projection,…}-builder.ts` — fluent builder DSL
+  - `libs/act/src/act.ts` — the `IAct` interface (`do`, `load`, `query`, `query_array`, `drain`, `settle`, `correlate`, `reset`, `close`) and lifecycle event names/shapes
+  - `libs/act/src/types/ports.ts` — `Store`, `Cache`, `Logger` interfaces
+  - `libs/act/src/types/index.ts` (and what it re-exports) — public type surface
+  - `libs/act/src/ports.ts` — the public port singletons (`store()`, `cache()`, `log()`, `dispose()`, etc.) and `SNAP_EVENT`/`TOMBSTONE_EVENT` constants
+
+  Out of scope for the charter — change freely: anything in `libs/act/src/internal/`, performance characteristics, log formats, adapter implementation details outside the contract.
+
 - **Changing a port interface (Store, Cache, Logger).** When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts`, you must also update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/`. The TCK is the executable contract — adapters validate themselves against it. Rules:
   1. Add or update cases in `libs/act-tck/src/{store,cache,logger}-tck.ts`.
   2. If the method is optional, add a flag to the matching `Capabilities` type and gate the new tests on it so existing adapters keep passing until they opt in.
