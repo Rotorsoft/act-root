@@ -44,6 +44,13 @@ export type HandleResult = Readonly<{
   at: number;
   error?: string;
   block?: boolean;
+  /**
+   * Wall-clock timestamp (ms since epoch) at which the next attempt on
+   * this stream may run. Populated by `_finalize` only on retry paths
+   * where the reaction defined `options.backoff`. Undefined means "no
+   * backoff configured" — drain re-attempts as soon as the lease expires.
+   */
+  nextAttemptAt?: number;
 }>;
 
 /**
@@ -87,6 +94,14 @@ export type DrainCycle<TEvents extends Schemas> = {
  * Returns `undefined` when nothing was claimed — caller can short-circuit
  * the rest of the drain pass.
  *
+ * **Deferred streams.** When `isDeferred(stream)` returns `true`, the
+ * cycle skips dispatch for that lease — no handle, no ack, no block. The
+ * lease holds for `leaseMillis` via the existing claim mechanism, which
+ * blocks competing workers from re-attempting during the backoff window
+ * and serves as the per-worker pacing timer. Subsequent claims after
+ * `leased_until` expires will re-acquire the lease and re-skip until the
+ * controller clears the entry.
+ *
  * @internal
  */
 export async function runDrainCycle<
@@ -102,14 +117,31 @@ export async function runDrainCycle<
   lagging: number,
   leading: number,
   eventLimit: number,
-  leaseMillis: number
+  leaseMillis: number,
+  isDeferred?: (stream: string) => boolean
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
   const leased = await ops.claim(lagging, leading, randomUUID(), leaseMillis);
   if (!leased.length) return undefined;
 
-  // Fetch events for each leased stream
-  const fetched = await ops.fetch(leased, eventLimit);
+  // Partition out streams whose handler is in a backoff window. We hold
+  // their leases (no ack/block) so competing workers can't re-attempt
+  // during the configured delay.
+  const active = isDeferred
+    ? leased.filter((l) => !isDeferred(l.stream))
+    : leased;
+  if (!active.length) {
+    return {
+      leased,
+      fetched: [],
+      handled: [],
+      acked: [],
+      blocked: [],
+    };
+  }
+
+  // Fetch events for each active leased stream
+  const fetched = await ops.fetch(active, eventLimit);
 
   // Build a single index keyed by stream — collapses two passes
   // (payloadsMap build + per-lease fetched.find) into one Map lookup.
@@ -144,7 +176,7 @@ export async function runDrainCycle<
   }
 
   const handled = await Promise.all(
-    leased.map((lease) => {
+    active.map((lease) => {
       // fetch() returns one entry per leased stream — fetchMap.get is
       // always defined here (asserted with `!`).
       const entry = fetchMap.get(lease.stream)!;
@@ -231,6 +263,15 @@ export class DrainController<
   private _armed = false;
   private _locked = false;
   private _ratio = 0.5;
+  /**
+   * Per-stream backoff: `stream → nextAttemptAt` (ms since epoch). Set by
+   * `_finalize` via `HandleResult.nextAttemptAt`; cleared on successful
+   * ack or terminal block. Lives in process memory — per-worker pacing
+   * by design (see {@link BackoffOptions} for the multi-worker trade-off).
+   */
+  private _backoff = new Map<string, number>();
+  /** Timer re-arming drain at the earliest pending `nextAttemptAt`. */
+  private _backoffTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private readonly deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>
@@ -248,6 +289,42 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
+  }
+
+  /** Returns true when `stream` is currently within a backoff window. */
+  private isDeferred = (stream: string): boolean => {
+    const next = this._backoff.get(stream);
+    return next !== undefined && next > Date.now();
+  };
+
+  /**
+   * Schedule the next drain re-arm at the earliest pending backoff
+   * expiry. Called only when the backoff map is non-empty (caller guard).
+   * Idempotent — collapses many simultaneously deferred streams into a
+   * single timer.
+   */
+  private scheduleBackoffWake(): void {
+    if (this._backoffTimer) clearTimeout(this._backoffTimer);
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const t of this._backoff.values()) if (t < earliest) earliest = t;
+    const delay = Math.max(0, earliest - Date.now());
+    this._backoffTimer = setTimeout(() => {
+      this._backoffTimer = undefined;
+      // Garbage-collect expired entries so the next cycle sees ready
+      // streams as active. Drain will be re-triggered by whoever owns the
+      // settle loop (or by the next commit). Re-arm here so a debounced
+      // settle picks it up.
+      const now = Date.now();
+      for (const [stream, at] of this._backoff) {
+        if (at <= now) this._backoff.delete(stream);
+      }
+      this._armed = true;
+    }, delay);
+    // Don't keep the event loop alive solely for backoff timers — letting
+    // a process exit during retry pacing is the right default. Safe to call
+    // unconditionally: Node's `setTimeout` always returns a Timeout with
+    // `unref()`.
+    this._backoffTimer.unref();
   }
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
@@ -273,7 +350,8 @@ export class DrainController<
         lagging,
         leading,
         eventLimit,
-        leaseMillis
+        leaseMillis,
+        this._backoff.size > 0 ? this.isDeferred : undefined
       );
 
       if (!cycle) {
@@ -286,6 +364,18 @@ export class DrainController<
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = computeLagLeadRatio(handled, lagging, leading);
+
+      // Refresh per-stream backoff state from this cycle's outcomes.
+      // Successful acks and terminal blocks both clear the window;
+      // retry-not-block results carry a `nextAttemptAt` set by `_finalize`.
+      for (const lease of acked) this._backoff.delete(lease.stream);
+      for (const lease of blocked) this._backoff.delete(lease.stream);
+      for (const h of handled) {
+        if (h.nextAttemptAt !== undefined && !h.block) {
+          this._backoff.set(h.lease.stream, h.nextAttemptAt);
+        }
+      }
+      if (this._backoff.size > 0) this.scheduleBackoffWake();
 
       if (acked.length) this.deps.onAcked(acked);
       if (blocked.length) this.deps.onBlocked(blocked);

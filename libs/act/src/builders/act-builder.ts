@@ -385,6 +385,7 @@ export function act<
             options: {
               blockOnError: options?.blockOnError ?? true,
               maxRetries: options?.maxRetries ?? 3,
+              backoff: options?.backoff,
             },
           };
           if (!handler.name)

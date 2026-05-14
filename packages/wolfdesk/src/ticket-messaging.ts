@@ -77,16 +77,30 @@ export const TicketMessagingSlice = slice()
   .withState(TicketMessaging)
 
   .on("MessageAdded")
-  .do(async function deliver(event, _stream, app) {
-    await deliverMessage(event.data);
-    await app.do(
-      "MarkMessageDelivered",
-      {
-        stream: event.stream,
-        actor: { id: randomUUID(), name: "deliver reaction" },
+  .do(
+    async function deliver(event, _stream, app) {
+      await deliverMessage(event.data);
+      await app.do(
+        "MarkMessageDelivered",
+        {
+          stream: event.stream,
+          actor: { id: randomUUID(), name: "deliver reaction" },
+        },
+        { messageId: event.data.messageId },
+        event
+      );
+    },
+    // Exponential backoff with jitter for an external delivery channel —
+    // a flaky receiver shouldn't be hammered, and lockstep retries from
+    // many tickets at once would just create a thundering herd.
+    {
+      maxRetries: 5,
+      backoff: {
+        strategy: "exponential",
+        baseMs: 200,
+        maxMs: 30_000,
+        jitter: true,
       },
-      { messageId: event.data.messageId },
-      event
-    );
-  })
+    }
+  )
   .build();
