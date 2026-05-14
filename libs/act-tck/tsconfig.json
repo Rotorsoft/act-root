@@ -5,10 +5,7 @@
   },
   "references": [
     {
-      "path": "../act"
-    },
-    {
-      "path": "../act-tck/tsconfig.build.json"
+      "path": "../act/tsconfig.build.json"
     }
   ],
   "exclude": ["dist", "node_modules"]

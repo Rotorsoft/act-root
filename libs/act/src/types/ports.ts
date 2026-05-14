@@ -147,14 +147,19 @@ export type StreamPosition = {
  * is an orchestrator concern; the streams table doesn't store kinds.
  * Layer that on top by joining results with `Act`'s built-in registry.
  *
- * @property stream - Stream-name filter. By default treated as a regex
- *   (PG `~`, SQLite/InMemory `LIKE`-translated). Pass `stream_exact: true`
- *   for exact string equality.
- * @property stream_exact - Use exact match instead of pattern match for
- *   `stream`.
- * @property source - Source-stream filter (regex by default). Useful to
- *   isolate dynamic-reaction subscriptions tied to a particular aggregate
- *   stream. Pass `source_exact: true` for exact equality.
+ * @property stream - Stream-name filter. Interpreted as a regex by
+ *   default — same anchor semantics across all stores (PG `~`, SQLite
+ *   anchor-aware `LIKE`, InMemory JS `RegExp`). **Anchors are caller-
+ *   controlled**: `^foo` for prefix, `foo$` for suffix, `^foo$` for
+ *   whole-string match. A plain string `foo` is a substring match
+ *   (matches any stream containing `foo`). Pass `stream_exact: true`
+ *   for a fast literal-equality comparison that skips regex compilation.
+ * @property stream_exact - Treat `stream` as a literal string instead
+ *   of a regex.
+ * @property source - Source-stream filter. Same anchor semantics as
+ *   `stream`. Useful to isolate dynamic-reaction subscriptions tied to
+ *   a particular aggregate stream. Pass `source_exact: true` for
+ *   literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   `source`.
  * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)

@@ -12,6 +12,9 @@ const sidebars: SidebarsConfig = {
         "guides/projections-to-database",
         "guides/production-checklist",
         "guides/contributing-new-package",
+        "guides/writing-a-store",
+        "guides/writing-a-cache",
+        "guides/writing-a-logger",
       ],
     },
     {
@@ -75,6 +78,11 @@ const sidebars: SidebarsConfig = {
           type: "link",
           label: "@rotorsoft/act-sse",
           href: "/docs/api/act-sse/src",
+        },
+        {
+          type: "link",
+          label: "@rotorsoft/act-tck",
+          href: "/docs/api/act-tck/src",
         },
       ],
     },

@@ -53,5 +53,8 @@
   "peerDependencies": {
     "@rotorsoft/act": ">=0.39.0",
     "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@rotorsoft/act-tck": "workspace:^"
   }
 }

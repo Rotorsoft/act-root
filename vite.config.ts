@@ -24,7 +24,15 @@ export default defineConfig({
         __dirname,
         "libs/act/src/test/index.ts"
       ),
+      "@rotorsoft/act/types": path.resolve(
+        __dirname,
+        "libs/act/src/types/index.ts"
+      ),
       "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
+      "@rotorsoft/act-tck": path.resolve(
+        __dirname,
+        "libs/act-tck/src/index.ts"
+      ),
     },
   },
   test: {
