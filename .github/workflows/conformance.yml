@@ -1,0 +1,147 @@
+name: Store Conformance Matrix
+
+# Runs the Store TCK from @rotorsoft/act-tck against every supported
+# version of the in-tree backend adapters. Catches dialect-specific
+# regressions (PG SKIP LOCKED behavior across majors, libSQL release
+# bumps) that the single-version `CI-CD` job can't see.
+#
+# Informational, not required for branch protection. A red cell signals
+# "this version slipped" — author owns the call to revert, pin, or
+# document the loss of support.
+
+on:
+  pull_request:
+    paths:
+      - "libs/act-pg/**"
+      - "libs/act-sqlite/**"
+      - "libs/act-tck/**"
+      - "libs/act/src/types/ports.ts"
+      - ".github/workflows/conformance.yml"
+  push:
+    branches: [master]
+    paths:
+      - "libs/act-pg/**"
+      - "libs/act-sqlite/**"
+      - "libs/act-tck/**"
+      - "libs/act/src/types/ports.ts"
+      - ".github/workflows/conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SKIP_SIMPLE_GIT_HOOKS: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  pg:
+    name: pg-${{ matrix.pg }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # PostgreSQL 13 went EOL 2025-11. 14 is the oldest still
+        # security-patched line; 17 is what `ci-cd.yml` uses as the
+        # ground-truth single-version run.
+        pg: ["14", "15", "16", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.pg }}-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: "pnpm"
+      - run: pnpm install
+      - name: Run TCK against PostgreSQL ${{ matrix.pg }}
+        run: pnpm -F @rotorsoft/act-pg exec vitest run test/store-tck.spec.ts
+
+  sqlite:
+    name: libsql-${{ matrix.libsql }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Pinned version is what the lockfile resolves to today; `latest`
+        # answers "does the next libSQL release break us before we adopt
+        # it." Two cells is enough — libSQL's surface is small and the
+        # release cadence makes a wider matrix expensive to maintain.
+        libsql:
+          - pinned
+          - latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Override @libsql/client to latest
+        if: matrix.libsql == 'latest'
+        # `pnpm.overrides` survives `pnpm install` and is the idiomatic
+        # way to swap a transitive version in a workspace. Writing into
+        # the root package.json keeps the change scoped to this job.
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            pkg.pnpm = pkg.pnpm ?? {};
+            pkg.pnpm.overrides = pkg.pnpm.overrides ?? {};
+            pkg.pnpm.overrides["@libsql/client"] = "latest";
+            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
+          '
+          cat package.json | grep -A 3 '"pnpm"' || true
+
+      - run: pnpm install --no-frozen-lockfile
+      - name: Print resolved @libsql/client version
+        run: pnpm list --filter @rotorsoft/act-sqlite @libsql/client --depth 0
+      - name: Run TCK against libSQL ${{ matrix.libsql }}
+        run: pnpm -F @rotorsoft/act-sqlite exec vitest run test/store-tck.spec.ts
+
+  summary:
+    # Always runs so the workflow summary is populated even when a cell
+    # fails. `if: always()` is required because the matrix jobs' failure
+    # would otherwise mark this dependency as skipped.
+    if: always()
+    needs: [pg, sqlite]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Compose conformance table
+        run: |
+          status() {
+            case "$1" in
+              success) echo "✅" ;;
+              failure) echo "❌" ;;
+              cancelled) echo "⚪" ;;
+              *) echo "❓" ;;
+            esac
+          }
+          {
+            echo "## Store conformance matrix"
+            echo ""
+            echo "| Adapter | Version | Result |"
+            echo "|---|---|---|"
+            # The `needs.<job>.result` for a matrix job rolls up to the
+            # worst single cell; per-cell detail is in the run UI.
+            echo "| PostgreSQL | 14, 15, 16, 17 | $(status ${{ needs.pg.result }}) |"
+            echo "| libSQL | pinned + latest | $(status ${{ needs.sqlite.result }}) |"
+            echo ""
+            echo "Per-version detail in the [run page](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
+          } >> "$GITHUB_STEP_SUMMARY"
