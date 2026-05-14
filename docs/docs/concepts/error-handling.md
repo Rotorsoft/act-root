@@ -196,11 +196,57 @@ Each reaction handler accepts options that control retry and blocking behaviour:
 
 ```typescript
 .on("OrderPlaced")
-  .do(handler, { maxRetries: 5, blockOnError: true })
+  .do(handler, {
+    maxRetries: 5,
+    blockOnError: true,
+    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true },
+  })
   .to(resolver)
 ```
 
 - **`maxRetries`** (default `3`) — how many times the framework re-claims a stream after a handler throws. Each failed cycle increments `retry_count`; the next `claim()` picks the stream up again with the same events.
 - **`blockOnError`** (default `true`) — once `retry_count` exceeds `maxRetries`, the framework calls `block()` to set `blocked = true` on the stream. Set `false` if your handler is idempotent and you'd rather keep retrying forever.
+- **`backoff`** (default omitted — retry as soon as the lease expires) — paces inter-attempt timing so flaky receivers aren't hammered.
 
 Set `maxRetries: 0` for handlers that should never retry — typically those that already implement their own dead-letter strategy.
+
+### Backoff
+
+Without `backoff`, the framework re-claims a failed stream on the next drain cycle — typically within milliseconds. For handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by deferring re-dispatch on this worker.
+
+```typescript
+backoff: {
+  strategy: "exponential",  // "fixed" | "linear" | "exponential"
+  baseMs: 200,              // base delay
+  maxMs: 30_000,            // cap (only used by exponential)
+  jitter: true,             // multiply by random factor in [0.5, 1.5)
+}
+```
+
+Delay computation, where `retry` is the lease's retry counter at the failed attempt (`0` is the first failure):
+
+| Strategy | Delay |
+|---|---|
+| `fixed` | `baseMs` |
+| `linear` | `baseMs * (retry + 1)` |
+| `exponential` | `min(baseMs * 2^retry, maxMs)` |
+
+With `jitter: true`, the final delay is multiplied by `0.5 + random()` (range `[0.5, 1.5)`) to avoid lockstep thundering herds.
+
+#### Per-worker semantics
+
+Backoff state lives in process memory on each worker's `DrainController`. With N competing workers (each running its own controller against a shared store):
+
+- Each worker only paces *its own* re-attempts.
+- The shared `retry_count` on the stream watermark climbs across workers — so the `blockOnError` threshold is hit up to N× faster than the configured strategy suggests.
+
+This is intentional: transient per-worker faults (one bad DNS resolver, one network blip) recover faster, and genuine poison messages get quarantined sooner. If you need cross-worker pacing for very long backoffs, forward events to an external bus rather than holding drain leases for minutes — see [external integration](../guides/external-integration) (forthcoming).
+
+#### Interaction with `leaseMillis`
+
+While a stream is in its backoff window, the controller claims its lease but skips dispatch — no `ack`, no `block`. The lease holds for `leaseMillis` via the existing claim mechanism, which prevents competing workers from re-attempting during the configured delay.
+
+- If your `backoff` delay is **shorter** than `leaseMillis`, the lease still holds until `leaseMillis` expires. Effective backoff is `max(configured, leaseMillis)`.
+- If your `backoff` delay is **longer** than `leaseMillis`, the lease expires partway through; subsequent claims (by this controller or competing workers) re-acquire the lease and re-skip until the delay elapses.
+
+This means **`backoff` is always at-least-as-long-as configured**, never shorter. To tighten backoff floors, lower `leaseMillis` (with the trade-off that overlapping workers can race more aggressively).

@@ -29,6 +29,7 @@ import type {
   Schemas,
   Target,
 } from "../types/index.js";
+import { computeBackoffDelay } from "./backoff.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -68,12 +69,20 @@ function finalize(
   const block = lease.retry >= options.maxRetries && options.blockOnError;
   if (block)
     logger.error(`Blocking ${lease.stream} after ${lease.retry} retries.`);
+  // Backoff applies only on retry paths — successful handles and terminal
+  // blocks never defer. `lease.retry` here is the just-failed attempt's
+  // counter, so the delay paces the *next* attempt.
+  const nextAttemptAt =
+    !block && options.backoff
+      ? Date.now() + computeBackoffDelay(lease.retry, options.backoff)
+      : undefined;
   return {
     lease,
     handled,
     at,
     error: handled === 0 ? error.message : undefined,
     block,
+    nextAttemptAt,
   };
 }
 
