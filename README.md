@@ -10,12 +10,12 @@
   <tr>
     <td width="62%" align="center">
       <a href="https://rotorsoft.github.io/act-root/">
-        <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
+        <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%" height="100%">
       </a>
     </td>
     <td width="38%" align="center">
       <a href="https://payhip.com/b/7ezLy">
-        <img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%">
+        <img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%" height="100%">
       </a>
     </td>
   </tr>
