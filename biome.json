@@ -117,9 +117,11 @@
                     "group": [
                       "**/internal/*",
                       "!**/internal/index",
-                      "!**/internal/index.js"
+                      "!**/internal/index.js",
+                      "!**/internal/lru-map",
+                      "!**/internal/lru-map.js"
                     ],
-                    "message": "Import via the internal barrel ('./internal/index.js'), not a deep path."
+                    "message": "Import via the internal barrel ('./internal/index.js'), not a deep path. Exception: `internal/lru-map.js` is a side-effect-free leaf utility and can be imported directly."
                   }
                 ]
               }

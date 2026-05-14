@@ -14,7 +14,6 @@
  * @internal
  */
 
-import { LruSet } from "../lru-map.js";
 import { log, store } from "../ports.js";
 import type {
   Query,
@@ -24,6 +23,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
+import { LruSet } from "./lru-map.js";
 
 /**
  * Static resolver target collected at build time. Subscribed once during
