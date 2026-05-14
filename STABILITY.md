@@ -29,15 +29,19 @@ The runtime surface returned from `act(...).build()`:
 
 The signatures, return shapes, and behavioral contracts of these methods are stable. Additive new methods on `IAct` are not breaking. Changing the meaning of an existing call (e.g., what `settle()` guarantees) is.
 
-### Store and Cache adapter contracts
+### Store, Cache, and Logger adapter contracts
 
-The `Store` and `Cache` interfaces in `libs/act/src/types/` define what an adapter must implement. Once 1.0 ships:
+The `Store`, `Cache`, and `Logger` interfaces in `libs/act/src/types/` define what an adapter must implement. The contracts are **executable** — [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck) exposes `runStoreTck`, `runCacheTck`, and `runLoggerTck` that exercise every method on each interface against any factory you point them at. If your adapter passes the TCK, it honors the contract; if the contract changes in a way that affects you, the TCK fails first.
 
-- Adding a **required** method to `Store` or `Cache` is a breaking change.
-- Adding an **optional** method (with a default fallback in the orchestrator) is not.
+Once 1.0 ships:
+
+- Adding a **required** method to `Store`, `Cache`, or `Logger` is a breaking change.
+- Adding an **optional** method (with a default fallback in the orchestrator) is not. Optional surface is gated behind a `Capabilities` flag in the TCK so existing adapters keep passing until they opt in.
 - Changing the semantics of an existing method (return shape, error contract, ordering guarantees) is breaking.
 
-This is the contract third-party adapters depend on. We will be explicit in release notes when this surface changes.
+In-tree adapters are validated against the TCK across multiple backend versions in [`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) — PostgreSQL 14/15/16/17 and `@libsql/client` pinned + latest. A regression in any cell surfaces before it reaches users.
+
+We will be explicit in release notes when this surface changes.
 
 ### Lifecycle events
 
@@ -83,6 +87,7 @@ These may change in **any** release, including patches. Don't depend on them in 
 | `@rotorsoft/act-sse` | Yes — public broadcast surface |
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
 | `@rotorsoft/act-diagram` | Goes to 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
+| `@rotorsoft/act-tck` | **Stays at 0.x.** The Store/Cache/Logger contracts the TCK validates are stable at 1.0; the TCK's own surface (`run*Tck` functions, `Capabilities` types, fixture helpers) keeps evolving until third-party adapter authors have shaken it out in practice. Joins the 1.x line once that settles. |
 
 Each library's `README.md` carries a one-line stability note linking back to this document.
 

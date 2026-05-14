@@ -2,6 +2,8 @@
 
 Test Compatibility Kit for the `Store`, `Cache`, and `Logger` ports of [`@rotorsoft/act`](https://www.npmjs.com/package/@rotorsoft/act).
 
+> **Stability:** This package stays at **0.x** while `@rotorsoft/act` ships **1.0**. The Store/Cache/Logger contracts the TCK validates are covered by the [Act Stability Charter](../../STABILITY.md) and are stable at 1.0. The TCK's own surface (the `run*Tck` functions, the `Capabilities` types, the fixture helpers) may still evolve in 0.x as third-party adapter authors report what they need. The TCK joins the 1.x line once that surface settles.
+
 ## Why it exists
 
 A port without an executable contract is undefined behavior. The three pluggable ports in `@rotorsoft/act` (event store, snapshot cache, logger) each have multiple in-tree adapters and an open door for third-party implementations. Before this package, each adapter's test file independently re-stated what the contract was — that's tribal knowledge, not a spec. This package turns the contract into a runnable spec a third party can validate themselves against.
