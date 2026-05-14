@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pino-v0.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.4.2...@rotorsoft/act-pino-v0.5.0) (2026-05-14)
+
+
+### Features
+
+* **act-tck:** extract Store/Cache/Logger TCK package (ACT-302) ([ff9bfd4](https://github.com/rotorsoft/act-root/commit/ff9bfd44b3cf36890186c6db7965c531458953a2))
+
 # [@rotorsoft/act-pino-v0.4.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.4.1...@rotorsoft/act-pino-v0.4.2) (2026-05-14)
 
 
