@@ -178,6 +178,53 @@ describe("per-reaction backoff (integration)", () => {
     expect(drained.blocked.length).toBe(1);
   });
 
+  it("garbage-collects only entries whose window has elapsed", async () => {
+    // Two streams enter backoff on the same drain cycle. The fixed 50ms
+    // window means both expire ~50ms after their failure. We schedule
+    // them ~30ms apart so when the timer fires for the first, the second
+    // is still ~30ms from ready — exercising the "keep" branch of the
+    // callback's per-entry check.
+    const attempts: Record<string, number> = { early: 0, late: 0 };
+    const handler = vi
+      .fn()
+      .mockImplementation(async (event: { stream: string }) => {
+        attempts[event.stream]++;
+        throw new Error("transient");
+      });
+    Object.defineProperty(handler, "name", { value: "multiStream" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, {
+        maxRetries: 5,
+        backoff: { strategy: "fixed", baseMs: 50 },
+      })
+      .build();
+
+    // Commit + correlate + drain "early" — backoff entry set at T+50.
+    await app.do("tick", { stream: "early", actor }, {});
+    await app.correlate();
+    await app.drain({ leaseMillis: 1 });
+    expect(attempts.early).toBe(1);
+
+    // Commit + correlate + drain "late" 30ms later — entry set at T'+50.
+    // Both entries are now in the map; the earliest timer reschedules.
+    await sleep(30);
+    await app.do("tick", { stream: "late", actor }, {});
+    await app.correlate();
+    await app.drain({ leaseMillis: 1 });
+    expect(attempts.late).toBe(1);
+
+    // ~25ms more lets `early`'s timer fire (~55ms total from its
+    // failure) while `late` is only ~25ms in. The callback iterates the
+    // map and must delete `early` but keep `late`.
+    await sleep(25);
+    await app.drain({ leaseMillis: 1 });
+    expect(attempts.early).toBe(2);
+    expect(attempts.late).toBe(1);
+  });
+
   it("default (no backoff) preserves current rapid-retry behavior", async () => {
     let attempts = 0;
     const handler = vi.fn().mockImplementation(async () => {

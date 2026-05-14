@@ -291,17 +291,6 @@ export class DrainController<
     return this._armed;
   }
 
-  /**
-   * Releases the backoff timer so processes can exit cleanly. Safe to call
-   * multiple times.
-   */
-  dispose(): void {
-    if (this._backoffTimer) {
-      clearTimeout(this._backoffTimer);
-      this._backoffTimer = undefined;
-    }
-  }
-
   /** Returns true when `stream` is currently within a backoff window. */
   private isDeferred = (stream: string): boolean => {
     const next = this._backoff.get(stream);
@@ -310,15 +299,12 @@ export class DrainController<
 
   /**
    * Schedule the next drain re-arm at the earliest pending backoff
-   * expiry. Idempotent — collapses many simultaneously deferred streams
-   * into a single timer.
+   * expiry. Called only when the backoff map is non-empty (caller guard).
+   * Idempotent — collapses many simultaneously deferred streams into a
+   * single timer.
    */
   private scheduleBackoffWake(): void {
-    if (this._backoffTimer) {
-      clearTimeout(this._backoffTimer);
-      this._backoffTimer = undefined;
-    }
-    if (this._backoff.size === 0) return;
+    if (this._backoffTimer) clearTimeout(this._backoffTimer);
     let earliest = Number.POSITIVE_INFINITY;
     for (const t of this._backoff.values()) if (t < earliest) earliest = t;
     const delay = Math.max(0, earliest - Date.now());
@@ -328,19 +314,17 @@ export class DrainController<
       // streams as active. Drain will be re-triggered by whoever owns the
       // settle loop (or by the next commit). Re-arm here so a debounced
       // settle picks it up.
-      this.gcExpiredBackoff();
+      const now = Date.now();
+      for (const [stream, at] of this._backoff) {
+        if (at <= now) this._backoff.delete(stream);
+      }
       this._armed = true;
     }, delay);
     // Don't keep the event loop alive solely for backoff timers — letting
-    // a process exit during retry pacing is the right default.
-    this._backoffTimer.unref?.();
-  }
-
-  private gcExpiredBackoff(): void {
-    const now = Date.now();
-    for (const [stream, at] of this._backoff) {
-      if (at <= now) this._backoff.delete(stream);
-    }
+    // a process exit during retry pacing is the right default. Safe to call
+    // unconditionally: Node's `setTimeout` always returns a Timeout with
+    // `unref()`.
+    this._backoffTimer.unref();
   }
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
