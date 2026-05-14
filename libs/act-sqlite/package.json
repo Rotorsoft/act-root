@@ -51,7 +51,7 @@
     "@libsql/client": "^0.17.3"
   },
   "peerDependencies": {
-    "@rotorsoft/act": ">=0.35.2",
+    "@rotorsoft/act": ">=0.39.0",
     "zod": "^4.4.3"
   }
 }

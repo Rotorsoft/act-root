@@ -244,7 +244,7 @@ importers:
   libs/act-pg:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=0.35.2'
+        specifier: '>=0.39.0'
         version: link:../act
       pg:
         specifier: ^8.20.0
@@ -260,7 +260,7 @@ importers:
   libs/act-pino:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=0.35.2'
+        specifier: '>=0.39.0'
         version: link:../act
       pino:
         specifier: ^10.3.1
@@ -275,7 +275,7 @@ importers:
         specifier: ^0.17.3
         version: 0.17.3
       '@rotorsoft/act':
-        specifier: '>=0.35.2'
+        specifier: '>=0.39.0'
         version: link:../act
       zod:
         specifier: ^4.4.3
@@ -290,8 +290,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.35.2
-        version: 0.35.2(zod@4.4.3)
+        specifier: ^0.39.0
+        version: link:../../libs/act
       '@trpc/server':
         specifier: 11.16.0
         version: 11.16.0(typescript@5.9.3)
@@ -493,11 +493,11 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.35.2
-        version: 0.35.2(zod@4.4.3)
+        specifier: ^0.39.0
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
         specifier: ^0.20.2
-        version: 0.20.2(@rotorsoft/act@0.35.2(zod@4.4.3))(zod@4.4.3)
+        version: 0.20.2(@rotorsoft/act@libs+act)(zod@4.4.3)
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3131,21 +3131,11 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@rotorsoft/act-patch@1.2.2':
-    resolution: {integrity: sha512-qqFHW/1P7R0WNSXIDLmzGtNkJIFt967dc9AmcMqgiTlVBhrPgQQgO9Htdy9m5vf/29ZOZnyWSGnN7Yl74Ra9Og==}
-    engines: {node: '>=22.18.0'}
-
   '@rotorsoft/act-pg@0.20.2':
     resolution: {integrity: sha512-yDf5r7kbeFPBmUbI+OjdHG+WjtbcTRGYr8f7RYyJpdRQNo2Jc3gQLGqCmcQsgnNSaabvELR+q0ooI1/UbtFzcQ==}
     engines: {node: '>=22.18.0'}
     peerDependencies:
       '@rotorsoft/act': '>=0.31.1'
-      zod: ^4.4.3
-
-  '@rotorsoft/act@0.35.2':
-    resolution: {integrity: sha512-cEheK5ABgy1LV5wadNzyGx48U3669lqFnWkrSr29NVaoW+GuyIoypgxTpaJGuS5s+3SwyWJGRI1bft3SW7JSwg==}
-    engines: {node: '>=22.18.0'}
-    peerDependencies:
       zod: ^4.4.3
 
   '@rspack/binding-darwin-arm64@1.7.11':
@@ -12299,20 +12289,13 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.60.3':
     optional: true
 
-  '@rotorsoft/act-patch@1.2.2': {}
-
-  '@rotorsoft/act-pg@0.20.2(@rotorsoft/act@0.35.2(zod@4.4.3))(zod@4.4.3)':
+  '@rotorsoft/act-pg@0.20.2(@rotorsoft/act@libs+act)(zod@4.4.3)':
     dependencies:
-      '@rotorsoft/act': 0.35.2(zod@4.4.3)
+      '@rotorsoft/act': link:libs/act
       pg: 8.20.0
       zod: 4.4.3
     transitivePeerDependencies:
       - pg-native
-
-  '@rotorsoft/act@0.35.2(zod@4.4.3)':
-    dependencies:
-      '@rotorsoft/act-patch': 1.2.2
-      zod: 4.4.3
 
   '@rspack/binding-darwin-arm64@1.7.11':
     optional: true
