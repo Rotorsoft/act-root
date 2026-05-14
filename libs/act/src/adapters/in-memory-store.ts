@@ -299,7 +299,7 @@ export class InMemoryStore implements Store {
     if (query.stream) {
       if (query.stream_exact) {
         if (e.stream !== query.stream) return false;
-      } else if (!RegExp(`^${query.stream}$`).test(e.stream)) return false;
+      } else if (!RegExp(query.stream).test(e.stream)) return false;
     }
     if (query.names && !query.names.includes(e.name as string)) return false;
     if (query.correlation && e.meta?.correlation !== query.correlation)
@@ -561,11 +561,11 @@ export class InMemoryStore implements Store {
     await sleep();
     const streamRe =
       filter.stream && !filter.stream_exact
-        ? new RegExp(`^${filter.stream}$`)
+        ? new RegExp(filter.stream)
         : undefined;
     const sourceRe =
       filter.source && !filter.source_exact
-        ? new RegExp(`^${filter.source}$`)
+        ? new RegExp(filter.source)
         : undefined;
     let count = 0;
     for (const s of this._streams.values()) {
@@ -611,11 +611,11 @@ export class InMemoryStore implements Store {
     const blocked = query?.blocked;
     const streamRe =
       query?.stream && !query.stream_exact
-        ? new RegExp(`^${query.stream}$`)
+        ? new RegExp(query.stream)
         : undefined;
     const sourceRe =
       query?.source && !query.source_exact
-        ? new RegExp(`^${query.source}$`)
+        ? new RegExp(query.source)
         : undefined;
 
     const sorted = [...this._streams.values()].sort((a, b) =>

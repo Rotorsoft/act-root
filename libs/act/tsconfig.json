@@ -6,6 +6,9 @@
   "references": [
     {
       "path": "../act-patch/tsconfig.build.json"
+    },
+    {
+      "path": "../act-tck/tsconfig.build.json"
     }
   ],
   "exclude": ["dist", "node_modules"]

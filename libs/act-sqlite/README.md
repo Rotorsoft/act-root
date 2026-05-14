@@ -127,10 +127,27 @@ For multi-server deployments requiring distributed stream processing, use [@roto
 | Streaming | Callback pattern | Callback pattern |
 | Performance | Fast for moderate loads | Scales horizontally |
 
+## Testing
+
+Validated against the executable Store contract in [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck):
+
+```ts
+import { runStoreTck } from "@rotorsoft/act-tck";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+runStoreTck({
+  name: "SqliteStore",
+  factory: () => new SqliteStore({ url: "file:tck-store.db" }),
+});
+```
+
+See [Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md) for the third-party authoring guide.
+
 ## Related
 
 - [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) — Core framework
 - [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) — PostgreSQL adapter
+- [@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck) — Test Compatibility Kit
 - [Documentation](https://rotorsoft.github.io/act-root/)
 - [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
 

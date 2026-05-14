@@ -174,9 +174,33 @@ The PostgreSQL adapter uses `FOR UPDATE SKIP LOCKED` for atomic stream claiming 
 
 This replaces the previous two-step poll/lease approach, eliminating contention and simplifying the drain cycle.
 
+## Testing
+
+Validated against the executable Store contract in [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck):
+
+```ts
+import { runStoreTck } from "@rotorsoft/act-tck";
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+runStoreTck({
+  name: "PostgresStore",
+  factory: () =>
+    new PostgresStore({
+      port: 5431,
+      schema: "tck",
+      table: "tck_store",
+      notify: true,
+    }),
+  capabilities: { notify: true },
+});
+```
+
+See [Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md) for the third-party authoring guide.
+
 ## Related
 
 - [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) - Core framework
+- [@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck) - Test Compatibility Kit
 - [Documentation](https://rotorsoft.github.io/act-root/)
 - [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
 

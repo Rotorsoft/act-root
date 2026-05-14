@@ -1,23 +1,24 @@
 {
-  "name": "@rotorsoft/act-pg",
+  "name": "@rotorsoft/act-tck",
   "type": "module",
-  "version": "0.21.1",
-  "description": "act pg adapters",
+  "version": "0.0.0",
+  "description": "Test Compatibility Kit for @rotorsoft/act Store, Cache, and Logger ports",
   "keywords": [
     "typescript",
     "event-sourcing",
-    "postgres",
-    "event-store",
-    "listen-notify"
+    "cqrs",
+    "tck",
+    "test-compatibility-kit",
+    "contract-tests"
   ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rotorsoft/act-root.git",
-    "directory": "libs/act-pg"
+    "directory": "libs/act-tck"
   },
-  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-pg#readme",
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-tck#readme",
   "bugs": {
     "url": "https://github.com/rotorsoft/act-root/issues"
   },
@@ -44,18 +45,16 @@
   "scripts": {
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
-    "build": "pnpm clean && tsup && pnpm types",
-    "stress": "tsx test/stress/runner.ts"
-  },
-  "dependencies": {
-    "pg": "^8.20.0"
+    "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@rotorsoft/act": ">=0.39.0",
+    "@rotorsoft/act": "workspace:^",
+    "vitest": ">=3",
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^",
-    "@types/pg": "^8.20.0"
+    "@rotorsoft/act": "workspace:^",
+    "vitest": "^4.1.6",
+    "zod": "^4.4.3"
   }
 }

@@ -114,6 +114,22 @@ await logger.dispose(); // flushes buffered logs
 - **`logSingleLine`** — controlled by `LOG_SINGLE_LINE` env var (affects `pino-pretty` formatting)
 - **`env`** — when `"production"`, pretty-printing is disabled by default (structured JSON output)
 
+## Testing
+
+Validated against the executable Logger contract in [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck):
+
+```ts
+import { runLoggerTck } from "@rotorsoft/act-tck";
+import { PinoLogger } from "@rotorsoft/act-pino";
+
+runLoggerTck({
+  name: "PinoLogger",
+  factory: () => new PinoLogger({ level: "trace", pretty: false }),
+});
+```
+
+See [Writing a custom Logger adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-logger.md) for the third-party authoring guide.
+
 ## License
 
 MIT

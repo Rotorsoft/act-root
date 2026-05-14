@@ -6,6 +6,7 @@ coverage/
 .npmrc
 local.db*
 test-store.db*
+tck-store.db*
 .DS_Store
 *.tsbuildinfo
 # Perf bench output is per-run; baseline is checked in.

@@ -17,6 +17,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
   - `@rotorsoft/act-sse` — Server-Sent Events for incremental state broadcast
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
+  - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
 
 - **`/packages`** — example applications
   - `calculator` — simple state machine; rebuild and close demos
@@ -137,6 +138,12 @@ Source-of-truth for what lives where:
 - Keep state machines focused; split concerns into separate slices
 - Adding a feature to core: update `libs/act/src/types/`, implement, test, demo in an example, ensure all three stores (InMemory/Postgres/Sqlite) support it
 - Adding a new `/libs` package: see [contributing-new-package.md](docs/docs/guides/contributing-new-package.md) — **seed a baseline tag before the first merge** or semantic-release defaults to `1.0.0`
+- **Changing a port interface (Store, Cache, Logger).** When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts`, you must also update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/`. The TCK is the executable contract — adapters validate themselves against it. Rules:
+  1. Add or update cases in `libs/act-tck/src/{store,cache,logger}-tck.ts`.
+  2. If the method is optional, add a flag to the matching `Capabilities` type and gate the new tests on it so existing adapters keep passing until they opt in.
+  3. Update the `docs/docs/guides/writing-a-*.md` walkthrough for that port (if it exists yet).
+  4. Run the TCK against every in-tree adapter (InMemory, act-pg, act-sqlite, act-pino).
+  Example: when `Store.query_heads(streams)` (#639) lands, add a `queryHeads` capability and a "returns latest event per stream, empty for unknown, respects pagination" block in `store-tck.ts`.
 
 ### Documentation discipline
 

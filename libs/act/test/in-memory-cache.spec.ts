@@ -1,29 +1,14 @@
 import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 
-describe("InMemoryCache", () => {
-  let cache: InMemoryCache;
+// Contract-level cases live in `in-memory-cache-tck.spec.ts` (via the
+// shared Cache TCK in `@rotorsoft/act-tck`). This file only covers
+// InMemory-specific implementation details: LRU ordering and size
+// bounding, both of which are adapter-specific (the Cache contract
+// has no notion of eviction policy or max size).
 
-  beforeEach(() => {
-    cache = new InMemoryCache({ maxSize: 3 });
-  });
-
-  it("returns undefined for missing keys", async () => {
-    expect(await cache.get("missing")).toBeUndefined();
-  });
-
-  it("stores and retrieves entries", async () => {
-    const entry = {
-      state: { count: 1 },
-      version: 0,
-      event_id: 0,
-      patches: 1,
-      snaps: 0,
-    };
-    await cache.set("s1", entry);
-    expect(await cache.get("s1")).toEqual(entry);
-  });
-
-  it("evicts LRU entry when full", async () => {
+describe("InMemoryCache (adapter-specific)", () => {
+  it("evicts the least-recently-used entry when full", async () => {
+    const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
       state: {},
       version: 0,
@@ -46,10 +31,10 @@ describe("InMemoryCache", () => {
       snaps: 0,
     });
 
-    // Access "a" to make it recently used
+    // Touch "a" so it becomes most-recently-used.
     await cache.get("a");
 
-    // Adding "d" should evict "b" (least recently used)
+    // Adding "d" should evict "b" (least recently used).
     await cache.set("d", {
       state: {},
       version: 0,
@@ -64,7 +49,8 @@ describe("InMemoryCache", () => {
     expect(await cache.get("d")).toBeDefined();
   });
 
-  it("updates existing keys without growing", async () => {
+  it("set overwrites a prior entry on the same stream without growing", async () => {
+    const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
       state: { v: 1 },
       version: 0,
@@ -80,41 +66,10 @@ describe("InMemoryCache", () => {
       snaps: 0,
     });
     expect(cache.size).toBe(1);
-    expect((await cache.get("a"))?.state).toEqual({ v: 2 });
   });
 
-  it("invalidates a specific key", async () => {
-    await cache.set("s1", {
-      state: {},
-      version: 0,
-      event_id: 0,
-      patches: 0,
-      snaps: 0,
-    });
-    await cache.invalidate("s1");
-    expect(await cache.get("s1")).toBeUndefined();
-  });
-
-  it("clears all entries", async () => {
-    await cache.set("a", {
-      state: {},
-      version: 0,
-      event_id: 0,
-      patches: 0,
-      snaps: 0,
-    });
-    await cache.set("b", {
-      state: {},
-      version: 0,
-      event_id: 1,
-      patches: 0,
-      snaps: 0,
-    });
-    await cache.clear();
-    expect(cache.size).toBe(0);
-  });
-
-  it("dispose clears all entries", async () => {
+  it("dispose clears all entries (observable via `size`)", async () => {
+    const cache = new InMemoryCache({ maxSize: 3 });
     await cache.set("a", {
       state: {},
       version: 0,
@@ -137,8 +92,7 @@ describe("InMemoryCache", () => {
         snaps: 0,
       });
     }
-    // First entry should have been evicted
-    expect(await big.get("k0")).toBeUndefined();
+    expect(await big.get("k0")).toBeUndefined(); // evicted
     expect(await big.get("k1")).toBeDefined();
     expect(big.size).toBe(1000);
   });
