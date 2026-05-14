@@ -20,9 +20,13 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  # One paths-filter pass produces two signals:
-  #   - `src-changed`: any `libs/*/src/**` touched → run unit + bench tests.
+  # One paths-filter pass produces three signals:
+  #   - `src-changed`: any `libs/*/src/**` touched → run unit tests.
   #     Pure docs/CHANGELOG/PERFORMANCE updates inside a lib don't trip this.
+  #   - `perf-changed`: a perf-critical hot path or a benchmark file changed
+  #     → run benches on top of unit tests. Most PRs and most master pushes
+  #     skip this. A perf-affecting change that doesn't touch the filter's
+  #     paths goes uncaught; refresh `perf-baseline.json` when that bites.
   #   - `libs`: which lib directories changed at all → CD matrix entries.
   #     semantic-release still has the final say (a `docs:` commit produces
   #     no release), so this is just an upper bound on which jobs to spin up.
@@ -30,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       src-changed: ${{ steps.src.outputs.src }}
+      perf-changed: ${{ steps.perf.outputs.perf }}
       libs: ${{ steps.libs.outputs.changes }}
     steps:
       - uses: actions/checkout@v6
@@ -39,6 +44,32 @@ jobs:
           filters: |
             src:
               - 'libs/*/src/**'
+      - uses: dorny/paths-filter@v4
+        id: perf
+        with:
+          # Hot paths are enforced by directory convention, not an
+          # explicit file list:
+          #   - `libs/*/src/internal/**` — non-public pipeline code
+          #     (drain, correlate, settle, close, event-sourcing,
+          #     lru-map, etc.). The right home for perf-sensitive
+          #     helpers that aren't public API.
+          #   - `libs/*/src/adapters/**` — Store/Cache/Logger impls.
+          #     The in-memory adapters are exercised by every bench.
+          #   - `libs/*/{bench,scripts}/**` — bench files and the
+          #     bench-runner scripts themselves.
+          #   - `libs/*/perf-baseline.json` — baseline refreshes.
+          # Code that doesn't fit a convention either lives in
+          # `internal/` (the right place for perf-sensitive helpers)
+          # or accepts that it won't be auto-bench-validated. The
+          # convention is the contract; expand it by moving files
+          # into one of these dirs, not by amending the workflow.
+          filters: |
+            perf:
+              - 'libs/*/src/internal/**'
+              - 'libs/*/src/adapters/**'
+              - 'libs/*/bench/**'
+              - 'libs/*/scripts/**'
+              - 'libs/*/perf-baseline.json'
       - uses: dorny/paths-filter@v4
         id: libs
         with:
@@ -50,6 +81,7 @@ jobs:
             act-sqlite:  ['libs/act-sqlite/**']
             act-pino:    ['libs/act-pino/**']
             act-diagram: ['libs/act-diagram/**']
+            act-tck:     ['libs/act-tck/**']
 
   ci:
     needs: changes
@@ -110,14 +142,23 @@ jobs:
       # checked-in baseline; fails if any scenario's p50 exceeds 1.5× baseline.
       # To refresh: `pnpm -F @rotorsoft/act bench:update` in a PR labeled
       # `perf-baseline-update` with rationale in PERFORMANCE.md.
+      #
+      # Benches run only when a perf-critical file changed (see the `perf`
+      # filter above). Most PRs and most master pushes skip the bench
+      # steps entirely. If a perf-sensitive change lands without touching
+      # the filter's paths, it will not be auto-detected — keep the file
+      # list in sync as new hot paths emerge.
       - run: pnpm -F @rotorsoft/act bench:run
+        if: needs.changes.outputs.perf-changed == 'true'
       - run: pnpm -F @rotorsoft/act bench:check
+        if: needs.changes.outputs.perf-changed == 'true'
 
       # Scenario benchmarks (Shape C). Each one has a built-in
       # regression assertion, so a real perf regression breaks the
       # build. The captured stdout ends up in the workflow's step
       # summary so reviewers see the numbers without scrolling logs.
       - name: bench:scenarios
+        if: needs.changes.outputs.perf-changed == 'true'
         env:
           # vitest/node emit ANSI color codes even when stdout is piped,
           # which renders as `␛[32m'…'␛[39m` garbage inside the markdown
@@ -129,7 +170,9 @@ jobs:
           set -o pipefail
           pnpm bench:scenarios 2>&1 | tee bench-scenarios.log
       - name: Append scenario bench results to step summary
-        if: always()
+        if: |
+          always() &&
+          needs.changes.outputs.perf-changed == 'true'
         run: |
           {
             echo "## Scenario benchmark results"

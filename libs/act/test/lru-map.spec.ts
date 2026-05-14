@@ -1,4 +1,4 @@
-import { LruMap, LruSet } from "../src/lru-map.js";
+import { LruMap, LruSet } from "../src/internal/lru-map.js";
 
 describe("LruMap", () => {
   it("returns undefined for missing keys", () => {
