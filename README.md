@@ -1,6 +1,6 @@
 <table width="100%">
   <tr>
-    <td colspan="2" align="center">
+    <td colspan="2" align="left">
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml/badge.svg?branch=master" alt="Store Conformance"></a>
       <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
@@ -8,12 +8,12 @@
     </td>
   </tr>
   <tr>
-    <td width="62%" align="center" valign="middle">
+    <td width="62%" align="center">
       <a href="https://rotorsoft.github.io/act-root/">
         <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
       </a>
     </td>
-    <td width="38%" align="center" valign="middle">
+    <td width="38%" align="center">
       <a href="https://payhip.com/b/7ezLy">
         <img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%">
       </a>
