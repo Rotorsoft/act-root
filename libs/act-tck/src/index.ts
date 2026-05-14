@@ -59,6 +59,18 @@
  * adapters keep passing until they explicitly opt in.
  */
 
+// Re-export the port contracts so adapter authors only need a single
+// import line in their test files (`@rotorsoft/act-tck`) rather than
+// reaching into `@rotorsoft/act/types` for the interfaces and the TCK
+// for the run* functions. Same types — keeps the two paths from
+// drifting in adapter-author code.
+export type {
+  Cache,
+  CacheEntry,
+  Logger,
+  Store,
+  StoreNotification,
+} from "@rotorsoft/act/types";
 export type { CacheTckOptions } from "./cache-tck.js";
 export { runCacheTck } from "./cache-tck.js";
 export type { CounterEvents } from "./fixtures/events.js";
