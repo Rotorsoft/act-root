@@ -1,4 +1,4 @@
-<table width="100%">
+<table width="100%" cellspacing="0">
   <tr>
     <td colspan="2" align="left">
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
