@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.41.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.40.0...@rotorsoft/act-v0.41.0) (2026-05-14)
+
+
+### Features
+
+* **act:** per-reaction retry backoff (ACT-601) ([49f18ba](https://github.com/rotorsoft/act-root/commit/49f18ba2bed9685b45a5dbd2c40caeeb0075ca2a))
+
 # [@rotorsoft/act-v0.40.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.39.0...@rotorsoft/act-v0.40.0) (2026-05-14)
 
 
