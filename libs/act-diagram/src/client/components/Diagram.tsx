@@ -361,6 +361,12 @@ export function Diagram({
             </button>
           )}
           {toolbarExtra}
+          <span
+            className="select-none font-mono text-[9px] text-zinc-600"
+            title="@rotorsoft/act-diagram version"
+          >
+            v{__ACT_DIAGRAM_VERSION__}
+          </span>
         </div>
       </div>
 
