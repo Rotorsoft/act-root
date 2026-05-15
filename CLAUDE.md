@@ -44,6 +44,10 @@ pnpm -F calculator test                               # one package
 vitest packages/calculator/src/__tests__/calculator.test.ts  # one file
 
 pnpm -F shared drizzle:migrate   # migrations (also auto-run before tests)
+
+pnpm act                                  # interactive contracts explorer (current dir)
+pnpm act packages/wolfdesk                # explore a specific package
+pnpm act -q TicketOpened                  # non-interactive: print one entity, exit
 ```
 
 ## Important Constraints
@@ -74,6 +78,15 @@ Conventional commits, validated by hook:
 
 When the user wants to scaffold or extend an app using Act, use the **`scaffold-act-app`** skill. It owns the full app-building surface: spec parsing, state/slice/projection design, monorepo layout, tRPC API, React client, SSE wiring, tests. The skill description triggers it automatically when the user asks to build, scaffold, or translate a domain model.
 
+### Inspecting an Act app from the terminal
+
+The **`act`** CLI (shipped from `@rotorsoft/act-diagram` as a `bin`) is the build-time companion to `act-inspector`. Where the inspector shows runtime state, `act` shows the **structural contract** — every event, action, slice, projection, state, and reaction the parser can see, with producer/consumer relationships, captured Zod schemas, and deprecation status (via the `_v<n>` convention). Detail views can jump straight into `$EDITOR` at the source line.
+
+- `pnpm act` — interactive: pick a category → entry → view detail → optionally open in `$EDITOR`.
+- `pnpm act -q <name>` — non-interactive, exits after printing. Used by CI smoke tests in `ci-cd.yml`.
+
+If schemas aren't being captured for an event, the parser is best-effort: it walks `.emits({...})` literally. Shorthand (`{ TicketOpened }`) records the identifier name; explicit Zod expressions are captured verbatim.
+
 ### Framework reference (Docusaurus)
 
 | Topic | File |
@@ -96,6 +109,7 @@ When the user wants to scaffold or extend an app using Act, use the **`scaffold-
 | Production deployment checklist | [docs/docs/guides/production-checklist.md](docs/docs/guides/production-checklist.md) |
 | Database-backed projections (Drizzle, batched replay) | [docs/docs/guides/projections-to-database.md](docs/docs/guides/projections-to-database.md) |
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
+| Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
 
 ### Performance evidence
 

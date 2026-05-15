@@ -38,6 +38,19 @@ export type EventNode = {
   name: string;
   hasCustomPatch: boolean;
   line?: number;
+  /**
+   * Best-effort source text of the Zod schema expression as written in
+   * `.emits({ EventName: <expr> })`. Captured by re-scanning the source
+   * file after evaluation. Absent when the event was found but no source
+   * match could be made (synthetic events, unparseable blocks).
+   */
+  schema?: string;
+  /**
+   * Runtime Zod schema object captured during evaluation. Only present
+   * after parsing — never serialized. The act-contracts CLI uses this
+   * to emit JSON Schema via `z.toJSONSchema()`.
+   */
+  zod?: unknown;
 };
 
 export type ActionNode = {
@@ -62,6 +75,7 @@ export type ProjectionNode = {
   name: string;
   varName: string;
   handles: string[]; // event names
+  file?: string;
   line?: number;
 };
 
@@ -69,6 +83,7 @@ export type ReactionNode = {
   event: string;
   handlerName: string; // function name or "on EventName"
   dispatches: string[]; // action names this reaction calls via app.do()
+  file?: string;
   line?: number;
 };
 

@@ -113,6 +113,20 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # `act` CLI smoke test — non-interactive `-q` query against both
+      # example apps. Catches regressions in the parser, builder, or
+      # formatter that would silently break the doc surface.
+      - name: act-cli smoke (calculator)
+        run: |
+          set -o pipefail
+          pnpm act packages/calculator -q Incremented | tee act-cli-calculator.log
+          grep -q "event Incremented" act-cli-calculator.log
+      - name: act-cli smoke (wolfdesk)
+        run: |
+          set -o pipefail
+          pnpm act packages/wolfdesk -q TicketOpened | tee act-cli-wolfdesk.log
+          grep -q "event TicketOpened" act-cli-wolfdesk.log
+
       # Render the v8 coverage summary as a markdown table in the PR/run
       # summary. `json-summary` reporter is enabled in vite.config.ts.
       - name: Coverage summary

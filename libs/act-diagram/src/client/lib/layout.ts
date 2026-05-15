@@ -38,6 +38,8 @@ export type N = {
   projections?: string[];
   guards?: string[];
   reactions?: string[];
+  /** Best-effort Zod source text for event nodes (see EventNode.schema). */
+  schema?: string;
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 export type Box = {
@@ -151,6 +153,7 @@ function placeChain(
   lookup: Map<string, ReactionDef>,
   eventProjections: Map<string, string[]>,
   eventReactions: Map<string, string[]>,
+  eventSchemas: Map<string, string>,
   sliceRightXRef: { value: number }
 ): void {
   const dispatchBaseX = rX + W + GAP;
@@ -233,6 +236,7 @@ function placeChain(
         file: row.targetState?.file,
         projections: eventProjections.get(emit.name),
         reactions: eventReactions.get(emit.name),
+        schema: eventSchemas.get(emit.name),
       });
 
       // Recurse into sub-chain — reaction aligns with this emit
@@ -251,6 +255,7 @@ function placeChain(
           lookup,
           eventProjections,
           eventReactions,
+          eventSchemas,
           sliceRightXRef
         );
       }
@@ -277,6 +282,15 @@ export function computeLayout(viewModel: DomainModel): Layout {
   // Build projection lookup: event name → projection names
   const eventProjections = new Map<string, string[]>();
   const eventReactions = new Map<string, string[]>();
+  // Captured Zod schema text per event name (first occurrence wins).
+  const eventSchemas = new Map<string, string>();
+  for (const s of viewModel.states) {
+    for (const e of s.events) {
+      if (e.schema && !eventSchemas.has(e.name)) {
+        eventSchemas.set(e.name, e.schema);
+      }
+    }
+  }
 
   for (const slice of viewModel.slices) {
     for (const r of slice.reactions) {
@@ -492,6 +506,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           file: eventFileMap.get(en) ?? st.file,
           projections: eventProjections.get(en),
           reactions: eventReactions.get(en),
+          schema: eventSchemas.get(en),
         });
         eventYMap.set(en, evtY);
 
@@ -523,6 +538,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
             sliceReactionByEvent,
             eventProjections,
             eventReactions,
+            eventSchemas,
             sliceRightXRef
           );
           // Advance watermark past all nodes placed by this chain
@@ -712,6 +728,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           label: en,
           projections: eventProjections.get(en),
           reactions: eventReactions.get(en),
+          schema: eventSchemas.get(en),
         });
         eventYMap.set(en, evtY);
         evtY += H + GAP / 2;
@@ -726,6 +743,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
         label: en,
         projections: eventProjections.get(en),
         reactions: eventReactions.get(en),
+        schema: eventSchemas.get(en),
       });
       eventYMap.set(en, evtY);
       evtY += H + GAP / 2;

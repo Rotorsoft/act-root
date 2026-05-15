@@ -598,6 +598,20 @@ export function Diagram({
                   onClick={() => onClickElement?.(n.label, n.type, n.file)}
                   onMouseEnter={(ev) => {
                     const parts = [n.label];
+                    if (n.schema) {
+                      // Multi-line schemas render as a "Schema:" header
+                      // followed by indented body lines so the tooltip
+                      // keeps the original formatting (z.object(...) +
+                      // .describe chains, etc.).
+                      const schemaLines = n.schema.split("\n");
+                      if (schemaLines.length === 1) {
+                        parts.push(`Schema: ${n.schema}`);
+                      } else {
+                        parts.push("Schema:");
+                        for (const sl of schemaLines)
+                          parts.push(`  ${sl.replace(/^\s+/, "")}`);
+                      }
+                    }
                     if (n.guards?.length)
                       parts.push(`Guards: ${n.guards.join(", ")}`);
                     if (n.reactions?.length)

@@ -45,9 +45,11 @@ export default defineConfig({
       exclude: [
         "**/node_modules/**",
         "packages/**",
+        "**/*.tsx",
         "libs/act-diagram/src/server/**",
         "libs/act-diagram/src/client/data/**",
         "libs/act-diagram/src/client/components/**",
+        "libs/act-diagram/src/client/main.tsx",
         "libs/act-diagram/src/client/types/protocol.ts",
         "libs/act-diagram/src/client/types/file-tab.ts",
         "libs/act-diagram/src/client/types/index.ts",

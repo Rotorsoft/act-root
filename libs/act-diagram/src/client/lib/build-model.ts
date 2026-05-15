@@ -14,6 +14,7 @@ import type {
   ReactionNode,
   StateNode,
 } from "../types/index.js";
+import { extractSchemasFromSource } from "./schema-extract.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -45,6 +46,9 @@ function buildState(
     eventNodes.push({
       name: eventName,
       hasCustomPatch: st.patches?.has(eventName) ?? false,
+      // Stash the runtime Zod schema so the JSON Schema exporter can
+      // call `z.toJSONSchema(zod)` later without re-running the parser.
+      zod: events[eventName],
     });
   }
 
@@ -214,13 +218,17 @@ export function buildModel(
         if (p && p._tag === "Projection") projNames.push(p.target as string);
       }
 
+      const sliceFile = s._sourceFile as string | undefined;
       model.slices.push({
         name: sliceName,
         states: sliceStateKeys,
         stateVars: sliceStateKeys,
         projections: projNames,
-        reactions: (s.reactions as ReactionNode[]) ?? [],
-        file: s._sourceFile as string | undefined,
+        reactions: ((s.reactions as ReactionNode[]) ?? []).map((r) => ({
+          ...r,
+          file: r.file ?? sliceFile,
+        })),
+        file: sliceFile,
         error: errors.length > 0 ? errors.join("; ") : undefined,
       });
     } catch (e: unknown) {
@@ -255,12 +263,37 @@ export function buildModel(
     }
   }
 
+  // ── Step 2b: Capture best-effort Zod schema text per event ────────
+  // Re-scan each state's source file for `.emits({...})` and slice out
+  // the value expression for every known event name. The captured text
+  // feeds both the act-contracts CLI and the diagram tooltips.
+  const sourceByPath = new Map<string, string>();
+  for (const f of files) sourceByPath.set(f.path, f.content);
+  for (const stNode of model.states) {
+    if (!stNode.file) continue;
+    // `stNode.file` came from `_sourceFile`, which was set during file
+    // evaluation — so it's always present in `files`. The `!` and
+    // v8-ignore acknowledge the type-level optionality without paying
+    // for an unreachable branch.
+    /* v8 ignore next */
+    const src = sourceByPath.get(stNode.file)!;
+    const names = new Set(stNode.events.map((e) => e.name));
+    if (names.size === 0) continue;
+    const schemas = extractSchemasFromSource(src, names);
+    for (const ev of stNode.events) {
+      // Set unconditionally — `undefined` is a valid value for the
+      // optional schema field and matches the "not captured" state.
+      ev.schema = schemas.get(ev.name);
+    }
+  }
+
   // ── Step 3: Build projections ─────────────────────────────────────
   for (const p of rawProjections) {
     model.projections.push({
       name: p.target,
       varName: p.target,
       handles: p.handles,
+      file: p._sourceFile as string | undefined,
     });
   }
 
@@ -287,8 +320,9 @@ export function buildModel(
       states: model.states.map((s) => s.name),
     } as ActNode;
 
+    const actFile = a._sourceFile as string | undefined;
     for (const r of (a.reactions as ReactionNode[]) ?? []) {
-      model.reactions.push(r);
+      model.reactions.push({ ...r, file: r.file ?? actFile });
     }
 
     const entryPath = (a._sourceFile ?? "app.ts") as string;
