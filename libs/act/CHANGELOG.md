@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v0.42.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.41.0...@rotorsoft/act-v0.42.0) (2026-05-15)
+
+
+### Features
+
+* **act:** configurable correlation id generator (ACT-404) ([ad250c7](https://github.com/rotorsoft/act-root/commit/ad250c77105e7ffd61375b36d43fc03c3b577acb))
+
 # [@rotorsoft/act-v0.41.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.40.0...@rotorsoft/act-v0.41.0) (2026-05-14)
 
 
