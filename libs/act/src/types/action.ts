@@ -163,9 +163,18 @@ export type CorrelatorContext = {
  * a readable + index-friendly default (`{state[:4]}-{action[:4]}-{ts}{rnd}`).
  *
  * Common patterns apps plug in:
- * - Embed a tenant id: `(ctx) => \`${tenantOf(ctx.actor)}-...\``
- * - Propagate an inbound trace id when present (HTTP middleware sets it
- *   on the actor or context).
+ *
+ * ```ts
+ * // Embed a tenant id pulled from the actor
+ * const tenantPrefixed: Correlator = (ctx) =>
+ *   tenantOf(ctx.actor) + "-" + defaultSuffix(ctx);
+ *
+ * // Propagate an inbound trace id when present
+ * const tracePropagating: Correlator = (ctx) =>
+ *   currentTraceId() ?? defaultCorrelator(ctx);
+ * ```
+ *
+ * Other shapes:
  * - Use ULID / UUIDv7 if you've standardized on those elsewhere.
  * - Call a database sequence for hard-monotonic ids (one extra round-trip
  *   per commit).
