@@ -157,15 +157,27 @@ export async function main(deps: RunDeps): Promise<number> {
     const exact = matches.filter(
       (m) => m.name.toLowerCase() === args.query!.toLowerCase()
     );
-    if (exact.length === 1) {
-      deps.output.write(formatDetail(idx, exact[0]) + "\n");
+    // Two entries with identical (kind, name, qualifier) describe the
+    // same logical entity declared in different files (e.g. a `Counter`
+    // state defined in two demo entrypoints). Collapse them so `-q`
+    // surfaces a detail view instead of an ambiguity menu.
+    const equivKey = (m: (typeof matches)[number]) =>
+      `${m.kind}\x00${m.name}\x00${m.qualifier ?? ""}`;
+    const uniqExact = Array.from(
+      new Map(exact.map((m) => [equivKey(m), m])).values()
+    );
+    if (uniqExact.length === 1) {
+      deps.output.write(formatDetail(idx, uniqExact[0]) + "\n");
       return 0;
     }
-    if (matches.length === 1) {
-      deps.output.write(formatDetail(idx, matches[0]) + "\n");
+    const uniqMatches = Array.from(
+      new Map(matches.map((m) => [equivKey(m), m])).values()
+    );
+    if (uniqMatches.length === 1) {
+      deps.output.write(formatDetail(idx, uniqMatches[0]) + "\n");
       return 0;
     }
-    deps.output.write(formatMatches(args.query, matches) + "\n");
+    deps.output.write(formatMatches(args.query, uniqMatches) + "\n");
     return 0;
   }
 
