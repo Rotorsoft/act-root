@@ -139,6 +139,40 @@ export type ZodTypes<T extends Schemas> = {
 };
 
 /**
+ * Per-action context handed to a {@link Correlator} when minting a
+ * correlation id for an originating commit.
+ *
+ * Reactions inherit `reactingTo.meta.correlation`, so the correlator is
+ * only consulted for actions that *start* a workflow.
+ *
+ * @property action - The action name being dispatched.
+ * @property state - The resolved state name that owns this action.
+ * @property stream - The target stream the action commits to.
+ * @property actor - The actor invoking the action.
+ */
+export type CorrelatorContext = {
+  readonly action: string;
+  readonly state: string;
+  readonly stream: string;
+  readonly actor: Actor;
+};
+
+/**
+ * Delegate that mints the `correlation` field on event metadata for
+ * originating actions. When omitted from {@link ActOptions}, Act uses
+ * a readable + index-friendly default (`{state[:4]}-{action[:4]}-{ts}{rnd}`).
+ *
+ * Common patterns apps plug in:
+ * - Embed a tenant id: `(ctx) => \`${tenantOf(ctx.actor)}-...\``
+ * - Propagate an inbound trace id when present (HTTP middleware sets it
+ *   on the actor or context).
+ * - Use ULID / UUIDv7 if you've standardized on those elsewhere.
+ * - Call a database sequence for hard-monotonic ids (one extra round-trip
+ *   per commit).
+ */
+export type Correlator = (ctx: CorrelatorContext) => string;
+
+/**
  * Represents a message (event or action) with a name and data payload.
  *
  * Messages are the basic building blocks of the event log. Each message

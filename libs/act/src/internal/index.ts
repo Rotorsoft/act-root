@@ -19,13 +19,14 @@
 export { classifyRegistry } from "./build-classify.js";
 export { runCloseCycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
+export { closeCorrelation, defaultCorrelator } from "./correlator.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { EsOps } from "./event-sourcing.js";
+export type { BoundAction, EsOps } from "./event-sourcing.js";
 export {
   currentVersionOf,
   deprecatedEventNames,

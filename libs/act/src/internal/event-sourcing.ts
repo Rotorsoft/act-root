@@ -15,7 +15,6 @@
  * @internal
  */
 
-import { randomUUID } from "node:crypto";
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import {
@@ -26,6 +25,7 @@ import {
 import type {
   AsOf,
   Committed,
+  Correlator,
   Emitted,
   EventMeta,
   Schema,
@@ -35,12 +35,33 @@ import type {
   Target,
 } from "../types/index.js";
 import { validate } from "../utils.js";
+import { defaultCorrelator } from "./correlator.js";
+
+/**
+ * Internal action signature seen by the orchestrator — the {@link Correlator}
+ * is bound at `buildEs` time, so callers don't pass it through.
+ *
+ * @internal
+ */
+export type BoundAction = <
+  TState extends Schema,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TKey extends keyof TActions,
+>(
+  me: State<TState, TEvents, TActions>,
+  action: TKey,
+  target: Target,
+  payload: Readonly<TActions[TKey]>,
+  reactingTo?: Committed<Schemas, keyof Schemas>,
+  skipValidation?: boolean
+) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
 export interface EsOps {
   snap: typeof snap;
   load: typeof load;
-  action: typeof action;
+  action: BoundAction;
   tombstone: typeof tombstone;
 }
 
@@ -246,7 +267,8 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation = false
+  skipValidation = false,
+  correlator: Correlator = defaultCorrelator
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -317,7 +339,14 @@ export async function action<
   }));
 
   const meta: EventMeta = {
-    correlation: reactingTo?.meta.correlation || randomUUID(),
+    correlation:
+      reactingTo?.meta.correlation ||
+      correlator({
+        action: action as string,
+        state: me.name,
+        stream,
+        actor: target.actor,
+      }),
     causation: {
       action: {
         name: action as string,
