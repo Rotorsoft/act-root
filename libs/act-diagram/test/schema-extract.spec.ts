@@ -412,4 +412,16 @@ describe("extractIdentifierAssignments", () => {
     const out = extractIdentifierAssignments(src);
     expect(out.get("Foo")).toBe("fn(a, b, c) + arr[0]");
   });
+
+  it("handles pathological whitespace runs in linear time (ReDoS guard)", () => {
+    // CodeQL flagged the original regex as polynomial on inputs like
+    // `#let $:` + N spaces, no `=`. Build a worst-case source and make
+    // sure the call completes well under the previously-quadratic limit.
+    const pathological = `#let $:${" ".repeat(50_000)}`;
+    const start = Date.now();
+    const out = extractIdentifierAssignments(pathological);
+    const elapsed = Date.now() - start;
+    expect(out.size).toBe(0);
+    expect(elapsed).toBeLessThan(100);
+  });
 });

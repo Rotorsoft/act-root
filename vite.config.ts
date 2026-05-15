@@ -37,6 +37,16 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // picocolors enables color emission when `CI` is set in env, which
+    // wraps act-diagram CLI output in ANSI escapes and breaks
+    // plain-text `toContain` assertions in format.spec/repl.spec. Force
+    // picocolors off in tests so output is deterministic across local
+    // and CI runs; `colors.spec.ts` mocks picocolors directly and is
+    // unaffected.
+    env: {
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html", "json-summary"],

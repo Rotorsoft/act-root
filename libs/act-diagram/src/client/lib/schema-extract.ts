@@ -274,8 +274,13 @@ function readTopLevelExpression(src: string, start: number): number {
  */
 export function extractIdentifierAssignments(src: string): Map<string, string> {
   const out = new Map<string, string>();
+  // The type-annotation arm uses `[^=\n;]+` (greedy, no inner `\s*`) to
+  // avoid polynomial backtracking when `\s*` and `[^=;]+?` would
+  // otherwise compete to consume whitespace in pathological inputs
+  // like `let $:` followed by many spaces and no `=`. Bounded to a
+  // single line — multi-line type annotations are rare in declarations.
   const re =
-    /(?:^|[^\w$])(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;]+?)?\s*=\s*/gm;
+    /(?:^|[^\w$])(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n;]+)?=\s*/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     const ident = m[1];
@@ -305,9 +310,11 @@ export function extractIdentifierAssignments(src: string): Map<string, string> {
  */
 function findIdentifierObjectLiteral(src: string, ident: string): number {
   // Match `const/let/var IDENT [: T] =` followed by optional whitespace.
-  // The capture stops just before whatever the value is.
+  // The capture stops just before whatever the value is. See
+  // `extractIdentifierAssignments` for why the type-annotation arm
+  // uses `[^=\n;]+` (greedy, no inner `\s*`) — same ReDoS hazard.
   const re = new RegExp(
-    `(?:^|[^\\w$])(?:const|let|var)\\s+${ident}\\b\\s*(?::\\s*[^=]+?)?\\s*=\\s*`,
+    `(?:^|[^\\w$])(?:const|let|var)\\s+${ident}\\b\\s*(?::[^=\\n;]+)?=\\s*`,
     "m"
   );
   const m = re.exec(src);
