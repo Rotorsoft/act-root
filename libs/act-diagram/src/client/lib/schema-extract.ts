@@ -274,13 +274,14 @@ function readTopLevelExpression(src: string, start: number): number {
  */
 export function extractIdentifierAssignments(src: string): Map<string, string> {
   const out = new Map<string, string>();
-  // The type-annotation arm uses `[^=\n;]+` (greedy, no inner `\s*`) to
-  // avoid polynomial backtracking when `\s*` and `[^=;]+?` would
-  // otherwise compete to consume whitespace in pathological inputs
-  // like `let $:` followed by many spaces and no `=`. Bounded to a
-  // single line — multi-line type annotations are rare in declarations.
+  // The type-annotation arm is line-bounded (`[^=\n;]`) and explicitly
+  // capped at 256 chars so the inner `+` can't drive O(N²) backtracking
+  // across pathological inputs like many `#let $:` repetitions without
+  // a closing `=`. Real TS type annotations on a top-level binding are
+  // dramatically shorter than 256 chars — a binding with a longer one
+  // simply isn't captured here, which is fine for the cross-file lookup.
   const re =
-    /(?:^|[^\w$])(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n;]+)?=\s*/gm;
+    /(?:^|[^\w$])(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=\n;]{1,256})?=\s*/gm;
   let m: RegExpExecArray | null;
   while ((m = re.exec(src)) !== null) {
     const ident = m[1];

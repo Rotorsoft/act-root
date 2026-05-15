@@ -424,4 +424,18 @@ describe("extractIdentifierAssignments", () => {
     expect(out.size).toBe(0);
     expect(elapsed).toBeLessThan(100);
   });
+
+  it("handles many `#let $:` repetitions in linear time (ReDoS guard)", () => {
+    // CodeQL alert #29: with the previous regex, each `#let $:` repetition
+    // restarted the type-annotation arm, which then greedily scanned the
+    // remaining input looking for an `=`. N positions × O(N) scan was
+    // O(N²). The bounded `{1,256}` cap keeps the per-position work
+    // constant, so 50K repetitions stay well under 100ms.
+    const pathological = "#let $:".repeat(50_000);
+    const start = Date.now();
+    const out = extractIdentifierAssignments(pathological);
+    const elapsed = Date.now() - start;
+    expect(out.size).toBe(0);
+    expect(elapsed).toBeLessThan(100);
+  });
 });
