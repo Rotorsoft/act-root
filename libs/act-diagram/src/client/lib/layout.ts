@@ -40,6 +40,10 @@ export type N = {
   reactions?: string[];
   /** Best-effort Zod source text for event nodes (see EventNode.schema). */
   schema?: string;
+  /** Events this action emits — shown in action-node tooltips. */
+  emits?: string[];
+  /** Events this projection handles — shown in projection-node tooltips. */
+  handles?: string[];
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 export type Box = {
@@ -200,6 +204,7 @@ function placeChain(
           ? dispatchedAction.invariants
           : undefined,
       file: row.targetState?.file,
+      emits: dispatchedAction?.emits,
     });
     es.push({
       from: { x: rp.x + W, y: rp.y + H / 2 },
@@ -290,6 +295,11 @@ export function computeLayout(viewModel: DomainModel): Layout {
         eventSchemas.set(e.name, e.schema);
       }
     }
+  }
+  // Projection name → event names it handles (for projection tooltips).
+  const projectionHandles = new Map<string, string[]>();
+  for (const proj of viewModel.projections) {
+    projectionHandles.set(proj.name, proj.handles);
   }
 
   for (const slice of viewModel.slices) {
@@ -565,6 +575,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
             pos: { x: eventColX, y: evtY },
             type: "projection",
             label: pn,
+            handles: projectionHandles.get(pn),
           });
           evtY += H + GAP / 2;
         }
@@ -593,6 +604,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
           file: actionFileMap.get(action.name) ?? st.file,
+          emits: action.emits,
         });
         for (const en of action.emits) {
           const ey = eventYMap.get(en)!;
@@ -769,6 +781,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
         label: action.name,
         sub: action.invariants.length > 0 ? "guarded" : undefined,
         guards: action.invariants.length > 0 ? action.invariants : undefined,
+        emits: action.emits,
       });
       for (const en of action.emits) {
         const ey = eventYMap.get(en)!;

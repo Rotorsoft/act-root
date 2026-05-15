@@ -14,7 +14,10 @@ import type {
   ReactionNode,
   StateNode,
 } from "../types/index.js";
-import { extractSchemasFromSource } from "./schema-extract.js";
+import {
+  extractIdentifierAssignments,
+  extractSchemasFromSource,
+} from "./schema-extract.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -267,8 +270,19 @@ export function buildModel(
   // Re-scan each state's source file for `.emits({...})` and slice out
   // the value expression for every known event name. The captured text
   // feeds both the act-contracts CLI and the diagram tooltips.
+  //
+  // Build a cross-file identifier map first so `.emits({ TicketOpened })`
+  // resolves to the `export const TicketOpened = z.object(...)` that
+  // lives in another module. First definition wins on collision — Act
+  // codebases don't reassign event-schema identifiers.
   const sourceByPath = new Map<string, string>();
-  for (const f of files) sourceByPath.set(f.path, f.content);
+  const externalIdents = new Map<string, string>();
+  for (const f of files) {
+    sourceByPath.set(f.path, f.content);
+    for (const [ident, expr] of extractIdentifierAssignments(f.content)) {
+      if (!externalIdents.has(ident)) externalIdents.set(ident, expr);
+    }
+  }
   for (const stNode of model.states) {
     if (!stNode.file) continue;
     // `stNode.file` came from `_sourceFile`, which was set during file
@@ -279,7 +293,7 @@ export function buildModel(
     const src = sourceByPath.get(stNode.file)!;
     const names = new Set(stNode.events.map((e) => e.name));
     if (names.size === 0) continue;
-    const schemas = extractSchemasFromSource(src, names);
+    const schemas = extractSchemasFromSource(src, names, externalIdents);
     for (const ev of stNode.events) {
       // Set unconditionally — `undefined` is a valid value for the
       // optional schema field and matches the "not captured" state.

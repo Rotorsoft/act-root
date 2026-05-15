@@ -626,6 +626,10 @@ export function Diagram({
                   onClick={() => onClickElement?.(n.label, n.type, n.file)}
                   onMouseEnter={(ev) => {
                     const sections: TipSection[] = [];
+                    if (n.emits?.length)
+                      sections.push({ label: "Emits", items: n.emits });
+                    if (n.handles?.length)
+                      sections.push({ label: "Handles", items: n.handles });
                     if (n.guards?.length)
                       sections.push({ label: "Guards", items: n.guards });
                     if (n.reactions?.length)

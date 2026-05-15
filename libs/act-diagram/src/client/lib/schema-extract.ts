@@ -190,6 +190,110 @@ function parseObjectLiteral(
 }
 
 /**
+ * Consume one top-level expression starting at `start`. Stops at `;`
+ * at depth 0, or end-of-file. Mirrors `readValue` but operates outside
+ * an object literal — used to extract the right-hand side of
+ * `const IDENT = <expr>;`.
+ */
+function readTopLevelExpression(src: string, start: number): number {
+  let i = start;
+  let depth = 0;
+  while (i < src.length) {
+    const c = src[i];
+    if (c === '"' || c === "'") {
+      const q = c;
+      i++;
+      while (i < src.length && src[i] !== q) {
+        if (src[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (c === "`") {
+      i++;
+      while (i < src.length && src[i] !== "`") {
+        if (src[i] === "\\") {
+          i += 2;
+          continue;
+        }
+        if (src[i] === "$" && src[i + 1] === "{") {
+          let td = 1;
+          i += 2;
+          while (i < src.length && td > 0) {
+            if (src[i] === "{") td++;
+            else if (src[i] === "}") td--;
+            if (td > 0) i++;
+          }
+          i++;
+          continue;
+        }
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") i++;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      i += 2;
+      while (i < src.length && !(src[i - 1] === "*" && src[i] === "/")) i++;
+      i++;
+      continue;
+    }
+    if (c === "(" || c === "{" || c === "[") {
+      depth++;
+      i++;
+      continue;
+    }
+    if (c === ")" || c === "}" || c === "]") {
+      depth--;
+      i++;
+      continue;
+    }
+    if (c === ";" && depth === 0) return i;
+    i++;
+  }
+  return i;
+}
+
+/**
+ * Build a map of every top-level identifier assignment in `src`.
+ *
+ *   const Foo = z.object({...});            → Foo  → "z.object({...})"
+ *   export const Bar: T = someExpr;         → Bar  → "someExpr"
+ *   let Baz = "literal";                    → Baz  → "\"literal\""
+ *
+ * Used so cross-file shorthand `.emits({ TicketOpened })` can resolve
+ * to the actual Zod expression defined in another module.
+ */
+export function extractIdentifierAssignments(src: string): Map<string, string> {
+  const out = new Map<string, string>();
+  const re =
+    /(?:^|[^\w$])(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::\s*[^=;]+?)?\s*=\s*/gm;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(src)) !== null) {
+    const ident = m[1];
+    if (out.has(ident)) {
+      // Keep the first assignment; later reassignments are uncommon
+      // and would just confuse the lookup.
+      continue;
+    }
+    const start = m.index + m[0].length;
+    const end = readTopLevelExpression(src, start);
+    const text = src.slice(start, end).trim();
+    if (text) out.set(ident, text);
+    re.lastIndex = end;
+  }
+  return out;
+}
+
+/**
  * Locate the object literal a top-level identifier points at. Handles:
  *
  *   const Events = { Foo: z.string(), Bar: z.number() };
@@ -213,18 +317,36 @@ function findIdentifierObjectLiteral(src: string, ident: string): number {
   return src[skipped] === "{" ? skipped : -1;
 }
 
+/** Bare-identifier matcher; used to decide whether to chase a value. */
+const BARE_IDENT_RE = /^[A-Za-z_$][\w$]*$/;
+
 /**
  * Find every `.emits( ... )` call in `src` and extract the Zod source
- * text for any event name in `eventNames`. Also resolves `.emits(IDENT)`
- * by chasing the identifier to its `const IDENT = { ... }` definition.
+ * text for any event name in `eventNames`. Resolves three indirection
+ * patterns:
+ *
+ *   .emits({ Foo: z.object(...) })   → direct value capture
+ *   .emits({ Foo })                  → shorthand → chase `Foo` to its
+ *                                      definition, locally or via
+ *                                      `external` (cross-file)
+ *   .emits(EventsObj)                → chase the identifier to its
+ *                                      `const EventsObj = { ... }`
+ *
  * Returns a map keyed by event name; missing events stay absent.
  */
 export function extractSchemasFromSource(
   src: string,
-  eventNames: Set<string>
+  eventNames: Set<string>,
+  external?: Map<string, string>
 ): Map<string, string> {
   const out = new Map<string, string>();
   if (!src || eventNames.size === 0) return out;
+  // Same-file identifier map, scanned once for the shorthand case.
+  const localIdents = extractIdentifierAssignments(src);
+  const deref = (text: string): string =>
+    BARE_IDENT_RE.test(text)
+      ? (localIdents.get(text) ?? external?.get(text) ?? text)
+      : text;
   const emitsRe = /\.emits\s*\(/g;
   let m: RegExpExecArray | null;
   while ((m = emitsRe.exec(src)) !== null) {
@@ -243,7 +365,8 @@ export function extractSchemasFromSource(
     if (!parsed) continue;
     for (const e of parsed.entries) {
       if (!eventNames.has(e.key)) continue;
-      const text = src.slice(e.valueStart, e.valueEnd).trim();
+      const raw = src.slice(e.valueStart, e.valueEnd).trim();
+      const text = deref(raw);
       if (text) out.set(e.key, text);
     }
     emitsRe.lastIndex = Math.max(emitsRe.lastIndex, parsed.endBrace + 1);

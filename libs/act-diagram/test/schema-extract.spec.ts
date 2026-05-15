@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractSchemasFromSource } from "../src/client/lib/schema-extract.js";
+import {
+  extractIdentifierAssignments,
+  extractSchemasFromSource,
+} from "../src/client/lib/schema-extract.js";
 
 describe("extractSchemasFromSource", () => {
   it("captures plain identifier and z.object values", () => {
@@ -262,5 +265,151 @@ describe("extractSchemasFromSource", () => {
     expect(
       extractSchemasFromSource('.emits("nope")', new Set(["X"])).size
     ).toBe(0);
+  });
+
+  it("resolves shorthand by chasing the local identifier definition", () => {
+    const src = `
+      const TicketOpened = z.object({ id: z.string() }).describe("opened");
+      const state = something().emits({ TicketOpened }).build();
+    `;
+    const out = extractSchemasFromSource(src, new Set(["TicketOpened"]));
+    expect(out.get("TicketOpened")?.replace(/\s+/g, " ")).toBe(
+      'z.object({ id: z.string() }).describe("opened")'
+    );
+  });
+
+  it("resolves shorthand via the external (cross-file) identifier map", () => {
+    const stateSrc = `.emits({ Foo, Bar })`;
+    const external = new Map<string, string>([
+      ["Foo", "z.object({ a: z.string() })"],
+      ["Bar", "z.number()"],
+    ]);
+    const out = extractSchemasFromSource(
+      stateSrc,
+      new Set(["Foo", "Bar"]),
+      external
+    );
+    expect(out.get("Foo")).toBe("z.object({ a: z.string() })");
+    expect(out.get("Bar")).toBe("z.number()");
+  });
+
+  it("prefers same-file resolution over external when both exist", () => {
+    const src = `
+      const Foo = z.string();
+      .emits({ Foo })
+    `;
+    const external = new Map<string, string>([["Foo", "z.never()"]]);
+    const out = extractSchemasFromSource(src, new Set(["Foo"]), external);
+    expect(out.get("Foo")).toBe("z.string()");
+  });
+
+  it("keeps the identifier text when no resolution succeeds", () => {
+    // Neither same-file nor external knows about `Unknown`.
+    const out = extractSchemasFromSource(
+      `.emits({ Unknown })`,
+      new Set(["Unknown"])
+    );
+    expect(out.get("Unknown")).toBe("Unknown");
+  });
+});
+
+describe("extractIdentifierAssignments", () => {
+  it("extracts top-level const/let/var assignments", () => {
+    const src = `
+      const Foo = z.object({ a: z.string() });
+      let Bar = "hello";
+      var Baz = 42;
+    `;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("z.object({ a: z.string() })");
+    expect(out.get("Bar")).toBe('"hello"');
+    expect(out.get("Baz")).toBe("42");
+  });
+
+  it("strips TypeScript type annotations", () => {
+    const out = extractIdentifierAssignments(
+      `const Foo: z.ZodType = z.string();`
+    );
+    expect(out.get("Foo")).toBe("z.string()");
+  });
+
+  it("handles `export const IDENT = …`", () => {
+    const out = extractIdentifierAssignments(
+      `export const Foo = z.object({ id: z.string() });`
+    );
+    expect(out.get("Foo")).toBe("z.object({ id: z.string() })");
+  });
+
+  it("captures multi-line expressions until the next top-level `;`", () => {
+    const src = `
+      const Foo = z
+        .object({ id: z.string() })
+        .describe("test");
+    `;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")?.replace(/\s+/g, " ")).toBe(
+      'z .object({ id: z.string() }) .describe("test")'
+    );
+  });
+
+  it("keeps the first assignment when an identifier is re-defined", () => {
+    const src = `
+      const Foo = z.string();
+      const Foo = z.number();
+    `;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("z.string()");
+  });
+
+  it("skips empty assignments", () => {
+    const src = `const Foo =;`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.has("Foo")).toBe(false);
+  });
+
+  it("stops at EOF when no `;` is present", () => {
+    const src = `const Foo = z.string()`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("z.string()");
+  });
+
+  it("walks string literals containing semicolons without stopping", () => {
+    const src = `const Foo = "has ; inside" + "more;";`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe('"has ; inside" + "more;"');
+  });
+
+  it("walks escaped chars inside string literals", () => {
+    const src = `const Foo = "with \\" escaped quote";`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe('"with \\" escaped quote"');
+  });
+
+  it("walks template literals with interpolation and escaped backticks", () => {
+    const src = "const Foo = `hello ${name}\\` ${x.y}` ;";
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("`hello ${name}\\` ${x.y}`");
+  });
+
+  it("walks template interpolation with nested braces", () => {
+    const src = "const Foo = `outer ${ ({ a: 1 }).a } end`;";
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("`outer ${ ({ a: 1 }).a } end`");
+  });
+
+  it("walks line and block comments inside the expression", () => {
+    const src = `const Foo = z.string()
+        // trailing comment with ;
+        .optional() /* and ; here */;`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")?.replace(/\s+/g, " ")).toBe(
+      "z.string() // trailing comment with ; .optional() /* and ; here */"
+    );
+  });
+
+  it("walks balanced brackets so `;` inside nested calls doesn't terminate", () => {
+    const src = `const Foo = fn(a, b, c) + arr[0];`;
+    const out = extractIdentifierAssignments(src);
+    expect(out.get("Foo")).toBe("fn(a, b, c) + arr[0]");
   });
 });

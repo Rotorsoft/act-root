@@ -48,6 +48,62 @@ describe("computeLayout — schema propagation", () => {
     expect(unplaced?.schema).toBeUndefined();
   });
 
+  it("attaches `emits` to standalone action nodes", () => {
+    const model: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "S",
+          varName: "S:0",
+          events: [{ name: "E", hasCustomPatch: false }],
+          actions: [{ name: "act1", emits: ["E"], invariants: [] }],
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    };
+    const layout = computeLayout(model);
+    const a = layout.ns.find((n) => n.type === "action" && n.label === "act1");
+    expect(a?.emits).toEqual(["E"]);
+  });
+
+  it("attaches `handles` to projection nodes", () => {
+    const model: DomainModel = {
+      entries: [],
+      states: [
+        {
+          name: "S",
+          varName: "S:0",
+          events: [{ name: "OrderPlaced", hasCustomPatch: false }],
+          actions: [{ name: "place", emits: ["OrderPlaced"], invariants: [] }],
+        },
+      ],
+      slices: [
+        {
+          name: "Fulfillment",
+          states: ["S:0"],
+          stateVars: ["S:0"],
+          projections: ["OrdersByCustomer"],
+          reactions: [],
+        },
+      ],
+      projections: [
+        {
+          name: "OrdersByCustomer",
+          varName: "OrdersByCustomer",
+          handles: ["OrderPlaced", "OrderShipped"],
+        },
+      ],
+      reactions: [],
+    };
+    const layout = computeLayout(model);
+    const p = layout.ns.find(
+      (n) => n.type === "projection" && n.label === "OrdersByCustomer"
+    );
+    expect(p?.handles).toEqual(["OrderPlaced", "OrderShipped"]);
+  });
+
   it("keeps the first-seen schema when the same event is declared twice", () => {
     const model: DomainModel = {
       entries: [],
