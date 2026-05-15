@@ -296,4 +296,73 @@ describe("formatMarkdown — defensive paths", () => {
     const md = formatMarkdown(idx);
     expect(md).toMatch(/### `doThing`/);
   });
+
+  it("handles an action whose qualifier matches but the state lacks that action", () => {
+    const idx = buildContractIndex({
+      entries: [],
+      states: [
+        {
+          name: "Match",
+          varName: "Match:0",
+          file: "src/m.ts",
+          events: [],
+          actions: [], // qualifier matches, but no matching action name
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    });
+    // Qualifier matches "Match" so we enter find(), but find returns
+    // undefined → exercises the `if (found)` falsy arm.
+    idx.entries.push({ kind: "action", name: "phantom", qualifier: "Match" });
+    const md = formatMarkdown(idx);
+    expect(md).toContain("### `phantom`");
+    expect(md).toContain("**on state:** `Match`");
+    // Action lookup missed, so no `defined in:` or `emits:` lines.
+    expect(md).not.toContain("**emits:**");
+  });
+
+  it("handles an action entry with no matching state at all (action stays undefined)", () => {
+    const idx = buildContractIndex({
+      entries: [],
+      states: [],
+      slices: [],
+      projections: [],
+      reactions: [],
+    });
+    // Force an action entry into an empty index — no state with the
+    // matching action name exists, so `action`/`stateFile` stay
+    // undefined and the `if (action)` block is skipped.
+    idx.entries.push({ kind: "action", name: "lonely" });
+    const md = formatMarkdown(idx);
+    expect(md).toContain("### `lonely`");
+    expect(md).not.toContain("**emits:**");
+    expect(md).not.toContain("**defined in:**");
+  });
+
+  it("handles an event entry whose name doesn't match any state's events", () => {
+    const idx = buildContractIndex({
+      entries: [],
+      states: [
+        {
+          name: "Other",
+          varName: "Other:0",
+          events: [{ name: "Different", hasCustomPatch: false }],
+          actions: [],
+        },
+      ],
+      slices: [],
+      projections: [],
+      reactions: [],
+    });
+    // Push an event entry that doesn't exist in any state — the
+    // `if (ev)` lookup misses for every iteration.
+    idx.entries.push({ kind: "event", name: "Ghost" });
+    const md = formatMarkdown(idx);
+    expect(md).toContain("### `Ghost`");
+    // No "defined in" line — entry has no file and lookup missed.
+    expect(md).not.toMatch(/### `Ghost`[\s\S]*\*\*defined in:\*\*/);
+    expect(md).toContain("(not captured)");
+  });
 });

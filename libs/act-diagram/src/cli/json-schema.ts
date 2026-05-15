@@ -127,9 +127,11 @@ export function toJsonSchemaSafe(
     const schema = z.toJSONSchema(zod as z.ZodType);
     return { schema };
   } catch (err) {
-    /* c8 ignore next — the `String(err)` arm only fires when something
-       non-Error is thrown, which Zod never does in practice. */
+    // The `String(err)` arm only fires when something non-Error is
+    // thrown, which Zod never does in practice — ignore for coverage.
+    /* v8 ignore start */
     return { error: err instanceof Error ? err.message : String(err) };
+    /* v8 ignore stop */
   }
 }
 
