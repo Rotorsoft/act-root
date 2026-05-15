@@ -1,3 +1,20 @@
+# [@rotorsoft/act-diagram-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.10...@rotorsoft/act-diagram-v0.4.0) (2026-05-15)
+
+
+### Bug Fixes
+
+* **act-diagram:** cap type-annotation regex repetitions to kill ReDoS ([f086bd2](https://github.com/rotorsoft/act-root/commit/f086bd275c82e9bed431c29ecb12f63bb60e2073)), closes [#29](https://github.com/rotorsoft/act-root/issues/29) [#let](https://github.com/rotorsoft/act-root/issues/let) [#let](https://github.com/rotorsoft/act-root/issues/let) [#let](https://github.com/rotorsoft/act-root/issues/let)
+* **act-diagram:** unblock CI by disabling color in tests and de-fanging ReDoS ([931168f](https://github.com/rotorsoft/act-root/commit/931168fd86e9b28cc17bedd0f0377458712118d2)), closes [#let](https://github.com/rotorsoft/act-root/issues/let)
+* **act-diagram:** unblock CI smoke by collapsing equivalent -q matches ([ba1921f](https://github.com/rotorsoft/act-root/commit/ba1921f627f3632b8d845fd8b328eb13ee433cfd))
+
+
+### Features
+
+* **act-diagram:** interactive `act` CLI for contracts exploration (ACT-402) ([b66c4d0](https://github.com/rotorsoft/act-root/commit/b66c4d01f0a2715b5cdd6dbdb88540c9db5827b6))
+* **act-diagram:** resolve cross-file Zod identifiers + richer tooltips ([10bdb0d](https://github.com/rotorsoft/act-root/commit/10bdb0d08653259fafcad68a142a4000256c25b2))
+* **act-diagram:** stamp package version into toolbar ([e07ea08](https://github.com/rotorsoft/act-root/commit/e07ea08e276b42accf7f25055a1ab7c5924b6b1f))
+* **act-diagram:** structured details tooltip with schema code block ([5e3fd27](https://github.com/rotorsoft/act-root/commit/5e3fd27f76c30ca8d4cae6568b3b9fb2608bb6ad))
+
 # [@rotorsoft/act-diagram-v0.3.10](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.9...@rotorsoft/act-diagram-v0.3.10) (2026-05-10)
 
 
