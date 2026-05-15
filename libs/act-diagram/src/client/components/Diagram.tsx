@@ -126,9 +126,31 @@ export function Diagram({
   onFixWithAi,
   toolbarExtra,
 }: Props) {
-  const [tip, setTip] = useState<{ x: number; y: number; t: string } | null>(
-    null
-  );
+  type TipSection = { label: string; items: string[] };
+  type Tip = {
+    x: number;
+    y: number;
+    /** Plain-text legacy fallback (used by guard/projection chips). */
+    t?: string;
+    kind?: keyof typeof COLORS;
+    title?: string;
+    schema?: string;
+    sections?: TipSection[];
+    file?: string;
+  };
+  const [tip, setTip] = useState<Tip | null>(null);
+
+  // Kind-colored title classes for the tooltip header. Only includes
+  // node types that actually render via `ns` — `slice` rendering happens
+  // as boxes (Box[]), not nodes.
+  const KIND_TEXT: Record<keyof typeof COLORS, string> = {
+    event: "text-orange-300",
+    action: "text-blue-300",
+    state: "text-yellow-300",
+    projection: "text-emerald-300",
+    reaction: "text-fuchsia-300",
+    error: "text-red-300",
+  };
   const [activeTab, setActiveTab] = useState(0);
   const [showTree, setShowTree] = useState(false);
   const [showWarnings, setShowWarnings] = useState(false);
@@ -597,31 +619,24 @@ export function Diagram({
                   className="cursor-pointer"
                   onClick={() => onClickElement?.(n.label, n.type, n.file)}
                   onMouseEnter={(ev) => {
-                    const parts = [n.label];
-                    if (n.schema) {
-                      // Multi-line schemas render as a "Schema:" header
-                      // followed by indented body lines so the tooltip
-                      // keeps the original formatting (z.object(...) +
-                      // .describe chains, etc.).
-                      const schemaLines = n.schema.split("\n");
-                      if (schemaLines.length === 1) {
-                        parts.push(`Schema: ${n.schema}`);
-                      } else {
-                        parts.push("Schema:");
-                        for (const sl of schemaLines)
-                          parts.push(`  ${sl.replace(/^\s+/, "")}`);
-                      }
-                    }
+                    const sections: TipSection[] = [];
                     if (n.guards?.length)
-                      parts.push(`Guards: ${n.guards.join(", ")}`);
+                      sections.push({ label: "Guards", items: n.guards });
                     if (n.reactions?.length)
-                      parts.push(`Reactions: ${n.reactions.join(", ")}`);
+                      sections.push({ label: "Reactions", items: n.reactions });
                     if (n.projections?.length)
-                      parts.push(`Projections: ${n.projections.join(", ")}`);
+                      sections.push({
+                        label: "Projections",
+                        items: n.projections,
+                      });
                     setTip({
                       x: ev.clientX,
                       y: ev.clientY,
-                      t: parts.join("\n"),
+                      kind: n.type,
+                      title: n.label,
+                      schema: n.schema,
+                      sections,
+                      file: n.file,
                     });
                   }}
                   onMouseLeave={() => setTip(null)}
@@ -809,30 +824,81 @@ export function Diagram({
 
       {tip && (
         <div
-          className="pointer-events-none fixed z-50 max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 shadow-2xl"
+          className="pointer-events-none fixed z-50 max-w-sm rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 shadow-2xl"
           style={{ left: tip.x + 14, top: tip.y - 12 }}
         >
-          {tip.t.split("\n").map((line, i) => (
-            <div
-              key={i}
-              className={
-                i === 0
-                  ? "text-[11px] font-medium text-zinc-200"
-                  : "mt-0.5 text-[9px] text-zinc-400"
-              }
-            >
-              {i > 0 && line.includes(":") ? (
-                <>
-                  <span className="text-zinc-500">{line.split(":")[0]}:</span>
-                  <span className="text-zinc-300">
-                    {line.slice(line.indexOf(":") + 1)}
-                  </span>
-                </>
-              ) : (
-                line
+          {/* Legacy plain-text path — guard/projection chips still use this. */}
+          {tip.t &&
+            tip.t.split("\n").map((line, i) => (
+              <div
+                key={i}
+                className={
+                  i === 0
+                    ? "text-[11px] font-medium text-zinc-200"
+                    : "mt-0.5 text-[9px] text-zinc-400"
+                }
+              >
+                {i > 0 && line.includes(":") ? (
+                  <>
+                    <span className="text-zinc-500">
+                      {line.split(":")[0]}:
+                    </span>
+                    <span className="text-zinc-300">
+                      {line.slice(line.indexOf(":") + 1)}
+                    </span>
+                  </>
+                ) : (
+                  line
+                )}
+              </div>
+            ))}
+          {/* Structured tooltip — title (kind-colored), schema block,
+              sections, and file location. */}
+          {tip.title && tip.kind && (
+            <>
+              <div className="flex items-baseline gap-1.5">
+                <span
+                  className={`text-[9px] font-medium uppercase tracking-wide ${KIND_TEXT[tip.kind]}`}
+                >
+                  {tip.kind}
+                </span>
+                <span className="text-[12px] font-semibold text-zinc-100">
+                  {tip.title}
+                </span>
+              </div>
+              {tip.schema && (
+                <div className="mt-1.5">
+                  <div className="text-[9px] uppercase tracking-wide text-zinc-500">
+                    Schema
+                  </div>
+                  <pre className="mt-0.5 max-h-48 overflow-auto rounded border border-zinc-800 bg-zinc-950 px-2 py-1 font-mono text-[10px] leading-snug text-zinc-300 whitespace-pre">
+                    {tip.schema}
+                  </pre>
+                </div>
               )}
-            </div>
-          ))}
+              {tip.sections && tip.sections.length > 0 && (
+                <table className="mt-1.5 w-full text-[10px] leading-snug">
+                  <tbody>
+                    {tip.sections.map((s) => (
+                      <tr key={s.label}>
+                        <td className="w-[68px] shrink-0 pr-2 align-top text-zinc-500">
+                          {s.label}
+                        </td>
+                        <td className="align-top text-zinc-300">
+                          {s.items.join(", ")}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {tip.file && (
+                <div className="mt-1.5 border-t border-zinc-800 pt-1 text-[9px] text-zinc-500">
+                  {tip.file}
+                </div>
+              )}
+            </>
+          )}
         </div>
       )}
     </div>
