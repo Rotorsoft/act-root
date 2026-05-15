@@ -27,7 +27,8 @@
  */
 
 import { config } from "../config.js";
-import type { AsOf, Logger, Schemas } from "../types/index.js";
+import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
+import { defaultCorrelator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
 import type { EsOps } from "./event-sourcing.js";
@@ -144,12 +145,36 @@ const traced = <F extends AsyncFn>(
  *
  * @internal
  */
-export function buildEs(logger: Logger): EsOps {
+export function buildEs(
+  logger: Logger,
+  correlator: Correlator = defaultCorrelator
+): EsOps {
+  // `es.action` takes `correlator` as its last positional arg; the
+  // orchestrator never wants to plumb it through every call site, so we
+  // bind it once here and present an `EsOps.action` with the original
+  // 6-arg signature.
+  const boundAction: EsOps["action"] = (
+    me,
+    actionName,
+    target,
+    payload,
+    reactingTo,
+    skipValidation = false
+  ) =>
+    es.action(
+      me,
+      actionName,
+      target,
+      payload,
+      reactingTo,
+      skipValidation,
+      correlator
+    );
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
       load: es.load,
-      action: es.action,
+      action: boundAction,
       tombstone: es.tombstone,
     };
   }
@@ -179,7 +204,7 @@ export function buildEs(logger: Logger): EsOps {
       );
     }),
     action: traced(
-      es.action,
+      boundAction,
       (snapshots, _me, _action, target) => {
         const committed = snapshots.filter((s) => s.event);
         if (committed.length) {

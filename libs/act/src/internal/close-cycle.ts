@@ -14,7 +14,6 @@
  * @internal
  */
 
-import { randomUUID } from "node:crypto";
 import { cache, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   CloseResult,
@@ -37,6 +36,13 @@ export type CloseCycleDeps = {
   readonly load: EsOps["load"];
   readonly tombstone: EsOps["tombstone"];
   readonly logger: Logger;
+  /**
+   * Correlation id for the close transaction. Caller (`Act.close`)
+   * computes this via the configured {@link Correlator}, so close
+   * commits share the user's chosen id scheme instead of stamping a
+   * UUID.
+   */
+  readonly correlation: string;
 };
 
 /**
@@ -78,12 +84,13 @@ export async function runCloseCycle(
   );
   if (!safe.length) return { truncated: new Map(), skipped };
 
-  // 3. Guard: commit a tombstone with expectedVersion per safe stream
-  const correlation = randomUUID();
+  // 3. Guard: commit a tombstone with expectedVersion per safe stream.
+  // Correlation comes from the orchestrator's configured correlator so
+  // close commits share the app's id scheme — see ACT-404.
   const { guarded, guardEvents } = await guardWithTombstones(
     safe,
     streamInfo,
-    correlation,
+    deps.correlation,
     deps.tombstone,
     skipped
   );
@@ -107,7 +114,7 @@ export async function runCloseCycle(
     guarded,
     seedStates,
     guardEvents,
-    correlation
+    deps.correlation
   );
 
   return { truncated, skipped };

@@ -52,11 +52,14 @@ describe("tracing", () => {
   });
 
   describe("buildEs", () => {
-    it("returns bare ops for non-trace levels", () => {
+    it("returns bare ops for non-trace levels (action still wrapped to bind correlator)", () => {
       const ops = buildEs(withLevel("info"));
       expect(ops.snap).toBe(es.snap);
       expect(ops.load).toBe(es.load);
-      expect(ops.action).toBe(es.action);
+      // ACT-404: action always carries a bound correlator, so it's a
+      // closure regardless of trace level — the bare-vs-traced split now
+      // only governs snap/load/tombstone.
+      expect(ops.action).not.toBe(es.action);
     });
 
     it("returns wrapped ops for trace level", () => {

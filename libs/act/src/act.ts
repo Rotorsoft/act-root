@@ -6,8 +6,10 @@ import {
   buildHandleBatch,
   CorrelateCycle,
   classifyRegistry,
+  closeCorrelation,
   DrainController,
   type DrainOps,
+  defaultCorrelator,
   type EsOps,
   type Handle,
   type HandleBatch,
@@ -23,6 +25,7 @@ import type {
   CloseResult,
   CloseTarget,
   Committed,
+  Correlator,
   Drain,
   DrainOptions,
   IAct,
@@ -135,6 +138,17 @@ export type ActOptions = {
    * stream keys). Omit for the singleton path.
    */
   readonly scoped?: Scoped;
+  /**
+   * Correlation-id generator for originating actions (ACT-404). When
+   * omitted, Act uses {@link defaultCorrelator}, which produces a
+   * readable, time-monotonic-within-window, lowercase id of the form
+   * `{state[:4]}-{action[:4]}-{ts}{rnd}` (18 chars).
+   *
+   * Reactions inherit `reactingTo.meta.correlation` so the chain stays
+   * intact — the delegate is only consulted on originating commits and
+   * for the close-the-books transaction.
+   */
+  readonly correlator?: Correlator;
 };
 
 export class Act<
@@ -229,6 +243,14 @@ export class Act<
    * path keeps reading fresh `store()`/`cache()` per call, which matters for
    * tests that dispose and re-seed mid-suite. */
   private readonly _scoped: <T>(fn: () => Promise<T>) => Promise<T>;
+
+  /**
+   * Correlation-id generator for originating actions. Bound at
+   * construction from `options.correlator ?? defaultCorrelator`. The
+   * `do()` path passes this into the `_es.action` closure; close-cycle
+   * uses it via {@link closeCorrelation}.
+   */
+  private readonly _correlator: Correlator;
   /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
    * payload (it captures the triggering event for reactingTo auto-inject). */
   private readonly _bound_do = this.do.bind(this);
@@ -260,7 +282,8 @@ export class Act<
     this._scoped = options.scoped
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
-    this._es = buildEs(this._logger);
+    this._correlator = options.correlator ?? defaultCorrelator;
+    this._es = buildEs(this._logger, this._correlator);
     this._cd = buildDrain<TEvents>(this._logger);
     this._handle = buildHandle<TEvents, TActions, TActor>({
       logger: this._logger,
@@ -991,12 +1014,16 @@ export class Act<
       // the safety check examines subscription positions.
       await this.correlate({ limit: 1000 });
 
+      // Synthesize an actor for the close transaction so user-supplied
+      // correlators can still tag tenant context / trace ids.
+      const closeActor = { id: "$close", name: "close" };
       const result = await runCloseCycle(targets, {
         reactiveEventsSize: this._reactive_events.size,
         eventToState: this._event_to_state,
         load: this._es.load,
         tombstone: this._es.tombstone,
         logger: this._logger,
+        correlation: closeCorrelation(this._correlator, closeActor),
       });
 
       this.emit("closed", result);

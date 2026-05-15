@@ -152,6 +152,37 @@ Correlation enables dynamic stream discovery:
 
 **Optimization:** Resolvers are classified at build time as static or dynamic. Static targets (`_this_`, `.to("target")`) are subscribed once at init. An advancing checkpoint ensures correlate only scans new events. When no dynamic resolvers exist, correlate is skipped entirely — settle goes straight to drain.
 
+### Correlation IDs
+
+The `meta.correlation` field on every event is what lets you trace a workflow — every event emitted by an action, plus every event emitted by reactions that fire on those events, shares the same correlation id. Originating actions mint a fresh id; reactions inherit `reactingTo.meta.correlation` so the chain stays intact.
+
+By default Act produces a readable, time-monotonic, lowercase id of the form `{state[:4]}-{action[:4]}-{ts}{rnd}` — for example `coun-incr-lwxk9p3a`. The 4-character timestamp segment wraps every ~28 minutes so adjacent inserts cluster on the same B-tree pages (much better index behavior than a random UUID), and the 4-character random tail keeps competing-consumer workers from colliding (1.68M values per ms).
+
+Apps that need a different scheme plug a delegate in via `ActOptions.correlator`:
+
+```ts
+import { act, type Correlator } from "@rotorsoft/act";
+
+const tenantPrefixed: Correlator = ({ state, action, actor }) => {
+  const tenant = (actor as TenantActor).tenantId.slice(0, 6);
+  return `${tenant}-${state.slice(0, 4)}-${action.slice(0, 4)}-${Date.now().toString(36)}`;
+};
+
+const app = act()
+  .withState(Counter)
+  .build({ correlator: tenantPrefixed });
+```
+
+Common shapes apps plug in:
+
+- **Tenant-prefixed:** embed the actor's tenant id so multi-tenant systems can grep correlations per tenant.
+- **Trace-id propagation:** when an HTTP request carries a W3C `traceparent`, pass it through the actor and return it as the correlation — single id from edge to event log.
+- **Idempotency-key bridge:** when callers supply an `Idempotency-Key`, surface it via the actor and use it as the correlation so retries collapse onto the same workflow.
+- **DB-issued monotonic:** call a Postgres sequence in the delegate for hard cross-worker monotonicity (one extra round-trip per commit).
+- **ULID / UUIDv7:** drop in either if you've standardized elsewhere — both are time-ordered and globally unique without coordination.
+
+The delegate is only consulted on **originating actions** and on **close-the-books transactions** (where Act synthesizes `state: "$close"`, `action: "close"`). Reactions never call it — they propagate `reactingTo.meta.correlation`.
+
 ### The Drain Cycle
 
 `drain()` processes pending reactions:
