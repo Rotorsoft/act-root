@@ -17,7 +17,8 @@ Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/pack
 - **IDE-agnostic** — works over props, postMessage, or WebSocket (see [act-nvim](https://github.com/Rotorsoft/act-nvim) for Neovim integration)
 - **Embeddable** — React component for any host (IDE webview, standalone app, docs site)
 - **AI refinement** — optional prompt bar to generate code via a streaming endpoint (see [AI server](#ai-server-optional))
-- **High test coverage** — over 300 tests covering extraction, layout, navigation, and error paths
+- **`act` CLI** — terminal companion that walks the model interactively, surfaces Zod schemas as captured source text, and jumps into `$EDITOR` at any file:line (see [the act CLI](#the-act-cli))
+- **High test coverage** — over 400 tests covering extraction, layout, navigation, the CLI, and error paths
 
 ## Installation
 
@@ -203,6 +204,29 @@ type DiagramMessage =
   | { type: "navigate"; file: string; line: number; col: number }
   | { type: "aiRequest"; prompt: string; files: FileTab[] };
 ```
+
+## The `act` CLI
+
+A terminal companion for the diagram. Reuses the same parser to walk the model, but renders neighborhoods as text and lets you jump into `$EDITOR` at any file:line.
+
+```sh
+# From the monorepo root
+pnpm act                        # interactive: pick category → entry → detail
+pnpm act packages/wolfdesk      # target a specific package
+pnpm act -q TicketOpened        # non-interactive: print one entity and exit
+```
+
+In interactive mode you navigate with arrow keys (powered by [`@clack/prompts`](https://github.com/natemoo-re/clack)). Each entry shows producers, consumers, captured Zod schema text, deprecation status (via the `_v<n>` convention), and a one-key shortcut to open the source in `$EDITOR` (`$VISUAL` takes precedence). VS Code, Cursor, vim, nvim, nano, and emacs are all recognized.
+
+`-q <name>` is the script-friendly path — exits 0 with the detail on a single match, 0 with the match list on ambiguity, 1 with no matches. CI uses this to smoke-test the parser against the example apps.
+
+The CLI ships as the `act` bin from this package, so:
+
+```sh
+npx -p @rotorsoft/act-diagram act
+```
+
+works from any project that has the package installed.
 
 ## AI server (optional)
 

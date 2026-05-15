@@ -38,6 +38,12 @@ export type N = {
   projections?: string[];
   guards?: string[];
   reactions?: string[];
+  /** Best-effort Zod source text for event nodes (see EventNode.schema). */
+  schema?: string;
+  /** Events this action emits — shown in action-node tooltips. */
+  emits?: string[];
+  /** Events this projection handles — shown in projection-node tooltips. */
+  handles?: string[];
 };
 export type E = { from: Pos; to: Pos; color: string; dash?: boolean };
 export type Box = {
@@ -151,6 +157,7 @@ function placeChain(
   lookup: Map<string, ReactionDef>,
   eventProjections: Map<string, string[]>,
   eventReactions: Map<string, string[]>,
+  eventSchemas: Map<string, string>,
   sliceRightXRef: { value: number }
 ): void {
   const dispatchBaseX = rX + W + GAP;
@@ -197,6 +204,7 @@ function placeChain(
           ? dispatchedAction.invariants
           : undefined,
       file: row.targetState?.file,
+      emits: dispatchedAction?.emits,
     });
     es.push({
       from: { x: rp.x + W, y: rp.y + H / 2 },
@@ -233,6 +241,7 @@ function placeChain(
         file: row.targetState?.file,
         projections: eventProjections.get(emit.name),
         reactions: eventReactions.get(emit.name),
+        schema: eventSchemas.get(emit.name),
       });
 
       // Recurse into sub-chain — reaction aligns with this emit
@@ -251,6 +260,7 @@ function placeChain(
           lookup,
           eventProjections,
           eventReactions,
+          eventSchemas,
           sliceRightXRef
         );
       }
@@ -277,6 +287,20 @@ export function computeLayout(viewModel: DomainModel): Layout {
   // Build projection lookup: event name → projection names
   const eventProjections = new Map<string, string[]>();
   const eventReactions = new Map<string, string[]>();
+  // Captured Zod schema text per event name (first occurrence wins).
+  const eventSchemas = new Map<string, string>();
+  for (const s of viewModel.states) {
+    for (const e of s.events) {
+      if (e.schema && !eventSchemas.has(e.name)) {
+        eventSchemas.set(e.name, e.schema);
+      }
+    }
+  }
+  // Projection name → event names it handles (for projection tooltips).
+  const projectionHandles = new Map<string, string[]>();
+  for (const proj of viewModel.projections) {
+    projectionHandles.set(proj.name, proj.handles);
+  }
 
   for (const slice of viewModel.slices) {
     for (const r of slice.reactions) {
@@ -492,6 +516,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           file: eventFileMap.get(en) ?? st.file,
           projections: eventProjections.get(en),
           reactions: eventReactions.get(en),
+          schema: eventSchemas.get(en),
         });
         eventYMap.set(en, evtY);
 
@@ -523,6 +548,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
             sliceReactionByEvent,
             eventProjections,
             eventReactions,
+            eventSchemas,
             sliceRightXRef
           );
           // Advance watermark past all nodes placed by this chain
@@ -549,6 +575,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
             pos: { x: eventColX, y: evtY },
             type: "projection",
             label: pn,
+            handles: projectionHandles.get(pn),
           });
           evtY += H + GAP / 2;
         }
@@ -577,6 +604,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
           file: actionFileMap.get(action.name) ?? st.file,
+          emits: action.emits,
         });
         for (const en of action.emits) {
           const ey = eventYMap.get(en)!;
@@ -712,6 +740,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
           label: en,
           projections: eventProjections.get(en),
           reactions: eventReactions.get(en),
+          schema: eventSchemas.get(en),
         });
         eventYMap.set(en, evtY);
         evtY += H + GAP / 2;
@@ -726,6 +755,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
         label: en,
         projections: eventProjections.get(en),
         reactions: eventReactions.get(en),
+        schema: eventSchemas.get(en),
       });
       eventYMap.set(en, evtY);
       evtY += H + GAP / 2;
@@ -751,6 +781,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
         label: action.name,
         sub: action.invariants.length > 0 ? "guarded" : undefined,
         guards: action.invariants.length > 0 ? action.invariants : undefined,
+        emits: action.emits,
       });
       for (const en of action.emits) {
         const ey = eventYMap.get(en)!;

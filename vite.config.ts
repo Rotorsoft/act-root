@@ -37,6 +37,16 @@ export default defineConfig({
   },
   test: {
     globals: true,
+    // picocolors enables color emission when `CI` is set in env, which
+    // wraps act-diagram CLI output in ANSI escapes and breaks
+    // plain-text `toContain` assertions in format.spec/repl.spec. Force
+    // picocolors off in tests so output is deterministic across local
+    // and CI runs; `colors.spec.ts` mocks picocolors directly and is
+    // unaffected.
+    env: {
+      NO_COLOR: "1",
+      FORCE_COLOR: "0",
+    },
     coverage: {
       provider: "v8",
       reporter: ["text", "lcov", "html", "json-summary"],
@@ -45,9 +55,11 @@ export default defineConfig({
       exclude: [
         "**/node_modules/**",
         "packages/**",
+        "**/*.tsx",
         "libs/act-diagram/src/server/**",
         "libs/act-diagram/src/client/data/**",
         "libs/act-diagram/src/client/components/**",
+        "libs/act-diagram/src/client/main.tsx",
         "libs/act-diagram/src/client/types/protocol.ts",
         "libs/act-diagram/src/client/types/file-tab.ts",
         "libs/act-diagram/src/client/types/index.ts",
