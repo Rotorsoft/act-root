@@ -245,7 +245,7 @@ Backoff state lives in process memory on each worker's `DrainController`. With N
 - Each worker only paces *its own* re-attempts.
 - The shared `retry_count` on the stream watermark climbs across workers — so the `blockOnError` threshold is hit up to N× faster than the configured strategy suggests.
 
-This is intentional: transient per-worker faults (one bad DNS resolver, one network blip) recover faster, and genuine poison messages get quarantined sooner. If you need cross-worker pacing for very long backoffs, forward events to an external bus rather than holding drain leases for minutes — see [external integration](../guides/external-integration) (forthcoming).
+This is intentional: transient per-worker faults (one bad DNS resolver, one network blip) recover faster, and genuine poison messages get quarantined sooner. If you need cross-worker pacing for very long backoffs, forward events to an external bus rather than holding drain leases for minutes — see [external integration](../guides/external-integration).
 
 #### Interaction with `leaseMillis`
 

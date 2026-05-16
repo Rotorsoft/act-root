@@ -10,6 +10,7 @@ const sidebars: SidebarsConfig = {
       items: [
         "guides/getting-started",
         "guides/projections-to-database",
+        "guides/external-integration",
         "guides/production-checklist",
         "guides/contributing-new-package",
         "guides/writing-a-store",

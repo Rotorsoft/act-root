@@ -7,6 +7,8 @@ title: Real-Time with SSE
 
 `@rotorsoft/act-sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
 
+> SSE is one of two HTTP-shaped integration paths. For the outbound side — webhooks, downstream services, message buses — see [External integration patterns](../guides/external-integration). The two are independent; an app can run both.
+
 ```bash
 npm install @rotorsoft/act-sse
 ```

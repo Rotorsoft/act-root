@@ -286,6 +286,7 @@ Any spec format works: event modeling diagrams, event storming boards, JSON conf
 
 - [API Reference](https://rotorsoft.github.io/act-root/docs/api/) — typedoc-generated, refreshed on every push to `master`
 - [Concepts & Guides](https://rotorsoft.github.io/act-root/docs/intro) — domain modeling, state management, error handling, real-time
+- [External integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration) — inline `webhook` vs forwarded bus, receiver-side idempotency, the recovery loop
 - [Architecture](https://rotorsoft.github.io/act-root/docs/architecture) — contributor-facing pages on concurrency, cache/snapshots, correlation+drain, close-cycle, schema evolution, extension points
 - [Performance & Benchmarks](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
 - [Philosophy](./docs/PHILOSOPHY.md) — DDD / Event Sourcing / CQRS lineage, integration patterns, why this shape
