@@ -192,11 +192,14 @@ export type QueryStreamsResult = {
 };
 
 /**
- * Filter for {@link Store.prioritize} bulk priority updates.
+ * Filter shape for bulk operations on registered streams. Used by
+ * {@link Store.prioritize}, {@link Store.reset}, and {@link Store.unblock}
+ * — anything that operates on a set of streams selected by pattern or
+ * exact match rather than enumerated by name.
  *
  * Same shape as {@link QueryStreams} but without pagination — bulk
- * UPDATEs don't paginate. Empty filter (`{}`) updates **every**
- * registered stream.
+ * UPDATEs don't paginate. Empty filter (`{}`) matches **every**
+ * registered stream; treat as a footgun and use sparingly.
  *
  * @property stream - Stream-name filter (regex by default; `stream_exact`
  *   for equality).
@@ -207,10 +210,17 @@ export type QueryStreamsResult = {
  * @property blocked - Restrict to blocked / unblocked streams. Omit
  *   for both.
  */
-export type PrioritizeFilter = Pick<
+export type StreamFilter = Pick<
   QueryStreams,
   "stream" | "stream_exact" | "source" | "source_exact" | "blocked"
 >;
+
+/**
+ * Alias of {@link StreamFilter}. Retained for backward compatibility
+ * with code that imports the filter by its prioritize-specific name.
+ * Prefer `StreamFilter` for new code.
+ */
+export type PrioritizeFilter = StreamFilter;
 
 /**
  * Interface for event store implementations.
@@ -486,13 +496,23 @@ export interface Store extends Disposable {
    * "needs drain" flag, so a settled `Act` instance will short-circuit and
    * skip the replay. `Act.reset()` wraps this and arms the flag.
    *
-   * @param streams - Stream names to reset
+   * Accepts either an explicit list of stream names or a
+   * {@link StreamFilter} for bulk operations (e.g., "rebuild every
+   * blocked stream"). The filter form is the same shape used by
+   * {@link prioritize} and {@link query_streams}. An empty filter
+   * (`{}`) matches every registered stream — typically a footgun for
+   * `reset`; prefer narrower filters like `{ blocked: true }`.
+   *
+   * @param input - Stream names or a {@link StreamFilter}
    * @returns Count of streams that were actually reset
    *
    * @example
    * ```typescript
-   * // Recommended
+   * // By name
    * await app.reset(["my-projection"]);
+   *
+   * // By filter — rebuild every blocked stream in a projection family
+   * await app.reset({ stream: "^proj-orders-", blocked: true });
    *
    * // Low-level (does NOT trigger replay on settled apps)
    * await store().reset(["my-projection"]);
@@ -501,7 +521,7 @@ export interface Store extends Disposable {
    * @see {@link Act.reset} for the high-level rebuild API that wraps
    *   this primitive and arms the orchestrator's drain flag
    */
-  reset: (streams: string[]) => Promise<number>;
+  reset: (input: string[] | StreamFilter) => Promise<number>;
 
   /**
    * Clears the blocked flag on streams without replaying their history.
@@ -527,13 +547,26 @@ export interface Store extends Disposable {
    * makes the call safe to issue concurrently with `claim()` — workers
    * holding a `FOR UPDATE SKIP LOCKED` lock won't see partial state.
    *
-   * @param streams - Stream names to unblock
+   * Accepts either an explicit list of stream names or a
+   * {@link StreamFilter} for bulk recovery (e.g., "unblock every
+   * blocked order projection"). The `blocked = true` predicate is
+   * always applied — passing `blocked: false` in the filter matches
+   * nothing. An empty filter (`{}`) means "unblock everything that's
+   * blocked," which is a sane post-incident bulk recovery.
+   *
+   * @param input - Stream names or a {@link StreamFilter}
    * @returns Count of streams that were actually flipped (were blocked)
    *
    * @example
    * ```typescript
-   * // After fixing the bug that caused a poison message:
+   * // By name (single targeted recovery)
    * await app.unblock(["webhooks-out-customer-42"]);
+   *
+   * // By filter — unblock every blocked stream in a family
+   * await app.unblock({ stream: "^webhooks-out-" });
+   *
+   * // Post-incident: unblock everything that's blocked
+   * await app.unblock({});
    *
    * // Low-level (does NOT trigger resume on settled apps)
    * await store().unblock(["webhooks-out-customer-42"]);
@@ -542,7 +575,7 @@ export interface Store extends Disposable {
    * @see {@link Act.unblock} for the high-level recovery API
    * @see {@link reset} for the rebuild-from-zero alternative
    */
-  unblock: (streams: string[]) => Promise<number>;
+  unblock: (input: string[] | StreamFilter) => Promise<number>;
 
   /**
    * Bulk-update the scheduling priority of streams matching a filter.
@@ -583,7 +616,7 @@ export interface Store extends Disposable {
    * @see {@link Act.prioritize} for the orchestrator-level wrapper
    * @see {@link claim} for how priority biases stream scheduling
    */
-  prioritize: (filter: PrioritizeFilter, priority: number) => Promise<number>;
+  prioritize: (filter: StreamFilter, priority: number) => Promise<number>;
 
   /**
    * Atomically truncates streams and seeds each with a final event.

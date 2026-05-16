@@ -7,7 +7,6 @@ import type {
   Logger,
   Message,
   NotifyDisposer,
-  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
@@ -15,6 +14,7 @@ import type {
   Schemas,
   Store,
   StoreNotification,
+  StreamFilter,
   StreamPosition,
 } from "@rotorsoft/act";
 import {
@@ -869,40 +869,101 @@ export class PostgresStore implements Store {
    * @param streams - Stream names to reset.
    * @returns Count of streams that were actually reset.
    */
-  async reset(streams: string[]): Promise<number> {
-    if (!streams.length) return 0;
+  /**
+   * Translate a {@link StreamFilter} to a `WHERE` clause fragment and
+   * the corresponding parameter values. The fragment never starts with
+   * `WHERE` — callers compose it with any other predicates they need.
+   * Returns an always-true clause (`true`) when the filter is empty.
+   */
+  private _filterClause(
+    filter: StreamFilter,
+    start: number
+  ): { clause: string; values: unknown[] } {
+    const conditions: string[] = [];
+    const values: unknown[] = [];
+    if (filter.stream !== undefined) {
+      values.push(filter.stream);
+      conditions.push(
+        filter.stream_exact
+          ? `stream = $${start + values.length - 1}`
+          : `stream ~ $${start + values.length - 1}`
+      );
+    }
+    if (filter.source !== undefined) {
+      conditions.push(`source IS NOT NULL`);
+      values.push(filter.source);
+      conditions.push(
+        filter.source_exact
+          ? `source = $${start + values.length - 1}`
+          : `source ~ $${start + values.length - 1}`
+      );
+    }
+    if (filter.blocked !== undefined) {
+      values.push(filter.blocked);
+      conditions.push(`blocked = $${start + values.length - 1}`);
+    }
+    return {
+      clause: conditions.length ? conditions.join(" AND ") : "TRUE",
+      values,
+    };
+  }
+
+  async reset(input: string[] | StreamFilter): Promise<number> {
+    const setClause = `SET at = -1, retry = 0, blocked = false, error = NULL,
+                          leased_by = NULL, leased_until = NULL`;
+    if (Array.isArray(input)) {
+      if (!input.length) return 0;
+      const { rowCount } = await this._pool.query(
+        `UPDATE ${this._fqs} ${setClause} WHERE stream = ANY($1)`,
+        [input]
+      );
+      return rowCount ?? 0;
+    }
+    const { clause, values } = this._filterClause(input, 1);
     const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs}
-       SET at = -1, retry = 0, blocked = false, error = NULL,
-           leased_by = NULL, leased_until = NULL
-       WHERE stream = ANY($1)`,
-      [streams]
+      `UPDATE ${this._fqs} ${setClause} WHERE ${clause}`,
+      values
     );
     return rowCount ?? 0;
   }
 
   /**
    * Clear blocked flag (and retry / error / lease state) on streams
-   * without touching the `at` watermark. The `blocked = true` clause
-   * makes the rowCount reflect only streams that were actually
-   * flipped — already-unblocked rows and unknown streams are skipped.
-   * See {@link Store.unblock}.
+   * without touching the `at` watermark. `blocked = true` is always
+   * applied, so the return count reflects only streams that were
+   * actually flipped — already-unblocked rows, unknown streams, and
+   * filter matches that aren't blocked are silently skipped.
+   *
+   * `retry = -1` matches the InMemoryStore convention: claim() bumps
+   * retry on every acquisition, so storing -1 means the first claim
+   * after unblock returns retry=0 ("first attempt"). Storing 0 would
+   * mis-report the post-recovery attempt as a continuation of the
+   * failed sequence. See {@link Store.unblock}.
    *
    * @returns Count of streams that were actually flipped (were blocked).
    */
-  async unblock(streams: string[]): Promise<number> {
-    if (!streams.length) return 0;
-    // `retry = -1` matches the InMemoryStore convention: claim() bumps
-    // retry on every acquisition, so storing -1 means the first claim
-    // after unblock returns retry=0 ("first attempt"). Storing 0 here
-    // would make the next claim return retry=1, mis-reporting the post-
-    // recovery attempt as a continuation of the failed sequence.
+  async unblock(input: string[] | StreamFilter): Promise<number> {
+    const setClause = `SET retry = -1, blocked = false, error = NULL,
+                          leased_by = NULL, leased_until = NULL`;
+    if (Array.isArray(input)) {
+      if (!input.length) return 0;
+      const { rowCount } = await this._pool.query(
+        `UPDATE ${this._fqs} ${setClause}
+         WHERE stream = ANY($1) AND blocked = true`,
+        [input]
+      );
+      return rowCount ?? 0;
+    }
+    // Filter form: force `blocked = true` regardless of what the
+    // caller passed — there is no use case for "unblock unblocked
+    // streams." A no-op overlay is the right shape here.
+    const { clause, values } = this._filterClause(
+      { ...input, blocked: true },
+      1
+    );
     const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs}
-       SET retry = -1, blocked = false, error = NULL,
-           leased_by = NULL, leased_until = NULL
-       WHERE stream = ANY($1) AND blocked = true`,
-      [streams]
+      `UPDATE ${this._fqs} ${setClause} WHERE ${clause}`,
+      values
     );
     return rowCount ?? 0;
   }
@@ -921,36 +982,11 @@ export class PostgresStore implements Store {
    *
    * @returns Count of streams whose priority changed.
    */
-  async prioritize(
-    filter: PrioritizeFilter,
-    priority: number
-  ): Promise<number> {
-    const conditions: string[] = ["priority <> $1"];
-    const values: unknown[] = [priority];
-
-    if (filter.stream !== undefined) {
-      values.push(filter.stream);
-      conditions.push(
-        filter.stream_exact
-          ? `stream = $${values.length}`
-          : `stream ~ $${values.length}`
-      );
-    }
-    if (filter.source !== undefined) {
-      conditions.push(`source IS NOT NULL`);
-      values.push(filter.source);
-      conditions.push(
-        filter.source_exact
-          ? `source = $${values.length}`
-          : `source ~ $${values.length}`
-      );
-    }
-    if (filter.blocked !== undefined) {
-      values.push(filter.blocked);
-      conditions.push(`blocked = $${values.length}`);
-    }
-    const sql = `UPDATE ${this._fqs} SET priority = $1 WHERE ${conditions.join(" AND ")}`;
-    const { rowCount } = await this._pool.query(sql, values);
+  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    const { clause, values } = this._filterClause(filter, 2);
+    const sql = `UPDATE ${this._fqs} SET priority = $1
+                 WHERE priority <> $1 AND ${clause}`;
+    const { rowCount } = await this._pool.query(sql, [priority, ...values]);
     return rowCount ?? 0;
   }
 

@@ -119,6 +119,22 @@ The same atomic UPDATE pattern in each adapter, gated by `WHERE blocked = true` 
 
 A subtle design point worth a paragraph: the `retry` value after unblock is `-1` in the InMemoryStore (and the new PG/SQLite impls match it). Since `claim()` bumps retry by 1 on every acquisition, storing `-1` makes the first post-unblock claim return `retry = 0` — "first attempt." Storing `0` would have made claim return `1`, mis-reporting the post-recovery attempt as a continuation of the failed retry sequence. The convention is small but load-bearing for telemetry and observability — operators reading lease.retry shouldn't see "2nd attempt" right after they explicitly cleared the failure history.
 
+### Names or filter — the API audit that came alongside
+
+ACT-604 originally added `unblock(streams: string[])` and `reset(streams: string[])`. Reviewing the PR surfaced a sharper question: *should these accept a filter?* The framework already exposed `prioritize(filter, n)` with a regex/exact/blocked predicate. `reset` and `unblock` are the only other Store-port methods that operate on a set of streams selected by name without per-row data (unlike `ack` / `block` / `close`, which carry per-row lease snapshots or callbacks that can't be reconstructed from a filter).
+
+The answer was both. The signature widens to `string[] | StreamFilter`. Names are the common path — "unblock these specific 3 streams after I investigated" reads cleaner as an array. Filters cover the bulk cases that didn't have a primitive: "unblock every blocked stream in this projection family" doesn't need a query-then-map round trip.
+
+A small naming choice came with it: `PrioritizeFilter` (the existing type used by `prioritize`) was retained as an alias of a new canonical `StreamFilter`. The shape is identical; the name fits better at every call site once three methods share it. Charter-additive — no breaking change.
+
+The filter form *intentionally* enforces `blocked = true` for `unblock` regardless of what the caller passes — there's no use case for "unblock unblocked streams" and the constraint removes an entire class of operator confusion at the boundary. The same isn't applied to `reset` because `reset({ blocked: true })` (rebuild only blocked streams) is a real and useful operational shape.
+
+### Discovering what's blocked — `app.blocked_streams()`
+
+Recovery needs discovery. The framework already exposed `store().query_streams(cb, { blocked: true })` for that, but reaching through the Store port for what's clearly an Act-level operation was awkward. ACT-604 added `app.blocked_streams()` as a thin wrapper — same query, array return, paginated by an optional `{ after, limit }` cursor.
+
+Three small primitives, then, together close the recovery loop: `blocked_streams` to discover, `unblock` (by name or filter) to recover, and `NonRetryableError` as the signal that triggers blocking on the first failure in the first place. Each one is small; together they shift "handle a poison message" from "drop into the database and write SQL" to "three method calls."
+
 ## What's deliberately out of scope
 
 Three follow-ups parked at ticket-filing time, worth noting because they'll come up:

@@ -236,4 +236,71 @@ describe("NonRetryableError (drain integration)", () => {
     expect(await app.unblock(["s7"])).toBe(0);
     expect(await app.unblock(["unknown-stream"])).toBe(0);
   });
+
+  it("app.unblock accepts a StreamFilter for bulk recovery", async () => {
+    let permanent = true;
+    const handler = vi.fn().mockImplementation(async () => {
+      if (permanent) throw new NonRetryableError("temp bug");
+    });
+    Object.defineProperty(handler, "name", { value: "filterRecovery" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, { maxRetries: 5 })
+      .build();
+
+    // Three streams in the same family all block on a shared bug.
+    for (const stream of ["fam-a", "fam-b", "fam-c"]) {
+      await app.do("tick", { stream, actor }, {});
+    }
+    await app.correlate();
+    const blocked = await app.drain({ leaseMillis: 1 });
+    expect(blocked.blocked.length).toBe(3);
+
+    // Operator confirms the bug is fixed.
+    permanent = false;
+
+    // Bulk recovery via filter — unblock the whole family in one call.
+    const unblocked = await app.unblock({ stream: "^fam-" });
+    expect(unblocked).toBe(3);
+
+    // Next drain succeeds for all three.
+    const ok = await app.drain({ leaseMillis: 1 });
+    expect(ok.acked.length).toBe(3);
+    expect(ok.blocked.length).toBe(0);
+  });
+
+  it("app.blocked_streams returns currently-blocked positions", async () => {
+    const handler = vi.fn().mockImplementation(async () => {
+      throw new NonRetryableError("permanent");
+    });
+    Object.defineProperty(handler, "name", { value: "alwaysBad" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, { maxRetries: 5 })
+      .build();
+
+    // Nothing blocked yet.
+    expect((await app.blocked_streams()).length).toBe(0);
+
+    // Block two streams.
+    for (const stream of ["bad-1", "bad-2"]) {
+      await app.do("tick", { stream, actor }, {});
+    }
+    await app.correlate();
+    await app.drain({ leaseMillis: 1 });
+
+    const blocked = await app.blocked_streams();
+    expect(blocked.length).toBe(2);
+    expect(blocked.map((p) => p.stream).sort()).toEqual(["bad-1", "bad-2"]);
+    // Each position carries the error string set at block time.
+    expect(blocked[0].error).toContain("permanent");
+
+    // After recovery, the list goes back to empty.
+    await app.unblock({ stream: "^bad-" });
+    expect((await app.blocked_streams()).length).toBe(0);
+  });
 });

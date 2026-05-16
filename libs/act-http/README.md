@@ -139,11 +139,21 @@ Generic catch sites can detect any handler-signaled permanent failure via `NonRe
 
 ### Recovering a blocked stream
 
-When the helper blocks a stream — whether on first attempt (4xx → `NonRetryableWebhookError`) or after exhausting `maxRetries` — the operator's recovery path is `app.unblock([stream])` (from `@rotorsoft/act`). It clears the blocked flag and resumes from where the stream stopped, *not* from the beginning. Don't use `app.reset()` for this — `reset` rebuilds from event 0 and would re-fire every historical webhook.
+When the helper blocks a stream — whether on first attempt (4xx → `NonRetryableWebhookError`) or after exhausting `maxRetries` — the operator's recovery path is `app.unblock(input)` from `@rotorsoft/act`. It clears the blocked flag and resumes from where the stream stopped, *not* from the beginning. Don't use `app.reset()` for this — `reset` rebuilds from event 0 and would re-fire every historical webhook.
 
 ```ts
-// After fixing the bug that caused the 4xx:
+// Single targeted recovery, by name.
 await app.unblock(["webhooks-out-customer-42"]);
+
+// Bulk recovery — every blocked stream in the webhook family.
+await app.unblock({ stream: "^webhooks-out-" });
+```
+
+To discover what's currently blocked first, use `app.blocked_streams()`:
+
+```ts
+const blocked = await app.blocked_streams();
+// → [{ stream, source, at, retry, blocked: true, error, ... }, …]
 ```
 
 ---

@@ -31,7 +31,6 @@ import type {
   IAct,
   Lease,
   Logger,
-  PrioritizeFilter,
   Query,
   Registry,
   Schema,
@@ -42,6 +41,8 @@ import type {
   State,
   Store,
   StoreNotification,
+  StreamFilter,
+  StreamPosition,
   Target,
 } from "./types/index.js";
 
@@ -920,9 +921,9 @@ export class Act<
    * @see {@link Store.reset} for the underlying store primitive
    * @see {@link settle} for the debounced full-catch-up loop
    */
-  async reset(streams: string[]): Promise<number> {
+  async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
-      const count = await store().reset(streams);
+      const count = await store().reset(input);
       if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
       return count;
     });
@@ -955,11 +956,49 @@ export class Act<
    * @see {@link Store.unblock} for the underlying store primitive
    * @see {@link reset} for the rebuild-from-zero alternative
    */
-  async unblock(streams: string[]): Promise<number> {
+  async unblock(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
-      const count = await store().unblock(streams);
+      const count = await store().unblock(input);
       if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
       return count;
+    });
+  }
+
+  /**
+   * Return every currently-blocked stream position. Convenience wrapper
+   * around `store().query_streams(cb, { blocked: true })` for the common
+   * "show me what's broken" operational query.
+   *
+   * Results are ordered by stream name, paginated by `limit` (default
+   * 100). Pass `after` to fetch the next page (keyset cursor on the
+   * stream name). For richer queries — including blocked + source
+   * filters, or full unblocked introspection — drop to
+   * `store().query_streams(...)` directly.
+   *
+   * @returns Array of {@link StreamPosition} for currently-blocked streams.
+   *
+   * @example Discover and recover
+   * ```typescript
+   * const blocked = await app.blocked_streams();
+   * console.table(blocked.map(({ stream, retry, error }) => ({ stream, retry, error })));
+   *
+   * // Operator investigates, then bulk-unblocks the family:
+   * await app.unblock({ stream: "^webhooks-out-" });
+   * ```
+   */
+  async blocked_streams(options?: {
+    after?: string;
+    limit?: number;
+  }): Promise<StreamPosition[]> {
+    return this._scoped(async () => {
+      const positions: StreamPosition[] = [];
+      await store().query_streams(
+        (p) => {
+          positions.push(p);
+        },
+        { blocked: true, after: options?.after, limit: options?.limit }
+      );
+      return positions;
     });
   }
 
@@ -1001,10 +1040,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    * @see {@link claim} for how priority biases scheduling
    */
-  async prioritize(
-    filter: PrioritizeFilter,
-    priority: number
-  ): Promise<number> {
+  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._scoped(() => store().prioritize(filter, priority));
   }
 

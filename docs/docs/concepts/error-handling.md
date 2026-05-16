@@ -325,24 +325,46 @@ Important: `NonRetryableError` does **not** override `blockOnError: false`. If t
 
 `@rotorsoft/act-http/webhook` exports `NonRetryableWebhookError` (a subclass) for 4xx responses. The split lets generic catch sites use `instanceof NonRetryableError` while webhook-aware code reads the HTTP-specific `status` / `url` / `responseBody` fields.
 
-### Recovering a blocked stream — `app.unblock(streams)`
+### Recovering a blocked stream — `app.unblock`
 
-When a stream blocks — whether from `NonRetryableError` (first attempt) or from exhausting `maxRetries` — the operator's recovery path is `app.unblock([stream])`:
+When a stream blocks — whether from `NonRetryableError` (first attempt) or from exhausting `maxRetries` — the operator's recovery path is `app.unblock(input)`. The input is either an explicit list of stream names or a `StreamFilter` for bulk recovery:
 
 ```ts
-// After fixing the bug that caused the failure:
+// Single targeted recovery — by name.
 await app.unblock(["webhooks-out-customer-42"]);
-// The stream resumes from the next event, NOT from zero.
+
+// Bulk recovery — by filter (all blocked streams matching a pattern).
+await app.unblock({ stream: "^webhooks-out-" });
+
+// Post-incident: unblock everything currently blocked.
+await app.unblock({});
 ```
 
 `unblock` clears the blocked flag, resets retry count, drops any stale lease, and arms the orchestrator's drain flag so a settled app picks up the now-free stream on the next cycle. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
 
-Contrast with `app.reset(streams)`, which is for projection rebuilds: `reset()` sets the watermark back to -1 and replays every event from the start. Two distinct operational primitives:
+The filter form always restricts to `blocked = true` regardless of what the caller passes — there's no use case for "unblock unblocked streams." Already-unblocked streams and unknown names are silently skipped; the return count reflects only streams that were actually flipped.
+
+Contrast with `app.reset(input)`, which is for projection rebuilds. `reset` accepts the same `string[] | StreamFilter` shape but sets the watermark back to -1 and replays every event from the start:
 
 | Use case | Method |
 |---|---|
-| Recovered from a poison message, resume normally | `app.unblock([stream])` |
+| Recovered from a poison message, resume normally | `app.unblock([stream])` or `app.unblock(filter)` |
+| Bulk recovery across a family of streams | `app.unblock({ stream: "^proj-" })` |
 | Deploy new projection logic, replay all events | `app.reset([stream])` |
-| Stream not blocked, just want to skip ahead | Neither — query state, decide |
+| Rebuild every blocked stream from zero | `app.reset({ blocked: true })` |
 
-`unblock` returns the count of streams that were *actually* blocked at call time. Already-unblocked streams and unknown stream names are silently skipped, so the count is a useful diagnostic ("I asked for 5 unblocks but only 3 streams were actually blocked").
+### Discovering blocked streams — `app.blocked_streams()`
+
+For the "show me what's broken" operational query, `app.blocked_streams()` returns every currently-blocked stream position. Convenience wrapper around `store().query_streams(cb, { blocked: true })`:
+
+```ts
+const blocked = await app.blocked_streams();
+console.table(
+  blocked.map(({ stream, retry, error }) => ({ stream, retry, error }))
+);
+
+// Operator investigates, then bulk-unblocks the family:
+await app.unblock({ stream: "^webhooks-out-" });
+```
+
+Results paginate by `limit` (default 100) with an `after` keyset cursor on the stream name. For richer queries — source filters, unblocked introspection, custom pagination — drop to `store().query_streams(...)` directly.
