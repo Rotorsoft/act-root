@@ -125,7 +125,7 @@ app.on("blocked", (blocked) => {
 When you change the projection's logic — add a column, fix an aggregation, change a join — the old read model is wrong. The fix is to **rebuild from scratch**:
 
 1. Truncate the projection's tables.
-2. Reset the projection's reaction watermark with `app.reset(["tickets"])`.
+2. Reset the projection's reaction watermark with `app.reset(["tickets"])`. For multiple related projections, you can also pass a `StreamFilter` — `app.reset({ stream: "^proj-" })` rebuilds every projection whose target stream starts with `proj-` in a single call.
 3. Call `app.settle()` once. The framework loops `correlate → drain` until every historical event has been replayed through the projection's handlers.
 
 For long event streams, replaying one event per transaction is slow. Define a `.batch(handler)` and Act will call it with every event for a stream in a single pass:
