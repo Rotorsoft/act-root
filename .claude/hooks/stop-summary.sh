@@ -40,6 +40,7 @@ if [[ ${#lines[@]} -eq 0 ]]; then
   exit 0
 fi
 
-printf '%s\n' "${lines[@]}" | jq -Rs '{
-  hookSpecificOutput: { hookEventName: "Stop", additionalContext: . }
-}'
+# Stop hooks don't accept hookSpecificOutput.additionalContext (that's
+# UserPromptSubmit / SessionStart territory). Emit `systemMessage` so
+# the line shows up in the transcript without claiming a decision.
+printf '%s\n' "${lines[@]}" | jq -Rs '{ systemMessage: . }'
