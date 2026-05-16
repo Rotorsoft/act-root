@@ -504,6 +504,47 @@ export interface Store extends Disposable {
   reset: (streams: string[]) => Promise<number>;
 
   /**
+   * Clears the blocked flag on streams without replaying their history.
+   * Sets `blocked = false`, `retry_count = 0`, `error = null`, and
+   * clears any lease bookkeeping. The `at` watermark stays where it
+   * was — the stream resumes from the next event after the last
+   * successful ack, not from zero.
+   *
+   * The distinction from {@link reset} matters: `reset()` is for
+   * projection rebuilds (replay from event 0); `unblock()` is for
+   * recovering from a poison message after the operator fixes the
+   * underlying issue. Use `unblock()` when you don't want to re-process
+   * history.
+   *
+   * **Prefer `Act.unblock()` over calling this directly.** Like
+   * `reset()`, this primitive doesn't raise the orchestrator's internal
+   * "needs drain" flag — a settled `Act` instance will short-circuit and
+   * skip the resume. `Act.unblock()` wraps this and arms the flag.
+   *
+   * Only streams that were actually blocked at call time count toward
+   * the return value; already-unblocked streams and unknown stream
+   * names are silently skipped. The atomic single-statement update
+   * makes the call safe to issue concurrently with `claim()` — workers
+   * holding a `FOR UPDATE SKIP LOCKED` lock won't see partial state.
+   *
+   * @param streams - Stream names to unblock
+   * @returns Count of streams that were actually flipped (were blocked)
+   *
+   * @example
+   * ```typescript
+   * // After fixing the bug that caused a poison message:
+   * await app.unblock(["webhooks-out-customer-42"]);
+   *
+   * // Low-level (does NOT trigger resume on settled apps)
+   * await store().unblock(["webhooks-out-customer-42"]);
+   * ```
+   *
+   * @see {@link Act.unblock} for the high-level recovery API
+   * @see {@link reset} for the rebuild-from-zero alternative
+   */
+  unblock: (streams: string[]) => Promise<number>;
+
+  /**
    * Bulk-update the scheduling priority of streams matching a filter.
    *
    * Used by {@link Act.prioritize} for operator runtime control over

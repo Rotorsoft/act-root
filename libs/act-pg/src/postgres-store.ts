@@ -882,6 +882,32 @@ export class PostgresStore implements Store {
   }
 
   /**
+   * Clear blocked flag (and retry / error / lease state) on streams
+   * without touching the `at` watermark. The `blocked = true` clause
+   * makes the rowCount reflect only streams that were actually
+   * flipped — already-unblocked rows and unknown streams are skipped.
+   * See {@link Store.unblock}.
+   *
+   * @returns Count of streams that were actually flipped (were blocked).
+   */
+  async unblock(streams: string[]): Promise<number> {
+    if (!streams.length) return 0;
+    // `retry = -1` matches the InMemoryStore convention: claim() bumps
+    // retry on every acquisition, so storing -1 means the first claim
+    // after unblock returns retry=0 ("first attempt"). Storing 0 here
+    // would make the next claim return retry=1, mis-reporting the post-
+    // recovery attempt as a continuation of the failed sequence.
+    const { rowCount } = await this._pool.query(
+      `UPDATE ${this._fqs}
+       SET retry = -1, blocked = false, error = NULL,
+           leased_by = NULL, leased_until = NULL
+       WHERE stream = ANY($1) AND blocked = true`,
+      [streams]
+    );
+    return rowCount ?? 0;
+  }
+
+  /**
    * Bulk-update priority of streams matching `filter` (ACT-102).
    *
    * Filter semantics mirror {@link query_streams}: regex on `stream` /

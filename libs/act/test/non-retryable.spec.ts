@@ -183,4 +183,57 @@ describe("NonRetryableError (drain integration)", () => {
     expect(calls).toBe(1);
     expect(drained.blocked.length).toBe(1);
   });
+
+  it("recovers via app.unblock without replaying history", async () => {
+    let permanent = true;
+    let attempts = 0;
+    const handler = vi.fn().mockImplementation(async () => {
+      attempts++;
+      if (permanent) throw new NonRetryableError("fix me");
+    });
+    Object.defineProperty(handler, "name", { value: "fixable" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, { maxRetries: 5 })
+      .build();
+
+    await app.do("tick", { stream: "s6", actor }, {});
+    await app.correlate();
+
+    // First drain — fails permanently, stream blocks.
+    const blockedRes = await app.drain({ leaseMillis: 1 });
+    expect(attempts).toBe(1);
+    expect(blockedRes.blocked.length).toBe(1);
+
+    // Further drains don't re-attempt — stream is blocked.
+    await app.drain({ leaseMillis: 1 });
+    expect(attempts).toBe(1);
+
+    // Operator fixes the underlying issue, then unblocks.
+    permanent = false;
+    const unblocked = await app.unblock(["s6"]);
+    expect(unblocked).toBe(1);
+
+    // Next drain re-attempts at the same event (no replay from zero).
+    const okRes = await app.drain({ leaseMillis: 1 });
+    expect(attempts).toBe(2);
+    expect(okRes.acked.length).toBe(1);
+  });
+
+  it("app.unblock returns 0 when nothing was blocked", async () => {
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(async function noop() {}, { maxRetries: 5 })
+      .build();
+
+    await app.do("tick", { stream: "s7", actor }, {});
+    await app.correlate();
+    await app.drain({ leaseMillis: 1 });
+
+    expect(await app.unblock(["s7"])).toBe(0);
+    expect(await app.unblock(["unknown-stream"])).toBe(0);
+  });
 });

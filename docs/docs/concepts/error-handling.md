@@ -324,3 +324,25 @@ import { NonRetryableError } from "@rotorsoft/act";
 Important: `NonRetryableError` does **not** override `blockOnError: false`. If the operator has explicitly chosen "never block, retry forever," the framework respects that — `NonRetryableError` becomes equivalent to any other error. The class signal only matters on the block-when-budget-exhausted path.
 
 `@rotorsoft/act-http/webhook` exports `NonRetryableWebhookError` (a subclass) for 4xx responses. The split lets generic catch sites use `instanceof NonRetryableError` while webhook-aware code reads the HTTP-specific `status` / `url` / `responseBody` fields.
+
+### Recovering a blocked stream — `app.unblock(streams)`
+
+When a stream blocks — whether from `NonRetryableError` (first attempt) or from exhausting `maxRetries` — the operator's recovery path is `app.unblock([stream])`:
+
+```ts
+// After fixing the bug that caused the failure:
+await app.unblock(["webhooks-out-customer-42"]);
+// The stream resumes from the next event, NOT from zero.
+```
+
+`unblock` clears the blocked flag, resets retry count, drops any stale lease, and arms the orchestrator's drain flag so a settled app picks up the now-free stream on the next cycle. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
+
+Contrast with `app.reset(streams)`, which is for projection rebuilds: `reset()` sets the watermark back to -1 and replays every event from the start. Two distinct operational primitives:
+
+| Use case | Method |
+|---|---|
+| Recovered from a poison message, resume normally | `app.unblock([stream])` |
+| Deploy new projection logic, replay all events | `app.reset([stream])` |
+| Stream not blocked, just want to skip ahead | Neither — query state, decide |
+
+`unblock` returns the count of streams that were *actually* blocked at call time. Already-unblocked streams and unknown stream names are silently skipped, so the count is a useful diagnostic ("I asked for 5 unblocks but only 3 streams were actually blocked").

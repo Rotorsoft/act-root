@@ -98,6 +98,27 @@ User code in regular reaction handlers gets the same primitive. A handler that w
 
 This is the leverage of a small primitive: one ten-line change in core, exported as one class, enables every helper and every user handler to express recoverability through the type system.
 
+## The recovery path: `app.unblock`
+
+Adding `NonRetryableError` made one pre-existing gap acute: blocked streams had no clean recovery path. The framework already shipped `Store.block()` to mark a stream blocked, but the only documented way to clear that flag was `app.reset()` — a rebuild-from-zero primitive that replays every event. For projection rebuilds, that's correct behavior. For "I fixed the validation bug, please retry the webhook from where you left off," it would re-fire every historical webhook. Catastrophic.
+
+Before ACT-604, the gap was hidden by patience: streams blocked rarely (only after burning through `maxRetries`), and operators could often afford the replay or accept the loss. With non-retryable errors, streams block on the *first* failure for known-permanent shapes. The recovery path can't require a full replay anymore.
+
+ACT-604 adds `Store.unblock(streams)` (and the matching `Act.unblock(streams)` wrapper) as a focused operational primitive — distinct in intent from `reset`:
+
+| | `reset` | `unblock` |
+|---|---|---|
+| `at` watermark | → -1 (replay from zero) | unchanged (resume) |
+| `blocked` flag | → false | → false |
+| `retry_count` | → 0 | → 0 |
+| `error` string | → null | → null |
+| lease state | cleared | cleared |
+| use case | projection rebuild | poison-message recovery |
+
+The same atomic UPDATE pattern in each adapter, gated by `WHERE blocked = true` so the return count reflects only streams that were actually flipped. Already-unblocked streams and unknown stream names cost nothing and aren't counted — operators get a useful diagnostic ("I asked for 5 unblocks; only 3 streams were actually blocked").
+
+A subtle design point worth a paragraph: the `retry` value after unblock is `-1` in the InMemoryStore (and the new PG/SQLite impls match it). Since `claim()` bumps retry by 1 on every acquisition, storing `-1` makes the first post-unblock claim return `retry = 0` — "first attempt." Storing `0` would have made claim return `1`, mis-reporting the post-recovery attempt as a continuation of the failed retry sequence. The convention is small but load-bearing for telemetry and observability — operators reading lease.retry shouldn't see "2nd attempt" right after they explicitly cleared the failure history.
+
 ## What's deliberately out of scope
 
 Three follow-ups parked at ticket-filing time, worth noting because they'll come up:

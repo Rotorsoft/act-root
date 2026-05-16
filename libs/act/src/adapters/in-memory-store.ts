@@ -176,6 +176,21 @@ class InMemoryStream {
     this._leased_by = undefined;
     this._leased_until = undefined;
   }
+
+  /**
+   * Clear the blocked flag and lease bookkeeping without touching the
+   * watermark. Returns true if the stream was actually blocked (and is
+   * now flipped); false otherwise.
+   */
+  unblock(): boolean {
+    if (!this._blocked) return false;
+    this._blocked = false;
+    this._retry = -1;
+    this._error = "";
+    this._leased_by = undefined;
+    this._leased_until = undefined;
+    return true;
+  }
 }
 
 /**
@@ -544,6 +559,24 @@ export class InMemoryStore implements Store {
         s.reset();
         count++;
       }
+    }
+    return count;
+  }
+
+  /**
+   * Clear the blocked flag (and retry / error / lease) on the given
+   * streams without touching the watermark. Streams that aren't blocked
+   * at call time are silently skipped. See {@link Store.unblock}.
+   *
+   * @param streams - Stream names to unblock.
+   * @returns Count of streams that were actually flipped (were blocked).
+   */
+  async unblock(streams: string[]) {
+    await sleep();
+    let count = 0;
+    for (const name of streams) {
+      const s = this._streams.get(name);
+      if (s?.unblock()) count++;
     }
     return count;
   }

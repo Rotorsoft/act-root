@@ -929,6 +929,41 @@ export class Act<
   }
 
   /**
+   * Clear the blocked flag on streams without replaying their history.
+   *
+   * Use this to recover from a poison message after fixing the
+   * underlying issue — the stream resumes from the next event after the
+   * last successful ack, not from the beginning. Compare with
+   * {@link reset}, which rebuilds from event 0 (suitable for projection
+   * rebuilds, wrong for "I fixed the bug, please retry").
+   *
+   * Wraps `store().unblock(streams)` and raises the orchestrator's
+   * internal "needs drain" flag so a settled app picks up the now-free
+   * streams on the next cycle. Equivalent to calling `store().unblock(...)`
+   * directly, but `store().unblock(...)` alone leaves the flag
+   * untouched.
+   *
+   * @param streams - Stream names to unblock
+   * @returns Count of streams that were actually flipped (were blocked)
+   *
+   * @example Recover from a 4xx webhook after fixing the bug
+   * ```typescript
+   * await app.unblock(["webhooks-out-customer-42"]);
+   * // The stream resumes from the next event, not from zero.
+   * ```
+   *
+   * @see {@link Store.unblock} for the underlying store primitive
+   * @see {@link reset} for the rebuild-from-zero alternative
+   */
+  async unblock(streams: string[]): Promise<number> {
+    return this._scoped(async () => {
+      const count = await store().unblock(streams);
+      if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
+      return count;
+    });
+  }
+
+  /**
    * Bulk-update scheduling priority for streams matching `filter`.
    *
    * Operator-grade override of the `claim()` lagging-frontier

@@ -471,6 +471,30 @@ export class SqliteStore implements Store {
     }
   }
 
+  // --- unblock: clear blocked + retry + lease without touching watermark ---
+  // `retry = -1` so claim's post-bump returns retry=0 (first attempt),
+  // matching the InMemoryStore convention.
+  async unblock(streams: string[]) {
+    const tx = await this.client.transaction("write");
+    try {
+      let count = 0;
+      for (const stream of streams) {
+        const r = await tx.execute({
+          sql: `UPDATE streams SET retry = -1, blocked = 0, error = '',
+                leased_by = NULL, leased_until = NULL
+                WHERE stream = ? AND blocked = 1`,
+          args: [stream],
+        });
+        count += r.rowsAffected;
+      }
+      await tx.commit();
+      return count;
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
   // --- query_streams: read-only introspection with filters ---
   async query_streams(
     callback: (position: StreamPosition) => void,
