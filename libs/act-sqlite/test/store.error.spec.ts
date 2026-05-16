@@ -203,6 +203,24 @@ describe("SqliteStore error paths", () => {
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
+  it("unblock: rolls back and rethrows on UPDATE failure (array form)", async () => {
+    const client = mockClientFailOn("UPDATE streams SET retry = -1");
+    (db as unknown as { client: unknown }).client = client;
+    await expect(db.unblock(["x"])).rejects.toThrow(
+      /UPDATE streams SET retry = -1/
+    );
+    expect(client._tx.rollback).toHaveBeenCalled();
+  });
+
+  it("unblock: rolls back and rethrows on UPDATE failure (filter form)", async () => {
+    const client = mockClientFailOn("UPDATE streams SET retry = -1");
+    (db as unknown as { client: unknown }).client = client;
+    await expect(db.unblock({ stream: "^x-" })).rejects.toThrow(
+      /UPDATE streams SET retry = -1/
+    );
+    expect(client._tx.rollback).toHaveBeenCalled();
+  });
+
   it("truncate: rolls back and rethrows on DELETE failure", async () => {
     const client = mockClientFailOn("DELETE FROM events");
     (db as unknown as { client: unknown }).client = client;

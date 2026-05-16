@@ -285,4 +285,35 @@ describe("PostgresStore", () => {
       expect(result).toBe(0);
     });
   });
+
+  describe("reset", () => {
+    it("returns 0 when rowCount is undefined for filter form (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.reset({ stream: "^never-matches-" });
+      expect(result).toBe(0);
+    });
+  });
+
+  describe("unblock", () => {
+    it("returns 0 when rowCount is undefined for array form (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.unblock(["never-blocked"]);
+      expect(result).toBe(0);
+    });
+
+    it("returns 0 when rowCount is undefined for filter form (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.unblock({ stream: "^never-blocked-" });
+      expect(result).toBe(0);
+    });
+  });
 });

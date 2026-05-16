@@ -607,9 +607,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const watermarkBefore = m2!.at;
         await store.block([{ ...(m2 as Lease), error: "permanent" }]);
 
-        // Stream is now blocked — claim won't see it.
-        const blockedClaim = await store.claim(100, 0, `w-${uid()}`, 100_000);
-        expect(blockedClaim.find((l) => l.stream === s)).toBeUndefined();
+        // Stream is now blocked — query_streams must report it as such.
+        // (Asserting on `claim()` would be flaky: an empty result is the
+        // same as "s not in the result," which short-circuits a find()
+        // callback and leaves it uncovered when no other streams happen
+        // to be claimable in the fixture.)
+        let blockedFlag: boolean | undefined;
+        await store.query_streams(
+          (p) => {
+            blockedFlag = p.blocked;
+          },
+          { stream: s, stream_exact: true, limit: 1 }
+        );
+        expect(blockedFlag).toBe(true);
 
         // Unblock — claim picks it back up at the same watermark.
         expect(await store.unblock([s])).toBe(1);
