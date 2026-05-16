@@ -218,6 +218,20 @@ describe("webhook", () => {
       expect(headers["idempotency-key"]).toBe("caller-supplied");
       expect(headers["Idempotency-Key"]).toBeUndefined();
     });
+
+    it("respects caller-supplied Content-Type (case-insensitive)", async () => {
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://example.com/hook",
+        headers: { "content-type": "application/x-protobuf" },
+        body: "raw-bytes",
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const headers = calls[0].init.headers as Record<string, string>;
+      expect(headers["content-type"]).toBe("application/x-protobuf");
+      expect(headers["Content-Type"]).toBeUndefined();
+    });
   });
 
   describe("header and body resolvers", () => {
