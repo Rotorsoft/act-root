@@ -51,16 +51,7 @@
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:www.npmjs.com)",
-      "WebFetch(domain:registry.npmjs.org)",
-      "WebFetch(domain:typedoc.org)",
-      "WebFetch(domain:typedoc-plugin-markdown.org)",
-      "WebFetch(domain:docusaurus.io)",
-      "WebFetch(domain:eventmodeling.org)",
-      "WebFetch(domain:event-driven.io)",
-      "WebFetch(domain:martendb.io)",
-      "WebFetch(domain:typst.app)",
-      "WebFetch(domain:cdn.jsdelivr.net)",
-      "WebSearch"
+      "WebFetch(domain:registry.npmjs.org)"
     ],
     "deny": [
       "Bash(git push --force*)",
