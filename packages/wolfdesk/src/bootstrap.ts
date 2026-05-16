@@ -3,6 +3,7 @@ import {
   TicketCreationSlice,
   TicketMessagingSlice,
   TicketOpsSlice,
+  TicketWebhooksSlice,
 } from "./ticket.js";
 import { TicketProjection } from "./ticket-projections.js";
 
@@ -36,5 +37,6 @@ export const app = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
+  .withSlice(TicketWebhooksSlice)
   .withProjection(TicketProjection)
   .build({ correlator: tenantCorrelator });

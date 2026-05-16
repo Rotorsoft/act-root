@@ -16,6 +16,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-sqlite` — SQLite/libSQL adapter (embedded/single-node)
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
   - `@rotorsoft/act-sse` — Server-Sent Events for incremental state broadcast
+  - `@rotorsoft/act-http` — HTTP integrations (umbrella): `webhook` for reaction-driven POST delivery, plus an `sse` submodule that mirrors `@rotorsoft/act-sse`
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
   - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
 

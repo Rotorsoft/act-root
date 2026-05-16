@@ -20,6 +20,8 @@
     "types": ["node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
+      "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
+      "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
       "@rotorsoft/*": ["../libs/*/src/index.ts"],
       "@act/*": ["*/src/index.ts"]
     }

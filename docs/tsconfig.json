@@ -8,7 +8,9 @@
       "@rotorsoft/act-patch": ["libs/act-patch/src/index.ts"],
       "@rotorsoft/act-pg": ["libs/act-pg/src/index.ts"],
       "@rotorsoft/act-sqlite": ["libs/act-sqlite/src/index.ts"],
-      "@rotorsoft/act-sse": ["libs/act-sse/src/index.ts"]
+      "@rotorsoft/act-sse": ["libs/act-sse/src/index.ts"],
+      "@rotorsoft/act-http/webhook": ["libs/act-http/src/webhook/index.ts"],
+      "@rotorsoft/act-http/sse": ["libs/act-http/src/sse/index.ts"]
     }
   },
   "include": [
@@ -16,7 +18,8 @@
     "../libs/act-patch/src/**/*",
     "../libs/act-pg/src/**/*",
     "../libs/act-sqlite/src/**/*",
-    "../libs/act-sse/src/**/*"
+    "../libs/act-sse/src/**/*",
+    "../libs/act-http/src/**/*"
   ],
   "exclude": ["../packages/**"]
 }
