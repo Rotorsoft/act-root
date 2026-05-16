@@ -202,9 +202,13 @@ For UI/frontend changes, start the dev server and exercise the feature in a brow
 
 ## Claude Code configuration
 
-This repo uses Claude Code's hooks, slash commands, and subagents. See [`.claude/README.md`](.claude/README.md) for what's wired up. Notable:
+This repo uses Claude Code's hooks, slash commands, and subagents. See [`.claude/README.md`](.claude/README.md) for the full overview, end-to-end workflow examples, and tuning tips.
+
+Quick reference:
 
 - **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
 - **Slash commands**: `/pr`, `/release-check`, `/charter-diff`, `/coverage`, `/book-note`, `/scaffold-package`.
 - **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
 - **Skill**: `scaffold-act-app` for translating specs into a working monorepo.
+
+The typical "ticket → PR" flow: implement → `/coverage` → `act-code-reviewer` (pre-PR) → `/charter-diff` (if touched) → `/pr <issue#>`. The hooks fill the gap between "I think it's done" and "it is done."
