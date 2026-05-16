@@ -33,7 +33,7 @@ The `dispose()` port collects cleanup callbacks. Adapters' `dispose()` methods a
 
 ## Store contract
 
-The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these eleven things:
+The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these twelve things:
 
 ```ts
 interface Store extends Disposable {
@@ -45,11 +45,15 @@ interface Store extends Disposable {
   subscribe(streams): Promise<{ subscribed; watermark }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<BlockedLease[]>;
-  reset(streams): Promise<number>;
+  reset(input: string[] | StreamFilter): Promise<number>;
+  unblock(input: string[] | StreamFilter): Promise<number>;
+  prioritize(filter: StreamFilter, priority): Promise<number>;
   truncate(targets): Promise<Map<stream, { deleted; committed }>>;
   query_streams(callback, query?): Promise<QueryStreamsResult>;
 }
 ```
+
+`reset`, `unblock`, and `prioritize` share the same `StreamFilter` shape (`stream` / `stream_exact` / `source` / `source_exact` / `blocked`). `reset` and `unblock` also accept a plain `string[]` for targeted operations. `unblock` always restricts to blocked streams regardless of what the filter passes — there's no "unblock unblocked streams" use case. `reset` is for projection rebuilds (watermark → -1); `unblock` is for poison-message recovery (watermark preserved).
 
 ### Invariants an adapter must hold
 

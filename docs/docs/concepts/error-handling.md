@@ -141,7 +141,12 @@ CreateItem: authedProcedure
 
 ## Blocked Streams
 
-When a reaction handler fails repeatedly, the stream is blocked after exceeding `maxRetries`. Blocked streams stay out of `claim()` results, so subsequent drain cycles skip them — they need an explicit `app.reset([stream])` (or external unblock) to start processing again.
+Streams block on two paths:
+
+1. A reaction handler fails repeatedly and `lease.retry` exceeds `maxRetries`. The lease is committed with `blocked = true` and stays out of `claim()` results.
+2. A reaction handler throws `NonRetryableError` (or a subclass like `NonRetryableWebhookError`) — the drain finalizer blocks the stream on the first failed attempt without consuming the retry budget. See [Non-retryable errors](#non-retryable-errors).
+
+Recovery uses `app.unblock(input)` (resume from where the stream stopped) or `app.reset(input)` (rebuild from event 0). Both accept either an explicit `string[]` or a `StreamFilter` for bulk operations. See [Recovering a blocked stream](#recovering-a-blocked-stream--appunblock) and [Discovering blocked streams](#discovering-blocked-streams--appblocked_streams).
 
 Monitor blocked streams via the `"blocked"` lifecycle event:
 
