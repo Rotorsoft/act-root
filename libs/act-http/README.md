@@ -50,15 +50,17 @@ import { webhook } from "@rotorsoft/act-http/webhook";
 
 ### Behavior
 
-| Outcome | Error | `retryable` |
+| Outcome | Thrown | Drain behavior |
 |---|---|---|
-| 2xx response | resolves (no throw) | — |
-| 5xx response | throws `WebhookError` | `true` |
-| 4xx response | throws `WebhookError` | `false` |
-| Network error | throws `WebhookError` (`status: 0`) | `true` |
-| Timeout | throws `WebhookError` (`status: 0`, abort) | `true` |
+| 2xx response | (resolves) | — |
+| 5xx response | `WebhookError` | retries per `maxRetries` + `backoff` |
+| Network error | `WebhookError` (`status: 0`) | retries per `maxRetries` + `backoff` |
+| Timeout | `WebhookError` (`status: 0`, abort) | retries per `maxRetries` + `backoff` |
+| 4xx response | `NonRetryableWebhookError` | **blocks on first attempt** (when `blockOnError` is true) |
 
-Whether the drain pipeline retries on those errors is governed by the reaction's `maxRetries` / `blockOnError` / `backoff` — the helper just throws and stays out of the way. To skip retries entirely on client errors, set `maxRetries: 0` on the reaction; both 4xx and 5xx will then block on the first failed attempt.
+The two-class split is the retry signal — `NonRetryableWebhookError` extends [`NonRetryableError`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/errors.ts) (from `@rotorsoft/act`), which the drain finalizer recognizes and treats as "block immediately, no more retries." Permanent client errors don't burn the retry budget or pace through the backoff window.
+
+A `NonRetryableWebhookError` does not override `blockOnError: false`. If the operator explicitly chose "retry forever," the framework respects that.
 
 ### Idempotency key
 
@@ -109,15 +111,31 @@ Strings as `body` are sent as-is. Anything else is `JSON.stringify`'d, and `Cont
 
 See the forthcoming [external integration guide](https://rotorsoft.github.io/act-root/docs/guides/external-integration) (ACT-603) for the outbox pattern in detail.
 
-### Retry & block semantics (current pipeline)
+### Retry & block semantics
 
-The drain pipeline (since ACT-601) does **not** look at error properties — it counts failed attempts. Today, the helper's `WebhookError.retryable` field is informational: a 4xx will be retried up to `maxRetries` just like a 5xx. The pragmatic shapes:
+The drain pipeline retries on `WebhookError` per the reaction's `maxRetries` and paces with `backoff`. It blocks immediately on `NonRetryableWebhookError` (when `blockOnError` is true) — no retry budget consumed.
 
-- **"Retry transient failures, give up on the rest"** — `{ maxRetries: 0 }`. Block on the first failed attempt; investigate via the `blocked` lifecycle event. Reserve for endpoints with strong idempotency and a known-stable surface.
-- **"Be patient with the receiver"** — `{ maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true } }`. The 80% default.
-- **"Never give up"** — `{ maxRetries: Infinity, blockOnError: false, backoff: {...} }`. For sinks that *must* eventually succeed.
+Common shapes:
 
-A follow-up may add proper non-retryable signaling so the helper can short-circuit 4xx without consuming retry budget. Until then, lean on `maxRetries` and operator review.
+- **"Be patient with the receiver"** — `{ maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true } }`. The 80% default. 5xx and network errors retry; 4xx blocks immediately.
+- **"Never give up"** — `{ maxRetries: Infinity, blockOnError: false, backoff: {...} }`. For sinks that *must* eventually succeed. 4xx falls back to the same loop because `blockOnError: false` overrides the non-retryable signal.
+- **"Strict — block on any failure"** — `{ maxRetries: 0 }`. Useful for endpoints with strong idempotency where any failed POST warrants operator review.
+
+To distinguish retryable from non-retryable webhook failures in catch blocks, check both classes (or check the shared `status` field):
+
+```ts
+try {
+  await deliver();
+} catch (err) {
+  if (err instanceof NonRetryableWebhookError) {
+    // 4xx — caller bug or permanent state; log and move on
+  } else if (err instanceof WebhookError) {
+    // retryable — drain will handle
+  }
+}
+```
+
+Generic catch sites can detect any handler-signaled permanent failure via `NonRetryableError` (the base class exported from `@rotorsoft/act`).
 
 ---
 

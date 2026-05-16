@@ -278,9 +278,11 @@ Behavior:
 
 - `POST` by default; method configurable.
 - `Idempotency-Key` derived from `event.id` (overridable per call, or return `null` to skip).
-- 5xx and network errors throw `WebhookError` with `retryable: true` → drain retries with backoff.
-- 4xx throws with `retryable: false`. The current pipeline treats this like any other error (counts against `maxRetries`); set `maxRetries: 0` if you want immediate block on client errors.
+- 5xx, network errors, and timeouts throw `WebhookError` → drain retries per `maxRetries` / `backoff`.
+- 4xx throws `NonRetryableWebhookError` (a subclass of `NonRetryableError`) → the drain finalizer **blocks the stream on the first failed attempt** when `blockOnError` is true. No wasted retries on permanent client errors.
 - `fetch` is injectable for tests.
+
+The two-class split lets handlers signal recoverability through the type system. `NonRetryableError` (exported from `@rotorsoft/act`) is the general primitive — any handler can throw it to bypass the retry budget for known-permanent failures (validation errors, "user deleted" 404s, business-rule violations). See [Non-retryable errors](#non-retryable-errors) below.
 
 ### When `webhook` fits — and when it doesn't
 
@@ -297,3 +299,28 @@ Behavior:
 | Multi-second / multi-minute API call | Emit an event, drain hands off to a bus; bus worker calls the API |
 | Bulk fan-out (10k+ receivers) | Emit a "fanout" event, let a dedicated consumer enumerate receivers |
 | Streaming / long-poll / large file transfer | Not `webhook` — write a dedicated worker |
+
+## Non-retryable errors
+
+The drain pipeline retries on any thrown error by default — `maxRetries` is a budget, not a classifier. For failures the handler *knows* won't recover on retry — a 4xx from a webhook, a `ZodError` on malformed input, a "user deleted" 404, a business-rule violation — throwing a generic `Error` wastes the budget and delays the operator signal.
+
+`NonRetryableError` (exported from `@rotorsoft/act`) is the handler-side signal. The drain finalizer checks `error instanceof NonRetryableError` and forces `block = blockOnError` regardless of `lease.retry`. The stream blocks on the first failed attempt; no retries, no backoff window.
+
+```ts
+import { NonRetryableError } from "@rotorsoft/act";
+
+.on("PaymentReceived")
+  .do(async (event) => {
+    const parsed = PaymentSchema.safeParse(event.data);
+    if (!parsed.success) {
+      throw new NonRetryableError("payment payload failed validation", {
+        cause: parsed.error,
+      });
+    }
+    // ... handle the parsed payload
+  })
+```
+
+Important: `NonRetryableError` does **not** override `blockOnError: false`. If the operator has explicitly chosen "never block, retry forever," the framework respects that — `NonRetryableError` becomes equivalent to any other error. The class signal only matters on the block-when-budget-exhausted path.
+
+`@rotorsoft/act-http/webhook` exports `NonRetryableWebhookError` (a subclass) for 4xx responses. The split lets generic catch sites use `instanceof NonRetryableError` while webhook-aware code reads the HTTP-specific `status` / `url` / `responseBody` fields.

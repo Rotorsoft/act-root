@@ -22,6 +22,7 @@ export const Errors = {
   InvariantError: "ERR_INVARIANT",
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
+  NonRetryableError: "ERR_NON_RETRYABLE",
 } as const;
 
 /**
@@ -297,5 +298,64 @@ export class StreamClosedError extends Error {
   ) {
     super(`Stream "${stream}" is closed (tombstoned)`);
     this.name = Errors.StreamClosedError;
+  }
+}
+
+/**
+ * Thrown by a reaction handler to signal that the failure is permanent
+ * and the drain pipeline should block the stream immediately, without
+ * consuming the rest of the `maxRetries` budget.
+ *
+ * The drain finalizer detects `instanceof NonRetryableError` and forces
+ * `block = options.blockOnError` regardless of `lease.retry`. When
+ * `blockOnError` is `false`, behavior is unchanged (drain keeps retrying
+ * forever) — the class never overrides the operator's explicit "never
+ * block" choice.
+ *
+ * Use this for failures the handler *knows* won't get better on retry:
+ * a 4xx from a webhook, a `ZodError` on malformed input, a "user
+ * deleted" 404 from a downstream API. Use regular `Error` (or a
+ * subclass) for transient failures so the existing retry-with-backoff
+ * loop applies.
+ *
+ * @example Wrapping a permanent downstream error
+ * ```typescript
+ * import { NonRetryableError } from "@rotorsoft/act";
+ *
+ * .on("OrderConfirmed")
+ *   .do(async (event) => {
+ *     const res = await fetch(url, ...);
+ *     if (res.status >= 400 && res.status < 500) {
+ *       throw new NonRetryableError(
+ *         `webhook ${url} responded ${res.status}`,
+ *         { cause: await res.text() }
+ *       );
+ *     }
+ *     if (!res.ok) throw new Error(`webhook ${url} responded ${res.status}`);
+ *   })
+ * ```
+ *
+ * @example Marking validation failures as non-retryable
+ * ```typescript
+ * .on("PaymentReceived")
+ *   .do(async (event) => {
+ *     const parsed = Schema.safeParse(event.data);
+ *     if (!parsed.success) {
+ *       throw new NonRetryableError("payment payload failed validation", {
+ *         cause: parsed.error,
+ *       });
+ *     }
+ *     // ... handle parsed payload
+ *   })
+ * ```
+ */
+export class NonRetryableError extends Error {
+  /** The original failure, if any. Mirrors the standard `Error.cause` shape. */
+  public override readonly cause?: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    this.name = Errors.NonRetryableError;
+    this.cause = options?.cause;
   }
 }

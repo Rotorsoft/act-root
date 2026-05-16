@@ -1,6 +1,10 @@
-import type { Committed } from "@rotorsoft/act";
+import { type Committed, NonRetryableError } from "@rotorsoft/act";
 import { describe, expect, it, vi } from "vitest";
-import { WebhookError, webhook } from "../../src/webhook/index.js";
+import {
+  NonRetryableWebhookError,
+  WebhookError,
+  webhook,
+} from "../../src/webhook/index.js";
 
 type Events = {
   OrderConfirmed: { orderId: string; total: number };
@@ -64,7 +68,7 @@ describe("webhook", () => {
   });
 
   describe("retry classification", () => {
-    it("throws retryable on 500", async () => {
+    it("throws WebhookError on 500", async () => {
       const { fetch } = makeFetch({ status: 500, body: "boom" });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
@@ -75,14 +79,14 @@ describe("webhook", () => {
         throw new Error("expected throw");
       } catch (err) {
         expect(err).toBeInstanceOf(WebhookError);
+        expect(err).not.toBeInstanceOf(NonRetryableError);
         const e = err as WebhookError;
         expect(e.status).toBe(500);
-        expect(e.retryable).toBe(true);
         expect(e.responseBody).toBe("boom");
       }
     });
 
-    it("throws retryable on 503", async () => {
+    it("throws WebhookError on 503", async () => {
       const { fetch } = makeFetch({ status: 503 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
@@ -90,10 +94,10 @@ describe("webhook", () => {
       });
       await expect(
         handler(makeEvent(), "stream-1", {} as never)
-      ).rejects.toMatchObject({ status: 503, retryable: true });
+      ).rejects.toBeInstanceOf(WebhookError);
     });
 
-    it("throws non-retryable on 400", async () => {
+    it("throws NonRetryableWebhookError on 400", async () => {
       const { fetch } = makeFetch({ status: 400, body: "bad input" });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
@@ -103,14 +107,15 @@ describe("webhook", () => {
         await handler(makeEvent(), "stream-1", {} as never);
         throw new Error("expected throw");
       } catch (err) {
-        const e = err as WebhookError;
+        expect(err).toBeInstanceOf(NonRetryableWebhookError);
+        expect(err).toBeInstanceOf(NonRetryableError);
+        const e = err as NonRetryableWebhookError;
         expect(e.status).toBe(400);
-        expect(e.retryable).toBe(false);
         expect(e.responseBody).toBe("bad input");
       }
     });
 
-    it("throws non-retryable on 404", async () => {
+    it("throws NonRetryableWebhookError on 404", async () => {
       const { fetch } = makeFetch({ status: 404 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
@@ -118,12 +123,12 @@ describe("webhook", () => {
       });
       await expect(
         handler(makeEvent(), "stream-1", {} as never)
-      ).rejects.toMatchObject({ status: 404, retryable: false });
+      ).rejects.toBeInstanceOf(NonRetryableWebhookError);
     });
   });
 
   describe("network and timeout errors", () => {
-    it("throws retryable with status 0 on network error", async () => {
+    it("throws WebhookError with status 0 on network error", async () => {
       const fetch = vi.fn(async () => {
         throw new TypeError("network down");
       }) as unknown as typeof globalThis.fetch;
@@ -135,14 +140,15 @@ describe("webhook", () => {
         await handler(makeEvent(), "stream-1", {} as never);
         throw new Error("expected throw");
       } catch (err) {
+        expect(err).toBeInstanceOf(WebhookError);
+        expect(err).not.toBeInstanceOf(NonRetryableError);
         const e = err as WebhookError;
         expect(e.status).toBe(0);
-        expect(e.retryable).toBe(true);
         expect(e.message).toContain("network down");
       }
     });
 
-    it("aborts and throws on timeout", async () => {
+    it("aborts and throws WebhookError on timeout", async () => {
       const fetch = vi.fn(
         (_url: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
           new Promise<Response>((_resolve, reject) => {
@@ -160,9 +166,10 @@ describe("webhook", () => {
         await handler(makeEvent(), "stream-1", {} as never);
         throw new Error("expected throw");
       } catch (err) {
+        expect(err).toBeInstanceOf(WebhookError);
+        expect(err).not.toBeInstanceOf(NonRetryableError);
         const e = err as WebhookError;
         expect(e.status).toBe(0);
-        expect(e.retryable).toBe(true);
         expect(e.message).toContain("timed out after 10ms");
       }
     });
@@ -313,17 +320,31 @@ describe("webhook", () => {
     });
   });
 
-  describe("WebhookError", () => {
-    it("exposes url and status fields", () => {
+  describe("error classes", () => {
+    it("WebhookError exposes url and status fields", () => {
       const err = new WebhookError("boom", {
         status: 502,
-        retryable: true,
         url: "https://x.example",
       });
       expect(err.name).toBe("WebhookError");
       expect(err.status).toBe(502);
-      expect(err.retryable).toBe(true);
       expect(err.url).toBe("https://x.example");
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(NonRetryableError);
+    });
+
+    it("NonRetryableWebhookError is a NonRetryableError", () => {
+      const err = new NonRetryableWebhookError("client error", {
+        status: 422,
+        url: "https://y.example",
+        responseBody: "validation failed",
+      });
+      expect(err.name).toBe("NonRetryableWebhookError");
+      expect(err.status).toBe(422);
+      expect(err.url).toBe("https://y.example");
+      expect(err.responseBody).toBe("validation failed");
+      expect(err).toBeInstanceOf(NonRetryableError);
+      expect(err).toBeInstanceOf(Error);
     });
   });
 });

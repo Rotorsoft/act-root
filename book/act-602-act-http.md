@@ -54,13 +54,15 @@ The pragmatic rule: keep `timeoutMs ≤ leaseMillis - safety_margin`. If you nee
 
 ACT-602's ticket open question explored whether per-reaction `leaseMillis` could land without changing the `Store` port. Conclusion: a `DrainController` could pick `claim()`'s `leaseMillis` as the max across configured reactions, but the cleaner approach is to forward to an external bus. Per-reaction leases are a knob most apps shouldn't reach for.
 
-## The 4xx-as-non-retryable limitation
+## The 4xx-as-non-retryable limitation — closed by ACT-604
 
-A wrinkle worth honest documentation. The original ACT-602 ticket described 4xx responses as "blocking the stream after the first attempt." Implementing it surfaced a real constraint: the drain pipeline (since ACT-601) blocks based on the `retry_count` watermark, not on error type. There's no built-in "this error is non-retryable, skip to block" channel without a core change.
+A wrinkle in the original ACT-602 implementation, since resolved. The ticket described 4xx responses as "blocking the stream after the first attempt." Implementing it surfaced a real constraint: the drain pipeline (since ACT-601) blocked based on the `retry_count` watermark, not on error type. There was no built-in "this error is non-retryable, skip to block" channel without a core change.
 
-So the helper currently does the right thing semantically — it tags 4xx errors with `retryable: false` — but the drain pipeline doesn't differentiate. A 4xx will be retried up to `maxRetries` just like a 5xx. The pragmatic shape today: callers who want strict client-error behavior set `maxRetries: 0` on the reaction, and both classes block on the first attempt.
+ACT-602 shipped with the limitation documented: 4xx errors were *tagged* as non-retryable on the helper's error class, but the drain pipeline didn't differentiate. The pragmatic workaround was to set `maxRetries: 0` on the reaction, which forced any failure to block on the first attempt.
 
-This is worth flagging as a follow-up: a `NonRetryableError` in core that drain recognizes and short-circuits would close the gap. It's not in this ticket because it's a core change and the helper has 95% of its value without it. The book chapter on schema-evolution-style "framework enforces what types can't" can mention this as another candidate: "the helper *knows* this is permanent, but the pipeline can't act on that knowledge yet."
+ACT-604 closed the gap with about ten lines of code. A new `NonRetryableError` class in core, one new branch in the drain finalizer that checks `error instanceof NonRetryableError`, and the webhook helper splits its error class into `WebhookError` (retryable) and `NonRetryableWebhookError extends NonRetryableError` (4xx). The finalizer now blocks the stream on the first failed attempt for client errors, exactly as the original ticket promised. See `book/act-604-non-retryable.md` for the design narrative.
+
+The lesson worth keeping: small visible gaps left at shipping time often resolve through targeted follow-ups rather than over-designing the original feature. ACT-602's helper had 95% of its value without the non-retryable signal; deferring the core change kept the package tight and let ACT-604 ship the right shape independently.
 
 ## Why subpath exports
 
