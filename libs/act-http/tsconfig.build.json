@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "declarationDir": "dist/@types",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    {
+      "path": "../act/tsconfig.build.json"
+    },
+    {
+      "path": "../act-patch/tsconfig.build.json"
+    }
+  ],
+  "include": ["src"],
+  "exclude": ["test", "dist", "node_modules"]
+}

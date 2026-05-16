@@ -1,0 +1,58 @@
+{
+  "name": "@rotorsoft/act-http",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "HTTP integrations for act apps — webhooks and SSE",
+  "keywords": [
+    "typescript",
+    "http",
+    "webhook",
+    "sse",
+    "server-sent-events",
+    "real-time"
+  ],
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act-http"
+  },
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-http#readme",
+  "bugs": {
+    "url": "https://github.com/rotorsoft/act-root/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./webhook": {
+      "types": "./dist/@types/webhook/index.d.ts",
+      "import": "./dist/webhook/index.js",
+      "require": "./dist/webhook/index.cjs"
+    },
+    "./sse": {
+      "types": "./dist/@types/sse/index.d.ts",
+      "import": "./dist/sse/index.js",
+      "require": "./dist/sse/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types"
+  },
+  "peerDependencies": {
+    "@rotorsoft/act": "workspace:^"
+  },
+  "dependencies": {
+    "@rotorsoft/act-patch": "workspace:^"
+  }
+}

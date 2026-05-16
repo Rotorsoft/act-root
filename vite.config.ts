@@ -12,6 +12,14 @@ export default defineConfig({
         __dirname,
         "libs/act-sse/src/index.ts"
       ),
+      "@rotorsoft/act-http/webhook": path.resolve(
+        __dirname,
+        "libs/act-http/src/webhook/index.ts"
+      ),
+      "@rotorsoft/act-http/sse": path.resolve(
+        __dirname,
+        "libs/act-http/src/sse/index.ts"
+      ),
       "@rotorsoft/act-pino": path.resolve(
         __dirname,
         "libs/act-pino/src/index.ts"

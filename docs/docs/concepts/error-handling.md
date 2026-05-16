@@ -250,3 +250,50 @@ While a stream is in its backoff window, the controller claims its lease but ski
 - If your `backoff` delay is **longer** than `leaseMillis`, the lease expires partway through; subsequent claims (by this controller or competing workers) re-acquire the lease and re-skip until the delay elapses.
 
 This means **`backoff` is always at-least-as-long-as configured**, never shorter. To tighten backoff floors, lower `leaseMillis` (with the trade-off that overlapping workers can race more aggressively).
+
+## Webhook delivery — `@rotorsoft/act-http/webhook`
+
+The 80% pattern for external integration is "POST this event to a URL." Every team writes the same `fetch` wrapper — timeout, idempotency key, status-coded errors, JSON serialization. The [`@rotorsoft/act-http`](https://github.com/rotorsoft/act-root/tree/master/libs/act-http) umbrella package ships that wrapper as `webhook()`, a reaction-handler factory that composes with the `maxRetries` / `backoff` options above:
+
+```ts
+import { webhook } from "@rotorsoft/act-http/webhook";
+
+.on("OrderConfirmed")
+  .do(
+    webhook({
+      url: "https://api.example.com/webhooks/orders",
+      headers: (event) => ({ Authorization: "Bearer " + token }),
+      body: (event) => ({ orderId: event.stream, total: event.data.total }),
+      timeoutMs: 2_000,
+    }),
+    {
+      maxRetries: 5,
+      backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000, jitter: true },
+    }
+  )
+  .to(resolver)
+```
+
+Behavior:
+
+- `POST` by default; method configurable.
+- `Idempotency-Key` derived from `event.id` (overridable per call, or return `null` to skip).
+- 5xx and network errors throw `WebhookError` with `retryable: true` → drain retries with backoff.
+- 4xx throws with `retryable: false`. The current pipeline treats this like any other error (counts against `maxRetries`); set `maxRetries: 0` if you want immediate block on client errors.
+- `fetch` is injectable for tests.
+
+### When `webhook` fits — and when it doesn't
+
+`webhook` is built for **fire-and-forget delivery to a cooperative receiver**: short timeouts, retries paced by `backoff`, and idempotent endpoints that can absorb the occasional duplicate.
+
+**Keep `timeoutMs` below `leaseMillis`.** The drain lease is what stops competing workers from re-dispatching while your handler is still in flight. If `timeoutMs` approaches or exceeds the lease, a slow receiver can hold the lease through expiry, at which point another worker will claim the stream and POST the same event in parallel. The downstream `Idempotency-Key` then becomes load-bearing — if your receiver doesn't dedup, you'll deliver twice. Rule of thumb: `timeoutMs ≤ leaseMillis - safety_margin`. If you need a longer window, bump `leaseMillis` globally on the Act options.
+
+**For heavy or long-running delivery, don't use `webhook` directly.** Drain leases aren't free, and holding one for tens of seconds while a slow API churns is the wrong shape. The Act-native pattern is an outbox-style fan-out: emit a small "needs delivery" event (a cheap, local operation), and let a separate consumer — a downstream worker, a Kafka/SQS pipeline, an external scheduler — pick it up and do the long work at its own pace. Drain stays responsive; the slow path runs at its own schedule. See [external integration](../guides/external-integration) (forthcoming) for the outbox pattern in detail.
+
+| Shape of work | Right tool |
+|---|---|
+| 1–2s POST to a fast, idempotent API | `webhook` directly |
+| Flaky-but-fast third party | `webhook` + aggressive `backoff` |
+| Multi-second / multi-minute API call | Emit an event, drain hands off to a bus; bus worker calls the API |
+| Bulk fan-out (10k+ receivers) | Emit a "fanout" event, let a dedicated consumer enumerate receivers |
+| Streaming / long-poll / large file transfer | Not `webhook` — write a dedicated worker |

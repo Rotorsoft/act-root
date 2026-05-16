@@ -9,6 +9,6 @@ export {
 } from "./ticket-invariants.js";
 export { TicketMessaging, TicketMessagingSlice } from "./ticket-messaging.js";
 export { TicketOperations, TicketOpsSlice } from "./ticket-operations.js";
-
 // Projection
 export { TicketProjection } from "./ticket-projections.js";
+export { TicketWebhooksSlice } from "./ticket-webhooks.js";

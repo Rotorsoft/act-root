@@ -249,6 +249,15 @@ importers:
         specifier: ^4.1.6
         version: 4.1.6(@opentelemetry/api@1.9.0)(@types/node@25.7.0)(@vitest/coverage-v8@4.1.6)(vite@7.3.3(@types/node@25.7.0)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.46.1)(tsx@4.22.0)(yaml@2.9.0))
 
+  libs/act-http:
+    dependencies:
+      '@rotorsoft/act':
+        specifier: workspace:^
+        version: link:../act
+      '@rotorsoft/act-patch':
+        specifier: workspace:^
+        version: link:../act-patch
+
   libs/act-patch: {}
 
   libs/act-pg:
@@ -506,6 +515,9 @@ importers:
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../../libs/act
+      '@rotorsoft/act-http':
+        specifier: workspace:^
+        version: link:../../libs/act-http
       '@rotorsoft/act-pg':
         specifier: workspace:^
         version: link:../../libs/act-pg
