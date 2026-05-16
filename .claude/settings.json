@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm:*)",
+      "Bash(npx:*)",
+      "Bash(node:*)",
+      "Bash(node -e:*)",
+      "Bash(npm view:*)",
+      "Bash(npm search:*)",
+      "Bash(tsx:*)",
+      "Bash(LOG_LEVEL=*)",
+      "Bash(NODE_ENV=*)",
+      "Bash(RUN_NOTIFY_REPORT=* pnpm:*)",
+      "Bash(git:*)",
+      "Bash(gh:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)",
+      "Bash(xargs:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(jq:*)",
+      "Bash(tee:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm -rf dist:*)",
+      "Bash(rm -rf coverage:*)",
+      "Bash(rm -rf *.tsbuildinfo:*)",
+      "Bash(curl:*)",
+      "Bash(docker compose:*)",
+      "Bash(docker ps:*)",
+      "Bash(pg_isready:*)",
+      "Bash(PGPASSWORD=postgres psql:*)",
+      "Bash(kill:*)",
+      "Bash(pkill:*)",
+      "WebFetch(domain:rotorsoft.github.io)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebFetch(domain:registry.npmjs.org)",
+      "WebFetch(domain:typedoc.org)",
+      "WebFetch(domain:typedoc-plugin-markdown.org)",
+      "WebFetch(domain:docusaurus.io)",
+      "WebFetch(domain:eventmodeling.org)",
+      "WebFetch(domain:event-driven.io)",
+      "WebFetch(domain:martendb.io)",
+      "WebFetch(domain:typst.app)",
+      "WebFetch(domain:cdn.jsdelivr.net)",
+      "WebSearch"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/typecheck-touched.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/stop-summary.sh",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .claude/hooks/inject-context.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -13,3 +13,7 @@ tck-store.db*
 libs/act/perf-result.json
 libs/act/realistic-result.json
 package-lock.json
+
+# Claude Code: machine-specific overrides + transient state.
+.claude/settings.local.json
+.claude/.cache/

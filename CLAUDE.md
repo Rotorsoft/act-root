@@ -179,8 +179,32 @@ Source-of-truth for what lives where:
 - New optimization → benchmark goes in `PERFORMANCE.md`, README links to it
 - Deep reference goes in `docs/docs/` (Docusaurus), procedural app-building guidance in `.claude/skills/scaffold-act-app/`, contributor workflow in `docs/docs/guides/`
 
+## Rules I always follow
+
+Durable expectations on the AI assistant working in this repo. These belong here (not in user-level memory) so every contributor's Claude session inherits them.
+
+- **100% coverage on every metric is a merge gate.** `pnpm test` must report 100% statements / branches / functions / lines before a PR ships. No exceptions for "defensive `?? 0` fallback" or "rollback path that mirrors an existing untested branch." Fault-injection patterns exist (see `libs/act-pg/test/store.error.spec.ts` and `libs/act-sqlite/test/store.error.spec.ts`) — use them. A 99.95% PR is not ready.
+- **Integration helpers live in separate packages, never in core.** HTTP delivery, message-bus forwarders, webhook signers, etc. go in their own `@rotorsoft/act-*` package (precedent: `act-http`, `act-sse`, `act-pino`, `act-pg`, `act-sqlite`, `act-tck`, `act-patch`). Core stays governed by `STABILITY.md`.
+- **No manual version bumps.** Semantic-release owns the `version` field in `package.json`. The only manual version event is seeding the baseline `0.0.0` tag when adding a new package. Manual bumps create diffs that conflict with the auto-bump commit.
+- **Don't modify working code without explicit approval.** Propose changes first when the user hasn't asked for code. Refactors-while-you're-here are the most common way to expand the blast radius of a small request.
+- **`unblock` resumes, `reset` rebuilds.** `app.unblock(input)` is the recovery primitive for blocked streams (preserves watermark). `app.reset(input)` is for projection rebuilds (replays from event 0). Don't use `reset` to clear a blocked webhook — it would re-fire every historical request.
+- **`NonRetryableError` is the handler-side block signal.** Throw it for failures the handler *knows* won't recover on retry (4xx, validation errors, "user deleted" 404). The drain finalizer recognizes it and blocks the stream on first attempt — *unless* `blockOnError: false` is set, which the framework respects.
+- **Conventional-commit subject must be lowercase.** `feat(act): add foo` not `feat(act): Add foo`. The commitlint hook will reject otherwise.
+- **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
+- **Naming.** Fields/methods are short snake_case (`reset`, `unblock`, `blocked_streams`). Factories are camelCase (`act`, `state`, `webhook`). Types are PascalCase, with `XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable. Match existing analogs over inventing new patterns.
+- **Book-essay voice.** Documentation in `book/` is narrative prose, not bullet-pointed reference. No em-dashes for emphasis, no "Here's how X works:" followed by a list, no bolded keyword definitions. Read aloud — if it sounds AI-generated, rewrite it.
+
 ## Troubleshooting
 
-See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, the retry pattern, blocked streams, per-reaction options, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
+See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError`, the retry pattern, blocked streams, per-reaction options, recovery via `app.unblock` / `app.blocked_streams`, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
 
 For UI/frontend changes, start the dev server and exercise the feature in a browser before reporting done — type-check and tests verify code correctness, not feature correctness.
+
+## Claude Code configuration
+
+This repo uses Claude Code's hooks, slash commands, and subagents. See [`.claude/README.md`](.claude/README.md) for what's wired up. Notable:
+
+- **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
+- **Slash commands**: `/pr`, `/release-check`, `/charter-diff`, `/coverage`, `/book-note`, `/scaffold-package`.
+- **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
+- **Skill**: `scaffold-act-app` for translating specs into a working monorepo.
