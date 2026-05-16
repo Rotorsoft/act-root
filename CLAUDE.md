@@ -191,7 +191,6 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged; the pre-push hook runs tests on master. Bypassing either ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 - **Naming new public API.** Match existing analogs over inventing new patterns. Fields/methods short snake_case (`reset`, `unblock`, `blocked_streams`). Factories camelCase (`act`, `state`, `webhook`). Types PascalCase, with `XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable.
-- **Book-essay voice.** Documentation in `book/` is narrative prose, not bullet-pointed reference. No em-dashes for emphasis, no "Here's how X works:" followed by a list, no bolded keyword definitions. Read aloud — if it sounds AI-generated, rewrite it.
 
 ## Troubleshooting
 

@@ -23,7 +23,30 @@ Two concerns are encoded here:
 
 ### Permissions
 
-A consolidated allowlist that covers the 95% case: `pnpm:*`, `git:*`, `gh:*`, common file utilities, `WebFetch` for project/npm/docs domains, `WebSearch`. Anything narrower can go in `settings.local.json` for the individual contributor.
+A deliberately narrow allowlist for what's needed to **work on the framework itself**: `pnpm:*`, `git:*` (with destructive ops explicitly denied), `gh:*` (same), common file utilities, and `WebFetch` for the project's own docs, GitHub source, and npm registry.
+
+What's **not** in the committed allowlist by design:
+
+- `WebSearch` — auto-allowing arbitrary search results would surface any URL on any topic. Personal browsing belongs in `settings.local.json`.
+- Research / blog / tool domains (`event-driven.io`, `martendb.io`, `typst.app`, etc.) — individual preferences, not project requirements.
+- Broad `Bash(curl:*)` — narrowed to `localhost`, `127.0.0.1`, `api.github.com`, and `registry.npmjs.org`. Other URLs prompt.
+
+The `deny` block enforces a safety floor that wildcards in `allow` can't override: force-pushes, history rewrites, `gh repo delete`, `npm publish`, catastrophic `rm -rf /` patterns, `--no-verify` on commit/push.
+
+Need a wider surface for your own workflow? Add to `settings.local.json` (gitignored):
+
+```jsonc
+// .claude/settings.local.json — per-machine extras, never committed
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:event-driven.io)",
+      "WebFetch(domain:martendb.io)"
+    ]
+  }
+}
+```
 
 ### Hooks
 
