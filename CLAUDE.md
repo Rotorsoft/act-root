@@ -180,8 +180,34 @@ Source-of-truth for what lives where:
 - New optimization → benchmark goes in `PERFORMANCE.md`, README links to it
 - Deep reference goes in `docs/docs/` (Docusaurus), procedural app-building guidance in `.claude/skills/scaffold-act-app/`, contributor workflow in `docs/docs/guides/`
 
+## Rules for contributing to this repo
+
+Durable workflow rules the AI assistant follows when working on the framework itself. Project-management concerns, not framework API guidance — for the latter, see "Safety-critical one-liners" above.
+
+- **100% coverage on every metric is a merge gate.** `pnpm test` must report 100% statements / branches / functions / lines before a PR ships. No exceptions for "defensive `?? 0` fallback" or "rollback path that mirrors an existing untested branch." Fault-injection patterns exist (see `libs/act-pg/test/store.error.spec.ts` and `libs/act-sqlite/test/store.error.spec.ts`) — use them. A 99.95% PR is not ready.
+- **Integration helpers live in separate packages, never in core.** HTTP delivery, message-bus forwarders, webhook signers, etc. go in their own `@rotorsoft/act-*` package (precedent: `act-http`, `act-sse`, `act-pino`, `act-pg`, `act-sqlite`, `act-tck`, `act-patch`). Core stays governed by `STABILITY.md`.
+- **No manual version bumps.** Semantic-release owns the `version` field in `package.json`. The only manual version event is seeding the baseline `0.0.0` tag when adding a new package. Manual bumps create diffs that conflict with the auto-bump commit.
+- **Don't modify working code without explicit approval.** Propose changes first when the user hasn't asked for code. Refactors-while-you're-here are the most common way to expand the blast radius of a small request.
+- **Conventional-commit subject must be lowercase.** `feat(act): add foo` not `feat(act): Add foo`. The commitlint hook will reject otherwise.
+- **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged; the pre-push hook runs tests on master. Bypassing either ships unverified work. If a hook fails, fix the underlying issue.
+- **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
+- **Naming new public API.** Match existing analogs over inventing new patterns. Fields/methods short snake_case (`reset`, `unblock`, `blocked_streams`). Factories camelCase (`act`, `state`, `webhook`). Types PascalCase, with `XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable.
+
 ## Troubleshooting
 
-See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, the retry pattern, blocked streams, per-reaction options, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
+See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError`, the retry pattern, blocked streams, per-reaction options, recovery via `app.unblock` / `app.blocked_streams`, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).
 
 For UI/frontend changes, start the dev server and exercise the feature in a browser before reporting done — type-check and tests verify code correctness, not feature correctness.
+
+## Claude Code configuration
+
+This repo uses Claude Code's hooks, slash commands, and subagents. See [`.claude/README.md`](.claude/README.md) for the full overview, end-to-end workflow examples, and tuning tips.
+
+Quick reference:
+
+- **Hooks** auto-typecheck files you edit, summarize work-in-progress state on turn end, and inject branch/dirty-file context on every prompt.
+- **Slash commands**: `/pr`, `/release-check`, `/charter-diff`, `/coverage`, `/book-note`, `/scaffold-package`.
+- **Subagents**: `act-code-reviewer` (charter-aware), `act-test-author` (TCK + fault-injection patterns), `act-doc-writer` (project voice).
+- **Skill**: `scaffold-act-app` for translating specs into a working monorepo.
+
+The typical "ticket → PR" flow: implement → `/coverage` → `act-code-reviewer` (pre-PR) → `/charter-diff` (if touched) → `/pr <issue#>`. The hooks fill the gap between "I think it's done" and "it is done."
