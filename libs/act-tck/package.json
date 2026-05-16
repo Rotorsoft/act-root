@@ -49,7 +49,7 @@
   },
   "peerDependencies": {
     "@rotorsoft/act": "workspace:^",
-    "vitest": ">=3",
+    "vitest": ">=3.0.9",
     "zod": "^4.4.3"
   },
   "devDependencies": {
