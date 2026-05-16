@@ -1,5 +1,6 @@
 import { ConcurrencyError } from "@rotorsoft/act";
 import type {
+  BlockedLease,
   Committed,
   Lease,
   Store,
@@ -583,6 +584,267 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("returns 0 for unknown streams and empty input", async () => {
         expect(await store.reset([`missing-${uid()}`])).toBe(0);
         expect(await store.reset([])).toBe(0);
+      });
+    });
+
+    describe("unblock", () => {
+      it("clears blocked flag and preserves the watermark", async () => {
+        const s = `unblock-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        // Two events so the watermark advances past 0 before block.
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(s, [inc(2)], makeMeta({ stream: s }));
+
+        // First lease + ack first event → watermark advances.
+        const first = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const m1 = first.find((l) => l.stream === s);
+        await store.ack([{ ...(m1 as Lease), at: m1!.at }]);
+
+        // Capture watermark before block.
+        const beforeBlock = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const m2 = beforeBlock.find((l) => l.stream === s);
+        expect(m2).toBeDefined();
+        const watermarkBefore = m2!.at;
+        await store.block([{ ...(m2 as Lease), error: "permanent" }]);
+
+        // Stream is now blocked — query_streams must report it as such.
+        // (Asserting on `claim()` would be flaky: an empty result is the
+        // same as "s not in the result," which short-circuits a find()
+        // callback and leaves it uncovered when no other streams happen
+        // to be claimable in the fixture.)
+        let blockedFlag: boolean | undefined;
+        await store.query_streams(
+          (p) => {
+            blockedFlag = p.blocked;
+          },
+          { stream: s, stream_exact: true, limit: 1 }
+        );
+        expect(blockedFlag).toBe(true);
+
+        // Unblock — claim picks it back up at the same watermark.
+        expect(await store.unblock([s])).toBe(1);
+        const after = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const back = after.find((l) => l.stream === s);
+        expect(back).toBeDefined();
+        expect(back!.at).toBe(watermarkBefore);
+        expect(back!.retry).toBe(0);
+      });
+
+      it("returns 0 when the stream is not blocked", async () => {
+        const s = `unblock-noop-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        // Stream exists but isn't blocked.
+        expect(await store.unblock([s])).toBe(0);
+      });
+
+      it("returns 0 for unknown streams and empty input", async () => {
+        expect(await store.unblock([`missing-${uid()}`])).toBe(0);
+        expect(await store.unblock([])).toBe(0);
+      });
+
+      it("only counts streams that were actually blocked", async () => {
+        const s1 = `unblock-mix-a-${uid()}`;
+        const s2 = `unblock-mix-b-${uid()}`;
+        await store.subscribe([{ stream: s1 }, { stream: s2 }]);
+        await store.commit<CounterEvents>(
+          s1,
+          [inc(1)],
+          makeMeta({ stream: s1 })
+        );
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1)],
+          makeMeta({ stream: s2 })
+        );
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const m1 = leased.find((l) => l.stream === s1);
+        const others = leased.filter((l) => l.stream !== s1);
+        await store.ack(others);
+        // Block only s1.
+        await store.block([{ ...(m1 as Lease), error: "boom" }]);
+        expect(await store.unblock([s1, s2])).toBe(1);
+      });
+
+      it("filter form: unblocks by stream pattern", async () => {
+        const tag = uid();
+        const s1 = `unblock-filter-${tag}-a`;
+        const s2 = `unblock-filter-${tag}-b`;
+        const s3 = `other-${tag}`;
+        await store.subscribe([{ stream: s1 }, { stream: s2 }, { stream: s3 }]);
+        await store.commit<CounterEvents>(
+          s1,
+          [inc(1)],
+          makeMeta({ stream: s1 })
+        );
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1)],
+          makeMeta({ stream: s2 })
+        );
+        await store.commit<CounterEvents>(
+          s3,
+          [inc(1)],
+          makeMeta({ stream: s3 })
+        );
+        // Block all three.
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const blockable: BlockedLease[] = leased
+          .filter((l) => l.stream === s1 || l.stream === s2 || l.stream === s3)
+          .map((l) => ({ ...(l as Lease), error: "boom" }));
+        // Ack any other leases the test fixture's shared store left
+        // outstanding so they don't pollute counts below.
+        await store.ack(
+          leased.filter(
+            (l) => !(l.stream === s1 || l.stream === s2 || l.stream === s3)
+          )
+        );
+        await store.block(blockable);
+
+        // Filter targets only `unblock-filter-${tag}-` prefix → 2 of 3.
+        const count = await store.unblock({
+          stream: `^unblock-filter-${tag}-`,
+        });
+        expect(count).toBe(2);
+
+        // s3 is still blocked.
+        const after = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        expect(after.find((l) => l.stream === s3)).toBeUndefined();
+        // s1 and s2 are unblocked and claimable.
+        expect(after.find((l) => l.stream === s1)).toBeDefined();
+        expect(after.find((l) => l.stream === s2)).toBeDefined();
+      });
+
+      it("filter form: empty filter unblocks every blocked stream", async () => {
+        // Set up an isolated set of blocked streams using a unique tag,
+        // then assert the filter unblocks every one. We can't use the
+        // truly empty filter `{}` across the shared TCK fixture because
+        // other tests may leave blocked rows behind; use the tag as a
+        // narrow proxy for "everything in my scope."
+        const tag = uid();
+        const s1 = `unblock-empty-${tag}-a`;
+        const s2 = `unblock-empty-${tag}-b`;
+        await store.subscribe([{ stream: s1 }, { stream: s2 }]);
+        await store.commit<CounterEvents>(
+          s1,
+          [inc(1)],
+          makeMeta({ stream: s1 })
+        );
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1)],
+          makeMeta({ stream: s2 })
+        );
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const mine = leased.filter((l) => l.stream === s1 || l.stream === s2);
+        await store.ack(leased.filter((l) => !mine.includes(l)));
+        await store.block(
+          mine.map((l) => ({ ...(l as Lease), error: "boom" }))
+        );
+        const count = await store.unblock({
+          stream: `^unblock-empty-${tag}-`,
+        });
+        expect(count).toBe(2);
+      });
+
+      it("filter form: explicit blocked:false matches nothing", async () => {
+        // The implementation forces `blocked = true` regardless of what
+        // the caller passed — operators can't accidentally "unblock"
+        // already-unblocked streams.
+        const tag = uid();
+        const s = `unblock-blocked-false-${tag}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        // Stream is registered but not blocked.
+        expect(
+          await store.unblock({
+            stream: `^unblock-blocked-false-${tag}`,
+            blocked: false,
+          })
+        ).toBe(0);
+      });
+    });
+
+    describe("reset filter form", () => {
+      it("resets streams matching a stream pattern", async () => {
+        const tag = uid();
+        const s1 = `reset-filter-${tag}-a`;
+        const s2 = `reset-filter-${tag}-b`;
+        const other = `other-reset-${tag}`;
+        await store.subscribe([
+          { stream: s1 },
+          { stream: s2 },
+          { stream: other },
+        ]);
+        await store.commit<CounterEvents>(
+          s1,
+          [inc(1)],
+          makeMeta({ stream: s1 })
+        );
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1)],
+          makeMeta({ stream: s2 })
+        );
+        await store.commit<CounterEvents>(
+          other,
+          [inc(1)],
+          makeMeta({ stream: other })
+        );
+        // Advance watermarks for all three so the reset is observable.
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const mine = leased.filter(
+          (l) => l.stream === s1 || l.stream === s2 || l.stream === other
+        );
+        await store.ack(mine.map((l) => ({ ...(l as Lease), at: l.at + 100 })));
+
+        // Filter targets only `reset-filter-${tag}-` prefix → 2 of 3.
+        const count = await store.reset({ stream: `^reset-filter-${tag}-` });
+        expect(count).toBe(2);
+
+        // Inspect via query_streams (doesn't lease, no regex alternation
+        // assumptions on SQLite's LIKE-pattern path) — fetch each name
+        // by exact match and check the watermark independently.
+        const positionFor = async (name: string): Promise<number | null> => {
+          let at: number | null = null;
+          await store.query_streams(
+            (p) => {
+              at = p.at;
+            },
+            { stream: name, stream_exact: true, limit: 1 }
+          );
+          return at;
+        };
+        expect(await positionFor(s1)).toBe(-1);
+        expect(await positionFor(s2)).toBe(-1);
+        expect(await positionFor(other)).toBeGreaterThan(-1);
+      });
+
+      it("filter form: resets only blocked streams when blocked:true", async () => {
+        const tag = uid();
+        const s1 = `reset-blocked-${tag}-blocked`;
+        const s2 = `reset-blocked-${tag}-fine`;
+        await store.subscribe([{ stream: s1 }, { stream: s2 }]);
+        await store.commit<CounterEvents>(
+          s1,
+          [inc(1)],
+          makeMeta({ stream: s1 })
+        );
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1)],
+          makeMeta({ stream: s2 })
+        );
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const m1 = leased.find((l) => l.stream === s1);
+        await store.ack(leased.filter((l) => l.stream !== s1));
+        await store.block([{ ...(m1 as Lease), error: "boom" }]);
+
+        const count = await store.reset({
+          stream: `^reset-blocked-${tag}-`,
+          blocked: true,
+        });
+        expect(count).toBe(1);
       });
     });
 

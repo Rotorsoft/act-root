@@ -5,12 +5,12 @@ import type {
   EventMeta,
   Lease,
   Message,
-  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
   Schemas,
   Store,
+  StreamFilter,
   StreamPosition,
 } from "@rotorsoft/act";
 
@@ -450,18 +450,104 @@ export class SqliteStore implements Store {
     }
   }
 
-  // --- reset: transactional ---
-  async reset(streams: string[]) {
+  /**
+   * Translate a {@link StreamFilter} to a SQLite `WHERE` clause fragment
+   * plus positional args. Returns `"1"` (always true) when empty so
+   * callers can compose it unconditionally.
+   */
+  private _filterClause(filter: StreamFilter): {
+    clause: string;
+    args: unknown[];
+  } {
+    const conditions: string[] = [];
+    const args: unknown[] = [];
+    if (filter.stream !== undefined) {
+      if (filter.stream_exact) {
+        conditions.push("stream = ?");
+        args.push(filter.stream);
+      } else {
+        conditions.push("stream LIKE ?");
+        args.push(streamPatternToLike(filter.stream));
+      }
+    }
+    if (filter.source !== undefined) {
+      conditions.push("source IS NOT NULL");
+      if (filter.source_exact) {
+        conditions.push("source = ?");
+        args.push(filter.source);
+      } else {
+        conditions.push("source LIKE ?");
+        args.push(streamPatternToLike(filter.source));
+      }
+    }
+    if (filter.blocked !== undefined) {
+      conditions.push("blocked = ?");
+      args.push(filter.blocked ? 1 : 0);
+    }
+    return { clause: conditions.length ? conditions.join(" AND ") : "1", args };
+  }
+
+  // --- reset: transactional, accepts names or filter ---
+  async reset(input: string[] | StreamFilter) {
+    const setClause = `SET at = -1, retry = 0, blocked = 0, error = '',
+                          leased_by = NULL, leased_until = NULL`;
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
-      for (const stream of streams) {
+      if (Array.isArray(input)) {
+        for (const stream of input) {
+          const r = await tx.execute({
+            sql: `UPDATE streams ${setClause} WHERE stream = ?`,
+            args: [stream],
+          });
+          count += r.rowsAffected;
+        }
+      } else {
+        const { clause, args } = this._filterClause(input);
         const r = await tx.execute({
-          sql: `UPDATE streams SET at = -1, retry = 0, blocked = 0, error = '',
-                leased_by = NULL, leased_until = NULL WHERE stream = ?`,
-          args: [stream],
+          sql: `UPDATE streams ${setClause} WHERE ${clause}`,
+          args: args as any[],
         });
-        count += r.rowsAffected;
+        count = r.rowsAffected;
+      }
+      await tx.commit();
+      return count;
+    } catch (e) {
+      await tx.rollback();
+      throw e;
+    }
+  }
+
+  // --- unblock: clear blocked + retry + lease without touching watermark ---
+  // `retry = -1` so claim's post-bump returns retry=0 (first attempt),
+  // matching the InMemoryStore convention.
+  async unblock(input: string[] | StreamFilter) {
+    const setClause = `SET retry = -1, blocked = 0, error = '',
+                          leased_by = NULL, leased_until = NULL`;
+    const tx = await this.client.transaction("write");
+    try {
+      let count = 0;
+      if (Array.isArray(input)) {
+        for (const stream of input) {
+          const r = await tx.execute({
+            sql: `UPDATE streams ${setClause}
+                  WHERE stream = ? AND blocked = 1`,
+            args: [stream],
+          });
+          count += r.rowsAffected;
+        }
+      } else {
+        // Filter form: force blocked = true regardless of what the
+        // caller passed.
+        const { clause, args } = this._filterClause({
+          ...input,
+          blocked: true,
+        });
+        const r = await tx.execute({
+          sql: `UPDATE streams ${setClause} WHERE ${clause}`,
+          args: args as any[],
+        });
+        count = r.rowsAffected;
       }
       await tx.commit();
       return count;
@@ -537,41 +623,17 @@ export class SqliteStore implements Store {
   }
 
   // --- prioritize: bulk priority update with filter (ACT-102) ---
-  async prioritize(
-    filter: PrioritizeFilter,
-    priority: number
-  ): Promise<number> {
+  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
+    const { clause, args: filterArgs } = this._filterClause(filter);
     // libSQL `?` placeholders are positional and NOT reusable, so we
     // bind `priority` twice: once for SET, once for the no-op skip
     // in WHERE.
-    const args: unknown[] = [priority, priority];
-    const conditions: string[] = ["priority <> ?"];
-
-    if (filter.stream !== undefined) {
-      if (filter.stream_exact) {
-        conditions.push("stream = ?");
-        args.push(filter.stream);
-      } else {
-        conditions.push("stream LIKE ?");
-        args.push(streamPatternToLike(filter.stream));
-      }
-    }
-    if (filter.source !== undefined) {
-      conditions.push("source IS NOT NULL");
-      if (filter.source_exact) {
-        conditions.push("source = ?");
-        args.push(filter.source);
-      } else {
-        conditions.push("source LIKE ?");
-        args.push(streamPatternToLike(filter.source));
-      }
-    }
-    if (filter.blocked !== undefined) {
-      conditions.push("blocked = ?");
-      args.push(filter.blocked ? 1 : 0);
-    }
-    const sql = `UPDATE streams SET priority = ? WHERE ${conditions.join(" AND ")}`;
-    const result = await this.client.execute({ sql, args: args as any[] });
+    const sql = `UPDATE streams SET priority = ?
+                 WHERE priority <> ? AND ${clause}`;
+    const result = await this.client.execute({
+      sql,
+      args: [priority, priority, ...filterArgs] as any[],
+    });
     return result.rowsAffected;
   }
 

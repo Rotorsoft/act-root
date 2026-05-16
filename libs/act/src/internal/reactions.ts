@@ -17,17 +17,18 @@
  * @internal
  */
 
-import type {
-  Actor,
-  BatchHandler,
-  Committed,
-  IAct,
-  Lease,
-  Logger,
-  ReactionOptions,
-  ReactionPayload,
-  Schemas,
-  Target,
+import {
+  type Actor,
+  type BatchHandler,
+  type Committed,
+  type IAct,
+  type Lease,
+  type Logger,
+  NonRetryableError,
+  type ReactionOptions,
+  type ReactionPayload,
+  type Schemas,
+  type Target,
 } from "../types/index.js";
 import { computeBackoffDelay } from "./backoff.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
@@ -66,9 +67,19 @@ function finalize(
 ): HandleResult {
   if (!error) return { lease, handled, at };
   logger.error(error);
-  const block = lease.retry >= options.maxRetries && options.blockOnError;
+  // A `NonRetryableError` from the handler short-circuits the retry
+  // budget — block on first attempt when the operator has opted in via
+  // `blockOnError`. When `blockOnError` is false, the operator has
+  // explicitly chosen "retry forever," so we don't override that.
+  const nonRetryable = error instanceof NonRetryableError;
+  const block =
+    options.blockOnError && (nonRetryable || lease.retry >= options.maxRetries);
   if (block)
-    logger.error(`Blocking ${lease.stream} after ${lease.retry} retries.`);
+    logger.error(
+      nonRetryable
+        ? `Blocking ${lease.stream} on non-retryable error.`
+        : `Blocking ${lease.stream} after ${lease.retry} retries.`
+    );
   // Backoff applies only on retry paths — successful handles and terminal
   // blocks never defer. `lease.retry` here is the just-failed attempt's
   // counter, so the delay paces the *next* attempt.

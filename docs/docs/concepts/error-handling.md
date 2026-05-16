@@ -141,7 +141,12 @@ CreateItem: authedProcedure
 
 ## Blocked Streams
 
-When a reaction handler fails repeatedly, the stream is blocked after exceeding `maxRetries`. Blocked streams stay out of `claim()` results, so subsequent drain cycles skip them — they need an explicit `app.reset([stream])` (or external unblock) to start processing again.
+Streams block on two paths:
+
+1. A reaction handler fails repeatedly and `lease.retry` exceeds `maxRetries`. The lease is committed with `blocked = true` and stays out of `claim()` results.
+2. A reaction handler throws `NonRetryableError` (or a subclass like `NonRetryableWebhookError`) — the drain finalizer blocks the stream on the first failed attempt without consuming the retry budget. See [Non-retryable errors](#non-retryable-errors).
+
+Recovery uses `app.unblock(input)` (resume from where the stream stopped) or `app.reset(input)` (rebuild from event 0). Both accept either an explicit `string[]` or a `StreamFilter` for bulk operations. See [Recovering a blocked stream](#recovering-a-blocked-stream--appunblock) and [Discovering blocked streams](#discovering-blocked-streams--appblocked_streams).
 
 Monitor blocked streams via the `"blocked"` lifecycle event:
 
@@ -278,9 +283,11 @@ Behavior:
 
 - `POST` by default; method configurable.
 - `Idempotency-Key` derived from `event.id` (overridable per call, or return `null` to skip).
-- 5xx and network errors throw `WebhookError` with `retryable: true` → drain retries with backoff.
-- 4xx throws with `retryable: false`. The current pipeline treats this like any other error (counts against `maxRetries`); set `maxRetries: 0` if you want immediate block on client errors.
+- 5xx, network errors, and timeouts throw `WebhookError` → drain retries per `maxRetries` / `backoff`.
+- 4xx throws `NonRetryableWebhookError` (a subclass of `NonRetryableError`) → the drain finalizer **blocks the stream on the first failed attempt** when `blockOnError` is true. No wasted retries on permanent client errors.
 - `fetch` is injectable for tests.
+
+The two-class split lets handlers signal recoverability through the type system. `NonRetryableError` (exported from `@rotorsoft/act`) is the general primitive — any handler can throw it to bypass the retry budget for known-permanent failures (validation errors, "user deleted" 404s, business-rule violations). See [Non-retryable errors](#non-retryable-errors) below.
 
 ### When `webhook` fits — and when it doesn't
 
@@ -297,3 +304,72 @@ Behavior:
 | Multi-second / multi-minute API call | Emit an event, drain hands off to a bus; bus worker calls the API |
 | Bulk fan-out (10k+ receivers) | Emit a "fanout" event, let a dedicated consumer enumerate receivers |
 | Streaming / long-poll / large file transfer | Not `webhook` — write a dedicated worker |
+
+## Non-retryable errors
+
+The drain pipeline retries on any thrown error by default — `maxRetries` is a budget, not a classifier. For failures the handler *knows* won't recover on retry — a 4xx from a webhook, a `ZodError` on malformed input, a "user deleted" 404, a business-rule violation — throwing a generic `Error` wastes the budget and delays the operator signal.
+
+`NonRetryableError` (exported from `@rotorsoft/act`) is the handler-side signal. The drain finalizer checks `error instanceof NonRetryableError` and forces `block = blockOnError` regardless of `lease.retry`. The stream blocks on the first failed attempt; no retries, no backoff window.
+
+```ts
+import { NonRetryableError } from "@rotorsoft/act";
+
+.on("PaymentReceived")
+  .do(async (event) => {
+    const parsed = PaymentSchema.safeParse(event.data);
+    if (!parsed.success) {
+      throw new NonRetryableError("payment payload failed validation", {
+        cause: parsed.error,
+      });
+    }
+    // ... handle the parsed payload
+  })
+```
+
+Important: `NonRetryableError` does **not** override `blockOnError: false`. If the operator has explicitly chosen "never block, retry forever," the framework respects that — `NonRetryableError` becomes equivalent to any other error. The class signal only matters on the block-when-budget-exhausted path.
+
+`@rotorsoft/act-http/webhook` exports `NonRetryableWebhookError` (a subclass) for 4xx responses. The split lets generic catch sites use `instanceof NonRetryableError` while webhook-aware code reads the HTTP-specific `status` / `url` / `responseBody` fields.
+
+### Recovering a blocked stream — `app.unblock`
+
+When a stream blocks — whether from `NonRetryableError` (first attempt) or from exhausting `maxRetries` — the operator's recovery path is `app.unblock(input)`. The input is either an explicit list of stream names or a `StreamFilter` for bulk recovery:
+
+```ts
+// Single targeted recovery — by name.
+await app.unblock(["webhooks-out-customer-42"]);
+
+// Bulk recovery — by filter (all blocked streams matching a pattern).
+await app.unblock({ stream: "^webhooks-out-" });
+
+// Post-incident: unblock everything currently blocked.
+await app.unblock({});
+```
+
+`unblock` clears the blocked flag, resets retry count, drops any stale lease, and arms the orchestrator's drain flag so a settled app picks up the now-free stream on the next cycle. The `at` watermark is **not touched** — the stream resumes from the next event after the last successful ack, not from the beginning.
+
+The filter form always restricts to `blocked = true` regardless of what the caller passes — there's no use case for "unblock unblocked streams." Already-unblocked streams and unknown names are silently skipped; the return count reflects only streams that were actually flipped.
+
+Contrast with `app.reset(input)`, which is for projection rebuilds. `reset` accepts the same `string[] | StreamFilter` shape but sets the watermark back to -1 and replays every event from the start:
+
+| Use case | Method |
+|---|---|
+| Recovered from a poison message, resume normally | `app.unblock([stream])` or `app.unblock(filter)` |
+| Bulk recovery across a family of streams | `app.unblock({ stream: "^proj-" })` |
+| Deploy new projection logic, replay all events | `app.reset([stream])` |
+| Rebuild every blocked stream from zero | `app.reset({ blocked: true })` |
+
+### Discovering blocked streams — `app.blocked_streams()`
+
+For the "show me what's broken" operational query, `app.blocked_streams()` returns every currently-blocked stream position. Convenience wrapper around `store().query_streams(cb, { blocked: true })`:
+
+```ts
+const blocked = await app.blocked_streams();
+console.table(
+  blocked.map(({ stream, retry, error }) => ({ stream, retry, error }))
+);
+
+// Operator investigates, then bulk-unblocks the family:
+await app.unblock({ stream: "^webhooks-out-" });
+```
+
+Results paginate by `limit` (default 100) with an `after` keyset cursor on the stream name. For richer queries — source filters, unblocked introspection, custom pagination — drop to `store().query_streams(...)` directly.

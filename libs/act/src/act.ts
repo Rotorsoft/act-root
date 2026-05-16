@@ -31,7 +31,6 @@ import type {
   IAct,
   Lease,
   Logger,
-  PrioritizeFilter,
   Query,
   Registry,
   Schema,
@@ -42,6 +41,8 @@ import type {
   State,
   Store,
   StoreNotification,
+  StreamFilter,
+  StreamPosition,
   Target,
 } from "./types/index.js";
 
@@ -920,11 +921,84 @@ export class Act<
    * @see {@link Store.reset} for the underlying store primitive
    * @see {@link settle} for the debounced full-catch-up loop
    */
-  async reset(streams: string[]): Promise<number> {
+  async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
-      const count = await store().reset(streams);
+      const count = await store().reset(input);
       if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
       return count;
+    });
+  }
+
+  /**
+   * Clear the blocked flag on streams without replaying their history.
+   *
+   * Use this to recover from a poison message after fixing the
+   * underlying issue — the stream resumes from the next event after the
+   * last successful ack, not from the beginning. Compare with
+   * {@link reset}, which rebuilds from event 0 (suitable for projection
+   * rebuilds, wrong for "I fixed the bug, please retry").
+   *
+   * Wraps `store().unblock(streams)` and raises the orchestrator's
+   * internal "needs drain" flag so a settled app picks up the now-free
+   * streams on the next cycle. Equivalent to calling `store().unblock(...)`
+   * directly, but `store().unblock(...)` alone leaves the flag
+   * untouched.
+   *
+   * @param streams - Stream names to unblock
+   * @returns Count of streams that were actually flipped (were blocked)
+   *
+   * @example Recover from a 4xx webhook after fixing the bug
+   * ```typescript
+   * await app.unblock(["webhooks-out-customer-42"]);
+   * // The stream resumes from the next event, not from zero.
+   * ```
+   *
+   * @see {@link Store.unblock} for the underlying store primitive
+   * @see {@link reset} for the rebuild-from-zero alternative
+   */
+  async unblock(input: string[] | StreamFilter): Promise<number> {
+    return this._scoped(async () => {
+      const count = await store().unblock(input);
+      if (count > 0 && this._reactive_events.size > 0) this._drain.arm();
+      return count;
+    });
+  }
+
+  /**
+   * Return every currently-blocked stream position. Convenience wrapper
+   * around `store().query_streams(cb, { blocked: true })` for the common
+   * "show me what's broken" operational query.
+   *
+   * Results are ordered by stream name, paginated by `limit` (default
+   * 100). Pass `after` to fetch the next page (keyset cursor on the
+   * stream name). For richer queries — including blocked + source
+   * filters, or full unblocked introspection — drop to
+   * `store().query_streams(...)` directly.
+   *
+   * @returns Array of {@link StreamPosition} for currently-blocked streams.
+   *
+   * @example Discover and recover
+   * ```typescript
+   * const blocked = await app.blocked_streams();
+   * console.table(blocked.map(({ stream, retry, error }) => ({ stream, retry, error })));
+   *
+   * // Operator investigates, then bulk-unblocks the family:
+   * await app.unblock({ stream: "^webhooks-out-" });
+   * ```
+   */
+  async blocked_streams(options?: {
+    after?: string;
+    limit?: number;
+  }): Promise<StreamPosition[]> {
+    return this._scoped(async () => {
+      const positions: StreamPosition[] = [];
+      await store().query_streams(
+        (p) => {
+          positions.push(p);
+        },
+        { blocked: true, after: options?.after, limit: options?.limit }
+      );
+      return positions;
     });
   }
 
@@ -966,10 +1040,7 @@ export class Act<
    * @see {@link Store.prioritize} for the underlying primitive
    * @see {@link claim} for how priority biases scheduling
    */
-  async prioritize(
-    filter: PrioritizeFilter,
-    priority: number
-  ): Promise<number> {
+  async prioritize(filter: StreamFilter, priority: number): Promise<number> {
     return this._scoped(() => store().prioritize(filter, priority));
   }
 

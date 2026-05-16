@@ -250,7 +250,11 @@ await app.reset(["my-projection"]);
 app.settle({ eventLimit: 1000 });
 ```
 
+`reset` accepts either an explicit `string[]` of target stream names (above) or a `StreamFilter` for bulk operations — e.g., `app.reset({ stream: "^proj-" })` rebuilds every projection target matching the pattern in a single call, or `app.reset({ blocked: true })` rebuilds everything currently blocked. The filter shape (`stream`, `stream_exact`, `source`, `source_exact`, `blocked`) is shared with `app.unblock` and `app.prioritize`.
+
 Always go through `app.reset(...)` rather than `store().reset(...)` directly — the orchestrator's internal `_armed` flag has to be raised, otherwise a settled app short-circuits and skips the replay.
+
+Use `app.reset` for **rebuilds** (watermark → -1, every event replayed). Use [`app.unblock`](./error-handling.md#recovering-a-blocked-stream--appunblock) for **recovery** (watermark preserved, stream resumes from where it stopped). Don't conflate them — using `reset` to clear a blocked webhook stream would re-fire every historical webhook.
 
 ## Closing the Books
 

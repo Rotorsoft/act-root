@@ -1,4 +1,8 @@
-import type { Committed, Schemas } from "@rotorsoft/act";
+import {
+  type Committed,
+  NonRetryableError,
+  type Schemas,
+} from "@rotorsoft/act";
 
 /**
  * Function or static value resolver. Used so callers can pass either a
@@ -67,36 +71,59 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
 };
 
 /**
- * Error thrown by the webhook handler on network failure, timeout, or
- * non-2xx response. The `status` field is `0` for network / timeout
- * errors and the HTTP status code otherwise.
+ * Common fields carried on both webhook error subclasses.
+ */
+type WebhookErrorInit = {
+  status: number;
+  url: string;
+  responseBody?: string;
+};
+
+/**
+ * Thrown when a webhook request fails in a way the drain pipeline
+ * should retry: network failure, timeout, or 5xx response. `status` is
+ * `0` for network / timeout errors, the HTTP status code otherwise.
  *
- * `retryable` reflects the helper's classification: network errors,
- * timeouts, and 5xx are flagged retryable; 4xx is not. The current drain
- * pipeline does not distinguish — both are caught and counted against
- * `maxRetries`. Callers who want different retry semantics per category
- * can introspect the error in a wrapping handler or tune `maxRetries` /
- * `backoff` on the reaction options.
+ * The class itself is the retry signal — if the helper throws this,
+ * drain treats it like any other error (counts against `maxRetries`,
+ * paces with `backoff`). For permanent failures, the helper throws
+ * {@link NonRetryableWebhookError} instead.
  */
 export class WebhookError extends Error {
   readonly status: number;
-  readonly retryable: boolean;
   readonly url: string;
   readonly responseBody?: string;
 
-  constructor(
-    message: string,
-    init: {
-      status: number;
-      retryable: boolean;
-      url: string;
-      responseBody?: string;
-    }
-  ) {
+  constructor(message: string, init: WebhookErrorInit) {
     super(message);
     this.name = "WebhookError";
     this.status = init.status;
-    this.retryable = init.retryable;
+    this.url = init.url;
+    this.responseBody = init.responseBody;
+  }
+}
+
+/**
+ * Thrown when a webhook returns a 4xx response. Extends
+ * {@link NonRetryableError} so the drain finalizer blocks the stream on
+ * the first failed attempt (when `blockOnError` is true) — no wasted
+ * retries on permanent client errors.
+ *
+ * Carries the same `status` / `url` / `responseBody` fields as
+ * {@link WebhookError}; not a subclass of it (a single instance can't
+ * be both `WebhookError` and `NonRetryableError`). Callers catching
+ * either retryable or non-retryable webhook failures should check both
+ * classes, or check the shared fields directly.
+ */
+export class NonRetryableWebhookError extends NonRetryableError {
+  readonly status: number;
+  readonly url: string;
+  readonly responseBody?: string;
+
+  constructor(message: string, init: WebhookErrorInit) {
+    super(message);
+    this.name = "NonRetryableWebhookError";
+    this.status = init.status;
     this.url = init.url;
     this.responseBody = init.responseBody;
   }

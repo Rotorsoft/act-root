@@ -60,7 +60,7 @@ app.on("blocked", (blocked) => {
 });
 ```
 
-Pair with monitoring: `act.streams.blocked` should be a 0-floor counter. Any non-zero is a paging condition. Unblock with `app.reset([stream])` after fixing the root cause.
+Pair with monitoring: `act.streams.blocked` should be a 0-floor counter. Any non-zero is a paging condition. Use `app.blocked_streams()` to inspect what's blocked, then recover with `app.unblock(input)` after fixing the root cause — the stream resumes from where it stopped without re-processing history. `unblock` accepts either an explicit name list or a `StreamFilter` for bulk recovery (e.g., `app.unblock({ stream: "^webhooks-out-" })` to clear a whole family at once). Use `app.reset(input)` only when you actually want to rebuild from event 0 (projection rebuilds).
 
 Per-reaction defaults: `maxRetries: 3`, `blockOnError: true`. Tune via `.do(handler, { maxRetries: 5, blockOnError: false })` per handler — see [Error handling → Per-reaction options](../concepts/error-handling.md#per-reaction-options).
 

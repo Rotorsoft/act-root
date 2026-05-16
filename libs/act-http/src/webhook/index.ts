@@ -26,10 +26,14 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
-import { type WebhookConfig, WebhookError } from "./types.js";
+import {
+  NonRetryableWebhookError,
+  type WebhookConfig,
+  WebhookError,
+} from "./types.js";
 
-export type { WebhookConfig, WebhookResolver } from "./types.js";
-export { WebhookError } from "./types.js";
+export type { WebhookBody, WebhookConfig, WebhookResolver } from "./types.js";
+export { NonRetryableWebhookError, WebhookError } from "./types.js";
 
 function resolve<TEvents extends Schemas, T>(
   resolver: T | ((e: Committed<TEvents, keyof TEvents>) => T) | undefined,
@@ -56,16 +60,14 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
  *
  * Behavior:
  *
- * - Network errors and timeouts throw {@link WebhookError} with
- *   `status: 0`, `retryable: true`.
- * - 5xx responses throw with `retryable: true`.
- * - 4xx responses throw with `retryable: false`.
  * - 2xx and 3xx return successfully.
- *
- * Drain retry behavior follows the reaction's `maxRetries` / `backoff`
- * options. To skip retries entirely for client errors, set
- * `maxRetries: 0` on the reaction — both 4xx and 5xx will block on the
- * first failed attempt.
+ * - 5xx responses, network errors, and timeouts throw
+ *   {@link WebhookError} (`status: 0` for network/timeout). Drain
+ *   retries per the reaction's `maxRetries` / `backoff`.
+ * - 4xx responses throw {@link NonRetryableWebhookError}, which
+ *   extends `NonRetryableError`. The drain finalizer blocks the
+ *   stream immediately (when `blockOnError` is true) without
+ *   consuming the retry budget.
  */
 export function webhook<TEvents extends Schemas = Schemas>(
   config: WebhookConfig<TEvents>
@@ -117,7 +119,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
         aborted
           ? `webhook ${method} ${url} timed out after ${timeoutMs}ms`
           : `webhook ${method} ${url} failed: ${(err as Error).message}`,
-        { status: 0, retryable: true, url }
+        { status: 0, url }
       );
     } finally {
       clearTimeout(timer);
@@ -132,10 +134,11 @@ export function webhook<TEvents extends Schemas = Schemas>(
       // best-effort body capture; ignore read errors
     }
 
-    const retryable = response.status >= 500;
-    throw new WebhookError(
+    const ErrorClass =
+      response.status >= 500 ? WebhookError : NonRetryableWebhookError;
+    throw new ErrorClass(
       `webhook ${method} ${url} responded ${response.status}`,
-      { status: response.status, retryable, url, responseBody }
+      { status: response.status, url, responseBody }
     );
   };
 }

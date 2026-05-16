@@ -125,7 +125,7 @@ worker A                  store                     worker B
 Three "exits" from a leased state:
 
 - **`ack`** — handler succeeded; advance the watermark to the last processed event ID, clear the lease, reset retry count.
-- **`block`** — handler failed past the retry budget; set `blocked=true`. The stream stays out of `claim()` results until something explicitly unblocks it (e.g., `app.reset()`).
+- **`block`** — handler failed past the retry budget (or threw `NonRetryableError`); set `blocked=true`. The stream stays out of `claim()` results until something explicitly unblocks it. Use `app.unblock(input)` to resume from where the stream stopped (the common case — operator fixed the underlying issue), or `app.reset(input)` to rebuild from event 0 (projection rebuild, rare). Both accept either a `string[]` of stream names or a `StreamFilter` (`{ stream?, source?, blocked? }`) for bulk operations — e.g., `app.unblock({ stream: "^webhooks-out-" })` to clear a whole family at once, or `app.unblock({})` for a post-incident "unblock everything blocked" sweep.
 - **Timeout** — worker died or hung; `leased_until` passes; the next `claim()` from any worker can acquire the stream. Retry count is *not* incremented — the timed-out worker may have processed the events successfully but failed to ack.
 
 ### Why a stream stays in `claim()` after a partial handler failure

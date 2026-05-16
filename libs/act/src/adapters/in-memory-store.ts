@@ -16,13 +16,13 @@ import type {
   EventMeta,
   Lease,
   Message,
-  PrioritizeFilter,
   Query,
   QueryStreams,
   QueryStreamsResult,
   Schema,
   Schemas,
   Store,
+  StreamFilter,
   StreamPosition,
 } from "../types/index.js";
 import { sleep } from "../utils.js";
@@ -175,6 +175,21 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+  }
+
+  /**
+   * Clear the blocked flag and lease bookkeeping without touching the
+   * watermark. Returns true if the stream was actually blocked (and is
+   * now flipped); false otherwise.
+   */
+  unblock(): boolean {
+    if (!this._blocked) return false;
+    this._blocked = false;
+    this._retry = -1;
+    this._error = "";
+    this._leased_by = undefined;
+    this._leased_until = undefined;
+    return true;
   }
 }
 
@@ -530,19 +545,102 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Reset watermarks for the given streams to -1, clearing retry, blocked,
-   * error, and lease state so they can be replayed from the beginning.
-   * @param streams - Stream names to reset.
+   * Build a predicate from a {@link StreamFilter}. Compiled regexes are
+   * cached in the closure so callers can apply it across the streams
+   * map without re-compiling per iteration.
+   */
+  private _filterPredicate(
+    filter: StreamFilter
+  ): (s: InMemoryStream) => boolean {
+    const streamRe =
+      filter.stream && !filter.stream_exact
+        ? new RegExp(filter.stream)
+        : undefined;
+    const sourceRe =
+      filter.source && !filter.source_exact
+        ? new RegExp(filter.source)
+        : undefined;
+    return (s) => {
+      if (filter.stream !== undefined) {
+        if (
+          filter.stream_exact
+            ? s.stream !== filter.stream
+            : !streamRe!.test(s.stream)
+        )
+          return false;
+      }
+      if (filter.source !== undefined) {
+        if (s.source === undefined) return false;
+        if (
+          filter.source_exact
+            ? s.source !== filter.source
+            : !sourceRe!.test(s.source)
+        )
+          return false;
+      }
+      if (filter.blocked !== undefined && s.blocked !== filter.blocked)
+        return false;
+      return true;
+    };
+  }
+
+  /**
+   * Reset watermarks to -1, clearing retry, blocked, error, and lease
+   * state so the matched streams can be replayed from the beginning.
+   * Accepts either an explicit list of names or a {@link StreamFilter}.
+   *
+   * @param input - Stream names or a filter selecting the streams to reset.
    * @returns Count of streams that were actually reset.
    */
-  async reset(streams: string[]) {
+  async reset(input: string[] | StreamFilter) {
     await sleep();
     let count = 0;
-    for (const name of streams) {
-      const s = this._streams.get(name);
-      if (s) {
-        s.reset();
-        count++;
+    if (Array.isArray(input)) {
+      for (const name of input) {
+        const s = this._streams.get(name);
+        if (s) {
+          s.reset();
+          count++;
+        }
+      }
+    } else {
+      const matches = this._filterPredicate(input);
+      for (const s of this._streams.values()) {
+        if (matches(s)) {
+          s.reset();
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Clear the blocked flag (and retry / error / lease) on the matched
+   * streams without touching the watermark. Streams that aren't blocked
+   * at call time are silently skipped. Accepts either an explicit list
+   * of names or a {@link StreamFilter}. The filter form always restricts
+   * to blocked streams — passing `blocked: false` matches nothing.
+   * See {@link Store.unblock}.
+   *
+   * @param input - Stream names or a filter selecting the streams to unblock.
+   * @returns Count of streams that were actually flipped (were blocked).
+   */
+  async unblock(input: string[] | StreamFilter) {
+    await sleep();
+    let count = 0;
+    if (Array.isArray(input)) {
+      for (const name of input) {
+        const s = this._streams.get(name);
+        if (s?.unblock()) count++;
+      }
+    } else {
+      // Filter form: always restrict to blocked streams. An explicit
+      // `blocked: false` in the filter is silently overridden — there
+      // is no use case for "unblock unblocked streams."
+      const matches = this._filterPredicate({ ...input, blocked: true });
+      for (const s of this._streams.values()) {
+        if (matches(s) && s.unblock()) count++;
       }
     }
     return count;
@@ -557,37 +655,12 @@ export class InMemoryStore implements Store {
    *
    * @returns Count of streams whose priority changed.
    */
-  async prioritize(filter: PrioritizeFilter, priority: number) {
+  async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
-    const streamRe =
-      filter.stream && !filter.stream_exact
-        ? new RegExp(filter.stream)
-        : undefined;
-    const sourceRe =
-      filter.source && !filter.source_exact
-        ? new RegExp(filter.source)
-        : undefined;
+    const matches = this._filterPredicate(filter);
     let count = 0;
     for (const s of this._streams.values()) {
-      if (filter.stream !== undefined) {
-        if (
-          filter.stream_exact
-            ? s.stream !== filter.stream
-            : !streamRe!.test(s.stream)
-        )
-          continue;
-      }
-      if (filter.source !== undefined) {
-        if (s.source === undefined) continue;
-        if (
-          filter.source_exact
-            ? s.source !== filter.source
-            : !sourceRe!.test(s.source)
-        )
-          continue;
-      }
-      if (filter.blocked !== undefined && s.blocked !== filter.blocked)
-        continue;
+      if (!matches(s)) continue;
       if (s.priority !== priority) {
         s.setPriority(priority);
         count++;
