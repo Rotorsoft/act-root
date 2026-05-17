@@ -10,7 +10,7 @@ Weave these ideas into the book (likely the Extensibility / Adapters chapter, wi
 - **Capabilities pattern.** Optional methods (e.g., `Store.notify`) are gated by flags in the TCK so adapters can opt out of features they don't implement. Show this as a generalizable pattern for evolving ports without breaking existing adapters.
 - **Reference implementation does double duty.** `InMemoryStore` / `InMemoryCache` / `ConsoleLogger` are both production-grade defaults *and* the first customers of the TCK — proves the TCK works before any external adapter ships.
 - **Fixed fixture domain.** TCK ships its own tiny Counter-style domain rather than accepting event schemas via options. Self-contained, deterministic, identical coverage across adapters. Use this as a worked example of "test fixtures should be the simplest thing that exercises the contract."
-- **Port evolution rule.** Changing a port interface (e.g., the planned `Store.query_heads` from #639) forces a matching TCK change. Encode this as a contributor rule and tie it to the book's "evolving event-sourced systems" theme.
+- **Port evolution rule.** Changing a port interface (e.g., `Store.query_stats` shipped in #639 / #752) forces a matching TCK change in lockstep. Encode this as a contributor rule and tie it to the book's "evolving event-sourced systems" theme.
 - **Third extension point — Logger.** Even though `Logger` is narrow, including it in the TCK signals that *all* extension points get the same treatment. Useful framing for the book: extensibility is uniform, not à la carte.
 
 Chapter placement candidates:
