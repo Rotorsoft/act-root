@@ -1244,37 +1244,43 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("filter form — source and blocked apply via subscriptions", async () => {
         const tag = uid();
-        const sub1 = `qsfs-${tag}-sub1`;
-        const sub2 = `qsfs-${tag}-sub2`;
+        // Two subscriptions, exercising the two filter branches
+        // independently: one with `source` (for the source filter test),
+        // one without (for the block test — claim()'s lagging-frontier
+        // semantics for source-based subscriptions varies across stores,
+        // so we use a no-source subscription to keep block + claim
+        // portable).
+        const sourced = `qsfs-${tag}-sourced`;
+        const blockable = `qsfs-${tag}-blockable`;
         const src = `qsfs-${tag}-src`;
-        // Commit events on each subscription stream + on the source stream
         await store.subscribe([
-          { stream: sub1, source: src },
-          { stream: sub2, source: src },
+          { stream: sourced, source: src },
+          { stream: blockable },
         ]);
         await store.commit<CounterEvents>(
-          sub1,
+          sourced,
           [inc(1)],
-          makeMeta({ stream: sub1 })
+          makeMeta({ stream: sourced })
         );
         await store.commit<CounterEvents>(
-          sub2,
+          blockable,
           [inc(2)],
-          makeMeta({ stream: sub2 })
+          makeMeta({ stream: blockable })
         );
 
-        // source filter — both subs share src
+        // source filter — only the sourced subscription matches.
         const bySource = await store.query_stats<CounterEvents>({
           stream: `^qsfs-${tag}-`,
           source: src,
           source_exact: true,
         });
-        expect([...bySource.keys()].sort()).toEqual([sub1, sub2].sort());
+        expect([...bySource.keys()]).toEqual([sourced]);
 
-        // Block sub1; blocked: true should match only it.
+        // Block `blockable` — its no-source subscription gets leased
+        // from its own events on every store, so block() reliably fires.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
-        const mine = leased.find((l) => l.stream === sub1);
-        const others = leased.filter((l) => l.stream !== sub1);
+        const mine = leased.find((l) => l.stream === blockable);
+        const others = leased.filter((l) => l.stream !== blockable);
         if (others.length) await store.ack(others);
         if (mine) await store.block([{ ...(mine as Lease), error: "boom" }]);
 
@@ -1282,7 +1288,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           stream: `^qsfs-${tag}-`,
           blocked: true,
         });
-        expect([...onlyBlocked.keys()]).toEqual([sub1]);
+        expect([...onlyBlocked.keys()]).toEqual([blockable]);
       });
     });
 
