@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v0.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v0.2.0...@rotorsoft/act-tck-v0.3.0) (2026-05-17)
+
+
+### Features
+
+* **act:** add Store.query_stats — batched per-stream aggregates ([#752](https://github.com/rotorsoft/act-root/issues/752)) ([fb1cbbc](https://github.com/rotorsoft/act-root/commit/fb1cbbcb99d02fd20bb3a6fa54ae48822f09c439)), closes [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#708](https://github.com/rotorsoft/act-root/issues/708) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#708](https://github.com/rotorsoft/act-root/issues/708) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639) [#639](https://github.com/rotorsoft/act-root/issues/639)
+
 # [@rotorsoft/act-tck-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v0.1.0...@rotorsoft/act-tck-v0.2.0) (2026-05-16)
 
 
