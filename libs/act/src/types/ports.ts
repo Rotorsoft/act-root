@@ -797,8 +797,13 @@ export interface Store extends Disposable {
    * one or both is the same cost.
    *
    * **`input`.** Either an explicit `string[]` of stream names, or a
-   * {@link StreamFilter} for pattern / `blocked` selection — same shape
-   * as {@link Store.reset} and {@link Store.unblock}.
+   * narrow event-stream selector `{ stream?, stream_exact? }` for
+   * pattern-based or exact-name matching. **Subscription-level filters
+   * (`source`, `blocked`) are intentionally not accepted here** — they
+   * describe subscriptions, not events, and conflating the two would
+   * silently exclude unsubscribed event streams. For
+   * "stats for all blocked subscriptions" compose explicitly:
+   * `query_streams({blocked: true})` → collect names → `query_stats(names)`.
    *
    * **`head` vs `tail` naming.** Follows the git-log convention: `head`
    * is the latest event (highest id), `tail` is the earliest (lowest id).
@@ -881,7 +886,7 @@ export interface Store extends Disposable {
    * @see {@link EventName} for the typed exclude entries
    */
   query_stats: <E extends Schemas>(
-    input: string[] | StreamFilter,
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
   ) => Promise<Map<string, StreamStats<E>>>;
 

@@ -752,7 +752,7 @@ export class InMemoryStore implements Store {
    *   event-bearing stream.
    */
   async query_stats<E extends Schemas>(
-    input: string[] | StreamFilter,
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
   ): Promise<Map<string, StreamStats<E>>> {
     await sleep();
@@ -763,16 +763,12 @@ export class InMemoryStore implements Store {
     const before = options?.before;
 
     // Pre-compile per-stream scope predicate, cached as we go so each
-    // distinct stream evaluates the regex / subscription lookup once.
+    // distinct stream evaluates the regex once.
     const arrayTargets = Array.isArray(input) ? new Set(input) : null;
-    const filter: StreamFilter | null = Array.isArray(input) ? null : input;
+    const filter = Array.isArray(input) ? null : input;
     const streamRe =
       filter?.stream && !filter.stream_exact
         ? new RegExp(filter.stream)
-        : undefined;
-    const sourceRe =
-      filter?.source && !filter.source_exact
-        ? new RegExp(filter.source)
         : undefined;
 
     const scopeCache = new Map<string, boolean>();
@@ -782,41 +778,11 @@ export class InMemoryStore implements Store {
       let ok = true;
       if (arrayTargets) {
         ok = arrayTargets.has(stream);
-      } else {
-        // arrayTargets null ⇒ input was a StreamFilter ⇒ filter is set.
-        // biome-ignore lint/style/noNonNullAssertion: TS can't correlate arrayTargets and filter
-        const filter_ = filter!;
-        if (filter_.stream !== undefined) {
-          ok = filter_.stream_exact
-            ? stream === filter_.stream
-            : // biome-ignore lint/style/noNonNullAssertion: streamRe set when stream is regex
-              streamRe!.test(stream);
-        }
-        if (
-          ok &&
-          (filter_.source !== undefined || filter_.blocked !== undefined)
-        ) {
-          const sub = this._streams.get(stream);
-          if (!sub) {
-            ok = false;
-          } else {
-            if (filter_.source !== undefined) {
-              if (sub.source === undefined) ok = false;
-              else
-                ok = filter_.source_exact
-                  ? sub.source === filter_.source
-                  : // biome-ignore lint/style/noNonNullAssertion: sourceRe set when source is regex
-                    sourceRe!.test(sub.source);
-            }
-            if (
-              ok &&
-              filter_.blocked !== undefined &&
-              sub.blocked !== filter_.blocked
-            ) {
-              ok = false;
-            }
-          }
-        }
+      } else if (filter?.stream !== undefined) {
+        ok = filter.stream_exact
+          ? stream === filter.stream
+          : // biome-ignore lint/style/noNonNullAssertion: streamRe set when stream is regex
+            streamRe!.test(stream);
       }
       scopeCache.set(stream, ok);
       return ok;

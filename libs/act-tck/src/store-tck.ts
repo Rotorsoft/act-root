@@ -1253,125 +1253,38 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect([...all.keys()].sort()).toEqual([sA, sB, sOther].sort());
       });
 
-      it("filter form — source and blocked apply via subscriptions", async () => {
+      it("compose with query_streams for subscription-level filters", async () => {
+        // `query_stats` only accepts event-stream selection. For
+        // "stats for blocked subscriptions" etc., compose with
+        // `query_streams` and pipe the names through. This test asserts
+        // that two-call pattern works end-to-end.
         const tag = uid();
-        // Two subscriptions, exercising the two filter branches
-        // independently: one with `source` (for the source filter test),
-        // one without (for the block test — claim()'s lagging-frontier
-        // semantics for source-based subscriptions varies across stores,
-        // so we use a no-source subscription to keep block + claim
-        // portable).
-        const sourced = `qsfs-${tag}-sourced`;
-        const blockable = `qsfs-${tag}-blockable`;
-        const src = `qsfs-${tag}-src`;
-        await store.subscribe([
-          { stream: sourced, source: src },
-          { stream: blockable },
-        ]);
-        await store.commit<CounterEvents>(
-          sourced,
-          [inc(1)],
-          makeMeta({ stream: sourced })
-        );
-        await store.commit<CounterEvents>(
-          blockable,
-          [inc(2)],
-          makeMeta({ stream: blockable })
-        );
+        const a = `qsc-${tag}-a`;
+        const b = `qsc-${tag}-b`;
+        await store.subscribe([{ stream: a }, { stream: b }]);
+        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
+        await store.commit<CounterEvents>(b, [inc(2)], makeMeta({ stream: b }));
 
-        // source filter — only the sourced subscription matches.
-        const bySource = await store.query_stats<CounterEvents>({
-          stream: `^qsfs-${tag}-`,
-          source: src,
-          source_exact: true,
-        });
-        expect([...bySource.keys()]).toEqual([sourced]);
-
-        // Block `blockable` — its no-source subscription gets leased
-        // from its own events on every store, so block() reliably fires.
+        // Block stream `a` via the standard claim → block path.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
-        const mine = leased.find((l) => l.stream === blockable);
+        const mine = leased.find((l) => l.stream === a);
         expect(mine).toBeDefined();
-        const others = leased.filter((l) => l.stream !== blockable);
+        const others = leased.filter((l) => l.stream !== a);
         await store.ack(others);
         await store.block([{ ...(mine as Lease), error: "boom" }]);
 
-        const onlyBlocked = await store.query_stats<CounterEvents>({
-          stream: `^qsfs-${tag}-`,
+        // Step 1: subscription-level filter via query_streams.
+        const blockedNames: string[] = [];
+        await store.query_streams((p) => blockedNames.push(p.stream), {
+          stream: `^qsc-${tag}-`,
           blocked: true,
         });
-        expect([...onlyBlocked.keys()]).toEqual([blockable]);
-      });
+        expect(blockedNames).toEqual([a]);
 
-      it("filter form — source regex, blocked false, no-stream filter, no-subscription", async () => {
-        const tag = uid();
-        // Three streams to exercise the remaining filter branches:
-        //   - `subSrc1` / `subSrc2`: subscribed with sources matching a regex
-        //   - `subBare`: subscribed without source — eligible for blocked-false
-        //   - `eventsOnly`: events committed but no subscription — must be
-        //     absent from source/blocked filter results
-        const subSrc1 = `qsfr-${tag}-1`;
-        const subSrc2 = `qsfr-${tag}-2`;
-        const subBare = `qsfr-${tag}-bare`;
-        const eventsOnly = `qsfr-${tag}-no-sub`;
-        const src1 = `qsfr-${tag}-src-1`;
-        const src2 = `qsfr-${tag}-src-2`;
-        await store.subscribe([
-          { stream: subSrc1, source: src1 },
-          { stream: subSrc2, source: src2 },
-          { stream: subBare },
-        ]);
-        await store.commit<CounterEvents>(
-          subSrc1,
-          [inc(1)],
-          makeMeta({ stream: subSrc1 })
-        );
-        await store.commit<CounterEvents>(
-          subSrc2,
-          [inc(2)],
-          makeMeta({ stream: subSrc2 })
-        );
-        await store.commit<CounterEvents>(
-          subBare,
-          [inc(3)],
-          makeMeta({ stream: subBare })
-        );
-        await store.commit<CounterEvents>(
-          eventsOnly,
-          [inc(99)],
-          makeMeta({ stream: eventsOnly })
-        );
-
-        // (1) source regex — matches both subscribed-source streams via
-        //     pattern, NOT the bare-subscribed or events-only streams.
-        const byRegex = await store.query_stats<CounterEvents>({
-          stream: `^qsfr-${tag}-`,
-          source: `^qsfr-${tag}-src-`,
-        });
-        expect([...byRegex.keys()].sort()).toEqual([subSrc1, subSrc2].sort());
-
-        // (2) blocked: false — every matched stream that has a non-blocked
-        //     subscription. `eventsOnly` is filtered out (no subscription
-        //     at all when source/blocked is set on the filter).
-        const notBlocked = await store.query_stats<CounterEvents>({
-          stream: `^qsfr-${tag}-`,
-          blocked: false,
-        });
-        expect([...notBlocked.keys()].sort()).toEqual(
-          [subSrc1, subSrc2, subBare].sort()
-        );
-        expect(notBlocked.has(eventsOnly)).toBe(false);
-
-        // (3) No-stream filter (only source) — exercises the filter form
-        //     when `stream` is undefined.
-        const sourceOnly = await store.query_stats<CounterEvents>({
-          source: `^qsfr-${tag}-src-`,
-        });
-        // Universe is global, but our regex narrows down to this tag's
-        // sources. Both subSrc1 and subSrc2 match.
-        expect([...sourceOnly.keys()].sort()).toEqual(
-          [subSrc1, subSrc2].sort()
-        );
+        // Step 2: event-level stats for those streams.
+        const stats = await store.query_stats<CounterEvents>(blockedNames);
+        expect(stats.get(a)?.head.name).toBe("Incremented");
+        expect(stats.has(b)).toBe(false);
       });
 
       it("empty filter {} — matches every event-bearing stream", async () => {

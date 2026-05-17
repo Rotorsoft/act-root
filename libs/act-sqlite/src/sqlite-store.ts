@@ -649,7 +649,7 @@ export class SqliteStore implements Store {
    *   since SQLite has no native array type.
    */
   async query_stats<E extends Schemas>(
-    input: string[] | StreamFilter,
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
   ): Promise<Map<string, StreamStats<E>>> {
     const exclude = options?.exclude ?? [];
@@ -663,42 +663,25 @@ export class SqliteStore implements Store {
       return new Map<string, StreamStats<E>>();
     }
 
-    // Build WHERE clause + positional args. `e.` alias is used
-    // unconditionally so the column references stay stable across the
-    // two code paths and across the JOIN-vs-no-JOIN forms.
+    // Build WHERE clause + positional args. Subscription-level filters
+    // (source, blocked) are intentionally not accepted — events live in
+    // the events table; subscription state in the streams table. For
+    // "stats for blocked subscriptions" callers compose with
+    // query_streams. So no JOIN here.
     const where: string[] = [];
     const args: unknown[] = [];
-    const isArray = Array.isArray(input);
-    const needsStreamsJoin =
-      !isArray && (input.source !== undefined || input.blocked !== undefined);
 
-    if (isArray) {
+    if (Array.isArray(input)) {
       const placeholders = input.map(() => "?").join(",");
       where.push(`e.stream IN (${placeholders})`);
       args.push(...input);
-    } else {
-      if (input.stream !== undefined) {
-        if (input.stream_exact) {
-          where.push(`e.stream = ?`);
-          args.push(input.stream);
-        } else {
-          where.push(`e.stream LIKE ?`);
-          args.push(streamPatternToLike(input.stream));
-        }
-      }
-      if (input.source !== undefined) {
-        where.push(`s.source IS NOT NULL`);
-        if (input.source_exact) {
-          where.push(`s.source = ?`);
-          args.push(input.source);
-        } else {
-          where.push(`s.source LIKE ?`);
-          args.push(streamPatternToLike(input.source));
-        }
-      }
-      if (input.blocked !== undefined) {
-        where.push(`s.blocked = ?`);
-        args.push(input.blocked ? 1 : 0);
+    } else if (input.stream !== undefined) {
+      if (input.stream_exact) {
+        where.push(`e.stream = ?`);
+        args.push(input.stream);
+      } else {
+        where.push(`e.stream LIKE ?`);
+        args.push(streamPatternToLike(input.stream));
       }
     }
     if (exclude.length) {
@@ -711,9 +694,7 @@ export class SqliteStore implements Store {
       args.push(before);
     }
 
-    const fromClause = needsStreamsJoin
-      ? `events e JOIN streams s ON s.stream = e.stream`
-      : `events e`;
+    const fromClause = `events e`;
     // Always emit a WHERE clause — `WHERE 1=1` short-circuits the
     // empty-filter case without a conditional branch on the generation
     // side. SQLite optimizes the trivial predicate out.

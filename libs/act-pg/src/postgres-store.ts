@@ -1109,7 +1109,7 @@ export class PostgresStore implements Store {
    * exist for subscribed streams.
    */
   async query_stats<E extends Schemas>(
-    input: string[] | StreamFilter,
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
     options?: QueryStatsOptions<E>
   ): Promise<Map<string, StreamStats<E>>> {
     const exclude = options?.exclude ?? [];
@@ -1124,40 +1124,24 @@ export class PostgresStore implements Store {
       return new Map<string, StreamStats<E>>();
     }
 
-    // Build the shared WHERE clause + parameter list. The `e.` alias is
-    // used unconditionally even when no JOIN — keeps column references
-    // stable across the two code paths.
+    // Build WHERE clause + parameter list. Subscription-level filters
+    // (source, blocked) are intentionally not accepted — events live in
+    // the events table; subscription state in the streams table. For
+    // "stats for blocked subscriptions" callers compose with
+    // query_streams. So no JOIN here.
     const where: string[] = [];
     const params: unknown[] = [];
-    const isArray = Array.isArray(input);
-    const needsStreamsJoin =
-      !isArray && (input.source !== undefined || input.blocked !== undefined);
 
-    if (isArray) {
+    if (Array.isArray(input)) {
       params.push(input);
       where.push(`e.stream = ANY($${params.length})`);
-    } else {
-      if (input.stream !== undefined) {
-        params.push(input.stream);
-        where.push(
-          input.stream_exact
-            ? `e.stream = $${params.length}`
-            : `e.stream ~ $${params.length}`
-        );
-      }
-      if (input.source !== undefined) {
-        where.push(`s.source IS NOT NULL`);
-        params.push(input.source);
-        where.push(
-          input.source_exact
-            ? `s.source = $${params.length}`
-            : `s.source ~ $${params.length}`
-        );
-      }
-      if (input.blocked !== undefined) {
-        params.push(input.blocked);
-        where.push(`s.blocked = $${params.length}`);
-      }
+    } else if (input.stream !== undefined) {
+      params.push(input.stream);
+      where.push(
+        input.stream_exact
+          ? `e.stream = $${params.length}`
+          : `e.stream ~ $${params.length}`
+      );
     }
     if (exclude.length) {
       params.push(exclude);
@@ -1168,9 +1152,7 @@ export class PostgresStore implements Store {
       where.push(`e.id < $${params.length}`);
     }
 
-    const fromClause = needsStreamsJoin
-      ? `${this._fqt} e JOIN ${this._fqs} s ON s.stream = e.stream`
-      : `${this._fqt} e`;
+    const fromClause = `${this._fqt} e`;
     // Always emit a WHERE clause — `WHERE TRUE` short-circuits the
     // empty-filter case without a conditional branch on the generation
     // side. PG optimizes the trivial predicate out.
