@@ -6,12 +6,14 @@ import type {
   Lease,
   Message,
   Query,
+  QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
   Schemas,
   Store,
   StreamFilter,
   StreamPosition,
+  StreamStats,
 } from "@rotorsoft/act";
 
 /**
@@ -620,6 +622,24 @@ export class SqliteStore implements Store {
     }
 
     return { maxEventId: Number(maxResult.rows[0].m), count };
+  }
+
+  /**
+   * Per-stream aggregated stats — see {@link Store.query_stats}.
+   *
+   * **Slice scaffolding (ACT-639 slice 1+2):** stub. Real implementation
+   * lands in slice 4 of #639 (`ROW_NUMBER()` window function for heads,
+   * `GROUP BY` with `json_group_object` for full-scan path). Throws here
+   * so the interface is satisfied but accidental callers get a clear
+   * error message until the impl lands.
+   */
+  async query_stats<E extends Schemas>(
+    _input: string[] | StreamFilter,
+    _options?: QueryStatsOptions<E>
+  ): Promise<Map<string, StreamStats<E>>> {
+    throw new Error(
+      "SqliteStore.query_stats not implemented yet — see ACT-639 slice 4"
+    );
   }
 
   // --- prioritize: bulk priority update with filter (ACT-102) ---

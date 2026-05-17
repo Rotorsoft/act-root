@@ -8,6 +8,7 @@ import type {
   Message,
   NotifyDisposer,
   Query,
+  QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
   Schema,
@@ -16,6 +17,7 @@ import type {
   StoreNotification,
   StreamFilter,
   StreamPosition,
+  StreamStats,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -1077,6 +1079,24 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Per-stream aggregated stats — see {@link Store.query_stats}.
+   *
+   * **Slice scaffolding (ACT-639 slice 1+2):** stub. Real implementation
+   * lands in slice 3 of #639 (DISTINCT ON for heads, CTE with
+   * `jsonb_object_agg` for full-scan path). Throws here so the interface
+   * is satisfied but accidental callers get a clear error message until
+   * the impl lands.
+   */
+  async query_stats<E extends Schemas>(
+    _input: string[] | StreamFilter,
+    _options?: QueryStatsOptions<E>
+  ): Promise<Map<string, StreamStats<E>>> {
+    throw new Error(
+      "PostgresStore.query_stats not implemented yet — see ACT-639 slice 3"
+    );
   }
 
   /**
