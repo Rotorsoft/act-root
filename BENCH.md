@@ -38,6 +38,8 @@ Both invocations run a single root-level vitest process — no `pnpm -r` fan-out
 | `scripts/perf-bench.ts` | B | JSON-output regression baseline (commit / load / drain throughput) | CI regression guard via `bench:run` + `bench:check`. Baseline lives in `libs/act/perf-baseline.json`. |
 | `scripts/realistic-bench.ts` | B | Multi-aggregate workload throughput | Manual sanity check before releases. |
 
+**ACT-639 query_stats per-adapter benches:** the InMemory bench above (`bench/query-stats.micro.bench.ts`) shows the linear-vs-quadratic structural win. The PG and SQLite benches below capture the round-trip and statement-prep cost that durable adapters actually pay (the architectural motivation for the primitive).
+
 ### `@rotorsoft/act-pg`
 
 | File | Shape | Measures | Notes |
@@ -50,10 +52,17 @@ Both invocations run a single root-level vitest process — no `pnpm -r` fan-out
 | `bench/notify-perf.scenario.bench.ts` | C | cross-process commit→reaction latency, notify vs polling | **ACT-101**. Built-in regression bound: notify p99 < polling p99. See [`act-pg/PERFORMANCE.md`](./libs/act-pg/PERFORMANCE.md#act-101--cross-process-commitreaction-latency-listennotify-wakeup). |
 | `bench/priority-claim.scenario.bench.ts` | C | priority-aware claim vs dual-frontier baseline | **ACT-102**. Validates per-stream priority lanes during saturated drain. See [`libs/act/PERFORMANCE.md`](./libs/act/PERFORMANCE.md). |
 | `bench/reaction-latency.scenario.bench.ts` | C | single-process commit→reaction latency on PG, idle / 100 per sec / 1000 per sec | **ACT-103**. Built-in regression bound: idle p50 < 50 ms. Numbers in [`libs/act/PERFORMANCE.md`](./libs/act/PERFORMANCE.md#reaction-latency-act-103). |
+| `bench/query-stats.micro.bench.ts` | A | `query_stats` vs per-stream `query()` loop at N=10/100/1000 streams × 10 events | **ACT-639**. Real DB measures round-trip + transaction amortization: 6.55× faster at N=1000. |
 | `scripts/correlate-checkpoint.ts` | B | three sub-benchmarks for the correlate checkpoint optimization | Validates [correlate-checkpoint](./libs/act/PERFORMANCE.md#correlation-checkpoint--static-resolver-optimization-v0220) deltas. |
 | `scripts/drain-contention.ts` | B | many workers × many streams, measuring waste/throughput | Operational research. |
 | `scripts/watermark-claim.ts` | B | claim performance with many subscribed streams | Validates [watermark-aware claim filtering](./libs/act/PERFORMANCE.md#watermark-aware-claim-filtering-v0230). |
 | `test/stress/runner.ts` | (custom) | end-to-end stress harness | Run via `pnpm -F @rotorsoft/act-pg stress`. |
+
+### `@rotorsoft/act-sqlite`
+
+| File | Shape | Measures | Notes |
+| --- | --- | --- | --- |
+| `bench/query-stats.micro.bench.ts` | A | `query_stats` vs per-stream `query()` loop at N=10/100/1000 streams × 10 events | **ACT-639**. Embedded SQLite — no network round trips; measures statement-prep overhead. ~1.9× faster at N=1000. |
 
 ### `@rotorsoft/act-patch`
 
