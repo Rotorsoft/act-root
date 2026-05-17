@@ -8,6 +8,7 @@ import type {
   Message,
   NotifyDisposer,
   Query,
+  QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
   Schema,
@@ -16,6 +17,7 @@ import type {
   StoreNotification,
   StreamFilter,
   StreamPosition,
+  StreamStats,
 } from "@rotorsoft/act";
 import {
   ConcurrencyError,
@@ -1077,6 +1079,245 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Per-stream aggregated stats — see {@link Store.query_stats}.
+   *
+   * Two code paths chosen by the requested stats:
+   *
+   * - **Heads-only path** (no `count`, no `names`): one or two
+   *   `SELECT DISTINCT ON (stream) ... ORDER BY stream, version DESC|ASC`
+   *   queries, executed in parallel when `tail: true`. The
+   *   `(stream, version)` unique index gives index-only access — K rows
+   *   touched per query (K = matched streams), not N (events).
+   *   Ordering by `version` (not `id`) is equivalent within a stream
+   *   (versions are monotonic per stream and events are committed
+   *   sequentially) and is the column actually indexed.
+   *
+   * - **Full-scan path** (`count` or `names` set): one CTE materializes
+   *   the filtered events, then `GROUP BY stream, name` →
+   *   `jsonb_object_agg(name, n)` for the `names` map plus per-stream
+   *   `COUNT(*)` for `count`. Heads (and `tails` when requested) come
+   *   from `DISTINCT ON` over the same CTE — they ride free on the
+   *   already-paid scan.
+   *
+   * The stream universe is derived from the events table: filter form
+   * matches event-bearing streams (not subscription rows). When the
+   * filter sets `source` or `blocked`, the events table is joined
+   * against the streams subscription table since those concepts only
+   * exist for subscribed streams.
+   */
+  async query_stats<E extends Schemas>(
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
+    options?: QueryStatsOptions<E>
+  ): Promise<Map<string, StreamStats<E>>> {
+    const exclude = options?.exclude ?? [];
+    const wantTail = options?.tail ?? false;
+    const wantCount = options?.count ?? false;
+    const wantNames = options?.names ?? false;
+    const before = options?.before;
+    const fullScan = wantCount || wantNames;
+
+    // Empty array short-circuit — saves a round trip on a no-op.
+    if (Array.isArray(input) && input.length === 0) {
+      return new Map<string, StreamStats<E>>();
+    }
+
+    // Build WHERE clause + parameter list. Subscription-level filters
+    // (source, blocked) are intentionally not accepted — events live in
+    // the events table; subscription state in the streams table. For
+    // "stats for blocked subscriptions" callers compose with
+    // query_streams. So no JOIN here.
+    const where: string[] = [];
+    const params: unknown[] = [];
+
+    if (Array.isArray(input)) {
+      params.push(input);
+      where.push(`e.stream = ANY($${params.length})`);
+    } else if (input.stream !== undefined) {
+      params.push(input.stream);
+      where.push(
+        input.stream_exact
+          ? `e.stream = $${params.length}`
+          : `e.stream ~ $${params.length}`
+      );
+    }
+    if (exclude.length) {
+      params.push(exclude);
+      where.push(`e.name <> ALL($${params.length})`);
+    }
+    if (before !== undefined) {
+      params.push(before);
+      where.push(`e.id < $${params.length}`);
+    }
+
+    const fromClause = `${this._fqt} e`;
+    // Always emit a WHERE clause — `WHERE TRUE` short-circuits the
+    // empty-filter case without a conditional branch on the generation
+    // side. PG optimizes the trivial predicate out.
+    const whereClause = `WHERE ${where.length ? where.join(" AND ") : "TRUE"}`;
+
+    return fullScan
+      ? this._queryStatsFullScan<E>(
+          fromClause,
+          whereClause,
+          params,
+          wantTail,
+          wantCount,
+          wantNames
+        )
+      : this._queryStatsHeadsOnly<E>(fromClause, whereClause, params, wantTail);
+  }
+
+  /**
+   * Cheap path: index-only DISTINCT ON for the head per stream, plus an
+   * optional second query (in parallel) for the tail. K rows touched
+   * per query, not N events.
+   */
+  private async _queryStatsHeadsOnly<E extends Schemas>(
+    fromClause: string,
+    whereClause: string,
+    params: unknown[],
+    wantTail: boolean
+  ): Promise<Map<string, StreamStats<E>>> {
+    const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
+    const headSql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${fromClause} ${whereClause} ORDER BY e.stream, e.version DESC`;
+    const tailSql = wantTail
+      ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${fromClause} ${whereClause} ORDER BY e.stream, e.version ASC`
+      : null;
+
+    const [headRes, tailRes] = await Promise.all([
+      this._pool.query<Committed<E, keyof E>>(headSql, params),
+      tailSql
+        ? this._pool.query<Committed<E, keyof E>>(tailSql, params)
+        : Promise.resolve(null),
+    ]);
+
+    const out = new Map<string, StreamStats<E>>();
+    for (const row of headRes.rows) {
+      out.set(row.stream, { head: row });
+    }
+    if (tailRes) {
+      for (const row of tailRes.rows) {
+        // Head and tail share the same WHERE, so any stream returning a
+        // tail must also have returned a head — no null check needed.
+        (
+          out.get(row.stream) as {
+            head: Committed<E, keyof E>;
+            tail?: Committed<E, keyof E>;
+          }
+        ).tail = row;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Full-scan path: one CTE-based query computes the per-stream
+   * `COUNT(*)` and `jsonb_object_agg(name, n)` map alongside the head
+   * (and tail when requested). All extras share the single events scan.
+   */
+  private async _queryStatsFullScan<E extends Schemas>(
+    fromClause: string,
+    whereClause: string,
+    params: unknown[],
+    wantTail: boolean,
+    wantCount: boolean,
+    wantNames: boolean
+  ): Promise<Map<string, StreamStats<E>>> {
+    const tailCte = wantTail
+      ? `, tails AS (SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version ASC)`
+      : "";
+    const tailJoin = wantTail ? `LEFT JOIN tails t ON t.stream = h.stream` : "";
+    const tailCols = wantTail
+      ? `, t.id AS t_id, t.stream AS t_stream, t.version AS t_version,
+           t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta`
+      : "";
+
+    const sql = `
+      WITH ef AS (
+        SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta
+        FROM ${fromClause}
+        ${whereClause}
+      ),
+      agg AS (
+        SELECT stream,
+               SUM(n)::int AS cnt,
+               jsonb_object_agg(name, n) AS names
+        FROM (
+          SELECT stream, name, COUNT(*)::int AS n
+          FROM ef
+          GROUP BY stream, name
+        ) t
+        GROUP BY stream
+      ),
+      heads AS (
+        SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version DESC
+      )
+      ${tailCte}
+      SELECT
+        h.id, h.stream, h.version, h.name, h.data, h.created, h.meta,
+        a.cnt AS agg_count,
+        a.names AS agg_names
+        ${tailCols}
+      FROM heads h
+      LEFT JOIN agg a ON a.stream = h.stream
+      ${tailJoin}
+    `;
+
+    const res = await this._pool.query<
+      Committed<E, keyof E> & {
+        agg_count: number;
+        agg_names: Record<string, number> | null;
+        t_id?: number;
+        t_stream?: string;
+        t_version?: number;
+        t_name?: string;
+        t_data?: object;
+        t_created?: Date;
+        t_meta?: object;
+      }
+    >(sql, params);
+
+    const out = new Map<string, StreamStats<E>>();
+    for (const row of res.rows) {
+      const stats: {
+        head: Committed<E, keyof E>;
+        tail?: Committed<E, keyof E>;
+        count?: number;
+        names?: Record<string, number>;
+      } = {
+        head: {
+          id: row.id,
+          stream: row.stream,
+          version: row.version,
+          name: row.name,
+          data: row.data,
+          created: row.created,
+          meta: row.meta,
+        } as Committed<E, keyof E>,
+      };
+      if (wantTail && row.t_id !== undefined && row.t_id !== null) {
+        stats.tail = {
+          id: row.t_id,
+          stream: row.t_stream,
+          version: row.t_version,
+          name: row.t_name,
+          data: row.t_data,
+          created: row.t_created,
+          meta: row.t_meta,
+        } as unknown as Committed<E, keyof E>;
+      }
+      if (wantCount) stats.count = row.agg_count;
+      // `agg_names` is non-null when this row exists: heads and agg are
+      // both built from the same `ef` CTE, so any stream in heads has
+      // at least one matching event and `jsonb_object_agg` returns an
+      // object (never null) for that group.
+      if (wantNames) stats.names = row.agg_names as Record<string, number>;
+      out.set(row.stream, stats as StreamStats<E>);
+    }
+    return out;
   }
 
   /**

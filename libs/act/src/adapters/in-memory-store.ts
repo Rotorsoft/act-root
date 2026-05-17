@@ -17,6 +17,7 @@ import type {
   Lease,
   Message,
   Query,
+  QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
   Schema,
@@ -24,6 +25,7 @@ import type {
   Store,
   StreamFilter,
   StreamPosition,
+  StreamStats,
 } from "../types/index.js";
 import { sleep } from "../utils.js";
 
@@ -731,6 +733,102 @@ export class InMemoryStore implements Store {
       if (count >= limit) break;
     }
     return { maxEventId: this._events.length - 1, count };
+  }
+
+  /**
+   * Per-stream aggregated stats — see {@link Store.query_stats}.
+   *
+   * Single forward scan over the in-memory event list, accumulating per
+   * stream. The "cheap heads" cost tier from durable adapters doesn't
+   * apply here (InMemory has no indexes); correctness is the goal, perf
+   * is a non-issue.
+   *
+   * Scope rules:
+   * - Array `input` — explicit stream names, regardless of subscription.
+   * - Filter `input` — `stream`/`stream_exact` match against event-bearing
+   *   stream names; `source`/`source_exact`/`blocked` require a
+   *   corresponding subscription in `_streams` (those are subscription
+   *   concepts, not event concepts). Empty filter `{}` matches every
+   *   event-bearing stream.
+   */
+  async query_stats<E extends Schemas>(
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
+    options?: QueryStatsOptions<E>
+  ): Promise<Map<string, StreamStats<E>>> {
+    await sleep();
+    const exclude = new Set<string>(options?.exclude ?? []);
+    const wantTail = options?.tail ?? false;
+    const wantCount = options?.count ?? false;
+    const wantNames = options?.names ?? false;
+    const before = options?.before;
+
+    // Pre-compile per-stream scope predicate, cached as we go so each
+    // distinct stream evaluates the regex once.
+    const arrayTargets = Array.isArray(input) ? new Set(input) : null;
+    const filter = Array.isArray(input) ? null : input;
+    const streamRe =
+      filter?.stream && !filter.stream_exact
+        ? new RegExp(filter.stream)
+        : undefined;
+
+    const scopeCache = new Map<string, boolean>();
+    const inScope = (stream: string): boolean => {
+      const cached = scopeCache.get(stream);
+      if (cached !== undefined) return cached;
+      let ok = true;
+      if (arrayTargets) {
+        ok = arrayTargets.has(stream);
+      } else if (filter?.stream !== undefined) {
+        ok = filter.stream_exact
+          ? stream === filter.stream
+          : // biome-ignore lint/style/noNonNullAssertion: streamRe set when stream is regex
+            streamRe!.test(stream);
+      }
+      scopeCache.set(stream, ok);
+      return ok;
+    };
+
+    type Acc = {
+      head: Committed<Schemas, keyof Schemas>;
+      tail?: Committed<Schemas, keyof Schemas>;
+      count: number;
+      names?: Record<string, number>;
+    };
+    const acc = new Map<string, Acc>();
+    for (const e of this._events) {
+      if (before !== undefined && e.id >= before) continue;
+      if (!inScope(e.stream)) continue;
+      if (exclude.has(e.name as string)) continue;
+      let a = acc.get(e.stream);
+      if (!a) {
+        a = { head: e, count: 0 };
+        if (wantTail) a.tail = e;
+        if (wantNames) a.names = {};
+        acc.set(e.stream, a);
+      }
+      a.head = e;
+      a.count++;
+      if (wantNames) {
+        const n = String(e.name);
+        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when wantNames
+        a.names![n] = (a.names![n] ?? 0) + 1;
+      }
+    }
+
+    const out = new Map<string, StreamStats<E>>();
+    for (const [stream, a] of acc) {
+      const stats: {
+        head: Committed<Schemas, keyof Schemas>;
+        tail?: Committed<Schemas, keyof Schemas>;
+        count?: number;
+        names?: Record<string, number>;
+      } = { head: a.head };
+      if (wantTail) stats.tail = a.tail;
+      if (wantCount) stats.count = a.count;
+      if (wantNames) stats.names = a.names;
+      out.set(stream, stats as StreamStats<E>);
+    }
+    return out;
   }
 
   /**

@@ -1,4 +1,4 @@
-import { ConcurrencyError } from "@rotorsoft/act";
+import { ConcurrencyError, SNAP_EVENT, TOMBSTONE_EVENT } from "@rotorsoft/act";
 import type {
   BlockedLease,
   Committed,
@@ -225,6 +225,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(backward.map((e) => e.id)).toEqual(
           [...committed].reverse().map((c) => c.id)
         );
+
+        // Backward + limit — exercises the limit-break branch in the
+        // backward-traversal path. Latest event only.
+        const latest = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          backward: true,
+          limit: 1,
+        });
+        expect(latest).toHaveLength(1);
+        expect(latest[0].id).toBe(committed.at(-1)!.id);
       });
 
       it("after/before bound the id range", async () => {
@@ -1041,6 +1052,287 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           blocked: false,
         });
         expect(unblocked).toEqual([sibling]);
+      });
+    });
+
+    describe("query_stats", () => {
+      it("array input — returns head per stream, absent when not in input", async () => {
+        const tag = uid();
+        const sA = `qst-${tag}-a`;
+        const sB = `qst-${tag}-b`;
+        const sUnasked = `qst-${tag}-unasked`;
+        await store.commit<CounterEvents>(
+          sA,
+          [inc(1), inc(2)],
+          makeMeta({ stream: sA })
+        );
+        await store.commit<CounterEvents>(
+          sB,
+          [dec(5)],
+          makeMeta({ stream: sB })
+        );
+        await store.commit<CounterEvents>(
+          sUnasked,
+          [inc(99)],
+          makeMeta({ stream: sUnasked })
+        );
+
+        const stats = await store.query_stats<CounterEvents>([sA, sB]);
+        expect(stats.size).toBe(2);
+        expect(stats.get(sA)?.head.name).toBe("Incremented");
+        expect((stats.get(sA)?.head.data as { amount: number }).amount).toBe(2);
+        expect(stats.get(sB)?.head.name).toBe("Decremented");
+        expect((stats.get(sB)?.head.data as { amount: number }).amount).toBe(5);
+        expect(stats.has(sUnasked)).toBe(false);
+
+        // Empty input — empty result.
+        const empty = await store.query_stats([]);
+        expect(empty.size).toBe(0);
+
+        // Unknown stream name — absent, not an error.
+        const unknown = await store.query_stats([`qst-${tag}-missing`]);
+        expect(unknown.size).toBe(0);
+      });
+
+      it("tail returns the earliest event per stream", async () => {
+        const tag = uid();
+        const s = `qst-tail-${tag}`;
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(s, [inc(2)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(s, [inc(3)], makeMeta({ stream: s }));
+
+        const stats = await store.query_stats<CounterEvents>([s], {
+          tail: true,
+        });
+        const r = stats.get(s);
+        expect(r?.head.name).toBe("Incremented");
+        expect((r?.head.data as { amount: number }).amount).toBe(3);
+        expect(r?.tail?.name).toBe("Incremented");
+        expect((r?.tail?.data as { amount: number }).amount).toBe(1);
+      });
+
+      it("count + names — full aggregates including framework markers", async () => {
+        const tag = uid();
+        const s = `qst-cn-${tag}`;
+        // 1 inc, then truncate (wipes + seeds snap), then 2 more incs + 1 dec
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.truncate([{ stream: s, snapshot: { count: 99 } }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(2), inc(3), dec(1)],
+          makeMeta({ stream: s })
+        );
+
+        const stats = await store.query_stats<CounterEvents>([s], {
+          count: true,
+          names: true,
+        });
+        const r = stats.get(s);
+        // Post-truncate live events: snap + inc + inc + dec = 4
+        expect(r?.count).toBe(4);
+        expect(r?.names?.[SNAP_EVENT]).toBe(1);
+        expect(r?.names?.Incremented).toBe(2);
+        expect(r?.names?.Decremented).toBe(1);
+        // Snapshot count is derivable from the names map — no separate field needed.
+        expect(r?.names?.[SNAP_EVENT]).toBe(1);
+      });
+
+      it("exclude shifts head past filtered events; stream absent when all filtered", async () => {
+        const tag = uid();
+        const s = `qst-excl-${tag}`;
+        const sAllOut = `qst-allout-${tag}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), dec(2), inc(3)],
+          makeMeta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          sAllOut,
+          [inc(7)],
+          makeMeta({ stream: sAllOut })
+        );
+
+        // Without exclude — head is the latest Incremented.
+        const all = await store.query_stats<CounterEvents>([s]);
+        expect(all.get(s)?.head.name).toBe("Incremented");
+        expect((all.get(s)?.head.data as { amount: number }).amount).toBe(3);
+
+        // Exclude Incremented — head is now Decremented (the next-latest).
+        const excl = await store.query_stats<CounterEvents>([s], {
+          exclude: ["Incremented"],
+        });
+        expect(excl.get(s)?.head.name).toBe("Decremented");
+        expect((excl.get(s)?.head.data as { amount: number }).amount).toBe(2);
+
+        // Exclude every name on a stream — that stream is absent from result.
+        const wipe = await store.query_stats<CounterEvents>([sAllOut], {
+          exclude: ["Incremented", "Decremented", "Reset"],
+        });
+        expect(wipe.has(sAllOut)).toBe(false);
+
+        // Framework markers are typed in EventName<E> too — close-cycle pattern.
+        const noTomb = await store.query_stats<CounterEvents>([s], {
+          exclude: [TOMBSTONE_EVENT],
+        });
+        expect(noTomb.get(s)?.head.name).toBe("Incremented");
+      });
+
+      it("before — time travel narrows head/tail/count", async () => {
+        const tag = uid();
+        const s = `qst-tt-${tag}`;
+        const c1 = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          makeMeta({ stream: s })
+        );
+        const c2 = await store.commit<CounterEvents>(
+          s,
+          [inc(2)],
+          makeMeta({ stream: s })
+        );
+        await store.commit<CounterEvents>(s, [inc(3)], makeMeta({ stream: s }));
+
+        // Cutoff at id of c2's event — only c1's event is < cutoff
+        const before = c2[0].id;
+        const stats = await store.query_stats<CounterEvents>([s], {
+          tail: true,
+          count: true,
+          before,
+        });
+        const r = stats.get(s);
+        expect(r?.count).toBe(1);
+        expect(r?.head.id).toBe(c1[0].id);
+        expect(r?.tail?.id).toBe(c1[0].id);
+
+        // Cutoff before any event — stream absent
+        const empty = await store.query_stats<CounterEvents>([s], {
+          before: 0,
+        });
+        expect(empty.has(s)).toBe(false);
+      });
+
+      it("filter form — stream regex, stream_exact, empty {} match", async () => {
+        const tag = uid();
+        const sA = `qsf-${tag}-orders-1`;
+        const sB = `qsf-${tag}-orders-2`;
+        const sOther = `qsf-${tag}-users-1`;
+        await store.commit<CounterEvents>(
+          sA,
+          [inc(1)],
+          makeMeta({ stream: sA })
+        );
+        await store.commit<CounterEvents>(
+          sB,
+          [inc(2)],
+          makeMeta({ stream: sB })
+        );
+        await store.commit<CounterEvents>(
+          sOther,
+          [inc(3)],
+          makeMeta({ stream: sOther })
+        );
+
+        // Regex match — restrict to this tag's orders.
+        const orders = await store.query_stats<CounterEvents>({
+          stream: `^qsf-${tag}-orders-`,
+        });
+        expect([...orders.keys()].sort()).toEqual([sA, sB].sort());
+
+        // Exact match — single stream.
+        const exact = await store.query_stats<CounterEvents>({
+          stream: sA,
+          stream_exact: true,
+        });
+        expect([...exact.keys()]).toEqual([sA]);
+
+        // Empty filter — matches every event-bearing stream visible to
+        // this test's tag (filtered down to avoid sibling-test pollution).
+        const all = await store.query_stats<CounterEvents>({
+          stream: `^qsf-${tag}-`,
+        });
+        expect([...all.keys()].sort()).toEqual([sA, sB, sOther].sort());
+      });
+
+      it("compose with query_streams for subscription-level filters", async () => {
+        // `query_stats` only accepts event-stream selection. For
+        // "stats for blocked subscriptions" etc., compose with
+        // `query_streams` and pipe the names through. This test asserts
+        // that two-call pattern works end-to-end.
+        const tag = uid();
+        const a = `qsc-${tag}-a`;
+        const b = `qsc-${tag}-b`;
+        await store.subscribe([{ stream: a }, { stream: b }]);
+        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
+        await store.commit<CounterEvents>(b, [inc(2)], makeMeta({ stream: b }));
+
+        // Block stream `a` via the standard claim → block path.
+        const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === a);
+        expect(mine).toBeDefined();
+        const others = leased.filter((l) => l.stream !== a);
+        await store.ack(others);
+        await store.block([{ ...(mine as Lease), error: "boom" }]);
+
+        // Step 1: subscription-level filter via query_streams.
+        const blockedNames: string[] = [];
+        await store.query_streams((p) => blockedNames.push(p.stream), {
+          stream: `^qsc-${tag}-`,
+          blocked: true,
+        });
+        expect(blockedNames).toEqual([a]);
+
+        // Step 2: event-level stats for those streams.
+        const stats = await store.query_stats<CounterEvents>(blockedNames);
+        expect(stats.get(a)?.head.name).toBe("Incremented");
+        expect(stats.has(b)).toBe(false);
+      });
+
+      it("empty filter {} — matches every event-bearing stream", async () => {
+        const tag = uid();
+        const a = `qse-${tag}-a`;
+        const b = `qse-${tag}-b`;
+        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
+        await store.commit<CounterEvents>(b, [dec(2)], makeMeta({ stream: b }));
+
+        // {} matches all event-bearing streams globally — the TCK runs
+        // against a shared store, so we only assert that this tag's
+        // streams are present (other tests' streams may also appear).
+        const all = await store.query_stats<CounterEvents>({});
+        expect(all.has(a)).toBe(true);
+        expect(all.has(b)).toBe(true);
+      });
+
+      it("stat-flag combinations — count-only, names-only, tail-only", async () => {
+        const tag = uid();
+        const s = `qsfl-${tag}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), dec(3)],
+          makeMeta({ stream: s })
+        );
+
+        // count only → no names, no tail in result.
+        const c = await store.query_stats<CounterEvents>([s], {
+          count: true,
+        });
+        expect(c.get(s)?.count).toBe(3);
+        expect(c.get(s)?.names).toBeUndefined();
+        expect(c.get(s)?.tail).toBeUndefined();
+
+        // names only → no count, no tail.
+        const n = await store.query_stats<CounterEvents>([s], {
+          names: true,
+        });
+        expect(n.get(s)?.names).toEqual({ Incremented: 2, Decremented: 1 });
+        expect(n.get(s)?.count).toBeUndefined();
+        expect(n.get(s)?.tail).toBeUndefined();
+
+        // tail only → no count, no names. Cheap path (no full scan).
+        const t = await store.query_stats<CounterEvents>([s], { tail: true });
+        expect(t.get(s)?.tail?.name).toBe("Incremented");
+        expect((t.get(s)?.tail?.data as { amount: number }).amount).toBe(1);
+        expect(t.get(s)?.count).toBeUndefined();
+        expect(t.get(s)?.names).toBeUndefined();
       });
     });
 

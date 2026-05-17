@@ -223,6 +223,102 @@ export type StreamFilter = Pick<
 export type PrioritizeFilter = StreamFilter;
 
 /**
+ * Framework-internal event names — written by the runtime, not by user
+ * code. Snapshots are seeded by `truncate()`; tombstones by `close()`.
+ *
+ * Kept as a literal-string union here (rather than re-exported from
+ * `../ports.js` where the runtime constants live) so {@link QueryStatsOptions.exclude}
+ * can be type-checked without inducing a `types/` → `ports.ts` cycle.
+ * The runtime constants {@link "../ports.js".SNAP_EVENT | SNAP_EVENT} and
+ * {@link "../ports.js".TOMBSTONE_EVENT | TOMBSTONE_EVENT} (exported from
+ * `@rotorsoft/act`) are the typed source of truth; this union mirrors
+ * them at the type level.
+ */
+export type FrameworkEventName = "__snapshot__" | "__tombstone__";
+
+/**
+ * Union of all event names valid for a given schema set: user-declared
+ * event names plus the framework-internal markers. Used by
+ * {@link QueryStatsOptions.exclude} so callers can mix domain events and
+ * framework markers in the same filter list without `as string` casts
+ * or stringly-typed mistakes (e.g. `"__tombsotne__"` typos fail at
+ * compile time).
+ *
+ * @template E - Event schemas; defaults to {@link Schemas}.
+ */
+export type EventName<E extends Schemas = Schemas> =
+  | (keyof E & string)
+  | FrameworkEventName;
+
+/**
+ * Per-stream aggregated stats returned by {@link Store.query_stats}.
+ *
+ * `head` and `tail` follow the **git-log convention**, not the Unix
+ * `head`/`tail` convention:
+ * - `head` — the **latest** event (highest id), always present.
+ * - `tail` — the **earliest** event (lowest id), opt-in via
+ *   {@link QueryStatsOptions.tail}.
+ *
+ * @template E - Event schemas; defaults to {@link Schemas} when the caller
+ *   does not narrow.
+ * @property head - Latest non-excluded event for the stream.
+ * @property tail - Earliest non-excluded event for the stream, when
+ *   `options.tail` is true.
+ * @property count - Total non-excluded event count for the stream, when
+ *   `options.count` is true.
+ * @property names - Sparse map of event name → count of events with
+ *   that name, when `options.names` is true. Keys are typed as
+ *   {@link EventName | EventName<E>} so typos on lookup
+ *   (e.g. `stats.names?.["TicktOpened"]`) fail at compile time when the
+ *   caller narrows `E`. Empty object never returned — a stream with no
+ *   matching events is absent from the result map entirely.
+ */
+export type StreamStats<E extends Schemas = Schemas> = {
+  readonly head: Committed<E, keyof E>;
+  readonly tail?: Committed<E, keyof E>;
+  readonly count?: number;
+  readonly names?: Readonly<Partial<Record<EventName<E>, number>>>;
+};
+
+/**
+ * Options for {@link Store.query_stats}. All stat fields default to
+ * `false` except `head`, which is always returned.
+ *
+ * **Cost model:** With no opt-in flags (or `tail` alone), each requested
+ * stat resolves via an index-backed lookup — O(K) cost where K is the
+ * number of matched streams. Setting `count` and/or `names` triggers a
+ * full event scan over the matched streams (O(N) where N is total events);
+ * both share the same scan and so requesting one is the same cost as
+ * requesting both.
+ *
+ * @template E - Event schemas; defaults to {@link Schemas}. When the caller
+ *   narrows `E`, `exclude` is type-checked against the schema's event names
+ *   — typos like `["TOMBSTON_EVENT"]` fail at compile time.
+ * @property tail - Include the earliest non-excluded event per stream.
+ *   Cheap when alone (indexed); free when `count`/`names` also set
+ *   (already scanning).
+ * @property count - Include the total non-excluded event count per stream.
+ *   Triggers full scan.
+ * @property names - Include a `name → count` map per stream. Triggers
+ *   full scan (shares cost with `count`).
+ * @property exclude - Event names to skip — e.g.
+ *   `[TOMBSTONE_EVENT, SNAP_EVENT]` to ignore framework markers. Applies
+ *   to all returned stats (head, tail, count, names) consistently.
+ * @property before - Time-travel cutoff: only consider events with
+ *   `id < before`. Omitted = current state. Useful for "what did this
+ *   stream look like at event N?" historical queries without changing
+ *   the call shape. Cheap on both code paths (cheap-heads path narrows
+ *   the index scan; full-scan path adds a `WHERE id < ?` predicate).
+ */
+export type QueryStatsOptions<E extends Schemas = Schemas> = {
+  readonly tail?: boolean;
+  readonly count?: boolean;
+  readonly names?: boolean;
+  readonly exclude?: ReadonlyArray<EventName<E>>;
+  readonly before?: number;
+};
+
+/**
  * Interface for event store implementations.
  *
  * The Store interface defines the contract for persistence adapters in Act.
@@ -688,6 +784,114 @@ export interface Store extends Disposable {
     callback: (position: StreamPosition) => void,
     query?: QueryStreams
   ) => Promise<QueryStreamsResult>;
+
+  /**
+   * Per-stream aggregated stats — single round trip per adapter.
+   *
+   * Returns the latest event (`head`) plus opt-in extras (`tail`, `count`,
+   * `names`) for each stream selected by `input`. Streams with no
+   * qualifying events are absent from the result map.
+   *
+   * **Cost model.** With no opt-in flags, the call uses an index-backed
+   * head lookup per stream — O(K) where K is the number of matched
+   * streams. `tail` alone stays in the cheap tier. Setting `count` and/or
+   * `names` triggers a full event scan over the matched streams (O(N)
+   * where N is total events); both stats share that scan, so requesting
+   * one or both is the same cost.
+   *
+   * **`input`.** Either an explicit `string[]` of stream names, or a
+   * narrow event-stream selector `{ stream?, stream_exact? }` for
+   * pattern-based or exact-name matching. **Subscription-level filters
+   * (`source`, `blocked`) are intentionally not accepted here** — they
+   * describe subscriptions, not events, and conflating the two would
+   * silently exclude unsubscribed event streams. For
+   * "stats for all blocked subscriptions" compose explicitly:
+   * `query_streams({blocked: true})` → collect names → `query_stats(names)`.
+   *
+   * **`head` vs `tail` naming.** Follows the git-log convention: `head`
+   * is the latest event (highest id), `tail` is the earliest (lowest id).
+   * This is the **opposite** of the Unix `head`/`tail` commands.
+   *
+   * **Framework markers.** Snapshots (`__snapshot__`) and tombstones
+   * (`__tombstone__`) are real events and are included by default —
+   * intentional, so schema-evolution tooling can count them. To exclude
+   * them, pass them in `options.exclude` (typed against {@link EventName})
+   * so typos are compile-time errors.
+   *
+   * **Snapshot counts come from `names`.** When `names: true` and snapshots
+   * are not in `exclude`, `result.names["__snapshot__"]` is the snapshot
+   * count for that stream — no separate field needed. Validates snapshot
+   * policy at scale: `names["__snapshot__"] / count` should match the
+   * configured snap predicate's expected ratio.
+   *
+   * **Time travel.** `options.before` narrows to events with `id < before`,
+   * answering "what did this stream look like at event N?" without
+   * special call shape.
+   *
+   * @example Cheap heads — close-cycle pattern (one round trip, no scan)
+   * ```typescript
+   * const stats = await store().query_stats(streams, {
+   *   exclude: [TOMBSTONE_EVENT],
+   * });
+   * for (const [stream, { head }] of stats) {
+   *   // head.id, head.version, head.name
+   * }
+   * ```
+   *
+   * @example Full stats — inspector / admin dashboard (one full scan)
+   * ```typescript
+   * const stats = await store().query_stats<MyEvents>(
+   *   { stream: "^orders-" },
+   *   { count: true, tail: true, names: true,
+   *     exclude: [TOMBSTONE_EVENT] }
+   * );
+   * for (const [stream, s] of stats) {
+   *   const snaps = s.names?.[SNAP_EVENT] ?? 0;
+   *   const domain = (s.count ?? 0) - snaps;
+   *   console.log(stream, { snaps, domain, tail: s.tail?.created });
+   * }
+   * ```
+   *
+   * @example Schema-evolution — surface deprecated events per stream
+   * ```typescript
+   * const stats = await store().query_stats<TicketEvents>(
+   *   { stream: "^ticket-" },
+   *   { names: true }
+   * );
+   * for (const [stream, { names = {} }] of stats) {
+   *   if ((names["TicketOpened"] ?? 0) > 0) {
+   *     console.log(`${stream}: ${names["TicketOpened"]} legacy events`);
+   *   }
+   * }
+   * ```
+   *
+   * @example Time travel — stream state at a historical cutoff
+   * ```typescript
+   * const stats = await store().query_stats(["order-42"], {
+   *   before: 100_000, // events up to (not including) id 100000
+   *   tail: true,
+   * });
+   * const { head, tail } = stats.get("order-42") ?? {};
+   * // head = latest event with id < 100_000; tail = earliest in range
+   * ```
+   *
+   * @template E - Event schemas. Narrow at the call site to type-check
+   *   `exclude` against your event names (typos fail at compile time).
+   *
+   * @param input - Stream names or a filter selecting the streams to stat.
+   * @param options - Opt-in stat fields, event-name exclusions, and
+   *   time-travel cutoff. See {@link QueryStatsOptions}.
+   * @returns Map keyed by stream name. Streams with no qualifying events
+   *   (after `exclude` and `before` are applied) are absent.
+   *
+   * @see {@link QueryStatsOptions} for the cost-aware option surface
+   * @see {@link StreamStats} for the per-stream result shape
+   * @see {@link EventName} for the typed exclude entries
+   */
+  query_stats: <E extends Schemas>(
+    input: string[] | Pick<StreamFilter, "stream" | "stream_exact">,
+    options?: QueryStatsOptions<E>
+  ) => Promise<Map<string, StreamStats<E>>>;
 
   /**
    * Optional cross-process commit notifications.
