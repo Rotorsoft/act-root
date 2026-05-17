@@ -30,23 +30,21 @@
   </tr>
 </table>
 
-## Event sourcing without the ceremony
+## What Act is
 
-Most event-sourcing frameworks ask you to learn five concepts before you can ship a feature: aggregates, commands, events, sagas, projections — and the glue between them. Act asks you to learn **three**: actions, state, reactions. The rest is plumbing the framework handles for you.
+Act is an event-sourcing framework for TypeScript. The domain is expressed through three composable primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — all defined as Zod schemas with full TypeScript inference, all backed by an immutable event log.
 
-Your domain stays in TypeScript. Your schemas stay in Zod. Your events live in Postgres (or SQLite, or memory — same API). The framework wires the pipeline: validate input, append to the log, derive state, fan out reactions, drain them under back-pressure, recover blocked streams when something downstream breaks. No Kafka. No RabbitMQ. No saga DSL. No upcasting middleware. No code generators.
+Around those primitives, the framework provides the pipeline: input validation against the schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions over a polled drain loop with configurable backoff and stream-level dead-lettering, recovery primitives for blocked streams, snapshots and a cache layer for fast cold loads, time-travel queries against the same log. Pick a store at bootstrap — Postgres for production, SQLite for embedded, in-memory for tests — and the application code stays the same.
 
-If you've tried event sourcing before and bounced off the ceremony, **Act is the version where it clicks**.
+## What you get
 
-## Why teams pick Act
-
-- **Three primitives, not fifteen.** `Actions → {State} ← Reactions` is the whole mental model. The same shape covers commands, queries, projections, sagas, and integrations — without separate vocabularies for each.
+- **Three primitives organize the API.** Slices, projections, snapshots, the drain loop, lifecycle events — they all attach to `actions`, `state`, and `reactions`. One mental model for commands, queries, projections, and integrations.
 - **One schema, two purposes.** Zod schemas define your events at runtime *and* generate the TypeScript types at compile time. No drift, no duplication, no `unknown` escape hatches. Refactor an event, the compiler tells you everywhere it broke.
-- **Production-grade out of the box.** Atomic stream claiming via `FOR UPDATE SKIP LOCKED`. Optimistic concurrency on every commit. Automatic retries with configurable backoff. Stream-level dead-lettering with a real recovery API — not a TODO comment that says "wire up your DLQ here."
-- **Time-travel is just `load()`.** Reconstruct state at any historical event ID or timestamp with the same call you use for the current state. No separate read store, no "as-of" API to learn.
-- **Zero brokers required.** The event store IS the message bus. Postgres with `LISTEN`/`NOTIFY` for low-latency cross-process wakeups; SQLite for embedded; in-memory for tests. Same code, same semantics.
+- **Production-grade defaults.** Atomic stream claiming via `FOR UPDATE SKIP LOCKED`. Optimistic concurrency on every commit. Automatic retries with configurable backoff. Stream-level blocked-state with an explicit recovery API (`blocked_streams`, `unblock`).
+- **Time-travel via `load()`.** Reconstruct state at any historical event ID or timestamp with the same call you use for the current state. No separate read store, no "as-of" API to learn.
+- **No external broker.** The event store carries the message-bus role. Postgres with `LISTEN`/`NOTIFY` for low-latency cross-process wakeups; SQLite for embedded; in-memory for tests. The orchestrator works without notify too — it just adds polling lag.
 - **100% test coverage, perf-regression-gated.** Every PR runs the full suite at 100% statement/branch/function/line coverage. A separate CI bench fails the build when any scenario's p50 regresses past 1.5× the baseline. Numbers are public ([PERFORMANCE.md](./libs/act/PERFORMANCE.md)) and adapter conformance is enforced via a [Test Compatibility Kit](./libs/act-tck).
-- **AI scaffolding that actually works.** Drop a spec — event-modeling diagram, event-storming board, JSON config, or plain prose — into Claude Code with the included [scaffold skill](./.claude/skills/scaffold-act-app/), and get a working monorepo. Domain, API, client, tests.
+- **AI scaffolding.** Drop a spec — event-modeling diagram, event-storming board, JSON config, or plain prose — into Claude Code with the included [scaffold skill](./.claude/skills/scaffold-act-app/), and get a working monorepo. Domain, API, client, tests.
 
 ## 30-second demo
 
