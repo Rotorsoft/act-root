@@ -33,6 +33,8 @@ Both invocations run a single root-level vitest process — no `pnpm -r` fan-out
 | `bench/drain-skip.micro.bench.ts` | A | drain after a non-reactive event (skip optimization) vs reactive event | Documents the [drain-skip optimization](./libs/act/PERFORMANCE.md#drain-skip-for-non-reactive-events-v0240) (~3× faster). |
 | `bench/batch-projection.scenario.bench.ts` | C | per-event drain vs batched drain at 50 / 200 / 500 events | Documents the [batched projection replay](./libs/act/PERFORMANCE.md#batched-projection-replay) (~10–100× faster). |
 | `bench/reaction-latency.scenario.bench.ts` | C | commit→reaction latency (p50 / p95 / p99) at idle / 100/sec / 1000/sec on `InMemoryStore` | **ACT-103**. Built-in regression bound: idle p99 < 50 ms. See [Reaction latency](./libs/act/PERFORMANCE.md#reaction-latency-act-103). |
+| `bench/query-stats.micro.bench.ts` | A | `Store.query_stats` vs pre-ACT-639 per-stream `query()` loop at N=10/100/1000 streams × 10 events (heads-only and full-scan paths) | **ACT-639**. Demonstrates the linear-vs-quadratic scaling: ~27× faster at N=1000 on InMemory. |
+| `bench/close-bulk.scenario.bench.ts` | C | bulk close-cycle scan: per-stream loop vs `query_stats` at N=10/100/1000 streams | **ACT-639**. Built-in regression bound: ≥2× faster at N=1000 (typically ~37× in practice). |
 | `scripts/perf-bench.ts` | B | JSON-output regression baseline (commit / load / drain throughput) | CI regression guard via `bench:run` + `bench:check`. Baseline lives in `libs/act/perf-baseline.json`. |
 | `scripts/realistic-bench.ts` | B | Multi-aggregate workload throughput | Manual sanity check before releases. |
 
