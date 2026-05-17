@@ -22,8 +22,8 @@ title: Close cycle
                       │
                       ▼
           ┌───────────────────────────┐
-          │ Phase 1: Scan stream heads│  For each target, find the latest non-tombstone event.
-          │   query_stats(exclude=snap)│  Single round trip — indexed heads-only path.
+          │ Phase 1: Scan stream heads│  For each target, find the latest non-tombstone event in
+          │   query_stats             │  a single indexed round trip; snapshots filtered out.
           └───────────┬───────────────┘
                       │
                       ▼
