@@ -1,6 +1,6 @@
-<table width="100%" cellspacing="0">
+<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border-spacing:0;margin:0;padding:0">
   <tr>
-    <td colspan="2" align="left">
+    <td colspan="2" align="left" style="padding:0">
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
       <a href="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml/badge.svg?branch=master" alt="Store Conformance"></a>
       <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
@@ -8,43 +8,47 @@
     </td>
   </tr>
   <tr>
-    <td width="69%" align="center">
+    <td width="69%" align="center" style="padding:0">
       <a href="https://rotorsoft.github.io/act-root/">
         <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
       </a>
     </td>
-    <td width="31%" align="center">
+    <td width="31%" align="center" style="padding:0">
       <a href="https://payhip.com/b/7ezLy">
         <img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%">
       </a>
     </td>
   </tr>
   <tr>
-    <td align="center">
+    <td align="center" style="padding:0">
       <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
       <a href="https://rotorsoft.github.io/act-root/"><img src="https://img.shields.io/badge/Documentation-7c5cff?style=for-the-badge&labelColor=11141b" alt="Documentation"></a>
     </td>
-    <td align="center">
+    <td align="center" style="padding:0">
       <a href="https://payhip.com/b/7ezLy"><img src="https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge" alt="Get the Book"></a>
     </td>
   </tr>
 </table>
 
-## What Act is
+## What it is
 
-Act is an event-sourcing framework for TypeScript. The domain is expressed through three composable primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — all defined as Zod schemas with full TypeScript inference, all backed by an immutable event log.
+Act is an event-sourcing framework for TypeScript. The domain is expressed through three composable primitives: actions, state, and reactions. An action validates input against a Zod schema, commits one or more events under optimistic concurrency, and reduces them into derived state via a patch handler. Reactions fire on commit, drain in order, retry under back-pressure, and surface to the operator when something downstream wedges. The framework wires the rest of the pipeline: snapshots and a cache layer for fast cold loads, correlation across stream boundaries, a recovery API for blocked streams, time-travel queries against the same log. Pick a store at bootstrap. Postgres for production, SQLite for embedded, in-memory for tests. The application code stays the same.
 
-Around those primitives, the framework provides the pipeline: input validation against the schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions over a polled drain loop with configurable backoff and stream-level dead-lettering, recovery primitives for blocked streams, snapshots and a cache layer for fast cold loads, time-travel queries against the same log. Pick a store at bootstrap — Postgres for production, SQLite for embedded, in-memory for tests — and the application code stays the same.
+```
+   ┌─────────────┐    action     ┌─────────────────┐    reaction      ┌──────────────┐
+   │             │ ────────────► │       Act       │ ───────────────► │              │
+   │   client    │               │  events, state, │                  │  downstream  │
+   │             │ ◄──────────── │  drain, recover │                  │              │
+   └─────────────┘    load()     └─────────────────┘                  └──────────────┘
+```
 
-## What you get
+The primitives:
 
-- **Three primitives organize the API.** Slices, projections, snapshots, the drain loop, lifecycle events — they all attach to `actions`, `state`, and `reactions`. One mental model for commands, queries, projections, and integrations.
-- **One schema, two purposes.** Zod schemas define your events at runtime *and* generate the TypeScript types at compile time. No drift, no duplication, no `unknown` escape hatches. Refactor an event, the compiler tells you everywhere it broke.
-- **Production-grade defaults.** Atomic stream claiming via `FOR UPDATE SKIP LOCKED`. Optimistic concurrency on every commit. Automatic retries with configurable backoff. Stream-level blocked-state with an explicit recovery API (`blocked_streams`, `unblock`).
-- **Time-travel via `load()`.** Reconstruct state at any historical event ID or timestamp with the same call you use for the current state. No separate read store, no "as-of" API to learn.
-- **No external broker.** The event store carries the message-bus role. Postgres with `LISTEN`/`NOTIFY` for low-latency cross-process wakeups; SQLite for embedded; in-memory for tests. The orchestrator works without notify too — it just adds polling lag.
-- **100% test coverage, perf-regression-gated.** Every PR runs the full suite at 100% statement/branch/function/line coverage. A separate CI bench fails the build when any scenario's p50 regresses past 1.5× the baseline. Numbers are public ([PERFORMANCE.md](./libs/act/PERFORMANCE.md)) and adapter conformance is enforced via a [Test Compatibility Kit](./libs/act-tck).
-- **AI scaffolding.** Drop a spec — event-modeling diagram, event-storming board, JSON config, or plain prose — into Claude Code with the included [scaffold skill](./.claude/skills/scaffold-act-app/), and get a working monorepo. Domain, API, client, tests.
+| | |
+|---|---|
+| Action | The change you want to make. Validated against a Zod schema, emitted as one or more immutable events, committed under optimistic concurrency. |
+| State | The data you care about. Defined as a Zod schema, evolved by emit-and-patch, served back through `load()` with snapshot and cache layers in front of replay. |
+| Reaction | What happens as a result. Fires in commit order, retried under back-pressure with configurable backoff, blocked-stream surfaced to operators when a downstream wedges. |
 
 ## 30-second demo
 
@@ -61,45 +65,25 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .build();
 
 const app = act().withState(Counter).build();
-
 await app.do("increment", { stream: "c1", actor: { id: "1", name: "u" } }, { by: 5 });
 
 const snap = await app.load(Counter, "c1");
 console.log(snap.state); // { count: 5 }
 ```
 
-That's the whole loop: define state, declare actions, dispatch, load. Everything else — projections, reactions, slices, cross-process drain, time-travel — is more of the same builder calls.
-
-## The three primitives
-
-- **State** — the data you care about. Defined as a Zod schema, evolved by emit-and-patch.
-- **Actions** — the changes you want to make to it. Validated by Zod, emitted as immutable events, committed under optimistic concurrency.
-- **Reactions** — what happens as a result. Fired in commit order, retried under back-pressure, blocked-streams visible to operators.
-
-```
-   ┌──────────┐    Actions     ┌──────────┐    Reactions     ┌──────────────┐
-   │  Client  │ ─────────────► │  Act     │ ───────────────► │  Downstream  │
-   └──────────┘                │  State   │                  │  (webhooks,  │
-                  load()       │  Events  │   correlate +     │  projections,│
-              ◄─────────────── │  Drain   │      drain         │  bus, etc.)  │
-                               └──────────┘                  └──────────────┘
-```
-
-That's the whole architecture. Slices group related state + reactions into vertical features; projections build read models from the same event stream — all using the same builder vocabulary.
-
 ## What's in the box
 
 | | |
 |---|---|
-| 🏗️ **Framework core** | State, actions, reactions, slices, projections, snapshots, cache, correlation, drain, recovery — all in one focused 0-dep package (`@rotorsoft/act`). |
-| 💾 **Production stores** | PostgreSQL (`@rotorsoft/act-pg`) with cross-process `LISTEN`/`NOTIFY`. SQLite (`@rotorsoft/act-sqlite`) for single-node and edge. InMemory bundled in core for tests. All three pass the same conformance suite. |
-| 🌐 **HTTP integrations** | Inline `webhook` delivery with auto-derived `Idempotency-Key`, status-classified retries, and a published receiver-side contract. SSE for live state broadcast (`@rotorsoft/act-http`). |
-| 🔍 **Live inspector** | A web app (`packages/inspector`) that connects to any Act store. Browse the event log, watch correlation + drain in real time, inspect blocked streams, page through subscription positions. |
-| 🎨 **Interactive diagrams** | `@rotorsoft/act-diagram` reads your TypeScript and renders an SVG model of states, actions, events, slices, projections, and reactions — with click-through to source. |
-| 🪵 **Pluggable logging** | `@rotorsoft/act-pino` adapter for transports, redaction, async sinks. The framework's default `ConsoleLogger` covers dev. |
-| ⏪ **Time-travel** | `app.load(State, id, _, { before: 5000 })`. Same `load()` as everything else. |
-| 🛟 **Recovery loop** | `app.blocked_streams()` finds what's wedged. `app.unblock(...)` resumes without replaying history. `app.reset(...)` rebuilds projections from scratch. |
-| 🤖 **AI scaffolding** | Drop a functional spec into [Claude Code](https://claude.ai/code) with the bundled skill. Get a working monorepo: domain, tRPC API, React client, tests. |
+| Production stores | Postgres, SQLite, and in-memory all pass the same `runStoreTck`. Application code doesn't change between them; only the bootstrap line differs. |
+| Zod end to end | Schemas define every action, event, and state shape at runtime and generate the TypeScript types at compile time. One source of truth, full inference into reducers, projections, and queries. |
+| No external broker | The event store carries the message-bus role. Postgres exposes cross-process wakeups via `LISTEN`/`NOTIFY`; the orchestrator falls back to a polling debounce when the hook isn't there, so correctness is preserved either way. |
+| HTTP integrations | Outbound `webhook` reaction helper with auto Idempotency-Key, status-classified retries, and a published receiver-side dedup contract. SSE for incremental state broadcast lives on the same subpath. |
+| Live inspector | A web app you point at any Act store. Browse the event log, watch correlation and drain in real time, inspect blocked streams, page through subscription positions. |
+| Interactive diagrams | An SVG of the domain model with click-through to source, plus the `act` CLI that walks the same content in the terminal. |
+| Time-travel | `app.load(State, id, _, { before: N })` reconstructs state at any historical event id or timestamp through the same call you use for the current state. |
+| Recovery loop | `app.blocked_streams()` surfaces what's wedged. `app.unblock(...)` resumes from the watermark without replaying history; `app.reset(...)` rebuilds projections from scratch. |
+| AI scaffolding | The bundled Claude Code skill turns a functional spec into a working monorepo. Domain, tRPC API, React client, vitest. |
 
 ## Packages
 
@@ -107,81 +91,71 @@ That's the whole architecture. Slices group related state + reactions into verti
 
 | Package | Description |
 |---|---|
-| [@rotorsoft/act](https://github.com/rotorsoft/act-root/tree/master/libs/act)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act) | The framework. State, actions, reactions, slices, projections — Zod-typed end to end. |
-| [@rotorsoft/act&#x2011;pg](https://github.com/rotorsoft/act-root/tree/master/libs/act-pg)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-pg.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pg)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pg) | PostgreSQL store. Production-ready, atomic stream claiming, snapshots, connection pooling, cross-process `LISTEN`/`NOTIFY`. |
-| [@rotorsoft/act&#x2011;sqlite](https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-sqlite.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-sqlite) | libSQL store for embedded or single-node deployments. |
-| [@rotorsoft/act&#x2011;patch](https://github.com/rotorsoft/act-root/tree/master/libs/act-patch)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-patch.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-patch)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-patch.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-patch) | Immutable deep-merge patch utility — drives `act` state reducers. Zero deps, browser-safe. |
+| [@rotorsoft/act](https://github.com/rotorsoft/act-root/tree/master/libs/act)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act) | The framework. State, actions, reactions, slices, projections, the correlate / drain / settle loop, snapshots, cache, recovery. Zod-typed end to end. |
+| [@rotorsoft/act&#x2011;pg](https://github.com/rotorsoft/act-root/tree/master/libs/act-pg)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-pg.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pg)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pg) | Postgres store. Atomic stream claiming via `FOR UPDATE SKIP LOCKED`, connection pooling, optional `LISTEN`/`NOTIFY` for cross-process wakeups. |
+| [@rotorsoft/act&#x2011;sqlite](https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-sqlite.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-sqlite) | libSQL store for single-node and edge deployments. |
+| [@rotorsoft/act&#x2011;patch](https://github.com/rotorsoft/act-root/tree/master/libs/act-patch)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-patch.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-patch)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-patch.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-patch) | Immutable deep-merge patch utility used by state reducers. Zero dependencies, browser-safe. |
 
 ### Integrations
 
 | Package | Description |
 |---|---|
-| [@rotorsoft/act&#x2011;http](https://github.com/rotorsoft/act-root/tree/master/libs/act-http)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-http.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-http)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-http.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-http) | HTTP integrations — `webhook` for inline POST delivery, SSE for live state broadcast (subpath exports). |
-| [@rotorsoft/act&#x2011;pino](https://github.com/rotorsoft/act-root/tree/master/libs/act-pino)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pino)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter — transports, redaction, async sinks. |
-| [@rotorsoft/act&#x2011;diagram](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-diagram)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-diagram) | Interactive SVG diagram extractor — your domain model, rendered live, with click-through to source. |
-| [@rotorsoft/act&#x2011;tck](https://github.com/rotorsoft/act-root/tree/master/libs/act-tck)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-tck.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-tck)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-tck.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-tck) | Test Compatibility Kit for Store/Cache/Logger ports — drop-in vitest suite that validates any custom adapter against the contract. |
+| [@rotorsoft/act&#x2011;http](https://github.com/rotorsoft/act-root/tree/master/libs/act-http)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-http.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-http)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-http.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-http) | Outbound `webhook` helper with auto Idempotency-Key, status-classified retries, and a published receiver-side dedup contract. The `/sse` subpath broadcasts incremental state to live UIs. |
+| [@rotorsoft/act&#x2011;pino](https://github.com/rotorsoft/act-root/tree/master/libs/act-pino)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-pino.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pino)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pino.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-pino) | Pino logger adapter for transports, redaction, async sinks. |
+| [@rotorsoft/act&#x2011;diagram](https://github.com/rotorsoft/act-root/tree/master/libs/act-diagram)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-diagram.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-diagram)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-diagram) | Interactive SVG of the domain model with click-through to source. Also ships the `act` CLI for the same content in the terminal. |
+| [@rotorsoft/act&#x2011;tck](https://github.com/rotorsoft/act-root/tree/master/libs/act-tck)<br>[![npm](https://img.shields.io/npm/v/@rotorsoft/act-tck.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-tck)&nbsp;[![downloads](https://img.shields.io/npm/dm/@rotorsoft/act-tck.svg?style=flat-square&label=)](https://www.npmjs.com/package/@rotorsoft/act-tck) | Executable conformance kit for Store, Cache, and Logger ports. Third-party adapters validate themselves against it. |
 
-### Tools
-
-Workspace apps (not published to npm):
+### Workspace apps (not on npm)
 
 | Package | Description |
 |---|---|
-| [@rotorsoft/act&#x2011;inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)<br>_web app_ | Event sourcing observatory — connect to any Act PostgreSQL store and inspect events in real time. Event log, SVG timeline, stream inspector, correlation explorer, drain monitor with live polling. |
+| [@rotorsoft/act&#x2011;inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector) | Web app you point at any Act store. Browse the event log, watch correlation and drain in real time, inspect blocked streams, page through subscription positions. |
 
-## Production-ready
+## AI-assisted scaffolding
 
-Numbers, not promises:
+The repo ships a [Claude Code](https://claude.ai/code) skill at [`.claude/skills/scaffold-act-app`](./.claude/skills/scaffold-act-app/). Drop a functional spec into Claude Code and ask it to build the app: event-modeling diagrams, event-storming boards, JSON configs, user stories, and prose all work. The skill maps the spec's vocabulary into framework concepts (aggregates into states, commands into actions, policies into reactions, read models into projections), scaffolds the monorepo, and walks the build process end to end with production guidance for Postgres, background processing, automated jobs, and error handling.
 
-- **100% test coverage** — statements, branches, functions, lines. Every PR. No exceptions for "defensive" branches. [Coverage badge](https://coveralls.io/github/Rotorsoft/act-root?branch=master).
-- **Property-based tests** with `fast-check` cover commit version monotonicity, claim/lease lifecycle, cache/store coherence, correlate→drain delivery exactness, and close idempotency. See [`libs/act/test/property/`](./libs/act/test/property/).
-- **CI perf regression guard** runs the bench suite on every PR and fails when any scenario's p50 exceeds 1.5× the checked-in baseline. Numbers and scenarios in [PERFORMANCE.md](./libs/act/PERFORMANCE.md#ci-regression-guard).
-- **Store conformance matrix** — all three in-tree stores (PG, SQLite, InMemory) pass the same TCK, currently 60+ test cases each. Custom adapters get the same harness. [Conformance badge](https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml).
-- **Stability charter** — [STABILITY.md](./STABILITY.md) names exactly which surfaces are covered by semver. Breaking changes require a `BREAKING CHANGE:` footer and a written migration note.
-
-## AI-assisted application scaffolding
-
-Build a complete Act application from a functional spec using [Claude Code](https://claude.ai/code) and the bundled skill.
+To install:
 
 ```sh
-# Project skill (recommended)
+# In the project root
 mkdir -p .claude/skills
 cp -r /path/to/act-root/.claude/skills/scaffold-act-app .claude/skills/
 
-# Or install personally across all projects
+# Or globally for all your projects
 cp -r /path/to/act-root/.claude/skills/scaffold-act-app ~/.claude/skills/
 ```
 
-Then open Claude Code in an empty directory and say: **"Build me an app from this spec: `<link-or-file>`"**
+Then ask Claude Code: **"Build me an app from this spec: `<link-or-file>`"**.
 
-Any spec format works — event modeling diagrams, event storming boards, JSON configs, user stories, or plain prose. The skill maps the vocabulary to framework concepts (aggregates → states, commands → actions, policies → reactions, read models → projections), scaffolds the monorepo (domain, tRPC API, React client, vitest), and walks the 10-step build process: schemas, invariants, states, slices, projections, bootstrap, router, client, tests, dependencies. Production guidance for PostgreSQL, background processing, automated jobs, and error handling is baked in.
+## Quality signals
 
-Review, iterate, deploy.
+100% statement, branch, function, and line coverage on every PR. Property-based tests cover commit version monotonicity, claim/lease lifecycle, cache/store coherence, correlate→drain delivery exactness, and close idempotency. A CI bench fails the build when any scenario's p50 regresses past 1.5× the checked-in baseline; numbers are in [PERFORMANCE.md](./libs/act/PERFORMANCE.md). The three in-tree stores (Postgres, SQLite, InMemory) pass the same [TCK](./libs/act-tck) and the [conformance workflow](https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml) runs on every PR. Public API stability is governed by [STABILITY.md](./STABILITY.md): breaking changes require an explicit `BREAKING CHANGE:` footer and a written migration note.
 
-## Documentation & resources
+## Documentation
 
-- **[Get started](https://rotorsoft.github.io/act-root/docs/intro)** — 5-minute walkthrough from `pnpm add` to a working app
-- **[Concepts & guides](https://rotorsoft.github.io/act-root/docs/intro)** — domain modeling, state management, error handling, real-time, external integration, production checklist
-- **[API reference](https://rotorsoft.github.io/act-root/docs/api/)** — typedoc-generated, refreshed on every push to `master`
-- **[Architecture](https://rotorsoft.github.io/act-root/docs/architecture)** — concurrency, cache/snapshots, correlation+drain, close-cycle, schema evolution, extension points
-- **[Performance & benchmarks](./libs/act/PERFORMANCE.md)** — throughput numbers per store, CI regression guard, optimization history
-- **[Philosophy](./docs/PHILOSOPHY.md)** — DDD / Event Sourcing / CQRS lineage, integration patterns, why this shape
-- **[The book](https://payhip.com/b/7ezLy)** — _Practical Event Sourcing in TypeScript_ — Event Sourcing / CQRS / DDD applied end-to-end through a multiplayer Risk game
-- **[Examples](#examples)** below — calculator, WolfDesk ticketing, tRPC integration
+- [Get started](https://rotorsoft.github.io/act-root/docs/intro) — walkthrough from install to a working app
+- [Concepts](https://rotorsoft.github.io/act-root/docs/intro) — state management, event sourcing, error handling, real-time, testing, configuration
+- [Architecture](https://rotorsoft.github.io/act-root/docs/architecture) — concurrency model, cache and snapshots, correlation and drain, cross-process reactions, priority lanes, close cycle, schema evolution, extension points
+- [Guides](https://rotorsoft.github.io/act-root/docs/intro) — production checklist, projections to a database, external integration, writing a custom store/cache/logger, contributing a new package
+- [API reference](https://rotorsoft.github.io/act-root/docs/api/) — typedoc, refreshed on every push to `master`
+- [Performance](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
+- [Philosophy](./docs/PHILOSOPHY.md) — DDD / Event Sourcing / CQRS lineage, integration patterns, why this shape
+- [The book](https://payhip.com/b/7ezLy) — _Practical Event Sourcing in TypeScript_, Event Sourcing / CQRS / DDD applied end to end through a multiplayer Risk game
 
 ## Examples
 
-- **[Calculator](./packages/calculator/src/)** — actions are key presses, a digit board tracks how many times each digit has been pressed. The hello-world for the framework.
-- **[WolfDesk](./packages/wolfdesk/src/)** — reference implementation of the WolfDesk ticketing system from Vlad Khononov's [_Learning Domain-Driven Design_](https://a.co/d/1udDtcE). Multi-slice domain, real workflows, blocked-stream recovery, webhook integration.
-- **[tRPC client + server](./packages/server/src/)** — exposes the calculator as a web app. The shape that lets the AI-scaffolding skill produce its tRPC layer.
+- [Calculator](./packages/calculator/src/) — actions are key presses, a digit board tracks how many times each digit has been pressed. The hello-world for the framework.
+- [WolfDesk](./packages/wolfdesk/src/) — reference implementation of the WolfDesk ticketing system from Vlad Khononov's [_Learning Domain-Driven Design_](https://a.co/d/1udDtcE). Multi-slice domain, real workflows, blocked-stream recovery, webhook integration.
+- [tRPC client + server](./packages/server/src/) — exposes the calculator as a web app. The shape the AI-scaffolding skill produces.
 
 ## Contributing
 
-Fork, branch, install (`pnpm install`), test (`pnpm test`), lint (`pnpm lint`), commit, push, PR. Conventional Commits. 100% coverage gate. The full pre-handoff workflow lives in [CLAUDE.md](./CLAUDE.md); the per-package contributing guide is in [docs/docs/guides/contributing-new-package.md](./docs/docs/guides/contributing-new-package.md). Open an issue or join [GitHub Discussions](https://github.com/rotorsoft/act-root/discussions) for questions.
+Fork, branch, install (`pnpm install`), test (`pnpm test`), lint (`pnpm lint`), commit, push, PR. Conventional commits. 100% coverage gate. The full pre-handoff workflow lives in [CLAUDE.md](./CLAUDE.md); the per-package contributing guide is in [docs/docs/guides/contributing-new-package.md](./docs/docs/guides/contributing-new-package.md). Open an issue or join [GitHub Discussions](https://github.com/rotorsoft/act-root/discussions) for questions.
 
 ## Versioning
 
-[SemVer](https://semver.org/). What semver protects and what it doesn't is documented in [STABILITY.md](./STABILITY.md); release notes and breaking changes are in [CHANGELOG.md](./CHANGELOG.md).
+[SemVer](https://semver.org/). What semver protects and what it doesn't is in [STABILITY.md](./STABILITY.md); release notes and breaking changes are in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 
