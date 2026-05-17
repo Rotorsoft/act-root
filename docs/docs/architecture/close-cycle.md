@@ -23,7 +23,7 @@ title: Close cycle
                       ▼
           ┌───────────────────────────┐
           │ Phase 1: Scan stream heads│  For each target, find the latest non-tombstone event.
-          │   query backward, limit:1 │  Streams with no events are skipped here.
+          │   query_stats(exclude=snap)│  Single round trip — indexed heads-only path.
           └───────────┬───────────────┘
                       │
                       ▼
@@ -79,13 +79,13 @@ If `app.close()` is called and dynamic-resolver streams haven't been correlated 
 
 ### Phase 1 — Scan stream heads
 
-For each target, query the store backward, filter out tombstones in the callback, take the first non-tombstone event. This gives us `(maxId, version, lastEventName)` per stream.
+Call `Store.query_stats(streams, { exclude: [SNAP_EVENT] })` once for the whole target set. The store returns the latest non-snapshot event per stream in a single round trip — on Postgres and SQLite this uses the existing `(stream, version)` index for an index-only path (see [ACT-639](https://github.com/Rotorsoft/act-root/issues/639)). Streams whose latest non-snap event is a tombstone are skipped in the consuming loop (the call doesn't re-tombstone an already-closed stream). The kept entries become a `Map<stream, { maxId, version, lastEventName }>` consumed by the subsequent phases.
 
-The `with_snaps` flag is *not* set, so snapshot events are filtered server-side. The query returns the latest *domain* event.
+- **Stream has no domain events**: absent from the result map (no qualifying event). Phase 2's `safe` list excludes it. Result: stream untouched.
+- **Stream has only a tombstone**: included in the result map (the head is the tombstone), then dropped by the explicit `head.name === TOMBSTONE_EVENT` filter in the consumer. Same outcome — skipped.
+- **`query_stats` call fails**: close() throws to caller. Streams are untouched.
 
-- **Stream has no domain events**: not included in the result map. Phase 2's `safe` list will exclude it. Result: stream untouched.
-- **Stream has only a tombstone**: same outcome as no domain events — the tombstone is filtered, no result entry, skipped.
-- **Query fails**: close() throws to caller. Streams are untouched.
+Before #639 this phase ran `N` parallel `query(backward: true, limit: 1)` calls — one round trip per stream. The new shape collapses to one call regardless of `N`, which matters most for bulk close jobs (hundreds of streams).
 
 ### Phase 2 — Partition by safety
 
@@ -169,12 +169,12 @@ The result map contains `{ deleted: count, committed: seed_event }` per stream. 
 
 Calling `close()` on an already-closed stream is a no-op:
 
-1. Phase 1 scans backward; the head is `__tombstone__` (because it's filtered, the scan returns no result for this stream)
+1. Phase 1's `query_stats` returns the head — which is `__tombstone__` — but the consumer loop drops any entry whose `head.name === TOMBSTONE_EVENT` so we don't re-tombstone an already-closed stream
 2. Phase 1's result map doesn't include this stream
 3. Phase 2's `safe` list doesn't include this stream
 4. Result: stream isn't in `truncated`, isn't in `skipped` from a concurrency error — it's just absent
 
-For a stream that's been *restarted* but not tombstoned (one `__snapshot__` event at v=0), close() will find that snapshot in Phase 1 (snapshots aren't filtered like tombstones are), proceed through guard, and tombstone it. The result is a truncate-and-tombstone of the restarted stream.
+For a stream that's been *restarted* but not tombstoned (one `__snapshot__` event at v=0), Phase 1 calls `query_stats` with `exclude: [SNAP_EVENT]` so the snapshot is filtered out server-side — leaving the stream absent from the result map. Without a head, Phase 2 doesn't include the stream in `safe`, so the restarted-but-empty stream stays untouched. To force-tombstone a restarted stream, commit at least one domain event first.
 
 ## Pointers
 

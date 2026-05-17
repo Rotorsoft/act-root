@@ -118,7 +118,7 @@ runStoreTck({
 
 ## When the Store port changes
 
-The TCK and the interface evolve together. When the framework adds, removes, or changes a method on `Store` (e.g., the planned `Store.query_heads(streams)` primitive in [#639](https://github.com/Rotorsoft/act-root/issues/639)):
+The TCK and the interface evolve together. When the framework adds, removes, or changes a method on `Store` (e.g., the `Store.query_stats(input, options)` primitive added in [#639](https://github.com/Rotorsoft/act-root/issues/639) / [#752](https://github.com/Rotorsoft/act-root/pull/752)):
 
 1. The matching cases land in `libs/act-tck/src/store-tck.ts`.
 2. New optional methods are gated behind a `Capabilities` flag so existing adapters keep passing until they opt in.

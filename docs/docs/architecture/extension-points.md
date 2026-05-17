@@ -50,10 +50,13 @@ interface Store extends Disposable {
   prioritize(filter: StreamFilter, priority): Promise<number>;
   truncate(targets): Promise<Map<stream, { deleted; committed }>>;
   query_streams(callback, query?): Promise<QueryStreamsResult>;
+  query_stats(input, options?): Promise<Map<stream, StreamStats>>;
 }
 ```
 
 `reset`, `unblock`, and `prioritize` share the same `StreamFilter` shape (`stream` / `stream_exact` / `source` / `source_exact` / `blocked`). `reset` and `unblock` also accept a plain `string[]` for targeted operations. `unblock` always restricts to blocked streams regardless of what the filter passes — there's no "unblock unblocked streams" use case. `reset` is for projection rebuilds (watermark → -1); `unblock` is for poison-message recovery (watermark preserved).
+
+`query_stats` is the per-stream-aggregate primitive (added in [ACT-639](https://github.com/Rotorsoft/act-root/issues/639)). Default returns the head event per stream via an indexed path; opt-in `count`/`tail`/`names` trigger a full scan but share it. Input is `string[]` for an enumerated set or `Pick<StreamFilter, "stream" | "stream_exact">` for pattern selection — subscription-level filters (`source`, `blocked`) live on `query_streams`; compose the two for "stats for blocked subscriptions" workflows.
 
 ### Invariants an adapter must hold
 
