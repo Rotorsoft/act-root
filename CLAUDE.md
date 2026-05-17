@@ -181,11 +181,12 @@ Sequence at the end of a feature branch:
 
 1. `/release-check` — runs typecheck + tests + 100% coverage + lint + build + charter-diff in parallel. See [.claude/commands/release-check.md](.claude/commands/release-check.md).
 2. If coverage < 100% on any metric: run `/coverage` to see the uncovered lines, then write the fault-injection test or restructure the code to remove the branch. See `feedback_full_coverage.md` in memory and the patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`.
-3. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
+3. **For substantive tickets** (anything that touched `libs/act/src/`, added a new public method, changed semantics, or migrated a callsite to a new primitive): run `/book-note <ticket-slug>` and write the narrative essay. See [.claude/commands/book-note.md](.claude/commands/book-note.md) and `book/README.md`. Skip only for pure chore/deps/docs PRs. The essay captures the *why* and the *rejected designs* — the part that won't be visible from the diff once it's merged. **Do this BEFORE opening the PR**, so the book entry lands with the code.
+4. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
 
 **Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
 
-Why this exists: the gate caught zero issues during development of ACT-639's eight slices because per-slice tests were run ad-hoc — but the merge gate verifies the full matrix (typecheck against the workspace, lint across changed files, build of every adapter, 100% coverage including newly-added defensive branches). Skipping it ships partially-verified work.
+Why this exists: the gate caught zero issues during development of ACT-639's eight slices because per-slice tests were run ad-hoc — but the merge gate verifies the full matrix (typecheck against the workspace, lint across changed files, build of every adapter, 100% coverage including newly-added defensive branches). Skipping it ships partially-verified work. The book-note step exists for the same reason in narrative form: ACT-639's PR almost shipped without one because the workflow didn't enforce it — and once a PR merges, the reasoning behind rejected designs lives only in the author's head until it's lost.
 
 ### Documentation discipline
 
