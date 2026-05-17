@@ -1,14 +1,26 @@
 # @rotorsoft/act-tck
 
-Test Compatibility Kit for the `Store`, `Cache`, and `Logger` ports of [`@rotorsoft/act`](https://www.npmjs.com/package/@rotorsoft/act).
+[![NPM Version](https://img.shields.io/npm/v/@rotorsoft/act-tck.svg)](https://www.npmjs.com/package/@rotorsoft/act-tck)
+[![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-tck.svg)](https://www.npmjs.com/package/@rotorsoft/act-tck)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-> **Stability:** This package stays at **0.x** while `@rotorsoft/act` ships **1.0**. The Store/Cache/Logger contracts the TCK validates are covered by the [Act Stability Charter](../../STABILITY.md) and are stable at 1.0. The TCK's own surface (the `run*Tck` functions, the `Capabilities` types, the fixture helpers) may still evolve in 0.x as third-party adapter authors report what they need. The TCK joins the 1.x line once that surface settles.
+_Test Compatibility Kit for the `Store`, `Cache`, and `Logger` ports of [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)._
 
-## Why it exists
+## Why this package
 
-A port without an executable contract is undefined behavior. The three pluggable ports in `@rotorsoft/act` (event store, snapshot cache, logger) each have multiple in-tree adapters and an open door for third-party implementations. Before this package, each adapter's test file independently re-stated what the contract was — that's tribal knowledge, not a spec. This package turns the contract into a runnable spec a third party can validate themselves against.
+A port without an executable contract is undefined behavior. Act has three pluggable ports (event store, snapshot cache, logger), each with multiple in-tree adapters and an open door for third-party implementations. Before this package, every adapter's test file independently re-stated what the contract was — tribal knowledge, not a spec.
 
-## Usage
+`act-tck` turns the contract into a runnable spec. Drop it into your adapter's test file, point it at your implementation, and vitest will execute the same conformance suite the in-tree adapters pass. New port methods land here first; adapters add capability flags and opt in.
+
+## Installation
+
+```bash
+pnpm add -D @rotorsoft/act-tck
+```
+
+The kit is a dev dependency — it ships test code, not runtime code.
+
+## Quick start
 
 ```ts
 // libs/act-mysql/test/store-tck.spec.ts
@@ -22,29 +34,15 @@ runStoreTck({
 });
 ```
 
-```ts
-// libs/act-redis/test/cache-tck.spec.ts
-import { runCacheTck } from "@rotorsoft/act-tck";
-import { RedisCache } from "../src/index.js";
+That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internally; your test runner drives execution. A fixed Counter-style fixture domain keeps tests deterministic and self-contained.
 
-runCacheTck({
-  name: "RedisCache",
-  factory: () => new RedisCache({ url: process.env.REDIS_URL! }),
-});
-```
+## API
 
-```ts
-// libs/act-winston/test/logger-tck.spec.ts
-import { runLoggerTck } from "@rotorsoft/act-tck";
-import { WinstonLogger } from "../src/index.js";
-
-runLoggerTck({
-  name: "WinstonLogger",
-  factory: () => new WinstonLogger({ level: "trace" }),
-});
-```
-
-Each `run*Tck` is a function that calls vitest's `describe` and `it` internally. Vitest is a peer dependency — your test runner drives execution. The TCK ships a fixed Counter-style fixture domain so tests are deterministic and self-contained.
+- **`runStoreTck(options)`** — every `Store` method, capability-gated where optional.
+- **`runCacheTck(options)`** — every `Cache` method, cross-stream isolation, dispose idempotency.
+- **`runLoggerTck(options)`** — structural smoke test of the `Logger` contract.
+- **`StoreCapabilities`** / **`CacheCapabilities`** / **`LoggerCapabilities`** — flag types for opting into optional surface (e.g., `Store.notify`).
+- Fixture helpers re-exported from `@rotorsoft/act-tck/fixtures` for adapter-specific tests that want the same Counter domain.
 
 ## What's covered
 
@@ -61,63 +59,62 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 - `prioritize` — bulk priority updates by filter
 - `truncate` — snapshot vs tombstone seeding, empty inputs, missing streams
 - `query_streams` — filters, exact-match, pagination, blocked
+- `query_stats` — array + filter forms, opt-in count/tail/names, exclude + before, snapshot count via `names`
 - `notify` (capability-gated) — subscribe + dispose smoke test
 
 ### `runCacheTck`
 
-Every method on the `Cache` interface:
-
-- `get` on unset stream returns `undefined`
-- `set` then `get` round-trip
-- `set` overwrites a prior entry
-- `invalidate` removes one stream, leaves others
-- `invalidate` / `clear` no-op on absent state
-- `clear` empties every stream
-- Cross-stream isolation
-- `dispose` idempotency
+Every method on the `Cache` interface: `get` on unset stream returns `undefined`; `set` then `get` round-trip; `set` overwrites; `invalidate` removes one stream, leaves others; `invalidate`/`clear` no-op on absent state; `clear` empties every stream; cross-stream isolation; `dispose` idempotency.
 
 ### `runLoggerTck`
 
-Structural smoke test of the `Logger` interface:
+Structural smoke test of the `Logger` interface: `level` is a non-empty string; every level method callable with both overload signatures; `null` and cyclic payloads don't throw; `child(bindings)` returns a Logger satisfying the same contract; `dispose` is idempotent and awaitable.
 
-- `level` is a non-empty string
-- Every level method (`fatal`/`error`/`warn`/`info`/`debug`/`trace`) callable with both overload signatures
-- `null` and cyclic payloads don't throw
-- `child(bindings)` returns a Logger satisfying the same contract; child loggers can themselves spawn children
-- `dispose` is idempotent and awaitable
+## Common patterns
 
-## Capabilities flags
+### Capability flags for optional methods
 
-Optional methods (currently just `Store.notify`) are gated by capability flags so adapters can opt out of features they don't implement:
+Optional methods are gated so adapters can opt out of features they don't implement:
 
 ```ts
 runStoreTck({
   name: "MysqlStore",
   factory: () => new MysqlStore({ /* … */ }),
-  capabilities: {
-    notify: true, // adapter implements Store.notify
-  },
+  capabilities: { notify: true }, // adapter implements Store.notify
 });
 ```
 
-## When the port interface changes
+### Adding adapter-specific tests alongside the TCK
 
-When a method is added, removed, or changed on `Store`, `Cache`, or `Logger`, the matching cases in `libs/act-tck/src/` are updated in lockstep. New optional methods land behind a `Capabilities` flag so existing adapters keep passing until they opt in.
+The TCK validates the contract; adapter-specific edge cases (defensive `rowCount ?? 0` branches, dialect-specific SQL paths) belong in the adapter's own test file. See `libs/act-pg/test/store.error.spec.ts` and `libs/act-sqlite/test/store.error.spec.ts` for the fault-injection patterns the in-tree adapters use to round out the 100% coverage gate.
 
-## Reference adapters
+### When the port interface changes
 
-The in-tree adapters are the first customers of this kit. They prove the TCK works before any external adapter ships:
+New / changed methods on `Store`, `Cache`, or `Logger` are added to `libs/act-tck/src/` in lockstep. Optional methods land behind a `Capabilities` flag so existing adapters keep passing until they opt in.
 
-- [`InMemoryStore`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/adapters/in-memory-store.ts), [`InMemoryCache`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/adapters/in-memory-cache.ts), [`ConsoleLogger`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/adapters/console-logger.ts)
-- [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg)
-- [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
-- [`@rotorsoft/act-pino`](https://www.npmjs.com/package/@rotorsoft/act-pino)
+## Compatibility
 
-## See also
+- **Node**: >=22.18.0
+- **Peer**: `@rotorsoft/act` (workspace version), `vitest` >=3.0.9, `zod` ^4.4.3
+- **Runtime deps**: none — pure test code
 
-- [Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md)
-- [Writing a custom Cache adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-cache.md)
-- [Writing a custom Logger adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-logger.md)
+## Stability
+
+This package stays at **0.x** while `@rotorsoft/act` ships **1.0**. The Store/Cache/Logger contracts the TCK validates are covered by the [Act Stability Charter](../../STABILITY.md) and are stable at 1.0. The TCK's own surface (the `run*Tck` functions, the `Capabilities` types, the fixture helpers) may still evolve in 0.x as third-party adapter authors report what they need. The TCK joins the 1.x line once that surface settles.
+
+## Related packages
+
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework defining the ports this kit validates.
+- **[@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg)** / **[@rotorsoft/act-sqlite](https://www.npmjs.com/package/@rotorsoft/act-sqlite)** — reference `Store` adapters; both pass `runStoreTck`.
+- **[@rotorsoft/act-pino](https://www.npmjs.com/package/@rotorsoft/act-pino)** — reference `Logger` adapter; passes `runLoggerTck`.
+
+The in-tree InMemoryStore / InMemoryCache / ConsoleLogger (bundled with `@rotorsoft/act`) are the first customers — they prove the TCK works before any external adapter ships.
+
+## Documentation
+
+- **[Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md)** — full walkthrough, with `runStoreTck` as the acceptance harness.
+- **[Writing a custom Cache adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-cache.md)**.
+- **[Writing a custom Logger adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-logger.md)**.
 
 ## License
 

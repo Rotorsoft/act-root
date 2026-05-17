@@ -4,183 +4,60 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sse.svg)](https://www.npmjs.com/package/@rotorsoft/act-sse)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Incremental state broadcast over SSE for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps. Zero dependencies.
+_Incremental state broadcast over Server-Sent Events for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps._
 
-Instead of sending full aggregate state after each action, `act-sse` forwards the domain patches that event handlers already compute — sending only what changed as version-keyed partials.
+> [!WARNING]
+> **This package is being deprecated.** Its surface lives on as the `@rotorsoft/act-http/sse` subpath of the [@rotorsoft/act-http](https://www.npmjs.com/package/@rotorsoft/act-http) umbrella package, which consolidates webhook and SSE integrations under one install.
+>
+> New projects: install `@rotorsoft/act-http` and import from the `/sse` subpath. Existing projects: migration is a one-import change (see below). This package will receive bug fixes only and be removed in a future release.
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Migration to `@rotorsoft/act-http/sse`
 
-## Installation
+`@rotorsoft/act-http/sse` is a verbatim copy of this package's surface — same classes, same functions, same wire format, same semantics. Migration is one import change per file:
 
-```sh
-npm install @rotorsoft/act-sse
-# or
+```diff
+- import { BroadcastChannel, applyPatchMessage } from "@rotorsoft/act-sse";
++ import { BroadcastChannel, applyPatchMessage } from "@rotorsoft/act-http/sse";
+```
+
+Then:
+
+```bash
+pnpm remove @rotorsoft/act-sse
+pnpm add @rotorsoft/act-http
+```
+
+The umbrella package keeps SSE and `webhook` as independent subpath exports (`@rotorsoft/act-http/sse` and `@rotorsoft/act-http/webhook`) — nothing in one depends on the other, so the bundle cost is the same. Future HTTP-adjacent integrations (OAuth refresh, signed-webhook senders, gRPC-web) will land as additional subpaths rather than separate packages.
+
+## What this package does (legacy)
+
+Instead of sending full aggregate state after each action, `act-sse` forwards the domain patches that event handlers already compute — sending only what changed as version-keyed partials. The wire format, server surface (`BroadcastChannel`, `PresenceTracker`, `StateCache`, `publishOverlay`), and client patch applicator (`applyPatchMessage`) are all preserved unchanged in `@rotorsoft/act-http/sse`.
+
+For the full reference (architecture diagram, wire format, server + client usage, version contract, bandwidth savings), see the [@rotorsoft/act-http README](https://github.com/Rotorsoft/act-root/blob/master/libs/act-http/README.md#sse--incremental-state-broadcast).
+
+## Installation (legacy)
+
+Still works. New projects should use `@rotorsoft/act-http` instead.
+
+```bash
 pnpm add @rotorsoft/act-sse
 ```
 
-**Requirements:** Node.js >= 22.18.0
+## Stability
 
-## Architecture
+Public API governed by the [Act Stability Charter](../../STABILITY.md) — but this package is on the deprecation track. New work goes to `@rotorsoft/act-http/sse`.
 
-```
-  app.do() → Snapshot[] (each carries its event's domain patch)
-      │
-      ▼
-  deriveState(snap)              ← app-specific (overlay presence, deadlines, etc.)
-  state._v = snap.event.version  ← event store version is the single source of truth
-      │
-      ▼
-  broadcast.publish(streamId, state, patches)
-      │
-      └── version-key each patch → { "5": { count: 3 }, "6": { name: "updated" } }
-      └── push to all SSE subscribers
-      │
-      ▼
-  Client: applyPatchMessage(msg, cached)
-      │
-      ├── contiguous → deep merge patches in version order
-      ├── stale      → skip (client already ahead)
-      └── behind     → invalidate + refetch (client missed versions)
-```
+## Related packages
 
-## Wire Format
+- **[@rotorsoft/act-http](https://www.npmjs.com/package/@rotorsoft/act-http)** ← **migrate here.** The umbrella package that now owns SSE + webhook integrations.
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — core framework.
+- **[@rotorsoft/act-patch](https://www.npmjs.com/package/@rotorsoft/act-patch)** — immutable patch utility this package uses for state merging.
 
-```typescript
-// Version-keyed domain patches
-// Keys = state version after that patch is applied
-// Values = domain patch (deep partial of state)
-{
-  "5": { territories: { brazil: { armies: 3 } } },
-  "6": { currentPlayerIndex: 2, phase: "reinforce" }
-}
-```
+## Documentation
 
-Multi-event commits produce multiple version-keyed entries. Version gaps trigger full state refetch on the client.
-
-## Server Usage
-
-```typescript
-import { BroadcastChannel } from "@rotorsoft/act-sse";
-
-const broadcast = new BroadcastChannel<MyAppState>();
-
-// After every app.do():
-const snaps = await app.do(action, target, payload);
-const snap = snaps.at(-1)!;
-const patches = snaps.map(s => s.patch).filter(Boolean);
-const state = deriveState(snap);
-broadcast.publish(streamId, state, patches);
-
-// For non-event state changes (e.g. presence overlay):
-broadcast.publishOverlay(streamId, { players: { pid: { connected: true } } });
-
-// SSE subscription (tRPC example):
-onStateChange: publicProcedure
-  .input(z.object({ streamId: z.string() }))
-  .subscription(async function* ({ input, signal }) {
-    let resolve: (() => void) | null = null;
-    let pending: PatchMessage | null = null;
-
-    const cleanup = broadcast.subscribe(input.streamId, (msg) => {
-      pending = msg;
-      if (resolve) { resolve(); resolve = null; }
-    });
-
-    try {
-      while (!signal?.aborted) {
-        if (!pending) {
-          await new Promise<void>((r) => {
-            resolve = r;
-            signal?.addEventListener("abort", () => r(), { once: true });
-          });
-        }
-        if (signal?.aborted) break;
-        if (pending) { const msg = pending; pending = null; yield msg; }
-      }
-    } finally {
-      cleanup();
-    }
-  }),
-```
-
-## Client Usage
-
-```typescript
-import { applyPatchMessage } from "@rotorsoft/act-sse";
-
-// In your SSE onData handler (React Query example):
-onData: (msg) => {
-  const cached = utils.getState.getData({ streamId });
-  const result = applyPatchMessage(msg, cached);
-
-  if (result.ok) {
-    utils.getState.setData({ streamId }, result.state);
-  } else if (result.reason === "behind") {
-    // Client missed versions — trigger full refetch
-    utils.getState.invalidate({ streamId });
-  }
-  // "stale" → no-op (client already has newer state from mutation response)
-}
-```
-
-## API
-
-### `BroadcastChannel<S>`
-
-Server-side broadcast manager with per-stream subscriber channels and LRU state cache.
-
-| Method | Description |
-|--------|-------------|
-| `publish(streamId, state, patches?)` | Cache state, version-key patches, push to subscribers |
-| `publishOverlay(streamId, patch)` | Same-version update (e.g. presence change) |
-| `subscribe(streamId, cb)` | Register subscriber, returns cleanup function |
-| `getState(streamId)` | Get cached state (for reconnects) |
-| `getSubscriberCount(streamId)` | Number of active subscribers |
-| `cache` | Direct access to `StateCache` instance |
-
-### `applyPatchMessage(msg, cached)`
-
-Client-side patch applicator. Returns `{ ok: true, state }` or `{ ok: false, reason }`.
-
-Reasons: `"stale"` (skip), `"behind"` (resync).
-
-### `patch(original, patches)`
-
-Browser-safe deep merge utility. Deep merges plain objects, replaces arrays and other non-mergeable types (Date, Map, Set, RegExp, TypedArrays). Deletes keys set to `null` or `undefined`.
-
-### `StateCache<S>`
-
-Generic LRU cache. Methods: `get`, `set`, `delete`, `has`, `size`, `entries`.
-
-### Types
-
-```typescript
-type BroadcastState = Record<string, unknown> & { _v: number };
-type PatchMessage<S extends BroadcastState> = Record<number, DeepPartial<S>>;
-type Subscriber<S extends BroadcastState> = (msg: PatchMessage<S>) => void;
-```
-
-## Version Contract
-
-The `_v` field **must** be set from `snap.event.version` — the event store's monotonic stream version. This is the single source of truth for ordering. No separate version counters.
-
-## Bandwidth Savings
-
-Typical savings for a game/collaborative app with ~5KB state:
-
-| Action | Full (bytes) | Patch (bytes) | Savings |
-|--------|-------------|--------------|---------|
-| Single field change | ~5,000 | ~150 | 97% |
-| Multi-field update | ~5,000 | ~400 | 92% |
-| Presence toggle | ~5,000 | ~80 | 98% |
-
-## Related
-
-- [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) - Core framework
-- [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) - PostgreSQL adapter
-- [Documentation](https://rotorsoft.github.io/act-root/)
-- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
+- **[Real-time with SSE](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/concepts/real-time.md)** — the concept guide; same content applies to `@rotorsoft/act-http/sse`.
+- **[@rotorsoft/act-http README](https://github.com/Rotorsoft/act-root/blob/master/libs/act-http/README.md)** — full SSE reference at its new home.
 
 ## License
 
-[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)
+MIT

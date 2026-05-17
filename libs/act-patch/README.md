@@ -4,210 +4,122 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-patch.svg)](https://www.npmjs.com/package/@rotorsoft/act-patch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Immutable deep-merge patch utility for [Act](https://github.com/rotorsoft/act-root) event-sourced apps. Zero dependencies, browser-safe.
+_Immutable deep-merge patch utility for event-sourced apps. Zero dependencies, browser-safe, sub-microsecond on small states._
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Why this package
 
-## Install
+Event sourcing reduces every state mutation to applying a patch on top of a prior state. Doing that well requires three properties at once: type safety (so the compiler enforces the patch shape against the state shape), immutability (so reducers can't accidentally mutate snapshots), and structural sharing (so unchanged subtrees don't get deep-copied on every event). Most existing solutions get one or two; `act-patch` gets all three.
 
-```sh
-npm install @rotorsoft/act-patch
-# or
+`patch(original, patches)` is the forward direction — the reducer that the Act framework applies on every committed event. `delta(before, after)` is its inverse — computes the smallest patch that turns `before` into `after`. Together they form a closed bidirectional algebra over `Patch<S>`: any state change can be expressed as a patch, applied with `patch`, and reconstructed with `delta`. Zod schemas handle validation; this package handles the algebra.
+
+Used internally by `@rotorsoft/act` state reducers and `@rotorsoft/act-http/sse` for incremental state broadcast. Equally useful standalone in any TypeScript app that needs immutable deep-merge.
+
+## Installation
+
+```bash
 pnpm add @rotorsoft/act-patch
 ```
 
-## API
+## Quick start
 
-### `patch(original, patches) → state`
-
-Immutably deep-merges `patches` into `original`, returning a new state object.
-
-```typescript
-import { patch } from "@rotorsoft/act-patch";
+```ts
+import { patch, delta } from "@rotorsoft/act-patch";
 
 const state = { user: { name: "Alice", age: 30 }, theme: "dark" };
+
+// Forward: apply a patch (immutably)
 const updated = patch(state, { user: { age: 31 } });
 // → { user: { name: "Alice", age: 31 }, theme: "dark" }
+
+// Inverse: compute the patch that produces `after` from `before`
+const d = delta(state, updated);
+// → { user: { age: 31 } }
+
+patch(state, d);
+// → updated (deeply equal)
 ```
 
-#### Merging Rules
+That's the whole surface — two functions plus the type-level helpers. Everything below is rules, performance characteristics, and the comparison to the standardized alternatives.
 
-| Value type | Behavior |
+## API
+
+- **`patch(original, patches)`** — immutably deep-merges `patches` into `original`. Returns a new state object with structural sharing of unchanged subtrees.
+- **`delta(before, after)`** — computes the smallest `Patch<S>` that, applied via `patch()`, yields a state deeply equal to `after`.
+- **Types**: `Patch<T>` (recursive partial), `DeepPartial<T>` (alias for consumer APIs), `Schema` (plain-object shape).
+
+## Common patterns
+
+### Merging rules
+
+| Value type | `patch` behavior |
 |---|---|
 | Plain objects | Deep merge recursively |
 | Arrays, Dates, RegExp, Maps, Sets, TypedArrays | Replace entirely |
 | `undefined` or `null` | Delete the property |
 | Primitives (string, number, boolean) | Replace with patch value |
 
-```typescript
-// Deep merge nested objects
-patch({ a: { x: 1, y: 2 } }, { a: { x: 10 } })
-// → { a: { x: 10, y: 2 } }
-
-// Replace arrays (not merged)
-patch({ items: [1, 2, 3] }, { items: [4, 5] })
-// → { items: [4, 5] }
-
-// Delete properties
-patch({ a: 1, b: 2, c: 3 }, { b: undefined, c: null })
-// → { a: 1 }
-
-// Add new keys
-patch({ a: 1 }, { b: 2 })
-// → { a: 1, b: 2 }
+```ts
+patch({ a: { x: 1, y: 2 } }, { a: { x: 10 } });          // → { a: { x: 10, y: 2 } }
+patch({ items: [1, 2, 3] }, { items: [4, 5] });          // → { items: [4, 5] }
+patch({ a: 1, b: 2, c: 3 }, { b: undefined, c: null });  // → { a: 1 }
+patch({ a: 1 }, { b: 2 });                                // → { a: 1, b: 2 }
 ```
 
-#### Purity and Structural Sharing
+### Structural sharing
 
-`patch()` is a **pure function** — it never mutates its arguments and always returns a deterministic result for the same inputs.
+`patch` is a pure function — it never mutates inputs. Unpatched subtrees are reused by reference (same approach as Immer, Redux Toolkit). An empty patch short-circuits entirely:
 
-Unpatched subtrees are **reused by reference** (structural sharing), not deep-copied. This is the same approach used by Immer, Redux Toolkit, and other immutable state libraries.
-
-```typescript
+```ts
 const original = { unchanged: { deep: true }, patched: "old" };
 const result = patch(original, { patched: "new" });
 
-result.unchanged === original.unchanged  // true — same reference
-result !== original                      // true — new top-level object
+result.unchanged === original.unchanged;  // true — same reference
+result !== original;                      // true — new top-level object
+
+patch(state, {}) === state;                // true — no work, no allocation
 ```
 
-This is safe in Act's event sourcing model because:
+This is safe in event sourcing because state is typed `Readonly<S>` (compiler prevents mutation), events are immutable (state is only updated through new patches), and each `patch()` call creates a new top-level object.
 
-- State is always typed as `Readonly<S>` — the type system prevents mutation
-- Events are immutable — state is only ever updated through new patches
-- Each `patch()` call creates a new top-level object; unchanged subtrees are shared, not copied
-
-An empty patch short-circuits entirely and returns the original reference with zero allocation:
-
-```typescript
-const result = patch(state, {});
-result === state  // true — no work done
-```
-
-### `delta(before, after) → Patch<S>`
-
-Computes the smallest `Patch<S>` that, when applied to `before` via `patch()`, yields an object semantically equal to `after`. The semantic inverse of `patch()`.
-
-```typescript
-import { delta, patch } from "@rotorsoft/act-patch";
-
-const before = { user: { name: "Alice", age: 30 }, theme: "dark" };
-const after = { user: { name: "Alice", age: 31 }, theme: "dark" };
-
-const d = delta(before, after);
-// → { user: { age: 31 } }
-
-patch(before, d);
-// → { user: { name: "Alice", age: 31 }, theme: "dark" }   (deeply equals `after`)
-```
-
-#### Round-trip identity
+### Round-trip identity
 
 ```
 patch(before, delta(before, after))  ≡  after        // round-trip
 delta(before, before)                ≡  {}           // idempotent
 ```
 
-`patch` and `delta` form a closed bidirectional algebra over `Patch<S>`. Any event whose payload is a `Patch<S>` over an aggregate's state shape can be produced by the caller via `delta` and applied by the patch handler via `patch` — no hand-rolled diff/merge logic needed.
+In Act's event sourcing model, an event's data *is* the patch. Either direction works: emit `delta(prev, next)` as event data and let the framework apply it via `patch`, or hand-write a `Patch<S>` and emit it directly. No diff/merge logic on the application side.
 
-| Direction | Operation |
-|---|---|
-| Forward (event → state) | `state' = patch(state, eventData)` |
-| Inverse (snapshots → event) | `eventData = delta(prevState, nextState)` |
-
-#### Equality semantics
+### Equality semantics in `delta`
 
 `delta` mirrors `patch`'s structural-sharing model — equality is reference-based (`Object.is`), not deep:
 
 | Case | Behavior |
 |---|---|
 | Same reference (`Object.is`) | omit (mirrors patch's structural sharing) |
-| Both plain objects | recurse (mirrors deep merge) |
-| Different references, any other diff | set to `after[K]` (mirrors wholesale replace) |
-| Key in `before` only | set to `null` (mirrors delete) |
+| Both plain objects | recurse |
+| Different references, any other diff | set to `after[K]` (wholesale replace) |
+| Key in `before` only | set to `null` (delete) |
 | Key in `after` only | set to `after[K]` |
 
-Two structurally-equal-but-distinct values (e.g. two `Date` instances with the same `getTime()`, or two arrays with the same elements) emit a replacement — safe for the round-trip identity, just slightly less compact. This matches what `patch` does: it never inspects the contents of non-plain values, it just replaces or shares the reference.
+Two structurally-equal-but-distinct values (e.g. two `Date` instances with the same `getTime()`) emit a replacement — safe for the round-trip, just slightly less compact. `Object.is` handles `NaN === NaN` and distinguishes `+0` from `-0` correctly.
 
-`Object.is` handles `NaN === NaN` and distinguishes `+0` from `-0` correctly.
+## When to use this vs JSON Patch (RFC 6902) vs JSON Merge Patch (RFC 7396)
 
-### Types
-
-```typescript
-import type { Patch, DeepPartial, Schema } from "@rotorsoft/act-patch";
-
-// Schema — plain object shape
-type Schema = Record<string, any>;
-
-// Patch<T> — recursive partial for patching state
-type Patch<T> = {
-  [K in keyof T]?: T[K] extends Schema ? Patch<T[K]> : T[K];
-};
-
-// DeepPartial<T> — recursive deep partial (alias for consumer APIs)
-type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends Record<string, any> ? DeepPartial<T[K]> : T[K];
-};
-```
-
-## Comparison: Act Patch vs JSON Patch (RFC 6902) vs JSON Merge Patch (RFC 7396)
-
-### JSON Patch (RFC 6902)
-
-An **array of operations** (`add`, `remove`, `replace`, `move`, `copy`, `test`) with JSON Pointer paths.
-
-```json
-[
-  { "op": "replace", "path": "/user/name", "value": "Alice" },
-  { "op": "remove", "path": "/temp" },
-  { "op": "add", "path": "/items/-", "value": 42 }
-]
-```
-
-**Pros:** Standardized, array-index-level operations, conditional `test` ops, compact for sparse changes, `move`/`copy` without data duplication.
-
-**Cons:** Verbose for bulk updates (each field = separate operation), path parsing overhead, requires diff algorithm to produce patches, index-based array ops fragile under concurrency, not type-safe (paths are strings), ~5 KB+ library overhead.
-
-### JSON Merge Patch (RFC 7396)
-
-A **partial document** recursively merged into the target. Closest to Act's approach.
-
-```json
-{ "user": { "name": "Alice" }, "temp": null }
-```
-
-**Pros:** Simple mental model, compact for bulk updates, standardized.
-
-**Cons:** Cannot set a value to `null` (null means delete), cannot express array-element-level changes, no conditional operations.
-
-### Why Act's Approach Wins for Event Sourcing
-
-| Criterion | JSON Patch (6902) | Merge Patch (7396) | Act Patch |
+| Criterion | JSON Patch (RFC 6902) | Merge Patch (RFC 7396) | `act-patch` |
 |---|---|---|---|
-| Type safety | None (paths are strings) | Partial (shape matches) | **Full** (Zod + `Patch<T>`) |
-| Bundle size | ~5 KB+ | Trivial | **< 1 KB** |
-| Apply perf | O(ops x path parse) | O(keys x depth) | **O(keys x depth)** |
+| Type safety | None (paths are strings) | Partial (shape matches) | **Full** (`Patch<T>` derived from `T`) |
+| Bundle size | ~5 KB+ | trivial | **< 1 KB** |
+| Apply perf | O(ops × path parse) | O(keys × depth) | **O(keys × depth)** with structural sharing |
 | Delete semantics | Explicit `remove` op | `null` = delete | `null`/`undefined` = delete |
-| Array handling | Index ops (fragile) | Replace only | Replace only (correct for ES) |
-| Event sourcing fit | Poor (opaque ops) | Good | **Best** (patch = event data shape) |
+| Array handling | Index ops (fragile under concurrency) | Replace only | Replace only |
+| Event sourcing fit | Poor (opaque ops) | Good | **Best** (patch ≡ event data shape) |
 
-**Key insight:** In event sourcing, each event's data *is* the patch. The event schema (Zod) already constrains the shape, providing compile-time and runtime validation for free. JSON Patch would add an unnecessary indirection layer — event data translated into operations, losing type safety and adding overhead.
-
-## Optimizations
-
-1. **Short-circuit on empty patch** — returns the original reference with zero allocation.
-2. **Fast-path for primitives** — skips mergeability when `typeof value !== "object"`.
-3. **Structural sharing** — unpatched subtrees are reused by reference instead of deep-copied.
-4. **Hybrid copy strategy** — uses V8-optimized spread for small objects (≤16 keys) and prototype-free two-pass enumeration for larger ones, avoiding spread overhead on wide states.
-5. **O(1) mergeability** — single `constructor === Object` check instead of iterating types.
+**Pick this** when you want type-safe patches over a Zod-derived schema. **Pick Merge Patch** when you need a standardized wire format with simple semantics and don't care about type safety. **Pick JSON Patch** when you genuinely need atomic array-index-level operations or conditional `test` ops — rare outside collaborative editing.
 
 ## Benchmarks
 
-Run with `pnpm bench:micro libs/act-patch/bench/patch.micro.bench.ts`.
-
-### Act Patch vs JSON Patch (RFC 6902) vs JSON Merge Patch (RFC 7396)
-
-All three implementations tested with equivalent operations on the same fixtures. JSON Patch and Merge Patch are inline reference implementations following their respective specs. Results on Apple M4 Max, Node 22:
+Run with `pnpm bench:micro libs/act-patch/bench/patch.micro.bench.ts`. Inline reference implementations of RFC 6902 and 7396 are tested with equivalent operations on the same fixtures. Apple M4 Max, Node 22:
 
 | Benchmark | Act Patch | Merge Patch (7396) | JSON Patch (6902) |
 |---|---:|---:|---:|
@@ -218,15 +130,32 @@ All three implementations tested with equivalent operations on the same fixtures
 | array replacement | **13.0M** ops/s | 12.8M ops/s | 2.9M ops/s |
 | sequential 10 patches | 1.1M ops/s | **1.4M** ops/s | 237K ops/s |
 | wide object (100 keys) | **221K** ops/s | 61K ops/s | 159K ops/s |
-| large state (1000 keys, 10-key) | **20.9K** ops/s | 4.0K ops/s | 7.4K ops/s |
+| large state (1000 keys, 10-key patch) | **20.9K** ops/s | 4.0K ops/s | 7.4K ops/s |
 
-**Takeaway:** Act Patch matches or beats Merge Patch on small objects and dominates on wide/large states (3.5–5.2x faster) thanks to structural sharing and the hybrid copy strategy. JSON Patch is consistently the slowest due to deep-clone + path parsing overhead.
+Act Patch matches or beats Merge Patch on small objects and dominates on wide/large states (3.5–5.2× faster) thanks to structural sharing and a hybrid copy strategy (V8-optimized spread for small objects, prototype-free two-pass enumeration for larger ones). JSON Patch is consistently the slowest due to deep-clone + path parsing overhead.
 
-## Browser Support
+## Compatibility
 
-- Zero Node.js dependencies
-- No `process`, `Buffer`, or other Node globals
-- Dual CJS/ESM output, fully tree-shakeable (`sideEffects: false`)
+- **Node**: >=22.18.0
+- **Browser**: ✓ — no `process`, `Buffer`, or other Node globals
+- **Runtime deps**: none
+- **Module formats**: ESM + CJS, fully tree-shakeable (`sideEffects: false`)
+- **TypeScript**: requires strict mode for `Patch<T>` to give the right inference
+
+## Stability
+
+Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
+## Related packages
+
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework whose state reducers consume `patch()`.
+- **[@rotorsoft/act-http](https://www.npmjs.com/package/@rotorsoft/act-http)** — uses `patch` in its `/sse` subpath for incremental state broadcast (only sends what changed).
+
+## Documentation
+
+- **[State management](https://rotorsoft.github.io/act-root/docs/concepts/state-management)** — how Act state reducers use `patch` internally.
+- **[Real-time with SSE](https://rotorsoft.github.io/act-root/docs/concepts/real-time)** — the wire format that pairs `delta` on the server with `patch` on the client.
+- **[Cache and snapshots](https://rotorsoft.github.io/act-root/docs/architecture/cache-and-snapshots)** — how snapshots interact with patch application during replay.
 
 ## License
 

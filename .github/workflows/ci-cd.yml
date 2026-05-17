@@ -114,6 +114,13 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
 
+      # Section-presence check for libs/*/README.md — ticket #751.
+      # Fails the build if any lib README is missing one of the required
+      # canonical sections (Title + tagline, Why, Installation, Quick start,
+      # Related, Documentation, License). Deprecated packages opt out via
+      # the `canonical-check: deprecated` HTML-comment marker.
+      - run: pnpm check:readmes
+
       # `act` CLI smoke test — non-interactive `-q` query against both
       # example apps. Catches regressions in the parser, builder, or
       # formatter that would silently break the doc surface. NO_COLOR
