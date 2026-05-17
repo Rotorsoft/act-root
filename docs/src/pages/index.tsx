@@ -424,16 +424,16 @@ function Sandboxes() {
             <Sandbox
               title="Event Sourcing"
               blurb="The classic Calculator example — actions, events, state, replay."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev"
+              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev%3Astackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
             />
 
             <Sandbox
               title="Adaptive Dual-Frontier Drain"
               blurb="Watch Act process thousands of events across leading and lagging frontiers, with parallel claim and atomic locking."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&view=editor&terminal=1&file=src/index.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start"
+              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&view=editor&terminal=1&file=src/index.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start%3Astackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src"
             />
           </section>
