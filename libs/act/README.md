@@ -4,15 +4,15 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-_Event sourcing without the ceremony — three primitives, Zod end to end, no broker required._
+_Event-sourcing framework for TypeScript — three primitives, Zod end to end, no broker required._
 
 ## Why this package
 
-Most event-sourcing frameworks ask you to learn five concepts before you can ship a feature: aggregates, commands, events, sagas, projections. Act asks you to learn three: **Actions → {State} ← Reactions**. Your domain stays in TypeScript, your schemas stay in Zod, your events live in an event store (in-memory by default; swap in Postgres or SQLite via the sibling adapters). The framework wires the pipeline — validation, append-only commit, derived state, fan-out reactions, drain under back-pressure, blocked-stream recovery.
+This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff and dead-lettering, blocked-stream recovery, time-travel queries against the same log.
 
-This package is the framework itself: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. The published surface is stable under [SemVer](../../STABILITY.md) at 1.0.
+Your domain stays in TypeScript; your schemas stay in Zod. Pick a store at bootstrap — Postgres (`@rotorsoft/act-pg`), SQLite (`@rotorsoft/act-sqlite`), or the bundled in-memory default — and the application code stays the same. The published surface is stable under [SemVer](../../STABILITY.md) at 1.0.
 
-For the marketing-shaped overview (what's cool about Act, who it's for, why teams pick it), see the [root README](../../README.md).
+For the project-level overview, see the [root README](../../README.md).
 
 ## Installation
 
