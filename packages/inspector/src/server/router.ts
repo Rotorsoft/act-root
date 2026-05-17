@@ -497,7 +497,18 @@ export const inspectorRouter = t.router({
     return [...names].sort();
   }),
 
-  /** Get distinct stream names for filter suggestions */
+  /** Get distinct stream names with per-stream metadata for the streams view.
+   *
+   * Backed by `Store.query_stats` (ACT-639): one round trip per adapter,
+   * returns per-stream aggregates instead of streaming every event row over
+   * the wire. For a store with 1M events / 10K streams this is ~100×
+   * less data transferred than the previous full-event-scan path.
+   *
+   * `names: true` is requested so the response also includes a per-stream
+   * event-name → count map, surfaced as `nameCounts` for future UI uses
+   * (schema-evolution view, drill-through to legacy-event filters).
+   * Sorting + limit stay client-side (the DB returns all matched streams).
+   */
   streams: t.procedure
     .input(
       z
@@ -508,41 +519,18 @@ export const inspectorRouter = t.router({
     )
     .query(async ({ input }) => {
       const s = getStore();
-
-      const events: AnyEvent[] = [];
-      await s.query<Schemas>(collect(events), { with_snaps: true });
-
-      const streamMap = new Map<
-        string,
-        {
-          count: number;
-          lastEvent: string;
-          lastVersion: number;
-          lastEventName: string;
-        }
-      >();
-
-      for (const e of events) {
-        const existing = streamMap.get(e.stream);
-        if (!existing || e.version > existing.lastVersion) {
-          streamMap.set(e.stream, {
-            count: (existing?.count ?? 0) + 1,
-            lastEvent: String(e.created),
-            lastVersion: e.version,
-            lastEventName: String(e.name),
-          });
-        } else {
-          existing.count++;
-        }
-      }
-
-      return [...streamMap.entries()]
-        .map(([stream, info]) => ({
+      const stats = await s.query_stats<Schemas>(
+        {},
+        { count: true, names: true }
+      );
+      return [...stats.entries()]
+        .map(([stream, { head, count, names }]) => ({
           stream,
-          eventCount: info.count,
-          lastEvent: info.lastEvent,
-          currentVersion: info.lastVersion,
-          isClosed: info.lastEventName === "__tombstone__",
+          eventCount: count ?? 0,
+          lastEvent: String(head.created),
+          currentVersion: head.version,
+          isClosed: head.name === "__tombstone__",
+          nameCounts: names ?? {},
         }))
         .sort((a, b) => b.eventCount - a.eventCount)
         .slice(0, input?.limit ?? 100);
