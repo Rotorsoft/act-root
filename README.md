@@ -1,34 +1,21 @@
-<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;border-spacing:0;margin:0;padding:0">
-  <tr>
-    <td colspan="2" align="left" style="padding:0">
-      <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
-      <a href="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml/badge.svg?branch=master" alt="Store Conformance"></a>
-      <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
-      <img src="https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square" alt="Repo Size">
-    </td>
-  </tr>
-  <tr>
-    <td width="69%" align="center" style="padding:0">
-      <a href="https://rotorsoft.github.io/act-root/">
-        <img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="100%">
-      </a>
-    </td>
-    <td width="31%" align="center" style="padding:0">
-      <a href="https://payhip.com/b/7ezLy">
-        <img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="100%">
-      </a>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" style="padding:0">
-      <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
-      <a href="https://rotorsoft.github.io/act-root/"><img src="https://img.shields.io/badge/Documentation-7c5cff?style=for-the-badge&labelColor=11141b" alt="Documentation"></a>
-    </td>
-    <td align="center" style="padding:0">
-      <a href="https://payhip.com/b/7ezLy"><img src="https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge" alt="Get the Book"></a>
-    </td>
-  </tr>
-</table>
+<p align="left">
+  <a href="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/ci-cd.yml/badge.svg?branch=master" alt="Build Status"></a>
+  <a href="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml"><img src="https://github.com/rotorsoft/act-root/actions/workflows/conformance.yml/badge.svg?branch=master" alt="Store Conformance"></a>
+  <a href="https://coveralls.io/github/Rotorsoft/act-root?branch=master"><img src="https://coveralls.io/repos/github/Rotorsoft/act-root/badge.svg?branch=master" alt="Coverage Status"></a>
+  <img src="https://img.shields.io/github/repo-size/rotorsoft/act-root?style=flat-square" alt="Repo Size">
+</p>
+
+<p align="center">
+  <a href="https://rotorsoft.github.io/act-root/"><img src="./assets/wordmark.png" alt="Act — Fluent Event Sourcing for TypeScript" width="67%"></a>
+  <a href="https://payhip.com/b/7ezLy"><img src="./assets/cover.jpg" alt="Practical Event Sourcing in TypeScript — Book Cover" width="30%"></a>
+</p>
+
+<p align="center">
+  <a href="https://rotorsoft.github.io/act-root/docs/intro"><img src="https://img.shields.io/badge/Get_Started-→-3bb0ff?style=for-the-badge&labelColor=11141b" alt="Get Started"></a>
+  <a href="https://rotorsoft.github.io/act-root/"><img src="https://img.shields.io/badge/Documentation-7c5cff?style=for-the-badge&labelColor=11141b" alt="Documentation"></a>
+  &nbsp;
+  <a href="https://payhip.com/b/7ezLy"><img src="https://img.shields.io/badge/Get_the_Book-📖-blue?style=for-the-badge" alt="Get the Book"></a>
+</p>
 
 ## What it is
 
