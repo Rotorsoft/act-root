@@ -266,15 +266,18 @@ export type EventName<E extends Schemas = Schemas> =
  *   `options.tail` is true.
  * @property count - Total non-excluded event count for the stream, when
  *   `options.count` is true.
- * @property names - Map of event name → count of events with that name,
- *   when `options.names` is true. Empty object never returned — a stream
- *   with no matching events is absent from the result map entirely.
+ * @property names - Sparse map of event name → count of events with
+ *   that name, when `options.names` is true. Keys are typed as
+ *   {@link EventName | EventName<E>} so typos on lookup
+ *   (e.g. `stats.names?.["TicktOpened"]`) fail at compile time when the
+ *   caller narrows `E`. Empty object never returned — a stream with no
+ *   matching events is absent from the result map entirely.
  */
 export type StreamStats<E extends Schemas = Schemas> = {
   readonly head: Committed<E, keyof E>;
   readonly tail?: Committed<E, keyof E>;
   readonly count?: number;
-  readonly names?: Readonly<Record<string, number>>;
+  readonly names?: Readonly<Partial<Record<EventName<E>, number>>>;
 };
 
 /**
