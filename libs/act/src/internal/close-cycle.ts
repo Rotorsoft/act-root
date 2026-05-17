@@ -14,7 +14,7 @@
  * @internal
  */
 
-import { cache, store, TOMBSTONE_EVENT } from "../ports.js";
+import { cache, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   CloseResult,
   CloseTarget,
@@ -127,26 +127,24 @@ export async function runCloseCycle(
 async function scanStreamHeads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
+  // One round trip: query_stats returns the latest non-snap event per
+  // stream (heads-only cheap path, indexed). Streams whose latest non-snap
+  // event is a tombstone are filtered out in the loop — we don't want to
+  // re-tombstone an already-closed stream. Streams with no events (or
+  // only snap/tombstone events filtered out) are absent from the result
+  // map entirely.
+  const stats = await store().query_stats(streams, {
+    exclude: [SNAP_EVENT],
+  });
   const out = new Map<string, StreamHead>();
-  await Promise.all(
-    streams.map(async (s) => {
-      let maxId = -1;
-      let version = -1;
-      let lastEventName = "";
-      await store().query(
-        (e) => {
-          // backward iteration: first non-tombstone is the most recent
-          // domain event. snaps are filtered server-side (no with_snaps).
-          if (e.name === TOMBSTONE_EVENT || maxId !== -1) return;
-          maxId = e.id;
-          version = e.version;
-          lastEventName = e.name;
-        },
-        { stream: s, stream_exact: true, backward: true, limit: 1 }
-      );
-      if (maxId >= 0) out.set(s, { maxId, version, lastEventName });
-    })
-  );
+  for (const [stream, { head }] of stats) {
+    if (head.name === TOMBSTONE_EVENT) continue;
+    out.set(stream, {
+      maxId: head.id,
+      version: head.version,
+      lastEventName: head.name as string,
+    });
+  }
   return out;
 }
 
