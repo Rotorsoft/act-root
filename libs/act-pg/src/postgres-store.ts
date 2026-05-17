@@ -1171,7 +1171,10 @@ export class PostgresStore implements Store {
     const fromClause = needsStreamsJoin
       ? `${this._fqt} e JOIN ${this._fqs} s ON s.stream = e.stream`
       : `${this._fqt} e`;
-    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    // Always emit a WHERE clause — `WHERE TRUE` short-circuits the
+    // empty-filter case without a conditional branch on the generation
+    // side. PG optimizes the trivial predicate out.
+    const whereClause = `WHERE ${where.length ? where.join(" AND ") : "TRUE"}`;
 
     return fullScan
       ? this._queryStatsFullScan<E>(
@@ -1215,17 +1218,14 @@ export class PostgresStore implements Store {
     }
     if (tailRes) {
       for (const row of tailRes.rows) {
-        const existing = out.get(row.stream);
-        // Existing must be present — head and tail share the same WHERE,
-        // so any stream returning a tail must also have returned a head.
-        if (existing) {
-          (
-            existing as {
-              head: Committed<E, keyof E>;
-              tail?: Committed<E, keyof E>;
-            }
-          ).tail = row;
-        }
+        // Head and tail share the same WHERE, so any stream returning a
+        // tail must also have returned a head — no null check needed.
+        (
+          out.get(row.stream) as {
+            head: Committed<E, keyof E>;
+            tail?: Committed<E, keyof E>;
+          }
+        ).tail = row;
       }
     }
     return out;
@@ -1328,7 +1328,11 @@ export class PostgresStore implements Store {
         } as unknown as Committed<E, keyof E>;
       }
       if (wantCount) stats.count = row.agg_count;
-      if (wantNames) stats.names = row.agg_names ?? {};
+      // `agg_names` is non-null when this row exists: heads and agg are
+      // both built from the same `ef` CTE, so any stream in heads has
+      // at least one matching event and `jsonb_object_agg` returns an
+      // object (never null) for that group.
+      if (wantNames) stats.names = row.agg_names as Record<string, number>;
       out.set(row.stream, stats as StreamStats<E>);
     }
     return out;

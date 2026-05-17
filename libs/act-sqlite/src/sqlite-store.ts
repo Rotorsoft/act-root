@@ -714,7 +714,10 @@ export class SqliteStore implements Store {
     const fromClause = needsStreamsJoin
       ? `events e JOIN streams s ON s.stream = e.stream`
       : `events e`;
-    const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    // Always emit a WHERE clause — `WHERE 1=1` short-circuits the
+    // empty-filter case without a conditional branch on the generation
+    // side. SQLite optimizes the trivial predicate out.
+    const whereClause = `WHERE ${where.length ? where.join(" AND ") : "1=1"}`;
 
     return fullScan
       ? this._queryStatsFullScan<E>(
@@ -756,7 +759,7 @@ export class SqliteStore implements Store {
       this.client.execute({ sql: headSql, args: args as any[] }),
       tailSql
         ? this.client.execute({ sql: tailSql, args: args as any[] })
-        : Promise.resolve(null),
+        : null,
     ]);
 
     const toCommitted = (row: Record<string, unknown>): Committed<E, keyof E> =>
@@ -778,15 +781,14 @@ export class SqliteStore implements Store {
     }
     if (tailRes) {
       for (const row of tailRes.rows) {
-        const existing = out.get(row.stream as string);
-        if (existing) {
-          (
-            existing as {
-              head: Committed<E, keyof E>;
-              tail?: Committed<E, keyof E>;
-            }
-          ).tail = toCommitted(row as Record<string, unknown>);
-        }
+        // Head and tail share the same WHERE, so any stream returning
+        // a tail must also have returned a head — no null check needed.
+        (
+          out.get(row.stream as string) as {
+            head: Committed<E, keyof E>;
+            tail?: Committed<E, keyof E>;
+          }
+        ).tail = toCommitted(row as Record<string, unknown>);
       }
     }
     return out;
@@ -903,9 +905,11 @@ export class SqliteStore implements Store {
         );
       }
       if (wantCount) stats.count = Number(r.agg_count);
-      if (wantNames) {
-        stats.names = r.agg_names ? JSON.parse(r.agg_names as string) : {};
-      }
+      // `agg_names` is non-null when this row exists: heads and agg are
+      // both built from the same `ef` CTE, so any stream in heads has
+      // at least one matching event and `json_group_object` returns a
+      // JSON string (never null) for that group.
+      if (wantNames) stats.names = JSON.parse(r.agg_names as string);
       out.set(r.stream as string, stats as StreamStats<E>);
     }
     return out;

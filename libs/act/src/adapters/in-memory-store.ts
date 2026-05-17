@@ -782,33 +782,36 @@ export class InMemoryStore implements Store {
       let ok = true;
       if (arrayTargets) {
         ok = arrayTargets.has(stream);
-      } else if (filter) {
-        if (filter.stream !== undefined) {
-          ok = filter.stream_exact
-            ? stream === filter.stream
+      } else {
+        // arrayTargets null ⇒ input was a StreamFilter ⇒ filter is set.
+        // biome-ignore lint/style/noNonNullAssertion: TS can't correlate arrayTargets and filter
+        const filter_ = filter!;
+        if (filter_.stream !== undefined) {
+          ok = filter_.stream_exact
+            ? stream === filter_.stream
             : // biome-ignore lint/style/noNonNullAssertion: streamRe set when stream is regex
               streamRe!.test(stream);
         }
         if (
           ok &&
-          (filter.source !== undefined || filter.blocked !== undefined)
+          (filter_.source !== undefined || filter_.blocked !== undefined)
         ) {
           const sub = this._streams.get(stream);
           if (!sub) {
             ok = false;
           } else {
-            if (filter.source !== undefined) {
+            if (filter_.source !== undefined) {
               if (sub.source === undefined) ok = false;
               else
-                ok = filter.source_exact
-                  ? sub.source === filter.source
+                ok = filter_.source_exact
+                  ? sub.source === filter_.source
                   : // biome-ignore lint/style/noNonNullAssertion: sourceRe set when source is regex
                     sourceRe!.test(sub.source);
             }
             if (
               ok &&
-              filter.blocked !== undefined &&
-              sub.blocked !== filter.blocked
+              filter_.blocked !== undefined &&
+              sub.blocked !== filter_.blocked
             ) {
               ok = false;
             }

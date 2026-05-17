@@ -225,6 +225,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(backward.map((e) => e.id)).toEqual(
           [...committed].reverse().map((c) => c.id)
         );
+
+        // Backward + limit — exercises the limit-break branch in the
+        // backward-traversal path. Latest event only.
+        const latest = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          backward: true,
+          limit: 1,
+        });
+        expect(latest).toHaveLength(1);
+        expect(latest[0].id).toBe(committed.at(-1)!.id);
       });
 
       it("after/before bound the id range", async () => {
@@ -1280,15 +1291,135 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // from its own events on every store, so block() reliably fires.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === blockable);
+        expect(mine).toBeDefined();
         const others = leased.filter((l) => l.stream !== blockable);
-        if (others.length) await store.ack(others);
-        if (mine) await store.block([{ ...(mine as Lease), error: "boom" }]);
+        await store.ack(others);
+        await store.block([{ ...(mine as Lease), error: "boom" }]);
 
         const onlyBlocked = await store.query_stats<CounterEvents>({
           stream: `^qsfs-${tag}-`,
           blocked: true,
         });
         expect([...onlyBlocked.keys()]).toEqual([blockable]);
+      });
+
+      it("filter form — source regex, blocked false, no-stream filter, no-subscription", async () => {
+        const tag = uid();
+        // Three streams to exercise the remaining filter branches:
+        //   - `subSrc1` / `subSrc2`: subscribed with sources matching a regex
+        //   - `subBare`: subscribed without source — eligible for blocked-false
+        //   - `eventsOnly`: events committed but no subscription — must be
+        //     absent from source/blocked filter results
+        const subSrc1 = `qsfr-${tag}-1`;
+        const subSrc2 = `qsfr-${tag}-2`;
+        const subBare = `qsfr-${tag}-bare`;
+        const eventsOnly = `qsfr-${tag}-no-sub`;
+        const src1 = `qsfr-${tag}-src-1`;
+        const src2 = `qsfr-${tag}-src-2`;
+        await store.subscribe([
+          { stream: subSrc1, source: src1 },
+          { stream: subSrc2, source: src2 },
+          { stream: subBare },
+        ]);
+        await store.commit<CounterEvents>(
+          subSrc1,
+          [inc(1)],
+          makeMeta({ stream: subSrc1 })
+        );
+        await store.commit<CounterEvents>(
+          subSrc2,
+          [inc(2)],
+          makeMeta({ stream: subSrc2 })
+        );
+        await store.commit<CounterEvents>(
+          subBare,
+          [inc(3)],
+          makeMeta({ stream: subBare })
+        );
+        await store.commit<CounterEvents>(
+          eventsOnly,
+          [inc(99)],
+          makeMeta({ stream: eventsOnly })
+        );
+
+        // (1) source regex — matches both subscribed-source streams via
+        //     pattern, NOT the bare-subscribed or events-only streams.
+        const byRegex = await store.query_stats<CounterEvents>({
+          stream: `^qsfr-${tag}-`,
+          source: `^qsfr-${tag}-src-`,
+        });
+        expect([...byRegex.keys()].sort()).toEqual([subSrc1, subSrc2].sort());
+
+        // (2) blocked: false — every matched stream that has a non-blocked
+        //     subscription. `eventsOnly` is filtered out (no subscription
+        //     at all when source/blocked is set on the filter).
+        const notBlocked = await store.query_stats<CounterEvents>({
+          stream: `^qsfr-${tag}-`,
+          blocked: false,
+        });
+        expect([...notBlocked.keys()].sort()).toEqual(
+          [subSrc1, subSrc2, subBare].sort()
+        );
+        expect(notBlocked.has(eventsOnly)).toBe(false);
+
+        // (3) No-stream filter (only source) — exercises the filter form
+        //     when `stream` is undefined.
+        const sourceOnly = await store.query_stats<CounterEvents>({
+          source: `^qsfr-${tag}-src-`,
+        });
+        // Universe is global, but our regex narrows down to this tag's
+        // sources. Both subSrc1 and subSrc2 match.
+        expect([...sourceOnly.keys()].sort()).toEqual(
+          [subSrc1, subSrc2].sort()
+        );
+      });
+
+      it("empty filter {} — matches every event-bearing stream", async () => {
+        const tag = uid();
+        const a = `qse-${tag}-a`;
+        const b = `qse-${tag}-b`;
+        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
+        await store.commit<CounterEvents>(b, [dec(2)], makeMeta({ stream: b }));
+
+        // {} matches all event-bearing streams globally — the TCK runs
+        // against a shared store, so we only assert that this tag's
+        // streams are present (other tests' streams may also appear).
+        const all = await store.query_stats<CounterEvents>({});
+        expect(all.has(a)).toBe(true);
+        expect(all.has(b)).toBe(true);
+      });
+
+      it("stat-flag combinations — count-only, names-only, tail-only", async () => {
+        const tag = uid();
+        const s = `qsfl-${tag}`;
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), dec(3)],
+          makeMeta({ stream: s })
+        );
+
+        // count only → no names, no tail in result.
+        const c = await store.query_stats<CounterEvents>([s], {
+          count: true,
+        });
+        expect(c.get(s)?.count).toBe(3);
+        expect(c.get(s)?.names).toBeUndefined();
+        expect(c.get(s)?.tail).toBeUndefined();
+
+        // names only → no count, no tail.
+        const n = await store.query_stats<CounterEvents>([s], {
+          names: true,
+        });
+        expect(n.get(s)?.names).toEqual({ Incremented: 2, Decremented: 1 });
+        expect(n.get(s)?.count).toBeUndefined();
+        expect(n.get(s)?.tail).toBeUndefined();
+
+        // tail only → no count, no names. Cheap path (no full scan).
+        const t = await store.query_stats<CounterEvents>([s], { tail: true });
+        expect(t.get(s)?.tail?.name).toBe("Incremented");
+        expect((t.get(s)?.tail?.data as { amount: number }).amount).toBe(1);
+        expect(t.get(s)?.count).toBeUndefined();
+        expect(t.get(s)?.names).toBeUndefined();
       });
     });
 
