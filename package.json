@@ -41,6 +41,7 @@
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
+    "check:readmes": "node scripts/check-lib-readmes.mjs",
     "prepare": "simple-git-hooks",
     "dev:calculator": "pnpm -F calculator dev",
     "dev:wolfdesk": "pnpm -F wolfdesk dev",

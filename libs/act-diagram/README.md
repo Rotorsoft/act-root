@@ -4,82 +4,45 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-diagram.svg)](https://www.npmjs.com/package/@rotorsoft/act-diagram)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) event-sourced apps. Extracts states, actions, events, reactions, slices, and projections from TypeScript source code and renders them as an interactive SVG.
+_Interactive domain model diagram for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). Reads your TypeScript, renders an SVG of states, slices, projections, and reactions — with click-through to source._
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). The diagram **output shape** (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Why this package
 
-## Features
+Act apps grow horizontally — more states, more slices, more projections, more reactions — and at some point the mental model of "what fires what" stops fitting in your head. This package solves that two ways:
 
-- **Real-time visualization** — SVG diagram updates as source files change
-- **Code navigation** — click any diagram element to jump to its `file:line:col` location
-- **Per-slice error isolation** — broken files show errors in their slice boundary while healthy slices render normally
-- **Bottom-up model building** — states → slices → act, each level independently validated
-- **IDE-agnostic** — works over props, postMessage, or WebSocket (see [act-nvim](https://github.com/Rotorsoft/act-nvim) for Neovim integration)
-- **Embeddable** — React component for any host (IDE webview, standalone app, docs site)
-- **AI refinement** — optional prompt bar to generate code via a streaming endpoint (see [AI server](#ai-server-optional))
-- **`act` CLI** — terminal companion that walks the model interactively, surfaces Zod schemas as captured source text, and jumps into `$EDITOR` at any file:line (see [the act CLI](#the-act-cli))
-- **High test coverage** — over 400 tests covering extraction, layout, navigation, the CLI, and error paths
+A **React component** that renders the live domain model as an interactive SVG, with click-to-source navigation. Drop it into an IDE webview (VS Code, Cursor, Neovim via [`act-nvim`](https://github.com/Rotorsoft/act-nvim)), a docs site, or a standalone explorer. Per-slice error isolation means a broken file shows its error in the slice boundary while healthy slices keep rendering.
+
+A **terminal CLI** (`act`) that walks the same parsed model interactively, surfaces captured Zod schemas, flags deprecation via the `_v<n>` convention, and jumps into `$EDITOR` at the exact `file:line`. Use it when you want the structural answer ("who emits `TicketOpened`?") without leaving the terminal.
+
+Both reuse the same extraction pipeline — mock builders + Sucrase transpile — so the diagram and the CLI always agree.
 
 ## Installation
 
-```sh
-npm install @rotorsoft/act-diagram
-# or
+```bash
 pnpm add @rotorsoft/act-diagram
 ```
 
-**Peer dependencies:** `react >= 18`, `react-dom >= 18`
-
-The component ships its own stylesheet — import it once at the host's entry point:
+The React component ships its own stylesheet — import it once at your host's entry point:
 
 ```ts
 import "@rotorsoft/act-diagram/styles.css";
 ```
 
-## How It Works
+The CLI ships as the `act` bin:
 
-```
-  TypeScript files (.ts)
-        |
-        v
-  topoSort()          ← order files by import dependencies
-        |
-        v
-  extractModel()      ← transpile + execute with mock builders → DomainModel
-        |               inventory scan → per-state validation → per-slice error isolation
-        v
-  validate()           ← check for missing emits, orphan reactions, etc.
-        |
-        v
-  computeLayout()      ← pure layout: positions nodes, edges, slice boxes, projections
-        |
-        v
-  <Diagram />          ← SVG rendering with pan/zoom/model tree/errors section
-        |
-        v
-  navigateToCode()     ← click element → { file, line, col }
+```bash
+npx -p @rotorsoft/act-diagram act
+# or, in a workspace that depends on it:
+pnpm act
 ```
 
-### Extraction Pipeline
+## Quick start
 
-The extraction uses mock versions of `state()`, `slice()`, `projection()`, and `act()` that capture the builder structure without needing the real framework runtime. Code is transpiled with [Sucrase](https://github.com/alangpierce/sucrase) and evaluated in an isolated scope.
-
-**Bottom-up model building:**
-
-1. **Inventory** — scan source files for all `state()`, `slice()`, `projection()`, `act()` declarations
-2. **Build states** — validate each state independently (detects undefined schemas from broken imports)
-3. **Build slices** — compose states from step 2, track missing/corrupted references per slice
-4. **Build projections** — extract projection handlers
-5. **Compose act** — wire slices + projections + reactions into entries, standalone states into a "global" slice
-
-Every item from the inventory is always displayed — with a diagram on success, or an error box on failure.
-
-## Usage
-
-### Standalone Component
+### React component
 
 ```tsx
 import { ActDiagram } from "@rotorsoft/act-diagram";
+import "@rotorsoft/act-diagram/styles.css";
 
 function App() {
   return (
@@ -89,109 +52,50 @@ function App() {
         { path: "src/app.ts", content: "..." },
       ]}
       onNavigate={(file, line, col) => {
-        console.log(`Navigate to ${file}:${line}:${col}`);
+        console.log(`open ${file}:${line}:${col}`);
       }}
     />
   );
 }
 ```
 
-### IDE Webview (postMessage)
+### CLI
 
-```tsx
-// In the webview
-<ActDiagram usePostMessage onNavigate={handleNavigate} />
-
-// From the IDE extension host
-webview.postMessage({ type: "files", files: [...] });
-webview.postMessage({ type: "fileChanged", path: "src/app.ts", content: "..." });
+```bash
+pnpm act                          # interactive: pick category → entry → detail
+pnpm act packages/wolfdesk        # target a specific package
+pnpm act -q TicketOpened          # non-interactive: print one entity, exit
 ```
 
-### Raw Diagram (bring your own pipeline)
-
-```tsx
-import { Diagram, extractModel, validate } from "@rotorsoft/act-diagram";
-
-const { model } = extractModel(files);
-const warnings = validate(model);
-
-<Diagram
-  model={model}
-  warnings={warnings}
-  onClickElement={(name, type, file) => { /* ... */ }}
-/>
-```
-
-### Code Navigation (pure function)
-
-```typescript
-import { navigateToCode } from "@rotorsoft/act-diagram";
-
-const result = navigateToCode(files, "OpenTicket", "action");
-// → { file: "src/states.ts", line: 24, col: 7 }
-```
+Interactive mode uses arrow-key navigation ([`@clack/prompts`](https://github.com/natemoo-re/clack)). Each entry shows producers, consumers, captured Zod schema text, deprecation status, and a one-key shortcut to open the source in `$EDITOR` (VS Code, Cursor, vim, nvim, nano, emacs all recognized). `-q <name>` is the script-friendly path — exits 0 with the detail on a single match, 0 with the match list on ambiguity, 1 with no matches. CI smoke-tests parsing with this mode.
 
 ## API
 
-### Components
+### React components
 
-| Component | Props | Description |
-|-----------|-------|-------------|
-| `ActDiagram` | `files?`, `onNavigate?(file, line, col, type?)`, `usePostMessage?`, `onAiRequest?`, `generating?` | Standalone wrapper: pipeline + diagram + optional AI bar. `onNavigate`'s 4th argument carries the diagram element type (`state`, `slice`, `event`, …) for callers that want type-aware routing. |
-| `Diagram` | `model`, `warnings`, `onClickElement?`, `onFixWithAi?`, `toolbarExtra?` | Raw SVG diagram with pan/zoom/model tree/warnings |
-| `AiBar` | `onSubmit`, `generating?` | Resizable prompt input with model and token controls |
-| `Logo` | `size?` | Act logo SVG |
-| `Tooltip` | `title`, `description?`, `details?`, `children`, `position?`, `align?` | Hover tooltip |
+| Component | Purpose |
+|---|---|
+| `ActDiagram` | Standalone wrapper — pipeline + diagram + optional AI bar. `onNavigate(file, line, col, type?)` for click-to-source. |
+| `Diagram` | Raw SVG diagram with pan/zoom/model tree/warnings. Use when you want to drive the pipeline yourself. |
+| `AiBar` | Resizable prompt input with model and token controls (optional refinement bar). |
+| `Logo`, `Tooltip` | Small UI primitives used inside the diagram, exported for host reuse. |
 
 ### Functions
 
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `extractModel` | `(files: FileTab[]) => { model: DomainModel; error?: string }` | Extract domain model from TypeScript source files (orchestrates `topoSort` + `buildModel`) |
-| `buildModel` | `(files: FileTab[]) => ExecuteResult` | Lower-level: transpile + execute one file at a time, returns the merged inventory and per-file errors. Use when you want to drive the pipeline yourself |
-| `validate` | `(model: DomainModel) => ValidationWarning[]` | Validate model for missing emits, etc. |
-| `navigateToCode` | `(files, name, type?, targetFile?) => { file, line, col } \| undefined` | Find source location of a named element |
-| `topoSort` | `(files: FileTab[]) => FileTab[]` | Sort files by import dependency order |
-| `computeLayout` | `(model: DomainModel) => Layout` | Pure layout computation — positions all nodes, edges, and slice boxes |
-| `emptyModel` | `() => DomainModel` | Create an empty domain model |
-| `parseMultiFileResponse` | `(text: string) => FileTab[]` | Parse a multi-file AI response into individual `FileTab`s |
-| `stripFences` | `(text: string) => string` | Strip Markdown code fences from a block — used by the AI pipeline to extract raw code |
-| `deriveProjectName` | `(files: FileTab[]) => string` | Best-effort project name from the file set — used in the AI prompt context |
+| Function | Purpose |
+|---|---|
+| `extractModel(files)` | High-level extract: `topoSort` + `buildModel`. Returns `{ model, error? }`. |
+| `buildModel(files)` | Lower-level: transpile + execute per-file, returns merged inventory + per-file errors. |
+| `validate(model)` | Check for missing emits, orphan reactions, etc. Returns `ValidationWarning[]`. |
+| `navigateToCode(files, name, type?)` | Pure function — find `{ file, line, col }` for a named element. |
+| `topoSort(files)` | Sort files by import dependency order. |
+| `computeLayout(model)` | Pure layout — positions nodes, edges, slice boxes. |
+| `emptyModel()` | Construct an empty `DomainModel`. |
+| `parseMultiFileResponse(text)`, `stripFences(text)`, `deriveProjectName(files)` | AI-pipeline helpers used by `ActDiagram` when `onAiRequest` is wired. |
 
-### Types
+### IDE plugin protocol (postMessage)
 
-```typescript
-type FileTab = { path: string; content: string };
-
-type ExecuteResult = {
-  model: DomainModel;
-  errors: Record<string, string>; // keyed by file path
-};
-
-type DomainModel = {
-  entries: EntryPoint[];
-  states: StateNode[];
-  slices: SliceNode[];
-  projections: ProjectionNode[];
-  reactions: ReactionNode[];
-  orchestrator?: ActNode; // present only after `act()` is composed
-};
-
-type StateNode = { name, varName, events: EventNode[], actions: ActionNode[], file?, line? };
-type ActionNode = { name, emits: string[], invariants: string[], line? };
-type EventNode = { name, hasCustomPatch: boolean, line? };
-type SliceNode = { name, states: string[], stateVars: string[], projections: string[], reactions: ReactionNode[], error?, file?, line? };
-type ProjectionNode = { name, varName, handles: string[], line? };
-type ReactionNode = { event, handlerName, dispatches: string[], line? };
-
-// Layout types
-type Box = { x, y, w, h, label, error? };
-type Layout = { ns: N[], es: E[], boxes: Box[], minX, minY, width, height };
-```
-
-### IDE Plugin Protocol
-
-```typescript
+```ts
 // Host → Diagram
 type HostMessage =
   | { type: "files"; files: FileTab[] }
@@ -205,59 +109,94 @@ type DiagramMessage =
   | { type: "aiRequest"; prompt: string; files: FileTab[] };
 ```
 
-## The `act` CLI
+Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/api/act-diagram/src/README.md).
 
-A terminal companion for the diagram. Reuses the same parser to walk the model, but renders neighborhoods as text and lets you jump into `$EDITOR` at any file:line.
+## Common patterns
 
-```sh
-# From the monorepo root
-pnpm act                        # interactive: pick category → entry → detail
-pnpm act packages/wolfdesk      # target a specific package
-pnpm act -q TicketOpened        # non-interactive: print one entity and exit
+### IDE webview (postMessage)
+
+```tsx
+<ActDiagram usePostMessage onNavigate={handleNavigate} />
 ```
 
-In interactive mode you navigate with arrow keys (powered by [`@clack/prompts`](https://github.com/natemoo-re/clack)). Each entry shows producers, consumers, captured Zod schema text, deprecation status (via the `_v<n>` convention), and a one-key shortcut to open the source in `$EDITOR` (`$VISUAL` takes precedence). VS Code, Cursor, vim, nvim, nano, and emacs are all recognized.
-
-`-q <name>` is the script-friendly path — exits 0 with the detail on a single match, 0 with the match list on ambiguity, 1 with no matches. CI uses this to smoke-test the parser against the example apps.
-
-The CLI ships as the `act` bin from this package, so:
-
-```sh
-npx -p @rotorsoft/act-diagram act
+```ts
+// From the extension host:
+webview.postMessage({ type: "files", files: [...] });
+webview.postMessage({ type: "fileChanged", path: "src/app.ts", content: "..." });
 ```
 
-works from any project that has the package installed.
+The webview side picks up host messages automatically when `usePostMessage` is set; the diagram emits `navigate` and `aiRequest` back through `window.parent.postMessage`.
 
-## AI server (optional)
+### Bring-your-own pipeline
 
-The `AiBar` component dispatches refinement prompts to a streaming endpoint. The package ships with a reference server at `src/server/server.ts` (port 4002) that forwards prompts to Anthropic's API:
+```tsx
+import { Diagram, extractModel, validate } from "@rotorsoft/act-diagram";
 
-```sh
-# In one terminal
+const { model } = extractModel(files);
+const warnings = validate(model);
+
+<Diagram
+  model={model}
+  warnings={warnings}
+  onClickElement={(name, type, file) => {/* … */}}
+/>
+```
+
+Use when you want to cache the extracted model, run extraction in a worker, or wire it to a non-standard file source.
+
+### Optional AI refinement
+
+The `AiBar` component dispatches refinement prompts to a streaming endpoint. A reference SSE server lives at `src/server/server.ts` (port 4002) and forwards prompts to Anthropic's API:
+
+```bash
 ANTHROPIC_API_KEY=sk-ant-... pnpm -F @rotorsoft/act-diagram dev:server
-
-# In your host app, pass onAiRequest to ActDiagram
-<ActDiagram onAiRequest={(prompt, files) => fetch("http://localhost:4002/api/generate", { ... })} />
 ```
 
-The reference server is a thin SSE relay — bring your own API key, your own model selection, and your own prompt strategy. AI mode is opt-in: omit `onAiRequest` and the `AiBar` doesn't render.
+In your host:
 
-## Neovim Integration
-
-See [@rotorsoft/act-nvim](https://github.com/Rotorsoft/act-nvim) — a Neovim plugin that renders act-diagram in the browser with bidirectional navigation, live refresh, and LSP diagnostic forwarding.
-
-## Development
-
-```sh
-# Visual dev server with sample diagram
-pnpm -F @rotorsoft/act-diagram dev
-
-# Run the test suite
-pnpm -F @rotorsoft/act-diagram test
-
-# Build library
-pnpm -F @rotorsoft/act-diagram build
+```tsx
+<ActDiagram
+  onAiRequest={(prompt, files) =>
+    fetch("http://localhost:4002/api/generate", { /* … */ })
+  }
+/>
 ```
+
+The reference server is a thin SSE relay — bring your own API key, model selection, and prompt strategy. AI mode is opt-in: omit `onAiRequest` and the `AiBar` doesn't render.
+
+### Neovim integration
+
+[`@rotorsoft/act-nvim`](https://github.com/Rotorsoft/act-nvim) renders this diagram in the browser with bidirectional navigation, live refresh, and LSP diagnostic forwarding. The diagram is launched from inside Neovim; you click an element in the browser and the cursor jumps to the corresponding source line.
+
+## How it works
+
+The extraction pipeline uses mock versions of `state()`, `slice()`, `projection()`, and `act()` that capture the builder structure without needing the real framework runtime. Code is transpiled with [Sucrase](https://github.com/alangpierce/sucrase) and evaluated in an isolated scope.
+
+Bottom-up: inventory scan → per-state validation → per-slice composition (with error isolation) → projection extraction → `act()` composition. Every item from the inventory is always displayed — with a diagram on success, or an error box on failure. Standalone states without a slice land in a synthetic "global" slice so nothing gets dropped.
+
+## Compatibility
+
+- **Node**: >=22.18.0
+- **Peer**: `react` ^18 || ^19, `react-dom` ^18 || ^19, `zod` ^4.4.3
+- **Bundled deps**: `lucide-react`, `sucrase`
+- **CLI**: works from any project where the package is installed; recognizes `$VISUAL` / `$EDITOR` (vim, nvim, nano, emacs, VS Code, Cursor)
+- **Browser**: the component is a React SPA — runs in any browser that supports modern ES (the host's bundler picks the target)
+- **400+ tests** covering extraction, layout, navigation, CLI, error paths
+
+## Stability
+
+Public API governed by the [Act Stability Charter](../../STABILITY.md). The diagram's **output shape** (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
+## Related packages
+
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework whose builders this parses (`state`, `slice`, `projection`, `act`).
+- **[@rotorsoft/act-inspector](https://github.com/rotorsoft/act-root/tree/master/packages/inspector)** — runtime observatory (sibling to this build-time tool). Inspector shows live events + drain state; diagram shows the structural contract.
+
+## Documentation
+
+- **[Contracts CLI guide](https://rotorsoft.github.io/act-root/docs/guides/contracts-cli)** — full reference for the `act` CLI's interactive and non-interactive modes.
+- **[State management](https://rotorsoft.github.io/act-root/docs/concepts/state-management)** — how the builders this parses compose into an app.
+- **[`act-nvim`](https://github.com/Rotorsoft/act-nvim)** — Neovim integration repo.
 
 ## License
 

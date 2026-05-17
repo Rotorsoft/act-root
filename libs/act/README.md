@@ -4,451 +4,159 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act.svg)](https://www.npmjs.com/package/@rotorsoft/act)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Act](../../README.md) core library — Event Sourcing + CQRS framework for TypeScript, built around DDD aggregates and reaction-driven workflows.
+_Event sourcing without the ceremony — three primitives, Zod end to end, no broker required._
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Why this package
+
+Most event-sourcing frameworks ask you to learn five concepts before you can ship a feature: aggregates, commands, events, sagas, projections. Act asks you to learn three: **Actions → {State} ← Reactions**. Your domain stays in TypeScript, your schemas stay in Zod, your events live in an event store (in-memory by default; swap in Postgres or SQLite via the sibling adapters). The framework wires the pipeline — validation, append-only commit, derived state, fan-out reactions, drain under back-pressure, blocked-stream recovery.
+
+This package is the framework itself: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. The published surface is stable under [SemVer](../../STABILITY.md) at 1.0.
+
+For the marketing-shaped overview (what's cool about Act, who it's for, why teams pick it), see the [root README](../../README.md).
 
 ## Installation
 
-```sh
-npm install @rotorsoft/act
-# or
+```bash
 pnpm add @rotorsoft/act
 ```
 
-**Requirements:** Node.js >= 22.18.0
+For production, also install one of the durable stores: [`@rotorsoft/act-pg`](https://www.npmjs.com/package/@rotorsoft/act-pg) (Postgres) or [`@rotorsoft/act-sqlite`](https://www.npmjs.com/package/@rotorsoft/act-sqlite) (SQLite). The bundled `InMemoryStore` is used by default and is intended for development and tests.
 
-## Quick Start
+## Quick start
 
-```typescript
+```ts
 import { act, state } from "@rotorsoft/act";
 import { z } from "zod";
 
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({  // optional — only for events needing custom reducers (passthrough is the default)
-    Incremented: ({ data }, state) => ({ count: state.count + data.amount }),
-  })
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
   .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
+  .emit((action) => ["Incremented", { amount: action.by }])
   .build();
 
 const app = act().withState(Counter).build();
 
-await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 5 });
-const snapshot = await app.load(Counter, "counter1");
-console.log(snapshot.state.count); // 5
+await app.do("increment", { stream: "counter1", actor: { id: "1", name: "u" } }, { by: 5 });
+const snap = await app.load(Counter, "counter1");
+console.log(snap.state); // { count: 5 }
 ```
 
-## Projections & Slices
+Define state, declare actions, dispatch, load. Everything else — projections, reactions, slices, cross-process drain, time-travel — is more of the same builder calls.
 
-Use `projection()` to build read-model updaters and `slice()` for vertical slice architecture. Use `.withState()`, `.withSlice()`, and `.withProjection()` to compose them:
+## API
 
-```typescript
+Top-level exports:
+
+- **Builders** — `state()`, `slice()`, `projection()`, `act()` build the domain. `withState`, `withSlice`, `withProjection` compose them.
+- **Ports** — `store()`, `cache()`, `log()` are first-call-wins singletons; pass an adapter on first call to override the default. `dispose()` registers shutdown callbacks.
+- **`Act` orchestrator** — `do`, `load`, `query`, `query_array`, `query_streams`, `query_stats`, `drain`, `settle`, `correlate`, `reset`, `unblock`, `blocked_streams`, `close` plus lifecycle events (`committed`, `notified`, `settled`, `blocked`, `closed`, …).
+- **Errors** — `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError` plus the `Errors` constants for string-matching.
+- **In-memory adapters** — `InMemoryStore`, `InMemoryCache`, `ConsoleLogger`.
+- **Constants** — `SNAP_EVENT`, `TOMBSTONE_EVENT`.
+- **Types** — full re-export of port interfaces, builder result types, lifecycle event payloads.
+
+Full type reference: [typedoc](https://rotorsoft.github.io/act-root/docs/api/).
+
+## Common patterns
+
+### Slices and projections
+
+`slice()` groups partial state with scoped reactions (vertical-slice architecture); `projection()` builds read-model updaters. Compose with `.withSlice()` / `.withProjection()`:
+
+```ts
 import { projection, slice } from "@rotorsoft/act";
 
-// Projection — read-model updater, handlers receive (event, stream)
+// Projection — read-model updater. Handlers receive (event, stream).
 const CounterProjection = projection("counters")
   .on({ Incremented: z.object({ amount: z.number() }) })
     .do(async ({ stream, data }) => { /* update read model */ })
   .build();
 
-// Slice — partial state + scoped reactions, handlers receive (event, stream, app)
-// Projections can be embedded in slices when their events are a subset of the slice's events
+// Slice — partial state + scoped reactions. Handlers receive (event, stream, app).
 const CounterSlice = slice()
   .withState(Counter)
-  .withProjection(CounterProjection)  // embed projection (events must be subset of slice events)
+  .withProjection(CounterProjection)
   .on("Incremented")
-    .do(async (event, _stream, app) => { /* dispatch actions via app */ })
+    .do(async (event, _stream, app) => { /* dispatch via app */ })
     .to("counter-target")
   .build();
 
-// Standalone projections work at the act() level for cross-slice events
 const app = act().withSlice(CounterSlice).build();
 ```
 
-## Related
+Standalone projections (cross-slice events) work at the `act()` level via `.withProjection()`.
 
-- [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) - PostgreSQL adapter for production deployments
-- [@rotorsoft/act-pino](https://www.npmjs.com/package/@rotorsoft/act-pino) - Pino logger adapter
-- [Full Documentation](https://rotorsoft.github.io/act-root/)
-- [API Reference](https://rotorsoft.github.io/act-root/docs/api/)
-- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
+### Lifecycle wiring at bootstrap
 
-## Performance
-
-- [PERFORMANCE.md](./PERFORMANCE.md) — historical optimizations, batched projection replay, and the **[Reaction latency](./PERFORMANCE.md#reaction-latency-act-103)** section answering "how long from `do()` to reaction firing?"
-- [BENCH.md](../../BENCH.md) — index of every benchmark in the workspace with run commands and current numbers.
-
----
-
-## Event Store
-
-The event store serves as the single source of truth for system state, persisting all changes as immutable events. It provides both durable storage and a queryable event history, enabling replayability, debugging, and distributed event-driven processing.
-
-### Append-Only, Immutable Event Log
-
-Unlike traditional databases that update records in place, the event store follows an append-only model:
-
-- All state changes are recorded as new events — past data is never modified.
-- Events are immutable, providing a complete historical record.
-- Each event is time-stamped and versioned, allowing state reconstruction at any point in time.
-
-This immutability is critical for auditability, debugging, and consistent state reconstruction across distributed systems.
-
-### Event Streams
-
-Events are grouped into streams, each representing a unique entity or domain process:
-
-- Each entity instance (e.g., a user, order, or transaction) has its own stream.
-- Events within a stream maintain strict ordering for correct state replay.
-- Streams are created dynamically as new entities appear.
-
-For example, an Order aggregate might have a stream containing:
-
-1. `OrderCreated`
-2. `OrderItemAdded`
-3. `OrderItemRemoved`
-4. `OrderShipped`
-
-Reconstructing the order's state means replaying these events in sequence, producing a deterministic result.
-
-### Optimistic Concurrency
-
-Each event stream maintains a version number for conflict detection:
-
-- When committing events, the system verifies the stream's version matches the expected version.
-- If another process has written events in the meantime, a `ConcurrencyError` is thrown.
-- The caller can retry with the latest stream state, preventing lost updates.
-
-This ensures strong consistency without heavyweight locks.
-
-```typescript
-// Version is tracked automatically — concurrent writes to the same stream are detected
-await app.do("increment", { stream: "counter1", actor }, { by: 1 });
-```
-
-### Querying
-
-Events can be retrieved in two ways:
-
-- **Load** — Fetch and replay all events for a given stream, reconstructing its current state:
-  ```typescript
-  const snapshot = await app.load(Counter, "counter1");
-  ```
-- **Query** — Filter events by stream, name, time range, correlation ID, or position, with support for forward and backward traversal:
-  ```typescript
-  const events = await app.query_array({ stream: "counter1", names: ["Incremented"], limit: 10 });
-  ```
-
-### Snapshots
-
-Replaying all events from the beginning for every request can be expensive for long-lived streams. Act supports configurable snapshotting:
-
-```typescript
-const Account = state({ Account: schema })
-  // ...
-  .snap((snap) => snap.patchCount >= 10) // snapshot every 10 events
-  .build();
-```
-
-When loading state, the system first loads the latest snapshot and replays only the events that came after it. For example, instead of replaying 1,000 events for an account balance, the system loads a snapshot and applies only the last few transactions.
-
-### Storage Backends
-
-The event store uses a port/adapter pattern, making it easy to swap implementations:
-
-- **InMemoryStore** (included) — Fast, ephemeral storage for development and testing.
-- **[PostgresStore](https://www.npmjs.com/package/@rotorsoft/act-pg)** — Production-ready with ACID guarantees, connection pooling, and distributed processing.
-
-```typescript
-import { store } from "@rotorsoft/act";
+```ts
+import { dispose, log, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 
-// Development: in-memory (default)
-const s = store();
+store(new PostgresStore({ /* … */ }));
+await store().seed();
 
-// Production: inject PostgreSQL
-store(new PostgresStore({ host: "localhost", database: "myapp", user: "postgres", password: "secret" }));
+app.on("committed", () => app.settle());          // drain reactions on every commit
+app.on("blocked", (xs) => log().error({ xs }));   // page on blocked streams
+dispose(async () => { /* your cleanup */ });      // wired into SIGINT/SIGTERM
 ```
 
-Custom store implementations must fulfill the `Store` interface contract (see [CLAUDE.md](../../CLAUDE.md) or the source for details).
+See the [production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist) for the full pre-deploy walkthrough.
 
-### Cache
-
-Cache is always-on with `InMemoryCache` as the default. It avoids full event replay on every `load()` by storing the latest state checkpoint in memory. On `load()`, the cache is checked first — only events committed after the cached position are replayed from the store. Actions update the cache automatically after each successful commit and invalidate on concurrency errors.
-
-```typescript
-import { cache } from "@rotorsoft/act";
-
-// Cache is active by default (InMemoryCache, LRU, maxSize 1000)
-// load() and action() use it transparently — no setup needed
-
-// Replace with a custom adapter (e.g., Redis) for distributed caching:
-cache(new RedisCache({ url: "redis://localhost:6379" }));
-```
-
-The `Cache` interface is async, so you can implement adapters backed by Redis or other external caches. `InMemoryCache` is included as a fast, in-process LRU implementation.
-
-### Logger
-
-Logging uses the same port/adapter pattern. The default `ConsoleLogger` emits JSON lines in production (compatible with GCP, AWS CloudWatch, Datadog) and colorized output in development — zero dependencies.
-
-```typescript
-import { log } from "@rotorsoft/act";
-
-const logger = log(); // ConsoleLogger (default)
-logger.info("Application started");
-```
-
-For pino, inject the adapter from `@rotorsoft/act-pino`:
-
-```typescript
-import { log } from "@rotorsoft/act";
-import { PinoLogger } from "@rotorsoft/act-pino";
-
-log(new PinoLogger({ level: "debug", pretty: true }));
-```
-
-Custom logger implementations must fulfill the `Logger` interface (extends `Disposable` with `fatal`, `error`, `warn`, `info`, `debug`, `trace`, and `child` methods).
-
-#### Snapshots vs Cache
-
-Cache and snapshots are the same checkpoint pattern at different layers:
-
-- **Cache** (in-memory) — checked first on every `load()`. Eliminates store round-trips entirely on warm hits.
-- **Snapshots** (in-store) — written to the event store as `__snapshot__` events. Used as a fallback on cache miss (cold start, eviction, process restart) to avoid replaying the entire event stream.
-
-On cache hit, snapshot events in the store are skipped (`with_snaps: false`). On cache miss, the store is queried with `with_snaps: true` to find the latest snapshot and replay only events after it.
-
-### Performance Considerations
-
-- **Cache is always-on** — warm reads skip the store entirely, delivering consistent throughput (7-46x faster than uncached). No configuration needed.
-- **Use snapshots for cold-start resilience** — on process restart or LRU eviction, snaps limit how much of the event stream must be replayed. Set `.snap((s) => s.patches >= 50)` for most use cases.
-- **Cache invalidation is automatic** — concurrency errors (`ERR_CONCURRENCY`) invalidate the stale cache entry, forcing a fresh load from the store on the next access.
-- **Snap writes are fire-and-forget** — `snap()` commits to the store asynchronously after `action()` returns. The cache is updated synchronously within `action()`, so subsequent reads see the post-snap state immediately without waiting for the store write.
-- **Atomic claim eliminates poll→lease overhead** — `claim()` fuses discovery and locking into a single SQL transaction using `FOR UPDATE SKIP LOCKED`, saving one round-trip per drain cycle and eliminating contention between workers.
-- **Watermark-aware claiming** — `claim()` skips caught-up streams (no pending events), focusing drain cycles on active work only. Up to 8x faster when most streams are idle.
-- Events are indexed by stream and version for fast lookups, with additional indexes on timestamps and correlation IDs.
-- The PostgreSQL adapter supports connection pooling and partitioning for high-volume deployments.
-
-For detailed benchmark data and performance evolution history, see [PERFORMANCE.md](PERFORMANCE.md).
-
-## Event-Driven Processing
-
-Act handles event-driven workflows through atomic stream claiming and correlation, ensuring ordered, non-duplicated event processing without external message queues. The event store itself acts as the message backbone — events are written once and consumed by multiple independent reaction handlers.
-
-### Reactions
-
-Reactions are asynchronous handlers triggered by events. They can update other state streams, trigger external integrations, or drive cross-aggregate workflows:
-
-```typescript
-const app = act()
-  .withState(Account)
-  .withState(AuditLog)
-  .on("Deposited")
-    .do((event) => [{ name: "LogEntry", data: { message: `Deposit: ${event.data.amount}` } }])
-    .to((event) => `audit-${event.stream}`)  // resolver determines target stream
-  .build();
-```
-
-Resolvers dynamically determine which stream a reaction targets, enabling flexible event routing without hardcoded dependencies. They can include source regex patterns to limit which streams trigger the reaction.
-
-### Stream Claiming
-
-Rather than processing events immediately, Act uses an atomic claim mechanism to coordinate distributed consumers. The `claim()` method atomically discovers and locks streams in a single operation using PostgreSQL's `FOR UPDATE SKIP LOCKED` pattern — competing consumers never block each other, and locked rows are silently skipped. This is the same pattern used by pgBoss, Graphile Worker, and other production job queues.
-
-- **Per-stream ordering** — Events within a stream are processed sequentially.
-- **Temporary ownership** — Claims expire after a configurable duration, allowing re-processing if a consumer fails.
-- **Zero-contention** — `FOR UPDATE SKIP LOCKED` means workers never block each other; locked rows are silently skipped.
-- **Backpressure** — Only a limited number of claims can be active at a time, preventing consumer overload.
-
-If a claim expires due to failure, the stream is automatically re-claimed by another consumer, ensuring no event is permanently lost.
-
-### Event Correlation
-
-Act tracks causation chains across actions and reactions using correlation metadata:
-
-- Each action/event carries a `correlation` ID (request trace) and `causation` ID (what triggered it).
-- `app.correlate()` scans events, discovers new target streams via reaction resolvers, and registers them with `subscribe()`. It returns `{ subscribed, last_id }` where `subscribed` is the count of newly registered streams.
-- This enables full workflow tracing — from the initial user action through every downstream reaction.
-
-```typescript
-// Correlate events to discover and subscribe new streams for processing
-const { subscribed, last_id } = await app.correlate();
-
-// Or run periodic background correlation
-app.start_correlations();
-```
-
-### Parallel Execution with Retry and Blocking
-
-While events within a stream are processed in order, multiple streams can be processed concurrently:
-
-- **Parallel handling** — Multiple streams are drained simultaneously for throughput.
-- **Retry with backoff** — Transient failures trigger retries before escalation.
-- **Stream blocking** — After exhausting retries, a stream is blocked to prevent cascading errors. Blocked streams can be inspected and unblocked manually.
-
-### Draining
-
-The `drain` method processes pending reactions across all subscribed streams:
-
-```typescript
-// Process pending reactions (synchronous, single cycle)
-await app.drain({ streamLimit: 100, eventLimit: 1000 });
-
-// Debounced correlate→drain for production (non-blocking, emits "settled" when done)
-app.settle();
-
-// Subscribe to the "settled" lifecycle event
-app.on("settled", (drain) => {
-  // drain has { fetched, claimed, acked, blocked }
-  // notify SSE clients, update caches, etc.
-});
-```
-
-Drain cycles continue until all reactions have caught up to the latest events. Consumers only process new work — acknowledged events are skipped, and failed streams are re-claimed automatically.
-
-The `settle()` method is the recommended production pattern — it debounces rapid commits (10ms default), loops correlate→drain until a pass makes no progress (default `maxPasses: Infinity`, which acts only as a kill-switch for runaway reaction loops), and emits a `"settled"` event when done. A single `settle()` call after `app.reset(...)` fully catches up paginated streams.
-
-**Drain skip optimization:** At build time, Act classifies which event names have registered reactions. When `do()` commits events that have no reactions, `drain()` returns immediately — zero DB round-trips. This eliminates wasted claim/query/ack cycles for high-frequency events that don't need reaction processing. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
-
-**Batched projection replay:** Static-target projections can register a `.batch()` handler that receives all events in a single call, enabling bulk DB operations in one transaction. When defined, the batch handler replaces individual `.do()` handlers during drain — reducing N DB writes to 1. See [PERFORMANCE.md](PERFORMANCE.md) for benchmarks.
-
-### Cross-Process Reactions (`Store.notify`)
-
-When two or more Act processes share a backing store, the second process has no in-process signal that the first committed. The default fallback is the polling/debounce path, which floors reaction latency at the poll interval. For lower latency, the configured store can implement the optional `Store.notify(handler)` hook; the orchestrator auto-wires the subscription at `build()` and wakes `settle()` immediately on remote commits.
-
-**Opt-in at the adapter level.** The cost (per-commit notification, dedicated DB connection per process) is wasted in single-instance deployments, so adapters default to off. Multi-process apps that need sub-poll wakeup enable it explicitly on every store instance:
+### Time-travel
 
 ```ts
-store(new PostgresStore({ ..., notify: true }));   // opt in
-const app = act()
-  .withState(Order)
-  .on("OrderPlaced").do(reduceInventory).to("inventory")
-  .build();
-// Worker B wakes within ~10 ms of Worker A's commit (vs. polling: ≥ poll interval).
-
-// Optional: tap the lifecycle event for fan-out (SSE, dashboards, audit)
-app.on("notified", (n) => sse.broadcast(n));
+await app.load(Counter, "counter1", undefined, { before: 5000 });            // state at event id
+await app.load(Counter, "counter1", undefined, { created_before: someDate }); // state at timestamp
 ```
 
-Adapter status:
+Same `load()` as everything else. The third parameter is a step-through callback that receives each intermediate snapshot during replay.
 
-- `PostgresStore` (`@rotorsoft/act-pg`) — implemented via `LISTEN`/`NOTIFY` on a per-`(schema, table)` channel.
-- `InMemoryStore` — not implemented; single-process, no remote writers.
-- `SqliteStore` (`@rotorsoft/act-sqlite`) — not implemented; single-node by design.
+### Recovery loop (operating Act)
 
-Stores **self-filter** their own commits (per-instance UUID in the payload) so the `"notified"` lifecycle event surfaces only **cross-process** activity. Local commits already arm drain via `do()` — the notify path stays out of the local fast path.
-
-`notify` is a hint, not a contract: if the store doesn't implement it, or a notification is dropped, the existing debounce/poll path still drains correctly. Build-time contract: inject the configured store via `store(adapter)` *before* `act()...build()` — wiring binds at construction.
-
-### Reaction Priority Lanes (ACT-102)
-
-When the worker is saturated (more lagging streams than `streamLimit` per cycle), priority biases which lagging stream gets the lease first:
+When a reaction handler fails past its retry budget (or throws `NonRetryableError`), the stream is blocked and stays out of `claim()` results. Operators:
 
 ```ts
-.on("OrderConfirmed")
-  .do(sendCriticalNotification)
-  .to({ target: "notifications-out", priority: 10 })  // jumps the lagging queue
+const blocked = await app.blocked_streams();
+// Inspect, fix the underlying cause, then:
+await app.unblock(["webhooks-out-customer-42"]);
+await app.unblock({ stream: "^webhooks-out-" }); // bulk
 ```
 
-`claim()`'s lagging frontier orders by `priority DESC, at ASC`. Default priority is `0` — apps that don't opt in see no behavior change. **Per-stream event ordering is unchanged** — priority only biases *which streams claim() picks first*, never reorders events within a stream.
+`unblock` resumes from where the stream stopped — it does **not** replay history. Use `app.reset(...)` only for projection rebuilds.
 
-Operators can override scheduling at runtime with `app.prioritize(filter, n)`. Filter shape mirrors `query_streams` (regex on `stream`/`source`, exact-match flags, `blocked` state). Sets the priority outright, ignoring the build-time max invariant — so it can decrease too:
+## Compatibility
 
-```ts
-await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
-await app.prioritize({ source: "^audit-" }, -5);
-await app.prioritize({}, 0);   // reset all to default
-```
+- **Node**: >=22.18.0
+- **Peer**: `zod` ^4.4.3
+- **Bundled deps**: `@rotorsoft/act-patch` (state reducer)
+- **Module formats**: ESM + CJS
+- **TypeScript**: strict mode recommended for full inference
 
-Only meaningful under saturation. With `streamLimit` ≥ candidate streams every cycle, every stream gets a slot every cycle and priority never binds. See [`@rotorsoft/act-pg/PERFORMANCE.md`](../act-pg/PERFORMANCE.md) for the ~11× speedup benchmark on tied-watermark replays under heavy contention.
+## Stability
 
-### Per-Act Scoped Ports (ACT-501)
+Public API governed by the [Act Stability Charter](../../STABILITY.md). The charter names exactly which surfaces are protected by SemVer (builders, `Act` interface, port interfaces, lifecycle event shapes, public type exports) and what's free to evolve (internal modules, performance characteristics, log formats). Breaking changes require a `BREAKING CHANGE:` commit footer and a written migration note. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
 
-The singleton `store()` / `cache()` ports cover the common case: one Act per process. When you need multiple Acts in the same process — multi-tenant SaaS, parallel test workers, side-by-side store experiments — pass `ActOptions.scoped` at build time and the framework routes that Act's internal port reads to its own bag via `AsyncLocalStorage`. Adapters are unchanged.
+## Related packages
 
-Hold the builder in a constant and call `.build()` once per tenant. The first build runs the one-time projection merge + deprecation scan; subsequent builds reuse the merged registry:
+- **[@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg)** — PostgreSQL store. Production default.
+- **[@rotorsoft/act-sqlite](https://www.npmjs.com/package/@rotorsoft/act-sqlite)** — SQLite store. Single-node / edge.
+- **[@rotorsoft/act-http](https://www.npmjs.com/package/@rotorsoft/act-http)** — `webhook` for outbound POST from reactions; `/sse` subpath for incremental state broadcast.
+- **[@rotorsoft/act-pino](https://www.npmjs.com/package/@rotorsoft/act-pino)** — pino logger adapter.
+- **[@rotorsoft/act-patch](https://www.npmjs.com/package/@rotorsoft/act-patch)** — immutable deep-merge patch utility used by state reducers.
+- **[@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck)** — conformance suite for `Store`/`Cache`/`Logger` adapters.
+- **[@rotorsoft/act-diagram](https://www.npmjs.com/package/@rotorsoft/act-diagram)** — interactive SVG diagram of the domain model + `act` CLI.
 
-```ts
-import { act, InMemoryCache } from "@rotorsoft/act";
-import { PostgresStore } from "@rotorsoft/act-pg";
+## Documentation
 
-const tenantBuilder = act()
-  .withState(Order)
-  .withProjection(OrderProjection)
-  .on("OrderPlaced").do(reduceInventory).to("inventory");
-
-const apps = new Map<string, ReturnType<typeof tenantBuilder.build>>();
-for (const tenant of tenants) {
-  apps.set(
-    tenant,
-    tenantBuilder.build({
-      scoped: {
-        store: new PostgresStore({ schema: tenant }),
-        cache: new InMemoryCache({ maxSize: 5000 }),
-      },
-    })
-  );
-}
-
-await apps.get("tenant_a")!.do("place", target, payload);
-```
-
-Both `store` and `cache` are required together — sharing a single cache across distinct stores would collide on stream-keyed entries. ALS overhead is essentially zero (~65 ns per `store()` read, scoped or not; no measurable difference in `app.do()` / `app.load()` throughput). See [PERFORMANCE.md § Per-Act scoped ports](./PERFORMANCE.md) for the bench and [`docs/architecture/extension-points.md`](../../docs/docs/architecture/extension-points.md) for the full pattern (use cases, contracts, caveats).
-
-### Testing (ACT-503)
-
-`@rotorsoft/act/test` exposes two thin helpers built on `ActOptions.scoped` for parallel-safe per-test isolation:
-
-```ts
-import { fixture, sandbox } from "@rotorsoft/act/test";
-
-// Common case — vitest fixture, auto-cleanup, supports test.concurrent
-const test = fixture(act().withState(Counter));
-test("increments", async ({ app }) => {
-  await app.do("increment", { stream: "c", actor }, { by: 1 });
-});
-
-// Escape hatch — explicit lifecycle, multi-Act, beforeAll-shared, PG factory
-const { app, store, cache, dispose } = await sandbox(builder, {
-  store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
-});
-```
-
-See [`docs/concepts/testing.md`](../../docs/docs/concepts/testing.md) for the canonical pattern.
-
-## Dual-Frontier Drain
-
-In event-sourced systems, consumers often subscribe to multiple event streams that advance at different rates: some produce bursts of events, while others stay idle for long periods. New streams can also be discovered while processing events from existing streams.
-
-Naive approaches have fundamental trade-offs:
-
-- Strictly serial processing across all streams blocks fast streams behind slow ones.
-- Fully independent processing risks inconsistent cross-stream states.
-- Prioritizing new streams over existing ones risks missing important events.
-
-Act addresses this with the **Dual-Frontier Drain** strategy.
-
-### How It Works
-
-Each drain cycle divides streams into two sets:
-
-- **Leading frontier** — Streams already near the latest known event (the global frontier). These continue processing without waiting.
-- **Lagging frontier** — Streams that are behind or newly discovered. These are advanced quickly to catch up.
-
-**Fast-forwarding:** If a lagging stream has no matching events in the current window, its watermark is advanced using the leading frontier's position. This prevents stale streams from blocking global convergence.
-
-**Dynamic correlation:** Event resolvers dynamically discover and add new streams as events arrive. Resolvers can include source regex patterns to limit which streams are matched. When a new matching stream is discovered, it joins the drain immediately.
-
-### Why It Matters
-
-- **Fast recovery** — Newly discovered or previously idle streams catch up quickly.
-- **No global blocking** — Fast streams are never paused to wait for slower ones.
-- **Eventual convergence** — All reactions end up aligned on the same global event position.
+- **[Get started](https://rotorsoft.github.io/act-root/docs/intro)** — 5-minute walkthrough.
+- **[Concepts](https://rotorsoft.github.io/act-root/docs/intro)** — state management, event sourcing, error handling, real-time, testing, configuration.
+- **[Architecture](https://rotorsoft.github.io/act-root/docs/architecture)** — concurrency model, cache + snapshots, correlation + drain, cross-process reactions, priority lanes, close-cycle, schema evolution, extension points.
+- **[Guides](https://rotorsoft.github.io/act-root/docs/intro)** — production checklist, projections to database, external integration, writing a custom store/cache/logger, contributing a new package, contracts CLI.
+- **[PERFORMANCE.md](./PERFORMANCE.md)** — measured throughput numbers, optimization history, and the reaction-latency benchmark answering "how long from `do()` to reaction firing?"
+- **[BENCH.md](../../BENCH.md)** — index of every benchmark in the workspace with run commands.
 
 ## License
 
-[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)
+MIT

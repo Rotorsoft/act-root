@@ -4,28 +4,27 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-PostgreSQL event store adapter for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). Provides persistent, production-ready event storage with ACID guarantees, connection pooling, and distributed stream processing.
+_PostgreSQL event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). ACID, connection-pooled, multi-process — production default for Act deployments._
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Why this package
+
+Act's in-memory store is fine for development and tests, but production needs durable events, cross-process coordination, and a query path that scales past a single Node process. `PostgresStore` is the canonical production implementation of Act's `Store` port: full ACID guarantees from PG, atomic stream claiming via `FOR UPDATE SKIP LOCKED` (no application-layer locking required), optional `LISTEN`/`NOTIFY` for sub-poll cross-process wakeup, and auto-managed schema via `seed()`.
+
+The adapter passes the same conformance suite (`@rotorsoft/act-tck`) as InMemoryStore and SqliteStore, so swapping it in is a one-line bootstrap change.
 
 ## Installation
 
-```sh
-npm install @rotorsoft/act @rotorsoft/act-pg
-# or
+```bash
 pnpm add @rotorsoft/act @rotorsoft/act-pg
 ```
 
-**Requirements:** Node.js >= 22.18.0, PostgreSQL >= 14
+## Quick start
 
-## Usage
-
-```typescript
+```ts
 import { act, state, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { z } from "zod";
 
-// Inject the PostgreSQL store before building your app
 store(new PostgresStore({
   host: "localhost",
   port: 5432,
@@ -34,84 +33,67 @@ store(new PostgresStore({
   password: "secret",
 }));
 
-// Initialize tables (creates schema, events table, streams table, and indexes)
+// One-time schema setup (idempotent — safe to leave in your bootstrap).
 await store().seed();
 
-// Build and use your app as normal
+// From here, the framework is identical to the InMemory version.
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })  // optional — only for custom reducers
+  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
   .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
+  .emit((a) => ["Incremented", { amount: a.by }])
   .build();
 
 const app = act().withState(Counter).build();
-await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
+await app.do("increment", { stream: "c1", actor: { id: "1", name: "u" } }, { by: 1 });
 ```
+
+## API
+
+- **`PostgresStore`** — class implementing Act's `Store` port. Construct once, pass to `store()`.
+- **`PostgresConfig`** — constructor options (host/port/db/user/password/schema/table/notify).
+
+Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/api/act-pg/src/README.md).
 
 ## Configuration
 
-All configuration fields are optional and have sensible defaults:
+All fields are optional and have sensible defaults:
 
 | Option | Default | Description |
-|--------|---------|-------------|
+|---|---|---|
 | `host` | `localhost` | PostgreSQL host |
 | `port` | `5432` | PostgreSQL port |
 | `database` | `postgres` | Database name |
 | `user` | `postgres` | Database user |
 | `password` | `postgres` | Database password |
-| `schema` | `public` | Schema for event tables |
-| `table` | `events` | Base name for event tables |
-
-### Custom Schema and Table Names
-
-```typescript
-const pgStore = new PostgresStore({
-  host: "db.example.com",
-  database: "production",
-  user: "app_user",
-  password: process.env.DB_PASSWORD,
-  schema: "events",       // custom schema
-  table: "act_events",    // creates act_events and act_events_streams tables
-});
-```
-
-### Environment-Based Configuration
-
-```typescript
-if (process.env.NODE_ENV === "production") {
-  store(new PostgresStore({
-    host: process.env.DB_HOST,
-    port: parseInt(process.env.DB_PORT || "5432"),
-    database: process.env.DB_NAME,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-  }));
-}
-// In development, the default InMemoryStore is used
-```
-
-## Features
-
-- **ACID Transactions** - Events are committed atomically within PostgreSQL transactions
-- **Optimistic Concurrency** - Version-based conflict detection prevents lost updates
-- **Connection Pooling** - Uses [node-postgres](https://node-postgres.com/) Pool for efficient connection management
-- **Atomic Stream Claiming** - Zero-contention competing consumers via `FOR UPDATE SKIP LOCKED`
-- **Auto Schema Setup** - `seed()` creates all required tables, indexes, and schema
-- **Cross-Process `LISTEN`/`NOTIFY`** (opt-in) - Set `notify: true` to wake `settle()` immediately on remote commits — no polling lag for horizontally-scaled deployments. Off by default. See [PERFORMANCE.md](./PERFORMANCE.md) for the latency benchmark.
-- **Multi-Tenant** - Isolate tenants using separate schemas
-
-## Cross-Process Reactions (opt-in)
-
-For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook via `LISTEN`/`NOTIFY` so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay.
-
-**Opt-in via the `notify: true` config flag.** The cost (per-commit `pg_notify`, dedicated `LISTEN` client per process) is wasted in single-instance deployments, so it defaults to **off** — existing callers see zero behavior change after upgrading. Multi-process apps that need sub-poll wakeup enable it on every store instance involved (writers and listeners both):
+| `schema` | `public` | Schema for event + streams tables |
+| `table` | `events` | Base name (`<table>` for events, `<table>_streams` for subscriptions) |
+| `notify` | `false` | Opt-in `LISTEN`/`NOTIFY` for cross-process commit wakeup (see below) |
+| `max`, `idleTimeoutMillis`, …pg.PoolConfig | (pg defaults) | Pass-through to node-postgres pool config |
 
 ```ts
-import { act, store } from "@rotorsoft/act";
-import { PostgresStore } from "@rotorsoft/act-pg";
+// Production deployment via env vars
+store(new PostgresStore({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT ?? 5432),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  schema: process.env.DB_SCHEMA ?? "public",
+  max: 20,  // pool size — raise for drain-heavy workloads
+}));
+```
 
+Multi-tenant deployments often want one schema per tenant. The store accepts both — use them rather than namespacing stream IDs.
+
+## Common patterns
+
+### Cross-process `LISTEN`/`NOTIFY` (opt-in)
+
+For multi-instance deployments, `PostgresStore` implements the optional `Store.notify` hook via `LISTEN`/`NOTIFY` so the orchestrator wakes `settle()` immediately on commits from other processes — no polling delay. Off by default to keep single-instance deployments allocation-free; enable on every store instance in a multi-process app:
+
+```ts
 const config = { schema: "myapp", table: "events", notify: true };
 
 // Worker A (writer)
@@ -119,91 +101,81 @@ store(new PostgresStore(config));
 const app = act().withState(Order).build();
 await app.do("placeOrder", { stream: "order-1", actor }, payload);
 
-// Worker B (reactions, separate process / pod / box)
-store(new PostgresStore(config));   // same DB, same opt-in
+// Worker B (reactions, separate process)
+store(new PostgresStore(config));
 const app = act()
   .withState(Order)
   .on("OrderPlaced").do(reduceInventory).to("inventory-1")
   .build();
-// On Worker A's commit, Worker B wakes within ~10 ms (vs. polling: ≥ poll interval).
-// Optional: tap the lifecycle event for fan-out.
-app.on("notified", (n) => sse.broadcast(n));
+// Worker B wakes within ~10ms of Worker A's commit (vs. ≥ poll interval).
+app.on("notified", (n) => sse.broadcast(n)); // optional fan-out
 ```
 
-When `notify: true`:
-- `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per transaction with the full event batch as a JSON payload.
-- The orchestrator auto-subscribes once at `build()` (one dedicated PG client per process — size your pool accordingly).
-- The store self-filters its own commits (per-instance UUID in the payload), so the `notified` lifecycle event surfaces only **cross-process** activity. Local commits already arm drain via `do()`.
+When `notify: true`: `commit()` issues one `NOTIFY act_commit_<schema>_<table>` per transaction with the full event batch as JSON. The store self-filters its own commits (per-instance UUID), so the `"notified"` lifecycle event surfaces only cross-process activity. Size your pool to account for one extra dedicated LISTEN client per process.
 
-When `notify: false` (the default): `commit()` skips the `pg_notify` SQL entirely, and `notify` is undefined on the store instance — the orchestrator's auto-wire short-circuits, no LISTEN client is allocated.
+`notify` is a hint, not a contract — lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
 
-`notify` is a hint, not a contract: lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
+**Build-time contract:** call `store(adapter)` *before* `act()…build()`. The orchestrator binds notify to whichever store is current at construction time.
 
-**Build-time contract:** call `store(adapter)` *before* `act()...build()`. The orchestrator binds notify to whichever store is current at construction; late injection won't take effect.
+### Competing consumer (free horizontal scaling)
 
-## Database Schema
+`claim()` uses `FOR UPDATE SKIP LOCKED` — the idiomatic Postgres competing-consumer pattern. Workers never block each other; locked rows are silently skipped. Same approach as pgBoss and Graphile Worker.
 
-Calling `seed()` creates two tables:
+Add a second pod, run the same Act app — drain workload splits with zero application-layer coordination. No external job queue, no Redis lock.
 
-**Events table** (`{schema}.{table}`) - stores all committed events:
-- `id` (serial) - global event sequence
-- `name` - event type name
-- `data` (jsonb) - event payload
-- `stream` - stream identifier
-- `version` - per-stream sequence number
-- `created` (timestamptz) - event timestamp
-- `meta` (jsonb) - correlation, causation, and actor metadata
-
-**Streams table** (`{schema}.{table}_streams`) - tracks stream processing state for reactions:
-- `stream` - stream identifier
-- `at` - last processed event position
-- `leased_by` / `leased_until` - distributed processing claim info
-- `blocked` / `error` - error tracking for failed streams
-- `priority` - scheduling priority (default 0; higher wins lagging-frontier ties — see [Priority lanes](https://rotorsoft.github.io/act-root/docs/architecture/priority-lanes))
-
-The `priority` column is added by `seed()` via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, so existing tables migrate transparently. A composite index on `(blocked, priority DESC, at)` supports the saturated-claim ORDER BY without a sort step.
-
-## Competing Consumer Pattern
-
-The PostgreSQL adapter uses `FOR UPDATE SKIP LOCKED` for atomic stream claiming — the idiomatic PostgreSQL competing consumer pattern. The `claim()` method discovers streams with pending events and locks them in a single query:
-
-- Workers never block each other — locked rows are silently skipped
-- No race between discovery and locking (unlike a separate poll + lease)
-- Same pattern used by pgBoss, Graphile Worker, and other production job queues
-- Enables horizontal scaling by simply adding more workers
-
-This replaces the previous two-step poll/lease approach, eliminating contention and simplifying the drain cycle.
-
-## Testing
-
-Validated against the executable Store contract in [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck):
+### Schema setup
 
 ```ts
-import { runStoreTck } from "@rotorsoft/act-tck";
-import { PostgresStore } from "@rotorsoft/act-pg";
-
-runStoreTck({
-  name: "PostgresStore",
-  factory: () =>
-    new PostgresStore({
-      port: 5431,
-      schema: "tck",
-      table: "tck_store",
-      notify: true,
-    }),
-  capabilities: { notify: true },
-});
+await store().seed();
 ```
 
-See [Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md) for the third-party authoring guide.
+Idempotent. Creates the events table, the streams (subscription) table, and the indexes that support the claim and notify paths. Safe to leave in your bootstrap. The store transparently runs `ADD COLUMN IF NOT EXISTS` migrations for new optional columns (e.g. `priority` for [priority lanes](https://rotorsoft.github.io/act-root/docs/architecture/priority-lanes)), so existing deployments upgrade in place.
 
-## Related
+### Database schema reference
 
-- [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) - Core framework
-- [@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck) - Test Compatibility Kit
-- [Documentation](https://rotorsoft.github.io/act-root/)
-- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
+Created by `seed()`:
+
+- **Events** (`{schema}.{table}`): `id` (serial PK), `name`, `data` (jsonb), `stream`, `version`, `created` (timestamptz), `meta` (jsonb). Unique index on `(stream, version)`.
+- **Streams** (`{schema}.{table}_streams`): `stream` (PK), `source`, `at`, `retry`, `blocked`, `error`, `leased_by`, `leased_until`, `priority`. Composite index on `(blocked, priority DESC, at)` for the saturated-claim ordering.
+
+## When to use this vs `act-sqlite`
+
+| You want… | Use |
+|---|---|
+| Multi-server deployment, distributed processing | `act-pg` |
+| Sub-poll cross-process reaction latency | `act-pg` (with `notify: true`) |
+| Embedded / single-server / edge | `act-sqlite` |
+| Zero-config local dev / tests | The default `InMemoryStore` |
+
+Both adapters pass the same conformance suite — your application code doesn't change.
+
+## Compatibility
+
+- **Node**: >=22.18.0
+- **PostgreSQL**: >=14 (uses `FOR UPDATE SKIP LOCKED`, `LISTEN`/`NOTIFY`, JSONB)
+- **Peer**: `@rotorsoft/act` >=0.39.0, `zod` ^4.4.3
+- **Bundled deps**: `pg` ^8.20.0
+- **Module formats**: ESM + CJS
+
+## Stability
+
+Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
+## Related packages
+
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework whose `Store` port this implements.
+- **[@rotorsoft/act-sqlite](https://www.npmjs.com/package/@rotorsoft/act-sqlite)** — sibling store adapter for single-node / edge deployments.
+- **[@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck)** — conformance suite. `PostgresStore` passes `runStoreTck` with `capabilities: { notify: true }`.
+- **[@rotorsoft/act-pino](https://www.npmjs.com/package/@rotorsoft/act-pino)** — pino logger adapter, common pairing for production deployments.
+
+## Documentation
+
+- **[Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist)** — operator-facing guide for taking an Act app to production with this store.
+- **[Cross-process reactions](https://rotorsoft.github.io/act-root/docs/architecture/cross-process-reactions)** — when to enable `notify`, what the latency looks like.
+- **[Concurrency model](https://rotorsoft.github.io/act-root/docs/architecture/concurrency-model)** — lease lifecycle, `claim`/`ack`/`block`/timeout, optimistic concurrency.
+- **[Writing a custom Store adapter](https://rotorsoft.github.io/act-root/docs/guides/writing-a-store)** — the recipe `PostgresStore` itself follows, for authors building against other databases.
+- **[PERFORMANCE.md](./PERFORMANCE.md)** — measured throughput numbers, including the `notify` latency benchmark.
 
 ## License
 
-[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)
+MIT

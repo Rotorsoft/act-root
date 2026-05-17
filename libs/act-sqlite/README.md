@@ -4,153 +4,142 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-SQLite event store adapter for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). Provides persistent, file-based event storage with ACID guarantees via [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts). Ideal for single-server deployments, edge functions, and embedded applications.
+_SQLite event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) via [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts). File-based, edge-ready, ACID — for single-node deployments._
 
-> **Stability:** Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+## Why this package
+
+Not every Act app needs Postgres. Single-server apps, embedded deployments, edge functions, and unit tests all want the same thing: a real event store with ACID guarantees, but no operational overhead. `SqliteStore` is that — `@libsql/client` under the hood (zero native bindings, browser-incompatible parts already stripped), full conformance with Act's `Store` port, the same one-line bootstrap swap.
+
+SQLite serializes all writes at the database level. For a single-server deployment this gives you the same isolation guarantees as Postgres's `FOR UPDATE SKIP LOCKED` without any coordination layer. When you outgrow that — multi-server distributed processing, sub-poll cross-process wakeup — swap in `@rotorsoft/act-pg`. Application code doesn't change.
 
 ## Installation
 
-```sh
-npm install @rotorsoft/act @rotorsoft/act-sqlite
-# or
+```bash
 pnpm add @rotorsoft/act @rotorsoft/act-sqlite
 ```
 
-**Requirements:** Node.js >= 22.18.0
+## Quick start
 
-## Usage
-
-```typescript
+```ts
 import { act, state, store } from "@rotorsoft/act";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { z } from "zod";
 
-// Inject the SQLite store before building your app
+// File-based persistence
 store(new SqliteStore({ url: "file:myapp.db" }));
 
-// Initialize tables (creates events table, streams table, and indexes)
+// One-time schema setup (idempotent — safe to leave in your bootstrap).
 await store().seed();
 
-// Build and use your app as normal
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: z.object({ amount: z.number() }) })
   .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
   .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
+  .emit((a) => ["Incremented", { amount: a.by }])
   .build();
 
 const app = act().withState(Counter).build();
-await app.do("increment", { stream: "counter1", actor: { id: "1", name: "User" } }, { by: 1 });
+await app.do("increment", { stream: "c1", actor: { id: "1", name: "u" } }, { by: 1 });
 ```
+
+## API
+
+- **`SqliteStore`** — class implementing Act's `Store` port. Construct once, pass to `store()`.
+- **`SqliteConfig`** — constructor options (`url`, `authToken`).
+
+Full type reference: [typedoc](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/api/act-sqlite/src/README.md).
 
 ## Configuration
 
 | Option | Default | Description |
-|--------|---------|-------------|
-| `url` | `file::memory:` | SQLite connection URL. Use `file:path.db` for persistent storage. |
+|---|---|---|
+| `url` | `file::memory:` | libSQL connection URL. Use `file:path.db` for persistent file, `libsql://…` for Turso. |
 | `authToken` | — | Auth token for libSQL server connections (Turso). |
 
-### File-Based Storage
+### File-based persistence
 
-```typescript
+```ts
 store(new SqliteStore({ url: "file:data/events.db" }));
 ```
 
-### In-Memory (Testing)
+### In-memory (tests / quick experiments)
 
-```typescript
+```ts
 store(new SqliteStore()); // defaults to file::memory:
 ```
 
-### Turso (Edge)
+### Turso (edge)
 
-```typescript
+```ts
 store(new SqliteStore({
   url: process.env.TURSO_URL!,
   authToken: process.env.TURSO_AUTH_TOKEN,
 }));
 ```
 
-## Features
+## Common patterns
 
-- **ACID Transactions** — All write operations use SQLite write transactions for atomicity
-- **Optimistic Concurrency** — Version-based conflict detection prevents lost updates
-- **WAL Mode** — Write-Ahead Logging enables concurrent readers during writes
-- **Serialized Writes** — SQLite's single-writer model guarantees mutual exclusion (equivalent to `FOR UPDATE SKIP LOCKED` for single-server use)
-- **Auto Schema Setup** — `seed()` creates all required tables and indexes
-- **Zero Dependencies** — Only requires `@libsql/client` (no native bindings)
-- **Edge-Ready** — Works with Turso for distributed SQLite at the edge
-
-## Database Schema
-
-Calling `seed()` creates two tables:
-
-**Events table** (`events`) — stores all committed events:
-- `id` (INTEGER PRIMARY KEY) — global event sequence (autoincrement)
-- `name` — event type name
-- `data` (TEXT/JSON) — event payload
-- `stream` — stream identifier
-- `version` — per-stream sequence number
-- `created` — ISO 8601 timestamp
-- `meta` (TEXT/JSON) — correlation, causation, and actor metadata
-
-**Streams table** (`streams`) — tracks stream processing state:
-- `stream` — stream identifier (PRIMARY KEY)
-- `source` — source stream pattern for reactions
-- `at` — last processed event position (watermark)
-- `leased_by` / `leased_until` — processing claim info
-- `blocked` / `error` — error tracking for failed streams
-
-## Concurrency Model
-
-SQLite serializes all write transactions at the database level. This means:
-
-- **No lock contention** — write transactions queue automatically
-- **Equivalent guarantees** — for single-server deployments, this provides the same isolation as PostgreSQL's `FOR UPDATE SKIP LOCKED`
-- **Lease ownership** — `ack()` and `block()` validate `leased_by` to prevent stale workers from interfering
-
-For multi-server deployments requiring distributed stream processing, use [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) instead.
-
-## What's *not* implemented
-
-- **`Store.notify`** is intentionally absent. The notify hook is a cross-process wake-up signal that lets a horizontally-scaled Act deployment skip the polling lag on remote commits. SQLite is single-node by design — there's no remote writer to be notified of — so the {@link Act} orchestrator falls back to the existing debounce/poll path, which is correct for this topology. If you outgrow that, switch to `@rotorsoft/act-pg`.
-
-## SQLite vs PostgreSQL
-
-| Feature | act-sqlite | act-pg |
-|---------|-----------|--------|
-| Deployment | Single server, edge | Multi-server, distributed |
-| Setup | Zero config (file path) | Connection pool config |
-| Concurrency | Serialized writes | `FOR UPDATE SKIP LOCKED` |
-| JSON storage | TEXT + `json_extract()` | Native JSONB |
-| Streaming | Callback pattern | Callback pattern |
-| Performance | Fast for moderate loads | Scales horizontally |
-
-## Testing
-
-Validated against the executable Store contract in [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck):
+### Schema setup
 
 ```ts
-import { runStoreTck } from "@rotorsoft/act-tck";
-import { SqliteStore } from "@rotorsoft/act-sqlite";
-
-runStoreTck({
-  name: "SqliteStore",
-  factory: () => new SqliteStore({ url: "file:tck-store.db" }),
-});
+await store().seed();
 ```
 
-See [Writing a custom Store adapter](https://github.com/Rotorsoft/act-root/blob/master/docs/docs/guides/writing-a-store.md) for the third-party authoring guide.
+Idempotent. Creates the events table, the streams (subscription) table, and the indexes that support claim ordering. PRAGMA `journal_mode=WAL` is set at the same time so readers don't block writers. Safe to leave in your bootstrap.
 
-## Related
+### Concurrency model
 
-- [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) — Core framework
-- [@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg) — PostgreSQL adapter
-- [@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck) — Test Compatibility Kit
-- [Documentation](https://rotorsoft.github.io/act-root/)
-- [Examples](https://github.com/rotorsoft/act-root/tree/master/packages)
+SQLite serializes write transactions at the database level. No application-layer locking, no `FOR UPDATE SKIP LOCKED` needed — writes queue automatically and `ack`/`block` validate `leased_by` to prevent stale workers from interfering. For a single-server deployment, this gives the same isolation guarantees as Postgres.
+
+### Database schema reference
+
+Created by `seed()`:
+
+- **Events** (`events`): `id` (INTEGER PRIMARY KEY AUTOINCREMENT), `name`, `data` (TEXT/JSON), `stream`, `version`, `created` (ISO 8601), `meta` (TEXT/JSON). Unique index on `(stream, version)`.
+- **Streams** (`streams`): `stream` (PK), `source`, `at`, `retry`, `blocked`, `error`, `leased_by`, `leased_until`, `priority`. Composite index on `(blocked, priority DESC, at)`.
+
+## When to use this vs `act-pg`
+
+| You want… | Use |
+|---|---|
+| Single server / embedded / edge | `act-sqlite` |
+| Zero infrastructure setup (file path is the config) | `act-sqlite` |
+| Edge runtime with Turso replication | `act-sqlite` (with Turso URL) |
+| Multi-server, distributed processing | `act-pg` |
+| Sub-poll cross-process reaction latency | `act-pg` (with `notify: true`) |
+| Heavy write contention across many writers | `act-pg` |
+
+Both adapters pass the same `runStoreTck` suite. Application code doesn't change between them; only the bootstrap line differs.
+
+## What's intentionally not implemented
+
+**`Store.notify`** is absent. The notify hook is a cross-process wake-up signal that lets a horizontally-scaled deployment skip polling lag on remote commits. SQLite is single-node by design — there's no remote writer to be notified of — so the Act orchestrator falls back to the existing debounce/poll path, which is correct for this topology. If you outgrow it, switch to `@rotorsoft/act-pg`.
+
+## Compatibility
+
+- **Node**: >=22.18.0
+- **Peer**: `@rotorsoft/act` >=0.39.0, `zod` ^4.4.3
+- **Bundled deps**: `@libsql/client` ^0.17.3 (no native bindings)
+- **Module formats**: ESM + CJS
+- **Runtimes**: Node, Bun, Deno (libSQL pure-TS implementation); also runs in Turso-compatible edge environments
+
+## Stability
+
+Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+
+## Related packages
+
+- **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework whose `Store` port this implements.
+- **[@rotorsoft/act-pg](https://www.npmjs.com/package/@rotorsoft/act-pg)** — sibling store adapter for multi-server / distributed deployments.
+- **[@rotorsoft/act-tck](https://www.npmjs.com/package/@rotorsoft/act-tck)** — conformance suite. `SqliteStore` passes `runStoreTck`.
+
+## Documentation
+
+- **[Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist)** — operator-facing guide; the SQLite path is called out where it differs from the PG path.
+- **[Concurrency model](https://rotorsoft.github.io/act-root/docs/architecture/concurrency-model)** — lease lifecycle, single-writer guarantees, optimistic concurrency.
+- **[Writing a custom Store adapter](https://rotorsoft.github.io/act-root/docs/guides/writing-a-store)** — for authors building against other databases; `SqliteStore` is one of the reference implementations.
 
 ## License
 
-[MIT](https://github.com/rotorsoft/act-root/blob/master/LICENSE)
+MIT
