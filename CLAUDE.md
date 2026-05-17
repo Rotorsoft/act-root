@@ -173,6 +173,20 @@ Source-of-truth for what lives where:
   4. Run the TCK against every in-tree adapter (InMemory, act-pg, act-sqlite, act-pino).
   Example: when `Store.query_heads(streams)` (#639) lands, add a `queryHeads` capability and a "returns latest event per stream, empty for unknown, respects pagination" block in `store-tck.ts`.
 
+### Pre-handoff workflow (mandatory before "ready for review" / PR)
+
+Branch work isn't done until `/release-check` passes cleanly. Per-slice `pnpm test -F <pkg>` during development is fine; the final gate is **not optional**.
+
+Sequence at the end of a feature branch:
+
+1. `/release-check` — runs typecheck + tests + 100% coverage + lint + build + charter-diff in parallel. See [.claude/commands/release-check.md](.claude/commands/release-check.md).
+2. If coverage < 100% on any metric: run `/coverage` to see the uncovered lines, then write the fault-injection test or restructure the code to remove the branch. See `feedback_full_coverage.md` in memory and the patterns in `libs/act-pg/test/store.error.spec.ts` / `libs/act-sqlite/test/store.error.spec.ts`.
+3. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
+
+**Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
+
+Why this exists: the gate caught zero issues during development of ACT-639's eight slices because per-slice tests were run ad-hoc — but the merge gate verifies the full matrix (typecheck against the workspace, lint across changed files, build of every adapter, 100% coverage including newly-added defensive branches). Skipping it ships partially-verified work.
+
 ### Documentation discipline
 
 - **READMEs** show current patterns and strategies — not historical benchmarks
