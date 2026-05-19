@@ -16,9 +16,24 @@ import { TicketOperations } from "./ticket-operations.js";
 const ESCALATION_WEBHOOK_URL =
   process.env.WOLFDESK_ESCALATION_WEBHOOK ?? "https://example.com/escalations";
 
+/**
+ * Webhook delivery rides on its own drain lane (ACT-1103). The lane
+ * gets a 30 s `leaseMillis` so a slow external receiver doesn't trip
+ * premature re-claim, plus a small `streamLimit` so a stuck endpoint
+ * can't tie up a wide pool of leases. Other reactions in the app stay
+ * on the `"default"` lane with their own (much shorter) lease budget;
+ * `Act._drainAll` runs both controllers in parallel so the webhook
+ * lane's in-flight POSTs don't block the rest of the pipeline.
+ */
 // prettier-ignore
 export const TicketWebhooksSlice = slice()
   .withState(TicketOperations)
+  .withLane({
+    name: "webhooks",
+    leaseMillis: 30_000,
+    streamLimit: 5,
+    cycleMs: 500,
+  })
   .on("TicketEscalated")
   .do(
     webhook({
@@ -39,5 +54,5 @@ export const TicketWebhooksSlice = slice()
       },
     }
   )
-  .to({ target: "ticket-escalation-webhooks" })
+  .to({ target: "ticket-escalation-webhooks", lane: "webhooks" })
   .build();
