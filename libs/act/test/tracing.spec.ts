@@ -357,7 +357,7 @@ describe("tracing", () => {
       const { subscribe, claim, ack, block } = buildDrain(withLevel("trace"));
       await subscribe([{ stream: "lane-trace-stream", lane: "slow" }]);
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/>> correlated.*lane-trace-stream\[slow\]/)
+        expect.stringMatching(/>> correlated.*lane-trace-stream.*\[slow\]/)
       );
 
       // Commit + lane-filtered claim — the caption is `slow:claimed`
@@ -370,20 +370,20 @@ describe("tracing", () => {
       expect(leased[0]?.lane).toBe("slow");
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
-          />> claimed.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+/
+          />> claimed.*slow.*lane-trace-stream.*@-?\d+\/-?\d+/
         )
       );
 
-      // Ack — caption is `acked (slow)`, lane carried back from the store.
+      // Ack — lane appended as `slow`, lane carried back from the store.
       const acked = await ack(leased);
       expect(acked[0]?.lane).toBe("slow");
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
-          />> acked.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+/
+          />> acked.*slow.*lane-trace-stream.*@-?\d+\/-?\d+/
         )
       );
 
-      // Block — caption is `blocked (slow)`, error inlined per stream.
+      // Block — lane appended, error inlined inside the dim block.
       await es.action(Counter, "increment", target("lane-trace-stream"), {
         by: 1,
       });
@@ -392,7 +392,7 @@ describe("tracing", () => {
       expect(blocked[0]?.lane).toBe("slow");
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
-          />> blocked.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+ \(boom\)/
+          />> blocked.*slow.*lane-trace-stream.*@-?\d+\/-?\d+ \(boom\)/
         )
       );
     });

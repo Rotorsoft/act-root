@@ -91,7 +91,7 @@ describe("tracing — plain (production) mode", () => {
     );
     await claim(2, 0, "plain-by", 60_000, "slow");
     expect(traceSpy).toHaveBeenCalledWith(
-      expect.stringMatching(/^>> claimed \(slow\) lane-plain@/)
+      expect.stringMatching(/^>> claimed slow lane-plain@/)
     );
 
     // Snap trace

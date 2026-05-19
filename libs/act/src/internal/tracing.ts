@@ -62,19 +62,25 @@ const es_caption = (caption: string, color: string, body: string): string =>
  * spotting in mixed log streams, plus a `caption` (past tense — every drain
  * trace fires on exit). All drain ops share one color (gray) so the pipeline
  * reads as a single channel; the caption disambiguates the phase. Lane
- * (ACT-1103) is appended in a contrasting color when set and non-default,
- * so the operator can see which lane produced the trace without parsing
- * the per-stream detail.
+ * (ACT-1103) is appended in lilac, unwrapped, when set and non-default,
+ * so the operator's eye lands on the lane name without parsing per-stream
+ * detail. Per-stream `@at/retry` and fetched event lists are muted via
+ * {@link dim} so the stream name itself reads loudest.
  */
-const C_LANE = "\x1b[38;5;39m"; // vivid sky blue — same as action, distinct from gray drain
+const C_LANE = "\x1b[38;5;183m"; // lilac — distinct from gray drain + drain ops
+const C_DIM = "\x1b[38;5;240m"; // dim gray — dimmer than C_DRAIN
+
+/** Wrap with the muted color when pretty mode is on. Plain in production. */
+const dim = (text: string): string =>
+  PRETTY ? `${C_DIM}${text}${C_RESET}` : text;
 
 const drain_caption = (caption: string, lane?: string): string => {
   const showLane = lane && lane !== "default";
   if (PRETTY) {
     const tag = `${C_DRAIN}>> ${caption}${C_RESET}`;
-    return showLane ? `${tag} ${C_LANE}(${lane})${C_RESET}` : tag;
+    return showLane ? `${tag} ${C_LANE}${lane}${C_RESET}` : tag;
   }
-  return showLane ? `>> ${caption} (${lane})` : `>> ${caption}`;
+  return showLane ? `>> ${caption} ${lane}` : `>> ${caption}`;
 };
 
 /**
@@ -267,7 +273,7 @@ export function buildDrain<TEvents extends Schemas>(
         // A claim() batch is single-lane (the controller filtered).
         const lane = leased[0]?.lane;
         const detail = leased
-          .map(({ stream, at, retry }) => `${stream}@${at}/${retry}`)
+          .map(({ stream, at, retry }) => `${stream}${dim(`@${at}/${retry}`)}`)
           .join(", ");
         logger.trace(`${drain_caption("claimed", lane)} ${detail}`);
       }
@@ -282,7 +288,7 @@ export function buildDrain<TEvents extends Schemas>(
           const event_summary = events
             .map(({ id, name }) => `#${id} ${String(name)}`)
             .join(", ");
-          return `${key} [${event_summary}]`;
+          return `${key} ${dim(`[${event_summary}]`)}`;
         })
         .join("; ");
       logger.trace(`${drain_caption("fetched", lane)} ${detail}`);
@@ -291,7 +297,7 @@ export function buildDrain<TEvents extends Schemas>(
       if (acked.length) {
         const lane = acked[0]?.lane;
         const detail = acked
-          .map(({ stream, at, retry }) => `${stream}@${at}/${retry}`)
+          .map(({ stream, at, retry }) => `${stream}${dim(`@${at}/${retry}`)}`)
           .join(", ");
         logger.trace(`${drain_caption("acked", lane)} ${detail}`);
       }
@@ -302,7 +308,7 @@ export function buildDrain<TEvents extends Schemas>(
         const detail = blocked
           .map(
             ({ stream, at, retry, error }) =>
-              `${stream}@${at}/${retry} (${error})`
+              `${stream}${dim(`@${at}/${retry} (${error})`)}`
           )
           .join(", ");
         logger.trace(`${drain_caption("blocked", lane)} ${detail}`);
@@ -312,7 +318,7 @@ export function buildDrain<TEvents extends Schemas>(
       if (result.subscribed) {
         const data = streams
           .map(({ stream, lane }) =>
-            lane && lane !== "default" ? `${stream}[${lane}]` : stream
+            lane && lane !== "default" ? `${stream}${dim(`[${lane}]`)}` : stream
           )
           .join(" ");
         logger.trace(`${drain_caption("correlated")} ${data}`);
