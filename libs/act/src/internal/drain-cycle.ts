@@ -31,6 +31,7 @@ import type {
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
 import { computeLagLeadRatio } from "./drain-ratio.js";
+import { traceCycle } from "./tracing.js";
 
 /**
  * Outcome of processing a single leased stream — produced by Act's `handle`
@@ -427,6 +428,12 @@ export class DrainController<
       }
 
       const { leased, fetched, handled, acked, blocked } = cycle;
+
+      // Cycle-level trace (ACT-1103) — one log line per drain pass:
+      // claim + fetch + outcomes folded together so the operator sees
+      // a single atomic narrative for each cycle. No-op when the
+      // logger isn't at trace level.
+      traceCycle(this.deps.logger, leased, fetched, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = computeLagLeadRatio(handled, lagging, leading);

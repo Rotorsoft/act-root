@@ -258,71 +258,90 @@ export function buildEs(
 export function buildDrain<TEvents extends Schemas>(
   logger: Logger
 ): DrainOps<TEvents> {
-  if (logger.level !== "trace") {
-    return {
-      claim: drain.claim,
-      fetch: drain.fetch,
-      ack: drain.ack,
-      block: drain.block,
-      subscribe: drain.subscribe,
-    };
-  }
+  // Cycle-level tracing happens in `DrainController.drain()` via
+  // {@link traceCycle} — claim/fetch/ack/block all flow into one log
+  // line per cycle to give the operator a single atomic narrative.
+  // `subscribe` stays decorated because it's driven from correlate-
+  // cycle (not from runDrainCycle) and doesn't fit the cycle shape.
   return {
-    claim: traced(drain.claim, (leased) => {
-      if (leased.length) {
-        // A claim() batch is single-lane (the controller filtered).
-        const lane = leased[0]?.lane;
-        const detail = leased
-          .map(({ stream, at, retry }) => `${stream}${dim(`@${at}/${retry}`)}`)
-          .join(", ");
-        logger.trace(`${drain_caption("claimed", lane)} ${detail}`);
-      }
-    }),
-    fetch: traced(drain.fetch<TEvents>, (fetched, leased) => {
-      // fetch() doesn't carry lane on its result entries — derive it
-      // from the input leases (uniform across the batch).
-      const lane = leased[0]?.lane;
-      const detail = fetched
-        .map(({ stream, source, events }) => {
-          const key = source ? `${stream}<-${source}` : stream;
-          const event_summary = events
-            .map(({ id, name }) => `#${id} ${String(name)}`)
-            .join(", ");
-          return `${key} ${dim(`[${event_summary}]`)}`;
-        })
-        .join("; ");
-      logger.trace(`${drain_caption("fetched", lane)} ${detail}`);
-    }),
-    ack: traced(drain.ack, (acked) => {
-      if (acked.length) {
-        const lane = acked[0]?.lane;
-        const detail = acked
-          .map(({ stream, at, retry }) => `${stream}${dim(`@${at}/${retry}`)}`)
-          .join(", ");
-        logger.trace(`${drain_caption("acked", lane)} ${detail}`);
-      }
-    }),
-    block: traced(drain.block, (blocked) => {
-      if (blocked.length) {
-        const lane = blocked[0]?.lane;
-        const detail = blocked
-          .map(
-            ({ stream, at, retry, error }) =>
-              `${stream}${dim(`@${at}/${retry} (${error})`)}`
-          )
-          .join(", ");
-        logger.trace(`${drain_caption("blocked", lane)} ${detail}`);
-      }
-    }),
-    subscribe: traced(drain.subscribe, (result, streams) => {
-      if (result.subscribed) {
-        const data = streams
-          .map(({ stream, lane }) =>
-            lane && lane !== "default" ? `${stream}${dim(`[${lane}]`)}` : stream
-          )
-          .join(" ");
-        logger.trace(`${drain_caption("correlated")} ${data}`);
-      }
-    }),
+    claim: drain.claim,
+    fetch: drain.fetch,
+    ack: drain.ack,
+    block: drain.block,
+    subscribe:
+      logger.level !== "trace"
+        ? drain.subscribe
+        : traced(drain.subscribe, (result, streams) => {
+            if (result.subscribed) {
+              const data = streams
+                .map(({ stream, lane }) =>
+                  lane && lane !== "default"
+                    ? `${stream}${dim(`[${lane}]`)}`
+                    : stream
+                )
+                .join(" ");
+              logger.trace(`${drain_caption("correlated")} ${data}`);
+            }
+          }),
   };
+}
+
+/**
+ * Emit one cycle-level drain trace summarizing what happened in a
+ * single `runDrainCycle` pass: claimed streams + their fetched events
+ * + per-stream outcome (✓ ack, ✗ block, ⊘ deferred, ⚠ retry-pending).
+ *
+ * One line per cycle keeps the operator's eye on "what changed in this
+ * pass" instead of stitching together separate `claimed`/`fetched`/
+ * `acked` lines. Lane prefixes the caption when the cycle is
+ * non-default. Skips emission when the cycle did nothing observable
+ * (no leases at all).
+ *
+ * @internal
+ */
+export function traceCycle<TEvents extends Schemas>(
+  logger: Logger,
+  leased: ReadonlyArray<{
+    readonly stream: string;
+    readonly at: number;
+    readonly retry: number;
+    readonly lane?: string;
+  }>,
+  fetched: ReadonlyArray<{
+    readonly stream: string;
+    readonly source?: string;
+    readonly events: ReadonlyArray<{
+      readonly id: number;
+      readonly name: keyof TEvents;
+    }>;
+  }>,
+  acked: ReadonlyArray<{ readonly stream: string }>,
+  blocked: ReadonlyArray<{ readonly stream: string; readonly error: string }>
+): void {
+  if (logger.level !== "trace" || !leased.length) return;
+  const lane = leased[0]?.lane;
+  const fetchByStream = new Map(fetched.map((f) => [f.stream, f]));
+  const ackedSet = new Set(acked.map((a) => a.stream));
+  const blockedByStream = new Map(blocked.map((b) => [b.stream, b.error]));
+  const detail = leased
+    .map(({ stream, at, retry }) => {
+      const f = fetchByStream.get(stream);
+      const key = f?.source ? `${stream}<-${f.source}` : stream;
+      const events =
+        f && f.events.length
+          ? ` ${dim(
+              `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
+            )}`
+          : "";
+      let outcome: string;
+      if (blockedByStream.has(stream))
+        outcome = ` ✗ ${dim(`(${blockedByStream.get(stream)})`)}`;
+      else if (ackedSet.has(stream)) outcome = " ✓";
+      else if (!f)
+        outcome = " ⊘"; // deferred: leased but not fetched (backoff window)
+      else outcome = " ⚠"; // handler errored, not yet at retry budget
+      return `${key}${dim(`@${at}/${retry}`)}${events}${outcome}`;
+    })
+    .join(", ");
+  logger.trace(`${drain_caption("drained", lane)} ${detail}`);
 }

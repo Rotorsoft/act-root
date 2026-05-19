@@ -4,7 +4,7 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import * as drain from "../src/internal/drain.js";
 import * as es from "../src/internal/event-sourcing.js";
-import { buildDrain, buildEs } from "../src/internal/tracing.js";
+import { buildDrain, buildEs, traceCycle } from "../src/internal/tracing.js";
 import { cache, log, store } from "../src/ports.js";
 import type { Logger } from "../src/types/index.js";
 import { ZodEmpty } from "../src/types/schemas.js";
@@ -80,12 +80,16 @@ describe("tracing", () => {
       expect(ops.subscribe).toBe(drain.subscribe);
     });
 
-    it("returns wrapped ops for trace level", () => {
+    it("at trace level only subscribe is decorated; cycle ops stay bare (ACT-1103)", () => {
+      // Per-op claim/fetch/ack/block decorators were folded into a
+      // single cycle trace emitted from `DrainController.drain()` via
+      // `traceCycle`. Subscribe stays decorated because it's driven
+      // from correlate-cycle, outside the cycle shape.
       const ops = buildDrain(withLevel("trace"));
-      expect(ops.claim).not.toBe(drain.claim);
-      expect(ops.fetch).not.toBe(drain.fetch);
-      expect(ops.ack).not.toBe(drain.ack);
-      expect(ops.block).not.toBe(drain.block);
+      expect(ops.claim).toBe(drain.claim);
+      expect(ops.fetch).toBe(drain.fetch);
+      expect(ops.ack).toBe(drain.ack);
+      expect(ops.block).toBe(drain.block);
       expect(ops.subscribe).not.toBe(drain.subscribe);
     });
   });
@@ -230,101 +234,97 @@ describe("tracing", () => {
       traceSpy = vi.spyOn(log(), "trace").mockImplementation(() => {});
     });
 
-    // Helper: a trace call with caption substring `>> claimed` etc.
-    // Tests assert the caption substring; in pretty mode the caption is
-    // wrapped in ANSI color codes, but the substring still matches.
-    // Trace decorators emit human-readable single-arg messages (no
-    // structured obj) — `c[0]` carries the caption + details.
-    const calledWithCaption = (substr: string) =>
-      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining(substr));
-    const noCaptionCall = (substr: string) =>
-      traceSpy.mock.calls.filter(
-        (c: [unknown]) => typeof c[0] === "string" && c[0].includes(substr)
-      );
-
-    it("withClaimTrace skips log when no leases returned", async () => {
-      const { claim } = buildDrain(withLevel("trace"));
-      const leased = await claim(1, 1, "by-x", 1000);
-      expect(leased).toEqual([]);
-      expect(noCaptionCall(">> claimed")).toHaveLength(0);
+    const lease = (stream: string, at = 0, retry = 0, lane?: string) => ({
+      stream,
+      at,
+      retry,
+      lane,
+      by: "test",
+      lagging: false,
     });
 
-    it("withClaimTrace logs when leases returned", async () => {
-      await store().subscribe([{ stream: "claim-stream" }]);
-      await es.action(Counter, "increment", target("claim-stream"), {
-        by: 1,
-      });
-      const { claim } = buildDrain(withLevel("trace"));
-      const leased = await claim(2, 0, "claim-by", 60_000);
-      expect(leased.length).toBeGreaterThan(0);
-      calledWithCaption(">> claimed");
+    it("traceCycle is a no-op when logger is below trace level", () => {
+      traceCycle(withLevel("info"), [lease("x")], [], [], []);
+      expect(traceSpy).not.toHaveBeenCalled();
     });
 
-    it("withFetchTrace logs stream-only and stream<-source variants", async () => {
-      // Commit so we have events to "fetch"
-      await es.action(Counter, "increment", target("fetch-stream"), { by: 2 });
+    it("traceCycle is a no-op when no leases were taken this cycle", () => {
+      traceCycle(withLevel("trace"), [], [], [], []);
+      expect(traceSpy).not.toHaveBeenCalled();
+    });
 
-      const { fetch } = buildDrain(withLevel("trace"));
-      const fetched = await fetch(
+    it("traceCycle marks acked streams with ✓ and blocked with ✗", () => {
+      traceCycle(
+        withLevel("trace"),
+        [lease("ok-stream"), lease("bad-stream", 1, 2)],
         [
           {
-            stream: "stream-only",
-            at: -1,
-            by: "x",
-            retry: 0,
-            lagging: false,
+            stream: "ok-stream",
+            events: [{ id: 1, name: "Incremented" }],
           },
+          { stream: "bad-stream", events: [{ id: 2, name: "Incremented" }] },
+        ],
+        [{ stream: "ok-stream" }],
+        [{ stream: "bad-stream", error: "boom" }]
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/>> drained.*ok-stream.*✓.*bad-stream.*✗/)
+      );
+      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
+    });
+
+    it("traceCycle marks deferred leases with ⊘ and handler-errored-not-blocked with ⚠", () => {
+      traceCycle(
+        withLevel("trace"),
+        [lease("deferred-stream"), lease("erroring-stream")],
+        // No fetch entry for deferred-stream → deferred outcome.
+        // erroring-stream got fetched but isn't in acked/blocked → ⚠.
+        [
           {
-            stream: "with-source",
-            source: "fetch-stream",
-            at: -1,
-            by: "x",
-            retry: 0,
-            lagging: false,
+            stream: "erroring-stream",
+            events: [{ id: 1, name: "Incremented" }],
           },
         ],
-        100
+        [],
+        []
       );
-      expect(fetched).toHaveLength(2);
-      calledWithCaption(">> fetched");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          />> drained.*deferred-stream.*⊘.*erroring-stream.*⚠/
+        )
+      );
     });
 
-    it("withAckTrace skips log on empty", async () => {
-      const { ack } = buildDrain(withLevel("trace"));
-      const result = await ack([]);
-      expect(result).toEqual([]);
-      expect(noCaptionCall(">> acked")).toHaveLength(0);
+    it("traceCycle prefixes the caption with lane when non-default", () => {
+      traceCycle(
+        withLevel("trace"),
+        [lease("lane-stream", 0, 0, "slow")],
+        [{ stream: "lane-stream", events: [{ id: 1, name: "Tick" }] }],
+        [{ stream: "lane-stream" }],
+        []
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/>> drained.*slow.*lane-stream/)
+      );
     });
 
-    it("withAckTrace logs on non-empty", async () => {
-      await store().subscribe([{ stream: "ack-stream" }]);
-      await es.action(Counter, "increment", target("ack-stream"), { by: 1 });
-      const { claim, ack } = buildDrain(withLevel("trace"));
-      const leased = await claim(2, 0, "ack-by", 60_000);
-      expect(leased.length).toBeGreaterThan(0);
-      const acked = await ack(leased);
-      expect(acked.length).toBeGreaterThan(0);
-      calledWithCaption(">> acked");
-    });
-
-    it("withBlockTrace skips log on empty", async () => {
-      const { block } = buildDrain(withLevel("trace"));
-      const result = await block([]);
-      expect(result).toEqual([]);
-      expect(noCaptionCall(">> blocked")).toHaveLength(0);
-    });
-
-    it("withBlockTrace logs on non-empty", async () => {
-      await store().subscribe([{ stream: "block-stream" }]);
-      await es.action(Counter, "increment", target("block-stream"), {
-        by: 1,
-      });
-      const { claim, block } = buildDrain(withLevel("trace"));
-      const leased = await claim(2, 0, "block-by", 60_000);
-      expect(leased.length).toBeGreaterThan(0);
-      const blocked = await block(leased.map((l) => ({ ...l, error: "boom" })));
-      expect(blocked.length).toBeGreaterThan(0);
-      calledWithCaption(">> blocked");
+    it("traceCycle renders source-prefixed streams as `stream<-source`", () => {
+      traceCycle(
+        withLevel("trace"),
+        [lease("sub")],
+        [
+          {
+            stream: "sub",
+            source: "src",
+            events: [{ id: 7, name: "Tick" }],
+          },
+        ],
+        [{ stream: "sub" }],
+        []
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringContaining("sub<-src")
+      );
     });
 
     it("withSubscribeTrace skips log when nothing newly subscribed", async () => {
@@ -351,49 +351,16 @@ describe("tracing", () => {
       );
     });
 
-    it("claim/ack/block/subscribe surface lane in the trace caption when set (ACT-1103)", async () => {
-      // Subscribe with an explicit lane — the correlated line tags the
-      // stream with `[lane]`.
-      const { subscribe, claim, ack, block } = buildDrain(withLevel("trace"));
-      await subscribe([{ stream: "lane-trace-stream", lane: "slow" }]);
+    it("subscribe trace tags non-default lanes (ACT-1103)", async () => {
+      // The cycle-level `>> drained` line is covered by the `traceCycle`
+      // unit tests above. This case only exercises subscribe's lane
+      // tag because subscribe is the one drain op still decorated by
+      // buildDrain — it's driven from correlate-cycle, not from
+      // runDrainCycle, so it sits outside the cycle aggregation.
+      const { subscribe } = buildDrain(withLevel("trace"));
+      await subscribe([{ stream: "lane-sub-stream", lane: "slow" }]);
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/>> correlated.*lane-trace-stream.*\[slow\]/)
-      );
-
-      // Commit + lane-filtered claim — the caption is `slow:claimed`
-      // and per-stream details inline as `stream@at/retry`.
-      await es.action(Counter, "increment", target("lane-trace-stream"), {
-        by: 1,
-      });
-      const leased = await claim(2, 0, "lane-trace-by", 60_000, "slow");
-      expect(leased.length).toBeGreaterThan(0);
-      expect(leased[0]?.lane).toBe("slow");
-      expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(
-          />> claimed.*slow.*lane-trace-stream.*@-?\d+\/-?\d+/
-        )
-      );
-
-      // Ack — lane appended as `slow`, lane carried back from the store.
-      const acked = await ack(leased);
-      expect(acked[0]?.lane).toBe("slow");
-      expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(
-          />> acked.*slow.*lane-trace-stream.*@-?\d+\/-?\d+/
-        )
-      );
-
-      // Block — lane appended, error inlined inside the dim block.
-      await es.action(Counter, "increment", target("lane-trace-stream"), {
-        by: 1,
-      });
-      const next = await claim(2, 0, "lane-block-by", 60_000, "slow");
-      const blocked = await block(next.map((l) => ({ ...l, error: "boom" })));
-      expect(blocked[0]?.lane).toBe("slow");
-      expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(
-          />> blocked.*slow.*lane-trace-stream.*@-?\d+\/-?\d+ \(boom\)/
-        )
+        expect.stringMatching(/>> correlated.*lane-sub-stream.*\[slow\]/)
       );
     });
   });

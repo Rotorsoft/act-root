@@ -41,4 +41,4 @@ export {
 } from "./merge.js";
 export { buildHandle, buildHandleBatch } from "./reactions.js";
 export { SettleLoop } from "./settle.js";
-export { buildDrain, buildEs } from "./tracing.js";
+export { buildDrain, buildEs, traceCycle } from "./tracing.js";
