@@ -101,7 +101,8 @@ describe("tracing — plain (production) mode", () => {
           events: [{ id: 1, name: "Incremented" }],
         },
       ],
-      [{ stream: "lane-plain" }],
+      [{ lease: { stream: "lane-plain" } }],
+      [{ stream: "lane-plain", at: 1 }],
       []
     );
     expect(traceSpy).toHaveBeenCalledWith(

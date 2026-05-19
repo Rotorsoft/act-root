@@ -106,17 +106,10 @@ async function main() {
     }))
     .build();
 
-  // Visible lane routing — every drain cycle prints which lanes acked.
-  // The `?? "default"` fallback matches the documented Lease contract:
-  // adapters populate the lane column; callers treat undefined (i.e. a
-  // pre-1103 adapter) as the implicit "default" lane.
-  app.on("acked", (leases) => {
-    for (const lease of leases) {
-      console.log(
-        `[ack] lane=${lease.lane ?? "default"} stream=${lease.stream} at=${lease.at}`
-      );
-    }
-  });
+  // Lane routing shows up in the per-cycle `>> drained` trace
+  // (`LOG_LEVEL=trace`) — caption prefix carries the lane, outcome
+  // marker is colored, post-ack watermark trails the ✓. No extra
+  // app.on("acked") listener needed.
 
   // start the correlation pump
   app.start_correlations();

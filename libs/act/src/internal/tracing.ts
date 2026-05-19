@@ -69,10 +69,15 @@ const es_caption = (caption: string, color: string, body: string): string =>
  */
 const C_LANE = "\x1b[38;5;183m"; // lilac — distinct from gray drain + drain ops
 const C_DIM = "\x1b[38;5;240m"; // dim gray — dimmer than C_DRAIN
+const C_ERR = "\x1b[38;5;196m"; // bright red — block marker
 
 /** Wrap with the muted color when pretty mode is on. Plain in production. */
 const dim = (text: string): string =>
   PRETTY ? `${C_DIM}${text}${C_RESET}` : text;
+
+/** Wrap with a foreground color when pretty mode is on; bare in production. */
+const hue = (color: string, text: string): string =>
+  PRETTY ? `${color}${text}${C_RESET}` : text;
 
 const drain_caption = (caption: string, lane?: string): string => {
   const showLane = lane && lane !== "default";
@@ -272,30 +277,39 @@ export function buildDrain<TEvents extends Schemas>(
       logger.level !== "trace"
         ? drain.subscribe
         : traced(drain.subscribe, (result, streams) => {
-            if (result.subscribed) {
-              const data = streams
-                .map(({ stream, lane }) =>
-                  lane && lane !== "default"
-                    ? `${stream}${dim(`[${lane}]`)}`
-                    : stream
-                )
-                .join(" ");
-              logger.trace(`${drain_caption("correlated")} ${data}`);
-            }
+            if (!result.subscribed) return;
+            // Caption mirrors `drained`: lane in the caption when the
+            // whole batch shares a single non-default lane. Mixed-lane
+            // batches (rare — different correlated targets resolving
+            // to different lanes in one scan) fall back to per-stream
+            // `[lane]` tags, default-lane streams stay bare either way.
+            const lanes = new Set(streams.map((s) => s.lane ?? "default"));
+            const uniformLane = lanes.size === 1 ? streams[0]?.lane : undefined;
+            const data = streams
+              .map(({ stream, lane }) =>
+                uniformLane || !lane || lane === "default"
+                  ? stream
+                  : `${stream}${dim(`[${lane}]`)}`
+              )
+              .join(" ");
+            logger.trace(`${drain_caption("correlated", uniformLane)} ${data}`);
           }),
   };
 }
 
 /**
  * Emit one cycle-level drain trace summarizing what happened in a
- * single `runDrainCycle` pass: claimed streams + their fetched events
- * + per-stream outcome (✓ ack, ✗ block, ⊘ deferred, ⚠ retry-pending).
+ * single `runDrainCycle` pass. Per-stream rendering shape — outcome +
+ * post-state anchored on the right:
  *
- * One line per cycle keeps the operator's eye on "what changed in this
- * pass" instead of stitching together separate `claimed`/`fetched`/
- * `acked` lines. Lane prefixes the caption when the cycle is
- * non-default. Skips emission when the cycle did nothing observable
- * (no leases at all).
+ *   stream<-source [events] ✓ @<new-at>             — acked
+ *   stream<-source [events] ✗ @<at>/<retry> (error) — blocked (final retry)
+ *   stream<-source ⊘ @<at>/<retry>                  — deferred (backoff)
+ *   stream<-source [events] ⚠ @<at>/<retry> (error) — handler errored, not yet blocked
+ *
+ * Lane prefixes the caption in lilac when non-default. Per-stream
+ * `[events]`, `@at/retry`, and `(error)` are dim so the stream
+ * identity + outcome marker read loudest.
  *
  * @internal
  */
@@ -315,14 +329,24 @@ export function traceCycle<TEvents extends Schemas>(
       readonly name: keyof TEvents;
     }>;
   }>,
-  acked: ReadonlyArray<{ readonly stream: string }>,
+  handled: ReadonlyArray<{
+    readonly lease: { readonly stream: string };
+    readonly error?: string;
+    readonly block?: boolean;
+  }>,
+  acked: ReadonlyArray<{ readonly stream: string; readonly at: number }>,
   blocked: ReadonlyArray<{ readonly stream: string; readonly error: string }>
 ): void {
   if (logger.level !== "trace" || !leased.length) return;
   const lane = leased[0]?.lane;
   const fetchByStream = new Map(fetched.map((f) => [f.stream, f]));
-  const ackedSet = new Set(acked.map((a) => a.stream));
+  const ackedByStream = new Map(acked.map((a) => [a.stream, a.at]));
   const blockedByStream = new Map(blocked.map((b) => [b.stream, b.error]));
+  const erroredByStream = new Map(
+    handled
+      .filter((h) => h.error && !h.block)
+      .map((h) => [h.lease.stream, h.error as string])
+  );
   const detail = leased
     .map(({ stream, at, retry }) => {
       const f = fetchByStream.get(stream);
@@ -333,14 +357,25 @@ export function traceCycle<TEvents extends Schemas>(
               `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
             )}`
           : "";
-      let outcome: string;
-      if (blockedByStream.has(stream))
-        outcome = ` ✗ ${dim(`(${blockedByStream.get(stream)})`)}`;
-      else if (ackedSet.has(stream)) outcome = " ✓";
-      else if (!f)
-        outcome = " ⊘"; // deferred: leased but not fetched (backoff window)
-      else outcome = " ⚠"; // handler errored, not yet at retry budget
-      return `${key}${dim(`@${at}/${retry}`)}${events}${outcome}`;
+      // Outcome + post-state on the right. The outcome marker and
+      // the most-actionable piece of state (post-ack watermark for ✓,
+      // bare marker for ✗/⚠) are colored bright so the operator's
+      // eye lands on them; secondary state stays dim.
+      let tail: string;
+      if (ackedByStream.has(stream)) {
+        // ✓ + new at in lime — "good outcome, here's the new state"
+        tail = ` ${hue(C_HIT, `✓ @${ackedByStream.get(stream)}`)}`;
+      } else if (blockedByStream.has(stream)) {
+        // ✗ in red, state + error dim
+        tail = ` ${hue(C_ERR, "✗")} ${dim(`@${at}/${retry} (${blockedByStream.get(stream)})`)}`;
+      } else if (erroredByStream.has(stream)) {
+        // ⚠ in amber, state + error dim
+        tail = ` ${hue(C_MISS, "⚠")} ${dim(`@${at}/${retry} (${erroredByStream.get(stream)})`)}`;
+      } else {
+        // ⊘ deferred — nothing changed, all dim.
+        tail = ` ${dim(`⊘ @${at}/${retry}`)}`;
+      }
+      return `${key}${events}${tail}`;
     })
     .join(", ");
   logger.trace(`${drain_caption("drained", lane)} ${detail}`);

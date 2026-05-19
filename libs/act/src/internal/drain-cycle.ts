@@ -433,7 +433,7 @@ export class DrainController<
       // claim + fetch + outcomes folded together so the operator sees
       // a single atomic narrative for each cycle. No-op when the
       // logger isn't at trace level.
-      traceCycle(this.deps.logger, leased, fetched, acked, blocked);
+      traceCycle(this.deps.logger, leased, fetched, handled, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = computeLagLeadRatio(handled, lagging, leading);

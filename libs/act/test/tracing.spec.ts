@@ -244,16 +244,16 @@ describe("tracing", () => {
     });
 
     it("traceCycle is a no-op when logger is below trace level", () => {
-      traceCycle(withLevel("info"), [lease("x")], [], [], []);
+      traceCycle(withLevel("info"), [lease("x")], [], [], [], []);
       expect(traceSpy).not.toHaveBeenCalled();
     });
 
     it("traceCycle is a no-op when no leases were taken this cycle", () => {
-      traceCycle(withLevel("trace"), [], [], [], []);
+      traceCycle(withLevel("trace"), [], [], [], [], []);
       expect(traceSpy).not.toHaveBeenCalled();
     });
 
-    it("traceCycle marks acked streams with ✓ and blocked with ✗", () => {
+    it("traceCycle marks acked streams with ✓ + post-at and blocked with ✗ + at/retry + error", () => {
       traceCycle(
         withLevel("trace"),
         [lease("ok-stream"), lease("bad-stream", 1, 2)],
@@ -264,34 +264,43 @@ describe("tracing", () => {
           },
           { stream: "bad-stream", events: [{ id: 2, name: "Incremented" }] },
         ],
-        [{ stream: "ok-stream" }],
+        [
+          { lease: { stream: "ok-stream" } },
+          { lease: { stream: "bad-stream" }, error: "boom", block: true },
+        ],
+        [{ stream: "ok-stream", at: 7 }],
         [{ stream: "bad-stream", error: "boom" }]
       );
+      // ✓ followed by post-ack @<at>; ✗ followed by @<at>/<retry> + error
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/>> drained.*ok-stream.*✓.*bad-stream.*✗/)
+        expect.stringMatching(/ok-stream.*✓.*@7/)
       );
-      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining("boom"));
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/bad-stream.*✗.*@1\/2.*boom/)
+      );
     });
 
-    it("traceCycle marks deferred leases with ⊘ and handler-errored-not-blocked with ⚠", () => {
+    it("traceCycle marks ⊘ deferred and ⚠ with the handler error message", () => {
       traceCycle(
         withLevel("trace"),
-        [lease("deferred-stream"), lease("erroring-stream")],
-        // No fetch entry for deferred-stream → deferred outcome.
-        // erroring-stream got fetched but isn't in acked/blocked → ⚠.
+        [lease("deferred-stream"), lease("erroring-stream", 5, 1)],
+        // No fetch entry for deferred-stream → ⊘. erroring-stream
+        // fetched + handled with error but not blocked → ⚠.
         [
           {
             stream: "erroring-stream",
             events: [{ id: 1, name: "Incremented" }],
           },
         ],
+        [{ lease: { stream: "erroring-stream" }, error: "timeout" }],
         [],
         []
       );
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(
-          />> drained.*deferred-stream.*⊘.*erroring-stream.*⚠/
-        )
+        expect.stringMatching(/deferred-stream.*⊘.*@0\/0/)
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/erroring-stream.*⚠.*@5\/1.*timeout/)
       );
     });
 
@@ -300,7 +309,8 @@ describe("tracing", () => {
         withLevel("trace"),
         [lease("lane-stream", 0, 0, "slow")],
         [{ stream: "lane-stream", events: [{ id: 1, name: "Tick" }] }],
-        [{ stream: "lane-stream" }],
+        [{ lease: { stream: "lane-stream" } }],
+        [{ stream: "lane-stream", at: 1 }],
         []
       );
       expect(traceSpy).toHaveBeenCalledWith(
@@ -319,7 +329,8 @@ describe("tracing", () => {
             events: [{ id: 7, name: "Tick" }],
           },
         ],
-        [{ stream: "sub" }],
+        [{ lease: { stream: "sub" } }],
+        [{ stream: "sub", at: 7 }],
         []
       );
       expect(traceSpy).toHaveBeenCalledWith(
@@ -351,16 +362,31 @@ describe("tracing", () => {
       );
     });
 
-    it("subscribe trace tags non-default lanes (ACT-1103)", async () => {
-      // The cycle-level `>> drained` line is covered by the `traceCycle`
-      // unit tests above. This case only exercises subscribe's lane
-      // tag because subscribe is the one drain op still decorated by
-      // buildDrain — it's driven from correlate-cycle, not from
-      // runDrainCycle, so it sits outside the cycle aggregation.
+    it("subscribe trace puts lane in caption when the batch is uniform (ACT-1103)", async () => {
+      // Uniform-lane batches: lane in the caption, streams bare. Mirrors
+      // the `>> drained` cycle caption convention so the operator sees
+      // the lane once per line.
       const { subscribe } = buildDrain(withLevel("trace"));
       await subscribe([{ stream: "lane-sub-stream", lane: "slow" }]);
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/>> correlated.*lane-sub-stream.*\[slow\]/)
+        expect.stringMatching(/>> correlated.*slow.*lane-sub-stream/)
+      );
+      // And the bracketed per-stream `[slow]` tag is gone.
+      expect(traceSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining("[slow]")
+      );
+    });
+
+    it("subscribe trace falls back to per-stream `[lane]` when the batch is mixed", async () => {
+      const { subscribe } = buildDrain(withLevel("trace"));
+      await subscribe([
+        { stream: "mix-fast", lane: "fast" },
+        { stream: "mix-slow", lane: "slow" },
+      ]);
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          />> correlated.*mix-fast.*\[fast\].*mix-slow.*\[slow\]/
+        )
       );
     });
   });

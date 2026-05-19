@@ -105,6 +105,14 @@ export class ConsoleLogger implements Logger {
     if (typeof objOrMsg === "string") {
       message = objOrMsg;
       obj = {};
+    } else if (objOrMsg instanceof Error) {
+      // Error instances spread to `{}` — capture the salient fields
+      // explicitly so structured log aggregators see them.
+      message = msg ?? objOrMsg.message;
+      obj = {
+        error: { message: objOrMsg.message, name: objOrMsg.name },
+        stack: objOrMsg.stack,
+      };
     } else if (objOrMsg !== null && typeof objOrMsg === "object") {
       message = msg;
       obj = { ...(objOrMsg as Record<string, unknown>) };
@@ -148,6 +156,13 @@ export class ConsoleLogger implements Logger {
 
     if (typeof objOrMsg === "string") {
       message = objOrMsg;
+    } else if (objOrMsg instanceof Error) {
+      // Error instances don't serialize their `message`/`stack` via
+      // JSON.stringify — `JSON.stringify(err) === "{}"`. Render the
+      // message inline and the stack as the data payload so operators
+      // see something useful instead of an empty object.
+      message = msg ?? objOrMsg.message;
+      data = objOrMsg.stack;
     } else {
       message = msg ?? "";
       if (objOrMsg !== undefined && objOrMsg !== null) {
