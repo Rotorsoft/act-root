@@ -9,6 +9,17 @@
 * **act:** parallel lane drain + per-lane workers; PG benchmark headline ([f76bc31](https://github.com/rotorsoft/act-root/commit/f76bc3146b0943c71d57992c8b270c85ed5e4eb1))
 * **act:** per-lane DrainController fan-out in the orchestrator ([71612ee](https://github.com/rotorsoft/act-root/commit/71612ee56ab094a57ce05de086c7a13f6be75841))
 
+# [@rotorsoft/act-pg-v0.25.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.24.0...@rotorsoft/act-pg-v0.25.0) (2026-05-19)
+
+
+### Features
+
+* **act-pg:** wire lanes through PostgresStore ([52ee53f](https://github.com/rotorsoft/act-root/commit/52ee53f805112dd7d5b5d12fd3581cd9bd484604))
+* **act-sqlite:** wire lanes through SqliteStore and consolidate the lane contract into the TCK ([70c062b](https://github.com/rotorsoft/act-root/commit/70c062b256b273982ca9e6d155a8606020fd35e4))
+* **act:** human-readable drain traces + lane suffix; lane on ack/block ([82fc17a](https://github.com/rotorsoft/act-root/commit/82fc17aea2f7eeef21be3ba1c387aac4591cd603)), closes [#id](https://github.com/rotorsoft/act-root/issues/id) [#id](https://github.com/rotorsoft/act-root/issues/id)
+* **act:** parallel lane drain + per-lane workers; PG benchmark headline ([f76bc31](https://github.com/rotorsoft/act-root/commit/f76bc3146b0943c71d57992c8b270c85ed5e4eb1))
+* **act:** per-lane DrainController fan-out in the orchestrator ([71612ee](https://github.com/rotorsoft/act-root/commit/71612ee56ab094a57ce05de086c7a13f6be75841))
+
 # [@rotorsoft/act-pg-v0.24.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.23.0...@rotorsoft/act-pg-v0.24.0) (2026-05-17)
 
 
