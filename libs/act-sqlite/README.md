@@ -4,7 +4,7 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-sqlite.svg)](https://www.npmjs.com/package/@rotorsoft/act-sqlite)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-_SQLite event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) via [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts). File-based, edge-ready, ACID — for single-node deployments._
+_SQLite event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) via [`@libsql/client`](https://github.com/tursodatabase/libsql-client-ts). File-based, edge-ready, ACID — for single-node deployments. Lane-aware claim/ack via `streams.lane` + `streams_lane_ix` since v0.9.0 ([ACT-1103](https://github.com/Rotorsoft/act-root/issues/733))._
 
 ## Why this package
 

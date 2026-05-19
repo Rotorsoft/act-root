@@ -4,7 +4,7 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-tck.svg)](https://www.npmjs.com/package/@rotorsoft/act-tck)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-_Test Compatibility Kit for the `Store`, `Cache`, and `Logger` ports of [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)._
+_Test Compatibility Kit for the `Store`, `Cache`, and `Logger` ports of [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). Lane conformance suite (claim filter, subscribe UPSERT, ack/block round-trip) added in v0.4.0 ([ACT-1103](https://github.com/Rotorsoft/act-root/issues/733))._
 
 ## Why this package
 

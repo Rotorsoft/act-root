@@ -556,6 +556,8 @@ Same reasoning as ACT-403: the cost is below measurement noise, so a baseline wo
 
 ## Lane Fan-out (ACT-1103)
 
+> Shipped in `@rotorsoft/act@0.45.0` (May 2026). See [#733](https://github.com/Rotorsoft/act-root/issues/733).
+
 The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drainAll` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Per-lane `cycleMs` autostarts a `setTimeout` chain that calls the controller's `drain()` at the lane's cadence — independent of the Act-level settle loop.
 
 Three perf questions:
