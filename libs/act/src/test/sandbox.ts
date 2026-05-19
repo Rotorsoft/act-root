@@ -11,14 +11,13 @@ import type { Cache, Store } from "../types/index.js";
  * generic when called across package boundaries.
  */
 type AnyActBuilder<TApp> = {
-  // The options shape is intentionally untyped here. `ActOptions` is
-  // generic in `TLanes` (ACT-1103); pinning the helper to one lane union
-  // would force contravariant mismatches across builders with different
-  // declared lanes. The runtime caller in `runSandbox` constructs an
-  // `ActOptions` it knows is valid for any declared lane set
-  // (`scoped` + pass-through `actOptions`), so the loss of compile-time
-  // narrowing on `build`'s param is harmless.
-  build: (options?: any) => TApp;
+  // `ActOptions<any>` rather than `ActOptions<string>` (the default) — a
+  // builder narrowed to `ActOptions<"default">` would otherwise trip
+  // function-parameter contravariance against `ActOptions<string>`. The
+  // `any` only widens `onlyLanes`; the rest of the option shape
+  // (`scoped`, `correlator`, `settleDebounceMs`, etc.) still type-checks
+  // at the runtime call site below.
+  build: (options?: ActOptions<any>) => TApp;
 };
 
 /**
