@@ -41,7 +41,7 @@ interface Store extends Disposable {
   drop(): Promise<void>;
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
   query(callback, filter?): Promise<number>;
-  claim(lagging, leading, by, millis): Promise<Lease[]>;
+  claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
   subscribe(streams): Promise<{ subscribed; watermark }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<BlockedLease[]>;
@@ -54,7 +54,9 @@ interface Store extends Disposable {
 }
 ```
 
-`reset`, `unblock`, and `prioritize` share the same `StreamFilter` shape (`stream` / `stream_exact` / `source` / `source_exact` / `blocked`). `reset` and `unblock` also accept a plain `string[]` for targeted operations. `unblock` always restricts to blocked streams regardless of what the filter passes — there's no "unblock unblocked streams" use case. `reset` is for projection rebuilds (watermark → -1); `unblock` is for poison-message recovery (watermark preserved).
+`reset`, `unblock`, and `prioritize` share the same `StreamFilter` shape (`stream` / `stream_exact` / `source` / `source_exact` / `blocked` / `lane`). `reset` and `unblock` also accept a plain `string[]` for targeted operations. `unblock` always restricts to blocked streams regardless of what the filter passes — there's no "unblock unblocked streams" use case. `reset` is for projection rebuilds (watermark → -1); `unblock` is for poison-message recovery (watermark preserved).
+
+`claim` takes an optional `lane` filter (ACT-1103). When set, only streams in the named lane are eligible; when omitted, the claim spans every lane — preserving pre-1103 behavior. Adapters that haven't migrated yet can leave `lane` unread on the SQL side and still satisfy the contract until they opt in. `subscribe`'s row shape gained an optional `lane` field for the same release; adapters UPSERT it on every call so a restarted Act with a new lane assignment moves streams without a manual migration.
 
 `query_stats` is the per-stream-aggregate primitive (added in [ACT-639](https://github.com/Rotorsoft/act-root/issues/639)). Default returns the head event per stream via an indexed path; opt-in `count`/`tail`/`names` trigger a full scan but share it. Input is `string[]` for an enumerated set or `Pick<StreamFilter, "stream" | "stream_exact">` for pattern selection — subscription-level filters (`source`, `blocked`) live on `query_streams`; compose the two for "stats for blocked subscriptions" workflows.
 

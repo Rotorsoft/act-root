@@ -208,6 +208,36 @@ app.on("closed", ({ truncated, skipped }) => {
 
 Closed streams are tombstoned — `app.do()` against them throws `StreamClosedError`. To re-open with a fresh starting state, `close()` with `restart: true`. See [Architecture → Close cycle](../architecture/close-cycle.md) for the full safety semantics.
 
+## 10. Sizing lanes
+
+If reactions in this app have heterogeneous timing profiles — webhook delivery measured in seconds alongside metric emission measured in microseconds — split them across lanes (ACT-1103). Without lanes, every reaction shares one `leaseMillis` and one `streamLimit`, and the slowest handler dictates the budget for everyone.
+
+```typescript
+const app = act()
+  .withState(Ticket)
+  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })
+  .withLane({ name: "metrics",  leaseMillis: 1_000,  streamLimit: 50, cycleMs: 50  })
+  .on("OrderConfirmed").do(deliverWebhook).to({ target: "webhooks-out", lane: "webhooks" })
+  .on("OrderConfirmed").do(emitMetric).to({ target: "metrics-out",  lane: "metrics" })
+  .build();
+```
+
+**Sizing each field:**
+
+- **`leaseMillis`** — set to the longest expected handler invocation in the lane plus headroom (50–100%). A lease shorter than the handler causes premature re-claim and double dispatch; a lease far longer than the handler delays crash recovery (a dead worker's leases stay parked until expiry). For webhook lanes, match your HTTP client timeout. For best-effort lanes, sub-second is usually right.
+- **`streamLimit`** — bounds the per-cycle parallel handler budget. With slow handlers (100 ms+), keep this low so an erroring batch doesn't tie up a wide pool of leases. With fast handlers, raise it to amortize the claim round-trip.
+- **`cycleMs`** — when set, the lane's controller drives itself at this cadence (independent of the Act's settle loop). Best for "always-on" lanes that need low commit-to-ack latency without callers explicitly driving `settle()`. Omit for lanes that are fine running on the settle debounce.
+
+**Sanity checks for the sizing:**
+
+- [ ] Slow lane's `leaseMillis` ≥ the longest expected handler runtime in that lane
+- [ ] Fast lane's `cycleMs` matches the responsiveness target (e.g., 10 ms for sub-100 ms acks)
+- [ ] No reaction targets the same stream via two reactions with different lanes (the build-time scan throws on this)
+- [ ] If running process-per-lane, `ACT_ONLY_LANES` / `ActOptions.onlyLanes` is wired from env so the same image deploys to every lane
+- [ ] Inspector / dashboards filter by `lease.lane` and `position.lane` — every lifecycle event now carries it
+
+See [Configuration → Lanes](../concepts/configuration.md#lanes) for the full API surface, and `libs/act/PERFORMANCE.md § Lane Fan-out` for the headline number: ~7× faster fast-event latency under slow-lane backpressure on Postgres.
+
 ## Pre-deploy quick check
 
 Before pushing to production, walk this list mentally:
@@ -221,5 +251,6 @@ Before pushing to production, walk this list mentally:
 - [ ] `dispose()` wired to SIGINT/SIGTERM
 - [ ] `LOG_LEVEL` and `NODE_ENV` set appropriately
 - [ ] Lifecycle metrics exported (blocked, settled, concurrency)
+- [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)
 
 Once these are in place, the framework runs itself.
