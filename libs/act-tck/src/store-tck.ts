@@ -900,26 +900,22 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `lane-default-${uid()}`;
         await store.subscribe([{ stream: s }]);
         const seen: string[] = [];
-        await store.query_streams(
-          (p) => {
-            if (p.stream === s) seen.push(p.lane ?? "<missing>");
-          },
-          { stream: s, stream_exact: true }
-        );
-        expect(seen[0]).toBe("default");
+        await store.query_streams((p) => seen.push(p.lane as string), {
+          stream: s,
+          stream_exact: true,
+        });
+        expect(seen).toEqual(["default"]);
       });
 
       it("subscribe records the lane passed in", async () => {
         const s = `lane-set-${uid()}`;
         await store.subscribe([{ stream: s, lane: "slow" }]);
         const seen: string[] = [];
-        await store.query_streams(
-          (p) => {
-            if (p.stream === s) seen.push(p.lane ?? "<missing>");
-          },
-          { stream: s, stream_exact: true }
-        );
-        expect(seen[0]).toBe("slow");
+        await store.query_streams((p) => seen.push(p.lane as string), {
+          stream: s,
+          stream_exact: true,
+        });
+        expect(seen).toEqual(["slow"]);
       });
 
       it("subscribe re-lanes existing streams on subsequent calls", async () => {
@@ -927,13 +923,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.subscribe([{ stream: s, lane: "slow" }]);
         await store.subscribe([{ stream: s, lane: "fast" }]);
         const seen: string[] = [];
-        await store.query_streams(
-          (p) => {
-            if (p.stream === s) seen.push(p.lane ?? "<missing>");
-          },
-          { stream: s, stream_exact: true }
-        );
-        expect(seen[0]).toBe("fast");
+        await store.query_streams((p) => seen.push(p.lane as string), {
+          stream: s,
+          stream_exact: true,
+        });
+        expect(seen).toEqual(["fast"]);
       });
 
       it("claim() filters by lane when supplied and returns lane on the Lease", async () => {
