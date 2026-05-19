@@ -158,15 +158,23 @@ export type ActBuilder<
     TNewEvents extends Schemas,
     TNewActions extends Schemas,
     TNewMap extends Record<string, Schema>,
+    TNewLanes extends string,
   >(
-    slice: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap>
+    slice: Slice<
+      TNewSchemaReg,
+      TNewEvents,
+      TNewActions,
+      TNewMap,
+      Actor,
+      TNewLanes
+    >
   ) => ActBuilder<
     TSchemaReg & TNewSchemaReg,
     TEvents & TNewEvents,
     TActions & TNewActions,
     TStateMap & TNewMap,
     TActor,
-    TLanes
+    TLanes | TNewLanes
   >;
   /**
    * Registers a standalone projection with the builder.
@@ -454,6 +462,27 @@ export function act<
         }
         mergeEventRegister(registry.events, input.events);
         pendingProjections.push(...input.projections);
+        // Merge slice-declared lanes into the Act's lane set (ACT-1103).
+        // Conflicting configs (same name, different field values) are
+        // rejected — the operator should pick one, not let a slice
+        // silently shadow an Act-level declaration.
+        for (const sliceLane of input.lanes) {
+          const existing = lanes.find((l) => l.name === sliceLane.name);
+          if (!existing) {
+            lanes.push(sliceLane);
+            continue;
+          }
+          if (
+            existing.leaseMillis !== sliceLane.leaseMillis ||
+            existing.streamLimit !== sliceLane.streamLimit ||
+            existing.cycleMs !== sliceLane.cycleMs
+          ) {
+            throw new Error(
+              `Lane "${sliceLane.name}" was already declared with a different config. ` +
+                `Pick one declaration — slices and the Act must agree on lane timing.`
+            );
+          }
+        }
         return builder as never;
       },
       withProjection: (proj) => {
