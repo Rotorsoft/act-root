@@ -303,14 +303,23 @@ export function buildDrain<TEvents extends Schemas>(
  * single `runDrainCycle` pass. Per-stream rendering shape — outcome +
  * post-state anchored on the right:
  *
- *   stream<-source [events] ✓ @<new-at>             — acked
- *   stream<-source [events] ✗ @<at>/<retry> (error) — blocked (final retry)
- *   stream<-source ⊘ @<at>/<retry>                  — deferred (backoff)
- *   stream<-source [events] ⚠ @<at>/<retry> (error) — handler errored, not yet blocked
+ *   stream<-source [events] ✓ @<acked-at>                        — full success
+ *   stream<-source [events] ✗ @<failed-at>/<retry> (error)       — total failure → blocked
+ *   stream<-source [events] ⚠ @<failed-at>/<retry> (error)       — total failure → retrying
+ *   stream<-source [events] ✓ @<acked-at> ✗ @<failed-at>/<retry> (error)  — partial then blocked
+ *   stream<-source [events] ✓ @<acked-at> ⚠ @<failed-at>/<retry> (error)  — partial then retrying
+ *   stream<-source ⊘ @<at>/<retry>                               — deferred (backoff)
  *
- * Lane prefixes the caption in lilac when non-default. Per-stream
- * `[events]`, `@at/retry`, and `(error)` are dim so the stream
- * identity + outcome marker read loudest.
+ * Partial-success-then-failure is the dual-outcome case: events
+ * 1..K succeeded (watermark advanced to K), event K+1 threw. The
+ * trace renders both the lime `✓ @K` and the red/amber `✗`/`⚠ @K+1`
+ * on the same line so an operator sees "we made progress *and* then
+ * something broke" at a glance.
+ *
+ * Lane prefixes the caption in lilac when non-default. The outcome
+ * marker and its adjacent post-state share the marker's color so the
+ * eye reads "outcome + where it landed" as one unit. Per-stream
+ * `[events]` and `(error)` stay dim — secondary context.
  *
  * @internal
  */
@@ -334,6 +343,7 @@ export function traceCycle<TEvents extends Schemas>(
     readonly lease: { readonly stream: string };
     readonly error?: string;
     readonly block?: boolean;
+    readonly failed_at?: number;
   }>,
   acked: ReadonlyArray<{ readonly stream: string; readonly at: number }>,
   blocked: ReadonlyArray<{ readonly stream: string; readonly error: string }>
@@ -343,15 +353,16 @@ export function traceCycle<TEvents extends Schemas>(
   const fetchByStream = new Map(fetched.map((f) => [f.stream, f]));
   const ackedByStream = new Map(acked.map((a) => [a.stream, a.at]));
   const blockedByStream = new Map(blocked.map((b) => [b.stream, b.error]));
-  const erroredByStream = new Map(
-    handled
-      .filter((h) => h.error && !h.block)
-      .map((h) => [h.lease.stream, h.error as string])
+  // Handled-with-error stays a single index now: `block` discriminates
+  // the marker (✗ vs ⚠); the failure exists independently of whether
+  // ack happened.
+  const failedByStream = new Map(
+    handled.filter((h) => h.error).map((h) => [h.lease.stream, h] as const)
   );
   const detail = leased
     .map(({ stream, at, retry }) => {
       const f = fetchByStream.get(stream);
-      // Target stream in cyan so the operator's eye lands on "which
+      // Target stream in yellow so the operator's eye lands on "which
       // stream did this happen on?" first; source (the events' origin)
       // stays dim — secondary info.
       const key = f?.source
@@ -363,24 +374,32 @@ export function traceCycle<TEvents extends Schemas>(
               `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
             )}`
           : "";
-      // Outcome + post-state on the right. The outcome marker and
-      // the most-actionable piece of state (post-ack watermark for ✓,
-      // bare marker for ✗/⚠) are colored bright so the operator's
-      // eye lands on them; secondary state stays dim.
-      let tail: string;
-      if (ackedByStream.has(stream)) {
-        // ✓ + new at in lime — "good outcome, here's the new state"
-        tail = ` ${hue(C_HIT, `✓ @${ackedByStream.get(stream)}`)}`;
-      } else if (blockedByStream.has(stream)) {
-        // ✗ in red, state + error dim
-        tail = ` ${hue(C_ERR, "✗")} ${dim(`@${at}/${retry} (${blockedByStream.get(stream)})`)}`;
-      } else if (erroredByStream.has(stream)) {
-        // ⚠ in amber, state + error dim
-        tail = ` ${hue(C_MISS, "⚠")} ${dim(`@${at}/${retry} (${erroredByStream.get(stream)})`)}`;
-      } else {
-        // ⊘ deferred — nothing changed, all dim.
-        tail = ` ${dim(`⊘ @${at}/${retry}`)}`;
+      // Build ack + fail segments independently — both can fire for
+      // the same stream in the partial-success-then-failure case.
+      const ackedAt = ackedByStream.get(stream);
+      const ackPart =
+        ackedAt !== undefined
+          ? hue(C_HIT, `✓ @${ackedAt}`) // ✓ + new at in lime
+          : "";
+      const failure = failedByStream.get(stream);
+      let failPart = "";
+      if (failure) {
+        // Failed event id when known (per-event path), else falls back
+        // to lease.at — the post-fetch watermark — for batch-mode
+        // total failures where no single event is "the one."
+        const failedAt = failure.failed_at ?? at;
+        const blockedError = blockedByStream.get(stream);
+        if (blockedError !== undefined) {
+          failPart = `${hue(C_ERR, `✗ @${failedAt}/${retry}`)} ${dim(`(${blockedError})`)}`;
+        } else {
+          failPart = `${hue(C_MISS, `⚠ @${failedAt}/${retry}`)} ${dim(`(${failure.error})`)}`;
+        }
       }
+      let tail: string;
+      if (ackPart && failPart) tail = ` ${ackPart} ${failPart}`;
+      else if (ackPart) tail = ` ${ackPart}`;
+      else if (failPart) tail = ` ${failPart}`;
+      else tail = ` ${dim(`⊘ @${at}/${retry}`)}`; // nothing happened
       return `${key}${events}${tail}`;
     })
     .join(", ");

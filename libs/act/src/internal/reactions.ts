@@ -53,9 +53,11 @@ export type ReactionDeps<
 };
 
 /**
- * Shared finalization: log the error, decide retry vs. block, surface the
- * error string only when nothing was handled (in batch mode `handled` is
- * always 0 on failure, so the rule degenerates to "always reported").
+ * Shared finalization: log the error and decide retry vs. block. The
+ * error string is *always* surfaced on the failure path — drain-cycle
+ * uses `handled > 0` (not `error` presence) to decide whether to ack
+ * the partial progress, so the message can travel for trace + blocked
+ * record without affecting the ack/skip choice.
  */
 function finalize(
   lease: Lease,
@@ -63,7 +65,8 @@ function finalize(
   at: number,
   error: Error | undefined,
   options: ReactionOptions,
-  logger: Logger
+  logger: Logger,
+  failed_at?: number
 ): HandleResult {
   if (!error) return { lease, handled, at };
   logger.error(error);
@@ -91,9 +94,10 @@ function finalize(
     lease,
     handled,
     at,
-    error: handled === 0 ? error.message : undefined,
+    error: error.message,
     block,
     nextAttemptAt,
+    failed_at,
   };
 }
 
@@ -157,7 +161,8 @@ export function buildHandle<
           at,
           error as Error,
           payload.options,
-          logger
+          logger,
+          event.id
         );
       }
     }

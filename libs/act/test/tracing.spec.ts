@@ -253,7 +253,7 @@ describe("tracing", () => {
       expect(traceSpy).not.toHaveBeenCalled();
     });
 
-    it("traceCycle marks acked streams with ✓ + post-at and blocked with ✗ + at/retry + error", () => {
+    it("traceCycle marks acked streams with ✓ + post-at and blocked with ✗ + failed-at/retry + error", () => {
       traceCycle(
         withLevel("trace"),
         [lease("ok-stream"), lease("bad-stream", 1, 2)],
@@ -266,17 +266,22 @@ describe("tracing", () => {
         ],
         [
           { lease: { stream: "ok-stream" } },
-          { lease: { stream: "bad-stream" }, error: "boom", block: true },
+          {
+            lease: { stream: "bad-stream" },
+            error: "boom",
+            block: true,
+            failed_at: 2,
+          },
         ],
         [{ stream: "ok-stream", at: 7 }],
         [{ stream: "bad-stream", error: "boom" }]
       );
-      // ✓ followed by post-ack @<at>; ✗ followed by @<at>/<retry> + error
+      // ✓ followed by post-ack @<at>; ✗ followed by @<failed-at>/<retry> + error
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(/ok-stream.*✓.*@7/)
       );
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/bad-stream.*✗.*@1\/2.*boom/)
+        expect.stringMatching(/bad-stream.*✗.*@2\/2.*boom/)
       );
     });
 
@@ -292,7 +297,13 @@ describe("tracing", () => {
             events: [{ id: 1, name: "Incremented" }],
           },
         ],
-        [{ lease: { stream: "erroring-stream" }, error: "timeout" }],
+        [
+          {
+            lease: { stream: "erroring-stream" },
+            error: "timeout",
+            failed_at: 1,
+          },
+        ],
         [],
         []
       );
@@ -300,7 +311,101 @@ describe("tracing", () => {
         expect.stringMatching(/deferred-stream.*⊘.*@0\/0/)
       );
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringMatching(/erroring-stream.*⚠.*@5\/1.*timeout/)
+        expect.stringMatching(/erroring-stream.*⚠.*@1\/1.*timeout/)
+      );
+    });
+
+    it("traceCycle renders dual outcome (✓ + ✗) when a partial batch acks then blocks", () => {
+      // First 15 events of a 16-event batch succeed; #16 throws a
+      // non-retryable error. drain-cycle puts the stream in BOTH the
+      // `acked` (at=15) and `blocked` arrays — trace lands one line
+      // with both segments so the operator sees "progress, then dead."
+      traceCycle(
+        withLevel("trace"),
+        [lease("partial-blocked", 0, 0)],
+        [
+          {
+            stream: "partial-blocked",
+            events: [
+              { id: 15, name: "OK" },
+              { id: 16, name: "Bad" },
+            ],
+          },
+        ],
+        [
+          {
+            lease: { stream: "partial-blocked" },
+            error: "non-retryable",
+            block: true,
+            failed_at: 16,
+          },
+        ],
+        [{ stream: "partial-blocked", at: 15 }],
+        [{ stream: "partial-blocked", error: "non-retryable" }]
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          /partial-blocked.*✓.*@15.*✗.*@16\/0.*non-retryable/
+        )
+      );
+    });
+
+    it("traceCycle renders dual outcome (✓ + ⚠) when a partial batch acks then retries", () => {
+      // Same shape as above but the failure is retryable — the stream
+      // is acked at 15 (progress) and the result carries an error but
+      // no block. Next claim will resume at 16 with retry=1.
+      traceCycle(
+        withLevel("trace"),
+        [lease("partial-retrying", 0, 0)],
+        [
+          {
+            stream: "partial-retrying",
+            events: [
+              { id: 15, name: "OK" },
+              { id: 16, name: "Bad" },
+            ],
+          },
+        ],
+        [
+          {
+            lease: { stream: "partial-retrying" },
+            error: "transient",
+            failed_at: 16,
+          },
+        ],
+        [{ stream: "partial-retrying", at: 15 }],
+        []
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/partial-retrying.*✓.*@15.*⚠.*@16\/0.*transient/)
+      );
+    });
+
+    it("traceCycle falls back to lease.at when failed_at is absent (batch path)", () => {
+      // Batch handlers are all-or-nothing — no single event id is "the
+      // one that failed", so finalize doesn't set failed_at. Trace
+      // falls back to lease.at (the post-fetch watermark).
+      traceCycle(
+        withLevel("trace"),
+        [lease("batch-failed", 42, 3)],
+        [
+          {
+            stream: "batch-failed",
+            events: [{ id: 43, name: "Batched" }],
+          },
+        ],
+        [
+          {
+            lease: { stream: "batch-failed" },
+            error: "batch fail",
+            block: true,
+          },
+        ],
+        [],
+        [{ stream: "batch-failed", error: "batch fail" }]
+      );
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/batch-failed.*✗.*@42\/3.*batch fail/)
       );
     });
 

@@ -52,6 +52,14 @@ export type HandleResult = Readonly<{
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
   nextAttemptAt?: number;
+  /**
+   * Event id that threw, when a handler error occurred. Distinct from
+   * `at` (which is the last *successful* event id, i.e., the ack target):
+   * `failed_at = at + 1` in dense streams, but adapters with sparse ids
+   * give the trace the exact position. Always set on the error path,
+   * regardless of whether the batch made partial progress.
+   */
+  failed_at?: number;
 }>;
 
 /**
@@ -199,10 +207,16 @@ export async function runDrainCycle<
     })
   );
 
+  // Ack any result that made progress — full success (no error), empty
+  // payloads (no work to do, watermark fast-forwards), and partial
+  // success (some events processed before the failure). The `error`
+  // string is no longer the "skip ack" signal; `handled > 0 || !error`
+  // is. Partial-success-then-block now lands in both `acked` and
+  // `blocked` arrays for the same stream — by design.
   const acked = await ops.ack(
     handled
-      .filter(({ error }) => !error)
-      .map(({ at, lease }) => ({ ...lease, at }))
+      .filter((h) => h.handled > 0 || !h.error)
+      .map((h) => ({ ...h.lease, at: h.at }))
   );
 
   const blocked = await ops.block(
