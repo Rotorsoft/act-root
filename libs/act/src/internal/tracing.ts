@@ -70,7 +70,7 @@ const es_caption = (caption: string, color: string, body: string): string =>
 const C_LANE = "\x1b[38;5;183m"; // lilac — distinct from gray drain + drain ops
 const C_DIM = "\x1b[38;5;240m"; // dim gray — dimmer than C_DRAIN
 const C_ERR = "\x1b[38;5;196m"; // bright red — block marker
-const C_STREAM = "\x1b[38;5;51m"; // cyan — target stream names in drain/correlate traces
+const C_STREAM = "\x1b[38;5;226m"; // bright yellow — target stream names in drain/correlate traces
 
 /** Wrap with the muted color when pretty mode is on. Plain in production. */
 const dim = (text: string): string =>
