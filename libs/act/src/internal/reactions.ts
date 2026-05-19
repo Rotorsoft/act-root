@@ -68,7 +68,7 @@ function finalize(
   logger: Logger,
   failed_at?: number
 ): HandleResult {
-  if (!error) return { lease, handled, at };
+  if (!error) return { lease, handled, acked_at: at };
   logger.error(error);
   // A `NonRetryableError` from the handler short-circuits the retry
   // budget — block on first attempt when the operator has opted in via
@@ -93,7 +93,7 @@ function finalize(
   return {
     lease,
     handled,
-    at,
+    acked_at: at,
     error: error.message,
     block,
     nextAttemptAt,
@@ -118,7 +118,7 @@ export function buildHandle<
 >(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
   const { logger, boundDo, boundLoad, boundQuery, boundQueryArray } = deps;
   return async (lease, payloads) => {
-    if (payloads.length === 0) return { lease, handled: 0, at: lease.at };
+    if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
 
     const stream = lease.stream;
     let at = payloads.at(0)!.event.id;

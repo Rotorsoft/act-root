@@ -42,7 +42,14 @@ import { traceCycle } from "./tracing.js";
 export type HandleResult = Readonly<{
   lease: Lease;
   handled: number;
-  at: number;
+  /**
+   * Event id at which the ack would land — the last *successful* event
+   * id, or `lease.at` when the batch had no work (empty payloads). Named
+   * `acked_at` to pair symmetrically with {@link failed_at} and to keep
+   * it visually distinct from `Lease.at` (the pre-cycle watermark — same
+   * field name across types but a different semantic).
+   */
+  acked_at: number;
   error?: string;
   block?: boolean;
   /**
@@ -54,10 +61,10 @@ export type HandleResult = Readonly<{
   nextAttemptAt?: number;
   /**
    * Event id that threw, when a handler error occurred. Distinct from
-   * `at` (which is the last *successful* event id, i.e., the ack target):
-   * `failed_at = at + 1` in dense streams, but adapters with sparse ids
-   * give the trace the exact position. Always set on the error path,
-   * regardless of whether the batch made partial progress.
+   * {@link acked_at}: `failed_at = acked_at + 1` in dense streams, but
+   * adapters with sparse ids give the trace the exact position. Always
+   * set on the per-event error path; absent in batch mode (where no
+   * single event id can be attributed to the failure).
    */
   failed_at?: number;
 }>;
@@ -216,7 +223,7 @@ export async function runDrainCycle<
   const acked = await ops.ack(
     handled
       .filter((h) => h.handled > 0 || !h.error)
-      .map((h) => ({ ...h.lease, at: h.at }))
+      .map((h) => ({ ...h.lease, at: h.acked_at }))
   );
 
   const blocked = await ops.block(
