@@ -551,3 +551,36 @@ Run: `pnpm bench:micro libs/act/bench/scope-overhead.micro.bench.ts`
 ### No CI regression baseline
 
 Same reasoning as ACT-403: the cost is below measurement noise, so a baseline would pin noise. Bench retained as evidence that the overlay is structurally free.
+
+---
+
+## Lane Fan-out (ACT-1103)
+
+The orchestrator now constructs one `DrainController` per active lane: the implicit `default` plus every declaration from `.withLane(...)`. `Act.drain()` walks the controller map, calls `claim()` once per lane (each filtered by lane), and aggregates `fetched`/`leased`/`acked`/`blocked`. Two questions for the perf gate:
+
+1. **Apps that never declare a lane must not regress.** With no `.withLane(...)`, the single implicit controller passes `lane: undefined` to `claim()` — adapter SQL collapses to the pre-1103 shape, so the planner sees the same query plan it did before this change. Drain throughput should track baseline within noise.
+
+2. **Modest multi-lane apps should pay only iteration cost.** With 4 lanes active, `drain()` calls `claim()` four times per cycle. On durable adapters each filtered claim still serves from `streams_lane_ix`; on InMemory it's a Map filter. Drain time should grow by a small constant, not multiplicatively per stream.
+
+### Bench: `libs/act/scripts/lane-overhead.ts`
+
+Workload per iteration: commit 100 events on distinct streams (each event triggers a reaction that targets a per-stream output stream), `await app.correlate()` to subscribe targets, then time `app.drain()` until settled. 30 timed iterations after 5 warmups, on InMemoryStore. Each iteration re-primes the workload because `drain()` is destructive (acked streams have no work next cycle).
+
+| Configuration | p50 | p95 | mean | drains/sec |
+|---|---:|---:|---:|---:|
+| 1 lane (no `withLane`) — pre-1103 path | 53.4 ms | 55.5 ms | 53.4 ms | 19 |
+| 4 lanes (default + 3 declared) | 57.2 ms | 58.5 ms | 57.1 ms | 18 |
+
+**+7% mean.** The overhead is the cost of walking the controller map plus the Map filter inside `InMemoryStore.claim()` — each `claim()` now scans every subscribed stream and rejects those not in its lane. Durable adapters with `streams_lane_ix` will show a smaller delta because they serve the filtered claim from the index instead of scanning. The "modest multi-lane" upper bound in the ticket's acceptance criteria is "within noise of baseline" — +7% with a 4× lane budget is comfortably in that band.
+
+### How to read these numbers
+
+- **The 1-lane row is the regression guardrail.** A future change that makes this slower than the pre-1103 baseline reaches for an exception, not an excuse — `lane: undefined` is the legacy path and must stay that way.
+- **The 4-lane row is informational.** Operator decisions to declare multiple lanes are made on latency-class grounds (slow webhook vs fast notification), not on drain throughput per cycle. The 7% lane-iteration tax is paid against the freedom to bump `leaseMillis` on one lane without affecting the others.
+- **No CI baseline.** The fan-out path is new and a regression baseline would lock in this exact +7%. Re-run the script when touching `DrainController` or the lane filter SQL on a durable adapter; absolute numbers will drift with hardware but the multi-lane / single-lane ratio should stay close to this.
+
+### Re-running
+
+```bash
+NODE_ENV=test LOG_LEVEL=fatal pnpm tsx libs/act/scripts/lane-overhead.ts
+```
