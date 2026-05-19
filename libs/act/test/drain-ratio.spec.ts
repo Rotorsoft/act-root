@@ -13,7 +13,7 @@ const lease = (overrides: Partial<Lease> & { lagging: boolean }): Lease => ({
 const result = (lagging: boolean, handled: number): HandleResult => ({
   lease: lease({ lagging }),
   handled,
-  at: handled,
+  acked_at: handled,
 });
 
 describe("computeLagLeadRatio", () => {

@@ -34,11 +34,33 @@ import type { StaticTarget } from "./correlate-cycle.js";
  *
  * @internal
  */
+/**
+ * Sentinel for "any reaction on this event has a dynamic resolver, so
+ * the lane is opaque until correlate runs the function — arm every
+ * controller." A Symbol rather than a string literal so it can't
+ * collide with a user-declared lane named `"all"`.
+ *
+ * @internal
+ */
+export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
+
+/**
+ * Per-event lane fan-in (ACT-1103). For events whose every reaction
+ * has a static resolver, the value is the union of those reactions'
+ * declared lanes — `do()` arms only those controllers on commit. For
+ * events with at least one dynamic resolver, the value is
+ * {@link ALL_LANES}; `do()` falls back to arming every controller.
+ *
+ * @internal
+ */
+export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
+
 export type Classification = {
   readonly staticTargets: StaticTarget[];
   readonly hasDynamicResolvers: boolean;
   readonly reactiveEvents: ReadonlySet<string>;
   readonly eventToState: ReadonlyMap<string, State<any, any, any>>;
+  readonly eventToLanes: ReadonlyMap<string, EventLaneSet>;
 };
 
 /**
@@ -59,6 +81,7 @@ export function classifyRegistry<
 ): Classification {
   const statics = new Map<string, StaticTarget>();
   const reactiveEvents = new Set<string>();
+  const eventToLanes = new Map<string, EventLaneSet>();
   let hasDynamicResolvers = false;
 
   for (const [name, register] of Object.entries(registry.events)) {
@@ -66,20 +89,40 @@ export function classifyRegistry<
     for (const reaction of register.reactions.values()) {
       if (typeof reaction.resolver === "function") {
         hasDynamicResolvers = true;
+        // Dynamic resolver — lane is opaque until runtime. Mark the
+        // event as wildcard so `do()` falls back to arming every
+        // controller for any commit of it.
+        eventToLanes.set(name, ALL_LANES);
       } else {
-        const { target, source, priority = 0 } = reaction.resolver;
+        const { target, source, priority = 0, lane } = reaction.resolver;
+        const lane_name = lane ?? "default";
+        const existing_lanes = eventToLanes.get(name);
+        if (existing_lanes !== ALL_LANES) {
+          const set =
+            (existing_lanes as Set<string> | undefined) ?? new Set<string>();
+          set.add(lane_name);
+          eventToLanes.set(name, set);
+        }
         const key = `${target}|${source ?? ""}`;
         const existing = statics.get(key);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority });
-        } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep
-          // the max priority so the highest-priority registrant sets
-          // the scheduling lane (mirrors subscribe-side semantics).
-          // `existing.priority` is always defined here since we always
-          // set it when inserting, but the StaticTarget type marks it
-          // optional for backwards compat with external consumers.
-          statics.set(key, { ...existing, priority });
+          statics.set(key, { stream: target, source, priority, lane });
+        } else {
+          // ACT-1103: lanes don't merge — disagreement is a config error.
+          if ((existing.lane ?? undefined) !== (lane ?? undefined))
+            throw new Error(
+              `Stream "${target}" has conflicting lane assignments ` +
+                `("${existing.lane ?? "default"}" vs "${lane ?? "default"}")`
+            );
+          if (priority > (existing.priority as number)) {
+            // Multiple reactions with the same (target, source) — keep
+            // the max priority so the highest-priority registrant sets
+            // the scheduling lane (mirrors subscribe-side semantics).
+            // `existing.priority` is always defined here since we always
+            // set it when inserting, but the StaticTarget type marks it
+            // optional for backwards compat with external consumers.
+            statics.set(key, { ...existing, priority });
+          }
         }
       }
     }
@@ -99,5 +142,6 @@ export function classifyRegistry<
     hasDynamicResolvers,
     reactiveEvents,
     eventToState,
+    eventToLanes,
   };
 }

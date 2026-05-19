@@ -61,6 +61,62 @@ function summarize(values: number[]): string {
   return values.length === 1 ? `${min}` : `${min}..${max}  gap=${gap}`;
 }
 
+type Bucket = {
+  lane: string;
+  frontier: "lagging" | "leading";
+  leased: number;
+  fetchedEvents: number;
+  ackedStreams: number;
+  watermarks: number[];
+};
+
+// Group drain results by (lane, frontier). `lane` lives on the lease
+// (ACT-1103); `frontier` is `lagging`. Both are independent dimensions
+// — the same lane can have streams on both frontiers, and a single
+// frontier can host work from multiple lanes. `Fetch` entries don't
+// carry the lane, so we resolve it via a stream→lane lookup built
+// from the leased entries of this same cycle.
+function bucketize<E extends Schemas>(drain: Drain<E>): Bucket[] {
+  const laneByStream = new Map<string, string>();
+  for (const l of drain.leased) laneByStream.set(l.stream, l.lane ?? "default");
+
+  const map = new Map<string, Bucket>();
+  const get = (lane: string, frontier: "lagging" | "leading") => {
+    const k = `${lane}|${frontier}`;
+    let b = map.get(k);
+    if (!b) {
+      b = {
+        lane,
+        frontier,
+        leased: 0,
+        fetchedEvents: 0,
+        ackedStreams: 0,
+        watermarks: [],
+      };
+      map.set(k, b);
+    }
+    return b;
+  };
+  for (const l of drain.leased) {
+    get(l.lane ?? "default", l.lagging ? "lagging" : "leading").leased += 1;
+  }
+  for (const f of drain.fetched) {
+    const lane = laneByStream.get(f.stream) ?? "default";
+    get(lane, f.lagging ? "lagging" : "leading").fetchedEvents +=
+      f.events.length;
+  }
+  for (const a of drain.acked) {
+    const b = get(a.lane ?? "default", a.lagging ? "lagging" : "leading");
+    b.ackedStreams += 1;
+    b.watermarks.push(a.at);
+  }
+  return [...map.values()].sort((x, y) =>
+    x.lane === y.lane
+      ? x.frontier.localeCompare(y.frontier)
+      : x.lane.localeCompare(y.lane)
+  );
+}
+
 export function updateStats<E extends Schemas>(
   drainCount: number,
   eventCount: number,
@@ -72,13 +128,8 @@ export function updateStats<E extends Schemas>(
   const ackedLagging = drain.acked.filter((a) => a.lagging);
   const ackedLeading = drain.acked.filter((a) => !a.lagging);
 
-  // Events fetched per frontier this cycle (proves where work is).
-  const fetchedLaggingEvents = drain.fetched
-    .filter((f) => f.lagging)
-    .reduce((s, f) => s + f.events.length, 0);
-  const fetchedLeadingEvents = drain.fetched
-    .filter((f) => !f.lagging)
-    .reduce((s, f) => s + f.events.length, 0);
+  // Per-(lane, frontier) buckets for the rendered table.
+  const buckets = bucketize(drain);
 
   // Watermarks of streams successfully acked this cycle (sorted for range).
   const laggingWatermarks = ackedLagging.map((a) => a.at).sort((a, b) => a - b);
@@ -146,20 +197,21 @@ export function updateStats<E extends Schemas>(
   ].join("  |  ");
 
   table.length = 0;
-  table.push(
-    [
-      "lagging",
-      leasedLagging,
-      `${fetchedLaggingEvents} evts / ${ackedLagging.length} streams`,
-      summarize(laggingWatermarks),
-    ],
-    [
-      "leading",
-      leasedLeading,
-      `${fetchedLeadingEvents} evts / ${ackedLeading.length} streams`,
-      summarize(leadingWatermarks),
-    ]
-  );
+  if (buckets.length === 0) {
+    // Empty cycle — show one neutral row rather than an empty grid.
+    table.push(["—", "—", 0, "0 evts / 0 streams", "—"]);
+  } else {
+    for (const b of buckets) {
+      const wms = [...b.watermarks].sort((a, b) => a - b);
+      table.push([
+        b.lane,
+        b.frontier,
+        b.leased,
+        `${b.fetchedEvents} evts / ${b.ackedStreams} streams`,
+        summarize(wms),
+      ]);
+    }
+  }
 
   const convergenceLine = convergedDrainCount
     ? `✓ Converged at drain #${convergedDrainCount} after ${(convergedTime / 1000).toFixed(2)}s`
@@ -179,9 +231,9 @@ export function updateStats<E extends Schemas>(
 }
 
 const table = new Table({
-  head: ["frontier", "claimed", "acked (this cycle)", "watermarks"],
-  colAligns: ["left", "right", "left", "left"],
-  colWidths: [10, 10, 28, 28],
+  head: ["lane", "frontier", "claimed", "acked (this cycle)", "watermarks"],
+  colAligns: ["left", "left", "right", "left", "left"],
+  colWidths: [12, 10, 9, 26, 26],
   wordWrap: false,
   style: { compact: true, head: ["green"] },
 });

@@ -79,6 +79,26 @@ describe("ConsoleLogger", () => {
       expect(output[4]).toContain("DEBUG");
       expect(output[5]).toContain("TRACE");
     });
+
+    it("renders Error instances with their message + stack, not '{}'", () => {
+      // JSON.stringify(err) === "{}" — operators staring at "ERROR {}"
+      // wasn't useful. ConsoleLogger now extracts the Error fields.
+      const logger = new ConsoleLogger({ level: "trace", pretty: true });
+      const err = new Error("boom");
+      logger.error(err);
+      expect(output[0]).toContain("ERROR");
+      expect(output[0]).toContain("boom");
+      // Stack is data; in pretty mode it's the trailing payload.
+      expect(output[0]).toContain("Error: boom");
+    });
+
+    it("uses supplied msg ahead of Error.message when both are provided", () => {
+      const logger = new ConsoleLogger({ level: "trace", pretty: true });
+      logger.error(new Error("inner"), "handler threw");
+      expect(output[0]).toContain("handler threw");
+      // Message replaces err.message; the stack still trails.
+      expect(output[0]).toContain("Error: inner");
+    });
   });
 
   describe("json mode", () => {
@@ -124,6 +144,20 @@ describe("ConsoleLogger", () => {
       logger.info("with bindings");
       const parsed = JSON.parse(output[0]);
       expect(parsed.service).toBe("test");
+    });
+
+    it("captures Error name/message/stack as structured fields", () => {
+      // JSON.stringify(err) === "{}" — JSON mode previously emitted
+      // empty objects for Error logs. Now the Error fields land
+      // explicitly so log aggregators can index them.
+      const logger = new ConsoleLogger({ level: "trace", pretty: false });
+      const err = new TypeError("nope");
+      logger.error(err);
+      const parsed = JSON.parse(output[0]);
+      expect(parsed.error?.message).toBe("nope");
+      expect(parsed.error?.name).toBe("TypeError");
+      expect(parsed.stack).toContain("TypeError: nope");
+      expect(parsed.msg).toBe("nope");
     });
   });
 

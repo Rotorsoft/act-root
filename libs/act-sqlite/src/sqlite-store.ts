@@ -122,7 +122,8 @@ export class SqliteStore implements Store {
         error TEXT NOT NULL DEFAULT '',
         leased_by TEXT,
         leased_until TEXT,
-        priority INTEGER NOT NULL DEFAULT 0
+        priority INTEGER NOT NULL DEFAULT 0,
+        lane TEXT NOT NULL DEFAULT 'default'
       )
     `);
     // Migration for tables created before priority lanes (ACT-102).
@@ -135,8 +136,20 @@ export class SqliteStore implements Store {
     } catch {
       // already present
     }
+    // Migration for tables created before drain lanes (ACT-1103).
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN lane TEXT NOT NULL DEFAULT 'default'"
+      );
+    } catch {
+      // already present
+    }
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
+    );
+    // Lane filter index (ACT-1103).
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_streams_lane ON streams(lane)"
     );
   }
 
@@ -290,22 +303,39 @@ export class SqliteStore implements Store {
   //     targeting the same stream (ACT-102). Operator overrides go
   //     through `prioritize()` instead.
   async subscribe(
-    streams: Array<{ stream: string; source?: string; priority?: number }>
+    streams: Array<{
+      stream: string;
+      source?: string;
+      priority?: number;
+      lane?: string;
+    }>
   ) {
     const tx = await this.client.transaction("write");
     try {
       let subscribed = 0;
-      for (const { stream, source, priority = 0 } of streams) {
+      for (const {
+        stream,
+        source,
+        priority = 0,
+        lane = "default",
+      } of streams) {
         const inserted = await tx.execute({
-          sql: "INSERT OR IGNORE INTO streams (stream, source, priority) VALUES (?, ?, ?)",
-          args: [stream, source ?? null, priority],
+          sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane) VALUES (?, ?, ?, ?)",
+          args: [stream, source ?? null, priority, lane],
         });
         if (inserted.rowsAffected > 0) {
           subscribed++;
-        } else if (priority > 0) {
+        } else {
+          if (priority > 0) {
+            await tx.execute({
+              sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
+              args: [priority, stream, priority],
+            });
+          }
+          // ACT-1103: current subscribe wins on lane.
           await tx.execute({
-            sql: "UPDATE streams SET priority = ? WHERE stream = ? AND priority < ?",
-            args: [priority, stream, priority],
+            sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ?",
+            args: [lane, stream, lane],
           });
         }
       }
@@ -322,16 +352,23 @@ export class SqliteStore implements Store {
 
   // --- claim: write transaction (SQLite serializes writes = equivalent
   //     to PG FOR UPDATE SKIP LOCKED for single-server) ---
-  async claim(lagging: number, leading: number, by: string, millis: number) {
+  async claim(
+    lagging: number,
+    leading: number,
+    by: string,
+    millis: number,
+    lane?: string
+  ) {
     const tx = await this.client.transaction("write");
     try {
       const now = new Date().toISOString();
 
+      const laneClause = lane !== undefined ? " AND lane = ?" : "";
       const result = await tx.execute({
-        sql: `SELECT stream, source, at, priority FROM streams
-              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
+        sql: `SELECT stream, source, at, priority, lane FROM streams
+              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)${laneClause}
               ORDER BY priority DESC, at ASC`,
-        args: [now],
+        args: lane !== undefined ? [now, lane] : [now],
       });
 
       const candidates: {
@@ -339,6 +376,7 @@ export class SqliteStore implements Store {
         source: string | undefined;
         at: number;
         priority: number;
+        lane: string;
       }[] = [];
       for (const row of result.rows) {
         const stream = row.stream as string;
@@ -366,6 +404,7 @@ export class SqliteStore implements Store {
             source: source ?? undefined,
             at,
             priority: Number(row.priority),
+            lane: row.lane as string,
           });
         }
       }
@@ -399,6 +438,7 @@ export class SqliteStore implements Store {
           by,
           retry: 0,
           lagging: row.at < 0,
+          lane: row.lane,
         });
       }
 
@@ -486,6 +526,10 @@ export class SqliteStore implements Store {
       conditions.push("blocked = ?");
       args.push(filter.blocked ? 1 : 0);
     }
+    if (filter.lane !== undefined) {
+      conditions.push("lane = ?");
+      args.push(filter.lane);
+    }
     return { clause: conditions.length ? conditions.join(" AND ") : "1", args };
   }
 
@@ -566,7 +610,7 @@ export class SqliteStore implements Store {
   ): Promise<QueryStreamsResult> {
     const limit = query?.limit ?? 100;
     let sql =
-      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority FROM streams WHERE 1=1";
+      "SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM streams WHERE 1=1";
     const args: unknown[] = [];
 
     if (query?.stream !== undefined) {
@@ -591,6 +635,10 @@ export class SqliteStore implements Store {
     if (query?.blocked !== undefined) {
       sql += " AND blocked = ?";
       args.push(query.blocked ? 1 : 0);
+    }
+    if (query?.lane !== undefined) {
+      sql += " AND lane = ?";
+      args.push(query.lane);
     }
     if (query?.after !== undefined) {
       sql += " AND stream > ?";
@@ -617,6 +665,7 @@ export class SqliteStore implements Store {
         priority: Number(row.priority),
         leased_by: (row.leased_by as string | null) ?? undefined,
         leased_until: leased_until ? new Date(leased_until) : undefined,
+        lane: row.lane as string,
       });
       count++;
     }

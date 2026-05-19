@@ -7,6 +7,12 @@ title: Reaction priority lanes
 
 How an operator biases the `claim()` lagging-frontier ordering when the worker is saturated. The short version: `.priority(n)` on the resolver target adds an `ORDER BY priority DESC, at ASC` clause to the lagging CTE so a high-priority replay wins lease slots before equal-watermark peers. Default `0`. Only meaningful under contention.
 
+:::note Priority is intra-lane
+
+ACT-1103 introduced **drain lanes** — separate `DrainController` instances with their own `leaseMillis`/`streamLimit`/`cycleMs` budgets. Priority (this page) and lane (ACT-1103) operate on different axes: a lane carves the drain pipeline along latency classes ("webhooks need 30 s leases, metrics need 1 s leases"), and priority biases which streams *within* a single lane win lease slots under saturation. A reaction sets both independently via `.to({ target, lane, priority })`. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+
+:::
+
 ## The problem
 
 `drain()` uses a dual-frontier `claim()` strategy: a lagging budget (most-behind streams catch up) plus a leading budget (active streams stay current). Each cycle picks at most `streamLimit` total. Within the lagging budget, the SQL is `ORDER BY at ASC` — most-behind first. Tie-breaking when many streams share a watermark — the typical replay-after-reset shape — falls to PostgreSQL's physical row order, which is undefined from the framework's perspective.

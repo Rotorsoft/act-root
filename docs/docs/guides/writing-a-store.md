@@ -14,11 +14,11 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `seed()` / `drop()` — initialization and teardown
 - `commit(stream, msgs, meta, expectedVersion?)` — append events atomically with optimistic concurrency
 - `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support
-- `claim(lagging, leading, by, millis)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`)
-- `subscribe(streams)` — register streams so they become claimable
+- `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
+- `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure
-- `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives
-- `query_streams(callback, query?)` — read-only introspection (operational dashboards)
+- `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match
+- `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`
 - `notify(handler)` — *optional* cross-process commit notifications
 
 Reading the JSDoc on each method is the first step. The TCK is the second.

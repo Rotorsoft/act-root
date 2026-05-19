@@ -19,21 +19,35 @@ function target(stream: string, N: number) {
   return first % N;
 }
 
+// Two-lane split (ACT-1103). Creates and updates flow through the
+// "writes" lane — frequent, latency-sensitive. Deletes flow through
+// "mutations" — rarer, can tolerate a longer lease. Each lane runs an
+// independent DrainController so a slow handler in one never stalls
+// the other. The leading/lagging frontier mechanic operates *within*
+// each lane, so both dimensions are visible in the per-cycle stats.
+const lane_for = (eventName: string): "writes" | "mutations" =>
+  eventName === "TodoDeleted" ? "mutations" : "writes";
+
 // serialize projection leases to one key or
 // one projection lease per stream?
 const projection_resolver =
   process.env.SERIAL_PROJECTION === "true"
     ? // serial projection (only one projection stream)
-      () => ({ target: "serial_projection" })
+      (committed: Committed<Schemas, keyof Schemas>) => ({
+        target: "serial_projection",
+        lane: lane_for(String(committed.name)),
+      })
     : // parallel projection (custom resolver to N projection streams)
       (committed: Committed<Schemas, keyof Schemas>) => ({
         target: `stream-${target(committed.stream, 25)}`, // use N > streamLimit to avoid conflicts
         source: "todo.*", // incluce all todos
+        lane: lane_for(String(committed.name)),
       });
 // // parallel projection (default resolver is one-stream-to-one-projection)
 // : (committed: Committed<Schemas, keyof Schemas>) => ({
 //   target: committed.stream,
 //   source: committed.stream,
+//   lane: lane_for(String(committed.name)),
 // });
 
 // Don't use PG option in browser
@@ -54,9 +68,14 @@ const projector = usePg
   ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
   : memProjector();
 
-// Composed "Todo" app with state and reactions
+// Composed "Todo" app with state and reactions. Two lanes give the
+// "writes" path a tight lease for responsiveness while "mutations"
+// (deletes) gets a longer lease — operators can tolerate slightly
+// stale tombstones to keep the hot path free.
 export const app = act()
   .withState(Todo)
+  .withLane({ name: "writes", leaseMillis: 5_000, streamLimit: 15 })
+  .withLane({ name: "mutations", leaseMillis: 30_000, streamLimit: 5 })
   .on("TodoCreated")
   .do(projector.projectTodoCreated)
   .to(projection_resolver)

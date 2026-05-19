@@ -60,11 +60,18 @@ async function main() {
   const actor: Actor = { id: randomUUID(), name: "Calculator" };
   const streams = ["A", "B"];
 
-  // Build the app with Calculator and DigitBoard
+  // Build the app with Calculator and DigitBoard. Two drain lanes
+  // (ACT-1103) make the lane mechanic visible in the logs: every
+  // DigitPressed routes through the "board" lane, every
+  // OperatorPressed routes through the "result" lane. Identical
+  // behavior to a single lane in this small demo — the point is the
+  // observability.
   const app = act()
     .withState(Calculator)
     .withState(DigitBoard)
     .withState(CalculatorResult)
+    .withLane({ name: "board", leaseMillis: 5_000, streamLimit: 10 })
+    .withLane({ name: "result", leaseMillis: 5_000, streamLimit: 10 })
     // React to every digit pressed and update the projection board
     .on("DigitPressed")
     .do(async function CountDigits(event) {
@@ -75,7 +82,11 @@ async function main() {
         event
       );
     })
-    .to({ source: `^(${streams.join("|")})$`, target: "Board" })
+    .to({
+      source: `^(${streams.join("|")})$`,
+      target: "Board",
+      lane: "board",
+    })
     .on("OperatorPressed")
     .do(async function ProjectResult(event) {
       // Load the current calculator state
@@ -91,8 +102,14 @@ async function main() {
     .to((e) => ({
       source: e.stream,
       target: "Calculator" + e.stream,
+      lane: "result",
     }))
     .build();
+
+  // Lane routing shows up in the per-cycle `>> drained` trace
+  // (`LOG_LEVEL=trace`) — caption prefix carries the lane, outcome
+  // marker is colored, post-ack watermark trails the ✓. No extra
+  // app.on("acked") listener needed.
 
   // start the correlation pump
   app.start_correlations();

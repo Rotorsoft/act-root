@@ -11,7 +11,13 @@ import type { Cache, Store } from "../types/index.js";
  * generic when called across package boundaries.
  */
 type AnyActBuilder<TApp> = {
-  build: (options?: ActOptions) => TApp;
+  // `ActOptions<any>` rather than `ActOptions<string>` (the default) — a
+  // builder narrowed to `ActOptions<"default">` would otherwise trip
+  // function-parameter contravariance against `ActOptions<string>`. The
+  // `any` only widens `onlyLanes`; the rest of the option shape
+  // (`scoped`, `correlator`, `settleDebounceMs`, etc.) still type-checks
+  // at the runtime call site below.
+  build: (options?: ActOptions<any>) => TApp;
 };
 
 /**

@@ -121,6 +121,7 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property leased_until - Lease expiration timestamp (when leased)
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier `claim()` ordering — see {@link Store.prioritize}.
+ * @property lane - Drain lane bound to the stream (ACT-1103)
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -132,6 +133,7 @@ export type StreamPosition = {
   readonly priority: number;
   readonly leased_by?: string;
   readonly leased_until?: Date;
+  readonly lane?: string;
 };
 
 /**
@@ -164,6 +166,7 @@ export type StreamPosition = {
  *   `source`.
  * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)
  *   streams. Omit for all.
+ * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
  * @property after - Keyset pagination cursor: returns only streams with
  *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
  *   the next page.
@@ -175,6 +178,7 @@ export type QueryStreams = {
   readonly source?: string;
   readonly source_exact?: boolean;
   readonly blocked?: boolean;
+  readonly lane?: string;
   readonly after?: string;
   readonly limit?: number;
 };
@@ -212,7 +216,7 @@ export type QueryStreamsResult = {
  */
 export type StreamFilter = Pick<
   QueryStreams,
-  "stream" | "stream_exact" | "source" | "source_exact" | "blocked"
+  "stream" | "stream_exact" | "source" | "source_exact" | "blocked" | "lane"
 >;
 
 /**
@@ -469,6 +473,7 @@ export interface Store extends Disposable {
    * @param leading - Max streams from the leading frontier (descending watermark)
    * @param by - Unique lease holder identifier (UUID)
    * @param millis - Lease duration in milliseconds
+   * @param lane - Optional lane filter (ACT-1103)
    * @returns Array of successfully leased streams with metadata
    *
    * @example
@@ -487,7 +492,8 @@ export interface Store extends Disposable {
     lagging: number,
     leading: number,
     by: string,
-    millis: number
+    millis: number,
+    lane?: string
   ) => Promise<Lease[]>;
 
   /**
@@ -526,6 +532,8 @@ export interface Store extends Disposable {
        * overrides that ignore this max — operator-driven changes.
        */
       priority?: number;
+      /** Drain lane (ACT-1103). Adapter UPSERTs on every subscribe. */
+      lane?: string;
     }>
   ) => Promise<{ subscribed: number; watermark: number }>;
 

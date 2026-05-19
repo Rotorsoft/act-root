@@ -31,6 +31,7 @@ import type {
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
 import { computeLagLeadRatio } from "./drain-ratio.js";
+import { traceCycle } from "./tracing.js";
 
 /**
  * Outcome of processing a single leased stream — produced by Act's `handle`
@@ -41,7 +42,14 @@ import { computeLagLeadRatio } from "./drain-ratio.js";
 export type HandleResult = Readonly<{
   lease: Lease;
   handled: number;
-  at: number;
+  /**
+   * Event id at which the ack would land — the last *successful* event
+   * id, or `lease.at` when the batch had no work (empty payloads). Named
+   * `acked_at` to pair symmetrically with {@link failed_at} and to keep
+   * it visually distinct from `Lease.at` (the pre-cycle watermark — same
+   * field name across types but a different semantic).
+   */
+  acked_at: number;
   error?: string;
   block?: boolean;
   /**
@@ -51,6 +59,14 @@ export type HandleResult = Readonly<{
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
   nextAttemptAt?: number;
+  /**
+   * Event id that threw, when a handler error occurred. Distinct from
+   * {@link acked_at}: `failed_at = acked_at + 1` in dense streams, but
+   * adapters with sparse ids give the trace the exact position. Always
+   * set on the per-event error path; absent in batch mode (where no
+   * single event id can be attributed to the failure).
+   */
+  failed_at?: number;
 }>;
 
 /**
@@ -118,10 +134,17 @@ export async function runDrainCycle<
   leading: number,
   eventLimit: number,
   leaseMillis: number,
-  isDeferred?: (stream: string) => boolean
+  isDeferred?: (stream: string) => boolean,
+  lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
-  const leased = await ops.claim(lagging, leading, randomUUID(), leaseMillis);
+  const leased = await ops.claim(
+    lagging,
+    leading,
+    randomUUID(),
+    leaseMillis,
+    lane
+  );
   if (!leased.length) return undefined;
 
   // Partition out streams whose handler is in a backoff window. We hold
@@ -191,10 +214,16 @@ export async function runDrainCycle<
     })
   );
 
+  // Ack any result that made progress — full success (no error), empty
+  // payloads (no work to do, watermark fast-forwards), and partial
+  // success (some events processed before the failure). The `error`
+  // string is no longer the "skip ack" signal; `handled > 0 || !error`
+  // is. Partial-success-then-block now lands in both `acked` and
+  // `blocked` arrays for the same stream — by design.
   const acked = await ops.ack(
     handled
-      .filter(({ error }) => !error)
-      .map(({ at, lease }) => ({ ...lease, at }))
+      .filter((h) => h.handled > 0 || !h.error)
+      .map((h) => ({ ...h.lease, at: h.acked_at }))
   );
 
   const blocked = await ops.block(
@@ -240,6 +269,14 @@ export type DrainControllerDeps<
   readonly handleBatch: HandleBatch<TEvents>;
   readonly onAcked: (acked: Lease[]) => void;
   readonly onBlocked: (blocked: BlockedLease[]) => void;
+  /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
+  readonly lane?: string;
+  /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
+  readonly defaults?: {
+    readonly streamLimit?: number;
+    readonly eventLimit?: number;
+    readonly leaseMillis?: number;
+  };
 };
 
 /**
@@ -272,6 +309,9 @@ export class DrainController<
   private _backoff = new Map<string, number>();
   /** Timer re-arming drain at the earliest pending `nextAttemptAt`. */
   private _backoffTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
+  private _worker: ReturnType<typeof setTimeout> | undefined;
+  private _stopped = false;
 
   constructor(
     private readonly deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>
@@ -327,14 +367,61 @@ export class DrainController<
     this._backoffTimer.unref();
   }
 
+  /** Lane this controller drains (undefined = legacy single-lane span). */
+  get lane(): string | undefined {
+    return this.deps.lane;
+  }
+
+  /**
+   * Start a per-lane worker that drains at the lane's `cycleMs`
+   * cadence (ACT-1103). When armed, the worker calls `drain()` on every
+   * tick and re-schedules; when not armed, it still re-schedules at
+   * `cycleMs` so a future `arm()` is picked up on the next tick.
+   *
+   * The setTimeout chain uses `unref()` so it doesn't keep the process
+   * alive on its own.
+   */
+  start(cycleMs: number): void {
+    if (this._worker || this._stopped) return;
+    // `drain()` swallows its own errors and returns EMPTY_DRAIN, so the
+    // tick is exception-free by contract. The post-drain `_stopped`
+    // check prevents re-scheduling after `stop()` was called mid-tick;
+    // an already-queued timer that fires before `clearTimeout()` lands
+    // will run at most one extra drain (drain is idempotent against
+    // a non-armed controller and self-disarms when settled).
+    const tick = async () => {
+      if (this._armed) await this.drain();
+      if (this._stopped) return;
+      this._worker = setTimeout(tick, cycleMs);
+      this._worker.unref();
+    };
+    this._worker = setTimeout(tick, cycleMs);
+    this._worker.unref();
+  }
+
+  /** Stop the per-lane worker. Idempotent. */
+  stop(): void {
+    this._stopped = true;
+    if (this._worker) {
+      clearTimeout(this._worker);
+      this._worker = undefined;
+    }
+  }
+
   /** Run one drain pass. Short-circuits when not armed or already running. */
-  async drain({
-    streamLimit = 10,
-    eventLimit = 10,
-    leaseMillis = 10_000,
-  }: DrainOptions = {}): Promise<Drain<TEvents>> {
+  async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+
+    const d = this.deps.defaults ?? {};
+    // Per-lane config wins over caller options (ACT-1103). The whole
+    // point of `withLane({leaseMillis: 30_000})` is to give the slow
+    // lane its own budget — a caller-level drain({leaseMillis}) would
+    // erase it. Caller options apply only when the lane didn't pin a
+    // value.
+    const streamLimit = d.streamLimit ?? options.streamLimit ?? 10;
+    const eventLimit = d.eventLimit ?? options.eventLimit ?? 10;
+    const leaseMillis = d.leaseMillis ?? options.leaseMillis ?? 10_000;
 
     try {
       this._locked = true;
@@ -351,7 +438,8 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.isDeferred : undefined
+        this._backoff.size > 0 ? this.isDeferred : undefined,
+        this.deps.lane
       );
 
       if (!cycle) {
@@ -361,6 +449,12 @@ export class DrainController<
       }
 
       const { leased, fetched, handled, acked, blocked } = cycle;
+
+      // Cycle-level trace (ACT-1103) — one log line per drain pass:
+      // claim + fetch + outcomes folded together so the operator sees
+      // a single atomic narrative for each cycle. No-op when the
+      // logger isn't at trace level.
+      traceCycle(this.deps.logger, leased, fetched, handled, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = computeLagLeadRatio(handled, lagging, leading);

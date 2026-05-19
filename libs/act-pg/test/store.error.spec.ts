@@ -152,6 +152,7 @@ describe("PostgresStore", () => {
             .mockResolvedValueOnce({}) // BEGIN
             .mockResolvedValueOnce({ rowCount: undefined }) // INSERT
             .mockResolvedValueOnce({ rowCount: 0 }) // priority UPDATE (ACT-102)
+            .mockResolvedValueOnce({ rowCount: 0 }) // lane UPDATE (ACT-1103)
             .mockResolvedValueOnce({ rows: [{ max: 42 }] }) // SELECT MAX(at)
             .mockResolvedValueOnce({}) // COMMIT
         )

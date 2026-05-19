@@ -80,6 +80,35 @@ describe("tracing — plain (production) mode", () => {
     await subscribe([{ stream: "fresh-plain" }]);
     expect(traceSpy).toHaveBeenCalledWith(">> correlated fresh-plain");
 
+    // Plain-mode cycle trace: lane appended without ANSI when the batch
+    // is in a non-default lane (ACT-1103). Driven via `traceCycle`
+    // directly so the test stays self-contained (DrainController is the
+    // runtime caller, but it's overkill to wire up here).
+    const { traceCycle } = await import("../src/internal/tracing.js");
+    traceCycle(
+      traceLogger,
+      [
+        {
+          stream: "lane-plain",
+          at: 0,
+          retry: 0,
+          lane: "slow",
+        },
+      ],
+      [
+        {
+          stream: "lane-plain",
+          events: [{ id: 1, name: "Incremented" }],
+        },
+      ],
+      [{ lease: { stream: "lane-plain" } }],
+      [{ stream: "lane-plain", at: 1 }],
+      []
+    );
+    expect(traceSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^>> drained slow lane-plain/)
+    );
+
     // Snap trace
     const [snapshot] = await es.action(
       Counter,

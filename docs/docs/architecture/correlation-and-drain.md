@@ -150,6 +150,12 @@ A naive drain would query the store on every call. For apps where most actions d
 
 When `_armed` is false, `drain()` returns immediately without issuing `claim`. Three round trips saved per call (`claim`, `query`, `ack`). Cold start: armed by `correlate.init()` so historical events are picked up on first drain.
 
+### One controller per lane
+
+ACT-1103: the orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drainAll` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Each controller filters its `claim()` by its lane — durable adapters serve the filter from `streams_lane_ix` so the four parallel claims add up to the same total work the single all-lanes claim was doing.
+
+The `_armed` flag is per-controller. `do()`, `reset()`, `unblock()`, and the cold-start path arm every controller via `Act._armAll`. Per-lane `LaneConfig.cycleMs` auto-starts a `setTimeout` chain on the controller that drains at the lane's cadence independent of the Act-level settle loop — useful for "always-on" lanes that need low commit-to-ack latency without callers explicitly driving `settle()`. Apps that never call `.withLane(...)` see one controller with `lane: undefined`, and the adapter SQL collapses to the pre-1103 shape. See [Concepts → Lanes](../concepts/configuration.md#lanes).
+
 ## Settle — the catch-up loop
 
 `settle()` is the production-friendly entry point. It debounces multiple rapid calls into one cycle, then runs `correlate → drain` in a loop until a pass produces no progress:

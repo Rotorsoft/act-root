@@ -61,11 +61,32 @@ const es_caption = (caption: string, color: string, body: string): string =>
  * Format a drain-pipeline caption. Drain logs keep a `>>` marker for easy
  * spotting in mixed log streams, plus a `caption` (past tense — every drain
  * trace fires on exit). All drain ops share one color (gray) so the pipeline
- * reads as a single channel; the caption disambiguates the phase.
+ * reads as a single channel; the caption disambiguates the phase. Lane
+ * (ACT-1103) is appended in lilac, unwrapped, when set and non-default,
+ * so the operator's eye lands on the lane name without parsing per-stream
+ * detail. Per-stream `@at/retry` and fetched event lists are muted via
+ * {@link dim} so the stream name itself reads loudest.
  */
-const drain_caption = (caption: string): string => {
-  const tag = `>> ${caption}`;
-  return PRETTY ? `${C_DRAIN}${tag}${C_RESET}` : tag;
+const C_LANE = "\x1b[38;5;183m"; // lilac — distinct from gray drain + drain ops
+const C_DIM = "\x1b[38;5;240m"; // dim gray — dimmer than C_DRAIN
+const C_ERR = "\x1b[38;5;196m"; // bright red — block marker
+const C_STREAM = "\x1b[38;5;226m"; // bright yellow — target stream names in drain/correlate traces
+
+/** Wrap with the muted color when pretty mode is on. Plain in production. */
+const dim = (text: string): string =>
+  PRETTY ? `${C_DIM}${text}${C_RESET}` : text;
+
+/** Wrap with a foreground color when pretty mode is on; bare in production. */
+const hue = (color: string, text: string): string =>
+  PRETTY ? `${color}${text}${C_RESET}` : text;
+
+const drain_caption = (caption: string, lane?: string): string => {
+  const showLane = lane && lane !== "default";
+  if (PRETTY) {
+    const tag = `${C_DRAIN}>> ${caption}${C_RESET}`;
+    return showLane ? `${tag} ${C_LANE}${lane}${C_RESET}` : tag;
+  }
+  return showLane ? `>> ${caption} ${lane}` : `>> ${caption}`;
 };
 
 /**
@@ -243,60 +264,144 @@ export function buildEs(
 export function buildDrain<TEvents extends Schemas>(
   logger: Logger
 ): DrainOps<TEvents> {
-  if (logger.level !== "trace") {
-    return {
-      claim: drain.claim,
-      fetch: drain.fetch,
-      ack: drain.ack,
-      block: drain.block,
-      subscribe: drain.subscribe,
-    };
-  }
+  // Cycle-level tracing happens in `DrainController.drain()` via
+  // {@link traceCycle} — claim/fetch/ack/block all flow into one log
+  // line per cycle to give the operator a single atomic narrative.
+  // `subscribe` stays decorated because it's driven from correlate-
+  // cycle (not from runDrainCycle) and doesn't fit the cycle shape.
   return {
-    claim: traced(drain.claim, (leased) => {
-      if (leased.length) {
-        const data = Object.fromEntries(
-          leased.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, drain_caption("claimed"));
-      }
-    }),
-    fetch: traced(drain.fetch<TEvents>, (fetched) => {
-      const data = Object.fromEntries(
-        fetched.map(({ stream, source, events }) => {
-          const key = source ? `${stream}<-${source}` : stream;
-          const value = Object.fromEntries(
-            events.map(({ id, stream, name }) => [id, { [stream]: name }])
-          );
-          return [key, value];
-        })
-      );
-      logger.trace(data, drain_caption("fetched"));
-    }),
-    ack: traced(drain.ack, (acked) => {
-      if (acked.length) {
-        const data = Object.fromEntries(
-          acked.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, drain_caption("acked"));
-      }
-    }),
-    block: traced(drain.block, (blocked) => {
-      if (blocked.length) {
-        const data = Object.fromEntries(
-          blocked.map(({ stream, at, retry, error }) => [
-            stream,
-            { at, retry, error },
-          ])
-        );
-        logger.trace(data, drain_caption("blocked"));
-      }
-    }),
-    subscribe: traced(drain.subscribe, (result, streams) => {
-      if (result.subscribed) {
-        const data = streams.map(({ stream }) => stream).join(" ");
-        logger.trace(`${drain_caption("correlated")} ${data}`);
-      }
-    }),
+    claim: drain.claim,
+    fetch: drain.fetch,
+    ack: drain.ack,
+    block: drain.block,
+    subscribe:
+      logger.level !== "trace"
+        ? drain.subscribe
+        : traced(drain.subscribe, (result, streams) => {
+            if (!result.subscribed) return;
+            // Caption mirrors `drained`: lane in the caption when the
+            // whole batch shares a single non-default lane. Mixed-lane
+            // batches (rare — different correlated targets resolving
+            // to different lanes in one scan) fall back to per-stream
+            // `[lane]` tags, default-lane streams stay bare either way.
+            const lanes = new Set(streams.map((s) => s.lane ?? "default"));
+            const uniformLane = lanes.size === 1 ? streams[0]?.lane : undefined;
+            const data = streams
+              .map(({ stream, lane }) =>
+                uniformLane || !lane || lane === "default"
+                  ? hue(C_STREAM, stream)
+                  : `${hue(C_STREAM, stream)}${dim(`[${lane}]`)}`
+              )
+              .join(" ");
+            logger.trace(`${drain_caption("correlated", uniformLane)} ${data}`);
+          }),
   };
+}
+
+/**
+ * Emit one cycle-level drain trace summarizing what happened in a
+ * single `runDrainCycle` pass. Per-stream rendering shape — outcome +
+ * post-state anchored on the right:
+ *
+ *   stream<-source [events] ✓ @<acked-at>                        — full success
+ *   stream<-source [events] ✗ @<failed-at>/<retry> (error)       — total failure → blocked
+ *   stream<-source [events] ⚠ @<failed-at>/<retry> (error)       — total failure → retrying
+ *   stream<-source [events] ✓ @<acked-at> ✗ @<failed-at>/<retry> (error)  — partial then blocked
+ *   stream<-source [events] ✓ @<acked-at> ⚠ @<failed-at>/<retry> (error)  — partial then retrying
+ *   stream<-source ⊘ @<at>/<retry>                               — deferred (backoff)
+ *
+ * Partial-success-then-failure is the dual-outcome case: events
+ * 1..K succeeded (watermark advanced to K), event K+1 threw. The
+ * trace renders both the lime `✓ @K` and the red/amber `✗`/`⚠ @K+1`
+ * on the same line so an operator sees "we made progress *and* then
+ * something broke" at a glance.
+ *
+ * Lane prefixes the caption in lilac when non-default. The outcome
+ * marker and its adjacent post-state share the marker's color so the
+ * eye reads "outcome + where it landed" as one unit. Per-stream
+ * `[events]` and `(error)` stay dim — secondary context.
+ *
+ * @internal
+ */
+export function traceCycle<TEvents extends Schemas>(
+  logger: Logger,
+  leased: ReadonlyArray<{
+    readonly stream: string;
+    readonly at: number;
+    readonly retry: number;
+    readonly lane?: string;
+  }>,
+  fetched: ReadonlyArray<{
+    readonly stream: string;
+    readonly source?: string;
+    readonly events: ReadonlyArray<{
+      readonly id: number;
+      readonly name: keyof TEvents;
+    }>;
+  }>,
+  handled: ReadonlyArray<{
+    readonly lease: { readonly stream: string };
+    readonly error?: string;
+    readonly block?: boolean;
+    readonly failed_at?: number;
+  }>,
+  acked: ReadonlyArray<{ readonly stream: string; readonly at: number }>,
+  blocked: ReadonlyArray<{ readonly stream: string; readonly error: string }>
+): void {
+  if (logger.level !== "trace" || !leased.length) return;
+  const lane = leased[0]?.lane;
+  const fetchByStream = new Map(fetched.map((f) => [f.stream, f]));
+  const ackedByStream = new Map(acked.map((a) => [a.stream, a.at]));
+  const blockedByStream = new Map(blocked.map((b) => [b.stream, b.error]));
+  // Handled-with-error stays a single index now: `block` discriminates
+  // the marker (✗ vs ⚠); the failure exists independently of whether
+  // ack happened.
+  const failedByStream = new Map(
+    handled.filter((h) => h.error).map((h) => [h.lease.stream, h] as const)
+  );
+  const detail = leased
+    .map(({ stream, at, retry }) => {
+      const f = fetchByStream.get(stream);
+      // Target stream in yellow so the operator's eye lands on "which
+      // stream did this happen on?" first; source (the events' origin)
+      // stays dim — secondary info.
+      const key = f?.source
+        ? `${hue(C_STREAM, stream)}${dim(`<-${f.source}`)}`
+        : hue(C_STREAM, stream);
+      const events =
+        f && f.events.length
+          ? ` ${dim(
+              `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
+            )}`
+          : "";
+      // Build ack + fail segments independently — both can fire for
+      // the same stream in the partial-success-then-failure case.
+      const ackedAt = ackedByStream.get(stream);
+      const ackPart =
+        ackedAt !== undefined
+          ? hue(C_HIT, `✓ @${ackedAt}`) // ✓ + new at in lime
+          : "";
+      const failure = failedByStream.get(stream);
+      let failPart = "";
+      if (failure) {
+        // Failed event id when known (per-event path), else falls back
+        // to lease.at — the post-fetch watermark — for batch-mode
+        // total failures where no single event is "the one."
+        const failedAt = failure.failed_at ?? at;
+        const blockedError = blockedByStream.get(stream);
+        if (blockedError !== undefined) {
+          failPart = `${hue(C_ERR, `✗ @${failedAt}/${retry}`)} ${dim(`(${blockedError})`)}`;
+        } else {
+          failPart = `${hue(C_MISS, `⚠ @${failedAt}/${retry}`)} ${dim(`(${failure.error})`)}`;
+        }
+      }
+      let tail: string;
+      if (ackPart && failPart) tail = ` ${ackPart} ${failPart}`;
+      else if (ackPart) tail = ` ${ackPart}`;
+      else if (failPart) tail = ` ${failPart}`;
+      else tail = ` ${dim(`⊘ @${at}/${retry}`)}`; // nothing happened
+      return `${key}${events}${tail}`;
+    })
+    .join(", ");
+  logger.trace(`${drain_caption("drained", lane)} ${detail}`);
 }

@@ -10,6 +10,9 @@
     },
     {
       "path": "../../libs/act-pg"
+    },
+    {
+      "path": "../../libs/act-http"
     }
   ],
   "include": ["src", "test"],

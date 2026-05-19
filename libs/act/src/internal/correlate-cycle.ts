@@ -39,6 +39,7 @@ export type StaticTarget = {
   readonly stream: string;
   readonly source?: string;
   readonly priority?: number;
+  readonly lane?: string;
 };
 
 /**
@@ -113,6 +114,7 @@ export class CorrelateCycle<
       {
         source?: string;
         priority: number;
+        lane?: string;
         payloads: ReactionPayload<TEvents>[];
       }
     >();
@@ -132,6 +134,7 @@ export class CorrelateCycle<
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
                 priority: incomingPriority,
+                lane: resolved.lane,
                 payloads: [],
               };
               // Multiple reactions targeting the same stream within a
@@ -155,10 +158,11 @@ export class CorrelateCycle<
 
     if (correlated.size) {
       const streams = [...correlated.entries()].map(
-        ([stream, { source, priority }]) => ({
+        ([stream, { source, priority, lane }]) => ({
           stream,
           source,
           priority,
+          lane,
         })
       );
       const { subscribed } = await this.cd.subscribe(streams);

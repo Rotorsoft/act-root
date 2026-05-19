@@ -6,11 +6,13 @@
  * self-contained functional slices (vertical slice architecture).
  */
 import { _this_, registerState } from "../internal/index.js";
+import { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
   Committed,
   EventRegister,
   IAct,
+  LaneConfig,
   Reaction,
   ReactionOptions,
   ReactionResolver,
@@ -40,17 +42,27 @@ export type Slice<
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
+  TLanes extends string = typeof DEFAULT_LANE,
 > = {
   readonly _tag: "Slice";
   readonly states: Map<string, State<any, any, any>>;
   readonly events: EventRegister<TEvents>;
   readonly projections: ReadonlyArray<Projection<any>>;
+  /**
+   * Drain lanes declared on this slice via `.withLane(...)` (ACT-1103).
+   * `act().withSlice(slice)` merges these into the Act's lane set so
+   * `.to({lane})` is statically checked at the slice's call site against
+   * the lanes the slice itself declared.
+   */
+  readonly lanes: ReadonlyArray<LaneConfig>;
   /** @internal phantom field for type-level state schema tracking */
   readonly _S?: TSchemaReg;
   /** @internal phantom field for type-level state name tracking */
   readonly _M?: TStateMap;
   /** @internal phantom field for type-level actor tracking */
   readonly _TActor?: TActor;
+  /** @internal phantom field for type-level lane union tracking */
+  readonly _TLanes?: TLanes;
 };
 
 /**
@@ -72,6 +84,7 @@ export type SliceBuilder<
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
+  TLanes extends string = typeof DEFAULT_LANE,
 > = {
   /**
    * Registers a state definition with the slice.
@@ -92,7 +105,8 @@ export type SliceBuilder<
     TEvents & TNewEvents,
     TActions & TNewActions,
     TStateMap & { [K in TNewName]: TNewState },
-    TActor
+    TActor,
+    TLanes
   >;
   /**
    * Embeds a built Projection within this slice. The projection's events
@@ -104,7 +118,21 @@ export type SliceBuilder<
     projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
       ? Projection<TNewEvents>
       : never
-  ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+  ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
+  /**
+   * Declares a drain lane on this slice (ACT-1103). Merged into the
+   * parent Act's lane set by `act().withSlice(slice)`.
+   */
+  withLane: <const TConfig extends LaneConfig>(
+    config: TConfig
+  ) => SliceBuilder<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    TStateMap,
+    TActor,
+    TLanes | TConfig["name"]
+  >;
   /**
    * Begins defining a reaction scoped to this slice's events.
    */
@@ -118,16 +146,30 @@ export type SliceBuilder<
         app: IAct<TEvents, TActions, TActor>
       ) => Promise<Snapshot<Schema, TEvents> | void>,
       options?: Partial<ReactionOptions>
-    ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> & {
+    ) => SliceBuilder<
+      TSchemaReg,
+      TEvents,
+      TActions,
+      TStateMap,
+      TActor,
+      TLanes
+    > & {
       to: (
-        resolver: ReactionResolver<TEvents, TKey> | string
-      ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
+      ) => SliceBuilder<
+        TSchemaReg,
+        TEvents,
+        TActions,
+        TStateMap,
+        TActor,
+        TLanes
+      >;
     };
   };
   /**
    * Builds and returns the Slice data structure.
    */
-  build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+  build: () => Slice<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
   /**
    * The registered event schemas and their reaction maps.
    */
@@ -185,6 +227,7 @@ export function slice<
   const actions: Record<string, any> = {};
   const events = {} as EventRegister<TEvents>;
   const projections: Projection<any>[] = [];
+  const lanes: LaneConfig[] = [];
 
   const builder: SliceBuilder<
     TSchemaReg,
@@ -200,6 +243,14 @@ export function slice<
     withProjection: (proj) => {
       projections.push(proj as Projection<any>);
       return builder;
+    },
+    withLane: (config) => {
+      if (config.name === DEFAULT_LANE)
+        throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
+      if (lanes.some((l) => l.name === config.name))
+        throw new Error(`Lane "${config.name}" was already declared`);
+      lanes.push(config);
+      return builder as never;
     },
     on: <TKey extends keyof TEvents>(event: TKey) => ({
       do: (
@@ -241,6 +292,7 @@ export function slice<
       states,
       events,
       projections,
+      lanes,
     }),
     events,
   };

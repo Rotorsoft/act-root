@@ -8,7 +8,7 @@
  *
  * @category Adapters
  */
-import { SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -41,17 +41,29 @@ class InMemoryStream {
   private _leased_by: string | undefined = undefined;
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
+  private _lane: string = DEFAULT_LANE;
 
   constructor(
     readonly stream: string,
     readonly source: string | undefined,
-    priority = 0
+    priority = 0,
+    lane: string = DEFAULT_LANE
   ) {
     this._priority = priority;
+    this._lane = lane;
   }
 
   get priority() {
     return this._priority;
+  }
+
+  get lane() {
+    return this._lane;
+  }
+
+  /** Replace on every subscribe — current builder config wins on restart. */
+  set lane(value: string) {
+    this._lane = value;
   }
 
   /**
@@ -120,6 +132,7 @@ class InMemoryStream {
       by: lease.by,
       retry: this._retry,
       lagging: lease.lagging,
+      lane: this._lane,
     };
   }
 
@@ -140,6 +153,7 @@ class InMemoryStream {
         by: lease.by,
         retry: this._retry,
         lagging: lease.lagging,
+        lane: this._lane,
       };
     }
   }
@@ -161,6 +175,7 @@ class InMemoryStream {
         retry: this._retry,
         error: this._error,
         lagging: lease.lagging,
+        lane: this._lane,
       };
     }
   }
@@ -431,7 +446,13 @@ export class InMemoryStore implements Store {
    * @param millis - Lease duration in milliseconds.
    * @returns Granted leases.
    */
-  async claim(lagging: number, leading: number, by: string, millis: number) {
+  async claim(
+    lagging: number,
+    leading: number,
+    by: string,
+    millis: number,
+    lane?: string
+  ) {
     await sleep();
     // Cache compiled regexes — multiple subscribed streams typically share the
     // same source pattern, and the inner loop can run thousands of times per claim.
@@ -454,7 +475,8 @@ export class InMemoryStore implements Store {
       return false;
     };
     const available = [...this._streams.values()].filter(
-      (s) => s.is_available && hasWork(s)
+      (s) =>
+        s.is_available && hasWork(s) && (lane === undefined || s.lane === lane)
     );
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
@@ -503,16 +525,30 @@ export class InMemoryStore implements Store {
    * @returns subscribed count and current max watermark.
    */
   async subscribe(
-    streams: Array<{ stream: string; source?: string; priority?: number }>
+    streams: Array<{
+      stream: string;
+      source?: string;
+      priority?: number;
+      lane?: string;
+    }>
   ) {
     await sleep();
     let subscribed = 0;
-    for (const { stream, source, priority = 0 } of streams) {
+    for (const {
+      stream,
+      source,
+      priority = 0,
+      lane = DEFAULT_LANE,
+    } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
         existing.bumpPriority(priority);
+        existing.lane = lane;
       } else {
-        this._streams.set(stream, new InMemoryStream(stream, source, priority));
+        this._streams.set(
+          stream,
+          new InMemoryStream(stream, source, priority, lane)
+        );
         subscribed++;
       }
     }
@@ -582,6 +618,7 @@ export class InMemoryStore implements Store {
       }
       if (filter.blocked !== undefined && s.blocked !== filter.blocked)
         return false;
+      if (filter.lane !== undefined && s.lane !== filter.lane) return false;
       return true;
     };
   }
@@ -718,6 +755,7 @@ export class InMemoryStore implements Store {
           continue;
       }
       if (blocked !== undefined && s.blocked !== blocked) continue;
+      if (query?.lane !== undefined && s.lane !== query.lane) continue;
       callback({
         stream: s.stream,
         source: s.source,
@@ -728,6 +766,7 @@ export class InMemoryStore implements Store {
         priority: s.priority,
         leased_by: s.leased_by,
         leased_until: s.leased_until,
+        lane: s.lane,
       });
       count++;
       if (count >= limit) break;

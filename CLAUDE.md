@@ -2,6 +2,17 @@
 
 Guidance for Claude Code working in this repository. This file is the **index**: brief project meta, plus pointers into `docs/docs/` (Docusaurus, for humans) and `.claude/skills/` (for Claude when building Act apps). When in doubt, follow the link.
 
+## Before you start
+
+This file is auto-loaded into context — that is not the same as having read it. Before drafting a slice plan or making the first edit, deliberately consult:
+
+1. **Working on a branch** — `git branch --show-current` should not return `master` (or `main`). If it does, create a feature branch first (`act-<issue>-<slug>`); never accumulate edits or commits on master.
+2. **Development Workflow** — the "Changing a port interface" rule, the "Pre-handoff workflow," the doc audit step. If a slice touches `libs/act/src/types/ports.ts`, updating `libs/act-tck/src/` is part of the same slice, not a follow-up.
+3. **Rules for contributing to this repo** — durable workflow rules (100% coverage gate, naming, no manual version bumps, integration helpers in separate packages, no `--no-verify`).
+4. **Safety-critical one-liners** — load-bearing per-feature gotchas. Re-skim the ones relevant to the file you're about to change.
+
+Skipping this checklist is how duplicated work (per-adapter tests that should have lived in the TCK), master-branch edits, and unnecessary major bumps slip in. Read the rules first; they answer most "should I…?" questions before they reach the user.
+
 ## Overview
 
 Act is an event sourcing + CQRS framework for TypeScript, built around DDD aggregates and reaction-driven workflows. The core philosophy: any system distills into **Actions → {State} ← Reactions**.
@@ -120,6 +131,8 @@ Per-package `PERFORMANCE.md` files track benchmark history with before/after num
 - `libs/act/PERFORMANCE.md` — drain/cache/correlate
 - `libs/act-pg/PERFORMANCE.md` — Postgres-specific (incl. `notify` latency)
 
+**Benchmarks must run on real adapters.** InMemoryStore is the fastest possible read/write path (no I/O, no SQL planner) — measuring perf optimizations against it understates wins and ignores the index/lock/connection-pool dimensions that the production adapters live in. Every perf claim that ships in a `PERFORMANCE.md` table needs numbers from `act-pg` (port 5431 docker) or `act-sqlite`. InMemory may appear as a baseline reference, never as the primary number. New benches go in the relevant adapter package's `bench/` or `scripts/`, not just `libs/act/bench/`.
+
 ## Safety-critical one-liners
 
 These are easy to get subtly wrong. Read the linked docs before editing related code.
@@ -135,6 +148,7 @@ These are easy to get subtly wrong. Read the linked docs before editing related 
 - **Deprecated event versions throw on emit:** the `_v<digits>` naming convention is load-bearing. Adding `Foo_v2` to `.emits({...})` auto-deprecates `Foo`; any static `.emit("Foo")` targeting the legacy version throws at `act().build()`. Reducers (`.patch({Foo: ...})`) stay silent — replay of historical events never warns. Dynamic emits warn once per process per event name. See [event-schema-evolution.md § The versioning convention is the deprecation signal](docs/docs/architecture/event-schema-evolution.md).
 - **Tests:** prefer `fixture(builder)` from `@rotorsoft/act/test` for the common case (per-test isolation, parallel-safe, auto-cleanup) and `sandbox(builder)` for multi-Act or `beforeAll`-shared setups. Legacy `store().seed()` in `beforeEach` + `dispose()()` in `afterAll` still works for tests that exercise the singleton port mechanism itself. In tests, prefer the explicit `await app.correlate(); await app.drain();` pair over `settle()` so cycle counts are deterministic.
 - **Reaction backoff is per-worker.** `ReactionOptions.backoff` paces retries in process memory on the local `DrainController`. With N competing workers, each worker only paces its own attempts, but the shared `retry_count` on the stream watermark climbs across all of them — so `blockOnError` fires up to N× sooner than the strategy suggests. Intentional: transient per-worker faults recover faster, poison messages get quarantined sooner. For cross-worker pacing on very long backoffs, forward to an external bus rather than holding leases. The effective backoff floor is `max(configured, leaseMillis)` because the controller holds the lease during the window. See [error-handling.md § Backoff](docs/docs/concepts/error-handling.md).
+- **Lanes give intra-process responsiveness, not just deployment shapes.** `.withLane({...})` spawns one `DrainController` per declared lane plus the implicit `"default"`. `Act._drainAll` runs every controller's `drain()` in parallel via `Promise.all`, so a slow handler holding the slow lane's lease doesn't block the fast lane's claim — even in a single process with no `ACT_ONLY_LANES`. Per-lane `LaneConfig.leaseMillis`/`streamLimit`/`cycleMs` override caller-passed `DrainOptions` (the whole point of `withLane({leaseMillis: 30_000})` is to give the lane its own budget — a caller-level override would erase it). Lane assignments must agree across reactions targeting the same `(target, source)` — disagreement throws at `classifyRegistry`, because lanes have no `max()` merge analogous to priority. Re-laning is restart-driven: `subscribe()` UPSERTs each stream's lane on every call; online re-laning while workers hold leases is not supported. See [concepts/configuration.md § Lanes](docs/docs/concepts/configuration.md#lanes) and [guides/production-checklist.md § Sizing lanes](docs/docs/guides/production-checklist.md).
 
 ## Code Organization (pointers, not duplication)
 

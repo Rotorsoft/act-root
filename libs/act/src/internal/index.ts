@@ -16,7 +16,9 @@
  *
  * @internal
  */
-export { classifyRegistry } from "./build-classify.js";
+
+export type { EventLaneSet } from "./build-classify.js";
+export { ALL_LANES, classifyRegistry } from "./build-classify.js";
 export { runCloseCycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { closeCorrelation, defaultCorrelator } from "./correlator.js";
@@ -39,4 +41,4 @@ export {
 } from "./merge.js";
 export { buildHandle, buildHandleBatch } from "./reactions.js";
 export { SettleLoop } from "./settle.js";
-export { buildDrain, buildEs } from "./tracing.js";
+export { buildDrain, buildEs, traceCycle } from "./tracing.js";

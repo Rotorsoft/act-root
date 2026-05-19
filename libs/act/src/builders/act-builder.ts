@@ -13,13 +13,14 @@ import {
   mergeProjection,
   registerState,
 } from "../internal/index.js";
-import { log } from "../ports.js";
+import { DEFAULT_LANE, log } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
   Committed,
   EventRegister,
   IAct,
+  LaneConfig,
   Reaction,
   ReactionOptions,
   ReactionResolver,
@@ -52,6 +53,34 @@ function registerBatchHandler(
 }
 
 /**
+ * Runtime backstop for slice-declared lane references — rejects
+ * static `.to({lane})` entries that aren't in the declared set.
+ * Inline reactions are caught at compile time; this only fires for
+ * slices built against older type definitions.
+ */
+function validateLaneReferences(
+  registry: Registry<any, any, any>,
+  lanes: ReadonlyArray<LaneConfig>
+): void {
+  const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
+  for (const [eventName, def] of Object.entries(registry.events)) {
+    const entry = def as { reactions: Map<string, Reaction<any, any>> };
+    for (const [handlerName, reaction] of entry.reactions) {
+      const resolver = reaction.resolver;
+      if (typeof resolver === "function") continue;
+      const lane = (resolver as { lane?: string }).lane;
+      if (lane && !declared.has(lane)) {
+        throw new Error(
+          `Reaction "${handlerName}" on "${eventName}" targets undeclared lane "${lane}". ` +
+            `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
+            `Add \`.withLane({ name: "${lane}", ... })\` to act() or correct the .to() declaration.`
+        );
+      }
+    }
+  }
+}
+
+/**
  * Fluent builder interface for composing event-sourced applications.
  *
  * Provides a chainable API for:
@@ -59,6 +88,7 @@ function registerBatchHandler(
  * - Registering slices via `.withSlice()`
  * - Registering projections via `.withProjection()`
  * - Locking a custom actor type via `.withActor<TActor>()`
+ * - Declaring drain lanes via `.withLane({name, ...})` (ACT-1103)
  * - Defining event reactions via `.on()` → `.do()` → `.to()`
  * - Building the orchestrator via `.build()`
  *
@@ -67,6 +97,9 @@ function registerBatchHandler(
  * @template TActions - Action schemas (maps action names to action payload schemas)
  * @template TStateMap - Map of state names to state schemas
  * @template TActor - Actor type extending base Actor
+ * @template TLanes - Union of declared lane names (ACT-1103). Narrowed by
+ *   `.withLane({name})` calls so `.to({lane})` and `ActOptions.onlyLanes`
+ *   reject typos at compile time. Starts at `"default"`.
  *
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
@@ -78,6 +111,7 @@ export type ActBuilder<
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
+  TLanes extends string = typeof DEFAULT_LANE,
 > = {
   /**
    * Registers a state definition with the builder.
@@ -99,7 +133,8 @@ export type ActBuilder<
     TEvents & TNewEvents,
     TActions & TNewActions,
     TStateMap & { [K in TNewName]: TNewState },
-    TActor
+    TActor,
+    TLanes
   >;
   /**
    * Registers a slice with the builder.
@@ -115,14 +150,23 @@ export type ActBuilder<
     TNewEvents extends Schemas,
     TNewActions extends Schemas,
     TNewMap extends Record<string, Schema>,
+    TNewLanes extends string,
   >(
-    slice: Slice<TNewSchemaReg, TNewEvents, TNewActions, TNewMap>
+    slice: Slice<
+      TNewSchemaReg,
+      TNewEvents,
+      TNewActions,
+      TNewMap,
+      Actor,
+      TNewLanes
+    >
   ) => ActBuilder<
     TSchemaReg & TNewSchemaReg,
     TEvents & TNewEvents,
     TActions & TNewActions,
     TStateMap & TNewMap,
-    TActor
+    TActor,
+    TLanes | TNewLanes
   >;
   /**
    * Registers a standalone projection with the builder.
@@ -134,7 +178,7 @@ export type ActBuilder<
     projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
       ? Projection<TNewEvents>
       : never
-  ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+  ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
   /**
    * Locks a custom actor type for this application.
    *
@@ -166,7 +210,33 @@ export type ActBuilder<
     TEvents,
     TActions,
     TStateMap,
-    TNewActor
+    TNewActor,
+    TLanes
+  >;
+  /**
+   * Declares a drain lane (ACT-1103). Lane name narrows `TLanes` so
+   * `.to({lane})` and `ActOptions.onlyLanes` type-check against it.
+   *
+   * @example
+   * ```typescript
+   * const app = act()
+   *   .withState(Counter)
+   *   .withLane({ name: "slow", leaseMillis: 60_000, streamLimit: 5 })
+   *   .on("OrderConfirmed")
+   *     .do(deliverWebhook)
+   *     .to({ target: "webhooks-out", lane: "slow" })
+   *   .build();
+   * ```
+   */
+  withLane: <const TConfig extends LaneConfig>(
+    config: TConfig
+  ) => ActBuilder<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    TStateMap,
+    TActor,
+    TLanes | TConfig["name"]
   >;
   /**
    * Begins defining a reaction to a specific event.
@@ -189,22 +259,32 @@ export type ActBuilder<
         app: IAct<TEvents, TActions, TActor>
       ) => Promise<Snapshot<Schema, TEvents> | void>,
       options?: Partial<ReactionOptions>
-    ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> & {
+    ) => ActBuilder<
+      TSchemaReg,
+      TEvents,
+      TActions,
+      TStateMap,
+      TActor,
+      TLanes
+    > & {
       to: (
-        resolver: ReactionResolver<TEvents, TKey> | string
-      ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
+        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
+      ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
     };
   };
   /**
    * Builds and returns the Act orchestrator instance.
    *
    * @param options - Optional runtime overrides (see {@link ActOptions}).
+   *   `options.onlyLanes` is narrowed to the declared `TLanes` union, so
+   *   `onlyLanes: ["typo"]` is a compile error when the lane wasn't
+   *   declared via `.withLane(...)`.
    * @returns The Act orchestrator instance
    *
    * @see {@link Act} for available orchestrator methods
    */
   build: (
-    options?: ActOptions
+    options?: ActOptions<TLanes>
   ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
   /**
    * The registered event schemas and their reaction maps.
@@ -273,6 +353,7 @@ export function act<
   };
   const pendingProjections: Projection<any>[] = [];
   const batchHandlers = new Map<string, BatchHandler<any>>();
+  const lanes: LaneConfig[] = [];
 
   // Set on the first `.build()` call. Lets the same builder produce
   // many Acts (multi-tenant / A-B testing patterns) without re-merging
@@ -355,6 +436,22 @@ export function act<
         }
         mergeEventRegister(registry.events, input.events);
         pendingProjections.push(...input.projections);
+        for (const sliceLane of input.lanes) {
+          const existing = lanes.find((l) => l.name === sliceLane.name);
+          if (!existing) {
+            lanes.push(sliceLane);
+            continue;
+          }
+          if (
+            existing.leaseMillis !== sliceLane.leaseMillis ||
+            existing.streamLimit !== sliceLane.streamLimit ||
+            existing.cycleMs !== sliceLane.cycleMs
+          ) {
+            throw new Error(
+              `Lane "${sliceLane.name}" was already declared with a different config`
+            );
+          }
+        }
         return builder as never;
       },
       withProjection: (proj) => {
@@ -370,6 +467,14 @@ export function act<
           TStateMap,
           TNewActor
         >,
+      withLane: (config) => {
+        if (config.name === DEFAULT_LANE)
+          throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
+        if (lanes.some((l) => l.name === config.name))
+          throw new Error(`Lane "${config.name}" was already declared`);
+        lanes.push(config);
+        return builder as never;
+      },
       on: <TKey extends keyof TEvents>(event: TKey) => ({
         do: (
           handler: (
@@ -420,6 +525,7 @@ export function act<
             registerBatchHandler(proj, batchHandlers);
           }
           finalizeDeprecations();
+          validateLaneReferences(registry, lanes);
           _built = true;
         }
 
@@ -427,7 +533,8 @@ export function act<
           registry,
           states,
           batchHandlers,
-          options
+          options,
+          lanes
         );
       },
       events: registry.events,

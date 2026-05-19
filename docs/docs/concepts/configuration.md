@@ -112,6 +112,80 @@ const app = act()
 
 - **`maxSubscribedStreams`** (default `1000`) — cap for the LRU set tracking already-subscribed reaction targets. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call.
 - **`settleDebounceMs`** (default `10`) — debounce window used by `settle()` when no per-call `debounceMs` is given. Coalesces commits in the same tick into a single correlate→drain pass. Lower for tight tests; raise for bursty production traffic.
+- **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
+
+## Lanes
+
+By default, every reaction lives in a single implicit `"default"` lane: one `DrainController` runs the whole pipeline with one timing budget. That works until reactions diverge — a webhook delivery wants `leaseMillis` measured in tens of seconds, a best-effort notification wants short retries, and a long projection replay needs a generous claim budget. Tuning any one of them globally penalises the others.
+
+`.withLane({...})` declares an independent drain lane with its own controller, lease budget, claim limit, and cycle cadence. Reactions opt in via `.to({lane})`; reactions without an explicit lane stay in `"default"`.
+
+```typescript
+const app = act()
+  .withState(Ticket)
+  .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })
+  .withLane({ name: "best-effort", leaseMillis: 1_000, streamLimit: 20, cycleMs: 50 })
+  .on("OrderConfirmed")
+    .do(deliverWebhook)
+    .to({ target: "webhooks-out", lane: "webhooks" })
+  .on("OrderConfirmed")
+    .do(emitMetric)
+    .to({ target: "metrics-out", lane: "best-effort" })
+  .build();
+```
+
+### `LaneConfig` fields
+
+- **`name`** — the lane identifier. `"default"` is reserved for the implicit lane; declaring it explicitly throws.
+- **`leaseMillis`** — lease window for `claim()` calls in this lane. Sized to the longest expected handler invocation in the lane plus headroom.
+- **`streamLimit`** — max streams claimed per cycle. Bounds the parallel-handler dispatch budget for the lane.
+- **`cycleMs`** — when set, auto-starts a per-lane `setTimeout` chain that calls the controller's `drain()` at this cadence. The timer is `unref()`'d so it doesn't keep the process alive; `app.shutdown()` clears it. When omitted, the lane drains alongside the Act-level `settle()` loop.
+
+Each declared lane field overrides caller-passed `DrainOptions` at drain time — `withLane({leaseMillis: 30_000})` would be meaningless if `drain({leaseMillis: 1_000})` could erase it. Caller options only apply when the lane is silent on the field.
+
+### Type-safe lane references
+
+The builder threads declared lane names into its `TLanes` generic. `.to({lane: "..."})` and `ActOptions.onlyLanes` are narrowed to that union at the call site — typos fail compile:
+
+```typescript
+const app = act()
+  .withState(Ticket)
+  .withLane({ name: "webhooks" })
+  .on("OrderConfirmed")
+    .do(deliverWebhook)
+    // @ts-expect-error "wbhooks" is not a declared lane
+    .to({ target: "out", lane: "wbhooks" })
+  .build({
+    // @ts-expect-error same — caught at the options site too
+    onlyLanes: ["wbhooks"],
+  });
+```
+
+Slices declare their own lanes via the same `.withLane(...)` method; `act().withSlice(slice)` merges the slice's lanes into the Act's set. Conflicting timing configs (same lane name, different `leaseMillis`/`streamLimit`/`cycleMs` between the slice and the Act) throw at composition time — pick one declaration.
+
+### Re-laning at restart
+
+`subscribe()` UPSERTs each stream's lane on every call. If you change a target's lane in the builder and restart, the store rewrites the persisted lane on the next `correlate()`. Online re-laning (changing a stream's lane while workers hold leases) is **not** supported — the safe trigger is process restart.
+
+### Conflicting lane assignments
+
+Two reactions routing to the same `(target, source)` stream must declare the same lane. Lanes have no ordering, so there's no `max()` merge analogous to priority — the build-time scan throws on disagreement:
+
+```typescript
+// throws at act().build()
+act()
+  .withState(Ticket)
+  .withLane({ name: "slow" }).withLane({ name: "fast" })
+  .on("OrderConfirmed").do(handlerA).to({ target: "shared", lane: "slow" })
+  .on("OrderConfirmed").do(handlerB).to({ target: "shared", lane: "fast" })
+  .build();
+```
+
+### `onlyLanes` — process-per-lane deployment
+
+`ActOptions.onlyLanes` restricts which lanes' controllers boot in this process. With `onlyLanes: ["webhooks"]`, only the webhook controller runs; other declared lanes are silent. Workers in different processes coordinate via the store's `SKIP LOCKED` semantics, so the same image can be deployed as one-process-per-lane without code changes.
+
+This is an escape hatch, not the primary path. A single process with multiple declared lanes already gets fast-lane responsiveness — `Act._drainAll` runs every controller's drain in parallel, so a slow lane's in-flight handler doesn't block a fast lane's claim. `onlyLanes` is for the cases where you want hardware isolation (different CPU/memory per lane) on top of that.
 
 ## Port/Adapter Pattern
 
@@ -233,7 +307,7 @@ interface Store extends Disposable {
   drop(): Promise<void>;
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
   query(callback, filter?): Promise<number>;
-  claim(lagging, leading, by, millis): Promise<Lease[]>;
+  claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
   subscribe(streams): Promise<{ subscribed: number; watermark: number }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<(Lease & { error })[]>;

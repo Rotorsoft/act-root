@@ -115,9 +115,10 @@ export type ReactionHandler<
 export type ReactionResolver<
   TEvents extends Schemas,
   TKey extends keyof TEvents,
+  TLane extends string = string,
 > =
-  | Resolved // static
-  | ((event: Committed<TEvents, TKey>) => Resolved | undefined); // dynamic
+  | Resolved<TLane> // static
+  | ((event: Committed<TEvents, TKey>) => Resolved<TLane> | undefined); // dynamic
 
 /**
  * Resolver output shape — what `.to(...)` returns for a static or dynamic
@@ -133,11 +134,28 @@ export type ReactionResolver<
  *   than the worker can claim per cycle); idle systems are unaffected.
  *   See `libs/act-pg/PERFORMANCE.md` for the benchmark that motivated this
  *   knob.
+ * @property lane - Optional drain lane (ACT-1103). Defaults to `"default"`.
  */
-export type Resolved = {
+export type Resolved<TLane extends string = string> = {
   readonly target: string;
   readonly source?: string;
   readonly priority?: number;
+  readonly lane?: TLane;
+};
+
+/**
+ * Build-time configuration for a drain lane (ACT-1103).
+ *
+ * @property name - Lane name (`"default"` is reserved for the implicit lane)
+ * @property leaseMillis - Lease window for `claim()` calls in this lane
+ * @property streamLimit - Max streams claimed per cycle in this lane
+ * @property cycleMs - Cycle frequency for this lane's controller
+ */
+export type LaneConfig<TName extends string = string> = {
+  readonly name: TName;
+  readonly leaseMillis?: number;
+  readonly streamLimit?: number;
+  readonly cycleMs?: number;
 };
 
 /**
@@ -320,6 +338,7 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
  * @property lagging - Whether this stream is behind (lagging frontier)
+ * @property lane - Drain lane the stream is bound to (ACT-1103)
  *
  * @example
  * ```typescript
@@ -345,6 +364,7 @@ export type Lease = {
   readonly by: string;
   readonly retry: number;
   readonly lagging: boolean;
+  readonly lane?: string;
 };
 
 /**
