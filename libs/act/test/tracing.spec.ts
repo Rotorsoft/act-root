@@ -233,15 +233,13 @@ describe("tracing", () => {
     // Helper: a trace call with caption substring `>> claimed` etc.
     // Tests assert the caption substring; in pretty mode the caption is
     // wrapped in ANSI color codes, but the substring still matches.
+    // Trace decorators emit human-readable single-arg messages (no
+    // structured obj) — `c[0]` carries the caption + details.
     const calledWithCaption = (substr: string) =>
-      expect(traceSpy).toHaveBeenCalledWith(
-        expect.any(Object),
-        expect.stringContaining(substr)
-      );
+      expect(traceSpy).toHaveBeenCalledWith(expect.stringContaining(substr));
     const noCaptionCall = (substr: string) =>
       traceSpy.mock.calls.filter(
-        (c: [unknown, unknown]) =>
-          typeof c[1] === "string" && c[1].includes(substr)
+        (c: [unknown]) => typeof c[0] === "string" && c[0].includes(substr)
       );
 
     it("withClaimTrace skips log when no leases returned", async () => {
@@ -350,6 +348,52 @@ describe("tracing", () => {
       // stream name follows after the reset, so match each piece.
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(/>> correlated.*fresh-stream/)
+      );
+    });
+
+    it("claim/ack/block/subscribe surface lane in the trace caption when set (ACT-1103)", async () => {
+      // Subscribe with an explicit lane — the correlated line tags the
+      // stream with `[lane]`.
+      const { subscribe, claim, ack, block } = buildDrain(withLevel("trace"));
+      await subscribe([{ stream: "lane-trace-stream", lane: "slow" }]);
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(/>> correlated.*lane-trace-stream\[slow\]/)
+      );
+
+      // Commit + lane-filtered claim — the caption is `slow:claimed`
+      // and per-stream details inline as `stream@at/retry`.
+      await es.action(Counter, "increment", target("lane-trace-stream"), {
+        by: 1,
+      });
+      const leased = await claim(2, 0, "lane-trace-by", 60_000, "slow");
+      expect(leased.length).toBeGreaterThan(0);
+      expect(leased[0]?.lane).toBe("slow");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          />> claimed.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+/
+        )
+      );
+
+      // Ack — caption is `acked (slow)`, lane carried back from the store.
+      const acked = await ack(leased);
+      expect(acked[0]?.lane).toBe("slow");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          />> acked.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+/
+        )
+      );
+
+      // Block — caption is `blocked (slow)`, error inlined per stream.
+      await es.action(Counter, "increment", target("lane-trace-stream"), {
+        by: 1,
+      });
+      const next = await claim(2, 0, "lane-block-by", 60_000, "slow");
+      const blocked = await block(next.map((l) => ({ ...l, error: "boom" })));
+      expect(blocked[0]?.lane).toBe("slow");
+      expect(traceSpy).toHaveBeenCalledWith(
+        expect.stringMatching(
+          />> blocked.*\(slow\).*lane-trace-stream@-?\d+\/-?\d+ \(boom\)/
+        )
       );
     });
   });

@@ -153,6 +153,7 @@ class InMemoryStream {
         by: lease.by,
         retry: this._retry,
         lagging: lease.lagging,
+        lane: this._lane,
       };
     }
   }
@@ -174,6 +175,7 @@ class InMemoryStream {
         retry: this._retry,
         error: this._error,
         lagging: lease.lagging,
+        lane: this._lane,
       };
     }
   }

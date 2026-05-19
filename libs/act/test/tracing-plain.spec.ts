@@ -76,9 +76,23 @@ describe("tracing — plain (production) mode", () => {
     );
 
     // Drain trace: `>> caption` (no ANSI)
-    const { subscribe } = buildDrain(traceLogger);
+    const { subscribe, claim } = buildDrain(traceLogger);
     await subscribe([{ stream: "fresh-plain" }]);
     expect(traceSpy).toHaveBeenCalledWith(">> correlated fresh-plain");
+
+    // Plain-mode lane suffix: `(slow)` appended without ANSI when the
+    // batch is in a non-default lane (ACT-1103).
+    await subscribe([{ stream: "lane-plain", lane: "slow" }]);
+    await es.action(
+      Counter,
+      "increment",
+      { stream: "lane-plain", actor: { id: "u", name: "u" } },
+      { by: 1 }
+    );
+    await claim(2, 0, "plain-by", 60_000, "slow");
+    expect(traceSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/^>> claimed \(slow\) lane-plain@/)
+    );
 
     // Snap trace
     const [snapshot] = await es.action(

@@ -814,6 +814,7 @@ export class PostgresStore implements Store {
         by: string;
         retry: number;
         lagging: boolean;
+        lane: string;
       }>(
         `
       WITH input AS (
@@ -828,7 +829,7 @@ export class PostgresStore implements Store {
         leased_until = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
-      RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane
       `,
         [JSON.stringify(leases)]
       );
@@ -841,6 +842,7 @@ export class PostgresStore implements Store {
         by: row.by,
         retry: row.retry,
         lagging: row.lagging,
+        lane: row.lane,
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -868,6 +870,7 @@ export class PostgresStore implements Store {
         retry: number;
         lagging: boolean;
         error: string;
+        lane: string;
       }>(
         `
       WITH input AS (
@@ -878,7 +881,7 @@ export class PostgresStore implements Store {
       SET blocked = true, error = i.error
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
-      RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error, i.lagging
+      RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error, i.lagging, s.lane
       `,
         [JSON.stringify(leases)]
       );
@@ -892,6 +895,7 @@ export class PostgresStore implements Store {
         retry: row.retry,
         lagging: row.lagging,
         error: row.error,
+        lane: row.lane,
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});

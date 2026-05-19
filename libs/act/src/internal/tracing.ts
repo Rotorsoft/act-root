@@ -61,11 +61,20 @@ const es_caption = (caption: string, color: string, body: string): string =>
  * Format a drain-pipeline caption. Drain logs keep a `>>` marker for easy
  * spotting in mixed log streams, plus a `caption` (past tense — every drain
  * trace fires on exit). All drain ops share one color (gray) so the pipeline
- * reads as a single channel; the caption disambiguates the phase.
+ * reads as a single channel; the caption disambiguates the phase. Lane
+ * (ACT-1103) is appended in a contrasting color when set and non-default,
+ * so the operator can see which lane produced the trace without parsing
+ * the per-stream detail.
  */
-const drain_caption = (caption: string): string => {
-  const tag = `>> ${caption}`;
-  return PRETTY ? `${C_DRAIN}${tag}${C_RESET}` : tag;
+const C_LANE = "\x1b[38;5;39m"; // vivid sky blue — same as action, distinct from gray drain
+
+const drain_caption = (caption: string, lane?: string): string => {
+  const showLane = lane && lane !== "default";
+  if (PRETTY) {
+    const tag = `${C_DRAIN}>> ${caption}${C_RESET}`;
+    return showLane ? `${tag} ${C_LANE}(${lane})${C_RESET}` : tag;
+  }
+  return showLane ? `>> ${caption} (${lane})` : `>> ${caption}`;
 };
 
 /**
@@ -255,46 +264,57 @@ export function buildDrain<TEvents extends Schemas>(
   return {
     claim: traced(drain.claim, (leased) => {
       if (leased.length) {
-        const data = Object.fromEntries(
-          leased.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, drain_caption("claimed"));
+        // A claim() batch is single-lane (the controller filtered).
+        const lane = leased[0]?.lane;
+        const detail = leased
+          .map(({ stream, at, retry }) => `${stream}@${at}/${retry}`)
+          .join(", ");
+        logger.trace(`${drain_caption("claimed", lane)} ${detail}`);
       }
     }),
-    fetch: traced(drain.fetch<TEvents>, (fetched) => {
-      const data = Object.fromEntries(
-        fetched.map(({ stream, source, events }) => {
+    fetch: traced(drain.fetch<TEvents>, (fetched, leased) => {
+      // fetch() doesn't carry lane on its result entries — derive it
+      // from the input leases (uniform across the batch).
+      const lane = leased[0]?.lane;
+      const detail = fetched
+        .map(({ stream, source, events }) => {
           const key = source ? `${stream}<-${source}` : stream;
-          const value = Object.fromEntries(
-            events.map(({ id, stream, name }) => [id, { [stream]: name }])
-          );
-          return [key, value];
+          const event_summary = events
+            .map(({ id, name }) => `#${id} ${String(name)}`)
+            .join(", ");
+          return `${key} [${event_summary}]`;
         })
-      );
-      logger.trace(data, drain_caption("fetched"));
+        .join("; ");
+      logger.trace(`${drain_caption("fetched", lane)} ${detail}`);
     }),
     ack: traced(drain.ack, (acked) => {
       if (acked.length) {
-        const data = Object.fromEntries(
-          acked.map(({ stream, at, retry }) => [stream, { at, retry }])
-        );
-        logger.trace(data, drain_caption("acked"));
+        const lane = acked[0]?.lane;
+        const detail = acked
+          .map(({ stream, at, retry }) => `${stream}@${at}/${retry}`)
+          .join(", ");
+        logger.trace(`${drain_caption("acked", lane)} ${detail}`);
       }
     }),
     block: traced(drain.block, (blocked) => {
       if (blocked.length) {
-        const data = Object.fromEntries(
-          blocked.map(({ stream, at, retry, error }) => [
-            stream,
-            { at, retry, error },
-          ])
-        );
-        logger.trace(data, drain_caption("blocked"));
+        const lane = blocked[0]?.lane;
+        const detail = blocked
+          .map(
+            ({ stream, at, retry, error }) =>
+              `${stream}@${at}/${retry} (${error})`
+          )
+          .join(", ");
+        logger.trace(`${drain_caption("blocked", lane)} ${detail}`);
       }
     }),
     subscribe: traced(drain.subscribe, (result, streams) => {
       if (result.subscribed) {
-        const data = streams.map(({ stream }) => stream).join(" ");
+        const data = streams
+          .map(({ stream, lane }) =>
+            lane && lane !== "default" ? `${stream}[${lane}]` : stream
+          )
+          .join(" ");
         logger.trace(`${drain_caption("correlated")} ${data}`);
       }
     }),
