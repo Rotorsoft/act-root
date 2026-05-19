@@ -193,6 +193,27 @@ describe("lanes (ACT-1103, slice 1)", () => {
     ).not.toThrow();
   });
 
+  it("runtime gate still rejects an undeclared lane when types are bypassed", () => {
+    // Static narrowing makes this branch unreachable for properly-typed
+    // slices, but it stays as a backstop for slices compiled against older
+    // type definitions (npm-installed older versions, registry manipulation
+    // by tooling). Exercising it requires a deliberate `as any` cast.
+    const stale = slice<typeof Counter>()
+      .withState(Counter)
+      .on("Incremented")
+      .do(function staleHandler() {
+        return Promise.resolve();
+      })
+      // Bypass the strict typing — simulates a slice built against the
+      // pre-1103 SliceBuilder.
+      .to({ target: "anywhere", lane: "ghost" as never })
+      .build();
+
+    expect(() => act().withSlice(stale).build()).toThrow(
+      /undeclared lane "ghost"/
+    );
+  });
+
   it("type-checks dynamic resolvers' lane return against the slice's TLanes", () => {
     // Dynamic resolvers thread the same TLanes generic — the function's
     // return shape is `Resolved<TLanes> | undefined`, so an undeclared
