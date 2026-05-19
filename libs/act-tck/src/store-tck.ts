@@ -887,6 +887,200 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
+    // ACT-1103: drain lanes. The Store contract now carries lane on
+    // every persisted-and-returned stream surface. Adapters that
+    // haven't migrated will fail these cases — the signal is
+    // intentional ("the contract changed, your adapter needs to
+    // surface lane"). Lane mutability across subscribe calls is the
+    // load-bearing case: the builder config wins on every restart, so
+    // operators can move a stream by editing config and restarting
+    // without a manual data migration.
+    describe("lanes", () => {
+      it("subscribe defaults lane to 'default' when omitted", async () => {
+        const s = `lane-default-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        const seen: string[] = [];
+        await store.query_streams(
+          (p) => {
+            if (p.stream === s) seen.push(p.lane ?? "<missing>");
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen[0]).toBe("default");
+      });
+
+      it("subscribe records the lane passed in", async () => {
+        const s = `lane-set-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "slow" }]);
+        const seen: string[] = [];
+        await store.query_streams(
+          (p) => {
+            if (p.stream === s) seen.push(p.lane ?? "<missing>");
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen[0]).toBe("slow");
+      });
+
+      it("subscribe re-lanes existing streams on subsequent calls", async () => {
+        const s = `lane-upsert-${uid()}`;
+        await store.subscribe([{ stream: s, lane: "slow" }]);
+        await store.subscribe([{ stream: s, lane: "fast" }]);
+        const seen: string[] = [];
+        await store.query_streams(
+          (p) => {
+            if (p.stream === s) seen.push(p.lane ?? "<missing>");
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen[0]).toBe("fast");
+      });
+
+      it("claim() filters by lane when supplied and returns lane on the Lease", async () => {
+        const tag = uid();
+        const src1 = `lane-claim-src1-${tag}`;
+        const src2 = `lane-claim-src2-${tag}`;
+        const subDefault = `lane-claim-def-${tag}`;
+        const subSlow = `lane-claim-slow-${tag}`;
+        await store.commit<CounterEvents>(
+          src1,
+          [inc(1)],
+          makeMeta({ stream: src1 })
+        );
+        await store.commit<CounterEvents>(
+          src2,
+          [inc(1)],
+          makeMeta({ stream: src2 })
+        );
+        await store.subscribe([
+          { stream: subDefault, source: src1 },
+          { stream: subSlow, source: src2, lane: "slow" },
+        ]);
+
+        const slow = await store.claim(50, 0, `w-slow-${tag}`, 1_000, "slow");
+        const slowMine = slow.filter(
+          (l) => l.stream === subDefault || l.stream === subSlow
+        );
+        expect(slowMine.map((l) => l.stream)).toEqual([subSlow]);
+        expect(slowMine[0]?.lane).toBe("slow");
+        await store.ack(slowMine.map((l) => ({ ...l, at: l.at + 1 })));
+
+        const all = await store.claim(50, 0, `w-all-${tag}`, 1_000);
+        const allMine = all
+          .filter((l) => l.stream === subDefault || l.stream === subSlow)
+          .map((l) => ({ stream: l.stream, lane: l.lane }));
+        expect(allMine).toEqual(
+          expect.arrayContaining([
+            { stream: subDefault, lane: "default" },
+            { stream: subSlow, lane: "slow" },
+          ])
+        );
+      });
+
+      it("query_streams filters by lane", async () => {
+        const tag = uid();
+        const a = `lane-q-a-${tag}`;
+        const b = `lane-q-b-${tag}`;
+        const c = `lane-q-c-${tag}`;
+        await store.subscribe([
+          { stream: a, lane: "qslow" },
+          { stream: b, lane: "qfast" },
+          { stream: c, lane: "qslow" },
+        ]);
+        const seen: string[] = [];
+        await store.query_streams((p) => seen.push(p.stream), {
+          lane: "qslow",
+          stream: `lane-q-.*-${tag}`,
+          limit: 100,
+        });
+        expect(seen.sort()).toEqual([a, c]);
+      });
+
+      it("prioritize filters by lane", async () => {
+        const tag = uid();
+        const a = `lane-pri-a-${tag}`;
+        const b = `lane-pri-b-${tag}`;
+        await store.subscribe([
+          { stream: a, lane: `pslow-${tag}` },
+          { stream: b, lane: `pfast-${tag}` },
+        ]);
+        const updated = await store.prioritize({ lane: `pslow-${tag}` }, 7);
+        expect(updated).toBe(1);
+        const seen = new Map<string, number>();
+        await store.query_streams((p) => seen.set(p.stream, p.priority), {
+          stream: `lane-pri-.*-${tag}`,
+          limit: 100,
+        });
+        expect(seen.get(a)).toBe(7);
+        expect(seen.get(b)).toBe(0);
+      });
+
+      it("reset filters by lane", async () => {
+        const tag = uid();
+        const src = `lane-reset-src-${tag}`;
+        const a = `lane-reset-a-${tag}`;
+        const b = `lane-reset-b-${tag}`;
+        await store.commit<CounterEvents>(
+          src,
+          [inc(1)],
+          makeMeta({ stream: src })
+        );
+        await store.subscribe([
+          { stream: a, source: src, lane: `rslow-${tag}` },
+          { stream: b, source: src, lane: `rfast-${tag}` },
+        ]);
+        const leases = await store.claim(50, 0, `w-${tag}`, 5_000);
+        const mine = leases.filter((l) => l.stream === a || l.stream === b);
+        await store.ack(mine.map((l) => ({ ...l, at: l.at + 1 })));
+
+        const count = await store.reset({ lane: `rslow-${tag}` });
+        expect(count).toBe(1);
+        // Fetch each stream by exact match — keeps the contract test
+        // adapter-agnostic (PG `~` and SQLite anchor-aware LIKE both
+        // honor `stream_exact: true` identically).
+        const ats = new Map<string, number>();
+        for (const name of [a, b]) {
+          await store.query_streams((p) => ats.set(p.stream, p.at), {
+            stream: name,
+            stream_exact: true,
+          });
+        }
+        expect(ats.get(a)).toBe(-1);
+        expect(ats.get(b)).toBeGreaterThanOrEqual(0);
+      });
+
+      it("unblock filters by lane", async () => {
+        const tag = uid();
+        const src = `lane-ub-src-${tag}`;
+        const a = `lane-ub-a-${tag}`;
+        const b = `lane-ub-b-${tag}`;
+        await store.commit<CounterEvents>(
+          src,
+          [inc(1)],
+          makeMeta({ stream: src })
+        );
+        await store.subscribe([
+          { stream: a, source: src, lane: `uslow-${tag}` },
+          { stream: b, source: src, lane: `ufast-${tag}` },
+        ]);
+        const leases = await store.claim(50, 0, `w-${tag}`, 5_000);
+        const mine = leases.filter((l) => l.stream === a || l.stream === b);
+        await store.block(mine.map((l) => ({ ...l, error: "boom" })));
+
+        const count = await store.unblock({ lane: `uslow-${tag}` });
+        expect(count).toBe(1);
+        const blocked = new Map<string, boolean>();
+        for (const name of [a, b]) {
+          await store.query_streams((p) => blocked.set(p.stream, p.blocked), {
+            stream: name,
+            stream_exact: true,
+          });
+        }
+        expect(blocked.get(a)).toBe(false);
+        expect(blocked.get(b)).toBe(true);
+      });
+    });
+
     describe("truncate", () => {
       it("seeds a tombstone when no snapshot is provided", async () => {
         const s = `trunc-tomb-${uid()}`;
