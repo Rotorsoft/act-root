@@ -12,7 +12,7 @@
     "dev:close": "tsx src/close-demo.ts"
   },
   "dependencies": {
-    "@rotorsoft/act": "^0.39.0",
+    "@rotorsoft/act": ">=0.45.0",
     "@trpc/server": "11.16.0",
     "zod": "^4.4.3"
   },
