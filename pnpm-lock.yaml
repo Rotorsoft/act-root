@@ -334,8 +334,8 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.39.0
-        version: 0.39.0(zod@4.4.3)
+        specifier: '>=0.45.0'
+        version: link:../../libs/act
       '@trpc/server':
         specifier: 11.16.0
         version: 11.16.0(typescript@5.9.3)
@@ -540,11 +540,11 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: ^0.39.0
-        version: 0.39.0(zod@4.4.3)
+        specifier: '>=0.45.0'
+        version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: ^0.20.2
-        version: 0.20.2(@rotorsoft/act@0.39.0(zod@4.4.3))(zod@4.4.3)
+        specifier: '>=0.25.0'
+        version: link:../../libs/act-pg
       cli-table3:
         specifier: ^0.6.5
         version: 0.6.5
@@ -3185,23 +3185,6 @@ packages:
     resolution: {integrity: sha512-QVTUovf40zgTqlFVrKA1uXMVvU2QWEFWfAH8Wdc48IxLvrJMQVMBRjuQyUpzZCDkakImib9eVazbWlC6ksWtJw==}
     cpu: [x64]
     os: [win32]
-
-  '@rotorsoft/act-patch@1.2.2':
-    resolution: {integrity: sha512-qqFHW/1P7R0WNSXIDLmzGtNkJIFt967dc9AmcMqgiTlVBhrPgQQgO9Htdy9m5vf/29ZOZnyWSGnN7Yl74Ra9Og==}
-    engines: {node: '>=22.18.0'}
-
-  '@rotorsoft/act-pg@0.20.2':
-    resolution: {integrity: sha512-yDf5r7kbeFPBmUbI+OjdHG+WjtbcTRGYr8f7RYyJpdRQNo2Jc3gQLGqCmcQsgnNSaabvELR+q0ooI1/UbtFzcQ==}
-    engines: {node: '>=22.18.0'}
-    peerDependencies:
-      '@rotorsoft/act': '>=0.31.1'
-      zod: ^4.4.3
-
-  '@rotorsoft/act@0.39.0':
-    resolution: {integrity: sha512-FC/Z8YwOOaoapyd52PKq4DQIGq1L0AKSSyiG1hPPpIFmL+jeA4z91or7wxvaFEMcIjsKe+8jn/IY3JKWT+bopQ==}
-    engines: {node: '>=22.18.0'}
-    peerDependencies:
-      zod: ^4.4.3
 
   '@rspack/binding-darwin-arm64@1.7.11':
     resolution: {integrity: sha512-oduECiZVqbO5zlVw+q7Vy65sJFth99fWPTyucwvLJJtJkPL5n17Uiql2cYP6Ijn0pkqtf1SXgK8WjiKLG5bIig==}
@@ -12374,21 +12357,6 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.60.4':
     optional: true
-
-  '@rotorsoft/act-patch@1.2.2': {}
-
-  '@rotorsoft/act-pg@0.20.2(@rotorsoft/act@0.39.0(zod@4.4.3))(zod@4.4.3)':
-    dependencies:
-      '@rotorsoft/act': 0.39.0(zod@4.4.3)
-      pg: 8.20.0
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - pg-native
-
-  '@rotorsoft/act@0.39.0(zod@4.4.3)':
-    dependencies:
-      '@rotorsoft/act-patch': 1.2.2
-      zod: 4.4.3
 
   '@rspack/binding-darwin-arm64@1.7.11':
     optional: true
