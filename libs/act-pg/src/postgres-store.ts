@@ -361,7 +361,8 @@ export class PostgresStore implements Store {
           error text,
           leased_by text,
           leased_until timestamptz,
-          priority int NOT NULL DEFAULT 0
+          priority int NOT NULL DEFAULT 0,
+          lane text NOT NULL DEFAULT 'default'
         ) TABLESPACE pg_default;`
       );
       // Migration for tables created before priority lanes (ACT-102).
@@ -370,6 +371,13 @@ export class PostgresStore implements Store {
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;`
+      );
+      // Migration for tables created before drain lanes (ACT-1103).
+      // Existing rows default to the implicit `"default"` lane, matching
+      // pre-1103 single-controller behavior.
+      await client.query(
+        `ALTER TABLE ${this._fqs}
+         ADD COLUMN IF NOT EXISTS lane text NOT NULL DEFAULT 'default';`
       );
 
       // Composite index for `claim()` — `(blocked, priority DESC, at)`
@@ -384,6 +392,14 @@ export class PostgresStore implements Store {
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_claim_ix"
         ON ${this._fqs} (blocked, priority DESC, at);`
+      );
+      // Lane filter (ACT-1103): supports lane-restricted `claim()` and
+      // `query_streams({lane})`. Plain btree on `lane` is sufficient —
+      // typical lane cardinality is small (single digits), so the
+      // planner can pick this index whenever `lane = ?` is present.
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_lane_ix"
+        ON ${this._fqs} (lane);`
       );
 
       await client.query("COMMIT");
@@ -622,24 +638,37 @@ export class PostgresStore implements Store {
     lagging: number,
     leading: number,
     by: string,
-    millis: number
+    millis: number,
+    lane?: string
   ): Promise<Lease[]> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
+      // Lane filter (ACT-1103): when supplied, restricts the available
+      // CTE to streams in the named lane. The parameter slot $5 is only
+      // referenced when the predicate is present; with no filter the
+      // SQL collapses to the pre-1103 form so planner behavior on the
+      // no-lane path is unchanged.
+      const laneClause = lane !== undefined ? `AND s.lane = $5` : "";
+      const params: unknown[] =
+        lane !== undefined
+          ? [lagging, leading, by, millis, lane]
+          : [lagging, leading, by, millis];
       const { rows } = await client.query<{
         stream: string;
         source: string | null;
         at: number;
         retry: number;
         lagging: boolean;
+        lane: string;
       }>(
         `
         WITH
         available AS (
-          SELECT stream, source, at, priority
+          SELECT stream, source, at, priority, lane
           FROM ${this._fqs} s
           WHERE blocked = false
+            ${laneClause}
             AND (leased_by IS NULL OR leased_until <= NOW())
             AND (s.at < 0 OR EXISTS (
               SELECT 1 FROM ${this._fqt} e
@@ -655,19 +684,19 @@ export class PostgresStore implements Store {
         -- ORDER BY collapses to plain at ASC so existing workloads
         -- see no behavior change.
         lag AS (
-          SELECT stream, source, at, TRUE AS lagging
+          SELECT stream, source, at, lane, TRUE AS lagging
           FROM available
           ORDER BY priority DESC, at ASC
           LIMIT $1
         ),
         lead AS (
-          SELECT stream, source, at, FALSE AS lagging
+          SELECT stream, source, at, lane, FALSE AS lagging
           FROM available
           ORDER BY at DESC
           LIMIT $2
         ),
         combined AS (
-          SELECT DISTINCT ON (stream) stream, source, at, lagging
+          SELECT DISTINCT ON (stream) stream, source, at, lane, lagging
           FROM (SELECT * FROM lag UNION ALL SELECT * FROM lead) t
           ORDER BY stream, at
         )
@@ -678,19 +707,20 @@ export class PostgresStore implements Store {
           retry = s.retry + 1
         FROM combined c
         WHERE s.stream = c.stream
-        RETURNING s.stream, s.source, s.at, s.retry, c.lagging
+        RETURNING s.stream, s.source, s.at, s.retry, c.lagging, s.lane
         `,
-        [lagging, leading, by, millis]
+        params
       );
       await client.query("COMMIT");
 
-      return rows.map(({ stream, source, at, retry, lagging }) => ({
+      return rows.map(({ stream, source, at, retry, lagging, lane }) => ({
         stream,
         source: source ?? undefined,
         at,
         by,
         retry,
         lagging,
+        lane,
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
@@ -709,26 +739,35 @@ export class PostgresStore implements Store {
    * @returns subscribed count and current max watermark.
    */
   async subscribe(
-    streams: Array<{ stream: string; source?: string; priority?: number }>
+    streams: Array<{
+      stream: string;
+      source?: string;
+      priority?: number;
+      lane?: string;
+    }>
   ): Promise<{ subscribed: number; watermark: number }> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
       let subscribed = 0;
       if (streams.length) {
-        // Two statements to keep `subscribed` meaning "newly
+        // Three statements to keep `subscribed` meaning "newly
         // registered streams" (not "rows touched"):
         //  1. INSERT ... ON CONFLICT DO NOTHING — rowCount = inserts.
         //  2. UPDATE priority on the existing rows whose new value is
         //     higher than the stored one (ACT-102: keep the max so the
         //     highest-priority registered reaction wins). Operator
         //     overrides (which may *decrease*) go through `prioritize()`.
+        //  3. UPDATE lane unconditionally (ACT-1103): the current
+        //     subscribe call wins so a restarted Act with a new lane
+        //     assignment moves the stream to its new lane.
         const { rowCount: inserted } = await client.query(
           `
-          INSERT INTO ${this._fqs} (stream, source, priority)
+          INSERT INTO ${this._fqs} (stream, source, priority, lane)
           SELECT s->>'stream',
                  s->>'source',
-                 COALESCE((s->>'priority')::int, 0)
+                 COALESCE((s->>'priority')::int, 0),
+                 COALESCE(s->>'lane', 'default')
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           `,
@@ -742,6 +781,16 @@ export class PostgresStore implements Store {
           FROM jsonb_array_elements($1::jsonb) AS s
           WHERE t.stream = s->>'stream'
             AND COALESCE((s->>'priority')::int, 0) > t.priority
+          `,
+          [JSON.stringify(streams)]
+        );
+        await client.query(
+          `
+          UPDATE ${this._fqs} t
+          SET lane = COALESCE(s->>'lane', 'default')
+          FROM jsonb_array_elements($1::jsonb) AS s
+          WHERE t.stream = s->>'stream'
+            AND t.lane <> COALESCE(s->>'lane', 'default')
           `,
           [JSON.stringify(streams)]
         );
@@ -904,6 +953,10 @@ export class PostgresStore implements Store {
       values.push(filter.blocked);
       conditions.push(`blocked = $${start + values.length - 1}`);
     }
+    if (filter.lane !== undefined) {
+      values.push(filter.lane);
+      conditions.push(`lane = $${start + values.length - 1}`);
+    }
     return {
       clause: conditions.length ? conditions.join(" AND ") : "TRUE",
       values,
@@ -1031,11 +1084,15 @@ export class PostgresStore implements Store {
       values.push(query.blocked);
       conditions.push(`blocked = $${values.length}`);
     }
+    if (query?.lane !== undefined) {
+      values.push(query.lane);
+      conditions.push(`lane = $${values.length}`);
+    }
     if (query?.after !== undefined) {
       values.push(query.after);
       conditions.push(`stream > $${values.length}`);
     }
-    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority FROM ${this._fqs}`;
+    let sql = `SELECT stream, source, at, retry, blocked, error, leased_by, leased_until, priority, lane FROM ${this._fqs}`;
     if (conditions.length) sql += " WHERE " + conditions.join(" AND ");
     values.push(limit);
     sql += ` ORDER BY stream LIMIT $${values.length}`;
@@ -1053,6 +1110,7 @@ export class PostgresStore implements Store {
           leased_by: string | null;
           leased_until: Date | null;
           priority: number;
+          lane: string;
         }>(sql, values),
         client.query<{ m: number | null }>(
           `SELECT COALESCE(MAX(id), -1) AS m FROM ${this._fqt}`
@@ -1071,6 +1129,7 @@ export class PostgresStore implements Store {
           priority: row.priority,
           leased_by: row.leased_by ?? undefined,
           leased_until: row.leased_until ?? undefined,
+          lane: row.lane,
         });
         count++;
       }
