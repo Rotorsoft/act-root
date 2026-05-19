@@ -424,16 +424,16 @@ function Sandboxes() {
             <Sandbox
               title="Event Sourcing + Lanes"
               blurb="Calculator demo — random keypresses commit events, a digit-board projection drains on the “board” lane, a per-stream result projection drains on the “result” lane. Watch lane names tag every drain cycle in the trace."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&view=editor&terminal=1&file=src/main.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev%3Astackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=dev%3Astackblitz"
+              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&file=src/main.ts&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=dev%3Astackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=dev%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
             />
 
             <Sandbox
               title="Lanes × Adaptive Dual-Frontier Drain"
               blurb="Todo load test split across two lanes — “writes” (creates + updates, tight lease, hot path) and “mutations” (deletes, longer lease, can tolerate lag). Each drain cycle prints a lane × frontier table so you can see Act adapt the leading/lagging budget independently per lane until everything converges."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&view=editor&terminal=1&file=src/index.ts&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start%3Astackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&view=editor&terminal=1&hideNavigation=1&showSidebar=0&showExplorer=0&showPreview=0&startScript=start%3Astackblitz"
+              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&file=src/index.ts&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=start%3Astackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=start%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src"
             />
           </section>
