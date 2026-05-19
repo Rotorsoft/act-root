@@ -1,3 +1,11 @@
+# [@rotorsoft/act-sqlite-v0.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.8.0...@rotorsoft/act-sqlite-v0.9.0) (2026-05-19)
+
+
+### Features
+
+* **act-sqlite:** wire lanes through SqliteStore and consolidate the lane contract into the TCK ([70c062b](https://github.com/rotorsoft/act-root/commit/70c062b256b273982ca9e6d155a8606020fd35e4))
+* **act:** per-lane DrainController fan-out in the orchestrator ([71612ee](https://github.com/rotorsoft/act-root/commit/71612ee56ab094a57ce05de086c7a13f6be75841))
+
 # [@rotorsoft/act-sqlite-v0.8.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.7.0...@rotorsoft/act-sqlite-v0.8.0) (2026-05-17)
 
 
