@@ -137,8 +137,6 @@ export class SqliteStore implements Store {
       // already present
     }
     // Migration for tables created before drain lanes (ACT-1103).
-    // Same try/swallow pattern — existing rows inherit the column
-    // default so pre-1103 streams stay in the implicit "default" lane.
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN lane TEXT NOT NULL DEFAULT 'default'"
@@ -149,9 +147,7 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_claim ON streams(blocked, priority DESC, at)"
     );
-    // Lane filter (ACT-1103): supports lane-restricted claim() and
-    // query_streams({lane}). Plain btree is sufficient — typical lane
-    // cardinality is small (single digits).
+    // Lane filter index (ACT-1103).
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_streams_lane ON streams(lane)"
     );
@@ -336,9 +332,7 @@ export class SqliteStore implements Store {
               args: [priority, stream, priority],
             });
           }
-          // ACT-1103: restart-driven re-laning. Update unconditionally
-          // when the incoming lane differs from the persisted one — the
-          // current subscribe call wins.
+          // ACT-1103: current subscribe wins on lane.
           await tx.execute({
             sql: "UPDATE streams SET lane = ? WHERE stream = ? AND lane <> ?",
             args: [lane, stream, lane],
@@ -369,9 +363,6 @@ export class SqliteStore implements Store {
     try {
       const now = new Date().toISOString();
 
-      // ACT-1103: lane filter. When supplied, the candidate SELECT
-      // narrows to streams in the named lane. No-filter path keeps the
-      // pre-1103 SQL shape unchanged.
       const laneClause = lane !== undefined ? " AND lane = ?" : "";
       const result = await tx.execute({
         sql: `SELECT stream, source, at, priority, lane FROM streams

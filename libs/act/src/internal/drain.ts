@@ -41,8 +41,9 @@ export const claim = (
   lagging: number,
   leading: number,
   by: string,
-  millis: number
-): Promise<Lease[]> => store().claim(lagging, leading, by, millis);
+  millis: number,
+  lane?: string
+): Promise<Lease[]> => store().claim(lagging, leading, by, millis, lane);
 
 export async function fetch<TEvents extends Schemas>(
   leased: Lease[],
@@ -67,6 +68,11 @@ export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
 
 export const subscribe = (
-  streams: Array<{ stream: string; source?: string }>
+  streams: Array<{
+    stream: string;
+    source?: string;
+    priority?: number;
+    lane?: string;
+  }>
 ): Promise<{ subscribed: number; watermark: number }> =>
   store().subscribe(streams);

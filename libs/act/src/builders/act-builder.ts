@@ -53,18 +53,10 @@ function registerBatchHandler(
 }
 
 /**
- * Walks every registered reaction's static resolver and rejects
- * references to lanes that were never declared via `.withLane(...)`.
- *
- * Inline reactions on `ActBuilder` are statically narrowed via `TLanes`,
- * so this check only matters for slice-declared reactions (the slice
- * builder can't see the parent Act's lane set) and dynamic resolvers.
- * Dynamic resolvers carry no static lane — their return value isn't
- * inspectable until runtime — so they're skipped here; if they return
- * an unknown lane it surfaces at subscribe time in later slices.
- *
- * The implicit `"default"` lane is always permitted, even if the
- * application declares zero lanes.
+ * Runtime backstop for slice-declared lane references — rejects
+ * static `.to({lane})` entries that aren't in the declared set.
+ * Inline reactions are caught at compile time; this only fires for
+ * slices built against older type definitions.
  */
 function validateLaneReferences(
   registry: Registry<any, any, any>,
@@ -222,22 +214,8 @@ export type ActBuilder<
     TLanes
   >;
   /**
-   * Declares a drain lane (ACT-1103).
-   *
-   * Each lane spawns its own `DrainController` at `build()` time with the
-   * configured `leaseMillis` / `streamLimit` / `cycleMs`. Reactions whose
-   * `.to({lane})` references the lane name land in that controller;
-   * reactions without an explicit `.lane` land in the implicit
-   * `"default"` lane.
-   *
-   * Lane names are tracked in the builder's `TLanes` type parameter — so
-   * `.to({lane: "slow"})` only compiles after `.withLane({ name: "slow" })`
-   * has been called, and `ActOptions.onlyLanes: ["typo"]` is rejected at
-   * build sites.
-   *
-   * Declaring the same lane name twice throws. Omitting `withLane` entirely
-   * preserves today's single-controller behavior — every reaction lands in
-   * the implicit `"default"` lane.
+   * Declares a drain lane (ACT-1103). Lane name narrows `TLanes` so
+   * `.to({lane})` and `ActOptions.onlyLanes` type-check against it.
    *
    * @example
    * ```typescript
@@ -375,10 +353,6 @@ export function act<
   };
   const pendingProjections: Projection<any>[] = [];
   const batchHandlers = new Map<string, BatchHandler<any>>();
-  // Declared drain lanes (ACT-1103). `withLane` appends here; the `Act`
-  // constructor receives the array on `build()`. Slice 1 records the
-  // configs but doesn't yet wire per-lane controllers — the single default
-  // controller still drains everything. Later slices fan out.
   const lanes: LaneConfig[] = [];
 
   // Set on the first `.build()` call. Lets the same builder produce
@@ -462,10 +436,6 @@ export function act<
         }
         mergeEventRegister(registry.events, input.events);
         pendingProjections.push(...input.projections);
-        // Merge slice-declared lanes into the Act's lane set (ACT-1103).
-        // Conflicting configs (same name, different field values) are
-        // rejected — the operator should pick one, not let a slice
-        // silently shadow an Act-level declaration.
         for (const sliceLane of input.lanes) {
           const existing = lanes.find((l) => l.name === sliceLane.name);
           if (!existing) {
@@ -478,8 +448,7 @@ export function act<
             existing.cycleMs !== sliceLane.cycleMs
           ) {
             throw new Error(
-              `Lane "${sliceLane.name}" was already declared with a different config. ` +
-                `Pick one declaration — slices and the Act must agree on lane timing.`
+              `Lane "${sliceLane.name}" was already declared with a different config`
             );
           }
         }
@@ -499,18 +468,10 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        // Reserve the literal `"default"` lane name for the implicit
-        // controller and forbid duplicate declarations — the latter
-        // would silently shadow the earlier config, hiding the typo.
-        if (config.name === DEFAULT_LANE) {
-          throw new Error(
-            `Lane "${DEFAULT_LANE}" is reserved for the implicit lane and cannot be redeclared. ` +
-              `Pick a different name, or omit \`withLane({name: "default"})\` and rely on the default.`
-          );
-        }
-        if (lanes.some((l) => l.name === config.name)) {
+        if (config.name === DEFAULT_LANE)
+          throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
+        if (lanes.some((l) => l.name === config.name))
           throw new Error(`Lane "${config.name}" was already declared`);
-        }
         lanes.push(config);
         return builder as never;
       },

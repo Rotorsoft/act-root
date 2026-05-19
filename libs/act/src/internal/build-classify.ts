@@ -67,19 +67,27 @@ export function classifyRegistry<
       if (typeof reaction.resolver === "function") {
         hasDynamicResolvers = true;
       } else {
-        const { target, source, priority = 0 } = reaction.resolver;
+        const { target, source, priority = 0, lane } = reaction.resolver;
         const key = `${target}|${source ?? ""}`;
         const existing = statics.get(key);
         if (!existing) {
-          statics.set(key, { stream: target, source, priority });
-        } else if (priority > (existing.priority as number)) {
-          // Multiple reactions with the same (target, source) — keep
-          // the max priority so the highest-priority registrant sets
-          // the scheduling lane (mirrors subscribe-side semantics).
-          // `existing.priority` is always defined here since we always
-          // set it when inserting, but the StaticTarget type marks it
-          // optional for backwards compat with external consumers.
-          statics.set(key, { ...existing, priority });
+          statics.set(key, { stream: target, source, priority, lane });
+        } else {
+          // ACT-1103: lanes don't merge — disagreement is a config error.
+          if ((existing.lane ?? undefined) !== (lane ?? undefined))
+            throw new Error(
+              `Stream "${target}" has conflicting lane assignments ` +
+                `("${existing.lane ?? "default"}" vs "${lane ?? "default"}")`
+            );
+          if (priority > (existing.priority as number)) {
+            // Multiple reactions with the same (target, source) — keep
+            // the max priority so the highest-priority registrant sets
+            // the scheduling lane (mirrors subscribe-side semantics).
+            // `existing.priority` is always defined here since we always
+            // set it when inserting, but the StaticTarget type marks it
+            // optional for backwards compat with external consumers.
+            statics.set(key, { ...existing, priority });
+          }
         }
       }
     }

@@ -1,9 +1,6 @@
 import { z } from "zod";
 import { act, dispose, slice, state, ZodEmpty } from "../src/index.js";
 
-// Minimal counter to attach reactions to. Slice 1 doesn't yet wire
-// per-lane controllers — these tests cover the builder type fanout,
-// runtime stub bookkeeping, and validation gates.
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
   .emits({ Incremented: ZodEmpty })
@@ -241,5 +238,111 @@ describe("lanes (ACT-1103, slice 1)", () => {
       .build();
 
     expect(() => act().withSlice(ok).build()).not.toThrow();
+  });
+
+  it("rejects two static reactions targeting the same stream with different lanes", () => {
+    function handlerA() {
+      return Promise.resolve();
+    }
+    function handlerB() {
+      return Promise.resolve();
+    }
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow" })
+        .withLane({ name: "fast" })
+        .on("Incremented")
+        .do(handlerA)
+        .to({ target: "shared", lane: "slow" })
+        .on("Incremented")
+        .do(handlerB)
+        .to({ target: "shared", lane: "fast" })
+        .build()
+    ).toThrow(/conflicting lane assignments/);
+  });
+
+  it("rejects when one reaction names a lane and another leaves it implicit", () => {
+    function handlerA() {
+      return Promise.resolve();
+    }
+    function handlerB() {
+      return Promise.resolve();
+    }
+    // Direction A: lane-first, then no-lane (existing.lane defined, incoming undefined)
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow" })
+        .on("Incremented")
+        .do(handlerA)
+        .to({ target: "shared", lane: "slow" })
+        .on("Incremented")
+        .do(handlerB)
+        .to("shared")
+        .build()
+    ).toThrow(/conflicting lane assignments/);
+    // Direction B: no-lane-first, then lane (existing.lane undefined, incoming defined)
+    function handlerC() {
+      return Promise.resolve();
+    }
+    function handlerD() {
+      return Promise.resolve();
+    }
+    expect(() =>
+      act()
+        .withState(Counter)
+        .withLane({ name: "slow" })
+        .on("Incremented")
+        .do(handlerC)
+        .to("shared2")
+        .on("Incremented")
+        .do(handlerD)
+        .to({ target: "shared2", lane: "slow" })
+        .build()
+    ).toThrow(/conflicting lane assignments/);
+  });
+
+  it("spawns one DrainController per active lane with the implicit default", () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "slow", leaseMillis: 30_000, streamLimit: 7 })
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { lane: string | undefined; armed: boolean }
+        >;
+      }
+    )._drain_controllers;
+    expect([...controllers.keys()].sort()).toEqual(["default", "slow"]);
+    // With multiple lanes active, each controller's lane is set so claim()
+    // filters per-lane. The single-default-only case keeps lane=undefined.
+    expect(controllers.get("default")?.lane).toBe("default");
+    expect(controllers.get("slow")?.lane).toBe("slow");
+  });
+
+  it("keeps a single controller with lane=undefined when no lanes are declared", () => {
+    const app = act().withState(Counter).build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { lane: string | undefined }>;
+      }
+    )._drain_controllers;
+    expect([...controllers.keys()]).toEqual(["default"]);
+    expect(controllers.get("default")?.lane).toBeUndefined();
+  });
+
+  it("honors ActOptions.onlyLanes — excluded lanes get no controller", () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .build({ onlyLanes: ["slow"] });
+    const controllers = (
+      app as unknown as { _drain_controllers: Map<string, unknown> }
+    )._drain_controllers;
+    expect([...controllers.keys()]).toEqual(["slow"]);
   });
 });

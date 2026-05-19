@@ -266,7 +266,11 @@ describe("Store.reset", () => {
     const count = await app.reset(["does-not-exist"]);
     expect(count).toBe(0);
     expect(
-      (app as unknown as { _drain: { armed: boolean } })._drain.armed
+      (
+        app as unknown as {
+          _drain_controllers: Map<string, { armed: boolean }>;
+        }
+      )._drain_controllers.get("default")!.armed
     ).toBe(false);
   });
 
@@ -279,7 +283,11 @@ describe("Store.reset", () => {
     const count = await app.reset(["no-reactions-proj"]);
     expect(count).toBe(1);
     expect(
-      (app as unknown as { _drain: { armed: boolean } })._drain.armed
+      (
+        app as unknown as {
+          _drain_controllers: Map<string, { armed: boolean }>;
+        }
+      )._drain_controllers.get("default")!.armed
     ).toBe(false);
   });
 });

@@ -61,11 +61,7 @@ class InMemoryStream {
     return this._lane;
   }
 
-  /**
-   * Replace on every subscribe (ACT-1103) — current builder config wins
-   * on restart, taking precedence over the lane persisted on a prior
-   * boot.
-   */
+  /** Replace on every subscribe — current builder config wins on restart. */
   set lane(value: string) {
     this._lane = value;
   }
@@ -545,10 +541,6 @@ export class InMemoryStore implements Store {
       const existing = this._streams.get(stream);
       if (existing) {
         existing.bumpPriority(priority);
-        // Re-laning at restart (ACT-1103): the current subscribe call
-        // wins, so a builder reconfig moves the stream to a new lane
-        // without manual migration. Online re-laning while workers hold
-        // leases is not supported — the safe trigger is process restart.
         existing.lane = lane;
       } else {
         this._streams.set(

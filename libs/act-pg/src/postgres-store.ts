@@ -373,8 +373,6 @@ export class PostgresStore implements Store {
          ADD COLUMN IF NOT EXISTS priority int NOT NULL DEFAULT 0;`
       );
       // Migration for tables created before drain lanes (ACT-1103).
-      // Existing rows default to the implicit `"default"` lane, matching
-      // pre-1103 single-controller behavior.
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS lane text NOT NULL DEFAULT 'default';`
@@ -393,10 +391,7 @@ export class PostgresStore implements Store {
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_claim_ix"
         ON ${this._fqs} (blocked, priority DESC, at);`
       );
-      // Lane filter (ACT-1103): supports lane-restricted `claim()` and
-      // `query_streams({lane})`. Plain btree on `lane` is sufficient —
-      // typical lane cardinality is small (single digits), so the
-      // planner can pick this index whenever `lane = ?` is present.
+      // Lane filter index (ACT-1103).
       await client.query(
         `CREATE INDEX IF NOT EXISTS "${this.config.table}_streams_lane_ix"
         ON ${this._fqs} (lane);`
@@ -644,11 +639,6 @@ export class PostgresStore implements Store {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
-      // Lane filter (ACT-1103): when supplied, restricts the available
-      // CTE to streams in the named lane. The parameter slot $5 is only
-      // referenced when the predicate is present; with no filter the
-      // SQL collapses to the pre-1103 form so planner behavior on the
-      // no-lane path is unchanged.
       const laneClause = lane !== undefined ? `AND s.lane = $5` : "";
       const params: unknown[] =
         lane !== undefined
@@ -758,9 +748,7 @@ export class PostgresStore implements Store {
         //     higher than the stored one (ACT-102: keep the max so the
         //     highest-priority registered reaction wins). Operator
         //     overrides (which may *decrease*) go through `prioritize()`.
-        //  3. UPDATE lane unconditionally (ACT-1103): the current
-        //     subscribe call wins so a restarted Act with a new lane
-        //     assignment moves the stream to its new lane.
+        //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
         const { rowCount: inserted } = await client.query(
           `
           INSERT INTO ${this._fqs} (stream, source, priority, lane)

@@ -120,27 +120,8 @@ export type SliceBuilder<
       : never
   ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
   /**
-   * Declares a drain lane on this slice (ACT-1103).
-   *
-   * Slice lanes are merged into the parent Act's lane set at
-   * `act().withSlice(slice)` — so the slice's `.to({lane})` declarations
-   * narrow to lanes the *slice itself* declared without having to know
-   * which Act will host it.
-   *
-   * Declaring the same lane name twice on the same slice throws.
-   * Conflicting configs across slices (same name, different
-   * `leaseMillis`/`streamLimit`/`cycleMs`) are caught at `withSlice`.
-   *
-   * @example
-   * ```typescript
-   * const WebhooksSlice = slice()
-   *   .withState(Ticket)
-   *   .withLane({ name: "webhooks", leaseMillis: 30_000 })
-   *   .on("TicketOpened")
-   *     .do(deliverWebhook)
-   *     .to({ target: "webhooks-out", lane: "webhooks" })  // type-checked
-   *   .build();
-   * ```
+   * Declares a drain lane on this slice (ACT-1103). Merged into the
+   * parent Act's lane set by `act().withSlice(slice)`.
    */
   withLane: <const TConfig extends LaneConfig>(
     config: TConfig
@@ -246,9 +227,6 @@ export function slice<
   const actions: Record<string, any> = {};
   const events = {} as EventRegister<TEvents>;
   const projections: Projection<any>[] = [];
-  // Drain lanes declared on the slice (ACT-1103). `act().withSlice` reads
-  // this and merges into the Act's lane set; the slice's `.to({lane})`
-  // declarations narrow against the slice's own `TLanes` at compile time.
   const lanes: LaneConfig[] = [];
 
   const builder: SliceBuilder<
@@ -267,14 +245,10 @@ export function slice<
       return builder;
     },
     withLane: (config) => {
-      if (config.name === DEFAULT_LANE) {
-        throw new Error(
-          `Lane "${DEFAULT_LANE}" is reserved for the implicit lane and cannot be redeclared`
-        );
-      }
-      if (lanes.some((l) => l.name === config.name)) {
+      if (config.name === DEFAULT_LANE)
+        throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
+      if (lanes.some((l) => l.name === config.name))
         throw new Error(`Lane "${config.name}" was already declared`);
-      }
       lanes.push(config);
       return builder as never;
     },

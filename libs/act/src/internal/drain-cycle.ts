@@ -118,10 +118,17 @@ export async function runDrainCycle<
   leading: number,
   eventLimit: number,
   leaseMillis: number,
-  isDeferred?: (stream: string) => boolean
+  isDeferred?: (stream: string) => boolean,
+  lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
-  const leased = await ops.claim(lagging, leading, randomUUID(), leaseMillis);
+  const leased = await ops.claim(
+    lagging,
+    leading,
+    randomUUID(),
+    leaseMillis,
+    lane
+  );
   if (!leased.length) return undefined;
 
   // Partition out streams whose handler is in a backoff window. We hold
@@ -240,6 +247,14 @@ export type DrainControllerDeps<
   readonly handleBatch: HandleBatch<TEvents>;
   readonly onAcked: (acked: Lease[]) => void;
   readonly onBlocked: (blocked: BlockedLease[]) => void;
+  /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
+  readonly lane?: string;
+  /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
+  readonly defaults?: {
+    readonly streamLimit?: number;
+    readonly eventLimit?: number;
+    readonly leaseMillis?: number;
+  };
 };
 
 /**
@@ -327,14 +342,20 @@ export class DrainController<
     this._backoffTimer.unref();
   }
 
+  /** Lane this controller drains (undefined = legacy single-lane span). */
+  get lane(): string | undefined {
+    return this.deps.lane;
+  }
+
   /** Run one drain pass. Short-circuits when not armed or already running. */
-  async drain({
-    streamLimit = 10,
-    eventLimit = 10,
-    leaseMillis = 10_000,
-  }: DrainOptions = {}): Promise<Drain<TEvents>> {
+  async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+
+    const d = this.deps.defaults ?? {};
+    const streamLimit = options.streamLimit ?? d.streamLimit ?? 10;
+    const eventLimit = options.eventLimit ?? d.eventLimit ?? 10;
+    const leaseMillis = options.leaseMillis ?? d.leaseMillis ?? 10_000;
 
     try {
       this._locked = true;
@@ -351,7 +372,8 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.isDeferred : undefined
+        this._backoff.size > 0 ? this.isDeferred : undefined,
+        this.deps.lane
       );
 
       if (!cycle) {
