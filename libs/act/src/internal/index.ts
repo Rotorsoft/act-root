@@ -18,7 +18,7 @@
  */
 
 export type { EventLaneSet } from "./build-classify.js";
-export { classifyRegistry } from "./build-classify.js";
+export { ALL_LANES, classifyRegistry } from "./build-classify.js";
 export { runCloseCycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { closeCorrelation, defaultCorrelator } from "./correlator.js";

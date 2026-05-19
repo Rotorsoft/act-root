@@ -495,6 +495,31 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(controllers.get("default")?.armed).toBe(false);
   });
 
+  it("allows declaring a lane named 'all' — sentinel is a Symbol, no collision", async () => {
+    // The wildcard sentinel in `_event_to_lanes` is a Symbol, so a
+    // user-declared lane named "all" works without ambiguity.
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "all" })
+      .on("Incremented")
+      .do(async function noop() {})
+      .to({ target: "all-out", lane: "all" })
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { armed: boolean }>;
+      }
+    )._drain_controllers;
+
+    await app.do(
+      "increment",
+      { stream: "x", actor: { id: "a", name: "a" } },
+      {}
+    );
+    expect(controllers.get("all")?.armed).toBe(true);
+    expect(controllers.get("default")?.armed).toBe(false);
+  });
+
   it("do() arms every lane when the event has a dynamic resolver", async () => {
     // A dynamic resolver makes the lane opaque at classify time, so
     // `_event_to_lanes` records "all" — committing the event arms

@@ -1,5 +1,6 @@
 import EventEmitter from "node:events";
 import {
+  ALL_LANES,
   buildDrain,
   buildEs,
   buildHandle,
@@ -842,7 +843,7 @@ export class Act<
     for (const name of names) {
       const set = this._event_to_lanes.get(name);
       if (set === undefined) continue;
-      if (set === "all") {
+      if (set === ALL_LANES) {
         this._armAll();
         return true;
       }
