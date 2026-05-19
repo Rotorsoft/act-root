@@ -115,9 +115,10 @@ export type ReactionHandler<
 export type ReactionResolver<
   TEvents extends Schemas,
   TKey extends keyof TEvents,
+  TLane extends string = string,
 > =
-  | Resolved // static
-  | ((event: Committed<TEvents, TKey>) => Resolved | undefined); // dynamic
+  | Resolved<TLane> // static
+  | ((event: Committed<TEvents, TKey>) => Resolved<TLane> | undefined); // dynamic
 
 /**
  * Resolver output shape — what `.to(...)` returns for a static or dynamic
@@ -133,11 +134,54 @@ export type ReactionResolver<
  *   than the worker can claim per cycle); idle systems are unaffected.
  *   See `libs/act-pg/PERFORMANCE.md` for the benchmark that motivated this
  *   knob.
+ * @property lane - Optional drain lane name (ACT-1103). When set, the
+ *   target stream is bound to the named lane's `DrainController` — its
+ *   per-lane `leaseMillis`, `streamLimit`, and `cycleMs` govern delivery.
+ *   When omitted, the stream lands in the implicit `"default"` lane.
+ *   Builder-declared lanes are strictly typed at the call site (the
+ *   `.to({lane})` literal narrows to declared lane names plus
+ *   `"default"`); slice-declared lanes are validated at runtime in
+ *   `act().build()` against the parent Act's declared set.
  */
-export type Resolved = {
+export type Resolved<TLane extends string = string> = {
   readonly target: string;
   readonly source?: string;
   readonly priority?: number;
+  readonly lane?: TLane;
+};
+
+/**
+ * Build-time configuration for a drain lane (ACT-1103).
+ *
+ * Each `act().withLane({...})` declaration constructs one `DrainController`
+ * with the configured timing budget. Reactions whose `.to({lane})`
+ * references the lane name land in that controller; reactions without
+ * `.lane` land in the implicit `"default"` lane.
+ *
+ * Lanes carve the drain pipeline along latency boundaries — slow webhook
+ * targets share one lane with a long `leaseMillis`, best-effort
+ * notifications share another with a short one, without the global lease
+ * bump that today's single-controller forces.
+ *
+ * @template TName - Literal lane name (narrowed by the builder so
+ *   `.to({lane: ...})` and `ActOptions.onlyLanes` reject typos at compile
+ *   time).
+ * @property name - Unique lane name. `"default"` is reserved for the
+ *   implicit lane every reaction lands in by default; declaring it
+ *   explicitly is allowed and lets operators tune its timing budget.
+ * @property leaseMillis - Lease window for `claim()` calls in this lane.
+ *   When omitted, falls back to the Act's `SettleOptions.leaseMillis` —
+ *   preserving today's behavior for apps that declare zero lanes.
+ * @property streamLimit - Max streams claimed per cycle in this lane.
+ *   Omitted falls back to the Act's `SettleOptions.streamLimit`.
+ * @property cycleMs - Cycle frequency for this lane's controller.
+ *   Omitted defers to the orchestrator's existing settle debounce.
+ */
+export type LaneConfig<TName extends string = string> = {
+  readonly name: TName;
+  readonly leaseMillis?: number;
+  readonly streamLimit?: number;
+  readonly cycleMs?: number;
 };
 
 /**
@@ -320,6 +364,11 @@ export type Fetch<TEvents extends Schemas> = Array<{
  * @property by - Unique identifier of the lease holder (UUID)
  * @property retry - Number of retry attempts (0 = first attempt)
  * @property lagging - Whether this stream is behind (lagging frontier)
+ * @property lane - Drain lane the stream is bound to (ACT-1103). Set by
+ *   the store on `claim()`; mirrors the `streams.lane` column. Optional
+ *   on the type because adapters land lane support incrementally —
+ *   adapters that haven't migrated yet omit the field, callers must
+ *   treat `undefined` as `"default"`.
  *
  * @example
  * ```typescript
@@ -345,6 +394,7 @@ export type Lease = {
   readonly by: string;
   readonly retry: number;
   readonly lagging: boolean;
+  readonly lane?: string;
 };
 
 /**

@@ -308,3 +308,14 @@ export const SNAP_EVENT = "__snapshot__";
  * @see {@link Act.close} for the close-the-books API
  */
 export const TOMBSTONE_EVENT = "__tombstone__";
+
+/**
+ * Name of the implicit lane every reaction lands in unless its `.to({lane})`
+ * declaration says otherwise (ACT-1103). Acts that don't call
+ * `.withLane(...)` see only this lane, and behavior is identical to
+ * pre-1103 single-controller drain.
+ *
+ * Persisted on `streams.lane` and threaded as the strict-typed default in
+ * builder generics — `lane?: TLanes` always includes `"default"`.
+ */
+export const DEFAULT_LANE = "default";

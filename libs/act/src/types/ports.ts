@@ -121,6 +121,12 @@ export type NotifyDisposer = () => void | Promise<void>;
  * @property leased_until - Lease expiration timestamp (when leased)
  * @property priority - Scheduling priority (default 0). Biases the
  *   lagging-frontier `claim()` ordering — see {@link Store.prioritize}.
+ * @property lane - Drain lane bound to the stream (ACT-1103). Set on
+ *   `subscribe()` from the reaction's `.to({lane})` declaration; updated
+ *   on subsequent subscribes so a restarted Act with a new lane
+ *   assignment wins. Optional during the lane rollout — adapters that
+ *   haven't migrated omit the field; callers treat `undefined` as
+ *   `"default"`.
  */
 export type StreamPosition = {
   readonly stream: string;
@@ -132,6 +138,7 @@ export type StreamPosition = {
   readonly priority: number;
   readonly leased_by?: string;
   readonly leased_until?: Date;
+  readonly lane?: string;
 };
 
 /**
@@ -164,6 +171,9 @@ export type StreamPosition = {
  *   `source`.
  * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)
  *   streams. Omit for all.
+ * @property lane - Restrict to streams bound to this drain lane
+ *   (ACT-1103). Exact-match only — lane names are short identifiers, not
+ *   patterns. Omit to span every lane.
  * @property after - Keyset pagination cursor: returns only streams with
  *   `stream > after` (lexicographic). Pass the last seen `stream` to fetch
  *   the next page.
@@ -175,6 +185,7 @@ export type QueryStreams = {
   readonly source?: string;
   readonly source_exact?: boolean;
   readonly blocked?: boolean;
+  readonly lane?: string;
   readonly after?: string;
   readonly limit?: number;
 };
@@ -212,7 +223,7 @@ export type QueryStreamsResult = {
  */
 export type StreamFilter = Pick<
   QueryStreams,
-  "stream" | "stream_exact" | "source" | "source_exact" | "blocked"
+  "stream" | "stream_exact" | "source" | "source_exact" | "blocked" | "lane"
 >;
 
 /**
@@ -469,6 +480,11 @@ export interface Store extends Disposable {
    * @param leading - Max streams from the leading frontier (descending watermark)
    * @param by - Unique lease holder identifier (UUID)
    * @param millis - Lease duration in milliseconds
+   * @param lane - Optional lane filter (ACT-1103). When set, restricts
+   *   the claim to streams bound to the named lane. When omitted, the
+   *   adapter spans every lane — preserving today's single-controller
+   *   semantics. Capability-gated in the TCK so adapters can adopt
+   *   lane filtering incrementally.
    * @returns Array of successfully leased streams with metadata
    *
    * @example
@@ -479,6 +495,11 @@ export interface Store extends Disposable {
    * });
    * ```
    *
+   * @example Lane-restricted claim
+   * ```typescript
+   * const slow = await store().claim(5, 5, randomUUID(), 60_000, "slow");
+   * ```
+   *
    * @see {@link subscribe} for registering new streams (used by correlate)
    * @see {@link ack} for acknowledging completion
    * @see {@link block} for blocking failed streams
@@ -487,7 +508,8 @@ export interface Store extends Disposable {
     lagging: number,
     leading: number,
     by: string,
-    millis: number
+    millis: number,
+    lane?: string
   ) => Promise<Lease[]>;
 
   /**
@@ -526,6 +548,15 @@ export interface Store extends Disposable {
        * overrides that ignore this max — operator-driven changes.
        */
       priority?: number;
+      /**
+       * Drain lane this stream is bound to (ACT-1103). Omitted means
+       * the implicit `"default"` lane. On every `subscribe()` call the
+       * adapter UPSERTs the row's `lane` to this value — so a restarted
+       * Act with a new lane assignment wins over the previously stored
+       * lane. Online re-laning (while workers hold leases) is **not**
+       * supported; the safe re-laning trigger is process restart.
+       */
+      lane?: string;
     }>
   ) => Promise<{ subscribed: number; watermark: number }>;
 

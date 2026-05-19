@@ -29,6 +29,7 @@ import type {
   Drain,
   DrainOptions,
   IAct,
+  LaneConfig,
   Lease,
   Logger,
   Query,
@@ -128,7 +129,7 @@ export type ActLifecycleEvents<
  *   Act instance instead of threading the value through every call site.
  *   Default: {@link DEFAULT_SETTLE_DEBOUNCE_MS}.
  */
-export type ActOptions = {
+export type ActOptions<TLanes extends string = string> = {
   readonly maxSubscribedStreams?: number;
   readonly settleDebounceMs?: number;
   /**
@@ -150,6 +151,20 @@ export type ActOptions = {
    * for the close-the-books transaction.
    */
   readonly correlator?: Correlator;
+  /**
+   * Restrict this process to a subset of declared lanes (ACT-1103).
+   *
+   * When set, only the named lanes have their controllers booted on
+   * `build()`; lanes not in the list are silently skipped. The implicit
+   * `"default"` lane is always included unless explicitly omitted (so
+   * `onlyLanes: ["slow"]` boots only the slow controller). Useful for
+   * the "process per lane" deployment shape — one image, lane selection
+   * via env. Also surfaced via the `ACT_ONLY_LANES` env var in later
+   * slices; this option is the programmatic form.
+   *
+   * Names not in the declared lane set are rejected at build time.
+   */
+  readonly onlyLanes?: ReadonlyArray<TLanes>;
 };
 
 export class Act<
@@ -261,6 +276,25 @@ export class Act<
   /** Reaction dispatchers built once and handed to runDrainCycle each cycle. */
   private readonly _handle: Handle<TEvents>;
   private readonly _handle_batch: HandleBatch<TEvents>;
+  /**
+   * Declared drain lanes (ACT-1103). Captured from the builder's
+   * `.withLane(...)` calls. Recorded on the instance for slice 7 to
+   * fan out per-lane controllers; for slice 1 the field is set but the
+   * orchestrator continues with the existing single-controller path.
+   */
+  private readonly _lanes: ReadonlyArray<LaneConfig>;
+
+  /**
+   * Drain lanes declared on this Act via `.withLane(...)` (ACT-1103).
+   *
+   * Read-only view, ordered by declaration. The implicit `"default"`
+   * lane is **not** included — only explicitly declared lanes. Used by
+   * the inspector to render lane chips, and by tests that assert the
+   * builder threaded its config through.
+   */
+  get lanes(): ReadonlyArray<LaneConfig> {
+    return this._lanes;
+  }
 
   /**
    * Create a new Act orchestrator. Prefer the {@link act} builder over
@@ -272,14 +306,34 @@ export class Act<
    * @param _states   Merged map of state name → state definition
    * @param batchHandlers Static-target projection batch handlers (target → handler)
    * @param options   Tuning knobs — see {@link ActOptions}
+   * @param lanes     Declared drain lanes (ACT-1103). The builder collects
+   *   these from `.withLane(...)` calls. Slice 1 records them on the
+   *   instance; later slices fan out one `DrainController` per lane.
    */
   constructor(
     public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
     private readonly _states: Map<string, State<any, any, any>> = new Map(),
     batchHandlers: Map<string, BatchHandler<any>> = new Map(),
-    options: ActOptions = {}
+    options: ActOptions = {},
+    lanes: ReadonlyArray<LaneConfig> = []
   ) {
     this._batch_handlers = batchHandlers;
+    this._lanes = lanes;
+    if (options.onlyLanes && options.onlyLanes.length > 0) {
+      const declared = new Set<string>([
+        "default",
+        ...lanes.map((l) => l.name),
+      ]);
+      const unknown = options.onlyLanes.filter((l) => !declared.has(l));
+      if (unknown.length > 0) {
+        throw new Error(
+          `ActOptions.onlyLanes references undeclared lane(s): ${unknown
+            .map((l) => `"${l}"`)
+            .join(", ")}. ` +
+            `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}.`
+        );
+      }
+    }
     this._scoped = options.scoped
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
