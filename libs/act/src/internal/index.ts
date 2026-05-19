@@ -16,6 +16,8 @@
  *
  * @internal
  */
+
+export type { EventLaneSet } from "./build-classify.js";
 export { classifyRegistry } from "./build-classify.js";
 export { runCloseCycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";

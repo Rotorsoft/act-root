@@ -450,6 +450,79 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(ctrl?._worker).toBe(before);
   });
 
+  it("do() arms only the lane whose reactions match the committed event", async () => {
+    // Two lanes, two reactions, each on a different event. Committing
+    // an event reactive to only one lane must not arm the other lane.
+    const TwoEvents = state({
+      TwoEvents: z.object({ count: z.number() }),
+    })
+      .init(() => ({ count: 0 }))
+      .emits({ FastTick: ZodEmpty, SlowTick: ZodEmpty })
+      .patch({
+        FastTick: (_, s) => ({ count: s.count + 1 }),
+        SlowTick: (_, s) => ({ count: s.count + 1 }),
+      })
+      .on({ fastTick: ZodEmpty })
+      .emit(() => ["FastTick", {}])
+      .on({ slowTick: ZodEmpty })
+      .emit(() => ["SlowTick", {}])
+      .build();
+
+    const app = act()
+      .withState(TwoEvents)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .on("FastTick")
+      .do(async function fastHandler() {})
+      .to({ target: "fast-out", lane: "fast" })
+      .on("SlowTick")
+      .do(async function slowHandler() {})
+      .to({ target: "slow-out", lane: "slow" })
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { armed: boolean }>;
+      }
+    )._drain_controllers;
+
+    await app.do(
+      "fastTick",
+      { stream: "x", actor: { id: "a", name: "a" } },
+      {}
+    );
+    expect(controllers.get("fast")?.armed).toBe(true);
+    expect(controllers.get("slow")?.armed).toBe(false);
+    expect(controllers.get("default")?.armed).toBe(false);
+  });
+
+  it("do() arms every lane when the event has a dynamic resolver", async () => {
+    // A dynamic resolver makes the lane opaque at classify time, so
+    // `_event_to_lanes` records "all" — committing the event arms
+    // every controller (fallback path).
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast" })
+      .withLane({ name: "slow" })
+      .on("Incremented")
+      .do(async function dyn() {})
+      .to((event) => ({ target: `dyn-${event.stream}`, lane: "fast" }))
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<string, { armed: boolean }>;
+      }
+    )._drain_controllers;
+
+    await app.do(
+      "increment",
+      { stream: "y", actor: { id: "a", name: "a" } },
+      {}
+    );
+    expect(controllers.get("fast")?.armed).toBe(true);
+    expect(controllers.get("slow")?.armed).toBe(true);
+    expect(controllers.get("default")?.armed).toBe(true);
+  });
+
   it("post-drain stop check — stop() called during a tick prevents re-scheduling", async () => {
     // The acked listener fires inside drain(). Calling shutdown() from
     // there flips `_stopped`; the tick then takes the post-drain

@@ -11,6 +11,7 @@ import {
   type DrainOps,
   defaultCorrelator,
   type EsOps,
+  type EventLaneSet,
   type Handle,
   type HandleBatch,
   runCloseCycle,
@@ -243,6 +244,14 @@ export class Act<
    * set when seeding a `restart` snapshot in multi-state apps.
    */
   private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
+  /**
+   * Event-name → lane fan-in for selective arming (ACT-1103). Built by
+   * `classifyRegistry` once per build. `"all"` means at least one of
+   * the event's reactions is a dynamic resolver (lane opaque until
+   * runtime); a `Set<string>` lists the static lanes only that event's
+   * reactions target.
+   */
+  private readonly _event_to_lanes: ReadonlyMap<string, EventLaneSet>;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
   /** Wraps a public-method body so internal `store()`/`cache()` resolve to the
@@ -326,10 +335,16 @@ export class Act<
     });
     this._handle_batch = buildHandleBatch<TEvents>(this._logger);
 
-    const { staticTargets, hasDynamicResolvers, reactiveEvents, eventToState } =
-      classifyRegistry(this.registry, this._states);
+    const {
+      staticTargets,
+      hasDynamicResolvers,
+      reactiveEvents,
+      eventToState,
+      eventToLanes,
+    } = classifyRegistry(this.registry, this._states);
     this._reactive_events = reactiveEvents;
     this._event_to_state = eventToState;
+    this._event_to_lanes = eventToLanes;
 
     // Build one DrainController per active lane (ACT-1103). The implicit
     // "default" lane is always present unless onlyLanes excludes it. Each
@@ -459,13 +474,12 @@ export class Act<
           // Wake once per commit when at least one event has a local
           // reaction. Avoids spurious wake-ups for remote commits
           // belonging to bounded contexts this process doesn't react to.
-          const hasReactive = notification.events.some((e) =>
-            this._reactive_events.has(e.name)
+          // ACT-1103: selective arming via the shared helper — only the
+          // lanes whose reactions match the notified events.
+          const armed = this._armForEventNames(
+            notification.events.map((e) => e.name)
           );
-          if (hasReactive) {
-            this._armAll();
-            this._settle.schedule({ debounceMs: 0 });
-          }
+          if (armed) this._settle.schedule({ debounceMs: 0 });
         } catch (err) {
           this._logger.error(err, "notified handler threw");
         }
@@ -573,20 +587,18 @@ export class Act<
         reactingTo,
         skipValidation
       );
-      // Arm the drain when any committed event has reactions.
-      // Skip the scan entirely when no event has any reaction (common in
-      // pure-state-machine apps).
-      if (this._reactive_events.size > 0) {
-        for (const snap of snapshots) {
-          if (
-            snap.event?.name &&
-            this._reactive_events.has(snap.event.name as string)
-          ) {
-            this._armAll();
-            break;
-          }
-        }
-      }
+      // Arm the drain when any committed event has reactions (ACT-1103:
+      // arm only the lanes whose reactions match — events whose reactions
+      // are all statically lane-resolved arm a subset; events with at
+      // least one dynamic resolver fall back to _armAll via the "all"
+      // sentinel).
+      if (this._reactive_events.size > 0)
+        // Snapshots produced by `action()` always carry their committed
+        // event — the optional `event?` on the type is for load()
+        // snapshots, which don't reach this path.
+        this._armForEventNames(
+          snapshots.map((s) => (s.event as { name: string }).name)
+        );
       this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
       return snapshots;
     });
@@ -814,6 +826,31 @@ export class Act<
   /** Arm every active lane controller (ACT-1103). */
   private _armAll(): void {
     for (const c of this._drain_controllers.values()) c.arm();
+  }
+
+  /**
+   * Arm only the lane controllers whose reactions match the supplied
+   * event names (ACT-1103 selective arming). Events with any dynamic
+   * resolver fall back to `_armAll()` via the `"all"` sentinel — the
+   * resolver's lane isn't known until correlate runs the function.
+   * Events with no reactions are skipped; `_event_to_lanes` doesn't
+   * carry them. Returns true when any controller was armed (used by
+   * the notify handler to decide whether to schedule a settle).
+   */
+  private _armForEventNames(names: Iterable<string>): boolean {
+    const to_arm = new Set<string>();
+    for (const name of names) {
+      const set = this._event_to_lanes.get(name);
+      if (set === undefined) continue;
+      if (set === "all") {
+        this._armAll();
+        return true;
+      }
+      for (const lane of set) to_arm.add(lane);
+    }
+    if (to_arm.size === 0) return false;
+    for (const lane of to_arm) this._drain_controllers.get(lane)?.arm();
+    return true;
   }
 
   /** Drain every active lane controller in parallel and aggregate.

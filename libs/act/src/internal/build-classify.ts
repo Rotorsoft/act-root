@@ -34,11 +34,24 @@ import type { StaticTarget } from "./correlate-cycle.js";
  *
  * @internal
  */
+/**
+ * Per-event lane fan-in (ACT-1103). For events whose every reaction
+ * has a static resolver, the value is the union of those reactions'
+ * declared lanes — `do()` arms only those controllers on commit. For
+ * events with at least one dynamic resolver, the value is `"all"`,
+ * because the resolver's lane is opaque until it's called at runtime;
+ * `do()` falls back to arming every controller for those events.
+ *
+ * @internal
+ */
+export type EventLaneSet = ReadonlySet<string> | "all";
+
 export type Classification = {
   readonly staticTargets: StaticTarget[];
   readonly hasDynamicResolvers: boolean;
   readonly reactiveEvents: ReadonlySet<string>;
   readonly eventToState: ReadonlyMap<string, State<any, any, any>>;
+  readonly eventToLanes: ReadonlyMap<string, EventLaneSet>;
 };
 
 /**
@@ -59,6 +72,7 @@ export function classifyRegistry<
 ): Classification {
   const statics = new Map<string, StaticTarget>();
   const reactiveEvents = new Set<string>();
+  const eventToLanes = new Map<string, Set<string> | "all">();
   let hasDynamicResolvers = false;
 
   for (const [name, register] of Object.entries(registry.events)) {
@@ -66,8 +80,19 @@ export function classifyRegistry<
     for (const reaction of register.reactions.values()) {
       if (typeof reaction.resolver === "function") {
         hasDynamicResolvers = true;
+        // Dynamic resolver — lane is opaque until runtime. Mark the
+        // event as wildcard so `do()` falls back to arming every
+        // controller for any commit of it.
+        eventToLanes.set(name, "all");
       } else {
         const { target, source, priority = 0, lane } = reaction.resolver;
+        const lane_name = lane ?? "default";
+        const existing_lanes = eventToLanes.get(name);
+        if (existing_lanes !== "all") {
+          const set = existing_lanes ?? new Set<string>();
+          set.add(lane_name);
+          eventToLanes.set(name, set);
+        }
         const key = `${target}|${source ?? ""}`;
         const existing = statics.get(key);
         if (!existing) {
@@ -107,5 +132,6 @@ export function classifyRegistry<
     hasDynamicResolvers,
     reactiveEvents,
     eventToState,
+    eventToLanes,
   };
 }
