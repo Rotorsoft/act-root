@@ -4,7 +4,7 @@
 [![NPM Downloads](https://img.shields.io/npm/dm/@rotorsoft/act-pg.svg)](https://www.npmjs.com/package/@rotorsoft/act-pg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-_PostgreSQL event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). ACID, connection-pooled, multi-process — production default for Act deployments._
+_PostgreSQL event store for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act). ACID, connection-pooled, multi-process — production default for Act deployments. Lane-aware claim/ack via `streams.lane` + `streams_lane_ix` since v0.25.0 ([ACT-1103](https://github.com/Rotorsoft/act-root/issues/733))._
 
 ## Why this package
 
