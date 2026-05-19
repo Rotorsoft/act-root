@@ -333,8 +333,10 @@ describe("tracing", () => {
         [{ stream: "sub", at: 7 }],
         []
       );
+      // Target stream is colored cyan, source is dim, so ANSI codes
+      // intervene between them — match each piece independently.
       expect(traceSpy).toHaveBeenCalledWith(
-        expect.stringContaining("sub<-src")
+        expect.stringMatching(/sub.*<-src/)
       );
     });
 

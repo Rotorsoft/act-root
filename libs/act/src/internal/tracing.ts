@@ -70,6 +70,7 @@ const es_caption = (caption: string, color: string, body: string): string =>
 const C_LANE = "\x1b[38;5;183m"; // lilac — distinct from gray drain + drain ops
 const C_DIM = "\x1b[38;5;240m"; // dim gray — dimmer than C_DRAIN
 const C_ERR = "\x1b[38;5;196m"; // bright red — block marker
+const C_STREAM = "\x1b[38;5;51m"; // cyan — target stream names in drain/correlate traces
 
 /** Wrap with the muted color when pretty mode is on. Plain in production. */
 const dim = (text: string): string =>
@@ -288,8 +289,8 @@ export function buildDrain<TEvents extends Schemas>(
             const data = streams
               .map(({ stream, lane }) =>
                 uniformLane || !lane || lane === "default"
-                  ? stream
-                  : `${stream}${dim(`[${lane}]`)}`
+                  ? hue(C_STREAM, stream)
+                  : `${hue(C_STREAM, stream)}${dim(`[${lane}]`)}`
               )
               .join(" ");
             logger.trace(`${drain_caption("correlated", uniformLane)} ${data}`);
@@ -350,7 +351,12 @@ export function traceCycle<TEvents extends Schemas>(
   const detail = leased
     .map(({ stream, at, retry }) => {
       const f = fetchByStream.get(stream);
-      const key = f?.source ? `${stream}<-${f.source}` : stream;
+      // Target stream in cyan so the operator's eye lands on "which
+      // stream did this happen on?" first; source (the events' origin)
+      // stays dim — secondary info.
+      const key = f?.source
+        ? `${hue(C_STREAM, stream)}${dim(`<-${f.source}`)}`
+        : hue(C_STREAM, stream);
       const events =
         f && f.events.length
           ? ` ${dim(
