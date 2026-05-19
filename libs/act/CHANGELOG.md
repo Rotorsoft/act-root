@@ -22,6 +22,30 @@
 
 * **act:** lane fan-out overhead bench + PERFORMANCE.md numbers ([11fb121](https://github.com/rotorsoft/act-root/commit/11fb121cfffd0da55973a4fa944899d3e31de203))
 
+# [@rotorsoft/act-v0.45.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.44.0...@rotorsoft/act-v0.45.0) (2026-05-19)
+
+
+### Bug Fixes
+
+* **act:** surface partial-success failures in drain trace + block records ([b4994d4](https://github.com/rotorsoft/act-root/commit/b4994d459ef6dc1221d23e9ca459f9434da644dc)), closes [#16](https://github.com/rotorsoft/act-root/issues/16)
+
+
+### Features
+
+* **act-sqlite:** wire lanes through SqliteStore and consolidate the lane contract into the TCK ([70c062b](https://github.com/rotorsoft/act-root/commit/70c062b256b273982ca9e6d155a8606020fd35e4))
+* **act:** add lane-aware type surface for drain controllers ([7914eca](https://github.com/rotorsoft/act-root/commit/7914eca874baa71997fca1da0e0fdbbf4f5b613a))
+* **act:** human-readable drain traces + lane suffix; lane on ack/block ([82fc17a](https://github.com/rotorsoft/act-root/commit/82fc17aea2f7eeef21be3ba1c387aac4591cd603)), closes [#id](https://github.com/rotorsoft/act-root/issues/id) [#id](https://github.com/rotorsoft/act-root/issues/id)
+* **act:** narrow slice lane declarations at compile time ([2ab2246](https://github.com/rotorsoft/act-root/commit/2ab2246e38a44e9a567b1e967b94fe6837741b70))
+* **act:** parallel lane drain + per-lane workers; PG benchmark headline ([f76bc31](https://github.com/rotorsoft/act-root/commit/f76bc3146b0943c71d57992c8b270c85ed5e4eb1))
+* **act:** per-lane DrainController fan-out in the orchestrator ([71612ee](https://github.com/rotorsoft/act-root/commit/71612ee56ab094a57ce05de086c7a13f6be75841))
+* **act:** selective lane arming by event-name → lane map ([53943bd](https://github.com/rotorsoft/act-root/commit/53943bde0273c18c3e37005a05576297001133d1))
+* **act:** wire lanes through InMemoryStore ([4c81d02](https://github.com/rotorsoft/act-root/commit/4c81d02afd09c99915a72147fabe180f64463c00)), closes [#733](https://github.com/rotorsoft/act-root/issues/733)
+
+
+### Performance Improvements
+
+* **act:** lane fan-out overhead bench + PERFORMANCE.md numbers ([11fb121](https://github.com/rotorsoft/act-root/commit/11fb121cfffd0da55973a4fa944899d3e31de203))
+
 # [@rotorsoft/act-v0.44.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.43.0...@rotorsoft/act-v0.44.0) (2026-05-17)
 
 
