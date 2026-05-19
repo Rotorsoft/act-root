@@ -345,4 +345,141 @@ describe("lanes (ACT-1103, slice 1)", () => {
     )._drain_controllers;
     expect([...controllers.keys()]).toEqual(["slow"]);
   });
+
+  it("auto-starts a per-lane worker when cycleMs is declared", async () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast", cycleMs: 5 })
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { lane: string | undefined; stop: () => void } & {
+            _worker: unknown;
+          }
+        >;
+      }
+    )._drain_controllers;
+    expect(controllers.get("fast")?._worker).toBeDefined();
+    expect(controllers.get("default")?._worker).toBeUndefined();
+  });
+
+  it("auto-fires the per-lane worker — armed drains are picked up on schedule", async () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast", cycleMs: 5, leaseMillis: 100 })
+      .on("Incremented")
+      .do(async function noop() {})
+      .to({ target: "out", lane: "fast" })
+      .build();
+    await app.do(
+      "increment",
+      { stream: "x", actor: { id: "a", name: "a" } },
+      {}
+    );
+    await app.correlate();
+    // Let the worker tick a couple of times; armed → drain → ack.
+    await new Promise<void>((r) => setTimeout(r, 50));
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<string, { armed: boolean }>;
+      }
+    )._drain_controllers.get("fast");
+    expect(ctrl?.armed).toBe(false);
+  });
+
+  it("shutdown stops every per-lane worker", async () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast", cycleMs: 5 })
+      .withLane({ name: "slow", cycleMs: 1_000 })
+      .build();
+    const controllers = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _worker: unknown; _stopped: boolean }
+        >;
+      }
+    )._drain_controllers;
+    expect(controllers.get("fast")?._worker).toBeDefined();
+    expect(controllers.get("slow")?._worker).toBeDefined();
+    await app.shutdown();
+    expect(controllers.get("fast")?._worker).toBeUndefined();
+    expect(controllers.get("slow")?._worker).toBeUndefined();
+    expect(controllers.get("fast")?._stopped).toBe(true);
+  });
+
+  it("start() is a no-op after stop() — once stopped, the controller stays stopped", () => {
+    const app = act().withState(Counter).build();
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          {
+            stop: () => void;
+            start: (ms: number) => void;
+            _worker: unknown;
+            _stopped: boolean;
+          }
+        >;
+      }
+    )._drain_controllers.get("default");
+    ctrl?.stop();
+    expect(ctrl?._stopped).toBe(true);
+    ctrl?.start(5);
+    expect(ctrl?._worker).toBeUndefined();
+  });
+
+  it("start() is a no-op when the worker is already running", () => {
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast", cycleMs: 5 })
+      .build();
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { start: (ms: number) => void; _worker: unknown }
+        >;
+      }
+    )._drain_controllers.get("fast");
+    const before = ctrl?._worker;
+    ctrl?.start(10);
+    expect(ctrl?._worker).toBe(before);
+  });
+
+  it("post-drain stop check — stop() called during a tick prevents re-scheduling", async () => {
+    // The acked listener fires inside drain(). Calling shutdown() from
+    // there flips `_stopped`; the tick then takes the post-drain
+    // early-return branch.
+    const app = act()
+      .withState(Counter)
+      .withLane({ name: "fast", cycleMs: 5, leaseMillis: 100 })
+      .on("Incremented")
+      .do(async function noop() {})
+      .to({ target: "stop-mid-tick", lane: "fast" })
+      .build();
+    app.on("acked", () => {
+      void app.shutdown();
+    });
+    await app.do(
+      "increment",
+      { stream: "x", actor: { id: "a", name: "a" } },
+      {}
+    );
+    await app.correlate();
+    await new Promise<void>((r) => setTimeout(r, 50));
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<
+          string,
+          { _worker: unknown; _stopped: boolean }
+        >;
+      }
+    )._drain_controllers.get("fast");
+    expect(ctrl?._stopped).toBe(true);
+    expect(ctrl?._worker).toBeUndefined();
+  });
 });

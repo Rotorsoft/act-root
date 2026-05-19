@@ -350,27 +350,30 @@ export class Act<
     this._drain_controllers = new Map();
     for (const name of activeLanes) {
       const cfg = lanes.find((l) => l.name === name);
-      this._drain_controllers.set(
-        name,
-        new DrainController({
-          logger: this._logger,
-          ops: this._cd,
-          registry: this.registry,
-          batchHandlers: this._batch_handlers,
-          handle: this._handle,
-          handleBatch: this._handle_batch,
-          onAcked: (acked) => this.emit("acked", acked),
-          onBlocked: (blocked) => this.emit("blocked", blocked),
-          // Pass lane only when a true per-lane controller is active.
-          // The all-lanes (single default) case keeps lane=undefined so
-          // adapter SQL collapses to the pre-1103 shape.
-          lane: singleDefaultLane ? undefined : name,
-          defaults: cfg && {
-            streamLimit: cfg.streamLimit,
-            leaseMillis: cfg.leaseMillis,
-          },
-        })
-      );
+      const controller = new DrainController({
+        logger: this._logger,
+        ops: this._cd,
+        registry: this.registry,
+        batchHandlers: this._batch_handlers,
+        handle: this._handle,
+        handleBatch: this._handle_batch,
+        onAcked: (acked) => this.emit("acked", acked),
+        onBlocked: (blocked) => this.emit("blocked", blocked),
+        // Pass lane only when a true per-lane controller is active.
+        // The all-lanes (single default) case keeps lane=undefined so
+        // adapter SQL collapses to the pre-1103 shape.
+        lane: singleDefaultLane ? undefined : name,
+        defaults: cfg && {
+          streamLimit: cfg.streamLimit,
+          leaseMillis: cfg.leaseMillis,
+        },
+      });
+      // Auto-start a per-lane worker when the operator declared a
+      // cycleMs — the intent of `withLane({cycleMs: 100})` is "drive
+      // this lane every 100 ms," independent of the Act-level settle
+      // loop. unref()'d so the timer doesn't keep the process alive.
+      if (cfg?.cycleMs !== undefined) controller.start(cfg.cycleMs);
+      this._drain_controllers.set(name, controller);
     }
 
     this._correlate = new CorrelateCycle(
@@ -423,6 +426,7 @@ export class Act<
         this._emitter.removeAllListeners();
         this.stop_correlations();
         this.stop_settling();
+        for (const c of this._drain_controllers.values()) c.stop();
         // `_wireNotify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.
         const disposer = await this._notify_disposer;
@@ -812,14 +816,23 @@ export class Act<
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
-  /** Drain every active lane controller in sequence and aggregate results. */
+  /** Drain every active lane controller in parallel and aggregate.
+   *
+   * Parallel — not sequential — so a slow lane's in-flight handler does
+   * not block a fast lane's claim/dispatch/ack cycle. Each controller's
+   * `claim()` is independent (filtered by lane); the store's
+   * `SKIP LOCKED` keeps cross-controller races safe. Lifecycle events
+   * (`acked`, `blocked`) may interleave by lane — listeners filter via
+   * `lease.lane`. */
   private async _drainAll(options: DrainOptions): Promise<Drain<TEvents>> {
+    const results = await Promise.all(
+      [...this._drain_controllers.values()].map((c) => c.drain(options))
+    );
     const fetched: Drain<TEvents>["fetched"] = [];
     const leased: Lease[] = [];
     const acked: Lease[] = [];
     const blocked: BlockedLease[] = [];
-    for (const c of this._drain_controllers.values()) {
-      const r = await c.drain(options);
+    for (const r of results) {
       fetched.push(...r.fetched);
       leased.push(...r.leased);
       acked.push(...r.acked);

@@ -131,6 +131,8 @@ Per-package `PERFORMANCE.md` files track benchmark history with before/after num
 - `libs/act/PERFORMANCE.md` — drain/cache/correlate
 - `libs/act-pg/PERFORMANCE.md` — Postgres-specific (incl. `notify` latency)
 
+**Benchmarks must run on real adapters.** InMemoryStore is the fastest possible read/write path (no I/O, no SQL planner) — measuring perf optimizations against it understates wins and ignores the index/lock/connection-pool dimensions that the production adapters live in. Every perf claim that ships in a `PERFORMANCE.md` table needs numbers from `act-pg` (port 5431 docker) or `act-sqlite`. InMemory may appear as a baseline reference, never as the primary number. New benches go in the relevant adapter package's `bench/` or `scripts/`, not just `libs/act/bench/`.
+
 ## Safety-critical one-liners
 
 These are easy to get subtly wrong. Read the linked docs before editing related code.

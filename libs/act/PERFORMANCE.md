@@ -556,31 +556,62 @@ Same reasoning as ACT-403: the cost is below measurement noise, so a baseline wo
 
 ## Lane Fan-out (ACT-1103)
 
-The orchestrator now constructs one `DrainController` per active lane: the implicit `default` plus every declaration from `.withLane(...)`. `Act.drain()` walks the controller map, calls `claim()` once per lane (each filtered by lane), and aggregates `fetched`/`leased`/`acked`/`blocked`. Two questions for the perf gate:
+The orchestrator builds one `DrainController` per active lane (implicit `default` + every `.withLane(...)`). `Act._drainAll` runs every controller's `drain()` in parallel via `Promise.all` and aggregates `fetched`/`leased`/`acked`/`blocked`. Per-lane `cycleMs` autostarts a `setTimeout` chain that calls the controller's `drain()` at the lane's cadence — independent of the Act-level settle loop.
 
-1. **Apps that never declare a lane must not regress.** With no `.withLane(...)`, the single implicit controller passes `lane: undefined` to `claim()` — adapter SQL collapses to the pre-1103 shape, so the planner sees the same query plan it did before this change. Drain throughput should track baseline within noise.
+Three perf questions:
 
-2. **Modest multi-lane apps should pay only iteration cost.** With 4 lanes active, `drain()` calls `claim()` four times per cycle. On durable adapters each filtered claim still serves from `streams_lane_ix`; on InMemory it's a Map filter. Drain time should grow by a small constant, not multiplicatively per stream.
+1. **Zero regression for zero-lane apps.** With no `.withLane(...)`, the single implicit controller passes `lane: undefined` to `claim()` — adapter SQL collapses to the pre-1103 shape.
+2. **Bounded multi-lane overhead.** With 4 lanes active, `_drainAll` calls four parallel claims. Each filtered claim is served from `streams_lane_ix` on durable adapters.
+3. **Fast-lane responsiveness under slow-lane backpressure.** When a slow handler holds the slow lane for 100 ms+, the fast lane keeps acking events on its own timing budget — the actual user-facing benefit of lanes.
 
-### Bench: `libs/act/scripts/lane-overhead.ts`
+### Bench 1: drain overhead — `libs/act-pg/scripts/lane-overhead.ts` (Postgres, headline)
 
-Workload per iteration: commit 100 events on distinct streams (each event triggers a reaction that targets a per-stream output stream), `await app.correlate()` to subscribe targets, then time `app.drain()` until settled. 30 timed iterations after 5 warmups, on InMemoryStore. Each iteration re-primes the workload because `drain()` is destructive (acked streams have no work next cycle).
+Workload: commit 100 events on distinct streams, `correlate()` once, time `drain()` until settled. 30 timed iterations after 5 warmups against Docker PG. Each iteration re-primes (drain is destructive). Two back-to-back runs reported because the delta sits inside the noise floor.
+
+| Configuration | p50 | p95 | mean | drains/sec |
+|---|---:|---:|---:|---:|
+| 1 lane (no `withLane`) — pre-1103 path | 60.4–60.8 ms | 67.1–69.9 ms | 60.6–61.9 ms | 16–17 |
+| 4 lanes (default + 3 declared) | 62.3–63.2 ms | 67.4–68.0 ms | 62.4–63.1 ms | 16 |
+
+**+1% to +4% mean across two runs — within run-to-run variance.** The lane-filtered `claim()` serves from `streams_lane_ix`; four parallel claims add up to the same total work the single all-lanes claim was doing. Production cost of the fan-out is essentially the controller-map walk.
+
+### Bench 2: drain overhead — `libs/act/scripts/lane-overhead.ts` (InMemoryStore, upper-bound reference)
+
+Same workload against the in-memory adapter, which has no index — every `claim()` scans every subscribed stream and rejects those outside its lane.
 
 | Configuration | p50 | p95 | mean | drains/sec |
 |---|---:|---:|---:|---:|
 | 1 lane (no `withLane`) — pre-1103 path | 53.4 ms | 55.5 ms | 53.4 ms | 19 |
 | 4 lanes (default + 3 declared) | 57.2 ms | 58.5 ms | 57.1 ms | 18 |
 
-**+7% mean.** The overhead is the cost of walking the controller map plus the Map filter inside `InMemoryStore.claim()` — each `claim()` now scans every subscribed stream and rejects those not in its lane. Durable adapters with `streams_lane_ix` will show a smaller delta because they serve the filtered claim from the index instead of scanning. The "modest multi-lane" upper bound in the ticket's acceptance criteria is "within noise of baseline" — +7% with a 4× lane budget is comfortably in that band.
+**+7% mean.** Cost is the Map filter inside `InMemoryStore.claim()`. Reference for the upper bound when no index is available.
+
+### Bench 3: fast-lane responsiveness — `libs/act-pg/scripts/lane-responsiveness.ts`
+
+Workload: commit 5 events on slow streams (handler sleeps 100 ms) + 50 events on fast streams (no-op handler), `correlate()`, then loop `drain()` until done. Measure fast-event latency from "drain may begin" to "fast handler fires" — commit serialization excluded so the number reflects orchestrator responsiveness only. 6 iterations, Postgres, two runs.
+
+| Configuration | p50 | p95 | p99 | mean |
+|---|---:|---:|---:|---:|
+| Single controller (no `withLane`) | 130–133 ms | 134–140 ms | 134–140 ms | 131–133 ms |
+| Two lanes (`slow` + `fast`) | 17.0–18.6 ms | 17.9–20.9 ms | 18.0–20.9 ms | 17.0–18.1 ms |
+
+**~7× faster fast-lane responsiveness under slow-lane backpressure.** With a single controller, slow + fast streams share one `Promise.all` dispatch — the cycle's `ack` waits for the slowest handler (the 100 ms sleep) before fast events ack. With two lanes, `_drainAll`'s `Promise.all` runs each controller's drain in parallel; the fast lane's handlers run, ack, and free their leases independently while the slow controller is still working. This is the user-facing benefit lanes were introduced for.
 
 ### How to read these numbers
 
-- **The 1-lane row is the regression guardrail.** A future change that makes this slower than the pre-1103 baseline reaches for an exception, not an excuse — `lane: undefined` is the legacy path and must stay that way.
-- **The 4-lane row is informational.** Operator decisions to declare multiple lanes are made on latency-class grounds (slow webhook vs fast notification), not on drain throughput per cycle. The 7% lane-iteration tax is paid against the freedom to bump `leaseMillis` on one lane without affecting the others.
-- **No CI baseline.** The fan-out path is new and a regression baseline would lock in this exact +7%. Re-run the script when touching `DrainController` or the lane filter SQL on a durable adapter; absolute numbers will drift with hardware but the multi-lane / single-lane ratio should stay close to this.
+- **The 1-lane / single-controller rows are the regression guardrail.** A future change that makes them slower than the pre-1103 baseline reaches for an exception, not an excuse — `lane: undefined` is the legacy path and must stay that way.
+- **The fan-out cost (Bench 1/2) is informational.** Operator decisions to declare lanes are made on latency-class grounds (slow webhook vs fast notification), not on drain throughput per cycle.
+- **The responsiveness number (Bench 3) is the actual headline.** Single-controller fast latency tracks the slow handler's duration; lane separation collapses it back to the no-op floor.
+- **No CI baseline.** The fan-out path is new and a regression baseline would lock in run-to-run variance. Re-run when touching `DrainController` or the lane filter SQL.
+
+### Per-lane worker (`cycleMs`)
+
+`withLane({cycleMs: 100})` auto-starts a `setTimeout` chain on the controller that calls its own `drain()` at the configured cadence. The timer uses `unref()` so it doesn't keep the process alive on its own; `shutdown()` clears it. Useful for "always-on" lanes that should drain continuously regardless of whether the application explicitly calls `settle()` — a fast lane with `cycleMs: 10` will reach commit-to-ack latency near 10 ms without the caller having to drive the loop. Not benchmarked separately because the responsiveness bench above already pumps drain in a tight loop; the worker exists for apps that don't.
 
 ### Re-running
 
 ```bash
-NODE_ENV=test LOG_LEVEL=fatal pnpm tsx libs/act/scripts/lane-overhead.ts
+NODE_ENV=test LOG_LEVEL=fatal pnpm tsx libs/act-pg/scripts/lane-overhead.ts          # bench 1 — PG headline
+NODE_ENV=test LOG_LEVEL=fatal pnpm tsx libs/act/scripts/lane-overhead.ts             # bench 2 — InMemory reference
+NODE_ENV=test LOG_LEVEL=fatal pnpm tsx libs/act-pg/scripts/lane-responsiveness.ts    # bench 3 — fast-lane latency
 ```
