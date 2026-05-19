@@ -521,13 +521,18 @@ export const inspectorRouter = t.router({
       const s = getStore();
       const stats = await s.query_stats<Schemas>(
         {},
-        { count: true, names: true }
+        { count: true, names: true, tail: true }
       );
       return [...stats.entries()]
-        .map(([stream, { head, count, names }]) => ({
+        .map(([stream, { head, tail, count, names }]) => ({
           stream,
           eventCount: count ?? 0,
           lastEvent: String(head.created),
+          // Earliest event id + created (ACT-639 tail opt-in). Lets the
+          // Streams view render an "age" column and filter for stale
+          // streams that haven't committed in N days. `tail` is always
+          // present in this response because the query requested it.
+          firstEvent: tail ? String(tail.created) : null,
           currentVersion: head.version,
           isClosed: head.name === "__tombstone__",
           nameCounts: names ?? {},
@@ -548,6 +553,10 @@ export const inspectorRouter = t.router({
         blocked: p.blocked,
         error: p.error || null,
         priority: p.priority,
+        // ACT-1103: drain lane the stream is bound to. `undefined`
+        // (the implicit "default" lane) surfaces as null for the UI;
+        // the Streams view dims it so non-default lanes pop.
+        lane: p.lane ?? null,
         leased_by: p.leased_by ?? null,
         leased_until: p.leased_until?.toISOString() ?? null,
       }));
@@ -576,6 +585,7 @@ export const inspectorRouter = t.router({
         at: number;
         gap: number;
         priority: number;
+        lane: string | null;
       }> = [];
       const activeLeases: Array<{
         stream: string;
@@ -583,11 +593,16 @@ export const inspectorRouter = t.router({
         leased_by: string;
         leased_until: string;
         priority: number;
+        lane: string | null;
       }> = [];
       const gaps: number[] = [];
       // Streams per priority lane — operators want a quick read of
       // "how many things are at priority > 0 right now."
       const priorityCounts = new Map<number, number>();
+      // Streams per drain lane (ACT-1103). `undefined`/`"default"`
+      // normalize to `"default"` so the histogram bucket renders one
+      // consistent label.
+      const laneCounts = new Map<string, number>();
 
       for (const p of positions) {
         const gap = Math.max(0, maxEventId - p.at);
@@ -596,6 +611,8 @@ export const inspectorRouter = t.router({
           p.priority,
           (priorityCounts.get(p.priority) ?? 0) + 1
         );
+        const laneKey = p.lane ?? "default";
+        laneCounts.set(laneKey, (laneCounts.get(laneKey) ?? 0) + 1);
 
         if (p.blocked) {
           blocked++;
@@ -607,6 +624,7 @@ export const inspectorRouter = t.router({
             at: p.at,
             gap,
             priority: p.priority,
+            lane: p.lane ?? null,
           });
         } else if (p.leased_by && p.leased_until && p.leased_until > now) {
           leased++;
@@ -616,6 +634,7 @@ export const inspectorRouter = t.router({
             leased_by: p.leased_by,
             leased_until: p.leased_until.toISOString(),
             priority: p.priority,
+            lane: p.lane ?? null,
           });
         } else if (gap > 10) {
           lagging++;
@@ -656,6 +675,12 @@ export const inspectorRouter = t.router({
         priorityCounts: [...priorityCounts.entries()]
           .sort((a, b) => b[0] - a[0])
           .map(([priority, count]) => ({ priority, count })),
+        // Sorted by count desc so the busiest lane is the first chip.
+        // Default lane sorts naturally alongside others — operators can
+        // see "30 streams on writes, 5 on default" at a glance.
+        laneCounts: [...laneCounts.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .map(([lane, count]) => ({ lane, count })),
         timestamp: new Date().toISOString(),
       };
     } catch {
@@ -670,6 +695,7 @@ export const inspectorRouter = t.router({
         activeLeases: [],
         histogram: [],
         priorityCounts: [],
+        laneCounts: [],
         timestamp: new Date().toISOString(),
       };
     }
