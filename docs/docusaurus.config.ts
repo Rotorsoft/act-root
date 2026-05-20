@@ -64,6 +64,30 @@ const config: Config = {
         href: "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700;800&display=swap",
       },
     },
+    {
+      tagName: "script",
+      attributes: {
+        src: "/act-root/coi-serviceworker.js",
+      },
+    },
+  ],
+
+  plugins: [
+    function coopCoepHeadersPlugin() {
+      return {
+        name: "coop-coep-headers",
+        configureWebpack() {
+          return {
+            devServer: {
+              headers: {
+                "Cross-Origin-Opener-Policy": "same-origin",
+                "Cross-Origin-Embedder-Policy": "require-corp",
+              },
+            },
+          };
+        },
+      };
+    },
   ],
 
   presets: [
@@ -187,8 +211,24 @@ const config: Config = {
               href: "https://www.npmjs.com/package/@rotorsoft/act-sqlite",
             },
             {
-              label: "@rotorsoft/act-sse",
-              href: "https://www.npmjs.com/package/@rotorsoft/act-sse",
+              label: "@rotorsoft/act-http",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-http",
+            },
+            {
+              label: "@rotorsoft/act-patch",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-patch",
+            },
+            {
+              label: "@rotorsoft/act-pino",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-pino",
+            },
+            {
+              label: "@rotorsoft/act-tck",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-tck",
+            },
+            {
+              label: "@rotorsoft/act-diagram",
+              href: "https://www.npmjs.com/package/@rotorsoft/act-diagram",
             },
           ],
         },

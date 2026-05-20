@@ -5,7 +5,8 @@ import BrowserOnly from "@docusaurus/BrowserOnly";
 import Layout from "@theme/Layout";
 import CodeBlock from "@theme/CodeBlock";
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import sdk from "@stackblitz/sdk";
 import styles from "./index.module.css";
 
 const QUICKSTART_INSTALL = `npm install @rotorsoft/act zod`;
@@ -334,14 +335,74 @@ function Quickstart() {
 
 type SandboxProps = {
   title: string;
-  src: string;
+  repoSlug: string;
+  openFile: string;
+  startScript: string;
   open: string;
   source: string;
   blurb: string;
 };
 
-function Sandbox({ title, src, open, source, blurb }: SandboxProps) {
+function Sandbox({ title, repoSlug, openFile, startScript, open, source, blurb }: SandboxProps) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (loaded) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setLoaded(true);
+      return;
+    }
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setLoaded(true);
+          obs.disconnect();
+        }
+      },
+      { rootMargin: "300px 0px" },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loaded]);
+
+  // The StackBlitz SDK creates and manages the iframe itself,
+  // including the credentialless attribute and cross-origin isolation
+  // hints that hand-rolled iframes can't reliably set through React.
+  useEffect(() => {
+    if (!loaded) return;
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const mount = document.createElement("div");
+    mount.style.width = "100%";
+    mount.style.height = "100%";
+    wrap.appendChild(mount);
+    let cancelled = false;
+    sdk
+      .embedGithubProject(mount, repoSlug, {
+        openFile,
+        startScript,
+        view: "default",
+        terminalHeight: 55,
+        hideNavigation: true,
+        hideExplorer: true,
+        theme: "dark",
+        height: 540,
+        forceEmbedLayout: true,
+        clickToLoad: false,
+        crossOriginIsolated: true,
+      })
+      .catch((err) => {
+        if (!cancelled) console.error("StackBlitz embed failed", err);
+      });
+    return () => {
+      cancelled = true;
+      mount.remove();
+    };
+  }, [loaded, repoSlug, openFile, startScript]);
+
   return (
     <div className={styles.sandboxCard}>
       <div className={styles.sandboxHeader}>
@@ -355,31 +416,17 @@ function Sandbox({ title, src, open, source, blurb }: SandboxProps) {
           <p className={styles.sandboxBlurb}>{blurb}</p>
         </div>
       </div>
-      <div className={styles.sandboxFrameWrap}>
-        {loaded ? (
-          <iframe
-            className={styles.sandboxFrame}
-            src={src}
-            title={title}
-            tabIndex={-1}
-            allow="accelerometer; ambient-light-sensor; camera; encrypted-media; geolocation; gyroscope; hid; microphone; midi; payment; usb; vr; xr-spatial-tracking"
-            sandbox="allow-forms allow-modals allow-popups allow-presentation allow-same-origin allow-scripts"
-          />
-        ) : (
-          <button
-            type="button"
-            className={styles.sandboxPoster}
-            onClick={() => setLoaded(true)}
-            aria-label={`Run ${title} sandbox`}
-          >
+      <div ref={wrapRef} className={styles.sandboxFrameWrap}>
+        {!loaded && (
+          <div className={styles.sandboxPoster} aria-busy="true" aria-label={`Loading ${title} sandbox`}>
             <span className={styles.sandboxPosterIcon}>
               <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor">
                 <polygon points="5 3 19 12 5 21 5 3" />
               </svg>
             </span>
-            <span className={styles.sandboxPosterTitle}>Run live sandbox</span>
-            <span className={styles.sandboxPosterHint}>Loads StackBlitz editor + terminal in place</span>
-          </button>
+            <span className={styles.sandboxPosterTitle}>Booting sandbox…</span>
+            <span className={styles.sandboxPosterHint}>StackBlitz boots when this section scrolls into view</span>
+          </div>
         )}
       </div>
       <div className={styles.sandboxLinks}>
@@ -414,26 +461,25 @@ function Sandboxes() {
                 Two interactive sandboxes — actions, events and replay in the first;
                 independent drain lanes drafting over the leading/lagging frontier in the second.
               </p>
-              <p className={styles.sectionNote}>
-                StackBlitz fetches the project from GitHub on each click. If the
-                sandbox stalls on "Downloading from GitHub…" the first time,
-                refresh once and it loads from the warm cache.
-              </p>
             </div>
 
             <Sandbox
               title="Event Sourcing + Lanes"
               blurb="Calculator demo — random keypresses commit events, a digit-board projection drains on the “board” lane, a per-stream result projection drains on the “result” lane. Watch lane names tag every drain cycle in the trace."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?embed=1&file=src/main.ts&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=dev%3Astackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&embed=1&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=dev%3Astackblitz"
+              repoSlug="rotorsoft/act-root/tree/master/packages/calculator"
+              openFile="src/main.ts"
+              startScript="dev:stackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/packages/calculator?file=src/main.ts&startScript=dev%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/packages/calculator/src"
             />
 
             <Sandbox
               title="Lanes × Adaptive Dual-Frontier Drain"
-              blurb="Todo load test split across two lanes — “writes” (creates + updates, tight lease, hot path) and “mutations” (deletes, longer lease, can tolerate lag). Each drain cycle prints a lane × frontier table so you can see Act adapt the leading/lagging budget independently per lane until everything converges."
-              src="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?embed=1&file=src/index.ts&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=start%3Astackblitz"
-              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&embed=1&hideNavigation=1&hideExplorer=1&terminalHeight=55&startScript=start%3Astackblitz"
+              blurb="Todo load test split across three lanes — “creates” (tight lease, hot path), “updates” (medium cadence), and “deletes” (long lease, can tolerate lag). Each drain cycle prints a lane × frontier table so you can see Act adapt the leading/lagging budget independently per lane until all three converge at their own pace."
+              repoSlug="rotorsoft/act-root/tree/master/performance/act-performance"
+              openFile="src/index.ts"
+              startScript="start:stackblitz"
+              open="https://stackblitz.com/github/rotorsoft/act-root/tree/master/performance/act-performance?file=src/index.ts&startScript=start%3Astackblitz"
               source="https://github.com/rotorsoft/act-root/tree/master/performance/act-performance/src"
             />
           </section>

@@ -76,7 +76,14 @@ type Bucket = {
 // frontier can host work from multiple lanes. `Fetch` entries don't
 // carry the lane, so we resolve it via a stream→lane lookup built
 // from the leased entries of this same cycle.
-function bucketize<E extends Schemas>(drain: Drain<E>): Bucket[] {
+//
+// `declaredLanes` pre-seeds buckets for every lane declared on the
+// app, so the rendered table includes those lanes (with zero counts)
+// even on cycles when they didn't drain any events.
+function bucketize<E extends Schemas>(
+  drain: Drain<E>,
+  declaredLanes: readonly string[] = []
+): Bucket[] {
   const laneByStream = new Map<string, string>();
   for (const l of drain.leased) laneByStream.set(l.stream, l.lane ?? "default");
 
@@ -97,6 +104,10 @@ function bucketize<E extends Schemas>(drain: Drain<E>): Bucket[] {
     }
     return b;
   };
+  for (const lane of declaredLanes) {
+    get(lane, "lagging");
+    get(lane, "leading");
+  }
   for (const l of drain.leased) {
     get(l.lane ?? "default", l.lagging ? "lagging" : "leading").leased += 1;
   }
@@ -120,7 +131,8 @@ function bucketize<E extends Schemas>(drain: Drain<E>): Bucket[] {
 export function updateStats<E extends Schemas>(
   drainCount: number,
   eventCount: number,
-  drain: Drain<E>
+  drain: Drain<E>,
+  declaredLanes: readonly string[] = []
 ): [ConvergenceState, ConvergenceState] {
   // --- This cycle's frontier split (what claim() actually pulled) ---
   const leasedLagging = drain.leased.filter((l) => l.lagging).length;
@@ -129,7 +141,7 @@ export function updateStats<E extends Schemas>(
   const ackedLeading = drain.acked.filter((a) => !a.lagging);
 
   // Per-(lane, frontier) buckets for the rendered table.
-  const buckets = bucketize(drain);
+  const buckets = bucketize(drain, declaredLanes);
 
   // Watermarks of streams successfully acked this cycle (sorted for range).
   const laggingWatermarks = ackedLagging.map((a) => a.at).sort((a, b) => a - b);

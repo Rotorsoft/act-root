@@ -11,6 +11,10 @@
     "dev:rebuild": "tsx src/rebuild-demo.ts",
     "dev:close": "tsx src/close-demo.ts"
   },
+  "stackblitz": {
+    "installDependencies": true,
+    "startCommand": "LOG_LEVEL=trace tsx watch src/main.ts"
+  },
   "dependencies": {
     "@rotorsoft/act": ">=0.45.0",
     "@trpc/server": "11.16.0",

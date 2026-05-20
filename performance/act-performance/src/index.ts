@@ -19,14 +19,20 @@ function target(stream: string, N: number) {
   return first % N;
 }
 
-// Two-lane split (ACT-1103). Creates and updates flow through the
-// "writes" lane — frequent, latency-sensitive. Deletes flow through
-// "mutations" — rarer, can tolerate a longer lease. Each lane runs an
-// independent DrainController so a slow handler in one never stalls
-// the other. The leading/lagging frontier mechanic operates *within*
-// each lane, so both dimensions are visible in the per-cycle stats.
-const lane_for = (eventName: string): "writes" | "mutations" =>
-  eventName === "TodoDeleted" ? "mutations" : "writes";
+// Three-lane split. Each event type drains on its own lane with a
+// distinct lease budget — creates are the hottest path (tight lease,
+// high stream limit), updates are medium-cadence, deletes can tolerate
+// the longest lag. Each lane runs an independent DrainController so a
+// slow handler in one never stalls the others. The leading/lagging
+// frontier mechanic operates *within* each lane, so both dimensions
+// are visible in the per-cycle stats.
+const LANES = ["creates", "updates", "deletes"] as const;
+type Lane = (typeof LANES)[number];
+const lane_for = (eventName: string): Lane => {
+  if (eventName === "TodoCreated") return "creates";
+  if (eventName === "TodoDeleted") return "deletes";
+  return "updates";
+};
 
 // serialize projection leases to one key or
 // one projection lease per stream?
@@ -68,14 +74,14 @@ const projector = usePg
   ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
   : memProjector();
 
-// Composed "Todo" app with state and reactions. Two lanes give the
-// "writes" path a tight lease for responsiveness while "mutations"
-// (deletes) gets a longer lease — operators can tolerate slightly
-// stale tombstones to keep the hot path free.
+// Composed "Todo" app with state and reactions. Three lanes give each
+// event type its own lease budget so the per-cycle table shows three
+// independent leading/lagging frontiers converging at different rates.
 export const app = act()
   .withState(Todo)
-  .withLane({ name: "writes", leaseMillis: 5_000, streamLimit: 15 })
-  .withLane({ name: "mutations", leaseMillis: 30_000, streamLimit: 5 })
+  .withLane({ name: "creates", leaseMillis: 2_000, streamLimit: 20 })
+  .withLane({ name: "updates", leaseMillis: 5_000, streamLimit: 15 })
+  .withLane({ name: "deletes", leaseMillis: 30_000, streamLimit: 5 })
   .on("TodoCreated")
   .do(projector.projectTodoCreated)
   .to(projection_resolver)
@@ -109,7 +115,12 @@ export async function drain() {
     const drain = await app.drain(drainOptions);
     drainCount++;
 
-    const [lagging, leading] = updateStats(drainCount, eventCount, drain);
+    const [lagging, leading] = updateStats(
+      drainCount,
+      eventCount,
+      drain,
+      LANES
+    );
 
     if (lagging.convergedAt && leading.convergedAt) {
       clearInterval(drainInterval);
@@ -122,6 +133,7 @@ export async function drain() {
         lagging: `Converged @${lagging.convergedAt} in ${lagging.convergedTime! / 1000} seconds`,
         leading: `Converged @${leading.convergedAt} in ${leading.convergedTime! / 1000} seconds`,
       });
+      process.exit(0);
     }
   }
 }
@@ -146,7 +158,7 @@ async function main(
     eventCount++;
     await sleep(eventFrequency);
     const op = Math.random();
-    if (eventCount < createMax && (op < 0.5 || streams.size === 0)) {
+    if (eventCount < createMax && (op < 0.4 || streams.size === 0)) {
       const stream = "todo-" + randomUUID();
       const [snap] = await app.do(
         "create",
@@ -159,7 +171,7 @@ async function main(
         after: snap.event!.id - 1,
       });
       streams.add(stream);
-    } else if (op <= 0.95 && streams.size > 0) {
+    } else if (op < 0.8 && streams.size > 0) {
       const idx = Math.floor(Math.random() * streams.size);
       const stream = [...streams.keys()][idx];
       await app.do(

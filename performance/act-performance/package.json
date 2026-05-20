@@ -23,5 +23,9 @@
     "@types/pg": "^8.20.0",
     "tsx": "^4.22.3",
     "typescript": "^5.9.3"
+  },
+  "stackblitz": {
+    "installDependencies": true,
+    "startCommand": "tsx --watch --env-file .env.local src/index.ts"
   }
 }
