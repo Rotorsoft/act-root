@@ -134,10 +134,22 @@ div[class^="announcementBar"] a {
 }
 
 /* ---------- Navbar ---------- */
+/* backdrop-filter on .navbar creates a containing block for position:fixed
+   descendants, which traps the mobile drawer (.navbar-sidebar) inside the
+   64px navbar and leaves the items panel with height 0. Apply blur through
+   a pseudo-element so the drawer's containing block remains the viewport. */
 .navbar {
+  background-color: transparent;
+  border-bottom: 1px solid var(--act-border);
+}
+.navbar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-color: var(--ifm-navbar-background-color);
   backdrop-filter: saturate(180%) blur(14px);
   -webkit-backdrop-filter: saturate(180%) blur(14px);
-  border-bottom: 1px solid var(--act-border);
 }
 .navbar__brand {
   margin-right: 1rem;
