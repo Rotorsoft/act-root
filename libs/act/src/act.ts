@@ -2,6 +2,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  audit,
   buildDrain,
   buildEs,
   buildHandle,
@@ -16,7 +17,6 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  runAudit,
   runCloseCycle,
   SettleLoop,
 } from "./internal/index.js";
@@ -412,11 +412,11 @@ export class Act<
     this._audit_deps = {
       store,
       logger: this._logger,
-      eventToState,
+      event_to_state: eventToState,
       states: this._states,
-      knownEventNames: new Set(eventToState.keys()),
-      declaredLanes: new Set(this._drain_controllers.keys()),
-      routedEventNames: new Set(eventToLanes.keys()),
+      known_events: new Set(eventToState.keys()),
+      declared_lanes: new Set(this._drain_controllers.keys()),
+      routed_events: new Set(eventToLanes.keys()),
     };
 
     this._correlate = new CorrelateCycle(
@@ -1208,7 +1208,7 @@ export class Act<
     categories?: AuditCategory[],
     options?: AuditOptions
   ): AsyncIterable<AuditFinding> {
-    return runAudit(this._audit_deps, categories, options);
+    return audit(this._audit_deps, categories, options);
   }
 
   /**

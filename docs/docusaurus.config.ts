@@ -1,5 +1,5 @@
 import type * as Preset from "@docusaurus/preset-classic";
-import type { Config } from "@docusaurus/types";
+import type { Config, Plugin } from "@docusaurus/types";
 import { themes as prismThemes } from "prism-react-renderer";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
@@ -73,7 +73,7 @@ const config: Config = {
   ],
 
   plugins: [
-    function coopCoepHeadersPlugin() {
+    function coopCoepHeadersPlugin(): Plugin {
       return {
         name: "coop-coep-headers",
         configureWebpack() {
@@ -84,7 +84,7 @@ const config: Config = {
                 "Cross-Origin-Embedder-Policy": "require-corp",
               },
             },
-          };
+          } as ReturnType<NonNullable<Plugin["configureWebpack"]>>;
         },
       };
     },

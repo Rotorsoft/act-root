@@ -41,7 +41,7 @@ describe("audit", () => {
     .build();
 
   // Second state with a snap reducer — for close-candidate
-  // `restartSupported: true` and restart-candidate `eventCount`
+  // `restart_supported: true` and restart-candidate `count`
   // exercises. Independent event names so it doesn't interfere
   // with the widget's deprecation classifier.
   const order = state({ Order: z.object({ items: z.number() }) })
@@ -128,7 +128,7 @@ describe("audit", () => {
         name: "Renamed_v2",
         reason: "schema_validation_failed",
       });
-      expect((findings[0] as { zodError?: unknown }).zodError).toBeDefined();
+      expect((findings[0] as { zod_error?: unknown }).zod_error).toBeDefined();
     });
 
     it("skips framework-internal events (__snapshot__, __tombstone__)", async () => {
@@ -186,16 +186,16 @@ describe("audit", () => {
       const f = findings[0];
       expect(f).toMatchObject({
         category: "deprecated-load",
-        eventName: "Renamed",
-        currentVersion: "Renamed_v2",
-        totalCount: 12,
+        name: "Renamed",
+        current_version: "Renamed_v2",
+        total: 12,
       });
       // top-streams sorted desc, with the right per-stream counts
       const findingWithStreams = f as Extract<
         AuditFinding,
         { category: "deprecated-load" }
       >;
-      expect(findingWithStreams.topStreams).toEqual([
+      expect(findingWithStreams.top_streams).toEqual([
         { stream: "a", count: 4 },
         { stream: "b", count: 4 },
         { stream: "c", count: 4 },
@@ -244,7 +244,7 @@ describe("audit", () => {
       expect(findings).toEqual([]);
     });
 
-    it("respects operator-supplied deprecatedLoadShareMin", async () => {
+    it("respects operator-supplied deprecated_min", async () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
       for (let i = 0; i < 100; i++) {
@@ -262,14 +262,14 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["deprecated-load"], {
-        thresholds: { deprecatedLoadShareMin: 0.005 }, // 0.5%
+        thresholds: { deprecated_min: 0.005 }, // 0.5%
       })) {
         findings.push(f);
       }
       expect(findings).toHaveLength(1);
       expect(findings[0]).toMatchObject({
         category: "deprecated-load",
-        eventName: "Renamed",
+        name: "Renamed",
       });
     });
   });
@@ -337,7 +337,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["close-candidate"], {
-        thresholds: { terminalEvents: ["OrderShipped"], idleDays: 10_000 },
+        thresholds: { terminal_events: ["OrderShipped"], idle_days: 10_000 },
       })) {
         findings.push(f);
       }
@@ -348,11 +348,11 @@ describe("audit", () => {
         stream: "o1",
         reason: "terminal",
         // Order state declares .snap() so restart is supported.
-        restartSupported: true,
+        restart_supported: true,
       });
     });
 
-    it("flags idle streams when the head event is older than idleDays", async () => {
+    it("flags idle streams when the head event is older than idle_days", async () => {
       const app = act().withState(order).build();
       const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
@@ -367,7 +367,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idleDays: 0 },
+        thresholds: { idle_days: 0 },
       })) {
         findings.push(f);
       }
@@ -379,9 +379,9 @@ describe("audit", () => {
       });
     });
 
-    it("reports restartSupported: false for states without .snap()", async () => {
+    it("reports restart_supported: false for states without .snap()", async () => {
       // widget has no .snap() declared. An idle widget stream should
-      // surface as a close-candidate with restartSupported: false.
+      // surface as a close-candidate with restart_supported: false.
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
       await store().commit(
@@ -392,7 +392,7 @@ describe("audit", () => {
       await sleep(20);
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idleDays: 0 },
+        thresholds: { idle_days: 0 },
       })) {
         findings.push(f);
       }
@@ -400,7 +400,7 @@ describe("audit", () => {
       expect(findings[0]).toMatchObject({
         stream: "w1",
         reason: "idle",
-        restartSupported: false,
+        restart_supported: false,
       });
     });
 
@@ -418,7 +418,7 @@ describe("audit", () => {
       await sleep(20);
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["close-candidate"], {
-        thresholds: { idleDays: 0 },
+        thresholds: { idle_days: 0 },
       })) {
         findings.push(f);
       }
@@ -503,7 +503,7 @@ describe("audit", () => {
       });
     });
 
-    it("flags near-block streams when retry >= nearBlockRetry", async () => {
+    it("flags near-block streams when retry >= near_block", async () => {
       // Driving retry counts to >= threshold via public APIs
       // requires the drain machinery (failing reactions). For a
       // unit-level audit smoke test, reach into the in-memory
@@ -529,7 +529,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["reaction-health"], {
-        thresholds: { nearBlockRetry: 3 },
+        thresholds: { near_block: 3 },
       })) {
         findings.push(f);
       }
@@ -561,8 +561,8 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["reaction-health"], {
-        // backoffStuckMinutes: 0 makes any expired lease count.
-        thresholds: { backoffStuckMinutes: 0 },
+        // stuck_minutes: 0 makes any expired lease count.
+        thresholds: { stuck_minutes: 0 },
       })) {
         findings.push(f);
       }
@@ -587,7 +587,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 20 },
+        thresholds: { drift_min: 20 },
       })) {
         findings.push(f);
       }
@@ -595,11 +595,9 @@ describe("audit", () => {
       expect(findings[0]).toMatchObject({
         category: "snapshot-drift",
         stream: "big",
-        eventsSinceLastSnapshot: 30,
+        events_since_snap: 30,
       });
-      expect(
-        (findings[0] as { snapshotAt?: number }).snapshotAt
-      ).toBeUndefined();
+      expect((findings[0] as { snap_at?: number }).snap_at).toBeUndefined();
     });
 
     it("counts only events after the last __snapshot__ when one exists", async () => {
@@ -624,7 +622,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 10 },
+        thresholds: { drift_min: 10 },
       })) {
         findings.push(f);
       }
@@ -632,9 +630,9 @@ describe("audit", () => {
       expect(findings[0]).toMatchObject({
         category: "snapshot-drift",
         stream: "s",
-        eventsSinceLastSnapshot: 15,
+        events_since_snap: 15,
       });
-      expect((findings[0] as { snapshotAt?: number }).snapshotAt).toBeDefined();
+      expect((findings[0] as { snap_at?: number }).snap_at).toBeDefined();
     });
 
     it("skips streams whose state has no .snap() reducer", async () => {
@@ -651,7 +649,7 @@ describe("audit", () => {
       }
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 10 },
+        thresholds: { drift_min: 10 },
       })) {
         findings.push(f);
       }
@@ -679,7 +677,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { eventCountForRestart: 20 },
+        thresholds: { restart_min: 20 },
       })) {
         findings.push(f);
       }
@@ -687,8 +685,8 @@ describe("audit", () => {
       expect(findings[0]).toMatchObject({
         category: "restart-candidate",
         stream: "big",
-        eventCount: 25,
-        snapshotCount: 0,
+        count: 25,
+        snaps: 0,
       });
     });
 
@@ -706,7 +704,7 @@ describe("audit", () => {
       }
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { eventCountForRestart: 20 },
+        thresholds: { restart_min: 20 },
       })) {
         findings.push(f);
       }
@@ -924,12 +922,12 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["deprecated-load"], {
-        thresholds: { deprecatedLoadShareMin: 0.1 },
+        thresholds: { deprecated_min: 0.1 },
       })) {
         findings.push(f);
       }
       // Both deprecated event families surface, Beta first (higher count).
-      const names = findings.map((f) => (f as { eventName: string }).eventName);
+      const names = findings.map((f) => (f as { name: string }).name);
       expect(names).toEqual(["Beta", "Alpha"]);
     });
 
@@ -948,7 +946,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["restart-candidate"], {
-        thresholds: { eventCountForRestart: 20 },
+        thresholds: { restart_min: 20 },
       })) {
         findings.push(f);
       }
@@ -987,7 +985,7 @@ describe("audit", () => {
 
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 20 },
+        thresholds: { drift_min: 20 },
       })) {
         findings.push(f);
       }
@@ -1008,7 +1006,7 @@ describe("audit", () => {
       }
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 20 },
+        thresholds: { drift_min: 20 },
       })) {
         findings.push(f);
       }
@@ -1038,7 +1036,7 @@ describe("audit", () => {
       }
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["snapshot-drift"], {
-        thresholds: { snapshotDriftMin: 10 },
+        thresholds: { drift_min: 10 },
       })) {
         findings.push(f);
       }
@@ -1151,7 +1149,7 @@ describe("audit", () => {
         (f) =>
           f.category === "routing-health" &&
           f.reason === "unrouted" &&
-          (f as { eventName?: string }).eventName === "Repriced"
+          (f as { name?: string }).name === "Repriced"
       );
       expect(repricedUnrouted).toBeUndefined();
     });

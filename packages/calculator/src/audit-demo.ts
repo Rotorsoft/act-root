@@ -192,7 +192,7 @@ async function main() {
     META
   );
   for (const f of await collect(app, "deprecated-load", {
-    thresholds: { deprecatedLoadShareMin: 0.1 },
+    thresholds: { deprecated_min: 0.1 },
   })) {
     describeFinding(f);
   }
@@ -209,8 +209,8 @@ async function main() {
     "close-candidate",
     "Streams ripe for app.close(...). Two flavours:\n" +
       "    · terminal — head event is in the operator's terminal list\n" +
-      "    · idle     — head event is older than idleDays\n" +
-      "  Each finding carries restartSupported so the operator picks\n" +
+      "    · idle     — head event is older than idle_days\n" +
+      "  Each finding carries restart_supported so the operator picks\n" +
       "  between close() (full tombstone) and close({restart:true})."
   );
   await app.do(
@@ -241,7 +241,7 @@ async function main() {
   }
   await sleep(20);
   for (const f of await collect(app, "close-candidate", {
-    thresholds: { idleDays: 90, terminalEvents: ["Cleared"] },
+    thresholds: { idle_days: 90, terminal_events: ["Cleared"] },
   })) {
     describeFinding(f);
   }
@@ -269,7 +269,7 @@ async function main() {
     );
   }
   for (const f of await collect(app, "restart-candidate", {
-    thresholds: { eventCountForRestart: 10 },
+    thresholds: { restart_min: 10 },
   })) {
     describeFinding(f);
   }
@@ -317,7 +317,7 @@ async function main() {
   const flaky = flakyMap.get("flaky-stream");
   if (flaky) flaky._retry = 4;
   for (const f of await collect(app, "reaction-health", {
-    thresholds: { nearBlockRetry: 3 },
+    thresholds: { near_block: 3 },
   })) {
     describeFinding(f);
   }
@@ -347,7 +347,7 @@ async function main() {
     );
   }
   for (const f of await collect(app, "snapshot-drift", {
-    thresholds: { snapshotDriftMin: 10 },
+    thresholds: { drift_min: 10 },
   })) {
     describeFinding(f);
   }

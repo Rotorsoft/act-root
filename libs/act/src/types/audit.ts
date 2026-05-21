@@ -42,19 +42,19 @@ export type AuditCategory =
  */
 export type AuditThresholds = {
   /** `close-candidate` (idle): days since head event committed. Default 90. */
-  idleDays?: number;
+  idle_days?: number;
   /** `restart-candidate`: minimum event count to consider close-with-restart. Default 10_000. */
-  eventCountForRestart?: number;
+  restart_min?: number;
   /** `reaction-health` (stuck-backoff): minutes since lease started. Default 30. */
-  backoffStuckMinutes?: number;
+  stuck_minutes?: number;
   /** `reaction-health` (near-block): retry count at which a stream is "about to block." Default 3. */
-  nearBlockRetry?: number;
+  near_block?: number;
   /** `deprecated-load`: minimum fraction-of-total to surface. Default 0.10. */
-  deprecatedLoadShareMin?: number;
+  deprecated_min?: number;
   /** `snapshot-drift`: minimum events since last snapshot to flag. Default 500. */
-  snapshotDriftMin?: number;
+  drift_min?: number;
   /** `close-candidate` (terminal): event names the operator considers terminal. */
-  terminalEvents?: string[];
+  terminal_events?: string[];
 };
 
 /**
@@ -70,7 +70,7 @@ export type AuditOptions = {
    */
   query?: import("./action.js").Query;
   /** Pagination size for event scans. Default 500. */
-  pageSize?: number;
+  page_size?: number;
   /** Per-category thresholds; see {@link AuditThresholds}. */
   thresholds?: AuditThresholds;
 };
@@ -84,32 +84,32 @@ export type AuditFinding =
   | {
       category: "schema";
       stream: string;
-      eventId: number;
+      event_id: number;
       name: string;
       reason: "unknown_event_name" | "schema_validation_failed";
-      zodError?: unknown;
+      zod_error?: unknown;
     }
   | {
       category: "close-candidate";
       stream: string;
-      lastEventAt: string;
+      last_event_at: string;
       reason: "terminal" | "idle";
-      idleDays?: number;
+      idle_days?: number;
       /** True when the state has a snapshot patch (`close({restart: true})` would work). */
-      restartSupported: boolean;
+      restart_supported: boolean;
     }
   | {
       category: "restart-candidate";
       stream: string;
-      eventCount: number;
-      snapshotCount: number;
+      count: number;
+      snaps: number;
     }
   | {
       category: "deprecated-load";
-      eventName: string;
-      currentVersion: string;
-      totalCount: number;
-      topStreams: Array<{ stream: string; count: number }>;
+      name: string;
+      current_version: string;
+      total: number;
+      top_streams: Array<{ stream: string; count: number }>;
     }
   | {
       category: "reaction-health";
@@ -121,8 +121,8 @@ export type AuditFinding =
   | {
       category: "snapshot-drift";
       stream: string;
-      eventsSinceLastSnapshot: number;
-      snapshotAt?: number;
+      events_since_snap: number;
+      snap_at?: number;
     }
   | {
       category: "routing-health";
@@ -133,12 +133,12 @@ export type AuditFinding =
   | {
       category: "correlation-gaps";
       stream: string;
-      eventId: number;
+      event_id: number;
       reason: "orphan-parent" | "missing-correlation";
     }
   | {
       category: "clock-anomalies";
       stream: string;
-      eventId: number;
+      event_id: number;
       reason: "future-created" | "out-of-order";
     };

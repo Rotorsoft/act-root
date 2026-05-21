@@ -76,20 +76,20 @@ export type AuditDeps = {
   readonly store: () => Store;
   readonly logger: Logger;
   /** event-name → state that registers it (for schema validation). */
-  readonly eventToState: ReadonlyMap<string, State<any, any, any>>;
+  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /** state-name → state (for snapshot-supported check on restart-candidate). */
   readonly states: ReadonlyMap<string, State<any, any, any>>;
   /** All event names the registry knows (for unknown-name detection). */
-  readonly knownEventNames: ReadonlySet<string>;
+  readonly known_events: ReadonlySet<string>;
   /** Declared drain lanes (for routing-health unknown-lane). */
-  readonly declaredLanes: ReadonlySet<string>;
+  readonly declared_lanes: ReadonlySet<string>;
   /**
    * Event names that the registry has at least one reaction for —
    * used by routing-health to detect "registered but unrouted"
    * events. Normalized down from the internal `eventToLanes` map
    * (which carries lane-set details audit doesn't need).
    */
-  readonly routedEventNames: ReadonlySet<string>;
+  readonly routed_events: ReadonlySet<string>;
 };
 
 /**
@@ -98,12 +98,12 @@ export type AuditDeps = {
  * find them operationally useful — operators can tune per call.
  */
 const DEFAULTS = {
-  idleDays: 90,
-  eventCountForRestart: 10_000,
-  backoffStuckMinutes: 30,
-  deprecatedLoadShareMin: 0.1,
-  snapshotDriftMin: 500,
-  nearBlockRetry: 3,
+  idle_days: 90,
+  restart_min: 10_000,
+  stuck_minutes: 30,
+  deprecated_min: 0.1,
+  drift_min: 500,
+  near_block: 3,
 };
 
 const ALL_CATEGORIES = [
@@ -155,7 +155,7 @@ type PassFactory = (deps: AuditDeps, options: AuditOptions) => AuditPass;
  * coordination across passes; the audit is bounded by `options.query`
  * scoping rather than mid-scan cancellation.)
  */
-export async function* runAudit(
+export async function* audit(
   deps: AuditDeps,
   categories?: AuditCategory[],
   options: AuditOptions = {}
@@ -231,14 +231,14 @@ const makeSchemaPass: PassFactory = (deps) => {
     category: "schema",
     onEvent(event) {
       const name = String(event.name);
-      const state = deps.eventToState.get(name);
+      const state = deps.event_to_state.get(name);
       if (!state) {
         // Skip framework markers — they're not user-declared.
         if (name.startsWith("__")) return;
         findings.push({
           category: "schema",
           stream: event.stream,
-          eventId: event.id,
+          event_id: event.id,
           name,
           reason: "unknown_event_name",
         });
@@ -250,10 +250,10 @@ const makeSchemaPass: PassFactory = (deps) => {
         findings.push({
           category: "schema",
           stream: event.stream,
-          eventId: event.id,
+          event_id: event.id,
           name,
           reason: "schema_validation_failed",
-          zodError: parsed.error,
+          zod_error: parsed.error,
         });
       }
     },
@@ -269,9 +269,8 @@ const makeSchemaPass: PassFactory = (deps) => {
  * `drain`.
  */
 const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
-  const shareMin =
-    options.thresholds?.deprecatedLoadShareMin ??
-    DEFAULTS.deprecatedLoadShareMin;
+  const share_min =
+    options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
   const totals = new Map<string, number>();
   const perStream = new Map<string, Map<string, number>>();
   return {
@@ -295,17 +294,17 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
       // Registry-driven deprecation classification (not on-disk-driven).
-      const deprecated = deprecatedEventNames(deps.knownEventNames);
+      const deprecated = deprecatedEventNames(deps.known_events);
       const sorted = [...deprecated]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
         .sort((a, b) => b.count - a.count);
       for (const { name, count } of sorted) {
         if (count === 0) continue;
-        if (count / grand < shareMin) continue;
+        if (count / grand < share_min) continue;
         // Contract: `deprecatedEventNames(registry)` only returns names
         // that have a higher version in the same family, so
         // `currentVersionOf(name, registry)` is guaranteed defined.
-        const currentVersion = currentVersionOf(name, deps.knownEventNames)!;
+        const currentVersion = currentVersionOf(name, deps.known_events)!;
         // perStream is populated in lockstep with totals — name is guaranteed present.
         const topStreams = [...perStream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
@@ -313,10 +312,10 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
           .slice(0, 10);
         findings.push({
           category: "deprecated-load",
-          eventName: name,
-          currentVersion,
-          totalCount: count,
-          topStreams,
+          name,
+          current_version: currentVersion,
+          total: count,
+          top_streams: topStreams,
         });
       }
       return findings;
@@ -331,31 +330,31 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
  * finding carries `restartSupported` (state has `.snap()`).
  */
 const makeCloseCandidatePass: PassFactory = (deps, options) => {
-  const idleDays = options.thresholds?.idleDays ?? DEFAULTS.idleDays;
-  const terminalEvents = new Set(options.thresholds?.terminalEvents ?? []);
-  const idleCutoff = Date.now() - idleDays * 24 * 60 * 60 * 1000;
+  const idle_days = options.thresholds?.idle_days ?? DEFAULTS.idle_days;
+  const terminal_events = new Set(options.thresholds?.terminal_events ?? []);
+  const idle_cutoff = Date.now() - idle_days * 24 * 60 * 60 * 1000;
   const findings: AuditFinding[] = [];
   return {
     category: "close-candidate",
     onStat(stream, { head }) {
-      const headName = String(head.name);
-      if (headName.startsWith("__")) return; // already-closed or mid-truncate
+      const head_name = String(head.name);
+      if (head_name.startsWith("__")) return; // already-closed or mid-truncate
       // All in-tree adapters return `created` as Date; the Date
       // constructor passes Date instances through unchanged, so a
       // single call shape works regardless.
-      const headTime = head.created.getTime();
-      const isIdle = headTime < idleCutoff;
-      const isTerminal = terminalEvents.has(headName);
-      if (!isIdle && !isTerminal) return;
+      const head_time = head.created.getTime();
+      const is_idle = head_time < idle_cutoff;
+      const is_terminal = terminal_events.has(head_name);
+      if (!is_idle && !is_terminal) return;
       findings.push({
         category: "close-candidate",
         stream,
-        lastEventAt: head.created.toISOString(),
-        reason: isTerminal ? "terminal" : "idle",
-        idleDays: isIdle
-          ? Math.floor((Date.now() - headTime) / (24 * 60 * 60 * 1000))
+        last_event_at: head.created.toISOString(),
+        reason: is_terminal ? "terminal" : "idle",
+        idle_days: is_idle
+          ? Math.floor((Date.now() - head_time) / (24 * 60 * 60 * 1000))
           : undefined,
-        restartSupported: restartIsSupported(deps, headName),
+        restart_supported: restartIsSupported(deps, head_name),
       });
     },
     drain: () => findings,
@@ -367,8 +366,7 @@ const makeCloseCandidatePass: PassFactory = (deps, options) => {
  * state declares `.snap()`. Reads from the shared `onStat` stream.
  */
 const makeRestartCandidatePass: PassFactory = (deps, options) => {
-  const threshold =
-    options.thresholds?.eventCountForRestart ?? DEFAULTS.eventCountForRestart;
+  const threshold = options.thresholds?.restart_min ?? DEFAULTS.restart_min;
   const findings: AuditFinding[] = [];
   return {
     category: "restart-candidate",
@@ -376,17 +374,17 @@ const makeRestartCandidatePass: PassFactory = (deps, options) => {
       // `count` / `names` always populated — query_stats is called
       // with both flags set; adapters keep them present together.
       if (count! < threshold) return;
-      const headName = String(head.name);
-      if (headName.startsWith("__")) return;
-      if (!restartIsSupported(deps, headName)) return;
+      const head_name = String(head.name);
+      if (head_name.startsWith("__")) return;
+      if (!restartIsSupported(deps, head_name)) return;
       findings.push({
         category: "restart-candidate",
         stream,
-        eventCount: count!,
+        count: count!,
         // names map is sparse — `__snapshot__` key absent when the
         // stream has never been snapshotted (a common case for the
         // restart-candidate signal).
-        snapshotCount: names!["__snapshot__"] ?? 0,
+        snaps: names!["__snapshot__"] ?? 0,
       });
     },
     drain: () => findings,
@@ -399,11 +397,10 @@ const makeRestartCandidatePass: PassFactory = (deps, options) => {
  * broadcast.
  */
 const makeReactionHealthPass: PassFactory = (_deps, options) => {
-  const nearBlockRetry =
-    options.thresholds?.nearBlockRetry ?? DEFAULTS.nearBlockRetry;
-  const stuckMinutes =
-    options.thresholds?.backoffStuckMinutes ?? DEFAULTS.backoffStuckMinutes;
-  const stuckCutoff = Date.now() - stuckMinutes * 60 * 1000;
+  const near_block = options.thresholds?.near_block ?? DEFAULTS.near_block;
+  const stuck_minutes =
+    options.thresholds?.stuck_minutes ?? DEFAULTS.stuck_minutes;
+  const stuck_cutoff = Date.now() - stuck_minutes * 60 * 1000;
   const findings: AuditFinding[] = [];
   return {
     category: "reaction-health",
@@ -418,20 +415,20 @@ const makeReactionHealthPass: PassFactory = (_deps, options) => {
         });
         return;
       }
-      if (p.retry >= nearBlockRetry) {
+      if (p.retry >= near_block) {
         findings.push({
           category: "reaction-health",
           stream: p.stream,
           status: "near-block",
           retry: p.retry,
-          reason: `retry ${p.retry} ≥ near-block threshold ${nearBlockRetry}`,
+          reason: `retry ${p.retry} ≥ near-block threshold ${near_block}`,
         });
         return;
       }
       if (
         p.leased_by &&
         p.leased_until &&
-        p.leased_until.getTime() < stuckCutoff
+        p.leased_until.getTime() < stuck_cutoff
       ) {
         const minutes = Math.floor(
           (Date.now() - p.leased_until.getTime()) / (60 * 1000)
@@ -456,14 +453,13 @@ const makeReactionHealthPass: PassFactory = (_deps, options) => {
  * `__snapshot__` event id and count events past it.
  */
 const makeSnapshotDriftPass: PassFactory = (deps, options) => {
-  const driftMin =
-    options.thresholds?.snapshotDriftMin ?? DEFAULTS.snapshotDriftMin;
+  const drift_min = options.thresholds?.drift_min ?? DEFAULTS.drift_min;
   // Streams the workspace pass identifies as drift candidates —
   // resolved in finalize with per-stream queries.
   const candidates: Array<{
     stream: string;
     total: number;
-    snapshotCount: number;
+    snaps: number;
   }> = [];
   const findings: AuditFinding[] = [];
   return {
@@ -473,18 +469,18 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
       // (__snapshot__, __tombstone__) — neither name appears in any
       // user state's events map, so the snap check rejects them.
       if (!restartIsSupported(deps, String(head.name))) return;
-      if (count! < driftMin) return; // upper-bound short-circuit
+      if (count! < drift_min) return; // upper-bound short-circuit
       candidates.push({
         stream,
         total: count!,
-        snapshotCount: names!["__snapshot__"] ?? 0,
+        snaps: names!["__snapshot__"] ?? 0,
       });
     },
     async finalize(deps) {
-      for (const { stream, total, snapshotCount } of candidates) {
-        let eventsSinceLastSnapshot = total;
-        let snapshotAt: number | undefined;
-        if (snapshotCount > 0) {
+      for (const { stream, total, snaps } of candidates) {
+        let events_since_snap = total;
+        let snap_at: number | undefined;
+        if (snaps > 0) {
           const collected: Array<{ id: number }> = [];
           await deps.store().query(
             (e) => {
@@ -499,24 +495,24 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
               with_snaps: true,
             }
           );
-          // snapshotCount > 0 means at least one `__snapshot__` event
-          // sits on this stream — the backward-walk above must surface it.
-          snapshotAt = collected[0]!.id;
+          // snaps > 0 means at least one `__snapshot__` event sits on
+          // this stream — the backward-walk above must surface it.
+          snap_at = collected[0]!.id;
           let after = 0;
           await deps.store().query(
             () => {
               after++;
             },
-            { stream, stream_exact: true, after: snapshotAt }
+            { stream, stream_exact: true, after: snap_at }
           );
-          eventsSinceLastSnapshot = after;
+          events_since_snap = after;
         }
-        if (eventsSinceLastSnapshot < driftMin) continue;
+        if (events_since_snap < drift_min) continue;
         findings.push({
           category: "snapshot-drift",
           stream,
-          eventsSinceLastSnapshot,
-          snapshotAt,
+          events_since_snap,
+          snap_at,
         });
       }
     },
@@ -535,7 +531,7 @@ const makeRoutingHealthPass: PassFactory = (deps) => {
     category: "routing-health",
     onStream(p) {
       if (!p.lane) return; // default lane — never an unknown-lane finding
-      if (deps.declaredLanes.has(p.lane)) return;
+      if (deps.declared_lanes.has(p.lane)) return;
       findings.push({
         category: "routing-health",
         stream: p.stream,
@@ -551,7 +547,7 @@ const makeRoutingHealthPass: PassFactory = (deps) => {
     finalize() {
       for (const name of seenEventNames) {
         if (name.startsWith("__")) continue;
-        if (deps.routedEventNames.has(name)) continue;
+        if (deps.routed_events.has(name)) continue;
         findings.push({
           category: "routing-health",
           stream: "*",
@@ -590,7 +586,7 @@ const makeCorrelationGapsPass: PassFactory = () => {
           findings.push({
             category: "correlation-gaps",
             stream,
-            eventId: id,
+            event_id: id,
             reason: "orphan-parent",
           });
         }
@@ -617,7 +613,7 @@ const makeClockAnomaliesPass: PassFactory = () => {
         findings.push({
           category: "clock-anomalies",
           stream: e.stream,
-          eventId: e.id,
+          event_id: e.id,
           reason: "future-created",
         });
       }
@@ -626,7 +622,7 @@ const makeClockAnomaliesPass: PassFactory = () => {
         findings.push({
           category: "clock-anomalies",
           stream: e.stream,
-          eventId: e.id,
+          event_id: e.id,
           reason: "out-of-order",
         });
       }
@@ -638,7 +634,7 @@ const makeClockAnomaliesPass: PassFactory = () => {
 
 /** Does the stream's owning state declare a `.snap()` reducer? */
 function restartIsSupported(deps: AuditDeps, headEventName: string): boolean {
-  const state = deps.eventToState.get(headEventName);
+  const state = deps.event_to_state.get(headEventName);
   return state?.snap !== undefined;
 }
 

@@ -29,7 +29,7 @@ for await (const finding of app.audit()) {
 // Narrow scope — common in scheduled audits
 for await (const finding of app.audit(["schema", "deprecated-load"], {
   query: { created_after: lastScanTimestamp },
-  thresholds: { deprecatedLoadShareMin: 0.10 },
+  thresholds: { deprecated_min: 0.10 },
 })) {
   await escalate(finding);
 }
@@ -60,7 +60,7 @@ Findings carry the event id + stream so you can drill straight to the offending 
 
 ### `deprecated-load` → "close the heaviest legacy carriers"
 
-Workspace-wide event-name histogram classified by the framework's `_v<digits>` rule (ACT-403). For each deprecated event whose share of the total store equals or exceeds `deprecatedLoadShareMin` (default 0.10), yields a finding with the top-10 stream carriers sorted by per-stream count.
+Workspace-wide event-name histogram classified by the framework's `_v<digits>` rule (ACT-403). For each deprecated event whose share of the total store equals or exceeds `deprecated_min` (default 0.10), yields a finding with the top-10 stream carriers sorted by per-stream count.
 
 **Remediation:** `app.close([{stream}, ...])` on the heaviest carriers. The migration's already happened in the registry; this surfaces the rump on-disk that's still costing replay time.
 
@@ -68,26 +68,26 @@ Workspace-wide event-name histogram classified by the framework's `_v<digits>` r
 
 Two flavours, evaluated per stream:
 
-- **`idle`** — stream's head event committed more than `idleDays` (default 90) ago. The "stream has gone quiet" signal.
-- **`terminal`** — stream's head event name is in the operator-supplied `terminalEvents` list. The framework doesn't declare what's terminal for a domain (wrong scope); you pass a list like `["OrderShipped", "TicketClosed"]`.
+- **`idle`** — stream's head event committed more than `idle_days` (default 90) ago. The "stream has gone quiet" signal.
+- **`terminal`** — stream's head event name is in the operator-supplied `terminal_events` list. The framework doesn't declare what's terminal for a domain (wrong scope); you pass a list like `["OrderShipped", "TicketClosed"]`.
 
-Each finding carries `restartSupported`, derived from whether the stream's owning state declares a `.snap()` reducer. Drives the choice between `app.close([{stream}])` (full tombstone) and `app.close([{stream, restart: true}])` (truncate + seed snapshot).
+Each finding carries `restart_supported`, derived from whether the stream's owning state declares a `.snap()` reducer. Drives the choice between `app.close([{stream}])` (full tombstone) and `app.close([{stream, restart: true}])` (truncate + seed snapshot).
 
 ### `restart-candidate` → `app.close([{stream, restart: true}])`
 
-Streams above `eventCountForRestart` (default 10,000) whose owning state has a `.snap()` reducer. Restart shrinks the working set without losing state. Streams whose state doesn't support snapshots are silently skipped (restart wouldn't work) — they belong in the close-candidate buckets instead.
+Streams above `restart_min` (default 10,000) whose owning state has a `.snap()` reducer. Restart shrinks the working set without losing state. Streams whose state doesn't support snapshots are silently skipped (restart wouldn't work) — they belong in the close-candidate buckets instead.
 
 ### `reaction-health` → `app.unblock(...)` / `app.reset(...)`
 
 Three sub-statuses, evaluated per stream position:
 
 - **`blocked`** — drain has given up on this stream. Remediation: investigate the underlying issue, then `app.unblock(stream)` or `app.reset(stream)` to replay.
-- **`near-block`** — `retry >= nearBlockRetry` (default 3) without yet being blocked. Heads-up that one more retry will tombstone the stream (if `blockOnError` is set on the reaction).
-- **`stuck-backoff`** — `leased_until` is in the past but `leased_by` is still set. Either a worker crashed mid-attempt or the framework's in-process backoff is holding off the next retry while no other worker has re-claimed. Threshold: `backoffStuckMinutes` (default 30).
+- **`near-block`** — `retry >= near_block` (default 3) without yet being blocked. Heads-up that one more retry will tombstone the stream (if `blockOnError` is set on the reaction).
+- **`stuck-backoff`** — `leased_until` is in the past but `leased_by` is still set. Either a worker crashed mid-attempt or the framework's in-process backoff is holding off the next retry while no other worker has re-claimed. Threshold: `stuck_minutes` (default 30).
 
 ### `snapshot-drift` → `load({snap: true})` or wait
 
-Streams that have accumulated many events since their last `__snapshot__` marker. Cold loads without a snapshot pay the full replay cost on every load — operationally painful for hot read paths. Default threshold: `snapshotDriftMin` (500 events). Skips streams whose owning state doesn't declare `.snap()`.
+Streams that have accumulated many events since their last `__snapshot__` marker. Cold loads without a snapshot pay the full replay cost on every load — operationally painful for hot read paths. Default threshold: `drift_min` (500 events). Skips streams whose owning state doesn't declare `.snap()`.
 
 ### `routing-health` → restart-with-new-config
 
@@ -131,7 +131,7 @@ if (findings.length > 0) {
 ```typescript
 const deprecatedFindings: unknown[] = [];
 for await (const f of app.audit(["deprecated-load"], {
-  thresholds: { deprecatedLoadShareMin: 0.05 },
+  thresholds: { deprecated_min: 0.05 },
 })) {
   deprecatedFindings.push(f);
 }
@@ -148,8 +148,8 @@ if (deprecatedFindings.length > 0) {
 ```typescript
 for await (const f of app.audit(["close-candidate", "restart-candidate"], {
   thresholds: {
-    idleDays: 60,
-    terminalEvents: ["OrderShipped", "TicketClosed"],
+    idle_days: 60,
+    terminal_events: ["OrderShipped", "TicketClosed"],
   },
 })) {
   console.log(f);
@@ -174,13 +174,13 @@ All thresholds are operator-tunable per call:
 
 | Threshold | Default | Used by |
 |---|---|---|
-| `idleDays` | 90 | `close-candidate` (idle) |
-| `eventCountForRestart` | 10,000 | `restart-candidate` |
-| `backoffStuckMinutes` | 30 | `reaction-health` (stuck-backoff) |
-| `nearBlockRetry` | 3 | `reaction-health` (near-block) |
-| `deprecatedLoadShareMin` | 0.10 | `deprecated-load` |
-| `snapshotDriftMin` | 500 | `snapshot-drift` |
-| `terminalEvents` | (none) | `close-candidate` (terminal) |
+| `idle_days` | 90 | `close-candidate` (idle) |
+| `restart_min` | 10,000 | `restart-candidate` |
+| `stuck_minutes` | 30 | `reaction-health` (stuck-backoff) |
+| `near_block` | 3 | `reaction-health` (near-block) |
+| `deprecated_min` | 0.10 | `deprecated-load` |
+| `drift_min` | 500 | `snapshot-drift` |
+| `terminal_events` | (none) | `close-candidate` (terminal) |
 
 ## What `app.audit()` does NOT do
 
