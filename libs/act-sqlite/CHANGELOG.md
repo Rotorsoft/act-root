@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.0.0...@rotorsoft/act-sqlite-v1.0.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* **act-sqlite:** re-cut the 1.0 line as 1.0.1 after npm reserved 1.0.0 ([3d2ae10](https://github.com/rotorsoft/act-root/commit/3d2ae10a7dd450f032e20db8e3fce731712d9aa2)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
 # [@rotorsoft/act-sqlite-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.9.0...@rotorsoft/act-sqlite-v1.0.0) (2026-05-21)
 
 
