@@ -171,6 +171,12 @@ Old instances built before the migration already emit the legacy event name and 
 
 **No opt-out flag.** A `--allow-deprecated-emit` knob would invite developers to silence the throw instead of fixing the call site. The fix is mechanical (one-character rename to the current version); the throw is the forcing function.
 
+## Surfacing on-disk drift — `app.audit()`
+
+The build-time deprecation enforcement answers "is my registry clean?" — it doesn't tell you "how many legacy events are still on disk." That question needs a store query, and a store query at app startup is a footgun on large tables. The operator runs it on demand via `app.audit(["deprecated-load"], { thresholds: { deprecatedLoadShareMin: 0.10 } })`. The audit walks `query_stats({names: true})` once, classifies event names by the same `_v<digits>` rule, and yields findings for each deprecated event whose share of the total store is at or above the threshold — sorted by absolute count with top-10 stream carriers per finding.
+
+Same operator-driven category as `app.close()` / `app.reset()` / `app.unblock()`: never auto-invoked; you decide when to run and what to do with the findings. The audit covers eight more categories beyond `deprecated-load` (schema, close-candidate, restart-candidate, reaction-health, snapshot-drift, routing-health, correlation-gaps, clock-anomalies) — each tagged with a remediation. See [Auditing a store](../guides/auditing-a-store.md) for the full catalogue and cookbook recipes.
+
 ## Pointers
 
 - `libs/act/src/types/action.ts` — `EventRegister`, `PatchHandlers` — type-level shape that drives this
