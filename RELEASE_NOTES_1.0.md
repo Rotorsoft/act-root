@@ -174,7 +174,7 @@ All of the above is governed by the charter as of 1.0.
 | `@rotorsoft/act-diagram` | Yes | Goes to 1.0 alongside core; diagram output shape (SVG structure, click-through anchors) is explicitly *not* part of the stability surface |
 | `@rotorsoft/act-patch` | Already past 1.0 | Stable utility, untouched |
 | `@rotorsoft/act-sse` | Already past 1.0, **deprecated** | Surface lives on as `@rotorsoft/act-http/sse`. Bug fixes only; will be removed in a future release. Migrate by changing the import path |
-| `@rotorsoft/act-tck` | Stays at 0.x | TCK API itself (`run*Tck` functions, capabilities flags, fixture helpers) is still stabilizing against third-party authors. The `Store`/`Cache`/`Logger` contracts it validates are covered by the charter; the kit's own surface is not yet |
+| `@rotorsoft/act-tck` | Yes | TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) joins the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
 
 ## What's not in 1.0
 

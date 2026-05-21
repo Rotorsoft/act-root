@@ -89,7 +89,7 @@ These may change in **any** release, including patches. Don't depend on them in 
 | `@rotorsoft/act-pino` | Yes — `Logger` adapter, narrow surface |
 | `@rotorsoft/act-sse` | **Deprecated** (already past 1.0). Surface moved to `@rotorsoft/act-http/sse`; bug fixes only, scheduled for removal in a future release. Migrate by changing the import path. |
 | `@rotorsoft/act-diagram` | Goes to 1.0 alongside core. Diagram output shape (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. |
-| `@rotorsoft/act-tck` | **Stays at 0.x.** The Store/Cache/Logger contracts the TCK validates are stable at 1.0; the TCK's own surface (`run*Tck` functions, `Capabilities` types, fixture helpers) keeps evolving until third-party adapter authors have shaken it out in practice. Joins the 1.x line once that settles. |
+| `@rotorsoft/act-tck` | Yes — TCK's published surface (`run*Tck` functions, `Capabilities` types, fixture helpers) joins the 1.x line alongside the `Store`/`Cache`/`Logger` contracts it validates |
 
 Each library's `README.md` carries a one-line stability note linking back to this document.
 
