@@ -558,13 +558,26 @@ function StreamDetail({
     { stream, limit: 100, backward: true },
     { staleTime: 3_000 }
   );
-  // Head + tail stats on demand (#698). Fetched only when the detail
-  // panel is open — the page-wide `streams` query doesn't carry the
-  // full Committed bodies because that'd 100× the payload for the
-  // common scan-the-list case.
+  // Head + tail stats — fetched on demand, one stream at a time (#698).
+  //
+  // Efficiency contract (don't tighten without revisiting):
+  // - Mount-driven: this hook lives in `StreamDetail`, which is only
+  //   rendered when `selected` is non-null. No selection = no query.
+  // - Single-stream: server passes `[stream]` to `query_stats`, which
+  //   becomes one `e.stream = ANY($1)` indexed range scan in PG.
+  // - No background refetch: window-focus polling is off because head/
+  //   tail of a stream doesn't drift fast enough to warrant it. The
+  //   page-wide live-mode polling already refreshes the row list with
+  //   timestamp-level granularity; opening the detail panel again on a
+  //   stale entry refetches via the `staleTime` window.
+  // - 30s staleTime: long enough that closing and reopening the same
+  //   stream re-uses the cached result instead of round-tripping.
   const statsQuery = trpc.streamStats.useQuery(
     { stream },
-    { staleTime: 5_000 }
+    {
+      staleTime: 30_000,
+      refetchOnWindowFocus: false,
+    }
   );
 
   const events = (eventsQuery.data?.events ?? []) as any[];
