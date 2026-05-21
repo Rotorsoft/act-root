@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, dispose, sleep, state, store } from "../src/index.js";
+import { act, dispose, projection, sleep, state, store } from "../src/index.js";
 import type { AuditFinding } from "../src/types/index.js";
 
 /**
@@ -466,6 +466,43 @@ describe("audit", () => {
       });
     });
 
+    it("falls back to a placeholder reason when blocked without recorded error", async () => {
+      // Some adapters can land a stream as blocked with an empty
+      // `error` string (e.g. crash mid-block, manual operator
+      // intervention). The audit should still flag it — with a
+      // generic reason — rather than emitting an empty string.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([{ stream: "w1", source: "w1" }]);
+      const s = (
+        store() as unknown as {
+          _streams: Map<string, { _blocked: boolean; _error: string }>;
+        }
+      )._streams.get("w1");
+      if (s) {
+        s._blocked = true;
+        s._error = "";
+      }
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["reaction-health"])) findings.push(f);
+      const blockedFinding = findings.find(
+        (f) => f.category === "reaction-health" && f.status === "blocked"
+      );
+      expect(blockedFinding).toBeDefined();
+      expect(blockedFinding).toMatchObject({
+        category: "reaction-health",
+        stream: "w1",
+        status: "blocked",
+        reason: "blocked without recorded error",
+      });
+    });
+
     it("flags near-block streams when retry >= nearBlockRetry", async () => {
       // Driving retry counts to >= threshold via public APIs
       // requires the drain machinery (failing reactions). For a
@@ -843,6 +880,305 @@ describe("audit", () => {
         stream: "w1",
         reason: "out-of-order",
       });
+    });
+  });
+
+  // Coverage of branches that are reachable but only via specific
+  // configurations not exercised by the main scenario tests above.
+  // Each test names the branch it's there for so future readers know
+  // why it exists.
+  describe("branch coverage edge cases", () => {
+    // Second deprecation family on top of widget — so the sort
+    // callback (`(a,b) => b.count - a.count` on the deprecated set)
+    // actually runs with 2+ items.
+    const twoDeprecated = state({
+      Two: z.object({ a: z.number(), b: z.number() }),
+    })
+      .init(() => ({ a: 0, b: 0 }))
+      .emits({
+        Alpha: z.object({ a: z.number() }),
+        Alpha_v2: z.object({ a: z.number() }),
+        Beta: z.object({ b: z.number() }),
+        Beta_v2: z.object({ b: z.number() }),
+      })
+      .patch({
+        Alpha: ({ data }, s) => ({ ...s, a: data.a }),
+        Alpha_v2: ({ data }, s) => ({ ...s, a: data.a }),
+        Beta: ({ data }, s) => ({ ...s, b: data.b }),
+        Beta_v2: ({ data }, s) => ({ ...s, b: data.b }),
+      })
+      .on({ noop: z.object({}) })
+      .emit(() => ["Alpha_v2", { a: 0 }])
+      .build();
+
+    it("sorts multiple deprecated event families by descending count", async () => {
+      const app = act().withState(twoDeprecated).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      // Beta has more events than Alpha — both deprecated.
+      for (let i = 0; i < 3; i++) {
+        await store().commit("s", [{ name: "Alpha", data: { a: i } }], meta);
+      }
+      for (let i = 0; i < 7; i++) {
+        await store().commit("s", [{ name: "Beta", data: { b: i } }], meta);
+      }
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["deprecated-load"], {
+        thresholds: { deprecatedLoadShareMin: 0.1 },
+      })) {
+        findings.push(f);
+      }
+      // Both deprecated event families surface, Beta first (higher count).
+      const names = findings.map((f) => (f as { eventName: string }).eventName);
+      expect(names).toEqual(["Beta", "Alpha"]);
+    });
+
+    it("restart-candidate skips streams whose head is a framework marker", async () => {
+      // count > threshold AND head is __tombstone__ → skip.
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      for (let i = 0; i < 25; i++) {
+        await store().commit(
+          "tomb",
+          [{ name: "OrderPlaced", data: { items: i } }],
+          meta
+        );
+      }
+      await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["restart-candidate"], {
+        thresholds: { eventCountForRestart: 20 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toEqual([]);
+    });
+
+    it("reaction-health yields nothing for healthy subscribed streams", async () => {
+      // Subscribed stream, no lease, no retries, not blocked → audit
+      // visits the row via query_streams and yields no finding.
+      // Exercises the "all checks fail" path through onStream.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "healthy",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([{ stream: "healthy", source: "healthy" }]);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["reaction-health"])) findings.push(f);
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams whose head is a framework marker", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      for (let i = 0; i < 30; i++) {
+        await store().commit(
+          "tomb",
+          [{ name: "OrderPlaced", data: { items: i } }],
+          meta
+        );
+      }
+      await store().commit("tomb", [{ name: "__tombstone__", data: {} }], meta);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["snapshot-drift"], {
+        thresholds: { snapshotDriftMin: 20 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams below driftMin", async () => {
+      // Stream with snap state but only a handful of events → not
+      // worth a drift finding.
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      for (let i = 0; i < 3; i++) {
+        await store().commit(
+          "tiny",
+          [{ name: "OrderPlaced", data: { items: i } }],
+          meta
+        );
+      }
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["snapshot-drift"], {
+        thresholds: { snapshotDriftMin: 20 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toEqual([]);
+    });
+
+    it("snapshot-drift skips streams whose post-snapshot count is below driftMin", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      // Total events ≥ driftMin to enter the candidate set, but
+      // post-snapshot count is below threshold.
+      for (let i = 0; i < 15; i++) {
+        await store().commit(
+          "fresh",
+          [{ name: "OrderPlaced", data: { items: i } }],
+          meta
+        );
+      }
+      await store().commit("fresh", [{ name: "__snapshot__", data: {} }], meta);
+      // Only a couple of events after the snapshot — not enough to flag.
+      for (let i = 0; i < 2; i++) {
+        await store().commit(
+          "fresh",
+          [{ name: "OrderPlaced", data: { items: 100 + i } }],
+          meta
+        );
+      }
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["snapshot-drift"], {
+        thresholds: { snapshotDriftMin: 10 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toEqual([]);
+    });
+
+    it("routing-health ignores streams subscribed without a lane string", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "nolane",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([{ stream: "nolane", source: "nolane" }]);
+      // Force-empty the stream's lane field — adapters can land
+      // rows with empty lane after manual ops.
+      const s = (
+        store() as unknown as {
+          _streams: Map<string, { _lane: string }>;
+        }
+      )._streams.get("nolane");
+      if (s) s._lane = "";
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const unknownLane = findings.filter(
+        (f) => f.category === "routing-health" && f.reason === "unknown-lane"
+      );
+      expect(unknownLane).toEqual([]);
+    });
+
+    it("routing-health ignores streams whose lane is declared", async () => {
+      // Default lane is always declared — subscribe without specifying
+      // a lane lands on the default and should NOT be flagged.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "defaultlane",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([
+        { stream: "defaultlane", source: "defaultlane" },
+      ]);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const unknownLane = findings.filter(
+        (f) => f.category === "routing-health" && f.reason === "unknown-lane"
+      );
+      expect(unknownLane).toEqual([]);
+    });
+
+    it("routing-health ignores framework-marker event names in the unrouted scan", async () => {
+      // __snapshot__ shows up in the workspace names map but must not
+      // be flagged as unrouted — it's a framework concern.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit("w1", [{ name: "__snapshot__", data: {} }], meta);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      const unrouted = findings.filter(
+        (f) => f.category === "routing-health" && f.reason === "unrouted"
+      );
+      expect(unrouted).toEqual([]);
+    });
+
+    it("routing-health does not flag event names with a registered reaction", async () => {
+      // Build a state with a slice that REACTS to Repriced — so
+      // Repriced is in `routedEventNames` and shouldn't be unrouted.
+      const targeted = state({
+        Routed: z.object({ touched: z.boolean() }),
+      })
+        .init(() => ({ touched: false }))
+        .emits({ RoutedHit: z.object({}) })
+        .patch({ RoutedHit: () => ({ touched: true }) })
+        .on({ trigger: z.object({}) })
+        .emit(() => ["RoutedHit", {}])
+        // The on().emit() pairing above declares a reaction-side
+        // entry — the `targeted.events.RoutedHit` mapping marks
+        // RoutedHit as routed for the orchestrator.
+        .build();
+      const sender = widget;
+      // Stand up an app combining widget (emits Repriced) and a
+      // projection that reacts to Repriced — so Repriced is routed.
+      const tracked = projection("tracked")
+        .on({ Repriced: z.object({ price: z.number() }) })
+        .do(async function trackRepriced() {
+          await Promise.resolve();
+        })
+        .build();
+      const app = act()
+        .withState(targeted)
+        .withState(sender)
+        .withProjection(tracked)
+        .build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["routing-health"])) findings.push(f);
+      // Repriced was routed; should NOT appear as unrouted.
+      const repricedUnrouted = findings.find(
+        (f) =>
+          f.category === "routing-health" &&
+          f.reason === "unrouted" &&
+          (f as { eventName?: string }).eventName === "Repriced"
+      );
+      expect(repricedUnrouted).toBeUndefined();
+    });
+
+    it("correlation-gaps does not flag events whose parent exists", async () => {
+      const app = act().withState(widget).build();
+      // Commit parent event first.
+      const [parent] = await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        { correlation: "c1", causation: {} }
+      );
+      // Child event whose causation.event.id points at the real parent.
+      await store().commit("w1", [{ name: "Repriced", data: { price: 2 } }], {
+        correlation: "c1",
+        causation: {
+          event: {
+            id: parent.id,
+            stream: parent.stream,
+            name: String(parent.name),
+          },
+        },
+      } as unknown as { correlation: string; causation: object });
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["correlation-gaps"])) findings.push(f);
+      expect(findings).toEqual([]);
     });
   });
 });

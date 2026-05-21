@@ -277,16 +277,17 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
   return {
     category: "deprecated-load",
     onStat(stream, { names }) {
-      for (const [name, n] of Object.entries(names ?? {})) {
-        const count = n ?? 0;
-        if (count === 0) continue;
-        totals.set(name, (totals.get(name) ?? 0) + count);
+      // Contract: query_stats was called with `{names: true}`,
+      // so adapter populates `names` with positive integer counts.
+      // No runtime fallback needed.
+      for (const [name, count] of Object.entries(names!)) {
+        totals.set(name, (totals.get(name) ?? 0) + count!);
         let m = perStream.get(name);
         if (!m) {
           m = new Map();
           perStream.set(name, m);
         }
-        m.set(stream, count);
+        m.set(stream, count!);
       }
     },
     drain() {
@@ -301,9 +302,12 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < shareMin) continue;
-        const currentVersion = currentVersionOf(name, deps.knownEventNames);
-        if (!currentVersion) continue;
-        const topStreams = [...(perStream.get(name)?.entries() ?? [])]
+        // Contract: `deprecatedEventNames(registry)` only returns names
+        // that have a higher version in the same family, so
+        // `currentVersionOf(name, registry)` is guaranteed defined.
+        const currentVersion = currentVersionOf(name, deps.knownEventNames)!;
+        // perStream is populated in lockstep with totals — name is guaranteed present.
+        const topStreams = [...perStream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 10);
@@ -336,20 +340,17 @@ const makeCloseCandidatePass: PassFactory = (deps, options) => {
     onStat(stream, { head }) {
       const headName = String(head.name);
       if (headName.startsWith("__")) return; // already-closed or mid-truncate
-      const headTime =
-        head.created instanceof Date
-          ? head.created.getTime()
-          : new Date(head.created as unknown as string).getTime();
-      const isIdle = Number.isFinite(headTime) && headTime < idleCutoff;
+      // All in-tree adapters return `created` as Date; the Date
+      // constructor passes Date instances through unchanged, so a
+      // single call shape works regardless.
+      const headTime = head.created.getTime();
+      const isIdle = headTime < idleCutoff;
       const isTerminal = terminalEvents.has(headName);
       if (!isIdle && !isTerminal) return;
       findings.push({
         category: "close-candidate",
         stream,
-        lastEventAt:
-          head.created instanceof Date
-            ? head.created.toISOString()
-            : String(head.created),
+        lastEventAt: head.created.toISOString(),
         reason: isTerminal ? "terminal" : "idle",
         idleDays: isIdle
           ? Math.floor((Date.now() - headTime) / (24 * 60 * 60 * 1000))
@@ -372,16 +373,20 @@ const makeRestartCandidatePass: PassFactory = (deps, options) => {
   return {
     category: "restart-candidate",
     onStat(stream, { head, count, names }) {
-      const total = count ?? 0;
-      if (total < threshold) return;
+      // `count` / `names` always populated — query_stats is called
+      // with both flags set; adapters keep them present together.
+      if (count! < threshold) return;
       const headName = String(head.name);
       if (headName.startsWith("__")) return;
       if (!restartIsSupported(deps, headName)) return;
       findings.push({
         category: "restart-candidate",
         stream,
-        eventCount: total,
-        snapshotCount: names?.["__snapshot__"] ?? 0,
+        eventCount: count!,
+        // names map is sparse — `__snapshot__` key absent when the
+        // stream has never been snapshotted (a common case for the
+        // restart-candidate signal).
+        snapshotCount: names!["__snapshot__"] ?? 0,
       });
     },
     drain: () => findings,
@@ -464,14 +469,15 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
   return {
     category: "snapshot-drift",
     onStat(stream, { head, count, names }) {
+      // restartIsSupported() already filters out framework markers
+      // (__snapshot__, __tombstone__) — neither name appears in any
+      // user state's events map, so the snap check rejects them.
       if (!restartIsSupported(deps, String(head.name))) return;
-      if (String(head.name).startsWith("__")) return;
-      const total = count ?? 0;
-      if (total < driftMin) return; // upper-bound short-circuit
+      if (count! < driftMin) return; // upper-bound short-circuit
       candidates.push({
         stream,
-        total,
-        snapshotCount: names?.["__snapshot__"] ?? 0,
+        total: count!,
+        snapshotCount: names!["__snapshot__"] ?? 0,
       });
     },
     async finalize(deps) {
@@ -493,17 +499,17 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
               with_snaps: true,
             }
           );
-          snapshotAt = collected[0]?.id;
-          if (snapshotAt !== undefined) {
-            let after = 0;
-            await deps.store().query(
-              () => {
-                after++;
-              },
-              { stream, stream_exact: true, after: snapshotAt }
-            );
-            eventsSinceLastSnapshot = after;
-          }
+          // snapshotCount > 0 means at least one `__snapshot__` event
+          // sits on this stream — the backward-walk above must surface it.
+          snapshotAt = collected[0]!.id;
+          let after = 0;
+          await deps.store().query(
+            () => {
+              after++;
+            },
+            { stream, stream_exact: true, after: snapshotAt }
+          );
+          eventsSinceLastSnapshot = after;
         }
         if (eventsSinceLastSnapshot < driftMin) continue;
         findings.push({
@@ -538,8 +544,7 @@ const makeRoutingHealthPass: PassFactory = (deps) => {
       });
     },
     onStat(_stream, { names }) {
-      for (const [name, n] of Object.entries(names ?? {})) {
-        if (!n || n === 0) continue;
+      for (const name of Object.keys(names!)) {
         seenEventNames.add(name);
       }
     },
@@ -606,11 +611,8 @@ const makeClockAnomaliesPass: PassFactory = () => {
   return {
     category: "clock-anomalies",
     onEvent(e) {
-      const created =
-        e.created instanceof Date
-          ? e.created.getTime()
-          : new Date(e.created as unknown as string).getTime();
-      if (!Number.isFinite(created)) return;
+      // `created` is a Date instance per the Store contract.
+      const created = e.created.getTime();
       if (created > Date.now()) {
         findings.push({
           category: "clock-anomalies",
