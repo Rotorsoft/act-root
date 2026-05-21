@@ -1,3 +1,17 @@
+# [@rotorsoft/act-pg-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.25.0...@rotorsoft/act-pg-v1.0.0) (2026-05-21)
+
+
+* chore(act-pg)!: enter 1.0 stability commitment ([cc4388e](https://github.com/rotorsoft/act-root/commit/cc4388e791c0a6c8cb25a2b395729f26695515cc)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-pg. It
+implements the Store contract from @rotorsoft/act 1.0 and is validated
+against @rotorsoft/act-tck across PostgreSQL 14/15/16/17 in CI. Per
+STABILITY.md, breaking changes to the published surface now require a
+major bump.
+
 # [@rotorsoft/act-pg-v0.25.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.24.0...@rotorsoft/act-pg-v0.25.0) (2026-05-19)
 
 
