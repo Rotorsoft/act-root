@@ -7,6 +7,41 @@ import { z } from "zod";
 
 const t = initTRPC.create();
 
+/**
+ * Write-mutation gate (#698). Mutating procedures that change adapter
+ * state — currently just `prioritize` — refuse to run unless this is
+ * explicitly opted into via `ACT_INSPECTOR_WRITE=1`. The legacy
+ * `backup` / `restore` mutations predate the gate and aren't covered;
+ * they're guarded by their UI flow (explicit click + confirm) rather
+ * than by env.
+ *
+ * Default off keeps the inspector safe to point at production from a
+ * laptop. A misclick in the dashboard can no longer reorder live
+ * priorities unless an operator has consciously set the env var.
+ */
+const writeEnabled = process.env.ACT_INSPECTOR_WRITE === "1";
+
+/**
+ * In-memory audit log (#698). Records each successful mutation so an
+ * operator can answer "who set priority=10 on which streams ten minutes
+ * ago?" without persistent storage. Bounded to keep memory usage flat;
+ * older entries fall off as new ones land. Cleared on process restart.
+ */
+type AuditEntry = {
+  readonly timestamp: string;
+  readonly action: "prioritize";
+  readonly filter: Record<string, unknown>;
+  readonly priority: number;
+  readonly affected: number;
+};
+const AUDIT_CAPACITY = 100;
+const auditLog: AuditEntry[] = [];
+const recordAudit = (entry: AuditEntry): void => {
+  auditLog.push(entry);
+  if (auditLog.length > AUDIT_CAPACITY)
+    auditLog.splice(0, auditLog.length - AUDIT_CAPACITY);
+};
+
 /** Loosely-typed committed event for inspector queries */
 type AnyEvent = Committed<Schemas, string>;
 
@@ -740,6 +775,70 @@ export const inspectorRouter = t.router({
 
       return { csv: [header, ...rows].join("\n"), count: events.length };
     }),
+
+  /**
+   * Inspector write-mode status (#698). Tells the UI whether mutation
+   * controls should render. Read-only by default; flipped on via the
+   * `ACT_INSPECTOR_WRITE=1` env var at server start. The flag is
+   * server-static — the UI doesn't get to toggle it, so refresh of a
+   * tab can't recover write access that the operator hasn't already
+   * granted to the process.
+   */
+  writeMode: t.procedure.query(() => ({
+    enabled: writeEnabled,
+    reason: writeEnabled
+      ? null
+      : "Set ACT_INSPECTOR_WRITE=1 on the inspector server to enable mutations.",
+  })),
+
+  /**
+   * Bulk-update the scheduling priority of streams matching a filter
+   * (#698 / ACT-102). Wraps `Store.prioritize`. Filter shape mirrors
+   * `query_streams` so the UI can preview affected counts via the
+   * existing query before committing the mutation.
+   *
+   * Single-stream edits set `stream` + `stream_exact: true`; bulk
+   * updates use regex with optional source / blocked / lane scoping.
+   * Refuses to run when {@link writeEnabled} is false.
+   */
+  prioritize: t.procedure
+    .input(
+      z.object({
+        priority: z.number().int(),
+        filter: z
+          .object({
+            stream: z.string().optional(),
+            stream_exact: z.boolean().optional(),
+            source: z.string().optional(),
+            source_exact: z.boolean().optional(),
+            blocked: z.boolean().optional(),
+            lane: z.string().optional(),
+          })
+          .default({}),
+      })
+    )
+    .mutation(async ({ input }) => {
+      if (!writeEnabled)
+        throw new Error(
+          "Inspector is in read-only mode. Set ACT_INSPECTOR_WRITE=1 on the server."
+        );
+      const s = getStore();
+      const affected = await s.prioritize(input.filter, input.priority);
+      recordAudit({
+        timestamp: new Date().toISOString(),
+        action: "prioritize",
+        filter: input.filter,
+        priority: input.priority,
+        affected,
+      });
+      return { ok: true as const, affected };
+    }),
+
+  /** Last 100 mutations performed via the inspector (#698). */
+  audit: t.procedure.query(() => ({
+    entries: [...auditLog].reverse(),
+    capacity: AUDIT_CAPACITY,
+  })),
 
   /** Restore events from CSV — drops and re-seeds the store, inserts with sequential IDs */
   restore: t.procedure
