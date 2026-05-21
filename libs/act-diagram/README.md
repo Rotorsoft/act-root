@@ -185,7 +185,7 @@ Bottom-up: inventory scan → per-state validation → per-slice composition (wi
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md). The diagram's **output shape** (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+Public API governed by the [Act Stability Charter](../../STABILITY.md). The diagram's **output shape** (SVG structure, click-through anchors) is *not* part of the stability surface and may evolve. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 

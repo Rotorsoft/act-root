@@ -159,7 +159,7 @@ Both adapters pass the same conformance suite — your application code doesn't 
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+Public API governed by the [Act Stability Charter](../../STABILITY.md). `PostgresStore` implements the `Store` contract from `@rotorsoft/act` and is validated against `@rotorsoft/act-tck` across PostgreSQL 14/15/16/17 in CI. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 
