@@ -1,7 +1,20 @@
-import { Activity, Database, GanttChart, GitBranch, List } from "lucide-react";
+import {
+  Activity,
+  Database,
+  GanttChart,
+  GitBranch,
+  Layers,
+  List,
+} from "lucide-react";
 import type { ReactNode } from "react";
 
-export type Tab = "log" | "timeline" | "streams" | "correlation" | "monitor";
+export type Tab =
+  | "log"
+  | "timeline"
+  | "streams"
+  | "correlation"
+  | "monitor"
+  | "schema";
 
 type TabDef = { id: Tab; label: string; icon: ReactNode };
 
@@ -11,6 +24,7 @@ const tabs: TabDef[] = [
   { id: "streams", label: "Streams", icon: <Database size={14} /> },
   { id: "correlation", label: "Correlation", icon: <GitBranch size={14} /> },
   { id: "monitor", label: "Monitor", icon: <Activity size={14} /> },
+  { id: "schema", label: "Schema", icon: <Layers size={14} /> },
 ];
 
 type TabNavProps = {
