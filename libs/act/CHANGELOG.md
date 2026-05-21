@@ -1,3 +1,18 @@
+# [@rotorsoft/act-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.46.0...@rotorsoft/act-v1.0.0) (2026-05-21)
+
+
+* chore(act)!: enter 1.0 stability commitment ([4d4e1de](https://github.com/rotorsoft/act-root/commit/4d4e1dec2ad8249f9e21b2be71e4124f6adda25f)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act. Per
+STABILITY.md, the public API surfaces — the builder DSL (state, slice,
+projection, act), the IAct runtime interface, the Store/Cache/Logger
+adapter contracts, the lifecycle event names and payload shapes, and
+the public type exports — are now covered by SemVer. Breaking changes
+require a major bump and a written migration note.
+
 # [@rotorsoft/act-v0.46.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.45.0...@rotorsoft/act-v0.46.0) (2026-05-21)
 
 
