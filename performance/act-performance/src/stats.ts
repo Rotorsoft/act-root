@@ -37,10 +37,25 @@ const leading: ConvergenceState = {
   consecutiveMatches: 0,
 };
 
-// Per-stream watermark tracking. The honest convergence signal: every
-// known projection stream has watermark == maxWatermarkObserved for
-// CONVERGENCE_STABLE_CYCLES drains in a row.
+// Per-stream watermark tracking — used for the "watermark range"
+// rendering in the table, not for convergence detection (see below).
 const watermarks = new Map<string, number>();
+
+// Convergence detection — "no progress for N cycles in a row".
+//
+// Earlier this checked `streamsConverged === streamsKnown && maxWatermark
+// >= eventCount`, which assumed every stream lives in the same global
+// id space. With the multi-lane setup each lane processes a different
+// event type into a disjoint set of target streams, so per-stream
+// watermarks naturally diverge — `creates-X` streams plateau at the
+// last TodoCreated event id, `updates-X` plateau later, etc. The old
+// rule would never fire even when everything is genuinely done.
+//
+// "No acks, no leases, no fetches for CONVERGENCE_STABLE_CYCLES" is
+// lane-config-independent: it directly observes the drain returning
+// empty, which only happens when no work is left to do across any
+// controller. Cheap, correct, and renders well as a "stable cycles"
+// counter the operator can watch tick up.
 const CONVERGENCE_STABLE_CYCLES = 5;
 let stableCycles = 0;
 let convergedDrainCount = 0;
@@ -132,7 +147,8 @@ export function updateStats<E extends Schemas>(
   drainCount: number,
   eventCount: number,
   drain: Drain<E>,
-  declaredLanes: readonly string[] = []
+  declaredLanes: readonly string[] = [],
+  loadFinished = false
 ): [ConvergenceState, ConvergenceState] {
   // --- This cycle's frontier split (what claim() actually pulled) ---
   const leasedLagging = drain.leased.filter((l) => l.lagging).length;
@@ -155,25 +171,37 @@ export function updateStats<E extends Schemas>(
       SPLIT_EMA_ALPHA * cycleSplit + (1 - SPLIT_EMA_ALPHA) * observedSplit;
   }
 
-  // --- Per-stream watermark map (honest convergence) ---
+  // --- Per-stream watermark map (used only for the table's
+  // "watermarks" range column) ---
   for (const acked of drain.acked) {
     const prev = watermarks.get(acked.stream) ?? -1;
     if (acked.at > prev) watermarks.set(acked.stream, acked.at);
   }
   const allWms = [...watermarks.values()];
   const maxWatermark = allWms.length > 0 ? Math.max(...allWms) : 0;
-  const streamsConverged = allWms.filter((w) => w === maxWatermark).length;
   const streamsKnown = watermarks.size;
+  const streamsConverged = allWms.filter((w) => w === maxWatermark).length;
 
-  // Real convergence: every known stream at max for N cycles in a row.
-  // We additionally require the maxWatermark to have caught up to
-  // eventCount — otherwise we'd declare convergence mid-load.
-  const allAtMax =
-    streamsKnown > 0 &&
-    streamsConverged === streamsKnown &&
-    maxWatermark >= eventCount;
+  // Convergence: no progress for N consecutive cycles AFTER the load
+  // generator has finished issuing operations.
+  //
+  // "No progress" = no claims, no fetched events, no acks this cycle.
+  // Gating on `loadFinished` instead of `maxWatermark >= eventCount`
+  // avoids the off-by-one between "ops requested by main loop" and
+  // "events present in the store" — projection events and reaction
+  // round-trips can push the actual event id space well past
+  // `eventCount`, and trying to predict that count from the load loop
+  // is brittle (it depends on which reactions emit further events,
+  // which adapters write extras, etc.). The gate "main loop done"
+  // captures the operator's actual intent: the workload is over,
+  // tell me when the drain catches up.
+  const emptyCycle =
+    drain.leased.length === 0 &&
+    drain.acked.length === 0 &&
+    drain.fetched.reduce((s, f) => s + f.events.length, 0) === 0;
+  const drainFinished = emptyCycle && loadFinished;
 
-  if (allAtMax) {
+  if (drainFinished) {
     stableCycles++;
     if (stableCycles >= CONVERGENCE_STABLE_CYCLES && !convergedDrainCount) {
       convergedDrainCount = drainCount;

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   act,
   type Committed,
+  type Drain,
   type Schemas,
   sleep,
   store,
@@ -19,13 +20,16 @@ function target(stream: string, N: number) {
   return first % N;
 }
 
-// Three-lane split. Each event type drains on its own lane with a
-// distinct lease budget — creates are the hottest path (tight lease,
-// high stream limit), updates are medium-cadence, deletes can tolerate
-// the longest lag. Each lane runs an independent DrainController so a
-// slow handler in one never stalls the others. The leading/lagging
-// frontier mechanic operates *within* each lane, so both dimensions
-// are visible in the per-cycle stats.
+// Three-lane split. Each event type drains on *its own* set of target
+// streams, on its own lane, with its own lease budget. Keeping the
+// target streams disjoint per lane is load-bearing: `subscribe()`
+// UPSERTs the lane every call, so if all three event types resolved
+// to the same `stream-X`, the lane field would be overwritten on
+// each subscribe and only the last writer's lane would actually hold
+// — the other two lanes would end up with zero streams assigned.
+//
+// Naming convention: `<lane>-<bucket>` (e.g. `creates-0`, `updates-3`,
+// `deletes-7`). 25 buckets per lane via UUID hash.
 const LANES = ["creates", "updates", "deletes"] as const;
 type Lane = (typeof LANES)[number];
 const lane_for = (eventName: string): Lane => {
@@ -34,27 +38,46 @@ const lane_for = (eventName: string): Lane => {
   return "updates";
 };
 
-// serialize projection leases to one key or
-// one projection lease per stream?
-const projection_resolver =
-  process.env.SERIAL_PROJECTION === "true"
-    ? // serial projection (only one projection stream)
-      (committed: Committed<Schemas, keyof Schemas>) => ({
-        target: "serial_projection",
-        lane: lane_for(String(committed.name)),
-      })
-    : // parallel projection (custom resolver to N projection streams)
-      (committed: Committed<Schemas, keyof Schemas>) => ({
-        target: `stream-${target(committed.stream, 25)}`, // use N > streamLimit to avoid conflicts
-        source: "todo.*", // incluce all todos
-        lane: lane_for(String(committed.name)),
-      });
-// // parallel projection (default resolver is one-stream-to-one-projection)
-// : (committed: Committed<Schemas, keyof Schemas>) => ({
-//   target: committed.stream,
-//   source: committed.stream,
-//   lane: lane_for(String(committed.name)),
-// });
+const resolveTarget = (committed: Committed<Schemas, keyof Schemas>) => {
+  const lane = lane_for(String(committed.name));
+  return {
+    target:
+      process.env.SERIAL_PROJECTION === "true"
+        ? `${lane}-serial`
+        : `${lane}-${target(committed.stream, 25)}`,
+    source: "todo.*",
+    lane,
+  };
+};
+
+// Lane-shaped artificial latency. Tuned to make the contrast obvious
+// in the rendered table — creates run at full speed; updates pay a
+// small tax; the slow lane (deletes) pays enough that an operator
+// watching the table sees its frontier lag behind creates and
+// updates have already settled.
+const LANE_DELAY_MS: Record<Lane, number> = {
+  creates: 0,
+  updates: 25,
+  deletes: 150,
+};
+
+// Wrap a projector callback with the lane-specific delay. Returns a
+// *named* function — Act's `.do()` rejects anonymous handlers because
+// the name shows up in traces.
+function withDelay<H extends (...args: never[]) => Promise<unknown>>(
+  name: string,
+  lane: Lane,
+  handler: H
+): H {
+  const delay = LANE_DELAY_MS[lane];
+  const wrapped = {
+    async [name](...args: Parameters<H>) {
+      if (delay > 0) await sleep(delay);
+      return handler(...args);
+    },
+  }[name];
+  return wrapped as H;
+}
 
 // Don't use PG option in browser
 const usePg = process.env.USE_PG === "true";
@@ -74,71 +97,96 @@ const projector = usePg
   ? pgProjector("postgres://postgres:postgres@localhost:5431/postgres")
   : memProjector();
 
-// Composed "Todo" app with state and reactions. Three lanes give each
-// event type its own lease budget so the per-cycle table shows three
-// independent leading/lagging frontiers converging at different rates.
+// Composed "Todo" app — three lanes give each event type its own
+// lease budget so the per-cycle table shows three independent
+// leading/lagging frontiers converging at different rates.
 export const app = act()
   .withState(Todo)
   .withLane({ name: "creates", leaseMillis: 2_000, streamLimit: 20 })
   .withLane({ name: "updates", leaseMillis: 5_000, streamLimit: 15 })
   .withLane({ name: "deletes", leaseMillis: 30_000, streamLimit: 5 })
   .on("TodoCreated")
-  .do(projector.projectTodoCreated)
-  .to(projection_resolver)
+  .do(withDelay("projectTodoCreated", "creates", projector.projectTodoCreated))
+  .to(resolveTarget)
   .on("TodoUpdated")
-  .do(projector.projectTodoUpdated)
-  .to(projection_resolver)
+  .do(withDelay("projectTodoUpdated", "updates", projector.projectTodoUpdated))
+  .to(resolveTarget)
   .on("TodoDeleted")
-  .do(projector.projectTodoDeleted)
-  .to(projection_resolver)
+  .do(withDelay("projectTodoDeleted", "deletes", projector.projectTodoDeleted))
+  .to(resolveTarget)
   .build();
 
-// load test variables
-let drainInterval: ReturnType<typeof setInterval> | undefined;
-let lastDrain = Date.now();
-let eventCount = 0;
-let drainCount = 0;
-const streams = new Set<string>();
+// === Observability via lifecycle events ===
+//
+// Best-practice Act apps don't poll for drain results — the framework
+// emits lifecycle events as work happens, and listeners read those.
+// Two channels feed the dashboard:
+//
+//   `committed` — increments the "committed" headline counter.
+//   `acked`     — appended to a recent-acks ring; the render timer
+//                 below snapshots and clears the ring each tick to
+//                 build the per-cycle table.
+//   `blocked`   — surfaced as a warning line.
+//
+// The orchestrator auto-schedules a settle pass on every commit, so
+// there's no manual `setInterval(drain)` driving work — load just
+// commits and the framework drives the drain to completion. The
+// `setInterval` below is *render only*: it doesn't trigger drain, it
+// just paints accumulated lifecycle data.
+//
+// (Why not the `settled` event? Settle is debounced + loops to
+// completion per pass, so under sustained load it fires once at the
+// very end. That'd give us one final table, not a running view.
+// Rendering off `acked` decouples display cadence from drain cadence.)
+import type { BlockedLease, Lease } from "@rotorsoft/act";
+
+let totalCommitted = 0;
+let renderCount = 0;
+let loadFinished = false;
+const ackedSinceLastRender: Lease[] = [];
+const blockedSeen: BlockedLease[] = [];
+
+app.on("committed", (snapshots) => {
+  totalCommitted += snapshots.length;
+});
+
+app.on("acked", (acked) => {
+  ackedSinceLastRender.push(...acked);
+});
+
+app.on("blocked", (blocked) => {
+  blockedSeen.push(...blocked);
+  for (const b of blocked) console.error(`⚠ blocked: ${b.stream} ${b.error}`);
+});
 
 /**
- * Debounced drain for convergence testing.
+ * Wait until the orchestrator has nothing left to drain.
  *
- * Drains the store every FREQ ms.
+ * Listens for a `settled` event whose `acked` + `leased` are both
+ * empty — that's the operational definition of "fully caught up".
+ * Schedules an immediate settle pass to kick things in case nothing
+ * recent has fired one.
  *
- * Logs the lag and lead of the drain.
+ * Returns true when settlement was observed; false on timeout.
  */
-export async function drain() {
-  const now = Date.now();
-  if (now - lastDrain > drainFrequency) {
-    lastDrain = now;
-
-    const drain = await app.drain(drainOptions);
-    drainCount++;
-
-    const [lagging, leading] = updateStats(
-      drainCount,
-      eventCount,
-      drain,
-      LANES
-    );
-
-    if (lagging.convergedAt && leading.convergedAt) {
-      clearInterval(drainInterval);
-      drainInterval = undefined;
-
-      console.log("\nConverged! Load test complete.");
-      const stats = await projector.getStats();
-      console.table({
-        ...stats,
-        lagging: `Converged @${lagging.convergedAt} in ${lagging.convergedTime! / 1000} seconds`,
-        leading: `Converged @${leading.convergedAt} in ${leading.convergedTime! / 1000} seconds`,
-      });
-      process.exit(0);
-    }
-  }
+function waitForCaughtUp(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      app.off("settled", onSettled);
+      resolve(false);
+    }, timeoutMs);
+    const onSettled = (drain: Drain<Schemas>) => {
+      if (drain.acked.length === 0 && drain.leased.length === 0) {
+        clearTimeout(timer);
+        app.off("settled", onSettled);
+        resolve(true);
+      }
+    };
+    app.on("settled", onSettled);
+    app.settle({ debounceMs: 0 });
+  });
 }
 
-// Main event generation loop
 async function main(
   { maxEvents, createMax, eventFrequency }: LoadTestOptions = {
     maxEvents: 300,
@@ -150,26 +198,47 @@ async function main(
   await store().seed();
   await projector.init();
 
-  drainInterval = setInterval(drain, drainFrequency);
-  // app.on("committed", debouncedDrain);
+  // Render the dashboard at a steady cadence, snapshotting whatever
+  // lifecycle events have accumulated since the last paint. This is
+  // separate from drain — Act runs that internally on every commit.
+  const renderTimer = setInterval(() => {
+    renderCount++;
+    const acked = ackedSinceLastRender.splice(0);
+    // Synthesize a minimal Drain-shaped payload from the accumulated
+    // acks. updateStats only reads `acked`, `leased`, `fetched`, so
+    // empty arrays for the latter two are fine — they'd be the same
+    // from the framework's perspective at the moment we render.
+    const drainSnapshot = {
+      acked,
+      leased: [],
+      fetched: [],
+      blocked: blockedSeen,
+    };
+    updateStats(
+      renderCount,
+      totalCommitted,
+      drainSnapshot,
+      LANES,
+      loadFinished
+    );
+  }, 500);
 
   const actorId = "local";
+  const streams = new Set<string>();
+  let eventCount = 0;
+  const startTime = Date.now();
+
   while (eventCount < maxEvents) {
     eventCount++;
     await sleep(eventFrequency);
     const op = Math.random();
     if (eventCount < createMax && (op < 0.4 || streams.size === 0)) {
       const stream = "todo-" + randomUUID();
-      const [snap] = await app.do(
+      await app.do(
         "create",
         { stream, actor: { id: actorId, name: actorId } },
         { text: "created @ " + new Date().toISOString() }
       );
-      // correlate right after creation
-      await app.correlate({
-        stream,
-        after: snap.event!.id - 1,
-      });
       streams.add(stream);
     } else if (op < 0.8 && streams.size > 0) {
       const idx = Math.floor(Math.random() * streams.size);
@@ -190,14 +259,29 @@ async function main(
       streams.delete(stream);
     }
   }
+  loadFinished = true;
+
+  console.log("\nLoad complete. Waiting for drain to catch up…");
+  const caughtUp = await waitForCaughtUp(120_000);
+  clearInterval(renderTimer);
+  if (!caughtUp) {
+    console.error("Timed out waiting for drain to settle.");
+    process.exit(1);
+  }
+
+  const elapsed = (Date.now() - startTime) / 1000;
+  console.log(
+    `\n✓ Converged after ${renderCount} render cycles, ${elapsed.toFixed(2)}s.`
+  );
+  console.table({
+    ...(await projector.getStats()),
+    committed: totalCommitted,
+    blocked: blockedSeen.length,
+    durationSec: elapsed.toFixed(2),
+  });
+  process.exit(0);
 }
 
-// 👉 Change drain options to evaluate performance at different load levels
-const drainFrequency = 500;
-const drainOptions = {
-  streamLimit: 15,
-  eventLimit: 20,
-};
 // 👉 Change app options to evaluate performance at different load levels
 void main({
   maxEvents: 350,
