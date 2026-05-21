@@ -1,5 +1,5 @@
-import { ArrowRight, RefreshCw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { ArrowRight, Check, Copy, RefreshCw, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { trpc } from "../trpc.js";
 
 type EventRow = {
@@ -31,6 +31,12 @@ export function SchemaEvolution() {
   const [statusFilter, setStatusFilter] = useState<
     "all" | "deprecated" | "current" | "active"
   >("all");
+  // Open drill-through modal for the clicked event row. Operators only
+  // really want to drill into *deprecated* rows ("which streams still
+  // carry the legacy event?"), but every row supports it — `active`
+  // and `current` drill-through is useful for "which streams use this
+  // event" forensics too.
+  const [selectedEvent, setSelectedEvent] = useState<string | null>(null);
 
   const query = trpc.schemaEvolution.useQuery(undefined, {
     staleTime: Infinity,
@@ -194,9 +200,22 @@ export function SchemaEvolution() {
               : "No events match the active filter."}
           </div>
         ) : (
-          filtered.map((row) => <EventNameRow key={row.name} row={row} />)
+          filtered.map((row) => (
+            <EventNameRow
+              key={row.name}
+              row={row}
+              onSelect={() => setSelectedEvent(row.name)}
+            />
+          ))
         )}
       </div>
+
+      {selectedEvent && (
+        <StreamsForEventModal
+          eventName={selectedEvent}
+          onClose={() => setSelectedEvent(null)}
+        />
+      )}
     </div>
   );
 }
@@ -220,10 +239,19 @@ function SummaryCard({
   );
 }
 
-function EventNameRow({ row }: { row: EventRow }) {
+function EventNameRow({
+  row,
+  onSelect,
+}: {
+  row: EventRow;
+  onSelect: () => void;
+}) {
   return (
-    <div
-      className={`flex items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-xs ${
+    <button
+      type="button"
+      onClick={onSelect}
+      title="Drill into streams holding this event"
+      className={`flex w-full items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-left text-xs transition hover:bg-zinc-900/50 ${
         row.status === "deprecated" ? "bg-amber-950/10" : ""
       }`}
     >
@@ -246,6 +274,230 @@ function EventNameRow({ row }: { row: EventRow }) {
       <span className="w-32 shrink-0 text-right font-mono text-zinc-300">
         {row.count.toLocaleString()}
       </span>
+    </button>
+  );
+}
+
+/**
+ * Modal listing every stream that holds at least one event of the
+ * named type (#708 slice 4). Built from the `streamsForEvent` tRPC
+ * query — pure read, no destructive actions from the inspector.
+ *
+ * Operators select rows + copy stream names (or a ready-to-paste
+ * `app.close([...])` snippet) so they can run the actual close from
+ * their own application code. The inspector doesn't have an Act
+ * orchestrator to call `app.close()` itself; see slice-3 commit and
+ * the PR body for the rationale.
+ */
+function StreamsForEventModal({
+  eventName,
+  onClose,
+}: {
+  eventName: string;
+  onClose: () => void;
+}) {
+  const query = trpc.streamsForEvent.useQuery(
+    { name: eventName },
+    { staleTime: 30_000, refetchOnWindowFocus: false }
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [copied, setCopied] = useState<"names" | "snippet" | null>(null);
+
+  // Auto-dismiss the "copied" toast after a beat so repeated copies
+  // give visual feedback each time.
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(null), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  // Esc closes the modal.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const rows = query.data?.streams ?? [];
+  const totalOfName = query.data?.totalEventsOfName ?? 0;
+
+  const toggle = (stream: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(stream)) next.delete(stream);
+      else next.add(stream);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected((prev) =>
+      prev.size === rows.length ? new Set() : new Set(rows.map((r) => r.stream))
+    );
+  };
+
+  const selectedStreams = rows
+    .filter((r) => selected.has(r.stream))
+    .map((r) => r.stream);
+
+  const copyNames = () => {
+    void navigator.clipboard.writeText(selectedStreams.join("\n"));
+    setCopied("names");
+  };
+
+  const copySnippet = () => {
+    const targets = selectedStreams
+      .map((s) => `  { stream: ${JSON.stringify(s)} }`)
+      .join(",\n");
+    const snippet = `await app.close([\n${targets}\n]);`;
+    void navigator.clipboard.writeText(snippet);
+    setCopied("snippet");
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="flex max-h-[80vh] w-[min(900px,90vw)] flex-col rounded-lg border border-zinc-700 bg-zinc-925 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start justify-between border-b border-zinc-800 px-4 py-3">
+          <div>
+            <h3 className="font-mono text-sm text-zinc-200">{eventName}</h3>
+            <p className="mt-0.5 text-[11px] text-zinc-500">
+              {rows.length === 0
+                ? "No streams hold this event."
+                : `${rows.length} streams hold ${totalOfName.toLocaleString()} ${eventName} events`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-zinc-500 transition hover:text-zinc-300"
+            title="Close (Esc)"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <div className="sticky top-0 flex items-center gap-3 border-b border-zinc-800 bg-zinc-925 px-4 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+            <button
+              type="button"
+              onClick={toggleAll}
+              className="w-6 shrink-0 text-left hover:text-zinc-300"
+              title={
+                selected.size === rows.length && rows.length > 0
+                  ? "Clear selection"
+                  : "Select all"
+              }
+            >
+              {selected.size === rows.length && rows.length > 0 ? "☑" : "☐"}
+            </button>
+            <span className="w-20 shrink-0 truncate">Lane</span>
+            <span className="w-12 shrink-0 text-right">Pri</span>
+            <span className="min-w-0 flex-1">Stream</span>
+            <span className="w-24 shrink-0 text-right">
+              {eventName.length > 8 ? "Event #" : `${eventName}`}
+            </span>
+            <span className="w-24 shrink-0 text-right">Total events</span>
+          </div>
+          {query.isLoading ? (
+            <div className="flex h-48 items-center justify-center text-sm text-zinc-600">
+              Loading streams…
+            </div>
+          ) : rows.length === 0 ? (
+            <div className="flex h-48 items-center justify-center text-sm text-zinc-600">
+              No streams currently hold this event.
+            </div>
+          ) : (
+            rows.map((r) => (
+              <button
+                key={r.stream}
+                type="button"
+                onClick={() => toggle(r.stream)}
+                className={`flex w-full items-center gap-3 border-b border-zinc-800/50 px-4 py-2 text-left text-xs transition hover:bg-zinc-900/50 ${
+                  selected.has(r.stream) ? "bg-emerald-950/30" : ""
+                }`}
+              >
+                <span className="w-6 shrink-0 font-mono text-zinc-400">
+                  {selected.has(r.stream) ? (
+                    <Check size={12} className="text-emerald-400" />
+                  ) : (
+                    <span className="text-zinc-700">☐</span>
+                  )}
+                </span>
+                <span
+                  className={`w-20 shrink-0 truncate font-mono text-[10px] ${r.lane ? "text-violet-300" : "text-zinc-700"}`}
+                  title={r.lane ? `lane: ${r.lane}` : "default lane"}
+                >
+                  {r.lane ?? "default"}
+                </span>
+                <span
+                  className={`w-12 shrink-0 text-right font-mono ${r.priority !== 0 ? "text-amber-400" : "text-zinc-700"}`}
+                >
+                  {r.priority}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-mono text-zinc-200">
+                  {r.stream}
+                </span>
+                <span className="w-24 shrink-0 text-right font-mono text-amber-300">
+                  {r.eventCount.toLocaleString()}
+                </span>
+                <span className="w-24 shrink-0 text-right font-mono text-zinc-500">
+                  {r.totalEvents.toLocaleString()}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t border-zinc-800 px-4 py-2.5">
+          <div className="text-[11px] text-zinc-500">
+            <span className="font-mono text-zinc-300">
+              {selected.size}
+            </span>{" "}
+            selected
+            {copied && (
+              <span className="ml-3 inline-flex items-center gap-1 text-emerald-400">
+                <Check size={11} />
+                {copied === "names"
+                  ? "Stream names copied"
+                  : "app.close() snippet copied"}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={copyNames}
+              disabled={selected.size === 0}
+              className="flex items-center gap-1.5 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[11px] text-zinc-300 transition hover:border-emerald-600 hover:text-emerald-300 disabled:cursor-not-allowed disabled:opacity-40"
+              title="Copy newline-separated stream names"
+            >
+              <Copy size={12} />
+              Copy names
+            </button>
+            <button
+              type="button"
+              onClick={copySnippet}
+              disabled={selected.size === 0}
+              className="flex items-center gap-1.5 rounded-md border border-emerald-700 bg-emerald-900/40 px-2 py-1 text-[11px] text-emerald-200 transition hover:border-emerald-600 hover:bg-emerald-900/60 disabled:cursor-not-allowed disabled:opacity-40"
+              title="Copy a ready-to-paste app.close([...]) snippet"
+            >
+              <Copy size={12} />
+              Copy app.close()
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
