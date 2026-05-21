@@ -7,6 +7,7 @@ import { queryClient, trpc, trpcClient } from "./trpc.js";
 import { Correlation } from "./views/Correlation.js";
 import { EventLog } from "./views/EventLog.js";
 import { Monitor } from "./views/Monitor.js";
+import { SchemaEvolution } from "./views/SchemaEvolution.js";
 import { Streams } from "./views/Streams.js";
 import { Timeline } from "./views/Timeline.js";
 
@@ -31,6 +32,7 @@ export function viewCaption(v: ViewState): string {
     streams: "Streams",
     correlation: "Correlation",
     monitor: "Monitor",
+    schema: "Schema Evolution",
   };
   return labels[v.tab];
 }
@@ -162,6 +164,7 @@ export default function App() {
                     onBlockedCount={setBlockedCount}
                   />
                 )}
+                {view.tab === "schema" && <SchemaEvolution />}
               </div>
             </>
           )}

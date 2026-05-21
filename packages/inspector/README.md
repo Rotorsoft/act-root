@@ -61,6 +61,15 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
   - Watermark histogram showing gap distribution across streams
   - Priority + lane chip filters — click a chip to drill blocked/lease lists to that priority value or drain lane (ACT-102 + ACT-1103). Default priority `p=0` and `default` lane dim; non-default values pop in amber (priority) and violet (lane). Same hue convention as the drain trace and the Streams view, so "this lane" reads the same everywhere.
   - Recent-mutations panel — last 10 inspector-driven mutations with timestamp, target priority, affected count, and the raw filter. Pill at the panel header shows whether the server is running in `write` or `read-only` mode.
+- **Schema Evolution** — answer the post-migration question "how big is the legacy event backlog on disk?":
+  - Four headline cards (total events, deprecated events, distinct names, deprecated names).
+  - Table of every event name on disk with status — `deprecated`, `current`, or `active`. Status derived from the `_v<digits>` convention (ACT-403): within a base group (`Foo`, `Foo_v2`, `Foo_v3`), the highest version is current, lower versions are deprecated, standalone groups are active. Deprecated rows pop with an amber-tinted background and point at their current-version sibling.
+  - Sortable name/status/count columns; filter by free-text name or status; manual refresh button (the workspace aggregation is lazy-loaded, never silently polled).
+  - Click any row → drill-through modal listing every stream that holds that event, with lane chip + priority chip + per-event count (sorted desc) + total events. Multi-select + two copy actions:
+    - "Copy names" — newline-separated stream names.
+    - "Copy app.close()" — ready-to-paste snippet you run from your own application code.
+  - The modal **does not** close streams directly; the inspector has no Act orchestrator (it's a standalone tool pointed at a Postgres store) and can't safely run `app.close()`. The copy affordance is the honest middle ground — inspector surfaces the data, your app runs the close.
+- **Time-travel stream detail** — every stream's detail panel has an "as-of" event-id input. Enter a value → head + tail + name counts re-fetch over the prefix slice (events with `id < beforeId`). A violet `as-of < <id>` chip badges the panel so historical data never reads as live. The forensic shape: "show me what `order-123` looked like before we deprecated `OrderPaid`" — head card reveals the legacy event, confirming the migration boundary.
 
 ### Mutations (write mode)
 
@@ -123,8 +132,11 @@ packages/inspector/
 | `stats` | query | Aggregate counts for current filters |
 | `eventNames` | query | Distinct event names for filter dropdown |
 | `streams` | query | Stream list with event counts, head + tail timestamps, and version |
+| `streamStats` | query | Per-stream head + tail + count + name counts. Optional `before: <id>` for time-travel ("as-of" the prefix with `id < before`) |
 | `streamMeta` | query | Subscription positions from the streams table — priority, lane, retry, lease holder |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram, priority + lane counts |
+| `schemaEvolution` | query | Workspace event-name rollup with deprecation status derived from the `_v<digits>` convention (ACT-403). Returns events + headline summary |
+| `streamsForEvent` | query | Streams that hold at least one event of the given name — feeds the Schema Evolution drill-through modal |
 | `writeMode` | query | `{ enabled, reason }` — reflects the `ACT_INSPECTOR_WRITE` env var |
 | `prioritize` | mutation | Bulk-update stream priority via `Store.prioritize(filter, n)`. Filter shape mirrors `query_streams` (stream/source/lane/blocked). Refuses when read-only. |
 | `audit` | query | Last 100 mutations performed via the inspector — in-memory ring buffer |
