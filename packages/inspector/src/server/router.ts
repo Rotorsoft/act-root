@@ -576,6 +576,48 @@ export const inspectorRouter = t.router({
         .slice(0, input?.limit ?? 100);
     }),
 
+  /**
+   * Full per-stream stats for the detail panel (#698). Fetched on
+   * demand when the operator opens a stream in the Streams view —
+   * cheaper than including head + tail Committed bodies in the
+   * page-wide `streams` query, which would 100× the payload for the
+   * common "scan the list" case.
+   *
+   * Returns the head + tail Committed events (id, name, version,
+   * created) plus the per-stream event-name → count map and the
+   * total event count.
+   */
+  streamStats: t.procedure
+    .input(z.object({ stream: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const s = getStore();
+      const stats = await s.query_stats<Schemas>([input.stream], {
+        count: true,
+        names: true,
+        tail: true,
+      });
+      const entry = stats.get(input.stream);
+      if (!entry) return null;
+      const { head, tail, count, names } = entry;
+      const project = (e: typeof head | undefined) =>
+        e
+          ? {
+              id: e.id,
+              name: String(e.name),
+              version: e.version,
+              created: String(e.created),
+            }
+          : null;
+      return {
+        head: project(head)!,
+        // `tail` is opt-in on the query; query_stats({tail:true}) yields
+        // it for every stream, but defensively guard for the empty case.
+        tail: project(tail),
+        eventCount: count ?? 0,
+        nameCounts: names ?? {},
+      };
+    }),
+
   /** Get stream processing metadata from the streams table */
   streamMeta: t.procedure.query(async () => {
     try {

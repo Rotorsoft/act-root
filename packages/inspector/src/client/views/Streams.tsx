@@ -435,6 +435,114 @@ export function Streams({
   );
 }
 
+/**
+ * Head / tail indicators rendered above the event list when a stream
+ * is selected (#698 follow-up). Two compact cards sharing the same
+ * font + spacing, one per end of the stream:
+ *
+ *   ┌──────────────────────────┬──────────────────────────┐
+ *   │ Tail (oldest)            │ Head (latest)            │
+ *   │ #42 DigitPressed v1      │ #519 OperatorPressed v17 │
+ *   │ 12d ago                  │ 3m ago                   │
+ *   └──────────────────────────┴──────────────────────────┘
+ *
+ * Single-event streams omit the tail card and render a "single-event
+ * stream" hint instead, since head and tail coincide. The card row
+ * collapses entirely while stats are still loading.
+ */
+function StreamStatsHeader({
+  stats,
+}: {
+  stats: {
+    head: { id: number; name: string; version: number; created: string };
+    tail: {
+      id: number;
+      name: string;
+      version: number;
+      created: string;
+    } | null;
+    eventCount: number;
+    nameCounts: Record<string, number | undefined>;
+  } | null;
+}) {
+  if (!stats) return null;
+  const sameEvent = stats.tail && stats.tail.id === stats.head.id;
+  return (
+    <div className="grid grid-cols-2 gap-3 border-b border-zinc-800 bg-zinc-950 px-4 py-3">
+      <EndpointCard
+        label="Tail (oldest)"
+        endpoint={sameEvent ? null : stats.tail}
+        muted
+      />
+      <EndpointCard label="Head (latest)" endpoint={stats.head} />
+      <div className="col-span-2 flex items-center gap-3 text-[10px] text-zinc-500">
+        <span className="font-mono">
+          {stats.eventCount} event{stats.eventCount === 1 ? "" : "s"}
+        </span>
+        {Object.keys(stats.nameCounts).length > 0 && (
+          <span className="truncate" title={JSON.stringify(stats.nameCounts)}>
+            {Object.entries(stats.nameCounts)
+              .sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))
+              .slice(0, 4)
+              .map(([n, c]) => `${n}·${c ?? 0}`)
+              .join("  ")}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EndpointCard({
+  label,
+  endpoint,
+  muted,
+}: {
+  label: string;
+  endpoint: {
+    id: number;
+    name: string;
+    version: number;
+    created: string;
+  } | null;
+  muted?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded border border-zinc-800 bg-zinc-950 px-2.5 py-1.5 ${
+        muted ? "opacity-60" : ""
+      }`}
+    >
+      <div className="mb-1 text-[9px] uppercase tracking-wider text-zinc-500">
+        {label}
+      </div>
+      {endpoint ? (
+        <>
+          <div className="flex items-baseline gap-2 font-mono">
+            <span className="text-[10px] text-zinc-500">#{endpoint.id}</span>
+            <span className="truncate text-xs text-zinc-200">
+              {endpoint.name}
+            </span>
+            <span className="text-[10px] text-zinc-500">
+              v{endpoint.version}
+            </span>
+          </div>
+          <div
+            className="font-mono text-[10px] text-zinc-500"
+            title={endpoint.created}
+          >
+            {relativeTime(endpoint.created)}
+          </div>
+        </>
+      ) : (
+        <div className="font-mono text-[10px] italic text-zinc-600">
+          single-event stream
+        </div>
+      )}
+    </div>
+  );
+}
+
 function StreamDetail({
   stream,
   onTrace,
@@ -449,6 +557,14 @@ function StreamDetail({
   const eventsQuery = trpc.query.useQuery(
     { stream, limit: 100, backward: true },
     { staleTime: 3_000 }
+  );
+  // Head + tail stats on demand (#698). Fetched only when the detail
+  // panel is open — the page-wide `streams` query doesn't carry the
+  // full Committed bodies because that'd 100× the payload for the
+  // common scan-the-list case.
+  const statsQuery = trpc.streamStats.useQuery(
+    { stream },
+    { staleTime: 5_000 }
   );
 
   const events = (eventsQuery.data?.events ?? []) as any[];
@@ -477,6 +593,9 @@ function StreamDetail({
           </button>
         </div>
       </div>
+
+      {/* Head + Tail indicators (on-demand stats) */}
+      <StreamStatsHeader stats={statsQuery.data ?? null} />
 
       {/* Event history */}
       <div className="flex-1">
