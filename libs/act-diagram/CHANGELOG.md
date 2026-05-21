@@ -1,3 +1,18 @@
+# [@rotorsoft/act-diagram-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.4.0...@rotorsoft/act-diagram-v1.0.0) (2026-05-21)
+
+
+* chore(act-diagram)!: enter 1.0 stability commitment ([3253475](https://github.com/rotorsoft/act-root/commit/3253475f6607fe55e68427b03b326017b4731458)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-diagram.
+The package's public exports — the React component, the parsed-model
+types, and the `act` CLI's command surface — are now covered by SemVer
+per STABILITY.md. The diagram's output shape (SVG structure, click-
+through anchors) is explicitly NOT part of the stability surface and
+may evolve.
+
 # [@rotorsoft/act-diagram-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v0.3.10...@rotorsoft/act-diagram-v0.4.0) (2026-05-15)
 
 
