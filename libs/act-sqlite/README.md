@@ -128,6 +128,8 @@ Both adapters pass the same `runStoreTck` suite. Application code doesn't change
 
 Public API governed by the [Act Stability Charter](../../STABILITY.md). `SqliteStore` implements the `Store` contract from `@rotorsoft/act` and is validated against `@rotorsoft/act-tck` on `@libsql/client` pinned + latest in CI. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
+> **Versioning note.** Version `1.0.0` is reserved on the npm registry from a prior publish and cannot be republished. The first 1.x release of this package on npm is **`1.0.1`**; its public surface is identical to the intended 1.0.0 cut.
+
 ## Related packages
 
 - **[@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act)** — the framework whose `Store` port this implements.
