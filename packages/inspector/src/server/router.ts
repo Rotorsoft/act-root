@@ -45,6 +45,64 @@ const recordAudit = (entry: AuditEntry): void => {
 /** Loosely-typed committed event for inspector queries */
 type AnyEvent = Committed<Schemas, string>;
 
+/**
+ * Event-version classifier (ACT-403 mirror) — #708.
+ *
+ * The framework's `internal/event-versions.ts` owns the canonical
+ * `_v<digits>` rule. The inspector can't reach into internal, so this
+ * is a local copy of the same convention:
+ *
+ *   `Foo_v<n>` with `n >= 2` is "version n of Foo"; bare `Foo` is
+ *   implicit v1; `Foo_v1` is just a literal name. Within a base
+ *   group, the highest version is "current", lower versions are
+ *   "deprecated", standalone bases (no siblings) are "active".
+ *
+ * Kept inline so the inspector stays standalone — it queries a PG
+ * store directly and never needs to import the running app's
+ * registry. The convention is documented in
+ * `docs/docs/architecture/event-schema-evolution.md`, so duplicating
+ * the rule here doesn't widen any unstable surface.
+ */
+const VERSION_SUFFIX_RE = /^(.+?)_v(\d+)$/;
+type EventStatus = "current" | "deprecated" | "active";
+type Classification = {
+  status: EventStatus;
+  /** Defined when `status === "deprecated"` — points at the highest version. */
+  currentVersion: string | null;
+};
+
+function classifyEventVersions(
+  names: Iterable<string>
+): Map<string, Classification> {
+  const groups = new Map<string, Array<{ name: string; version: number }>>();
+  for (const name of names) {
+    const m = name.match(VERSION_SUFFIX_RE);
+    const v = m ? Number.parseInt(m[2], 10) : 1;
+    const base = m && v >= 2 ? m[1] : name;
+    const list = groups.get(base);
+    if (list) list.push({ name, version: v });
+    else groups.set(base, [{ name, version: v }]);
+  }
+  const out = new Map<string, Classification>();
+  for (const [, list] of groups) {
+    if (list.length < 2) {
+      // Standalone — "active".
+      out.set(list[0].name, { status: "active", currentVersion: null });
+      continue;
+    }
+    list.sort((a, b) => b.version - a.version);
+    const current = list[0];
+    out.set(current.name, { status: "current", currentVersion: null });
+    for (let i = 1; i < list.length; i++) {
+      out.set(list[i].name, {
+        status: "deprecated",
+        currentVersion: current.name,
+      });
+    }
+  }
+  return out;
+}
+
 /** Collect events into an array */
 const collect =
   (target: AnyEvent[]) =>
@@ -617,6 +675,69 @@ export const inspectorRouter = t.router({
         nameCounts: names ?? {},
       };
     }),
+
+  /**
+   * Workspace event-name rollup with deprecation status (#708).
+   *
+   * Aggregates per-stream event-name counts from
+   * `query_stats({}, {names: true})` into a single workspace-wide
+   * histogram, then applies the framework's `_v<digits>` deprecation
+   * rule (ACT-403) to label each name as `current` / `deprecated` /
+   * `active`. Returns one row per distinct event name, sorted with
+   * deprecated rows first (operator's main concern) then by count
+   * descending.
+   *
+   * Lazy-loaded — the Schema Evolution view opens this on demand,
+   * not on every page load. `query_stats({}, …)` is a single round
+   * trip on durable adapters (`SELECT … GROUP BY stream` with a CTE
+   * aggregation), so the cost scales with the events table size
+   * rather than fetching every row over the wire.
+   */
+  schemaEvolution: t.procedure.query(async () => {
+    const s = getStore();
+    const stats = await s.query_stats<Schemas>({}, { names: true });
+    const totals = new Map<string, number>();
+    for (const { names } of stats.values()) {
+      for (const [name, n] of Object.entries(names ?? {})) {
+        totals.set(name, (totals.get(name) ?? 0) + (n ?? 0));
+      }
+    }
+    const classification = classifyEventVersions(totals.keys());
+    return {
+      events: [...totals.entries()]
+        .map(([name, count]) => ({
+          name,
+          count,
+          ...(classification.get(name) ?? {
+            status: "active" as EventStatus,
+            currentVersion: null,
+          }),
+        }))
+        .sort((a, b) => {
+          // Deprecated first — that's the migration backlog operators
+          // want to see at a glance. Within each status, sort by count
+          // desc so the heaviest tables surface first.
+          if (a.status !== b.status) {
+            if (a.status === "deprecated") return -1;
+            if (b.status === "deprecated") return 1;
+          }
+          return b.count - a.count;
+        }),
+      // Headline totals — render above the table so an operator can
+      // see "of the 5.2M total events, 4.2M are deprecated" at a
+      // glance without summing rows mentally.
+      summary: {
+        totalEvents: [...totals.values()].reduce((s, n) => s + n, 0),
+        deprecatedEvents: [...totals.entries()]
+          .filter(([n]) => classification.get(n)?.status === "deprecated")
+          .reduce((s, [, n]) => s + n, 0),
+        distinctNames: totals.size,
+        deprecatedNames: [...classification.values()].filter(
+          (c) => c.status === "deprecated"
+        ).length,
+      },
+    };
+  }),
 
   /** Get stream processing metadata from the streams table */
   streamMeta: t.procedure.query(async () => {
