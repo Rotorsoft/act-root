@@ -646,13 +646,23 @@ export const inspectorRouter = t.router({
    * total event count.
    */
   streamStats: t.procedure
-    .input(z.object({ stream: z.string().min(1) }))
+    .input(
+      z.object({
+        stream: z.string().min(1),
+        // Time-travel: include only events with `id < before` in the
+        // aggregation (#708 slice 5). Lets the detail panel answer
+        // "what did this stream look like before event N?". Default
+        // (omitted) returns live stats — the full stream.
+        before: z.number().int().positive().optional(),
+      })
+    )
     .query(async ({ input }) => {
       const s = getStore();
       const stats = await s.query_stats<Schemas>([input.stream], {
         count: true,
         names: true,
         tail: true,
+        before: input.before,
       });
       const entry = stats.get(input.stream);
       if (!entry) return null;
@@ -673,6 +683,9 @@ export const inspectorRouter = t.router({
         tail: project(tail),
         eventCount: count ?? 0,
         nameCounts: names ?? {},
+        // Echoed back so the UI doesn't have to thread state through
+        // its own cache key — `null` means "live, no time-travel".
+        asOf: input.before ?? null,
       };
     }),
 

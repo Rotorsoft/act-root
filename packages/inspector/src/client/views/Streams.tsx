@@ -554,6 +554,14 @@ function StreamDetail({
   onStream?: (stream: string) => void;
   onClose: () => void;
 }) {
+  // Time-travel `before` — when non-null, stats are computed over the
+  // slice of the stream with `id < beforeId`. Lets the detail panel
+  // answer schema-evolution forensics like "what did this stream look
+  // like before we deprecated TicketOpened?". `null` = live view
+  // (#708 slice 5).
+  const [beforeId, setBeforeId] = useState<number | null>(null);
+  const [beforeInput, setBeforeInput] = useState("");
+
   const eventsQuery = trpc.query.useQuery(
     { stream, limit: 100, backward: true },
     { staleTime: 3_000 }
@@ -572,8 +580,10 @@ function StreamDetail({
   //   stale entry refetches via the `staleTime` window.
   // - 30s staleTime: long enough that closing and reopening the same
   //   stream re-uses the cached result instead of round-tripping.
+  // - `beforeId` is part of the query key, so toggling time-travel
+  //   fires a fresh query and the result caches independently.
   const statsQuery = trpc.streamStats.useQuery(
-    { stream },
+    { stream, before: beforeId ?? undefined },
     {
       staleTime: 30_000,
       refetchOnWindowFocus: false,
@@ -586,7 +596,7 @@ function StreamDetail({
     <div className="flex flex-1 flex-col overflow-y-auto">
       {/* Detail header */}
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-925 px-4 py-2">
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <h3 className="truncate font-mono text-xs font-medium text-zinc-200">
             {stream}
           </h3>
@@ -596,8 +606,55 @@ function StreamDetail({
           >
             copy
           </button>
+          {beforeId !== null && (
+            <span
+              className="rounded border border-violet-700 bg-violet-950/60 px-1.5 py-0 font-mono text-[10px] text-violet-200"
+              title="Stats computed over events with id < beforeId. Click 'Live' to clear."
+            >
+              as-of &lt; {beforeId.toLocaleString()}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
+          {/* Time-travel control (#708 slice 5). Operator types an
+              event id and presses Enter to compute stats over the
+              prefix of the stream with `id < beforeId`. "Live"
+              clears the override. */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const parsed = Number.parseInt(beforeInput, 10);
+              setBeforeId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+            }}
+            className="flex items-center gap-1"
+          >
+            <label
+              className="text-[10px] uppercase tracking-wider text-zinc-500"
+              title="View stats as of the slice with id < this event"
+            >
+              as-of
+            </label>
+            <input
+              type="number"
+              value={beforeInput}
+              onChange={(e) => setBeforeInput(e.target.value)}
+              placeholder="event id"
+              className="w-24 rounded border border-zinc-700 bg-zinc-800 px-1.5 py-0.5 font-mono text-[10px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-emerald-600"
+            />
+            {beforeId !== null && (
+              <button
+                type="button"
+                onClick={() => {
+                  setBeforeId(null);
+                  setBeforeInput("");
+                }}
+                className="rounded border border-emerald-700 bg-emerald-950/40 px-1.5 py-0.5 text-[10px] text-emerald-300 transition hover:bg-emerald-900/60"
+                title="Clear time-travel and return to the live view"
+              >
+                live
+              </button>
+            )}
+          </form>
           <button
             onClick={onClose}
             className="text-zinc-500 hover:text-zinc-300"
