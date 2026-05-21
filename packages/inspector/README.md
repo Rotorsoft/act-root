@@ -49,7 +49,7 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
 
 - **Event Log** — reverse-chronological event list with filters (stream regex, event name pills, time range presets, correlation ID), infinite scroll pagination, expandable JSON detail panels
 - **Timeline** — SVG time-axis visualization with stream swimlanes, colored event dots, hover tooltips, zoom/pan, and density heatmap for large datasets
-- **Stream Inspector** — sortable/filterable stream list with event counts, versions, and expandable detail panels
+- **Stream Inspector** — sortable/filterable stream list with event counts, versions, scheduling priority (inline-editable when write mode is on), drain lane, age (relative-time on first commit), and last activity. Stale-stream filter (≥7/14/30/90 days) hides anything that's committed recently — the "which long-lived streams have gone quiet?" query reduces to one click.
 - **Correlation Explorer** — trace a correlation ID across its full event chain:
   - Waterfall view with causation indentation, color-coded by stream, gap detection for reaction latency
   - DAG graph with directed arrows showing event causation
@@ -59,6 +59,18 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
   - Blocked streams with expandable error details and retry counts
   - Active leases with countdown timers
   - Watermark histogram showing gap distribution across streams
+  - Priority + lane chip filters — click a chip to drill blocked/lease lists to that priority value or drain lane (ACT-102 + ACT-1103). Default priority `p=0` and `default` lane dim; non-default values pop in amber (priority) and violet (lane). Same hue convention as the drain trace and the Streams view, so "this lane" reads the same everywhere.
+  - Recent-mutations panel — last 10 inspector-driven mutations with timestamp, target priority, affected count, and the raw filter. Pill at the panel header shows whether the server is running in `write` or `read-only` mode.
+
+### Mutations (write mode)
+
+The inspector is **read-only by default**. Mutating controls (the inline priority editor on the Streams view) render as display-only spans and surface the reason in their tooltip. To enable mutations, set:
+
+```bash
+ACT_INSPECTOR_WRITE=1 pnpm -F @rotorsoft/act-inspector dev:server
+```
+
+The flag is server-static — refreshing a tab doesn't reacquire write access, so a misclick in the dashboard can't reorder live priorities unless an operator has consciously enabled writes on the process. Every successful mutation lands an entry in the in-memory audit log on the Monitor view's right column (capacity 100, cleared on restart).
 
 ### Navigation
 
@@ -110,9 +122,12 @@ packages/inspector/
 | `query` | query | Event queries with full filter support |
 | `stats` | query | Aggregate counts for current filters |
 | `eventNames` | query | Distinct event names for filter dropdown |
-| `streams` | query | Stream list with event counts and versions |
-| `streamMeta` | query | Subscription positions from the streams table |
-| `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram |
+| `streams` | query | Stream list with event counts, head + tail timestamps, and version |
+| `streamMeta` | query | Subscription positions from the streams table — priority, lane, retry, lease holder |
+| `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram, priority + lane counts |
+| `writeMode` | query | `{ enabled, reason }` — reflects the `ACT_INSPECTOR_WRITE` env var |
+| `prioritize` | mutation | Bulk-update stream priority via `Store.prioritize(filter, n)`. Filter shape mirrors `query_streams` (stream/source/lane/blocked). Refuses when read-only. |
+| `audit` | query | Last 100 mutations performed via the inspector — in-memory ring buffer |
 | `backup` | mutation | Stream the events table to CSV for archival |
 | `restore` | mutation | Truncate + re-import events from a CSV — destructive, gated by an explicit confirmation |
 
