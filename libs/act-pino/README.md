@@ -119,7 +119,7 @@ Pair with `dispose()` from `@rotorsoft/act` to wire pino flush into the framewor
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md). Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+Public API governed by the [Act Stability Charter](../../STABILITY.md). `PinoLogger` implements the `Logger` contract from `@rotorsoft/act` and is validated against `@rotorsoft/act-tck`. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 
