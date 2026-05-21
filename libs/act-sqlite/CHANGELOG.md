@@ -1,3 +1,17 @@
+# [@rotorsoft/act-sqlite-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.9.0...@rotorsoft/act-sqlite-v1.0.0) (2026-05-21)
+
+
+* chore(act-sqlite)!: enter 1.0 stability commitment ([1fc2846](https://github.com/rotorsoft/act-root/commit/1fc28466925d7c464877f0d413fbb80dd0f10af4)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-sqlite. It
+implements the Store contract from @rotorsoft/act 1.0 and is validated
+against @rotorsoft/act-tck on @libsql/client pinned + latest in CI.
+Per STABILITY.md, breaking changes to the published surface now
+require a major bump.
+
 # [@rotorsoft/act-sqlite-v0.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v0.8.0...@rotorsoft/act-sqlite-v0.9.0) (2026-05-19)
 
 
