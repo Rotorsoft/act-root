@@ -739,6 +739,65 @@ export const inspectorRouter = t.router({
     };
   }),
 
+  /**
+   * Drill-through query: streams that still hold a given event name
+   * (#708). Used by the Schema Evolution view's modal — operator
+   * clicks a deprecated event row, sees every stream where
+   * `nameCounts[name] > 0`, sorted by per-stream count descending.
+   *
+   * The inspector itself doesn't close streams (no Act orchestrator
+   * available); the modal surfaces the list + a "copy stream names"
+   * affordance so the operator can run `app.close([...])` from their
+   * application. Pure read surface — gated only by `getStore()`.
+   *
+   * Joins `query_stats({}, {names: true})` (events table aggregation)
+   * with `loadAllStreamPositions` (streams table) so each row carries
+   * the lane + priority operators care about when deciding what to
+   * close.
+   */
+  streamsForEvent: t.procedure
+    .input(z.object({ name: z.string().min(1) }))
+    .query(async ({ input }) => {
+      const s = getStore();
+      const [stats, { positions }] = await Promise.all([
+        s.query_stats<Schemas>({}, { count: true, names: true }),
+        loadAllStreamPositions().catch(() => ({ positions: [] })),
+      ]);
+      const metaByStream = new Map(
+        positions.map((p) => [
+          p.stream,
+          { lane: p.lane ?? null, priority: p.priority },
+        ])
+      );
+      const rows: Array<{
+        stream: string;
+        eventCount: number;
+        totalEvents: number;
+        lane: string | null;
+        priority: number;
+      }> = [];
+      let totalAcrossStreams = 0;
+      for (const [stream, { count, names }] of stats.entries()) {
+        const eventCount = names?.[input.name] ?? 0;
+        if (eventCount === 0) continue;
+        totalAcrossStreams += eventCount;
+        const meta = metaByStream.get(stream);
+        rows.push({
+          stream,
+          eventCount,
+          totalEvents: count ?? 0,
+          lane: meta?.lane ?? null,
+          priority: meta?.priority ?? 0,
+        });
+      }
+      rows.sort((a, b) => b.eventCount - a.eventCount);
+      return {
+        event: input.name,
+        streams: rows,
+        totalEventsOfName: totalAcrossStreams,
+      };
+    }),
+
   /** Get stream processing metadata from the streams table */
   streamMeta: t.procedure.query(async () => {
     try {
