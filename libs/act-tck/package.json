@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@rotorsoft/act": "workspace:^",
-    "vitest": "^4.1.6",
+    "vitest": "^4.1.7",
     "zod": "^4.4.3"
   }
 }
