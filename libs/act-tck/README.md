@@ -100,7 +100,7 @@ New / changed methods on `Store`, `Cache`, or `Logger` are added to `libs/act-tc
 
 ## Stability
 
-This package stays at **0.x** while `@rotorsoft/act` ships **1.0**. The Store/Cache/Logger contracts the TCK validates are covered by the [Act Stability Charter](../../STABILITY.md) and are stable at 1.0. The TCK's own surface (the `run*Tck` functions, the `Capabilities` types, the fixture helpers) may still evolve in 0.x as third-party adapter authors report what they need. The TCK joins the 1.x line once that surface settles.
+Public API governed by the [Act Stability Charter](../../STABILITY.md). The TCK's published surface — `runStoreTck`, `runCacheTck`, `runLoggerTck`, the `Capabilities` types, and the fixture helpers — is now covered by SemVer alongside the `Store`/`Cache`/`Logger` contracts it validates. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 
