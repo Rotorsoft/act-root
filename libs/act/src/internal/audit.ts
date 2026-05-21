@@ -116,9 +116,15 @@ export async function* runAudit(
   if (requested.has("deprecated-load")) {
     yield* auditDeprecatedLoad(deps, options);
   }
-  // Subsequent slices add: close-candidate, restart-candidate,
-  // reaction-health, snapshot-drift, routing-health, correlation-gaps,
-  // clock-anomalies. Each is a self-contained async generator below.
+  if (requested.has("close-candidate")) {
+    yield* auditCloseCandidate(deps, options);
+  }
+  if (requested.has("restart-candidate")) {
+    yield* auditRestartCandidate(deps, options);
+  }
+  // Subsequent slices add: reaction-health, snapshot-drift,
+  // routing-health, correlation-gaps, clock-anomalies. Each is a
+  // self-contained async generator below.
 }
 
 /**
@@ -248,4 +254,108 @@ async function* auditDeprecatedLoad(
       topStreams,
     };
   }
+}
+
+/**
+ * `close-candidate` — surfaces streams ripe for `app.close(...)`.
+ * Two flavours, evaluated independently per stream:
+ *
+ *   - `idle` — stream's head event is older than `idleDays`. The
+ *     "stream has gone quiet" signal; common for completed orders,
+ *     closed tickets, etc. Default cutoff 90 days.
+ *   - `terminal` — stream's head event name is in the operator-
+ *     supplied `terminalEvents` list. The framework doesn't
+ *     declare what's terminal for a domain (would be wrong scope);
+ *     operator passes a list like `["OrderShipped", "TicketClosed"]`.
+ *
+ * Each finding carries `restartSupported`, derived from whether
+ * the stream's state declares a `snap` reducer — operators use it
+ * to decide between `app.close([{stream}])` (full tombstone) and
+ * `app.close([{stream, restart: true}])` (truncate + seed snapshot).
+ */
+async function* auditCloseCandidate(
+  deps: AuditDeps,
+  options: AuditOptions
+): AsyncIterable<AuditFinding> {
+  const idleDays = options.thresholds?.idleDays ?? DEFAULTS.idleDays;
+  const terminalEvents = new Set(options.thresholds?.terminalEvents ?? []);
+  // Idle cutoff as a JS Date; comparison against head.created works
+  // for both Date and ISO-string head values from query_stats.
+  const idleCutoff = Date.now() - idleDays * 24 * 60 * 60 * 1000;
+
+  const stats = await deps.store().query_stats<Schemas>({});
+  for (const [stream, { head }] of stats) {
+    const headName = String(head.name);
+    // Skip framework markers — a tombstoned stream is already
+    // closed; a stream whose head is a snapshot is mid-truncate.
+    if (headName.startsWith("__")) continue;
+    const headTime =
+      head.created instanceof Date
+        ? head.created.getTime()
+        : new Date(head.created).getTime();
+    const isIdle = Number.isFinite(headTime) && headTime < idleCutoff;
+    const isTerminal = terminalEvents.has(headName);
+    if (!isIdle && !isTerminal) continue;
+    const restartSupported = restartIsSupported(deps, headName);
+    yield {
+      category: "close-candidate",
+      stream,
+      lastEventAt:
+        head.created instanceof Date
+          ? head.created.toISOString()
+          : String(head.created),
+      reason: isTerminal ? "terminal" : "idle",
+      idleDays: isIdle
+        ? Math.floor((Date.now() - headTime) / (24 * 60 * 60 * 1000))
+        : undefined,
+      restartSupported,
+    };
+  }
+}
+
+/**
+ * `restart-candidate` — streams above the event-count threshold
+ * that have a snapshot reducer declared. The signal is "this
+ * stream is getting big; if the state supports snapshots,
+ * `app.close([{stream, restart: true}])` would shrink the working
+ * set without losing state."
+ *
+ * Streams whose state doesn't declare `.snap()` are silently
+ * skipped — restart wouldn't work for them, so they belong in the
+ * idle/terminal close-candidate buckets, not here.
+ */
+async function* auditRestartCandidate(
+  deps: AuditDeps,
+  options: AuditOptions
+): AsyncIterable<AuditFinding> {
+  const threshold =
+    options.thresholds?.eventCountForRestart ?? DEFAULTS.eventCountForRestart;
+  const stats = await deps
+    .store()
+    .query_stats<Schemas>({}, { count: true, names: true });
+  for (const [stream, { head, count, names }] of stats) {
+    const total = count ?? 0;
+    if (total < threshold) continue;
+    const headName = String(head.name);
+    if (headName.startsWith("__")) continue;
+    if (!restartIsSupported(deps, headName)) continue;
+    yield {
+      category: "restart-candidate",
+      stream,
+      eventCount: total,
+      snapshotCount: names?.["__snapshot__"] ?? 0,
+    };
+  }
+}
+
+/**
+ * Does the stream's owning state declare a `.snap()` reducer?
+ * Drives the `restartSupported` flag on close-candidate and the
+ * skip condition on restart-candidate. Reads through the
+ * eventToState map (event-name → state) since each stream's
+ * identity in the registry is its head event's owning state.
+ */
+function restartIsSupported(deps: AuditDeps, headEventName: string): boolean {
+  const state = deps.eventToState.get(headEventName);
+  return state?.snap !== undefined;
 }

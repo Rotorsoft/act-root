@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { act, dispose, state, store } from "../src/index.js";
+import { act, dispose, sleep, state, store } from "../src/index.js";
 import type { AuditFinding } from "../src/types/index.js";
 
 /**
@@ -38,6 +38,27 @@ describe("audit", () => {
     .emit(({ name }) => ["Renamed_v2", { name, reason: "via-test" }])
     .on({ reprice: z.object({ price: z.number() }) })
     .emit(({ price }) => ["Repriced", { price }])
+    .build();
+
+  // Second state with a snap reducer — for close-candidate
+  // `restartSupported: true` and restart-candidate `eventCount`
+  // exercises. Independent event names so it doesn't interfere
+  // with the widget's deprecation classifier.
+  const order = state({ Order: z.object({ items: z.number() }) })
+    .init(() => ({ items: 0 }))
+    .emits({
+      OrderPlaced: z.object({ items: z.number() }),
+      OrderShipped: z.object({}),
+    })
+    .patch({
+      OrderPlaced: ({ data }) => ({ items: data.items }),
+      OrderShipped: () => ({}),
+    })
+    .on({ placeOrder: z.object({ items: z.number() }) })
+    .emit(({ items }) => ["OrderPlaced", { items }])
+    .on({ shipOrder: z.object({}) })
+    .emit(() => ["OrderShipped", {}])
+    .snap((s) => s.patches >= 5)
     .build();
 
   beforeEach(async () => {
@@ -253,14 +274,13 @@ describe("audit", () => {
       for await (const f of app.audit(["schema"])) onlySchema.push(f);
       const onlyDep: AuditFinding[] = [];
       for await (const f of app.audit(["deprecated-load"])) onlyDep.push(f);
-      const both: AuditFinding[] = [];
-      for await (const f of app.audit()) both.push(f);
-
       expect(onlySchema.every((f) => f.category === "schema")).toBe(true);
       expect(onlyDep.every((f) => f.category === "deprecated-load")).toBe(true);
-      // Default (no list) runs everything; in slice 1 that's both
-      // categories.
-      expect(both.length).toBe(onlySchema.length + onlyDep.length);
+      // Selective runs DO NOT include findings from other categories.
+      expect(onlySchema.some((f) => f.category === "deprecated-load")).toBe(
+        false
+      );
+      expect(onlyDep.some((f) => f.category === "schema")).toBe(false);
     });
 
     it("supports early break", async () => {
@@ -277,6 +297,170 @@ describe("audit", () => {
         break;
       }
       expect(findings).toHaveLength(1);
+    });
+  });
+
+  describe("close-candidate category", () => {
+    it("flags streams whose head event is in the operator's terminal list", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "o1",
+        [{ name: "OrderPlaced", data: { items: 3 } }],
+        meta
+      );
+      await store().commit("o1", [{ name: "OrderShipped", data: {} }], meta);
+      // Active order whose head isn't terminal — should NOT be flagged.
+      await store().commit(
+        "o2",
+        [{ name: "OrderPlaced", data: { items: 1 } }],
+        meta
+      );
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["close-candidate"], {
+        thresholds: { terminalEvents: ["OrderShipped"], idleDays: 10_000 },
+      })) {
+        findings.push(f);
+      }
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "close-candidate",
+        stream: "o1",
+        reason: "terminal",
+        // Order state declares .snap() so restart is supported.
+        restartSupported: true,
+      });
+    });
+
+    it("flags idle streams when the head event is older than idleDays", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "o1",
+        [{ name: "OrderPlaced", data: { items: 2 } }],
+        meta
+      );
+      // Tiny sleep so the head's `created` is strictly less than
+      // Date.now() at audit time even with millisecond-precision
+      // clocks.
+      await sleep(20);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["close-candidate"], {
+        thresholds: { idleDays: 0 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "close-candidate",
+        stream: "o1",
+        reason: "idle",
+      });
+    });
+
+    it("reports restartSupported: false for states without .snap()", async () => {
+      // widget has no .snap() declared. An idle widget stream should
+      // surface as a close-candidate with restartSupported: false.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 9 } }],
+        meta
+      );
+      await sleep(20);
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["close-candidate"], {
+        thresholds: { idleDays: 0 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        stream: "w1",
+        reason: "idle",
+        restartSupported: false,
+      });
+    });
+
+    it("skips framework-marker heads (tombstoned / snapshot)", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "o1",
+        [
+          { name: "OrderPlaced", data: { items: 1 } },
+          { name: "__tombstone__", data: {} },
+        ],
+        meta
+      );
+      await sleep(20);
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["close-candidate"], {
+        thresholds: { idleDays: 0 },
+      })) {
+        findings.push(f);
+      }
+      // Stream's head is __tombstone__ → already closed → not a candidate.
+      expect(findings).toEqual([]);
+    });
+  });
+
+  describe("restart-candidate category", () => {
+    it("flags streams above the event-count threshold when state has .snap()", async () => {
+      const app = act().withState(order).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      for (let i = 0; i < 25; i++) {
+        await store().commit(
+          "big",
+          [{ name: "OrderPlaced", data: { items: i } }],
+          meta
+        );
+      }
+      // Small stream → should NOT be flagged.
+      await store().commit(
+        "small",
+        [{ name: "OrderPlaced", data: { items: 0 } }],
+        meta
+      );
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["restart-candidate"], {
+        thresholds: { eventCountForRestart: 20 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        category: "restart-candidate",
+        stream: "big",
+        eventCount: 25,
+        snapshotCount: 0,
+      });
+    });
+
+    it("skips streams whose state has no .snap() reducer", async () => {
+      // widget doesn't declare .snap() — restart wouldn't work,
+      // so the audit silently skips it for restart-candidate.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      for (let i = 0; i < 25; i++) {
+        await store().commit(
+          "big",
+          [{ name: "Repriced", data: { price: i } }],
+          meta
+        );
+      }
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["restart-candidate"], {
+        thresholds: { eventCountForRestart: 20 },
+      })) {
+        findings.push(f);
+      }
+      expect(findings).toEqual([]);
     });
   });
 });
