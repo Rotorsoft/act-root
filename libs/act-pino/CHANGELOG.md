@@ -1,3 +1,16 @@
+# [@rotorsoft/act-pino-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.5.0...@rotorsoft/act-pino-v1.0.0) (2026-05-21)
+
+
+* chore(act-pino)!: enter 1.0 stability commitment ([e0284dd](https://github.com/rotorsoft/act-root/commit/e0284dd4c62d4157f3b88225492da507ba50bf0b)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-pino. It
+implements the Logger contract from @rotorsoft/act 1.0 and is
+validated against @rotorsoft/act-tck. Per STABILITY.md, breaking
+changes to the published surface now require a major bump.
+
 # [@rotorsoft/act-pino-v0.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.4.2...@rotorsoft/act-pino-v0.5.0) (2026-05-14)
 
 
