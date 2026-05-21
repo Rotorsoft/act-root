@@ -226,6 +226,24 @@ describe("audit", () => {
       expect(findings).toEqual([]);
     });
 
+    it("skips deprecated events with zero on-disk load", async () => {
+      // Registry declares Renamed + Renamed_v2 (Renamed deprecated)
+      // but only Repriced (non-deprecated) has events on disk. The
+      // deprecated-load pass should classify Renamed as deprecated
+      // via the registry rule, see count=0, and silently skip.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "s1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["deprecated-load"])) findings.push(f);
+      expect(findings).toEqual([]);
+    });
+
     it("respects operator-supplied deprecatedLoadShareMin", async () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
@@ -449,13 +467,72 @@ describe("audit", () => {
     });
 
     it("flags near-block streams when retry >= nearBlockRetry", async () => {
-      // Direct streams-table manipulation isn't on the public Store
-      // surface; the framework owns retry counts. Skip this case in
-      // the smoke suite — covered indirectly by the blocked test
-      // (any reaction that reaches blocked must transit through
-      // retry > 0 first). End-to-end retry behavior lives in
-      // the drain/backoff specs.
-      expect(true).toBe(true);
+      // Driving retry counts to >= threshold via public APIs
+      // requires the drain machinery (failing reactions). For a
+      // unit-level audit smoke test, reach into the in-memory
+      // store's `_streams` map directly to set a retry count.
+      // The audit reads `StreamPosition.retry` straight from
+      // `query_streams`, so any value > threshold flags.
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([{ stream: "w1", source: "w1" }]);
+      // InMemoryStream exposes `retry` as a getter on `_retry`.
+      // Reach in to bump _retry directly for the test setup.
+      const s = (
+        store() as unknown as {
+          _streams: Map<string, { _retry: number }>;
+        }
+      )._streams.get("w1");
+      if (s) s._retry = 5;
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["reaction-health"], {
+        thresholds: { nearBlockRetry: 3 },
+      })) {
+        findings.push(f);
+      }
+      const nearBlock = findings.find(
+        (f) => f.category === "reaction-health" && f.status === "near-block"
+      );
+      expect(nearBlock).toMatchObject({
+        category: "reaction-health",
+        stream: "w1",
+        status: "near-block",
+        retry: 5,
+      });
+    });
+
+    it("flags stuck-backoff for expired leases that weren't released", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "test-corr", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().subscribe([{ stream: "w1", source: "w1" }]);
+      // Lease for a very short window — by the time the audit runs,
+      // leased_until is in the past but no ack/block has cleared
+      // leased_by.
+      await store().claim(1, 1, "audit-stuck-test", 5);
+      await sleep(20);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["reaction-health"], {
+        // backoffStuckMinutes: 0 makes any expired lease count.
+        thresholds: { backoffStuckMinutes: 0 },
+      })) {
+        findings.push(f);
+      }
+      const stuck = findings.find(
+        (f) => f.category === "reaction-health" && f.status === "stuck-backoff"
+      );
+      expect(stuck).toBeDefined();
     });
   });
 
@@ -684,11 +761,7 @@ describe("audit", () => {
   });
 
   describe("clock-anomalies category", () => {
-    it("flags out-of-order created timestamps within a stream", async () => {
-      // Within a stream, events should commit in monotonic
-      // timestamp order. Adapter-side ordering is by id, not
-      // timestamp — clock skew during commits can produce a
-      // backward-jumping `created` value per stream.
+    it("yields nothing under normal monotonic commits", async () => {
       const app = act().withState(widget).build();
       const meta = { correlation: "c1", causation: {} };
       await store().commit(
@@ -696,32 +769,80 @@ describe("audit", () => {
         [{ name: "Repriced", data: { price: 1 } }],
         meta
       );
-      // Sleep briefly so the second commit's `created` is
-      // strictly later — then we'll seed an event whose `created`
-      // is manually backdated by bypassing into the in-memory
-      // events array. The InMemoryStore exposes events read-only
-      // through query, but we can drive the scenario via two
-      // separate commits where the second is forced to use an
-      // earlier timestamp.
-      //
-      // This test confirms the audit *detects* the anomaly given
-      // such data; framing the adversarial setup is harder than
-      // the detection itself.
       await sleep(20);
       await store().commit(
         "w1",
         [{ name: "Repriced", data: { price: 2 } }],
         meta
       );
-
-      // No clock anomaly under normal conditions.
       const findings: AuditFinding[] = [];
       for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
-      expect(findings.every((f) => f.category === "clock-anomalies")).toBe(
-        true
-      );
-      // Normal commits land in order; expect zero findings.
       expect(findings).toEqual([]);
+    });
+
+    it("flags future-dated events", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      // Force the committed event's `created` 1 hour into the
+      // future via direct in-memory mutation — simulates a writer
+      // whose clock was ahead of audit time.
+      const events = (
+        store() as unknown as {
+          _events: Array<{ created: Date }>;
+        }
+      )._events;
+      for (const e of events) {
+        e.created = new Date(Date.now() + 60 * 60 * 1000);
+      }
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
+      const future = findings.find(
+        (f) => f.category === "clock-anomalies" && f.reason === "future-created"
+      );
+      expect(future).toBeDefined();
+    });
+
+    it("flags out-of-order per-stream timestamps", async () => {
+      const app = act().withState(widget).build();
+      const meta = { correlation: "c1", causation: {} };
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 1 } }],
+        meta
+      );
+      await store().commit(
+        "w1",
+        [{ name: "Repriced", data: { price: 2 } }],
+        meta
+      );
+      // Backdate event 2 so its `created` is earlier than event
+      // 1 — simulates a writer whose clock jumped backward
+      // between commits.
+      const events = (
+        store() as unknown as {
+          _events: Array<{ stream: string; created: Date }>;
+        }
+      )._events;
+      const onW1 = events.filter((e) => e.stream === "w1");
+      onW1[0].created = new Date(Date.now() - 5 * 60 * 1000);
+      onW1[1].created = new Date(Date.now() - 15 * 60 * 1000);
+
+      const findings: AuditFinding[] = [];
+      for await (const f of app.audit(["clock-anomalies"])) findings.push(f);
+      const ooo = findings.find(
+        (f) => f.category === "clock-anomalies" && f.reason === "out-of-order"
+      );
+      expect(ooo).toMatchObject({
+        category: "clock-anomalies",
+        stream: "w1",
+        reason: "out-of-order",
+      });
     });
   });
 });
