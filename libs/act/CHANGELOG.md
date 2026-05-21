@@ -1,3 +1,13 @@
+# [@rotorsoft/act-v0.46.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.45.0...@rotorsoft/act-v0.46.0) (2026-05-21)
+
+
+### Features
+
+* **act:** app.audit() — schema + deprecated-load categories (slice 1) ([82803cb](https://github.com/rotorsoft/act-root/commit/82803cb68f92a18ae6367dda01a8eb82daabbc68)), closes [#723](https://github.com/rotorsoft/act-root/issues/723) [#723](https://github.com/rotorsoft/act-root/issues/723)
+* **act:** audit close-candidate + restart-candidate (slice 2) ([6e9d710](https://github.com/rotorsoft/act-root/commit/6e9d710077060b3d78523f82f8e38e3d0b9ccf9c)), closes [#723](https://github.com/rotorsoft/act-root/issues/723)
+* **act:** audit reaction-health + snapshot-drift (slice 3) ([604f149](https://github.com/rotorsoft/act-root/commit/604f149cd081e0d4c2d8a547cec364f7635cbe6f)), closes [#723](https://github.com/rotorsoft/act-root/issues/723)
+* **act:** audit slice 4 — routing-health, correlation-gaps, ([d69ea3b](https://github.com/rotorsoft/act-root/commit/d69ea3bbe576e7e83f4c241709a08ce3aabe1701)), closes [#723](https://github.com/rotorsoft/act-root/issues/723)
+
 # [@rotorsoft/act-v0.45.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.44.0...@rotorsoft/act-v0.45.0) (2026-05-19)
 
 
