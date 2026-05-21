@@ -10,7 +10,7 @@ _Event-sourcing framework for TypeScript — three primitives, Zod end to end, n
 
 This is the framework core: the builders (`state`, `slice`, `projection`, `act`), the port interfaces (`Store`, `Cache`, `Logger`) with bundled in-memory implementations, the orchestrator that runs the correlate → drain loop, and the snapshot/cache layer that keeps `load()` fast on long streams. Around three primitives — **actions** (the changes you want to make), **state** (the data you care about), and **reactions** (what happens as a result) — it provides input validation against Zod schemas, optimistic-concurrency commit, derived state via patch reducers, fan-out reactions with backoff and dead-lettering, blocked-stream recovery, time-travel queries against the same log.
 
-Your domain stays in TypeScript; your schemas stay in Zod. Pick a store at bootstrap — Postgres (`@rotorsoft/act-pg`), SQLite (`@rotorsoft/act-sqlite`), or the bundled in-memory default — and the application code stays the same. The published surface is stable under [SemVer](../../STABILITY.md) at 1.0.
+Your domain stays in TypeScript; your schemas stay in Zod. Pick a store at bootstrap — Postgres (`@rotorsoft/act-pg`), SQLite (`@rotorsoft/act-sqlite`), or the bundled in-memory default — and the application code stays the same. The published surface is stable under [SemVer](../../STABILITY.md) as of 1.0.0.
 
 For the project-level overview, see the [root README](../../README.md).
 
@@ -136,7 +136,7 @@ await app.unblock({ stream: "^webhooks-out-" }); // bulk
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md). The charter names exactly which surfaces are protected by SemVer (builders, `Act` interface, port interfaces, lifecycle event shapes, public type exports) and what's free to evolve (internal modules, performance characteristics, log formats). Breaking changes require a `BREAKING CHANGE:` commit footer and a written migration note. Charter takes effect at 1.0 (gated on [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1)).
+Public API governed by the [Act Stability Charter](../../STABILITY.md). The charter names exactly which surfaces are protected by SemVer (builders, `Act` interface, port interfaces, lifecycle event shapes, public type exports) and what's free to evolve (internal modules, performance characteristics, log formats). Breaking changes require a `BREAKING CHANGE:` commit footer and a written migration note. Charter is **in effect as of 1.0.0**; the milestone tracker is [milestone 1.0](https://github.com/Rotorsoft/act-root/milestone/1).
 
 ## Related packages
 
