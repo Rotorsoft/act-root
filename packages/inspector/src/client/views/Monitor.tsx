@@ -11,6 +11,17 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
   const statusQuery = trpc.drainStatus.useQuery(undefined, {
     staleTime: 2_000,
   });
+  // Write-mode + audit log (#698 slice 5). Both refresh on a mutation
+  // commit through `useUtils().audit.invalidate()` from the
+  // PriorityCell on the Streams view.
+  const writeModeQuery = trpc.writeMode.useQuery(undefined, {
+    staleTime: Infinity,
+  });
+  const auditQuery = trpc.audit.useQuery(undefined, {
+    staleTime: 2_000,
+    refetchInterval: 5_000,
+  });
+  const writeEnabled = writeModeQuery.data?.enabled ?? false;
 
   // Active priority + lane filters. Clicking a badge in the histogram
   // row sets the filter; clicking it again (or the "all" chip) clears
@@ -175,19 +186,104 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
           )}
         </div>
 
-        {/* Right: watermark histogram */}
-        <div className="flex w-72 shrink-0 flex-col px-4 py-3">
-          <span className="mb-3 text-[10px] uppercase tracking-wider text-zinc-500">
-            Watermark gap distribution
-          </span>
-          <div className="flex-1">
-            <Histogram buckets={data.histogram} />
+        {/* Right: watermark histogram + audit log */}
+        <div className="flex w-72 shrink-0 flex-col gap-3 px-4 py-3">
+          <div className="flex flex-col">
+            <span className="mb-3 text-[10px] uppercase tracking-wider text-zinc-500">
+              Watermark gap distribution
+            </span>
+            <div className="h-32">
+              <Histogram buckets={data.histogram} />
+            </div>
+            <div className="mt-2 text-[10px] text-zinc-600">
+              Max event ID: {data.maxEventId.toLocaleString()}
+            </div>
           </div>
-          <div className="mt-2 text-[10px] text-zinc-600">
-            Max event ID: {data.maxEventId.toLocaleString()}
-          </div>
+          <AuditPanel
+            writeEnabled={writeEnabled}
+            entries={auditQuery.data?.entries ?? []}
+          />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Right-side panel surfacing inspector-driven mutations (#698 slice
+ * 5). Shows the read-only-mode reason when writes are gated; otherwise
+ * lists the last 10 audit entries with timestamp + action + affected
+ * count. Cleared on server restart — this is operational breadcrumbs,
+ * not a compliance log.
+ */
+function AuditPanel({
+  writeEnabled,
+  entries,
+}: {
+  writeEnabled: boolean;
+  entries: ReadonlyArray<{
+    timestamp: string;
+    action: string;
+    filter: Record<string, unknown>;
+    priority: number;
+    affected: number;
+  }>;
+}) {
+  return (
+    <div className="flex flex-1 flex-col border-t border-zinc-800 pt-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+          Recent mutations
+        </span>
+        <span
+          className={`rounded-full border px-1.5 py-0 text-[9px] font-mono ${
+            writeEnabled
+              ? "border-emerald-700 bg-emerald-950/40 text-emerald-300"
+              : "border-zinc-700 bg-zinc-900 text-zinc-500"
+          }`}
+          title={
+            writeEnabled
+              ? "Inspector is in write mode"
+              : "Set ACT_INSPECTOR_WRITE=1 on the server to enable mutations"
+          }
+        >
+          {writeEnabled ? "write" : "read-only"}
+        </span>
+      </div>
+      {entries.length === 0 ? (
+        <div className="text-[10px] text-zinc-600">
+          {writeEnabled
+            ? "No mutations recorded this session."
+            : "Read-only — no mutations possible."}
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-1.5 overflow-y-auto text-[10px]">
+          {entries.slice(0, 10).map((e, i) => (
+            <li
+              key={`${e.timestamp}-${i}`}
+              className="rounded border border-zinc-800 bg-zinc-950 px-2 py-1.5"
+            >
+              <div className="flex items-center justify-between text-zinc-500">
+                <span className="font-mono">{e.action}</span>
+                <span>{new Date(e.timestamp).toLocaleTimeString()}</span>
+              </div>
+              <div className="mt-1 font-mono text-zinc-300">
+                p={e.priority}{" "}
+                <span className="text-zinc-600">→</span>{" "}
+                <span className="text-amber-300">{e.affected} streams</span>
+              </div>
+              <div
+                className="truncate font-mono text-[9px] text-zinc-600"
+                title={JSON.stringify(e.filter)}
+              >
+                {Object.keys(e.filter).length === 0
+                  ? "all streams"
+                  : JSON.stringify(e.filter)}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

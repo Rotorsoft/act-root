@@ -27,6 +27,97 @@ type SortKey =
 
 const STALE_DAY_OPTIONS = [7, 14, 30, 90];
 
+/**
+ * Inline-editable scheduling priority cell on the Streams view (#698
+ * slice 5). Click the value to switch into a numeric input;
+ * Enter / blur commits via `Store.prioritize({stream_exact:true})`.
+ * Esc reverts. When write mode is off the cell stays display-only and
+ * surfaces the reason in the tooltip.
+ *
+ * Width stays fixed across the display and edit modes so the row
+ * doesn't reflow mid-edit.
+ */
+function PriorityCell({
+  stream,
+  priority,
+  writeEnabled,
+  writeDisabledReason,
+  pending,
+  onCommit,
+}: {
+  stream: string;
+  priority: number;
+  writeEnabled: boolean;
+  writeDisabledReason: string;
+  pending: boolean;
+  onCommit: (value: number) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(priority));
+
+  const baseClass = `w-12 shrink-0 text-right font-mono ${priority !== 0 ? "text-amber-400" : "text-zinc-700"}`;
+
+  if (!writeEnabled) {
+    return (
+      <span
+        className={baseClass}
+        title={`priority: ${priority} — ${writeDisabledReason}`}
+      >
+        {priority}
+      </span>
+    );
+  }
+
+  if (!editing) {
+    return (
+      <span
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          setDraft(String(priority));
+          setEditing(true);
+        }}
+        className={`${baseClass} cursor-text hover:text-emerald-300 hover:underline`}
+        title={
+          pending
+            ? `Updating priority for ${stream}…`
+            : `priority: ${priority} — click to edit`
+        }
+      >
+        {pending ? "…" : priority}
+      </span>
+    );
+  }
+
+  const commit = () => {
+    const parsed = Number.parseInt(draft, 10);
+    if (Number.isFinite(parsed) && parsed !== priority) onCommit(parsed);
+    setEditing(false);
+  };
+
+  return (
+    <input
+      type="number"
+      autoFocus
+      value={draft}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          setEditing(false);
+        }
+      }}
+      className="w-12 shrink-0 rounded border border-emerald-700 bg-zinc-900 px-1 py-0 text-right font-mono text-xs text-emerald-300 outline-none"
+    />
+  );
+}
+
 function relativeTime(iso: string | null): string {
   if (!iso) return "—";
   const ts = new Date(iso).getTime();
@@ -77,6 +168,26 @@ export function Streams({
   // adapters (no event scan) so the second query is fine.
   const metaQuery = trpc.streamMeta.useQuery(undefined, {
     staleTime: 3_000,
+  });
+  // Write-mode probe (#698 slice 4). Drives whether the inline
+  // priority editor is interactive or display-only. Cached for the
+  // session — flipping the env var requires a server restart anyway.
+  const writeModeQuery = trpc.writeMode.useQuery(undefined, {
+    staleTime: Infinity,
+  });
+  const writeEnabled = writeModeQuery.data?.enabled ?? false;
+  const writeDisabledReason =
+    writeModeQuery.data?.reason ?? "Read-only mode";
+
+  // Mutation for per-row priority edits. On success, invalidate the
+  // joined queries so the new value renders without a full reload.
+  const utils = trpc.useUtils();
+  const prioritizeMutation = trpc.prioritize.useMutation({
+    onSuccess: () => {
+      void utils.streamMeta.invalidate();
+      void utils.drainStatus.invalidate();
+      void utils.audit.invalidate();
+    },
   });
 
   const streams = useMemo<StreamRow[]>(() => {
@@ -259,12 +370,22 @@ export function Streams({
                 <span className="w-12 shrink-0 text-right font-mono text-zinc-500">
                   v{s.currentVersion}
                 </span>
-                <span
-                  className={`w-12 shrink-0 text-right font-mono ${s.priority !== 0 ? "text-amber-400" : "text-zinc-700"}`}
-                  title={`priority: ${s.priority}`}
-                >
-                  {s.priority}
-                </span>
+                <PriorityCell
+                  stream={s.stream}
+                  priority={s.priority}
+                  writeEnabled={writeEnabled}
+                  writeDisabledReason={writeDisabledReason}
+                  pending={
+                    prioritizeMutation.isPending &&
+                    prioritizeMutation.variables?.filter?.stream === s.stream
+                  }
+                  onCommit={(value) =>
+                    prioritizeMutation.mutate({
+                      priority: value,
+                      filter: { stream: s.stream, stream_exact: true },
+                    })
+                  }
+                />
                 <span
                   className={`w-20 shrink-0 truncate font-mono text-[10px] ${s.lane ? "text-violet-300" : "text-zinc-700"}`}
                   title={s.lane ? `lane: ${s.lane}` : "default lane"}
