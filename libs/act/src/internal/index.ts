@@ -17,6 +17,7 @@
  * @internal
  */
 
+export { type AuditDeps, runAudit } from "./audit.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classifyRegistry } from "./build-classify.js";
 export { runCloseCycle } from "./close-cycle.js";

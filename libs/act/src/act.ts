@@ -1,6 +1,7 @@
 import EventEmitter from "node:events";
 import {
   ALL_LANES,
+  type AuditDeps,
   buildDrain,
   buildEs,
   buildHandle,
@@ -15,6 +16,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  runAudit,
   runCloseCycle,
   SettleLoop,
 } from "./internal/index.js";
@@ -22,6 +24,9 @@ import { dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
+  AuditCategory,
+  AuditFinding,
+  AuditOptions,
   BatchHandler,
   BlockedLease,
   CloseResult,
@@ -253,6 +258,14 @@ export class Act<
    * reactions target.
    */
   private readonly _event_to_lanes: ReadonlyMap<string, EventLaneSet>;
+  /**
+   * Audit dependency bag (#723). Built once at construction; held as
+   * an immutable snapshot of the registry state the audit module
+   * needs. Lives in `internal/audit.ts` — this orchestrator never
+   * carries audit logic, only the deps + a one-liner that hands them
+   * over.
+   */
+  private readonly _audit_deps: AuditDeps;
   /** Logger resolved at construction time (after user port configuration) */
   private readonly _logger: Logger = log();
   /** Wraps a public-method body so internal `store()`/`cache()` resolve to the
@@ -391,6 +404,20 @@ export class Act<
       if (cfg?.cycleMs !== undefined) controller.start(cfg.cycleMs);
       this._drain_controllers.set(name, controller);
     }
+
+    // Audit deps bag (#723). Snapshotted after registry classification +
+    // drain-controller build so the audit module sees the finalized lane
+    // set. Held as an immutable bag — the orchestrator never carries
+    // audit logic itself, only this typed contract.
+    this._audit_deps = {
+      store,
+      logger: this._logger,
+      eventToState,
+      states: this._states,
+      knownEventNames: new Set(eventToState.keys()),
+      declaredLanes: new Set(this._drain_controllers.keys()),
+      routedEventNames: new Set(eventToLanes.keys()),
+    };
 
     this._correlate = new CorrelateCycle(
       this.registry,
@@ -1134,6 +1161,54 @@ export class Act<
       );
       return positions;
     });
+  }
+
+  /**
+   * Operator-driven store audit (#723).
+   *
+   * Walks the connected store and yields per-category findings —
+   * each tagged with the remediation it suggests. Same operator-
+   * driven category as `app.close()` / `app.reset()` /
+   * `app.unblock()` / `app.blocked_streams()`: never auto-invoked by
+   * the framework; the operator decides when to run it (CI gate,
+   * scheduled job, ad-hoc forensics) and what to do with the
+   * findings.
+   *
+   * Categories are independent — pass a subset to scope the work,
+   * or omit to run everything:
+   *
+   * ```typescript
+   * // Targeted: schema drift + deprecated-event load only
+   * for await (const f of app.audit(["schema", "deprecated-load"], {
+   *   query: { created_after: lastScan },
+   *   thresholds: { deprecatedLoadShareMin: 0.10 },
+   * })) {
+   *   await escalate(f);
+   * }
+   *
+   * // Full audit, default thresholds
+   * for await (const f of app.audit()) console.log(f);
+   * ```
+   *
+   * Returns an `AsyncIterable` so callers can `break` early — the
+   * underlying store paginations respect the iterator protocol and
+   * stop cleanly. Each finding is emitted independently, so
+   * pipelining into Slack / persistence / further analysis works
+   * without buffering the full report in memory.
+   *
+   * Findings shape — see {@link AuditFinding}. The discriminated
+   * union carries enough context for the operator to act on each
+   * finding directly: stream id, event id, recommendation hints.
+   *
+   * @param categories - Subset of categories to run (default: all).
+   * @param options - Query window + per-category thresholds.
+   * @returns Async iterable of {@link AuditFinding}.
+   */
+  audit(
+    categories?: AuditCategory[],
+    options?: AuditOptions
+  ): AsyncIterable<AuditFinding> {
+    return runAudit(this._audit_deps, categories, options);
   }
 
   /**
