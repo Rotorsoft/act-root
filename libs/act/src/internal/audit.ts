@@ -122,9 +122,14 @@ export async function* runAudit(
   if (requested.has("restart-candidate")) {
     yield* auditRestartCandidate(deps, options);
   }
-  // Subsequent slices add: reaction-health, snapshot-drift,
-  // routing-health, correlation-gaps, clock-anomalies. Each is a
-  // self-contained async generator below.
+  if (requested.has("reaction-health")) {
+    yield* auditReactionHealth(deps, options);
+  }
+  if (requested.has("snapshot-drift")) {
+    yield* auditSnapshotDrift(deps, options);
+  }
+  // Subsequent slices add: routing-health, correlation-gaps,
+  // clock-anomalies. Each is a self-contained async generator below.
 }
 
 /**
@@ -358,4 +363,155 @@ async function* auditRestartCandidate(
 function restartIsSupported(deps: AuditDeps, headEventName: string): boolean {
   const state = deps.eventToState.get(headEventName);
   return state?.snap !== undefined;
+}
+
+/**
+ * `reaction-health` — surfaces streams the operator needs to look
+ * at. Three sub-statuses, evaluated per stream position:
+ *
+ *   - `blocked` — `streams.blocked === true`. Drain has given up on
+ *     this stream. Operator action: `app.unblock(...)` after fixing
+ *     the underlying issue (or `app.reset(...)` to replay).
+ *   - `near-block` — `retry >= nearBlockRetry` (default 3) without
+ *     yet being blocked. Heads-up that one more retry will tombstone
+ *     the stream (if the reaction's `blockOnError` is set).
+ *   - `stuck-backoff` — `leased_until` is in the past but `leased_by`
+ *     is still set. Either a worker crashed mid-backoff, or the
+ *     framework's in-process backoff is holding off the next attempt
+ *     while no worker has re-claimed. Either way the operator should
+ *     investigate.
+ *
+ * Reads through `Store.query_streams` so it works on any adapter.
+ */
+async function* auditReactionHealth(
+  deps: AuditDeps,
+  options: AuditOptions
+): AsyncIterable<AuditFinding> {
+  const nearBlockRetry = options.thresholds?.nearBlockRetry ?? 3;
+  const stuckMinutes =
+    options.thresholds?.backoffStuckMinutes ?? DEFAULTS.backoffStuckMinutes;
+  const stuckCutoff = Date.now() - stuckMinutes * 60 * 1000;
+
+  const buffer: AuditFinding[] = [];
+  await deps.store().query_streams((p) => {
+    if (p.blocked) {
+      buffer.push({
+        category: "reaction-health",
+        stream: p.stream,
+        status: "blocked",
+        retry: p.retry,
+        reason: p.error || "blocked without recorded error",
+      });
+      return;
+    }
+    if (p.retry >= nearBlockRetry) {
+      buffer.push({
+        category: "reaction-health",
+        stream: p.stream,
+        status: "near-block",
+        retry: p.retry,
+        reason: `retry ${p.retry} ≥ near-block threshold ${nearBlockRetry}`,
+      });
+      return;
+    }
+    if (
+      p.leased_by &&
+      p.leased_until &&
+      p.leased_until.getTime() < stuckCutoff
+    ) {
+      const minutes = Math.floor(
+        (Date.now() - p.leased_until.getTime()) / (60 * 1000)
+      );
+      buffer.push({
+        category: "reaction-health",
+        stream: p.stream,
+        status: "stuck-backoff",
+        retry: p.retry,
+        reason: `lease expired ${minutes}m ago without release`,
+      });
+    }
+  });
+  for (const f of buffer) yield f;
+}
+
+/**
+ * `snapshot-drift` — streams that have accumulated many events
+ * since their last `__snapshot__` marker. Loads cold without a
+ * snapshot pay the full replay cost on every load — operationally
+ * painful for hot read paths.
+ *
+ * Uses two reads per drifted stream: the workspace `query_stats`
+ * to learn the snapshot count, and a per-stream `query` (limit 1,
+ * backward, names=["__snapshot__"]) to find the last snapshot
+ * event id. Drift = total events since last snapshot. Streams that
+ * have never snapshotted have drift = total event count.
+ *
+ * Skips streams whose state doesn't declare `.snap()` (snapshots
+ * would never fire there; not a drift signal).
+ */
+async function* auditSnapshotDrift(
+  deps: AuditDeps,
+  options: AuditOptions
+): AsyncIterable<AuditFinding> {
+  const driftMin =
+    options.thresholds?.snapshotDriftMin ?? DEFAULTS.snapshotDriftMin;
+  const stats = await deps
+    .store()
+    .query_stats<Schemas>({}, { count: true, names: true });
+  for (const [stream, { head, count, names }] of stats) {
+    if (!restartIsSupported(deps, String(head.name))) continue;
+    if (String(head.name).startsWith("__")) continue;
+    const total = count ?? 0;
+    const snapshotCount = names?.["__snapshot__"] ?? 0;
+    // Cheap upper-bound on drift: if there were *no* snapshots,
+    // drift is just the total event count. With snapshots, the
+    // worst case is "total minus most-recent-snapshot id" — needs
+    // a per-stream `query`. Skip the per-stream call when the
+    // upper bound is already below the threshold.
+    const upperBound = total;
+    if (upperBound < driftMin) continue;
+
+    let eventsSinceLastSnapshot = total;
+    let snapshotAt: number | undefined;
+    if (snapshotCount > 0) {
+      // Find the most recent __snapshot__ event for this stream.
+      // `with_snaps: true` is required — `Store.query` filters out
+      // `__snapshot__` rows by default.
+      const collected: Array<{ id: number }> = [];
+      await deps.store().query(
+        (e) => {
+          collected.push({ id: e.id });
+        },
+        {
+          stream,
+          stream_exact: true,
+          names: ["__snapshot__"],
+          backward: true,
+          limit: 1,
+          with_snaps: true,
+        }
+      );
+      snapshotAt = collected[0]?.id;
+      if (snapshotAt !== undefined) {
+        // Count events strictly after the snapshot, excluding
+        // further `__snapshot__` rows (we want domain events
+        // accumulated since the last snap, not the snap itself).
+        let after = 0;
+        await deps.store().query(
+          () => {
+            after++;
+          },
+          { stream, stream_exact: true, after: snapshotAt }
+        );
+        eventsSinceLastSnapshot = after;
+      }
+    }
+    if (eventsSinceLastSnapshot < driftMin) continue;
+    yield {
+      category: "snapshot-drift",
+      stream,
+      eventsSinceLastSnapshot,
+      snapshotAt,
+    };
+  }
 }

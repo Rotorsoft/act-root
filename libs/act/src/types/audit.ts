@@ -47,6 +47,8 @@ export type AuditThresholds = {
   eventCountForRestart?: number;
   /** `reaction-health` (stuck-backoff): minutes since lease started. Default 30. */
   backoffStuckMinutes?: number;
+  /** `reaction-health` (near-block): retry count at which a stream is "about to block." Default 3. */
+  nearBlockRetry?: number;
   /** `deprecated-load`: minimum fraction-of-total to surface. Default 0.10. */
   deprecatedLoadShareMin?: number;
   /** `snapshot-drift`: minimum events since last snapshot to flag. Default 500. */
