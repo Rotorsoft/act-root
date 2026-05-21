@@ -27,12 +27,12 @@ import { z } from "zod";
 // Domain
 // =====================================================================
 // `Tally` is a tiny aggregate with TWO event families:
-//   - `Incremented` (deprecated) → `Incremented_v2`     (deprecation rule)
+//   - `Bumped` (deprecated) → `Bumped_v2`     (deprecation rule)
 //   - `Cleared` (terminal in the operator's mental model)
 // Plus `.snap()` so we can demonstrate restart/snapshot categories.
 
-const IncrementedV1 = z.object({ by: z.number() });
-const IncrementedV2 = z.object({ by: z.number(), reason: z.string() });
+const BumpedV1 = z.object({ by: z.number() });
+const BumpedV2 = z.object({ by: z.number(), reason: z.string() });
 const Cleared = z.object({});
 
 const Tally = state({
@@ -40,27 +40,27 @@ const Tally = state({
 })
   .init(() => ({ count: 0 }))
   .emits({
-    Incremented: IncrementedV1, // v1 — deprecated by Incremented_v2
-    Incremented_v2: IncrementedV2,
+    Bumped: BumpedV1, // v1 — deprecated by Bumped_v2
+    Bumped_v2: BumpedV2,
     Cleared,
   })
   .patch({
-    Incremented: ({ data }, s) => ({ count: s.count + data.by }),
-    Incremented_v2: ({ data }, s) => ({ count: s.count + data.by }),
+    Bumped: ({ data }, s) => ({ count: s.count + data.by }),
+    Bumped_v2: ({ data }, s) => ({ count: s.count + data.by }),
     Cleared: () => ({ count: 0 }),
   })
   .on({ increment: z.object({ by: z.number(), reason: z.string() }) })
-  .emit(({ by, reason }) => ["Incremented_v2", { by, reason }])
+  .emit(({ by, reason }) => ["Bumped_v2", { by, reason }])
   .on({ clear: z.object({}) })
   .emit(() => ["Cleared", {}])
   .snap((s) => s.patches >= 5)
   .build();
 
-// A projection that reacts to Incremented_v2 — so the registry has
+// A projection that reacts to Bumped_v2 — so the registry has
 // at least one routed event name. Anything else surfaced from the
 // store that *isn't* routed becomes a routing-health finding.
 const totals = projection("totals")
-  .on({ Incremented_v2: IncrementedV2 })
+  .on({ Bumped_v2: BumpedV2 })
   .do(async function trackTotals() {
     await Promise.resolve();
   })
@@ -156,7 +156,7 @@ async function main() {
   );
   await store().commit(
     "tally-2",
-    [{ name: "Incremented_v2", data: { by: 5 } }], // missing `reason`
+    [{ name: "Bumped_v2", data: { by: 5 } }], // missing `reason`
     META
   );
   for (const f of await collect(app, "schema")) describeFinding(f);
@@ -178,17 +178,17 @@ async function main() {
   // 8 legacy events across 2 streams + 2 current events. 80% legacy.
   for (const s of ["tally-a", "tally-b"]) {
     for (let i = 0; i < 4; i++) {
-      await store().commit(s, [{ name: "Incremented", data: { by: 1 } }], META);
+      await store().commit(s, [{ name: "Bumped", data: { by: 1 } }], META);
     }
   }
   await store().commit(
     "tally-a",
-    [{ name: "Incremented_v2", data: { by: 1, reason: "migrated" } }],
+    [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
     META
   );
   await store().commit(
     "tally-b",
-    [{ name: "Incremented_v2", data: { by: 1, reason: "migrated" } }],
+    [{ name: "Bumped_v2", data: { by: 1, reason: "migrated" } }],
     META
   );
   for (const f of await collect(app, "deprecated-load", {
@@ -342,7 +342,7 @@ async function main() {
   for (let i = 0; i < 15; i++) {
     await store().commit(
       "drifty",
-      [{ name: "Incremented_v2", data: { by: 1, reason: "no-snap" } }],
+      [{ name: "Bumped_v2", data: { by: 1, reason: "no-snap" } }],
       META
     );
   }
@@ -377,7 +377,7 @@ async function main() {
   ]);
   await store().commit(
     "rogue",
-    [{ name: "Incremented", data: { by: 99 } }], // legacy event isn't routed
+    [{ name: "Bumped", data: { by: 99 } }], // legacy event isn't routed
     META
   );
   for (const f of await collect(app, "routing-health")) describeFinding(f);
@@ -398,12 +398,12 @@ async function main() {
   );
   await store().commit(
     "ok-stream",
-    [{ name: "Incremented_v2", data: { by: 1, reason: "ok" } }],
+    [{ name: "Bumped_v2", data: { by: 1, reason: "ok" } }],
     META
   );
   await store().commit(
     "orphan-stream",
-    [{ name: "Incremented_v2", data: { by: 1, reason: "orphan" } }],
+    [{ name: "Bumped_v2", data: { by: 1, reason: "orphan" } }],
     {
       correlation: "demo-corr",
       causation: { event: { id: 9999, stream: "fake", name: "fake" } },
@@ -461,11 +461,7 @@ async function main() {
       "  table walks. Seed one tiny finding per category and let\n" +
       "  the dispatcher route each row to the interested passes.\n"
   );
-  await store().commit(
-    "all-1",
-    [{ name: "Incremented", data: { by: 1 } }],
-    META
-  );
+  await store().commit("all-1", [{ name: "Bumped", data: { by: 1 } }], META);
   await store().commit("all-1", [{ name: "Mystery", data: {} }], META);
   await app.do(
     "increment",
