@@ -10,6 +10,7 @@
  * Import from this module to access all core framework types in one place.
  */
 export type * from "./action.js";
+export type * from "./audit.js";
 export * from "./errors.js";
 export type * from "./ports.js";
 export type * from "./reaction.js";
