@@ -1,3 +1,17 @@
+# [@rotorsoft/act-http-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v0.2.0...@rotorsoft/act-http-v1.0.0) (2026-05-21)
+
+
+* chore(act-http)!: enter 1.0 stability commitment ([73dd7d4](https://github.com/rotorsoft/act-root/commit/73dd7d409c8356d92c56b2b14118fc0bc60d7256)), closes [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-http. The
+package's public exports — the `webhook` helper (`@rotorsoft/act-http
+/webhook`) and the SSE surface (`@rotorsoft/act-http/sse`, which hosts
+the API formerly published as @rotorsoft/act-sse) — are now covered by
+SemVer per STABILITY.md. Breaking changes require a major bump.
+
 # [@rotorsoft/act-http-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v0.1.0...@rotorsoft/act-http-v0.2.0) (2026-05-16)
 
 
