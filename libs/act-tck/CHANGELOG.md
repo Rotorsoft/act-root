@@ -1,3 +1,18 @@
+# [@rotorsoft/act-tck-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v0.4.0...@rotorsoft/act-tck-v1.0.0) (2026-05-21)
+
+
+* chore(act-tck)!: enter 1.0 stability commitment ([ff7a0dc](https://github.com/rotorsoft/act-root/commit/ff7a0dc17b10d2a5be660fd66ee3c19930c43a6c)), closes [#774](https://github.com/rotorsoft/act-root/issues/774) [#702](https://github.com/rotorsoft/act-root/issues/702)
+
+
+### BREAKING CHANGES
+
+* This is the 1.0 release of @rotorsoft/act-tck. The
+kit's published surface — `runStoreTck`, `runCacheTck`,
+`runLoggerTck`, the `Capabilities` types, and the fixture helpers —
+is now covered by SemVer per STABILITY.md, alongside the
+Store/Cache/Logger contracts the TCK validates. Breaking changes
+require a major bump and a written migration note.
+
 # [@rotorsoft/act-tck-v0.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v0.3.0...@rotorsoft/act-tck-v0.4.0) (2026-05-19)
 
 
