@@ -6,6 +6,7 @@ import {
   type StreamPosition,
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { initTRPC } from "@trpc/server";
 import pg from "pg";
 import { z } from "zod";
@@ -336,11 +337,14 @@ export const inspectorRouter = t.router({
    * - `pg` (default — backward-compatible with the existing frontend
    *   which doesn't send an `adapter` field) constructs a
    *   `PostgresStore` and verifies the connection with a 1-row probe.
+   * - `sqlite` constructs a `SqliteStore` against the given file path.
+   *   The file must already be an Act SQLite database (use the SQLite
+   *   discovery probe to find candidates); we don't call `.seed()` on
+   *   connect so a non-Act file fails the 1-row probe instead of being
+   *   silently initialized.
    * - `inmemory` constructs an `InMemoryStore` — ephemeral, single
    *   process, no persistent config. Useful for demo / playground
    *   flows and for ACT-1131's test suite (real adapter, no mocking).
-   *
-   * `sqlite` is reserved for #782.
    */
   connect: t.procedure
     .input(
@@ -355,6 +359,11 @@ export const inspectorRouter = t.router({
           schema: z.string().default("public"),
           table: z.string().default("events"),
           ssl: z.boolean().default(false),
+        }),
+        z.object({
+          adapter: z.literal("sqlite"),
+          file: z.string().min(1),
+          table: z.string().default("events"),
         }),
         z.object({
           adapter: z.literal("inmemory"),
@@ -375,6 +384,28 @@ export const inspectorRouter = t.router({
           return {
             ok: true as const,
             config: { adapter: "inmemory" as const },
+          };
+        }
+        if (input.adapter === "sqlite") {
+          const newStore = new SqliteStore({ url: `file:${input.file}` });
+          // Verify the file is an Act-shaped database — the 1-row
+          // probe throws on missing `events` table, which is exactly
+          // what we want (a non-Act file fails connect rather than
+          // being silently seeded).
+          await newStore.query<Schemas>(() => {}, { limit: 1 });
+          currentStore = newStore;
+          currentConfig = {
+            adapter: "sqlite",
+            file: input.file,
+            table: input.table,
+          };
+          return {
+            ok: true as const,
+            config: {
+              adapter: "sqlite" as const,
+              file: input.file,
+              table: input.table,
+            },
           };
         }
         const { adapter, ssl, ...pgConfig } = input;
@@ -410,8 +441,18 @@ export const inspectorRouter = t.router({
     return { ok: true as const };
   }),
 
-  /** Check connection status */
-  status: t.procedure.query(() => ({ connected: currentStore !== null })),
+  /**
+   * Check connection status.
+   *
+   * `adapter` is the kind of currently-connected store (null when not
+   * connected). The UI uses this to gate adapter-specific affordances —
+   * e.g. `BackupRestore` hides the restore button on non-PG adapters
+   * since `restore` is PG-only until #786.
+   */
+  status: t.procedure.query(() => ({
+    connected: currentStore !== null,
+    adapter: currentConfig?.adapter ?? null,
+  })),
 
   /** Query events using the Store interface */
   query: t.procedure
