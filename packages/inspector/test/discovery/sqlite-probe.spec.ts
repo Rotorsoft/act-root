@@ -145,11 +145,16 @@ describe("discoverSqlite", () => {
     const { homedir } = await import("node:os");
     const marker = `act-inspector-tilde-test-${process.pid}-${Date.now()}.db`;
     const file = path.join(homedir(), marker);
+    // Full regex-metachar escape — CodeQL's `js/incomplete-sanitization`
+    // flags partial escapes (e.g. dots only), even when the input shape
+    // makes other metacharacters impossible.
+    const escapeForRegex = (s: string) =>
+      s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     try {
       await buildActSqlite(file);
       const result = await discoverSqlite({
         dir: "~",
-        glob: marker.replace(/[.]/g, "\\."),
+        glob: `^${escapeForRegex(marker)}$`,
       });
       expect(result).toHaveLength(1);
       expect(result[0]!.file).toBe(file);
