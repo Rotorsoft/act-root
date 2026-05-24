@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.0.0...@rotorsoft/act-pg-v1.0.1) (2026-05-24)
+
+
+### Bug Fixes
+
+* **deps:** update dependency pg to ^8.21.0 ([35df7b0](https://github.com/rotorsoft/act-root/commit/35df7b094f2c0b758c222afcef54eef642783d1a))
+
 # [@rotorsoft/act-pg-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v0.25.0...@rotorsoft/act-pg-v1.0.0) (2026-05-21)
 
 
