@@ -11,7 +11,8 @@
     "dev:server": "tsx watch --env-file=.env src/server/server.ts",
     "dev:client": "vite",
     "dev": "concurrently -n 'server,client' -c 'cyan,yellow' 'pnpm run dev:server' 'pnpm run dev:client'",
-    "build": "vite build"
+    "build": "vite build",
+    "test": "vitest run --coverage --config ./vitest.config.ts"
   },
   "keywords": [],
   "license": "ISC",
