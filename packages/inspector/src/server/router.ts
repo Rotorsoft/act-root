@@ -114,9 +114,18 @@ const collect =
 const toDate = (iso: string | undefined): Date | undefined =>
   iso ? new Date(iso) : undefined;
 
-/** Managed store instance — not the singleton, so we can reconnect */
-let currentStore: Store | null = null;
-let currentConfig: {
+/**
+ * Per-adapter shape of the currently-connected store's configuration.
+ *
+ * Today only the `pg` member is reachable — `connect` always constructs a
+ * `PostgresStore`. The `sqlite` member is reserved so #781 (discovery) and
+ * #782 (SQLite `connect` branch) land as additive changes against a stable
+ * union, rather than churning this declaration a second time.
+ *
+ * Read-only-after-connect: mutated exclusively by `connect` / `disconnect`.
+ */
+type PgConfig = {
+  adapter: "pg";
   host: string;
   port: number;
   database: string;
@@ -124,7 +133,19 @@ let currentConfig: {
   password: string;
   schema: string;
   table: string;
-} | null = null;
+};
+
+type SqliteConfig = {
+  adapter: "sqlite";
+  file: string;
+  table: string;
+};
+
+type AdapterConfig = PgConfig | SqliteConfig;
+
+/** Managed store instance — not the singleton, so we can reconnect */
+let currentStore: Store | null = null;
+let currentConfig: AdapterConfig | null = null;
 
 function getStore(): Store {
   if (!currentStore) throw new Error("Not connected to a store");
@@ -412,9 +433,19 @@ function csvParseLine(line: string): string[] {
   return fields;
 }
 
-/** Get a raw pg client for direct queries */
-async function getRawClient(): Promise<pg.Client> {
+/**
+ * Get a raw pg client for direct queries.
+ *
+ * PG-only by design — narrows the {@link AdapterConfig} discriminator and
+ * throws on any non-PG adapter. The guard is a noop today (only PG can
+ * connect) but makes #782 safe to add the SQLite branch without inventing
+ * a fake `pg.Client`. The whole helper goes away in #786 once `restore`
+ * rides `Store.restore`.
+ */
+async function getRawPgClient(): Promise<pg.Client> {
   if (!currentConfig) throw new Error("Not connected to a store");
+  if (currentConfig.adapter !== "pg")
+    throw new Error("Raw PG client requires a PG-backed inspector connection");
   const client = new pg.Client({
     host: currentConfig.host,
     port: currentConfig.port,
@@ -477,7 +508,7 @@ export const inspectorRouter = t.router({
         // Test the connection
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
-        currentConfig = input;
+        currentConfig = { adapter: "pg", ...pgConfig };
         return { ok: true as const, config: { ...input, password: "***" } };
       } catch (err) {
         currentStore = null;
@@ -1080,6 +1111,10 @@ export const inspectorRouter = t.router({
     .input(z.object({ csv: z.string() }))
     .mutation(async ({ input }) => {
       if (!currentConfig) throw new Error("Not connected to a store");
+      if (currentConfig.adapter !== "pg")
+        throw new Error(
+          "Restore currently requires a PG-backed inspector connection"
+        );
       const fqt = `"${currentConfig.schema}"."${currentConfig.table}"`;
       const fqs = `"${currentConfig.schema}"."${currentConfig.table}_streams"`;
 
@@ -1110,7 +1145,7 @@ export const inspectorRouter = t.router({
       });
 
       // Drop existing data and re-seed
-      const client = await getRawClient();
+      const client = await getRawPgClient();
       try {
         await client.query("BEGIN");
 
