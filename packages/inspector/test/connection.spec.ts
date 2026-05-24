@@ -88,7 +88,8 @@ describe("discover", () => {
   it("returns an empty list when no PG servers are reachable", async () => {
     // Privileged port — not accepting TCP connections in any reasonable
     // test environment. probePort returns false; discover short-circuits
-    // before any PG auth attempt.
+    // before any PG auth attempt. `kind` defaults to "pg" so the input
+    // shape stays back-compat with the pre-ACT-1122 frontend.
     const result = await caller.discover({
       host: "127.0.0.1",
       portFrom: 1,

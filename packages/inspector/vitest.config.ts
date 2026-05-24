@@ -44,10 +44,10 @@ export default {
       // their PG-specific helpers. Each of those tickets will ramp
       // these thresholds toward 100% as it lands its own coverage.
       thresholds: {
-        statements: 60,
+        statements: 65,
         branches: 60,
-        functions: 65,
-        lines: 60,
+        functions: 75,
+        lines: 65,
       },
     },
   },
