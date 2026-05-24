@@ -12,6 +12,12 @@ export function BackupRestore() {
     csv: string;
   } | null>(null);
 
+  // `restore` is PG-only until #786 ports it to `Store.restore`. The
+  // status query surfaces the adapter so the UI can gate the button
+  // instead of letting the operator click into a server error.
+  const { data: status } = trpc.status.useQuery();
+  const restoreEnabled = status?.adapter === "pg";
+
   const backupMutation = trpc.backup.useMutation({
     onSuccess(data) {
       const blob = new Blob([data.csv], { type: "text/csv" });
@@ -92,9 +98,14 @@ export function BackupRestore() {
           <Download size={14} />
         </button>
         <button
-          onClick={() => fileRef.current?.click()}
-          title="Restore events from CSV"
-          className="rounded p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+          onClick={() => restoreEnabled && fileRef.current?.click()}
+          disabled={!restoreEnabled}
+          title={
+            restoreEnabled
+              ? "Restore events from CSV"
+              : "Restore is PG-only — coming to other adapters in ACT-1127"
+          }
+          className="rounded p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
           <Upload size={14} />
         </button>

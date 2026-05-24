@@ -5,5 +5,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "references": [{ "path": "../../libs/act" }, { "path": "../../libs/act-pg" }]
+  "references": [
+    { "path": "../../libs/act" },
+    { "path": "../../libs/act-pg" },
+    { "path": "../../libs/act-sqlite" }
+  ]
 }

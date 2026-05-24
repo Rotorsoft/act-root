@@ -2,48 +2,102 @@ import { useState } from "react";
 import { trpc } from "../trpc.js";
 import { Logo } from "./Logo.js";
 import { ScanDialog, type ScanResult } from "./ScanDialog.js";
+import {
+  SqliteScanDialog,
+  type SqliteScanResult,
+} from "./SqliteScanDialog.js";
 
-type Connection = {
+/**
+ * Connection persistence (ACT-1123).
+ *
+ * Saved connections widen to a discriminated union so SQLite entries
+ * can live alongside PG ones in the same localStorage list. Pre-1.1
+ * payloads (no `kind` field) are migrated as PG on load.
+ *
+ * `PgConnection` deliberately does NOT carry a `password` field — the
+ * password lives in a separate `useState` slot that is never spread
+ * into the saved list and never persisted. CodeQL's
+ * `js/clear-text-storage-of-sensitive-data` rule taint-tracks any
+ * object that ever held a `password` property through `localStorage`,
+ * so structurally excluding the field from the persisted type is the
+ * only stable way to keep the rule green.
+ */
+type PgConnection = {
+  kind: "pg";
   name: string;
   host: string;
   port: number;
   database: string;
   user: string;
-  password: string;
   schema: string;
   table: string;
   ssl: boolean;
 };
 
-const defaultConn: Connection = {
-  name: "Local",
+type SqliteConnection = {
+  kind: "sqlite";
+  name: string;
+  file: string;
+  table: string;
+};
+
+type Connection = PgConnection | SqliteConnection;
+
+const defaultPg: PgConnection = {
+  kind: "pg",
+  name: "Local PG",
   host: "localhost",
   port: 5432,
   database: "postgres",
   user: "postgres",
-  password: "postgres",
   schema: "public",
   table: "events",
   ssl: false,
 };
 
+const defaultSqlite: SqliteConnection = {
+  kind: "sqlite",
+  name: "Local SQLite",
+  file: "./events.db",
+  table: "events",
+};
+
 function loadSaved(): Connection[] {
   try {
     const raw = localStorage.getItem("inspector:connections");
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed: unknown[] = JSON.parse(raw);
+    // Migrate legacy entries (no `kind` field) and pre-ACT-1123
+    // payloads that may have carried `password: ""` — strip explicitly.
+    return parsed.map((c) => {
+      const obj = c as Record<string, unknown>;
+      const isPg = !("kind" in obj) || obj.kind === "pg";
+      if (isPg) {
+        return {
+          kind: "pg",
+          name: String(obj.name ?? "Local"),
+          host: String(obj.host ?? "localhost"),
+          port: Number(obj.port ?? 5432),
+          database: String(obj.database ?? "postgres"),
+          user: String(obj.user ?? "postgres"),
+          schema: String(obj.schema ?? "public"),
+          table: String(obj.table ?? "events"),
+          ssl: Boolean(obj.ssl ?? false),
+        };
+      }
+      return obj as unknown as Connection;
+    });
   } catch {
     return [];
   }
 }
 
 function saveConnections(conns: Connection[]) {
-  // Strip passwords before persisting — user re-enters on connect
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const safe = conns.map(({ password: _pw, ...rest }) => ({
-    ...rest,
-    password: "",
-  }));
-  localStorage.setItem("inspector:connections", JSON.stringify(safe));
+  // `Connection` has no `password` field by type — and never did at
+  // any point in this function's data flow. CodeQL's taint analyzer
+  // is satisfied because the storage sink can't possibly receive
+  // sensitive data.
+  localStorage.setItem("inspector:connections", JSON.stringify(conns));
 }
 
 type Props = {
@@ -53,11 +107,25 @@ type Props = {
 
 export function ConnectDialog({ onConnected, onClose }: Props) {
   const [saved, setSaved] = useState<Connection[]>(loadSaved);
-  const [conn, setConn] = useState<Connection>(saved[0] ?? defaultConn);
+  const initialConn = saved[0] ?? defaultPg;
+  const [conn, setConn] = useState<Connection>(initialConn);
+  // PG password lives in its own state slot — never enters `conn`,
+  // never reaches `saveConnections`, never serialized.
+  const [pgPassword, setPgPassword] = useState("postgres");
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
   const [showScan, setShowScan] = useState(false);
   const [connString, setConnString] = useState("");
+
+  // The active tab follows the current `conn.kind`. Switching tabs
+  // swaps in the appropriate default (or the most recently used saved
+  // connection of that kind, if any) and clears the password slot.
+  const handleSwitchTab = (kind: Connection["kind"]) => {
+    if (conn.kind === kind) return;
+    const recent = saved.find((s) => s.kind === kind);
+    setConn(recent ?? (kind === "pg" ? defaultPg : defaultSqlite));
+    if (kind !== "pg") setPgPassword("");
+  };
 
   const connectMutation = trpc.connect.useMutation({
     onSuccess: () => {
@@ -73,20 +141,31 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
     },
   });
 
-  const handleScanSelect = (result: ScanResult) => {
-    // Connection name: schema.table if descriptive, otherwise database name
+  const handlePgScanSelect = (result: ScanResult) => {
     const isDefault = result.schema === "public" && result.table === "events";
     const label = isDefault
       ? result.database
       : `${result.schema}.${result.table}`;
     setConn({
-      ...conn,
+      kind: "pg",
       name: label,
       host: result.host,
       port: result.port,
       user: result.user,
       database: result.database,
       schema: result.schema,
+      table: result.table,
+      ssl: conn.kind === "pg" ? conn.ssl : false,
+    });
+    setShowScan(false);
+  };
+
+  const handleSqliteScanSelect = (result: SqliteScanResult) => {
+    const base = result.file.split(/[/\\]/).pop() ?? result.file;
+    setConn({
+      kind: "sqlite",
+      name: base,
+      file: result.file,
       table: result.table,
     });
     setShowScan(false);
@@ -95,12 +174,21 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
   const handleConnect = () => {
     setError("");
     setTesting(true);
+    if (conn.kind === "sqlite") {
+      connectMutation.mutate({
+        adapter: "sqlite",
+        file: conn.file,
+        table: conn.table,
+      });
+      return;
+    }
     connectMutation.mutate({
+      adapter: "pg",
       host: conn.host,
       port: conn.port,
       database: conn.database,
       user: conn.user,
-      password: conn.password,
+      password: pgPassword,
       schema: conn.schema,
       table: conn.table,
       ssl: conn.ssl,
@@ -109,7 +197,12 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
 
   const handleSavedSelect = (name: string) => {
     const found = saved.find((s) => s.name === name);
-    if (found) setConn(found);
+    if (found) {
+      setConn(found);
+      // Saved connections never carry a password — clear the slot so
+      // the operator re-enters explicitly.
+      if (found.kind === "pg") setPgPassword("");
+    }
   };
 
   const handleDelete = (name: string) => {
@@ -139,6 +232,28 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
           )}
         </div>
 
+        {/* Adapter tabs */}
+        <div className="mb-4 flex gap-1 border-b border-zinc-800">
+          {(
+            [
+              ["pg", "Postgres"],
+              ["sqlite", "SQLite"],
+            ] as const
+          ).map(([kind, label]) => (
+            <button
+              key={kind}
+              onClick={() => handleSwitchTab(kind)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-xs font-medium transition ${
+                conn.kind === kind
+                  ? "border-emerald-500 text-emerald-400"
+                  : "border-transparent text-zinc-500 hover:text-zinc-300"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         {/* Saved connections */}
         {saved.length > 0 && (
           <div className="mb-4">
@@ -150,12 +265,15 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                 <div key={s.name} className="flex items-center gap-1">
                   <button
                     onClick={() => handleSavedSelect(s.name)}
-                    className={`rounded-md border px-3 py-1 text-xs transition ${
+                    className={`flex items-center gap-1.5 rounded-md border px-3 py-1 text-xs transition ${
                       conn.name === s.name
                         ? "border-emerald-600 bg-emerald-950 text-emerald-400"
                         : "border-zinc-700 bg-zinc-800 text-zinc-300 hover:border-zinc-600"
                     }`}
                   >
+                    <span className="rounded bg-zinc-700/60 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider text-zinc-400">
+                      {s.kind}
+                    </span>
                     {s.name}
                   </button>
                   <button
@@ -170,91 +288,136 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
           </div>
         )}
 
-        {/* Connection string */}
-        <div className="mb-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-xs text-zinc-400">Connection String</span>
-            <input
-              type="text"
-              value={connString}
-              onChange={(e) => {
-                setConnString(e.target.value);
-                // Parse: postgresql://user:pass@host:port/database?options
-                try {
-                  const url = new URL(e.target.value);
-                  const sslMode = url.searchParams.get("sslmode");
-                  setConn({
-                    ...conn,
-                    name: url.pathname.slice(1) || conn.name,
-                    host: url.hostname,
-                    port: Number(url.port) || 5432,
-                    database: url.pathname.slice(1) || "postgres",
-                    user: url.username || "postgres",
-                    password: decodeURIComponent(url.password || ""),
-                    schema: url.searchParams.get("schema") || "public",
-                    table: url.searchParams.get("table") || "events",
-                    ssl:
-                      sslMode === "require" ||
-                      sslMode === "prefer" ||
-                      url.hostname.includes("neon") ||
-                      url.hostname.includes("supabase"),
-                  });
-                } catch {
-                  // Not a valid URL yet, ignore
-                }
-              }}
-              placeholder="postgresql://user:pass@host:port/database"
-              className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
-            />
-          </label>
-        </div>
+        {/* PG form */}
+        {conn.kind === "pg" && (
+          <>
+            <div className="mb-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-zinc-400">Connection String</span>
+                <input
+                  type="text"
+                  value={connString}
+                  onChange={(e) => {
+                    setConnString(e.target.value);
+                    try {
+                      const url = new URL(e.target.value);
+                      const sslMode = url.searchParams.get("sslmode");
+                      setConn({
+                        kind: "pg",
+                        name: url.pathname.slice(1) || conn.name,
+                        host: url.hostname,
+                        port: Number(url.port) || 5432,
+                        database: url.pathname.slice(1) || "postgres",
+                        user: url.username || "postgres",
+                        schema: url.searchParams.get("schema") || "public",
+                        table: url.searchParams.get("table") || "events",
+                        ssl:
+                          sslMode === "require" ||
+                          sslMode === "prefer" ||
+                          url.hostname.includes("neon") ||
+                          url.hostname.includes("supabase"),
+                      });
+                      if (url.password) {
+                        setPgPassword(decodeURIComponent(url.password));
+                      }
+                    } catch {
+                      // Not a valid URL yet, ignore
+                    }
+                  }}
+                  placeholder="postgresql://user:pass@host:port/database"
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                />
+              </label>
+            </div>
 
-        {/* Connection form */}
-        <div className="grid grid-cols-2 gap-3">
-          {(
-            [
-              ["Connection Name", "name", "text"],
-              ["Host", "host", "text"],
-              ["Port", "port", "number"],
-              ["Database", "database", "text"],
-              ["User", "user", "text"],
-              ["Password", "password", "password"],
-              ["Schema", "schema", "text"],
-              ["Table", "table", "text"],
-            ] as const
-          ).map(([label, key, type]) => (
-            <label key={key} className="flex flex-col gap-1">
-              <span className="text-xs text-zinc-400">{label}</span>
+            <div className="grid grid-cols-2 gap-3">
+              {(
+                [
+                  ["Connection Name", "name", "text"],
+                  ["Host", "host", "text"],
+                  ["Port", "port", "number"],
+                  ["Database", "database", "text"],
+                  ["User", "user", "text"],
+                  ["Schema", "schema", "text"],
+                  ["Table", "table", "text"],
+                ] as const
+              ).map(([label, key, type]) => (
+                <label key={key} className="flex flex-col gap-1">
+                  <span className="text-xs text-zinc-400">{label}</span>
+                  <input
+                    type={type}
+                    value={String(conn[key] ?? "")}
+                    onChange={(e) =>
+                      setConn({
+                        ...conn,
+                        [key]:
+                          type === "number"
+                            ? Number(e.target.value)
+                            : e.target.value,
+                      })
+                    }
+                    className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                  />
+                </label>
+              ))}
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-zinc-400">Password</span>
+                <input
+                  type="password"
+                  value={pgPassword}
+                  onChange={(e) => setPgPassword(e.target.value)}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                />
+              </label>
+            </div>
+
+            <label className="mt-2 flex items-center gap-2">
               <input
-                type={type}
-                value={conn[key]}
-                onChange={(e) =>
-                  setConn({
-                    ...conn,
-                    [key]:
-                      type === "number"
-                        ? Number(e.target.value)
-                        : e.target.value,
-                  })
-                }
+                type="checkbox"
+                checked={conn.ssl}
+                onChange={(e) => setConn({ ...conn, ssl: e.target.checked })}
+                className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600"
+              />
+              <span className="text-xs text-zinc-400">
+                SSL (required for Neon, Supabase, etc.)
+              </span>
+            </label>
+          </>
+        )}
+
+        {/* SQLite form */}
+        {conn.kind === "sqlite" && (
+          <div className="flex flex-col gap-3">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Connection Name</span>
+              <input
+                type="text"
+                value={conn.name}
+                onChange={(e) => setConn({ ...conn, name: e.target.value })}
                 className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
               />
             </label>
-          ))}
-        </div>
-
-        {/* SSL toggle */}
-        <label className="mt-2 flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={conn.ssl}
-            onChange={(e) => setConn({ ...conn, ssl: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600"
-          />
-          <span className="text-xs text-zinc-400">
-            SSL (required for Neon, Supabase, etc.)
-          </span>
-        </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">File path</span>
+              <input
+                type="text"
+                value={conn.file}
+                onChange={(e) => setConn({ ...conn, file: e.target.value })}
+                placeholder="/absolute/path/to/store.db"
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 font-mono text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs text-zinc-400">Table</span>
+              <input
+                type="text"
+                value={conn.table}
+                onChange={(e) => setConn({ ...conn, table: e.target.value })}
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+              />
+            </label>
+          </div>
+        )}
 
         {error && (
           <div className="mt-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-xs text-red-400">
@@ -290,11 +453,18 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
         </div>
       </div>
 
-      {/* Scan popup */}
-      {showScan && (
+      {/* Adapter-specific scanner */}
+      {showScan && conn.kind === "pg" && (
         <ScanDialog
           initialHost={conn.host}
-          onSelect={handleScanSelect}
+          onSelect={handlePgScanSelect}
+          onClose={() => setShowScan(false)}
+        />
+      )}
+      {showScan && conn.kind === "sqlite" && (
+        <SqliteScanDialog
+          initialDir={conn.file.replace(/[^/\\]+$/, "") || "."}
+          onSelect={handleSqliteScanSelect}
           onClose={() => setShowScan(false)}
         />
       )}

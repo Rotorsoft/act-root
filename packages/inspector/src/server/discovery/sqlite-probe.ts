@@ -18,6 +18,7 @@
  * permission error — drops the file silently from the result.
  */
 import { readdir } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
 import { createClient } from "@libsql/client";
 import type { DiscoveredSqliteStore, SqliteDiscoveryInput } from "./types.js";
@@ -25,6 +26,22 @@ import type { DiscoveredSqliteStore, SqliteDiscoveryInput } from "./types.js";
 const DEFAULT_FILE_PATTERN = /\.(db|sqlite|sqlite3)$/i;
 const REQUIRED_TABLES = ["events", "streams"] as const;
 const REQUIRED_EVENT_COLUMNS = ["stream", "version", "meta"] as const;
+
+/**
+ * Expand a leading `~` / `~/` to the operator's home directory.
+ *
+ * Shell-style tilde expansion is something users reflexively type into
+ * any path input — the probe runs server-side where Node's `readdir`
+ * treats `~` as a literal directory name, so we have to expand it
+ * here. Any path without a leading `~` passes through unchanged.
+ */
+function expandTilde(p: string): string {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) {
+    return path.join(homedir(), p.slice(2));
+  }
+  return p;
+}
 
 /** Probe a single file. Returns the discovery row or null. */
 export async function probeSqliteFile(
@@ -74,7 +91,8 @@ export async function probeSqliteFile(
 export async function discoverSqlite(
   input: SqliteDiscoveryInput
 ): Promise<DiscoveredSqliteStore[]> {
-  const { dir, glob } = input;
+  const dir = expandTilde(input.dir);
+  const { glob } = input;
   let pattern: RegExp;
   try {
     pattern = glob ? new RegExp(glob) : DEFAULT_FILE_PATTERN;
