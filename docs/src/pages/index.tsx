@@ -226,7 +226,7 @@ function Hero() {
       <div className={styles.heroInner}>
         <div className={styles.heroBadge}>
           <span className={styles.heroBadgeDot} />
-          v0.x &middot; TypeScript-first event sourcing
+          v1.x &middot; TypeScript-first event sourcing
         </div>
 
         <div className={styles.heroBrand}>
