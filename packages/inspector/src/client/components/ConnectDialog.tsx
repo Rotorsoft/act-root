@@ -12,8 +12,15 @@ import {
  *
  * Saved connections widen to a discriminated union so SQLite entries
  * can live alongside PG ones in the same localStorage list. Pre-1.1
- * payloads (no `kind` field) are migrated as PG on load so existing
- * users don't lose their bookmarks.
+ * payloads (no `kind` field) are migrated as PG on load.
+ *
+ * `PgConnection` deliberately does NOT carry a `password` field — the
+ * password lives in a separate `useState` slot that is never spread
+ * into the saved list and never persisted. CodeQL's
+ * `js/clear-text-storage-of-sensitive-data` rule taint-tracks any
+ * object that ever held a `password` property through `localStorage`,
+ * so structurally excluding the field from the persisted type is the
+ * only stable way to keep the rule green.
  */
 type PgConnection = {
   kind: "pg";
@@ -22,7 +29,6 @@ type PgConnection = {
   port: number;
   database: string;
   user: string;
-  password: string;
   schema: string;
   table: string;
   ssl: boolean;
@@ -44,7 +50,6 @@ const defaultPg: PgConnection = {
   port: 5432,
   database: "postgres",
   user: "postgres",
-  password: "postgres",
   schema: "public",
   table: "events",
   ssl: false,
@@ -62,49 +67,37 @@ function loadSaved(): Connection[] {
     const raw = localStorage.getItem("inspector:connections");
     if (!raw) return [];
     const parsed: unknown[] = JSON.parse(raw);
-    // Migrate legacy entries (no `kind` field) — these predate ACT-1123
-    // and are always PG.
+    // Migrate legacy entries (no `kind` field) and pre-ACT-1123
+    // payloads that may have carried `password: ""` — strip explicitly.
     return parsed.map((c) => {
-      if (
-        typeof c === "object" &&
-        c !== null &&
-        "kind" in (c as Record<string, unknown>)
-      ) {
-        return c as Connection;
+      const obj = c as Record<string, unknown>;
+      const isPg = !("kind" in obj) || obj.kind === "pg";
+      if (isPg) {
+        return {
+          kind: "pg",
+          name: String(obj.name ?? "Local"),
+          host: String(obj.host ?? "localhost"),
+          port: Number(obj.port ?? 5432),
+          database: String(obj.database ?? "postgres"),
+          user: String(obj.user ?? "postgres"),
+          schema: String(obj.schema ?? "public"),
+          table: String(obj.table ?? "events"),
+          ssl: Boolean(obj.ssl ?? false),
+        };
       }
-      return { kind: "pg", ...(c as Omit<PgConnection, "kind">) };
+      return obj as unknown as Connection;
     });
   } catch {
     return [];
   }
 }
 
-type SavedPgConnection = Omit<PgConnection, "password">;
-type SavedConnection = SavedPgConnection | SqliteConnection;
-
 function saveConnections(conns: Connection[]) {
-  // Never touch `password` — not by spread, not by destructure-omit.
-  // Both still register as property accesses to CodeQL's taint
-  // analyzer (`js/clear-text-storage-of-sensitive-data`), which then
-  // taints the resulting `localStorage.setItem` sink. Build the saved
-  // record field by field so the password field is never read at all;
-  // the operator re-enters it on connect.
-  const safe: SavedConnection[] = conns.map((c) =>
-    c.kind === "pg"
-      ? {
-          kind: "pg",
-          name: c.name,
-          host: c.host,
-          port: c.port,
-          database: c.database,
-          user: c.user,
-          schema: c.schema,
-          table: c.table,
-          ssl: c.ssl,
-        }
-      : c
-  );
-  localStorage.setItem("inspector:connections", JSON.stringify(safe));
+  // `Connection` has no `password` field by type — and never did at
+  // any point in this function's data flow. CodeQL's taint analyzer
+  // is satisfied because the storage sink can't possibly receive
+  // sensitive data.
+  localStorage.setItem("inspector:connections", JSON.stringify(conns));
 }
 
 type Props = {
@@ -116,6 +109,9 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
   const [saved, setSaved] = useState<Connection[]>(loadSaved);
   const initialConn = saved[0] ?? defaultPg;
   const [conn, setConn] = useState<Connection>(initialConn);
+  // PG password lives in its own state slot — never enters `conn`,
+  // never reaches `saveConnections`, never serialized.
+  const [pgPassword, setPgPassword] = useState("postgres");
   const [error, setError] = useState("");
   const [testing, setTesting] = useState(false);
   const [showScan, setShowScan] = useState(false);
@@ -123,11 +119,12 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
 
   // The active tab follows the current `conn.kind`. Switching tabs
   // swaps in the appropriate default (or the most recently used saved
-  // connection of that kind, if any).
+  // connection of that kind, if any) and clears the password slot.
   const handleSwitchTab = (kind: Connection["kind"]) => {
     if (conn.kind === kind) return;
     const recent = saved.find((s) => s.kind === kind);
     setConn(recent ?? (kind === "pg" ? defaultPg : defaultSqlite));
+    if (kind !== "pg") setPgPassword("");
   };
 
   const connectMutation = trpc.connect.useMutation({
@@ -158,14 +155,12 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
       database: result.database,
       schema: result.schema,
       table: result.table,
-      password: conn.kind === "pg" ? conn.password : "",
       ssl: conn.kind === "pg" ? conn.ssl : false,
     });
     setShowScan(false);
   };
 
   const handleSqliteScanSelect = (result: SqliteScanResult) => {
-    // Use the file's basename as a friendlier default name.
     const base = result.file.split(/[/\\]/).pop() ?? result.file;
     setConn({
       kind: "sqlite",
@@ -193,7 +188,7 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
       port: conn.port,
       database: conn.database,
       user: conn.user,
-      password: conn.password,
+      password: pgPassword,
       schema: conn.schema,
       table: conn.table,
       ssl: conn.ssl,
@@ -202,7 +197,12 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
 
   const handleSavedSelect = (name: string) => {
     const found = saved.find((s) => s.name === name);
-    if (found) setConn(found);
+    if (found) {
+      setConn(found);
+      // Saved connections never carry a password — clear the slot so
+      // the operator re-enters explicitly.
+      if (found.kind === "pg") setPgPassword("");
+    }
   };
 
   const handleDelete = (name: string) => {
@@ -234,10 +234,12 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
 
         {/* Adapter tabs */}
         <div className="mb-4 flex gap-1 border-b border-zinc-800">
-          {([
-            ["pg", "Postgres"],
-            ["sqlite", "SQLite"],
-          ] as const).map(([kind, label]) => (
+          {(
+            [
+              ["pg", "Postgres"],
+              ["sqlite", "SQLite"],
+            ] as const
+          ).map(([kind, label]) => (
             <button
               key={kind}
               onClick={() => handleSwitchTab(kind)}
@@ -307,7 +309,6 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                         port: Number(url.port) || 5432,
                         database: url.pathname.slice(1) || "postgres",
                         user: url.username || "postgres",
-                        password: decodeURIComponent(url.password || ""),
                         schema: url.searchParams.get("schema") || "public",
                         table: url.searchParams.get("table") || "events",
                         ssl:
@@ -316,6 +317,9 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                           url.hostname.includes("neon") ||
                           url.hostname.includes("supabase"),
                       });
+                      if (url.password) {
+                        setPgPassword(decodeURIComponent(url.password));
+                      }
                     } catch {
                       // Not a valid URL yet, ignore
                     }
@@ -334,7 +338,6 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                   ["Port", "port", "number"],
                   ["Database", "database", "text"],
                   ["User", "user", "text"],
-                  ["Password", "password", "password"],
                   ["Schema", "schema", "text"],
                   ["Table", "table", "text"],
                 ] as const
@@ -357,6 +360,15 @@ export function ConnectDialog({ onConnected, onClose }: Props) {
                   />
                 </label>
               ))}
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-zinc-400">Password</span>
+                <input
+                  type="password"
+                  value={pgPassword}
+                  onChange={(e) => setPgPassword(e.target.value)}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-emerald-600 focus:ring-1 focus:ring-emerald-600"
+                />
+              </label>
             </div>
 
             <label className="mt-2 flex items-center gap-2">
