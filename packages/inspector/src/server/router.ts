@@ -1,5 +1,11 @@
 import { createConnection, type Socket } from "node:net";
-import type { Committed, Schemas, Store, StreamPosition } from "@rotorsoft/act";
+import {
+  type Committed,
+  InMemoryStore,
+  type Schemas,
+  type Store,
+  type StreamPosition,
+} from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { initTRPC } from "@trpc/server";
 import pg from "pg";
@@ -117,12 +123,17 @@ const toDate = (iso: string | undefined): Date | undefined =>
 /**
  * Per-adapter shape of the currently-connected store's configuration.
  *
- * Today only the `pg` member is reachable — `connect` always constructs a
- * `PostgresStore`. The `sqlite` member is reserved so #781 (discovery) and
- * #782 (SQLite `connect` branch) land as additive changes against a stable
- * union, rather than churning this declaration a second time.
+ * Three members:
+ * - `pg` — production path, constructs a `PostgresStore`.
+ * - `sqlite` — reserved for #782 (SQLite `connect` branch); not yet
+ *   reachable. Kept here so #781/#782 land additively rather than
+ *   churning this declaration.
+ * - `inmemory` — ephemeral, single-process. Used by ACT-1131's test
+ *   suite and by future "demo / playground" affordances in the UI.
+ *   No persistent config — every connect builds a fresh empty store.
  *
- * Read-only-after-connect: mutated exclusively by `connect` / `disconnect`.
+ * Read-only-after-connect: mutated exclusively by `connect` /
+ * `disconnect`.
  */
 type PgConfig = {
   adapter: "pg";
@@ -141,11 +152,27 @@ type SqliteConfig = {
   table: string;
 };
 
-type AdapterConfig = PgConfig | SqliteConfig;
+type InMemoryConfig = {
+  adapter: "inmemory";
+};
+
+type AdapterConfig = PgConfig | SqliteConfig | InMemoryConfig;
 
 /** Managed store instance — not the singleton, so we can reconnect */
 let currentStore: Store | null = null;
 let currentConfig: AdapterConfig | null = null;
+
+/**
+ * Test seam — direct read access to the connected store.
+ *
+ * Tests use this to seed events into the live `InMemoryStore` after a
+ * `connect({ adapter: "inmemory" })` call without resorting to `vi.mock`
+ * or module-private setters. Not part of the tRPC surface — production
+ * callers go through `query` / `query_stats` etc.
+ */
+export function getActiveStore(): Store | null {
+  return currentStore;
+}
 
 function getStore(): Store {
   if (!currentStore) throw new Error("Not connected to a store");
@@ -480,19 +507,37 @@ export const inspectorRouter = t.router({
       }
     }),
 
-  /** Initialize a PostgresStore connection */
+  /**
+   * Initialize a store connection.
+   *
+   * The input is a discriminated union over `adapter`:
+   * - `pg` (default — backward-compatible with the existing frontend
+   *   which doesn't send an `adapter` field) constructs a
+   *   `PostgresStore` and verifies the connection with a 1-row probe.
+   * - `inmemory` constructs an `InMemoryStore` — ephemeral, single
+   *   process, no persistent config. Useful for demo / playground
+   *   flows and for ACT-1131's test suite (real adapter, no mocking).
+   *
+   * `sqlite` is reserved for #782.
+   */
   connect: t.procedure
     .input(
-      z.object({
-        host: z.string().default("localhost"),
-        port: z.number().default(5432),
-        database: z.string().default("postgres"),
-        user: z.string().default("postgres"),
-        password: z.string().default("postgres"),
-        schema: z.string().default("public"),
-        table: z.string().default("events"),
-        ssl: z.boolean().default(false),
-      })
+      z.union([
+        z.object({
+          adapter: z.literal("pg").default("pg"),
+          host: z.string().default("localhost"),
+          port: z.number().default(5432),
+          database: z.string().default("postgres"),
+          user: z.string().default("postgres"),
+          password: z.string().default("postgres"),
+          schema: z.string().default("public"),
+          table: z.string().default("events"),
+          ssl: z.boolean().default(false),
+        }),
+        z.object({
+          adapter: z.literal("inmemory"),
+        }),
+      ])
     )
     .mutation(async ({ input }) => {
       try {
@@ -500,7 +545,17 @@ export const inspectorRouter = t.router({
           await currentStore.dispose();
           currentStore = null;
         }
-        const { ssl, ...pgConfig } = input;
+        if (input.adapter === "inmemory") {
+          const newStore = new InMemoryStore();
+          await newStore.seed();
+          currentStore = newStore;
+          currentConfig = { adapter: "inmemory" };
+          return {
+            ok: true as const,
+            config: { adapter: "inmemory" as const },
+          };
+        }
+        const { adapter, ssl, ...pgConfig } = input;
         const storeConfig = ssl
           ? { ...pgConfig, ssl: { rejectUnauthorized: false } }
           : pgConfig;
@@ -509,7 +564,10 @@ export const inspectorRouter = t.router({
         await newStore.query<Schemas>(() => {}, { limit: 1 });
         currentStore = newStore;
         currentConfig = { adapter: "pg", ...pgConfig };
-        return { ok: true as const, config: { ...input, password: "***" } };
+        return {
+          ok: true as const,
+          config: { adapter, ...pgConfig, ssl, password: "***" },
+        };
       } catch (err) {
         currentStore = null;
         currentConfig = null;
