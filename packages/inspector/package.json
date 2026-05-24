@@ -17,8 +17,10 @@
   "keywords": [],
   "license": "ISC",
   "dependencies": {
+    "@libsql/client": "^0.17.3",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
+    "@rotorsoft/act-sqlite": "workspace:^",
     "@tanstack/react-query": "^5.100.14",
     "@trpc/client": "11.16.0",
     "@trpc/react-query": "11.16.0",

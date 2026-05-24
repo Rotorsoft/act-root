@@ -1,4 +1,3 @@
-import { createConnection, type Socket } from "node:net";
 import {
   type Committed,
   InMemoryStore,
@@ -10,6 +9,11 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { initTRPC } from "@trpc/server";
 import pg from "pg";
 import { z } from "zod";
+import {
+  PG_PORT_RANGE_END,
+  PG_PORT_RANGE_START,
+  runDiscovery,
+} from "./discovery/index.js";
 
 const t = initTRPC.create();
 
@@ -206,209 +210,11 @@ async function loadAllStreamPositions(): Promise<{
 }
 
 // --- Discovery ---
-
-/** PG port range to scan: 5430–5480 */
-const PORT_RANGE_START = 5430;
-const PORT_RANGE_END = 5480;
-
-/** Common credential combos to try */
-const COMMON_CREDS = [
-  { user: "postgres", password: "postgres" },
-  { user: "postgres", password: "" },
-  { user: "postgres", password: "password" },
-  { user: "root", password: "root" },
-  { user: "admin", password: "admin" },
-];
-
-/** One discovered store per port — the best candidate */
-type DiscoveredStore = {
-  host: string;
-  port: number;
-  user: string;
-  database: string;
-  schema: string;
-  table: string;
-  eventCount: number;
-};
-
-/** Check if a TCP port is open */
-function probePort(
-  host: string,
-  port: number,
-  timeoutMs = 500
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket: Socket = createConnection({ host, port });
-    const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(false);
-    }, timeoutMs);
-    socket.on("connect", () => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolve(true);
-    });
-    socket.on("error", () => {
-      clearTimeout(timer);
-      resolve(false);
-    });
-  });
-}
-
-/** Try to authenticate with a PG server using given credentials */
-async function tryConnect(
-  host: string,
-  port: number,
-  user: string,
-  password: string
-): Promise<pg.Client | null> {
-  const client = new pg.Client({
-    host,
-    port,
-    user,
-    password,
-    database: "postgres",
-    connectionTimeoutMillis: 2000,
-  });
-  try {
-    await client.connect();
-    return client;
-  } catch {
-    return null;
-  }
-}
-
-/** Find the best Act event table per schema in a database (non-empty) */
-async function findEventTables(
-  config: { host: string; port: number; user: string; password: string },
-  dbName: string
-): Promise<{ schema: string; table: string; count: number }[]> {
-  const client = new pg.Client({
-    ...config,
-    database: dbName,
-    connectionTimeoutMillis: 2000,
-  });
-  try {
-    await client.connect();
-    // Find all Act-shaped tables, one best per schema
-    const result = await client.query<{
-      table_schema: string;
-      table_name: string;
-      row_estimate: string;
-    }>(
-      `SELECT DISTINCT ON (t.table_schema)
-              t.table_schema, t.table_name,
-              (SELECT reltuples::bigint FROM pg_class c
-               JOIN pg_namespace n ON n.oid = c.relnamespace
-               WHERE n.nspname = t.table_schema AND c.relname = t.table_name) AS row_estimate
-       FROM information_schema.tables t
-       WHERE t.table_type = 'BASE TABLE'
-         AND t.table_schema NOT IN ('pg_catalog', 'information_schema')
-         AND EXISTS (SELECT 1 FROM information_schema.columns c
-           WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name AND c.column_name = 'stream')
-         AND EXISTS (SELECT 1 FROM information_schema.columns c
-           WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name AND c.column_name = 'meta')
-         AND EXISTS (SELECT 1 FROM information_schema.columns c
-           WHERE c.table_schema = t.table_schema AND c.table_name = t.table_name AND c.column_name = 'version')
-       ORDER BY t.table_schema,
-         (t.table_name = 'events') DESC,
-         row_estimate DESC NULLS LAST`
-    );
-
-    // Filter out truly empty tables — reltuples can be -1 (no stats) or 0
-    const tables: { schema: string; table: string; count: number }[] = [];
-    for (const r of result.rows) {
-      const estimate = Number(r.row_estimate);
-      if (estimate > 0) {
-        tables.push({
-          schema: r.table_schema,
-          table: r.table_name,
-          count: estimate,
-        });
-      } else {
-        // Stats not gathered or zero — check for actual rows
-        const check = await client.query(
-          `SELECT EXISTS (SELECT 1 FROM "${r.table_schema}"."${r.table_name}" LIMIT 1) AS has_rows`
-        );
-        if (check.rows[0]?.has_rows) {
-          tables.push({
-            schema: r.table_schema,
-            table: r.table_name,
-            count: 0,
-          });
-        }
-      }
-    }
-    return tables;
-  } catch {
-    return [];
-  } finally {
-    await client.end();
-  }
-}
-
-/** Full discovery: scan ports, try credentials, pick best Act store per port */
-async function discover(
-  host: string,
-  portFrom: number,
-  portTo: number
-): Promise<DiscoveredStore[]> {
-  // 1. Scan port range in parallel
-  const ports = Array.from(
-    { length: portTo - portFrom + 1 },
-    (_, i) => portFrom + i
-  );
-  const portResults = await Promise.all(
-    ports.map(async (port) => ({ port, open: await probePort(host, port) }))
-  );
-  const openPorts = portResults.filter((r) => r.open).map((r) => r.port);
-
-  if (openPorts.length === 0) return [];
-
-  // 2. For each open port, try credential combos and find best table
-  const stores: DiscoveredStore[] = [];
-
-  for (const port of openPorts) {
-    for (const creds of COMMON_CREDS) {
-      const client = await tryConnect(host, port, creds.user, creds.password);
-      if (!client) continue;
-
-      try {
-        const dbResult = await client.query<{ datname: string }>(
-          `SELECT datname FROM pg_database
-           WHERE datistemplate = false AND datallowconn = true
-           ORDER BY datname`
-        );
-
-        // Find best table per schema across all databases on this port
-        for (const row of dbResult.rows) {
-          const tables = await findEventTables(
-            { host, port, user: creds.user, password: creds.password },
-            row.datname
-          );
-          for (const t of tables) {
-            stores.push({
-              host,
-              port,
-              user: creds.user,
-              database: row.datname,
-              schema: t.schema,
-              table: t.table,
-              eventCount: t.count,
-            });
-          }
-        }
-      } finally {
-        await client.end();
-      }
-
-      // Found working creds for this port, move to next port
-      break;
-    }
-  }
-
-  return stores;
-}
+//
+// The inline PG-only block that lived here pre-ACT-1122 has moved to
+// `src/server/discovery/`. The router now dispatches to `runDiscovery`
+// with a discriminated-union input that picks PG (port scan) or SQLite
+// (directory glob) at the call site.
 
 /** CSV column order for backup/restore */
 const CSV_COLUMNS = [
@@ -486,18 +292,34 @@ async function getRawPgClient(): Promise<pg.Client> {
 }
 
 export const inspectorRouter = t.router({
-  /** Scan host for PG servers and discover Act event stores */
+  /**
+   * Scan for Act event stores.
+   *
+   * Discriminated input — `{ kind: "pg" }` scans a TCP port range and
+   * walks credentials; `{ kind: "sqlite" }` globs a directory for SQLite
+   * files and probes each one's schema. The PG variant defaults its
+   * `kind` so existing frontend payloads (`{ host, portFrom, portTo }`)
+   * keep working unchanged.
+   */
   discover: t.procedure
     .input(
-      z.object({
-        host: z.string().default("localhost"),
-        portFrom: z.number().min(1).max(65535).default(PORT_RANGE_START),
-        portTo: z.number().min(1).max(65535).default(PORT_RANGE_END),
-      })
+      z.union([
+        z.object({
+          kind: z.literal("pg").default("pg"),
+          host: z.string().default("localhost"),
+          portFrom: z.number().min(1).max(65535).default(PG_PORT_RANGE_START),
+          portTo: z.number().min(1).max(65535).default(PG_PORT_RANGE_END),
+        }),
+        z.object({
+          kind: z.literal("sqlite"),
+          dir: z.string().min(1),
+          glob: z.string().optional(),
+        }),
+      ])
     )
     .mutation(async ({ input }) => {
       try {
-        const stores = await discover(input.host, input.portFrom, input.portTo);
+        const stores = await runDiscovery(input);
         return { ok: true as const, stores };
       } catch (err) {
         throw new Error(

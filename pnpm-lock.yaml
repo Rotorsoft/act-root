@@ -402,12 +402,18 @@ importers:
 
   packages/inspector:
     dependencies:
+      '@libsql/client':
+        specifier: ^0.17.3
+        version: 0.17.3
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../../libs/act
       '@rotorsoft/act-pg':
         specifier: workspace:^
         version: link:../../libs/act-pg
+      '@rotorsoft/act-sqlite':
+        specifier: workspace:^
+        version: link:../../libs/act-sqlite
       '@tanstack/react-query':
         specifier: ^5.100.14
         version: 5.100.14(react@19.2.6)

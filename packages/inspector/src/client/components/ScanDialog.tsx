@@ -1,7 +1,13 @@
 import { useState } from "react";
 import { trpc } from "../trpc.js";
 
+// Mirrors the server's `DiscoveredPgStore` shape (see
+// `server/discovery/types.ts`). ACT-1122 widened the `discover`
+// response to a discriminated union; this dialog still only surfaces
+// PG results, so we narrow the union at the boundary. #782 will add
+// the SQLite tab + its own variant.
 type DiscoveredStore = {
+  kind: "pg";
   host: string;
   port: number;
   user: string;
@@ -37,14 +43,18 @@ export function ScanDialog({ initialHost, onSelect, onClose }: Props) {
 
   const discoverMutation = trpc.discover.useMutation({
     onSuccess: (result) => {
-      setStores(result.stores);
+      // Narrow the union — this dialog is the PG scanner.
+      const pgStores = result.stores.filter(
+        (s): s is DiscoveredStore => s.kind === "pg"
+      );
+      setStores(pgStores);
       setScanning(false);
       setScanned(true);
-      if (result.stores.length === 0) {
+      if (pgStores.length === 0) {
         setError("No Act event stores found");
-      } else if (result.stores.length === 1) {
+      } else if (pgStores.length === 1) {
         // Single result — auto-select it
-        handleSelect(result.stores[0]);
+        handleSelect(pgStores[0]);
       }
     },
     onError: (err) => {
@@ -59,7 +69,7 @@ export function ScanDialog({ initialHost, onSelect, onClose }: Props) {
     setStores([]);
     setScanning(true);
     setScanned(false);
-    discoverMutation.mutate({ host, portFrom, portTo });
+    discoverMutation.mutate({ kind: "pg", host, portFrom, portTo });
   };
 
   const handleSelect = (store: DiscoveredStore) => {
