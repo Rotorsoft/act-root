@@ -80,11 +80,19 @@ function loadSaved(): Connection[] {
 }
 
 function saveConnections(conns: Connection[]) {
-  // Strip PG passwords before persisting — user re-enters on connect.
-  // SQLite has no password to strip.
-  const safe = conns.map((c) =>
-    c.kind === "pg" ? { ...c, password: "" } : c
-  );
+  // Drop the PG `password` field entirely before persisting — never
+  // serialize sensitive data into localStorage. Operator re-enters on
+  // connect. The destructure-omit pattern (rather than overriding
+  // `password = ""`) is what CodeQL's `js/clear-text-storage-of-
+  // sensitive-data` rule recognizes as a real strip. SQLite has no
+  // password to strip.
+  const safe = conns.map((c) => {
+    if (c.kind === "pg") {
+      const { password: _pw, ...rest } = c;
+      return rest;
+    }
+    return c;
+  });
   localStorage.setItem("inspector:connections", JSON.stringify(safe));
 }
 
