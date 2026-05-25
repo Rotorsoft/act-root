@@ -21,9 +21,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreEvent,
   RestoreOptions,
   RestoreResult,
-  RestoreRow,
   Schema,
   Schemas,
   Store,
@@ -934,22 +934,22 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
    *
    * Captures every index state up front, clears it, then iterates the
    * source. Any throw mid-iteration restores the snapshot, leaving
    * the store byte-for-byte unchanged from the operator's
    * perspective.
    *
-   * `id`s are reassigned `0..N-1` as rows arrive (matching the
+   * `id`s are reassigned `0..N-1` as events arrive (matching the
    * adapter's commit-id convention — InMemory uses `_events.length`).
    * `created` is preserved verbatim from the source. Causation
    * references in `meta.causation.event.id` are remapped via the
-   * `old → new` table that's built as rows land — references to ids
+   * `old → new` table that's built as events land — references to ids
    * not in the source pass through unchanged.
    */
   async restore(
-    source: AsyncIterable<RestoreRow>,
+    source: AsyncIterable<RestoreEvent>,
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     await sleep();
@@ -967,27 +967,29 @@ export class InMemoryStore implements Store {
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
     try {
-      const partial = await scan(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (event, meta) => {
         const id = this._events.length;
         const created =
-          row.created instanceof Date ? row.created : new Date(row.created);
+          event.created instanceof Date
+            ? event.created
+            : new Date(event.created);
         const committed: Committed<Schemas, keyof Schemas> = {
           id,
-          stream: row.stream,
-          version: row.version,
+          stream: event.stream,
+          version: event.version,
           created,
-          name: row.name,
-          data: row.data as Schemas[keyof Schemas],
+          name: event.name,
+          data: event.data as Schemas[keyof Schemas],
           meta,
         };
         this._events.push(committed);
-        // Last row per stream wins for the version watermark — the
+        // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
         // matching the legacy raw-SQL restore.
-        this._streamVersions.set(row.stream, row.version);
-        if (row.name !== SNAP_EVENT) {
-          this._maxEventIdByStream.set(row.stream, id);
+        this._streamVersions.set(event.stream, event.version);
+        if (event.name !== SNAP_EVENT) {
+          this._maxEventIdByStream.set(event.stream, id);
           this._maxNonSnapEventId = id;
         }
         return id;

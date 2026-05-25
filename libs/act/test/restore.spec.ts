@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { validateRestoreRow } from "../src/restore.js";
-import type { RestoreRow } from "../src/types/index.js";
+import { scan } from "../src/restore.js";
+import type { RestoreEvent } from "../src/types/index.js";
 
 /**
- * Source-side blocker validator (ACT-1125). Pure function — no
- * adapter, no I/O, no store. Tests exercise the validator directly
- * with hand-crafted rows; callers iterate their source themselves.
+ * Source-side scan helper (ACT-1125). Pure — no adapter, no I/O, no
+ * store. Validates each event inline and throws on the first blocker.
+ * Two modes: pre-flight (no writer) for source validation, restore
+ * (writer provided) drives adapter inserts.
  */
-const baseRow = (overrides: Partial<RestoreRow> = {}): RestoreRow => ({
+const baseEvent = (overrides: Partial<RestoreEvent> = {}): RestoreEvent => ({
   id: 1,
   name: "Tick",
   data: {},
@@ -18,101 +19,178 @@ const baseRow = (overrides: Partial<RestoreRow> = {}): RestoreRow => ({
   ...overrides,
 });
 
-describe("validateRestoreRow", () => {
-  it("returns no errors for a well-formed row", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow(), 1)).toEqual([]);
-  });
+async function* fromArray(events: RestoreEvent[]): AsyncIterable<RestoreEvent> {
+  for (const e of events) yield e;
+}
 
-  it("flags duplicate ids across calls", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow({ id: 7 }), 1)).toEqual([]);
-    expect(
-      v(baseRow({ id: 7, stream: "other", version: 0 }), 2)
-    ).toContainEqual({ reason: "Duplicate id: 7" });
-  });
-
-  it("flags negative version", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow({ version: -1 }), 1)).toContainEqual({
-      reason: "Negative version: -1",
+describe("scan (pre-flight, no writer)", () => {
+  it("returns kept count for a clean source", async () => {
+    const result = await scan(fromArray([baseEvent(), baseEvent({ id: 2 })]));
+    expect(result.kept).toBe(2);
+    expect(result.dropped).toEqual({
+      closed_streams: 0,
+      snapshots: 0,
+      empty_streams: 0,
     });
   });
 
-  it("flags malformed `created`", () => {
-    const v = validateRestoreRow();
-    // biome-ignore lint/suspicious/noExplicitAny: invalid input shape
-    const row = baseRow({ created: "not-a-date" as any });
-    expect(v(row, 1)).toContainEqual({
-      reason: "Malformed created: not-a-date",
+  it("throws on negative version", async () => {
+    await expect(scan(fromArray([baseEvent({ version: -1 })]))).rejects.toThrow(
+      /Invalid event at index 1/
+    );
+  });
+
+  it("throws on malformed `created`", async () => {
+    await expect(
+      scan(
+        fromArray([
+          // biome-ignore lint/suspicious/noExplicitAny: invalid input shape
+          baseEvent({ created: "not-a-date" as any }),
+        ])
+      )
+    ).rejects.toThrow(/Invalid event at index 1/);
+  });
+
+  it("throws on malformed Date instance", async () => {
+    await expect(
+      scan(fromArray([baseEvent({ created: new Date("garbage") })]))
+    ).rejects.toThrow(/Invalid event at index 1/);
+  });
+
+  it("reports the running index in the error", async () => {
+    await expect(
+      scan(
+        fromArray([
+          baseEvent(),
+          baseEvent({ id: 2 }),
+          baseEvent({ version: -1 }),
+        ])
+      )
+    ).rejects.toThrow(/Invalid event at index 3/);
+  });
+
+  it("accepts ISO-string `created`", async () => {
+    const result = await scan(
+      fromArray([baseEvent({ created: "2024-06-15T12:00:00.000Z" })])
+    );
+    expect(result.kept).toBe(1);
+  });
+
+  it("fires on_progress once per event", async () => {
+    const calls: number[] = [];
+    await scan(fromArray([baseEvent(), baseEvent({ id: 2 })]), {
+      on_progress: (p) => calls.push(p.processed),
     });
+    expect(calls).toEqual([1, 2]);
   });
 
-  it("flags per-stream version-contiguity gap", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow({ id: 1, stream: "s", version: 0 }), 1)).toEqual([]);
-    expect(v(baseRow({ id: 2, stream: "s", version: 1 }), 2)).toEqual([]);
-    // expected 2, got 5
-    expect(v(baseRow({ id: 3, stream: "s", version: 5 }), 3)).toContainEqual({
-      reason: "Version gap on s: expected 2, got 5",
-    });
-    // After flagging, advances past the source-provided version so
-    // subsequent rows don't cascade — version 6 should be OK.
-    expect(v(baseRow({ id: 4, stream: "s", version: 6 }), 4)).toEqual([]);
+  it("counts dropped snapshots when drop_snapshots is true", async () => {
+    const result = await scan(
+      fromArray([
+        baseEvent(),
+        baseEvent({ id: 2, name: "__snapshot__" }),
+        baseEvent({ id: 3 }),
+      ]),
+      { drop_snapshots: true }
+    );
+    expect(result.kept).toBe(2);
+    expect(result.dropped.snapshots).toBe(1);
+  });
+});
+
+describe("scan (with writer)", () => {
+  it("calls writeEvent once per non-dropped event", async () => {
+    const writes: RestoreEvent[] = [];
+    let nextId = 100;
+    const result = await scan(
+      fromArray([baseEvent({ id: 5 }), baseEvent({ id: 7 })]),
+      {},
+      async (event) => {
+        writes.push(event);
+        return nextId++;
+      }
+    );
+    expect(writes.map((w) => w.id)).toEqual([5, 7]);
+    expect(result.kept).toBe(2);
   });
 
-  it("tracks version progression per stream independently", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow({ id: 1, stream: "a", version: 0 }), 1)).toEqual([]);
-    expect(v(baseRow({ id: 2, stream: "b", version: 0 }), 2)).toEqual([]);
-    expect(v(baseRow({ id: 3, stream: "a", version: 1 }), 3)).toEqual([]);
-    expect(v(baseRow({ id: 4, stream: "b", version: 1 }), 4)).toEqual([]);
+  it("skips writes for snapshots when drop_snapshots is true", async () => {
+    const writes: RestoreEvent[] = [];
+    const result = await scan(
+      fromArray([
+        baseEvent(),
+        baseEvent({ id: 2, name: "__snapshot__" }),
+        baseEvent({ id: 3 }),
+      ]),
+      { drop_snapshots: true },
+      async (event) => {
+        writes.push(event);
+        return event.id;
+      }
+    );
+    expect(writes).toHaveLength(2);
+    expect(result.dropped.snapshots).toBe(1);
   });
 
-  it("accepts ISO-string created and Date created equivalently", () => {
-    const v = validateRestoreRow();
-    expect(v(baseRow({ created: "2024-06-15T12:00:00.000Z" }), 1)).toEqual([]);
+  it("rewrites causation refs through the old→new id map", async () => {
+    let nextId = 1000;
+    const seen: Array<{ id: number; causationId?: number }> = [];
+    await scan(
+      fromArray([
+        baseEvent({ id: 5 }),
+        baseEvent({
+          id: 7,
+          meta: {
+            correlation: "c",
+            causation: { event: { id: 5, name: "Tick", stream: "s" } },
+          },
+        }),
+      ]),
+      {},
+      async (event, meta) => {
+        const newId = nextId++;
+        seen.push({ id: event.id, causationId: meta.causation.event?.id });
+        return newId;
+      }
+    );
+    expect(seen[0]).toEqual({ id: 5, causationId: undefined });
+    // Second event's causation pointed at original id 5 → new id 1000.
+    expect(seen[1]).toEqual({ id: 7, causationId: 1000 });
   });
 
-  it("returns a fresh stateful closure per factory call", () => {
-    const v1 = validateRestoreRow();
-    const v2 = validateRestoreRow();
-    expect(v1(baseRow({ id: 9 }), 1)).toEqual([]);
-    // A second validator doesn't share state with the first.
-    expect(v2(baseRow({ id: 9 }), 1)).toEqual([]);
+  it("passes causation refs through unchanged when target not in source", async () => {
+    const causationIds: Array<number | undefined> = [];
+    await scan(
+      fromArray([
+        baseEvent({
+          meta: {
+            correlation: "c",
+            causation: { event: { id: 999, name: "Phantom", stream: "g" } },
+          },
+        }),
+      ]),
+      {},
+      async (_event, meta) => {
+        causationIds.push(meta.causation.event?.id);
+        return 1;
+      }
+    );
+    expect(causationIds).toEqual([999]);
   });
 
-  it("composes — caller can extend with custom rules", () => {
-    const baseline = validateRestoreRow();
-    const long = "x".repeat(101);
-    const customValidator = (row: RestoreRow, rowIdx: number) => {
-      const errors = [...baseline(row, rowIdx)];
-      if (row.stream.length > 100)
-        errors.push({ reason: "Stream name too long" });
-      return errors;
-    };
-    expect(customValidator(baseRow({ stream: long }), 1)).toContainEqual({
-      reason: "Stream name too long",
-    });
-  });
-
-  it("supports an end-to-end iteration loop", async () => {
-    // The canonical caller-side pattern: iterate the source, accumulate
-    // {row, reason} entries per validator hit.
-    const v = validateRestoreRow();
-    const errors: Array<{ row: number; reason: string }> = [];
-    const rows: RestoreRow[] = [
-      baseRow({ id: 1, stream: "s", version: 0 }),
-      baseRow({ id: 1, stream: "s", version: 1 }), // duplicate id
-      baseRow({ id: 3, stream: "s", version: -1 }), // negative version
-    ];
-    let rowIdx = 0;
-    for (const row of rows) {
-      rowIdx++;
-      for (const r of v(row, rowIdx))
-        errors.push({ row: rowIdx, reason: r.reason });
-    }
-    expect(errors).toContainEqual({ row: 2, reason: "Duplicate id: 1" });
-    expect(errors).toContainEqual({ row: 3, reason: "Negative version: -1" });
+  it("validates before writing — throws and writer never sees bad event", async () => {
+    const writes: RestoreEvent[] = [];
+    await expect(
+      scan(
+        fromArray([baseEvent(), baseEvent({ id: 2, version: -1 })]),
+        {},
+        async (event) => {
+          writes.push(event);
+          return event.id;
+        }
+      )
+    ).rejects.toThrow(/Invalid event at index 2/);
+    // First event went through; second blocked before the writer fired.
+    expect(writes).toHaveLength(1);
   });
 });

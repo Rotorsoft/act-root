@@ -1,8 +1,8 @@
 import {
   type Committed,
   InMemoryStore,
+  type RestoreEvent,
   type RestoreResult,
-  type RestoreRow,
   type Schemas,
   type Store,
   type StreamPosition,
@@ -276,14 +276,14 @@ function csvParseLine(line: string): string[] {
 }
 
 /**
- * Stream a CSV blob into `AsyncIterable<RestoreRow>` consumed by
+ * Stream a CSV blob into `AsyncIterable<RestoreEvent>` consumed by
  * `Store.restore` (#786). The blob still arrives as a single string
  * from the tRPC input, but the parser yields one row at a time so
  * the adapter never holds the full parsed array in memory alongside
  * the source. The header row format matches `backup`'s output —
  * round-tripping is the primary use case.
  */
-async function* parseCsvRows(csv: string): AsyncIterable<RestoreRow> {
+async function* parseCsvRows(csv: string): AsyncIterable<RestoreEvent> {
   const lines = csv.split("\n");
   if (lines.length < 2)
     throw new Error("CSV must have a header and at least one row");

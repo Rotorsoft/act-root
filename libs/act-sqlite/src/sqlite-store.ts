@@ -9,9 +9,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreEvent,
   RestoreOptions,
   RestoreResult,
-  RestoreRow,
   Schemas,
   Store,
   StreamFilter,
@@ -1032,7 +1032,7 @@ export class SqliteStore implements Store {
   }
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
    *
    * Wraps the entire rebuild in a single libsql `write` transaction
    * — on any throw the transaction rolls back and the store is
@@ -1042,13 +1042,13 @@ export class SqliteStore implements Store {
    * sequence is dense from 1.
    *
    * Causation refs in `meta.causation.event.id` are remapped through
-   * the `old → new` table built as rows land. References to ids not
+   * the `old → new` table built as events land. References to ids not
    * in the source pass through unchanged.
    *
    * `created` is preserved verbatim from the source.
    */
   async restore(
-    source: AsyncIterable<RestoreRow>,
+    source: AsyncIterable<RestoreEvent>,
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
@@ -1060,18 +1060,18 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const partial = await scan(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (event, meta) => {
         const createdIso =
-          row.created instanceof Date
-            ? row.created.toISOString()
-            : new Date(row.created).toISOString();
+          event.created instanceof Date
+            ? event.created.toISOString()
+            : new Date(event.created).toISOString();
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
           args: [
-            row.stream,
-            row.version,
-            row.name,
-            JSON.stringify(row.data),
+            event.stream,
+            event.version,
+            event.name,
+            JSON.stringify(event.data),
             JSON.stringify(meta),
             createdIso,
           ],

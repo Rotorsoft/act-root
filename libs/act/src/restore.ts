@@ -1,26 +1,26 @@
 /**
- * Per-row source validator for the restore primitive (ACT-1125).
- * Pure source-side operation — no adapter, no I/O, no store
- * reference. Callers iterate their source and invoke the validator
- * on each row before deciding whether to invoke `Store.restore`.
+ * Source-side scan helper for the restore primitive (ACT-1125).
+ * Pure — no adapter, no I/O, no store reference. Drives iteration,
+ * validates each event inline, applies `drop_snapshots`, fires
+ * `on_progress`, and rewrites causation refs to the new id space.
  *
- * The framework provides the blocker rules; callers drive the
- * iteration:
+ * Two call modes — same loop, same validation:
+ *
+ * **Pre-flight (no writer)** — callers pass no `writeEvent`. `scan`
+ * walks the source, validates every event, and throws on the first
+ * blocker. A clean return means the source is restorable.
  *
  * ```typescript
- * import { validateRestoreRow } from "@rotorsoft/act";
+ * import { scan } from "@rotorsoft/act";
  *
- * const validator = validateRestoreRow();
- * const errors: Array<{ row: number; reason: string }> = [];
- * let rowIdx = 0;
- * for await (const row of parseCsv(csv)) {
- *   rowIdx++;
- *   for (const r of validator(row, rowIdx))
- *     errors.push({ row: rowIdx, reason: r.reason });
- * }
- * if (errors.length) throw new Error(`${errors.length} blockers`);
- * await store.restore!(parseCsv(csv), {});
+ * await scan(parseCsv(csv));            // throws on bad event
+ * await store.restore!(parseCsv(csv));  // safe to commit
  * ```
+ *
+ * **Restore (writer provided)** — adapters call `scan` from inside
+ * their transaction, passing a `writeEvent` callback. Each non-dropped
+ * event is validated, written, and the returned new id recorded for
+ * causation remap on later events.
  *
  * Dry-run as a `Store.restore` mode was deliberately removed —
  * validating a CSV is a source operation, not a store operation.
@@ -29,53 +29,68 @@
 import { SNAP_EVENT } from "./ports.js";
 import type { EventMeta } from "./types/action.js";
 import type {
+  RestoreEvent,
   RestoreOptions,
   RestoreResult,
-  RestoreRow,
 } from "./types/ports.js";
 
 /**
- * Per-row validator. Returns the blockers for that row (empty array
- * if OK). Validators are typically stateful (tracking seen ids,
- * per-stream version progression) — build a fresh one per source
- * scan via {@link validateRestoreRow}.
+ * Per-event blocker check. Categories:
+ *
+ * - **Negative `version`** — versions are unsigned in the framework
+ *   contract.
+ * - **Malformed `created`** — `new Date(event.created)` must produce
+ *   a valid timestamp. CSV / JSONL sources stream `created` as a
+ *   string; garbage strings get caught here.
+ *
+ * Cross-event invariants (duplicate ids, per-stream version gaps) are
+ * **not** the validator's job — DB `UNIQUE(stream, version)` catches
+ * duplicates at commit time, and gap detection is a caller-specific
+ * policy (partial backups intentionally have gaps).
  */
-export type RestoreValidator = (
-  row: RestoreRow,
-  rowIdx: number
-) => ReadonlyArray<{ reason: string }>;
+function isValid(event: RestoreEvent): boolean {
+  if (event.version < 0) return false;
+  const created =
+    event.created instanceof Date ? event.created : new Date(event.created);
+  if (Number.isNaN(created.getTime())) return false;
+  return true;
+}
 
 /**
- * Adapter-provided write hook. Called by {@link runRestore} once per
- * non-dropped row, with the causation-rewritten `meta` already
- * applied. Returns the new id the adapter assigned to the row — the
- * loop adds it to the `old → new` map so subsequent rows' causation
- * refs resolve correctly.
+ * Adapter-provided write hook. Called by {@link scan} once per
+ * non-dropped event, with the causation-rewritten `meta` already
+ * applied. Returns the new id the adapter assigned to the event —
+ * the loop adds it to the `old → new` map so subsequent events'
+ * causation refs resolve correctly.
  */
-export type RestoreRowWriter = (
-  row: RestoreRow,
+export type RestoreEventWriter = (
+  event: RestoreEvent,
   meta: EventMeta
 ) => Promise<number>;
 
 /**
- * Drive the restore iteration loop. The framework owns iteration,
- * `drop_snapshots` filtering, `on_progress` callbacks, causation
- * remap, and kept/dropped counting. The adapter owns only the
- * transaction setup/wipe/commit around the call and the `writeRow`
- * hook that performs the actual insert.
+ * Scan a restore source event by event. The framework owns iteration,
+ * validation, the `drop_snapshots` filter, the `on_progress` callback,
+ * and the causation remap. Adapters supply only `writeEvent`.
+ *
+ * Throws on the first invalid event (negative version, malformed
+ * `created`) with the running index in the message.
+ *
+ * When called without `writeEvent`, `scan` runs as a pre-flight: it
+ * validates the source but writes nothing. A clean return means the
+ * source is restorable.
  *
  * Returns the partial {@link RestoreResult} (without `duration_ms`)
- * — the caller wraps with its own timing because the duration
- * should cover transaction setup and commit, not just the
- * iteration window.
+ * — adapters wrap with their own timing because the duration should
+ * cover transaction setup and commit, not just the iteration window.
  *
  * ```typescript
  * const started = Date.now();
  * await openTx();
  * await wipeAll();
  * try {
- *   const partial = await runRestore(source, opts, async (row, meta) => {
- *     const newId = await insert(row, meta);
+ *   const partial = await scan(source, opts, async (event, meta) => {
+ *     const newId = await insert(event, meta);
  *     return newId;
  *   });
  *   await commit();
@@ -87,25 +102,30 @@ export type RestoreRowWriter = (
  * ```
  */
 export async function scan(
-  source: AsyncIterable<RestoreRow>,
-  opts: RestoreOptions,
-  writeRow: RestoreRowWriter
+  source: AsyncIterable<RestoreEvent>,
+  opts: RestoreOptions = {},
+  writeEvent?: RestoreEventWriter
 ): Promise<Omit<RestoreResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
   const idMap = new Map<number, number>();
   let kept = 0;
   let droppedSnapshots = 0;
-  let rowIdx = 0;
-  for await (const row of source) {
-    rowIdx++;
-    if (on_progress) on_progress({ processed: rowIdx });
-    if (drop_snapshots && row.name === SNAP_EVENT) {
+  let processed = 0;
+  for await (const event of source) {
+    processed++;
+    if (!isValid(event)) throw new Error(`Invalid event at index ${processed}`);
+    if (on_progress) on_progress({ processed });
+    if (drop_snapshots && event.name === SNAP_EVENT) {
       droppedSnapshots++;
       continue;
     }
+    if (!writeEvent) {
+      kept++;
+      continue;
+    }
     // Causation remap — rewrite `meta.causation.event.id` to the new
-    // id space if the source pointed at an earlier row's old id.
-    let meta = row.meta;
+    // id space if the source pointed at an earlier event's old id.
+    let meta = event.meta;
     const causedBy = meta.causation.event?.id;
     if (causedBy !== undefined) {
       const remapped = idMap.get(causedBy);
@@ -119,8 +139,8 @@ export async function scan(
         };
       }
     }
-    const newId = await writeRow(row, meta);
-    idMap.set(row.id, newId);
+    const newId = await writeEvent(event, meta);
+    idMap.set(event.id, newId);
     kept++;
   }
   return {
@@ -130,62 +150,5 @@ export async function scan(
       snapshots: droppedSnapshots,
       empty_streams: 0,
     },
-  };
-}
-
-/**
- * Build the default {@link RestoreValidator} closure.
- *
- * Returns a fresh stateful validator each call — the closure owns
- * its own `seenIds` set and per-stream version-progression map.
- * Categories detected:
- *
- * - **Duplicate `id`** — the renumber-on-restore contract (#783)
- *   requires unique source ids to build a coherent `old → new`
- *   causation remap. A duplicate would silently shadow one of the
- *   rows in the remap table.
- * - **Per-stream version-contiguity gap** — versions must be
- *   `0, 1, 2, …` within a stream. Gaps don't break restore itself
- *   but break downstream consumers (snapshots, projections, replay).
- * - **Malformed `created`** — `new Date(row.created)` must produce
- *   a valid timestamp.
- * - **Negative `version`** — versions are unsigned in the framework
- *   contract.
- *
- * Causation refs pointing at ids not in the source are **not**
- * blockers — they pass through unchanged per #783's contract
- * (partial backups are a supported use case).
- *
- * @example Custom validator that extends the default
- * ```typescript
- * const baseline = validateRestoreRow();
- * const myValidator: RestoreValidator = (row, rowIdx) => {
- *   const errors = [...baseline(row, rowIdx)];
- *   if (row.stream.length > 100)
- *     errors.push({ reason: "Stream name too long" });
- *   return errors;
- * };
- * ```
- */
-export function validateRestoreRow(): RestoreValidator {
-  const seenIds = new Set<number>();
-  const expectedVersionByStream = new Map<string, number>();
-  return (row, _rowIdx) => {
-    const errors: Array<{ reason: string }> = [];
-    if (seenIds.has(row.id)) errors.push({ reason: `Duplicate id: ${row.id}` });
-    else seenIds.add(row.id);
-    if (row.version < 0)
-      errors.push({ reason: `Negative version: ${row.version}` });
-    const created =
-      row.created instanceof Date ? row.created : new Date(row.created);
-    if (Number.isNaN(created.getTime()))
-      errors.push({ reason: `Malformed created: ${String(row.created)}` });
-    const expected = expectedVersionByStream.get(row.stream) ?? 0;
-    if (row.version !== expected)
-      errors.push({
-        reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
-      });
-    expectedVersionByStream.set(row.stream, row.version + 1);
-    return errors;
   };
 }

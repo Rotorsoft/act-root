@@ -3,7 +3,7 @@ import type {
   BlockedLease,
   Committed,
   Lease,
-  RestoreRow,
+  RestoreEvent,
   Store,
   StoreNotification,
 } from "@rotorsoft/act/types";
@@ -1650,26 +1650,26 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.seed();
       });
 
-      /** Adapt a row array into the AsyncIterable contract. */
-      const asSource = (rows: RestoreRow[]): AsyncIterable<RestoreRow> =>
+      /** Adapt an event array into the AsyncIterable contract. */
+      const asSource = (events: RestoreEvent[]): AsyncIterable<RestoreEvent> =>
         (async function* () {
-          for (const r of rows) yield r;
+          for (const e of events) yield e;
         })();
 
       /**
-       * Build a RestoreRow with stub meta + the given created date.
-       * `originalId` populates `RestoreRow.id` — used by the adapter
+       * Build a RestoreEvent with stub meta + the given created date.
+       * `originalId` populates `RestoreEvent.id` — used by the adapter
        * to key the causation remap. Tests pass arbitrary values
        * (often a counter) since they're only consumed by the map.
        */
-      const row = (
+      const event = (
         originalId: number,
         stream: string,
         version: number,
         name: string,
         created: Date,
         data: Record<string, unknown> = {}
-      ): RestoreRow => ({
+      ): RestoreEvent => ({
         id: originalId,
         name,
         data,
@@ -1698,12 +1698,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const t0 = new Date("2020-01-01T00:00:00.000Z");
         const t1 = new Date("2020-01-02T00:00:00.000Z");
         const t2 = new Date("2020-01-03T00:00:00.000Z");
-        const rows = [
-          row(1, s, 0, "Incremented", t0, { amount: 1 }),
-          row(2, s, 1, "Incremented", t1, { amount: 2 }),
-          row(3, s, 2, "Decremented", t2, { amount: 1 }),
+        const events = [
+          event(1, s, 0, "Incremented", t0, { amount: 1 }),
+          event(2, s, 1, "Incremented", t1, { amount: 2 }),
+          event(3, s, 2, "Decremented", t2, { amount: 1 }),
         ];
-        const result = await store.restore!(asSource(rows));
+        const result = await store.restore!(asSource(events));
         expect(result.kept).toBe(3);
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
         await store.query<CounterEvents>(
@@ -1750,13 +1750,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const a = `restore-multi-a-${uid()}`;
         const b = `restore-multi-b-${uid()}`;
         const t = new Date("2020-06-01T00:00:00.000Z");
-        const rows = [
-          row(1, a, 0, "Incremented", t, { amount: 10 }),
-          row(2, b, 0, "Incremented", t, { amount: 20 }),
-          row(3, a, 1, "Decremented", t, { amount: 5 }),
-          row(4, b, 1, "Incremented", t, { amount: 30 }),
+        const events = [
+          event(1, a, 0, "Incremented", t, { amount: 10 }),
+          event(2, b, 0, "Incremented", t, { amount: 20 }),
+          event(3, a, 1, "Decremented", t, { amount: 5 }),
+          event(4, b, 1, "Incremented", t, { amount: 30 }),
         ];
-        const result = await store.restore!(asSource(rows));
+        const result = await store.restore!(asSource(events));
         expect(result.kept).toBe(4);
         const aBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
         const bBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
@@ -1813,7 +1813,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const fresh = `restore-fresh-${uid()}`;
         const t = new Date("2020-01-01T00:00:00.000Z");
         await store.restore!(
-          asSource([row(1, fresh, 0, "Incremented", t, { amount: 99 })])
+          asSource([event(1, fresh, 0, "Incremented", t, { amount: 99 })])
         );
         // The old stream is gone.
         const oldBack = await collect(store, {
@@ -1849,7 +1849,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("preserves snapshot events through restore", async () => {
         // SNAP_EVENT is a framework marker — restore writes it
         // through but skips updating the max-non-snap-id indexes.
-        // Covers the `row.name !== SNAP_EVENT` false branch.
+        // Covers the `event.name !== SNAP_EVENT` false branch.
         const s = `restore-snap-${uid()}`;
         const t = new Date("2020-04-01T00:00:00.000Z");
         await store.restore!(
@@ -1876,11 +1876,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("rewrites causation refs through the old→new id map", async () => {
         // Sparse source ids (5, 7, 9) — adapter renumbers densely;
-        // the row whose causation pointed at original id 5 must end
+        // the event whose causation pointed at original id 5 must end
         // up pointing at the new id assigned to that same row.
         const s = `restore-caus-${uid()}`;
         const t = new Date("2020-08-01T00:00:00.000Z");
-        const rows: RestoreRow[] = [
+        const events: RestoreEvent[] = [
           {
             id: 5,
             stream: s,
@@ -1919,7 +1919,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             },
           },
         ];
-        await store.restore!(asSource(rows));
+        await store.restore!(asSource(events));
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
         await store.query<CounterEvents>(
           (e) => {
@@ -1975,8 +1975,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1), inc(2), inc(3)],
           makeMeta({ stream: original })
         );
-        const explosive: AsyncIterable<RestoreRow> = (async function* () {
-          yield row(
+        const explosive: AsyncIterable<RestoreEvent> = (async function* () {
+          yield event(
             1,
             `restore-explode-${uid()}`,
             0,
@@ -2006,7 +2006,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const t = new Date("2020-10-01T00:00:00.000Z");
         const result = await store.restore!(
           asSource([
-            row(1, s, 0, "Incremented", t, { amount: 1 }),
+            event(1, s, 0, "Incremented", t, { amount: 1 }),
             {
               id: 2,
               stream: s,
@@ -2016,7 +2016,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               created: t,
               meta: { correlation: "snap", causation: {} },
             },
-            row(3, s, 2, "Incremented", t, { amount: 2 }),
+            event(3, s, 2, "Incremented", t, { amount: 2 }),
           ]),
           { drop_snapshots: true }
         );
@@ -2034,18 +2034,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ).toBe(true);
       });
 
-      it("on_progress fires once per row (caller throttles)", async () => {
+      it("on_progress fires once per event (caller throttles)", async () => {
         const calls: number[] = [];
         const s = `restore-progress-${uid()}`;
         const t = new Date("2021-02-01T00:00:00.000Z");
         await store.restore!(
           asSource([
-            row(1, s, 0, "Incremented", t, { amount: 1 }),
-            row(2, s, 1, "Incremented", t, { amount: 2 }),
+            event(1, s, 0, "Incremented", t, { amount: 1 }),
+            event(2, s, 1, "Incremented", t, { amount: 2 }),
           ]),
           { on_progress: (p) => calls.push(p.processed) }
         );
-        // One callback per row; values monotonic.
+        // One callback per event; values monotonic.
         expect(calls).toEqual([1, 2]);
       });
     });

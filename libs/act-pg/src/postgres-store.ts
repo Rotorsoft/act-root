@@ -11,9 +11,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreEvent,
   RestoreOptions,
   RestoreResult,
-  RestoreRow,
   Schema,
   Schemas,
   Store,
@@ -1544,24 +1544,24 @@ export class PostgresStore implements Store {
   }
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
    *
    * Wraps the entire rebuild in a single `BEGIN`/`COMMIT` transaction
    * — on any throw the transaction rolls back and the store ends
    * byte-for-byte unchanged. `TRUNCATE ... RESTART IDENTITY CASCADE`
    * wipes events + resets the serial sequence to 1; the streams
    * table is cleared in the same statement via `CASCADE`-like
-   * `DELETE`. Rows are inserted one at a time with explicit columns
+   * `DELETE`. Events are inserted one at a time with explicit columns
    * (skipping `id`) so the serial assigns dense ids from 1.
    *
    * Causation refs in `meta.causation.event.id` are remapped through
-   * the `old → new` table built as rows land. References to ids not
+   * the `old → new` table built as events land. References to ids not
    * in the source pass through unchanged.
    *
    * `created` is preserved verbatim from the source.
    */
   async restore(
-    source: AsyncIterable<RestoreRow>,
+    source: AsyncIterable<RestoreEvent>,
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
@@ -1574,13 +1574,15 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
-      const partial = await scan(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (event, meta) => {
         const created =
-          row.created instanceof Date ? row.created : new Date(row.created);
+          event.created instanceof Date
+            ? event.created
+            : new Date(event.created);
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
-          [row.name, row.data, row.stream, row.version, created, meta]
+          [event.name, event.data, event.stream, event.version, created, meta]
         );
         return rows[0]!.id;
       });

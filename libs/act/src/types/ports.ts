@@ -73,9 +73,9 @@ export type TruncateResult = Map<
 >;
 
 /**
- * Source row consumed by {@link Store.restore}.
+ * Source event consumed by {@link Store.restore}.
  *
- * Each row carries the columns adapters need to rebuild a Committed
+ * Each event carries the columns adapters need to rebuild a Committed
  * event: stream, version, name, data, meta, and the original
  * `created` timestamp.
  *
@@ -87,9 +87,9 @@ export type TruncateResult = Map<
  * pointed at other events in the source.
  *
  * `created` accepts a `Date` or an ISO string so callers can stream
- * CSV / JSONL rows without parsing dates eagerly.
+ * CSV / JSONL events without parsing dates eagerly.
  */
-export type RestoreRow = {
+export type RestoreEvent = {
   /** Original event id from the source — used only for causation remap. */
   readonly id: number;
   readonly name: string;
@@ -108,15 +108,15 @@ export type RestoreRow = {
  * over the source — they wait on the source-shape decision
  * (re-iterable factory vs. buffer in memory).
  *
- * Source validation is **not** a restore concern. Callers that
- * want to pre-flight a backup before invoking restore use
- * `validateRestoreRow()` directly in a loop over the source —
- * the framework provides the blocker rules; the caller drives
- * the iteration. See `libs/act/src/restore-validate.ts`.
+ * Source validation is **not** a separate concern — the framework
+ * `scan` helper validates each event inline (negative version,
+ * malformed `created`) and throws on the first blocker. Callers that
+ * want to pre-flight a backup before invoking restore call `scan`
+ * directly with no `writeEvent` callback.
  */
 export type RestoreOptions = {
   /**
-   * Skip rows with `name === SNAP_EVENT`. The next snap policy
+   * Skip events with `name === SNAP_EVENT`. The next snap policy
    * regenerates snapshots against current code; useful for backups
    * that should compact stale snapshot bytes. Counted in
    * {@link RestoreResult.dropped}`.snapshots`.
@@ -126,16 +126,16 @@ export type RestoreOptions = {
   readonly drop_snapshots?: boolean;
 
   /**
-   * Optional progress callback. Adapters fire it once per row during
+   * Optional progress callback. Adapters fire it once per event during
    * iteration. The callback receives the running `processed` count;
    * `total` is left `undefined` because the source is async-iterable
    * and the adapter doesn't know its length up front.
    *
    * Synchronous handler — adapters call it directly inside the
    * restore loop. **Throttling / batching is the caller's
-   * responsibility**: for a million-row restore, debounce in the
+   * responsibility**: for a million-event restore, debounce in the
    * handler rather than expecting the port to coalesce calls.
-   * Keeping the port unthrottled means callers that want every-row
+   * Keeping the port unthrottled means callers that want every-event
    * reporting get it without a config knob.
    */
   readonly on_progress?: (p: { processed: number; total?: number }) => void;
@@ -148,12 +148,12 @@ export type RestoreOptions = {
  * per-category counters when {@link RestoreOptions.drop_snapshots}
  * (or future compaction flags) trigger drops; otherwise zeros.
  * Live restore is atomic per #783 — any error throws and rolls back,
- * so there's no per-row error reporting on the result. Callers that
- * want to inspect a source for blockers before restoring run the
- * source through `validateRestoreRow()` themselves.
+ * so there's no per-event error reporting on the result. Callers that
+ * want to inspect a source for blockers before restoring call `scan`
+ * directly with no `writeEvent` callback.
  */
 export type RestoreResult = {
-  /** Number of rows written to the rebuilt store. */
+  /** Number of events written to the rebuilt store. */
   readonly kept: number;
   /** Wall-clock duration of the call, in milliseconds. */
   readonly duration_ms: number;
@@ -844,7 +844,7 @@ export interface Store extends Disposable {
   ) => Promise<TruncateResult>;
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
    *
    * **Capability-gated.** Adapters may or may not implement restore.
    * Callers must guard (`if (store.restore) …`) or rely on the TCK
@@ -891,7 +891,7 @@ export interface Store extends Disposable {
    *
    * @example Round-trip a CSV backup
    * ```typescript
-   * async function* parseCsv(blob: string): AsyncIterable<RestoreRow> {
+   * async function* parseCsv(blob: string): AsyncIterable<RestoreEvent> {
    *   for (const line of blob.split("\n").slice(1)) {
    *     const [id, name, data, stream, version, created, meta] = parse(line);
    *     yield { id: +id, name, data: JSON.parse(data), stream,
@@ -904,12 +904,12 @@ export interface Store extends Disposable {
    * await cache().clear();   // operator's responsibility
    * ```
    *
-   * @see {@link RestoreRow}, {@link RestoreOptions}, {@link RestoreResult}
+   * @see {@link RestoreEvent}, {@link RestoreOptions}, {@link RestoreResult}
    * @see {@link truncate} for the single-stream snapshot/tombstone
    *   primitive (different operation — restore wipes the whole store)
    */
   restore?: (
-    source: AsyncIterable<RestoreRow>,
+    source: AsyncIterable<RestoreEvent>,
     opts?: RestoreOptions
   ) => Promise<RestoreResult>;
 
