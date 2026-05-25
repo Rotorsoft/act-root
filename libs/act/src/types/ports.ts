@@ -103,37 +103,72 @@ export type RestoreRow = {
 /**
  * Options for {@link Store.restore}.
  *
- * Empty in v1 — the type is declared so {@link Store.restore} ships
- * with a stable shape that #784 and #785 can extend additively. Those
- * tickets own the design of the extension fields; this file does not
- * preempt them.
+ * Three flags land in v1 (ACT-1125): `drop_snapshots`, `dry_run`,
+ * `on_progress`. Two more reserved at the type level are deferred —
+ * `drop_closed_streams` and `drop_empty_streams` both need a pre-pass
+ * over the source, which requires deciding whether to make the source
+ * a re-iterable factory or buffer in memory. Those land in a follow-up
+ * once the source-shape question is settled.
  */
 export type RestoreOptions = {
   /**
-   * Reserved for future fields. Empty in the v1 surface so the call
-   * site (`store.restore(source, {})`) is forward-compatible.
+   * Skip rows with `name === SNAP_EVENT`. The next snap policy
+   * regenerates snapshots against current code; useful for backups
+   * that should compact stale snapshot bytes. Counted in
+   * {@link RestoreResult.dropped}`.snapshots`.
+   *
+   * Single-pass: no source-shape implications. Default `false`.
    */
-  readonly _reserved?: never;
+  readonly drop_snapshots?: boolean;
+
+  /**
+   * Pre-flight blocker scan. When `true`, the adapter iterates the
+   * source and validates every row but writes nothing — the store
+   * ends the call exactly as it began. Blockers (duplicate ids,
+   * version-contiguity gaps, malformed `created`, negative versions)
+   * surface in {@link RestoreResult.errors} so callers can render a
+   * report instead of catching an exception per row.
+   *
+   * Default `false` — live restore is atomic per #783's contract; any
+   * blocker propagates as a throw, and `errors` stays empty.
+   */
+  readonly dry_run?: boolean;
+
+  /**
+   * Optional progress callback. Adapters fire it once per row during
+   * iteration. The callback receives the running `processed` count;
+   * `total` is left `undefined` because the source is async-iterable
+   * and the adapter doesn't know its length up front.
+   *
+   * Synchronous handler — adapters call it directly inside the
+   * restore loop. **Throttling / batching is the caller's
+   * responsibility**: for a million-row restore, debounce in the
+   * handler rather than expecting the port to coalesce calls.
+   * Keeping the port unthrottled means callers that want every-row
+   * reporting get it without a config knob.
+   */
+  readonly on_progress?: (p: { processed: number; total?: number }) => void;
 };
 
 /**
  * Result of {@link Store.restore}.
  *
- * `kept` and `duration_ms` are populated in v1. The other fields
- * (`dropped`, `dry_run`) are placeholders kept stable so #784 can
- * light them up without changing the response shape; they're always
- * zero / `false` on the v1 path. The semantics of `dry_run` will be
- * defined by #784 (specifically: a pre-flight scan that surfaces
- * blockers — version-contiguity gaps, broken causation refs,
- * duplicate ids, malformed timestamps — without writing).
+ * `kept` and `duration_ms` are always populated. `dropped` carries
+ * per-category counters when {@link RestoreOptions.drop_snapshots} (or
+ * future compaction flags) trigger drops; otherwise zeros. `dry_run`
+ * mirrors the input option. `errors` is populated only during a
+ * dry-run scan and is always empty in live mode (live restore is
+ * atomic per #783 — any error throws and rolls back).
  */
 export type RestoreResult = {
-  /** Number of rows written to the rebuilt store. */
+  /** Number of rows written to the rebuilt store (or that WOULD be written in dry-run). */
   readonly kept: number;
   /** Wall-clock duration of the restore call, in milliseconds. */
   readonly duration_ms: number;
   /**
-   * Compaction-drop counters. All zero in v1; #784 populates.
+   * Per-category drop counters. Only `snapshots` is wired in v1;
+   * `closed_streams` and `empty_streams` are reserved for the
+   * follow-up that introduces those flags.
    */
   readonly dropped: {
     readonly closed_streams: number;
@@ -141,10 +176,19 @@ export type RestoreResult = {
     readonly empty_streams: number;
   };
   /**
-   * `true` when the call ran in dry-run / blocker-scan mode. Always
-   * `false` in v1; #784 wires up the option that flips it.
+   * `true` when the call ran in dry-run / blocker-scan mode — the
+   * store is unchanged.
    */
   readonly dry_run: boolean;
+  /**
+   * Per-row blockers found during a dry-run scan. Empty in live
+   * mode (live restore throws on the first error). Categories:
+   * duplicate `id`, version-contiguity gap within a stream, malformed
+   * `created`, negative `version`. Causation refs pointing at ids
+   * not in the source are **not** blockers — they pass through
+   * unchanged per #783's contract.
+   */
+  readonly errors: ReadonlyArray<{ row: number; reason: string }>;
 };
 
 /**

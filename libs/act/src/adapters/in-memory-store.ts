@@ -214,6 +214,53 @@ class InMemoryStream {
 }
 
 /**
+ * Per-row blocker check for {@link InMemoryStore.restore} dry-run
+ * mode. Mirrored by the same logic in `PostgresStore` and
+ * `SqliteStore` — kept inlined per adapter rather than exported so
+ * the public API stays narrow. Categories:
+ *
+ * - duplicate `id` in source
+ * - per-stream version-contiguity gap (versions must be 0, 1, 2, …)
+ * - malformed `created` (can't parse to a valid Date)
+ * - negative `version`
+ *
+ * Causation refs pointing at ids not in the source are **not**
+ * blockers (they pass through unchanged per #783's contract).
+ */
+function validateRestoreRow(
+  row: RestoreRow,
+  rowIdx: number,
+  seenIds: Set<number>,
+  expectedVersionByStream: Map<string, number>,
+  errors: Array<{ row: number; reason: string }>
+): void {
+  if (seenIds.has(row.id))
+    errors.push({ row: rowIdx, reason: `Duplicate id: ${row.id}` });
+  else seenIds.add(row.id);
+  if (row.version < 0)
+    errors.push({
+      row: rowIdx,
+      reason: `Negative version: ${row.version}`,
+    });
+  const created =
+    row.created instanceof Date ? row.created : new Date(row.created);
+  if (Number.isNaN(created.getTime()))
+    errors.push({
+      row: rowIdx,
+      reason: `Malformed created: ${String(row.created)}`,
+    });
+  const expected = expectedVersionByStream.get(row.stream) ?? 0;
+  if (row.version !== expected)
+    errors.push({
+      row: rowIdx,
+      reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
+    });
+  // Advance past the source-provided version so subsequent rows
+  // don't cascade gap errors after the first one.
+  expectedVersionByStream.set(row.stream, row.version + 1);
+}
+
+/**
  * In-memory event store implementation.
  *
  * This is the default store used by Act when no other store is injected.
@@ -949,10 +996,49 @@ export class InMemoryStore implements Store {
    */
   async restore(
     source: AsyncIterable<RestoreRow>,
-    _opts: RestoreOptions = {}
+    opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     await sleep();
     const started = Date.now();
+    const { drop_snapshots = false, dry_run = false, on_progress } = opts;
+    // Dry-run path — validate without mutating. Single pass, no
+    // snapshot/rollback bookkeeping needed because we never touch
+    // `this._*` indexes.
+    if (dry_run) {
+      const errors: Array<{ row: number; reason: string }> = [];
+      const seenIds = new Set<number>();
+      const expectedVersionByStream = new Map<string, number>();
+      let kept = 0;
+      let droppedSnapshots = 0;
+      let rowIdx = 0;
+      for await (const row of source) {
+        rowIdx++;
+        if (on_progress) on_progress({ processed: rowIdx });
+        validateRestoreRow(
+          row,
+          rowIdx,
+          seenIds,
+          expectedVersionByStream,
+          errors
+        );
+        if (drop_snapshots && row.name === SNAP_EVENT) {
+          droppedSnapshots++;
+          continue;
+        }
+        kept++;
+      }
+      return {
+        kept,
+        duration_ms: Date.now() - started,
+        dropped: {
+          closed_streams: 0,
+          snapshots: droppedSnapshots,
+          empty_streams: 0,
+        },
+        dry_run: true,
+        errors,
+      };
+    }
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;
     const prevStreams = this._streams;
@@ -971,7 +1057,15 @@ export class InMemoryStore implements Store {
     const idMap = new Map<number, number>();
     try {
       let kept = 0;
+      let droppedSnapshots = 0;
+      let rowIdx = 0;
       for await (const row of source) {
+        rowIdx++;
+        if (on_progress) on_progress({ processed: rowIdx });
+        if (drop_snapshots && row.name === SNAP_EVENT) {
+          droppedSnapshots++;
+          continue;
+        }
         const id = this._events.length;
         const created =
           row.created instanceof Date ? row.created : new Date(row.created);
@@ -1019,8 +1113,13 @@ export class InMemoryStore implements Store {
       return {
         kept,
         duration_ms: Date.now() - started,
-        dropped: { closed_streams: 0, snapshots: 0, empty_streams: 0 },
+        dropped: {
+          closed_streams: 0,
+          snapshots: droppedSnapshots,
+          empty_streams: 0,
+        },
         dry_run: false,
+        errors: [],
       };
     } catch (err) {
       // Roll back to the captured snapshot — every index restored

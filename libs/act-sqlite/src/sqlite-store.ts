@@ -29,6 +29,44 @@ export interface SqliteConfig {
   authToken?: string;
 }
 
+/**
+ * Per-row blocker check for {@link SqliteStore.restore} dry-run mode.
+ * Mirrored across `InMemoryStore` and `PostgresStore` — kept inlined
+ * per adapter rather than exported so the public API stays narrow.
+ * See `in-memory-store.ts:validateRestoreRow` for the canonical
+ * comment.
+ */
+function validateRestoreRow(
+  row: RestoreRow,
+  rowIdx: number,
+  seenIds: Set<number>,
+  expectedVersionByStream: Map<string, number>,
+  errors: Array<{ row: number; reason: string }>
+): void {
+  if (seenIds.has(row.id))
+    errors.push({ row: rowIdx, reason: `Duplicate id: ${row.id}` });
+  else seenIds.add(row.id);
+  if (row.version < 0)
+    errors.push({
+      row: rowIdx,
+      reason: `Negative version: ${row.version}`,
+    });
+  const created =
+    row.created instanceof Date ? row.created : new Date(row.created);
+  if (Number.isNaN(created.getTime()))
+    errors.push({
+      row: rowIdx,
+      reason: `Malformed created: ${String(row.created)}`,
+    });
+  const expected = expectedVersionByStream.get(row.stream) ?? 0;
+  if (row.version !== expected)
+    errors.push({
+      row: rowIdx,
+      reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
+    });
+  expectedVersionByStream.set(row.stream, row.version + 1);
+}
+
 const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
@@ -1048,9 +1086,48 @@ export class SqliteStore implements Store {
    */
   async restore(
     source: AsyncIterable<RestoreRow>,
-    _opts: RestoreOptions = {}
+    opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
+    const { drop_snapshots = false, dry_run = false, on_progress } = opts;
+    // Dry-run path — validate the source without opening a write
+    // transaction. We never DELETE; the store stays exactly as it
+    // was.
+    if (dry_run) {
+      const errors: Array<{ row: number; reason: string }> = [];
+      const seenIds = new Set<number>();
+      const expectedVersionByStream = new Map<string, number>();
+      let kept = 0;
+      let droppedSnapshots = 0;
+      let rowIdx = 0;
+      for await (const row of source) {
+        rowIdx++;
+        if (on_progress) on_progress({ processed: rowIdx });
+        validateRestoreRow(
+          row,
+          rowIdx,
+          seenIds,
+          expectedVersionByStream,
+          errors
+        );
+        if (drop_snapshots && row.name === "__snapshot__") {
+          droppedSnapshots++;
+          continue;
+        }
+        kept++;
+      }
+      return {
+        kept,
+        duration_ms: Date.now() - started,
+        dropped: {
+          closed_streams: 0,
+          snapshots: droppedSnapshots,
+          empty_streams: 0,
+        },
+        dry_run: true,
+        errors,
+      };
+    }
     const tx = await this.client.transaction("write");
     try {
       await tx.execute("DELETE FROM events");
@@ -1061,7 +1138,15 @@ export class SqliteStore implements Store {
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
       const idMap = new Map<number, number>();
       let kept = 0;
+      let droppedSnapshots = 0;
+      let rowIdx = 0;
       for await (const row of source) {
+        rowIdx++;
+        if (on_progress) on_progress({ processed: rowIdx });
+        if (drop_snapshots && row.name === "__snapshot__") {
+          droppedSnapshots++;
+          continue;
+        }
         // Rewrite causation refs to the new id space before insert.
         let meta = row.meta;
         const causedBy = meta.causation.event?.id;
@@ -1099,8 +1184,13 @@ export class SqliteStore implements Store {
       return {
         kept,
         duration_ms: Date.now() - started,
-        dropped: { closed_streams: 0, snapshots: 0, empty_streams: 0 },
+        dropped: {
+          closed_streams: 0,
+          snapshots: droppedSnapshots,
+          empty_streams: 0,
+        },
         dry_run: false,
+        errors: [],
       };
     } catch (error) {
       await tx.rollback();
