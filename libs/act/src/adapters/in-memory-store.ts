@@ -9,7 +9,7 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
-import { runRestore } from "../restore-validate.js";
+import { runRestore } from "../restore.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,

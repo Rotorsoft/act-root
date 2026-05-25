@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateRestoreRow } from "../src/restore-validate.js";
+import { validateRestoreRow } from "../src/restore.js";
 import type { RestoreRow } from "../src/types/index.js";
 
 /**
