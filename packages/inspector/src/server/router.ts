@@ -1,6 +1,8 @@
 import {
   type Committed,
   InMemoryStore,
+  type RestoreResult,
+  type RestoreRow,
   type Schemas,
   type Store,
   type StreamPosition,
@@ -8,7 +10,6 @@ import {
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { initTRPC } from "@trpc/server";
-import pg from "pg";
 import { z } from "zod";
 import {
   PG_PORT_RANGE_END,
@@ -38,13 +39,20 @@ const writeEnabled = process.env.ACT_INSPECTOR_WRITE === "1";
  * ago?" without persistent storage. Bounded to keep memory usage flat;
  * older entries fall off as new ones land. Cleared on process restart.
  */
-type AuditEntry = {
-  readonly timestamp: string;
-  readonly action: "prioritize";
-  readonly filter: Record<string, unknown>;
-  readonly priority: number;
-  readonly affected: number;
-};
+type AuditEntry =
+  | {
+      readonly timestamp: string;
+      readonly action: "prioritize";
+      readonly filter: Record<string, unknown>;
+      readonly priority: number;
+      readonly affected: number;
+    }
+  | {
+      readonly timestamp: string;
+      readonly action: "restore";
+      readonly adapter: AdapterConfig["adapter"];
+      readonly result: RestoreResult;
+    };
 const AUDIT_CAPACITY = 100;
 const auditLog: AuditEntry[] = [];
 const recordAudit = (entry: AuditEntry): void => {
@@ -268,28 +276,38 @@ function csvParseLine(line: string): string[] {
 }
 
 /**
- * Get a raw pg client for direct queries.
- *
- * PG-only by design — narrows the {@link AdapterConfig} discriminator and
- * throws on any non-PG adapter. The guard is a noop today (only PG can
- * connect) but makes #782 safe to add the SQLite branch without inventing
- * a fake `pg.Client`. The whole helper goes away in #786 once `restore`
- * rides `Store.restore`.
+ * Stream a CSV blob into `AsyncIterable<RestoreRow>` consumed by
+ * `Store.restore` (#786). The blob still arrives as a single string
+ * from the tRPC input, but the parser yields one row at a time so
+ * the adapter never holds the full parsed array in memory alongside
+ * the source. The header row format matches `backup`'s output —
+ * round-tripping is the primary use case.
  */
-async function getRawPgClient(): Promise<pg.Client> {
-  if (!currentConfig) throw new Error("Not connected to a store");
-  if (currentConfig.adapter !== "pg")
-    throw new Error("Raw PG client requires a PG-backed inspector connection");
-  const client = new pg.Client({
-    host: currentConfig.host,
-    port: currentConfig.port,
-    database: currentConfig.database,
-    user: currentConfig.user,
-    password: currentConfig.password,
-    connectionTimeoutMillis: 5000,
-  });
-  await client.connect();
-  return client;
+async function* parseCsvRows(csv: string): AsyncIterable<RestoreRow> {
+  const lines = csv.split("\n");
+  if (lines.length < 2)
+    throw new Error("CSV must have a header and at least one row");
+  const expectedHeader = CSV_COLUMNS.join(",");
+  if (lines[0] !== expectedHeader)
+    throw new Error(`Invalid CSV header. Expected: ${expectedHeader}`);
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.trim()) continue;
+    const fields = csvParseLine(line);
+    if (fields.length !== CSV_COLUMNS.length)
+      throw new Error(
+        `Row ${i}: expected ${CSV_COLUMNS.length} fields, got ${fields.length}`
+      );
+    yield {
+      id: Number.parseInt(fields[0]!, 10),
+      name: fields[1]!,
+      data: JSON.parse(fields[2]!),
+      stream: fields[3]!,
+      version: Number.parseInt(fields[4]!, 10),
+      created: fields[5]!,
+      meta: JSON.parse(fields[6]!),
+    };
+  }
 }
 
 export const inspectorRouter = t.router({
@@ -1027,72 +1045,43 @@ export const inspectorRouter = t.router({
     capacity: AUDIT_CAPACITY,
   })),
 
-  /** Restore events from CSV — drops and re-seeds the store, inserts with sequential IDs */
+  /**
+   * Restore events from a CSV blob via `Store.restore`.
+   *
+   * Pre-ACT-1127 this opened a raw `pg.Client` and ran TRUNCATE +
+   * INSERT against PG only. Now it streams the CSV into the active
+   * adapter's port-level restore, so every adapter that declares
+   * the `restore` capability (today: InMemory, PG, SQLite) is
+   * supported. The adapter handles atomicity, id-renumbering, and
+   * causation-remap; the inspector just streams rows and records
+   * the result in its audit log.
+   *
+   * Return shape carries both `count` (back-compat with pre-1127
+   * callers) and the full `RestoreResult` (for #787's UI to render
+   * `duration_ms`, `dropped` counters, etc.).
+   */
   restore: t.procedure
     .input(z.object({ csv: z.string() }))
     .mutation(async ({ input }) => {
-      if (!currentConfig) throw new Error("Not connected to a store");
-      if (currentConfig.adapter !== "pg")
+      const s = getStore();
+      if (!s.restore)
         throw new Error(
-          "Restore currently requires a PG-backed inspector connection"
+          "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
-      const fqt = `"${currentConfig.schema}"."${currentConfig.table}"`;
-      const fqs = `"${currentConfig.schema}"."${currentConfig.table}_streams"`;
-
-      // Parse CSV
-      const lines = input.csv.split("\n").filter((l) => l.trim());
-      if (lines.length < 2)
-        throw new Error("CSV must have a header and at least one row");
-
-      const headerFields = lines[0].split(",");
-      const expectedHeader = CSV_COLUMNS.join(",");
-      if (headerFields.join(",") !== expectedHeader)
-        throw new Error(`Invalid CSV header. Expected: ${expectedHeader}`);
-
-      const rows = lines.slice(1).map((line, lineIdx) => {
-        const fields = csvParseLine(line);
-        if (fields.length !== CSV_COLUMNS.length)
-          throw new Error(
-            `Row ${lineIdx + 1}: expected ${CSV_COLUMNS.length} fields, got ${fields.length}`
-          );
-        return {
-          name: fields[1],
-          data: JSON.parse(fields[2]),
-          stream: fields[3],
-          version: parseInt(fields[4], 10),
-          created: fields[5],
-          meta: JSON.parse(fields[6]),
-        };
-      });
-
-      // Drop existing data and re-seed
-      const client = await getRawPgClient();
       try {
-        await client.query("BEGIN");
-
-        // Truncate events and streams tables, reset sequence
-        await client.query(`TRUNCATE TABLE ${fqt} RESTART IDENTITY CASCADE`);
-        await client.query(`TRUNCATE TABLE ${fqs}`);
-
-        // Insert events preserving original order (new sequential IDs from 1)
-        for (const row of rows) {
-          await client.query(
-            `INSERT INTO ${fqt}(name, data, stream, version, created, meta)
-             VALUES($1, $2, $3, $4, $5, $6)`,
-            [row.name, row.data, row.stream, row.version, row.created, row.meta]
-          );
-        }
-
-        await client.query("COMMIT");
-        return { ok: true as const, count: rows.length };
+        const result = await s.restore(parseCsvRows(input.csv), {});
+        recordAudit({
+          timestamp: new Date().toISOString(),
+          action: "restore",
+          adapter: currentConfig!.adapter,
+          result,
+        });
+        return { ok: true as const, count: result.kept, result };
       } catch (error) {
-        await client.query("ROLLBACK").catch(() => {});
         throw new Error(
           `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
           { cause: error }
         );
-      } finally {
-        await client.end();
       }
     }),
 });
