@@ -26,7 +26,12 @@
  * blockers — they pass through unchanged per #783's contract
  * (partial backups are a supported use case).
  */
-import type { RestoreRow } from "./types/ports.js";
+import { SNAP_EVENT } from "./ports.js";
+import type {
+  RestoreOptions,
+  RestoreResult,
+  RestoreRow,
+} from "./types/ports.js";
 
 /**
  * Per-row dry-run validator. Adapters call this once per row when
@@ -77,6 +82,70 @@ export type RestoreValidator = (
  * };
  * ```
  */
+/**
+ * Run a dry-run restore over `source`. Adapter-agnostic — iterates
+ * the source, calls `opts.validate` per row if provided, honors
+ * `opts.drop_snapshots` and `opts.on_progress`, and returns a
+ * {@link RestoreResult} with `dry_run: true`. **No I/O.** The store
+ * is never touched, so adapters delegate to this helper directly
+ * when `opts.dry_run` is set:
+ *
+ * ```typescript
+ * async restore(source, opts = {}) {
+ *   if (opts.dry_run) return runRestoreDryRun(source, opts);
+ *   // ...adapter-specific live path...
+ * }
+ * ```
+ *
+ * Keeping the dry-run loop in the framework (rather than in each
+ * adapter) means the contract — what `dry_run` reports, when
+ * `validate` runs, how `on_progress` fires, how `drop_snapshots`
+ * counts — lives in exactly one place. Adapters only own the
+ * live-write mechanics that differ across backends.
+ *
+ * The `kept` count reflects what would be written: source row count
+ * minus drops (snapshots when `drop_snapshots` is true). Validation
+ * doesn't affect `kept` — a row with blockers still counts as kept
+ * because adapters wouldn't reject it during live restore (live
+ * mode throws atomically on the first error, the row's "would be
+ * written" status is hypothetical).
+ */
+export async function runRestoreDryRun(
+  source: AsyncIterable<RestoreRow>,
+  opts: RestoreOptions
+): Promise<RestoreResult> {
+  const started = Date.now();
+  const { drop_snapshots = false, on_progress, validate } = opts;
+  const errors: Array<{ row: number; reason: string }> = [];
+  let kept = 0;
+  let droppedSnapshots = 0;
+  let rowIdx = 0;
+  for await (const row of source) {
+    rowIdx++;
+    if (on_progress) on_progress({ processed: rowIdx });
+    if (validate) {
+      for (const r of validate(row, rowIdx))
+        errors.push({ row: rowIdx, reason: r.reason });
+    }
+    if (drop_snapshots && row.name === SNAP_EVENT) {
+      droppedSnapshots++;
+      continue;
+    }
+    kept++;
+  }
+  return {
+    kept,
+    duration_ms: Date.now() - started,
+    dropped: {
+      closed_streams: 0,
+      snapshots: droppedSnapshots,
+      empty_streams: 0,
+    },
+    dry_run: true,
+    errors,
+  };
+}
+
 export function validateRestoreRow(): RestoreValidator {
   const seenIds = new Set<number>();
   const expectedVersionByStream = new Map<string, number>();

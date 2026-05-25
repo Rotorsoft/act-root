@@ -25,6 +25,7 @@ import type {
 import {
   ConcurrencyError,
   log,
+  runRestoreDryRun,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
@@ -1564,46 +1565,8 @@ export class PostgresStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    const {
-      drop_snapshots = false,
-      dry_run = false,
-      on_progress,
-      validate,
-    } = opts;
-    // Dry-run path — iterate without opening a transaction. Adapters
-    // don't know validation policy; if the caller passed `validate`,
-    // we collect per-row blockers and surface them on the result.
-    // The store is never touched in this branch.
-    if (dry_run) {
-      const errors: Array<{ row: number; reason: string }> = [];
-      let kept = 0;
-      let droppedSnapshots = 0;
-      let rowIdx = 0;
-      for await (const row of source) {
-        rowIdx++;
-        if (on_progress) on_progress({ processed: rowIdx });
-        if (validate) {
-          for (const r of validate(row, rowIdx))
-            errors.push({ row: rowIdx, reason: r.reason });
-        }
-        if (drop_snapshots && row.name === SNAP_EVENT) {
-          droppedSnapshots++;
-          continue;
-        }
-        kept++;
-      }
-      return {
-        kept,
-        duration_ms: Date.now() - started,
-        dropped: {
-          closed_streams: 0,
-          snapshots: droppedSnapshots,
-          empty_streams: 0,
-        },
-        dry_run: true,
-        errors,
-      };
-    }
+    if (opts.dry_run) return runRestoreDryRun(source, opts);
+    const { drop_snapshots = false, on_progress } = opts;
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
