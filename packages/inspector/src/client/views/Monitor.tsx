@@ -216,18 +216,38 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
  * count. Cleared on server restart — this is operational breadcrumbs,
  * not a compliance log.
  */
+// ACT-1127 widened the audit log to a discriminated union — restore
+// entries carry the full RestoreResult instead of priority/affected.
+type AuditEntry =
+  | {
+      timestamp: string;
+      action: "prioritize";
+      filter: Record<string, unknown>;
+      priority: number;
+      affected: number;
+    }
+  | {
+      timestamp: string;
+      action: "restore";
+      adapter: "pg" | "sqlite" | "inmemory";
+      result: {
+        kept: number;
+        duration_ms: number;
+        dropped: {
+          closed_streams: number;
+          snapshots: number;
+          empty_streams: number;
+        };
+        dry_run: boolean;
+      };
+    };
+
 function AuditPanel({
   writeEnabled,
   entries,
 }: {
   writeEnabled: boolean;
-  entries: ReadonlyArray<{
-    timestamp: string;
-    action: string;
-    filter: Record<string, unknown>;
-    priority: number;
-    affected: number;
-  }>;
+  entries: ReadonlyArray<AuditEntry>;
 }) {
   return (
     <div className="flex flex-1 flex-col border-t border-zinc-800 pt-3">
@@ -267,19 +287,38 @@ function AuditPanel({
                 <span className="font-mono">{e.action}</span>
                 <span>{new Date(e.timestamp).toLocaleTimeString()}</span>
               </div>
-              <div className="mt-1 font-mono text-zinc-300">
-                p={e.priority}{" "}
-                <span className="text-zinc-600">→</span>{" "}
-                <span className="text-amber-300">{e.affected} streams</span>
-              </div>
-              <div
-                className="truncate font-mono text-[9px] text-zinc-600"
-                title={JSON.stringify(e.filter)}
-              >
-                {Object.keys(e.filter).length === 0
-                  ? "all streams"
-                  : JSON.stringify(e.filter)}
-              </div>
+              {e.action === "prioritize" ? (
+                <>
+                  <div className="mt-1 font-mono text-zinc-300">
+                    p={e.priority}{" "}
+                    <span className="text-zinc-600">→</span>{" "}
+                    <span className="text-amber-300">
+                      {e.affected} streams
+                    </span>
+                  </div>
+                  <div
+                    className="truncate font-mono text-[9px] text-zinc-600"
+                    title={JSON.stringify(e.filter)}
+                  >
+                    {Object.keys(e.filter).length === 0
+                      ? "all streams"
+                      : JSON.stringify(e.filter)}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mt-1 font-mono text-zinc-300">
+                    <span className="text-amber-300">
+                      {e.result.kept.toLocaleString()} events
+                    </span>{" "}
+                    <span className="text-zinc-600">in</span>{" "}
+                    {e.result.duration_ms}ms
+                  </div>
+                  <div className="truncate font-mono text-[9px] text-zinc-600">
+                    adapter: {e.adapter}
+                  </div>
+                </>
+              )}
             </li>
           ))}
         </ul>

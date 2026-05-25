@@ -12,11 +12,12 @@ export function BackupRestore() {
     csv: string;
   } | null>(null);
 
-  // `restore` is PG-only until #786 ports it to `Store.restore`. The
-  // status query surfaces the adapter so the UI can gate the button
-  // instead of letting the operator click into a server error.
+  // ACT-1127 rewrote restore onto `Store.restore`, so any
+  // adapter that declares the `restore` capability is supported.
+  // The status query still drives the disabled state for the
+  // pre-connect case (no active store).
   const { data: status } = trpc.status.useQuery();
-  const restoreEnabled = status?.adapter === "pg";
+  const restoreEnabled = status?.connected === true;
 
   const backupMutation = trpc.backup.useMutation({
     onSuccess(data) {
@@ -103,7 +104,7 @@ export function BackupRestore() {
           title={
             restoreEnabled
               ? "Restore events from CSV"
-              : "Restore is PG-only — coming to other adapters in ACT-1127"
+              : "Connect to a store to enable restore"
           }
           className="rounded p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
         >
