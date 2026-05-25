@@ -9,6 +9,7 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import { validateRestoreRow } from "../restore-validate.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -211,53 +212,6 @@ class InMemoryStream {
     this._leased_until = undefined;
     return true;
   }
-}
-
-/**
- * Per-row blocker check for {@link InMemoryStore.restore} dry-run
- * mode. Mirrored by the same logic in `PostgresStore` and
- * `SqliteStore` — kept inlined per adapter rather than exported so
- * the public API stays narrow. Categories:
- *
- * - duplicate `id` in source
- * - per-stream version-contiguity gap (versions must be 0, 1, 2, …)
- * - malformed `created` (can't parse to a valid Date)
- * - negative `version`
- *
- * Causation refs pointing at ids not in the source are **not**
- * blockers (they pass through unchanged per #783's contract).
- */
-function validateRestoreRow(
-  row: RestoreRow,
-  rowIdx: number,
-  seenIds: Set<number>,
-  expectedVersionByStream: Map<string, number>,
-  errors: Array<{ row: number; reason: string }>
-): void {
-  if (seenIds.has(row.id))
-    errors.push({ row: rowIdx, reason: `Duplicate id: ${row.id}` });
-  else seenIds.add(row.id);
-  if (row.version < 0)
-    errors.push({
-      row: rowIdx,
-      reason: `Negative version: ${row.version}`,
-    });
-  const created =
-    row.created instanceof Date ? row.created : new Date(row.created);
-  if (Number.isNaN(created.getTime()))
-    errors.push({
-      row: rowIdx,
-      reason: `Malformed created: ${String(row.created)}`,
-    });
-  const expected = expectedVersionByStream.get(row.stream) ?? 0;
-  if (row.version !== expected)
-    errors.push({
-      row: rowIdx,
-      reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
-    });
-  // Advance past the source-provided version so subsequent rows
-  // don't cascade gap errors after the first one.
-  expectedVersionByStream.set(row.stream, row.version + 1);
 }
 
 /**

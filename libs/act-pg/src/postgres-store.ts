@@ -27,6 +27,7 @@ import {
   log,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
+  validateRestoreRow,
 } from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
@@ -84,44 +85,6 @@ const PG_UNIQUE_VIOLATION = "23505";
 // any client (psql, scripts, alternative consumers) matches without
 // surprises.
 const NOTIFY_CHANNEL_PREFIX = "act_commit";
-
-/**
- * Per-row blocker check for {@link PostgresStore.restore} dry-run
- * mode. Mirrored across `InMemoryStore` and `SqliteStore` — kept
- * inlined per adapter rather than exported so the public API stays
- * narrow. See `in-memory-store.ts:validateRestoreRow` for the
- * canonical comment.
- */
-function validateRestoreRow(
-  row: RestoreRow,
-  rowIdx: number,
-  seenIds: Set<number>,
-  expectedVersionByStream: Map<string, number>,
-  errors: Array<{ row: number; reason: string }>
-): void {
-  if (seenIds.has(row.id))
-    errors.push({ row: rowIdx, reason: `Duplicate id: ${row.id}` });
-  else seenIds.add(row.id);
-  if (row.version < 0)
-    errors.push({
-      row: rowIdx,
-      reason: `Negative version: ${row.version}`,
-    });
-  const created =
-    row.created instanceof Date ? row.created : new Date(row.created);
-  if (Number.isNaN(created.getTime()))
-    errors.push({
-      row: rowIdx,
-      reason: `Malformed created: ${String(row.created)}`,
-    });
-  const expected = expectedVersionByStream.get(row.stream) ?? 0;
-  if (row.version !== expected)
-    errors.push({
-      row: rowIdx,
-      reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
-    });
-  expectedVersionByStream.set(row.stream, row.version + 1);
-}
 
 function notifyChannel(schema: string, table: string): string {
   return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
