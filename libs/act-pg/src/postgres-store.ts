@@ -25,7 +25,6 @@ import type {
 import {
   ConcurrencyError,
   log,
-  runRestoreDryRun,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
@@ -1565,7 +1564,6 @@ export class PostgresStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    if (opts.dry_run) return runRestoreDryRun(source, opts);
     const { drop_snapshots = false, on_progress } = opts;
     const client = await this._pool.connect();
     try {
@@ -1621,8 +1619,6 @@ export class PostgresStore implements Store {
           snapshots: droppedSnapshots,
           empty_streams: 0,
         },
-        dry_run: false,
-        errors: [],
       };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});

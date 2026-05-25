@@ -1,9 +1,4 @@
-import {
-  ConcurrencyError,
-  SNAP_EVENT,
-  TOMBSTONE_EVENT,
-  validateRestoreRow,
-} from "@rotorsoft/act";
+import { ConcurrencyError, SNAP_EVENT, TOMBSTONE_EVENT } from "@rotorsoft/act";
 import type {
   BlockedLease,
   Committed,
@@ -1688,7 +1683,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const result = await store.restore!(asSource([]));
         expect(result.kept).toBe(0);
         expect(result.duration_ms).toBeGreaterThanOrEqual(0);
-        expect(result.dry_run).toBe(false);
         expect(result.dropped).toEqual({
           closed_streams: 0,
           snapshots: 0,
@@ -2040,93 +2034,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ).toBe(true);
       });
 
-      it("dry_run: validates without writing; store stays unchanged", async () => {
-        // Pre-seed an event the dry-run must NOT touch.
-        const original = `restore-pre-dry-${uid()}`;
-        await store.commit<CounterEvents>(
-          original,
-          [inc(1)],
-          makeMeta({ stream: original })
-        );
-        const s = `restore-dryrun-${uid()}`;
-        const t = new Date("2020-11-01T00:00:00.000Z");
-        // Pass on_progress so the dry-run path's row-by-row callback
-        // is exercised in the same call.
-        const progressCalls: number[] = [];
-        const result = await store.restore!(
-          asSource([
-            row(1, s, 0, "Incremented", t, { amount: 1 }),
-            row(2, s, 1, "Incremented", t, { amount: 2 }),
-          ]),
-          {
-            dry_run: true,
-            on_progress: (p) => progressCalls.push(p.processed),
-            // Pass the default validator so blocker reporting is
-            // exercised end-to-end through the option callback.
-            validate: validateRestoreRow(),
-          }
-        );
-        expect(result.dry_run).toBe(true);
-        expect(result.kept).toBe(2);
-        expect(result.errors).toHaveLength(0);
-        expect(progressCalls).toEqual([1, 2]);
-        // The pre-existing event must still be there — dry_run never wrote.
-        const back = await collect(store, {
-          stream: original,
-          stream_exact: true,
-        });
-        expect(back).toHaveLength(1);
-      });
-
-      it("dry_run: reports duplicate id + version-contiguity gap + malformed created + negative version", async () => {
-        const s = `restore-blockers-${uid()}`;
-        const t = new Date("2020-12-01T00:00:00.000Z");
-        const result = await store.restore!(
-          asSource([
-            row(1, s, 0, "Incremented", t, { amount: 1 }),
-            row(1, s, 1, "Incremented", t, { amount: 2 }), // duplicate id
-            row(3, s, 5, "Incremented", t, { amount: 3 }), // version gap (expected 2)
-            row(4, s, -1, "Incremented", t, { amount: 4 }), // negative version
-            {
-              id: 5,
-              stream: s,
-              version: 7,
-              name: "Incremented",
-              data: { amount: 5 },
-              // biome-ignore lint/suspicious/noExplicitAny: invalid input
-              created: "not-a-date" as any,
-              meta: { correlation: "c", causation: {} },
-            },
-          ]),
-          { dry_run: true, validate: validateRestoreRow() }
-        );
-        const reasons = result.errors.map((e) => e.reason).join("\n");
-        expect(reasons).toMatch(/Duplicate id: 1/);
-        expect(reasons).toMatch(/Version gap on /);
-        expect(reasons).toMatch(/Negative version: -1/);
-        expect(reasons).toMatch(/Malformed created: not-a-date/);
-      });
-
-      it("dry_run without validate: empty errors (validation is caller-driven)", async () => {
-        const s = `restore-no-validator-${uid()}`;
-        const t = new Date("2021-04-01T00:00:00.000Z");
-        const result = await store.restore!(
-          asSource([row(1, s, 0, "Incremented", t, { amount: 1 })]),
-          { dry_run: true }
-        );
-        expect(result.dry_run).toBe(true);
-        expect(result.errors).toEqual([]);
-      });
-
-      it("live restore returns empty errors", async () => {
-        const s = `restore-clean-${uid()}`;
-        const t = new Date("2021-01-01T00:00:00.000Z");
-        const result = await store.restore!(
-          asSource([row(1, s, 0, "Incremented", t, { amount: 1 })])
-        );
-        expect(result.errors).toEqual([]);
-      });
-
       it("on_progress fires once per row (caller throttles)", async () => {
         const calls: number[] = [];
         const s = `restore-progress-${uid()}`;
@@ -2140,29 +2047,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         // One callback per row; values monotonic.
         expect(calls).toEqual([1, 2]);
-      });
-
-      it("dry_run + drop_snapshots: both reported in the result", async () => {
-        const s = `restore-dry-drop-${uid()}`;
-        const t = new Date("2021-03-01T00:00:00.000Z");
-        const result = await store.restore!(
-          asSource([
-            row(1, s, 0, "Incremented", t, { amount: 1 }),
-            {
-              id: 2,
-              stream: s,
-              version: 1,
-              name: SNAP_EVENT,
-              data: { count: 1 },
-              created: t,
-              meta: { correlation: "snap", causation: {} },
-            },
-          ]),
-          { dry_run: true, drop_snapshots: true }
-        );
-        expect(result.dry_run).toBe(true);
-        expect(result.kept).toBe(1);
-        expect(result.dropped.snapshots).toBe(1);
       });
     });
 

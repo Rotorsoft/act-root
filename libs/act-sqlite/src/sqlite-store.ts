@@ -18,7 +18,6 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { runRestoreDryRun } from "@rotorsoft/act";
 
 /**
  * SQLite store configuration
@@ -1052,7 +1051,6 @@ export class SqliteStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    if (opts.dry_run) return runRestoreDryRun(source, opts);
     const { drop_snapshots = false, on_progress } = opts;
     const tx = await this.client.transaction("write");
     try {
@@ -1115,8 +1113,6 @@ export class SqliteStore implements Store {
           snapshots: droppedSnapshots,
           empty_streams: 0,
         },
-        dry_run: false,
-        errors: [],
       };
     } catch (error) {
       await tx.rollback();

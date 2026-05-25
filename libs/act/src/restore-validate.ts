@@ -1,49 +1,38 @@
 /**
- * Default dry-run validator factory for {@link Store.restore}
- * (ACT-1125). Single source of truth for the blocker contract — but
- * the **adapter** doesn't import it. Adapters call whatever
- * validator the caller hands them via {@link RestoreOptions.validate}.
- * This file exports the canonical implementation so callers can
- * compose it, wrap it, or replace it without each adapter shipping
- * its own copy.
+ * Per-row source validator for the restore primitive (ACT-1125).
+ * Pure source-side operation — no adapter, no I/O, no store
+ * reference. Callers iterate their source and invoke the validator
+ * on each row before deciding whether to invoke `Store.restore`.
  *
- * Categories the default validator detects:
+ * The framework provides the blocker rules; callers drive the
+ * iteration:
  *
- * - **Duplicate `id` in source** — the renumber-on-restore contract
- *   (#783) requires unique source ids to build a coherent
- *   `old → new` causation remap. A duplicate would silently shadow
- *   one of the rows in the remap table.
- * - **Per-stream version-contiguity gap** — versions must be `0, 1,
- *   2, …` within a stream. Gaps don't break restore itself but break
- *   downstream consumers (snapshots, projections that step through
- *   versions, replay consistency).
- * - **Malformed `created`** — `new Date(row.created)` must produce a
- *   valid timestamp.
- * - **Negative `version`** — versions are unsigned in the framework
- *   contract; a negative value is a malformed source.
+ * ```typescript
+ * import { validateRestoreRow } from "@rotorsoft/act";
  *
- * Causation refs pointing at ids not in the source are **not**
- * blockers — they pass through unchanged per #783's contract
- * (partial backups are a supported use case).
+ * const validator = validateRestoreRow();
+ * const errors: Array<{ row: number; reason: string }> = [];
+ * let rowIdx = 0;
+ * for await (const row of parseCsv(csv)) {
+ *   rowIdx++;
+ *   for (const r of validator(row, rowIdx))
+ *     errors.push({ row: rowIdx, reason: r.reason });
+ * }
+ * if (errors.length) throw new Error(`${errors.length} blockers`);
+ * await store.restore!(parseCsv(csv), {});
+ * ```
+ *
+ * Dry-run as a `Store.restore` mode was deliberately removed —
+ * validating a CSV is a source operation, not a store operation.
+ * Adapters own only the destructive live-write path.
  */
-import { SNAP_EVENT } from "./ports.js";
-import type {
-  RestoreOptions,
-  RestoreResult,
-  RestoreRow,
-} from "./types/ports.js";
+import type { RestoreRow } from "./types/ports.js";
 
 /**
- * Per-row dry-run validator. Adapters call this once per row when
- * {@link RestoreOptions.dry_run} is true and a validator was
- * provided. Returns the blockers for that row (empty array if OK).
- * Adapters add the row index to each returned `{reason}` before
- * surfacing them on {@link RestoreResult.errors}.
- *
- * Validators are typically stateful (tracking seen ids,
- * per-stream version progression). Build a fresh one per
- * `restore` call — see {@link validateRestoreRow} for the canonical
- * factory.
+ * Per-row validator. Returns the blockers for that row (empty array
+ * if OK). Validators are typically stateful (tracking seen ids,
+ * per-stream version progression) — build a fresh one per source
+ * scan via {@link validateRestoreRow}.
  */
 export type RestoreValidator = (
   row: RestoreRow,
@@ -55,21 +44,23 @@ export type RestoreValidator = (
  *
  * Returns a fresh stateful validator each call — the closure owns
  * its own `seenIds` set and per-stream version-progression map.
- * Pass the returned function as `RestoreOptions.validate` to opt
- * into the standard blocker checks during a dry-run scan.
+ * Categories detected:
  *
- * @example
- * ```typescript
- * import { validateRestoreRow } from "@rotorsoft/act";
+ * - **Duplicate `id`** — the renumber-on-restore contract (#783)
+ *   requires unique source ids to build a coherent `old → new`
+ *   causation remap. A duplicate would silently shadow one of the
+ *   rows in the remap table.
+ * - **Per-stream version-contiguity gap** — versions must be
+ *   `0, 1, 2, …` within a stream. Gaps don't break restore itself
+ *   but break downstream consumers (snapshots, projections, replay).
+ * - **Malformed `created`** — `new Date(row.created)` must produce
+ *   a valid timestamp.
+ * - **Negative `version`** — versions are unsigned in the framework
+ *   contract.
  *
- * const result = await store.restore(source, {
- *   dry_run: true,
- *   validate: validateRestoreRow(),
- * });
- * for (const err of result.errors) {
- *   console.error(`Row ${err.row}: ${err.reason}`);
- * }
- * ```
+ * Causation refs pointing at ids not in the source are **not**
+ * blockers — they pass through unchanged per #783's contract
+ * (partial backups are a supported use case).
  *
  * @example Custom validator that extends the default
  * ```typescript
@@ -82,70 +73,6 @@ export type RestoreValidator = (
  * };
  * ```
  */
-/**
- * Run a dry-run restore over `source`. Adapter-agnostic — iterates
- * the source, calls `opts.validate` per row if provided, honors
- * `opts.drop_snapshots` and `opts.on_progress`, and returns a
- * {@link RestoreResult} with `dry_run: true`. **No I/O.** The store
- * is never touched, so adapters delegate to this helper directly
- * when `opts.dry_run` is set:
- *
- * ```typescript
- * async restore(source, opts = {}) {
- *   if (opts.dry_run) return runRestoreDryRun(source, opts);
- *   // ...adapter-specific live path...
- * }
- * ```
- *
- * Keeping the dry-run loop in the framework (rather than in each
- * adapter) means the contract — what `dry_run` reports, when
- * `validate` runs, how `on_progress` fires, how `drop_snapshots`
- * counts — lives in exactly one place. Adapters only own the
- * live-write mechanics that differ across backends.
- *
- * The `kept` count reflects what would be written: source row count
- * minus drops (snapshots when `drop_snapshots` is true). Validation
- * doesn't affect `kept` — a row with blockers still counts as kept
- * because adapters wouldn't reject it during live restore (live
- * mode throws atomically on the first error, the row's "would be
- * written" status is hypothetical).
- */
-export async function runRestoreDryRun(
-  source: AsyncIterable<RestoreRow>,
-  opts: RestoreOptions
-): Promise<RestoreResult> {
-  const started = Date.now();
-  const { drop_snapshots = false, on_progress, validate } = opts;
-  const errors: Array<{ row: number; reason: string }> = [];
-  let kept = 0;
-  let droppedSnapshots = 0;
-  let rowIdx = 0;
-  for await (const row of source) {
-    rowIdx++;
-    if (on_progress) on_progress({ processed: rowIdx });
-    if (validate) {
-      for (const r of validate(row, rowIdx))
-        errors.push({ row: rowIdx, reason: r.reason });
-    }
-    if (drop_snapshots && row.name === SNAP_EVENT) {
-      droppedSnapshots++;
-      continue;
-    }
-    kept++;
-  }
-  return {
-    kept,
-    duration_ms: Date.now() - started,
-    dropped: {
-      closed_streams: 0,
-      snapshots: droppedSnapshots,
-      empty_streams: 0,
-    },
-    dry_run: true,
-    errors,
-  };
-}
-
 export function validateRestoreRow(): RestoreValidator {
   const seenIds = new Set<number>();
   const expectedVersionByStream = new Map<string, number>();
@@ -164,8 +91,6 @@ export function validateRestoreRow(): RestoreValidator {
       errors.push({
         reason: `Version gap on ${row.stream}: expected ${expected}, got ${row.version}`,
       });
-    // Advance past the source-provided version so subsequent rows
-    // don't cascade gap errors after the first one.
     expectedVersionByStream.set(row.stream, row.version + 1);
     return errors;
   };

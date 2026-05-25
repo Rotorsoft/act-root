@@ -238,7 +238,6 @@ type AuditEntry =
           snapshots: number;
           empty_streams: number;
         };
-        dry_run: boolean;
       };
     };
 

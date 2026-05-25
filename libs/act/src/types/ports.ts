@@ -103,12 +103,16 @@ export type RestoreRow = {
 /**
  * Options for {@link Store.restore}.
  *
- * Three flags land in v1 (ACT-1125): `drop_snapshots`, `dry_run`,
- * `on_progress`. Two more reserved at the type level are deferred —
- * `drop_closed_streams` and `drop_empty_streams` both need a pre-pass
- * over the source, which requires deciding whether to make the source
- * a re-iterable factory or buffer in memory. Those land in a follow-up
- * once the source-shape question is settled.
+ * Two more flags reserved for a future follow-up
+ * (`drop_closed_streams`, `drop_empty_streams`) need a pre-pass
+ * over the source — they wait on the source-shape decision
+ * (re-iterable factory vs. buffer in memory).
+ *
+ * Source validation is **not** a restore concern. Callers that
+ * want to pre-flight a backup before invoking restore use
+ * `validateRestoreRow()` directly in a loop over the source —
+ * the framework provides the blocker rules; the caller drives
+ * the iteration. See `libs/act/src/restore-validate.ts`.
  */
 export type RestoreOptions = {
   /**
@@ -120,19 +124,6 @@ export type RestoreOptions = {
    * Single-pass: no source-shape implications. Default `false`.
    */
   readonly drop_snapshots?: boolean;
-
-  /**
-   * Pre-flight blocker scan. When `true`, the adapter iterates the
-   * source and validates every row but writes nothing — the store
-   * ends the call exactly as it began. Blockers (duplicate ids,
-   * version-contiguity gaps, malformed `created`, negative versions)
-   * surface in {@link RestoreResult.errors} so callers can render a
-   * report instead of catching an exception per row.
-   *
-   * Default `false` — live restore is atomic per #783's contract; any
-   * blocker propagates as a throw, and `errors` stays empty.
-   */
-  readonly dry_run?: boolean;
 
   /**
    * Optional progress callback. Adapters fire it once per row during
@@ -148,45 +139,23 @@ export type RestoreOptions = {
    * reporting get it without a config knob.
    */
   readonly on_progress?: (p: { processed: number; total?: number }) => void;
-
-  /**
-   * Optional dry-run validator. When `dry_run: true` and this is
-   * provided, the adapter calls it once per row and threads the
-   * returned blockers into {@link RestoreResult.errors} (with the
-   * row index attached). Has no effect when `dry_run` is false.
-   *
-   * The default `validateRestoreRow()` factory exported from
-   * `@rotorsoft/act` builds a closure covering the four standard
-   * blocker categories (duplicate id, version-contiguity gap,
-   * malformed `created`, negative version). Callers wanting to add
-   * custom checks compose around it.
-   *
-   * **Adapters don't define validation policy.** Keeping the
-   * validator in caller-land means the blocker contract lives in
-   * one place (the framework), and adapter implementations stay
-   * focused on the wipe-and-rebuild mechanics. Third-party
-   * adapters get this behavior for free.
-   */
-  readonly validate?: (
-    row: RestoreRow,
-    rowIdx: number
-  ) => ReadonlyArray<{ reason: string }>;
 };
 
 /**
  * Result of {@link Store.restore}.
  *
  * `kept` and `duration_ms` are always populated. `dropped` carries
- * per-category counters when {@link RestoreOptions.drop_snapshots} (or
- * future compaction flags) trigger drops; otherwise zeros. `dry_run`
- * mirrors the input option. `errors` is populated only during a
- * dry-run scan and is always empty in live mode (live restore is
- * atomic per #783 — any error throws and rolls back).
+ * per-category counters when {@link RestoreOptions.drop_snapshots}
+ * (or future compaction flags) trigger drops; otherwise zeros.
+ * Live restore is atomic per #783 — any error throws and rolls back,
+ * so there's no per-row error reporting on the result. Callers that
+ * want to inspect a source for blockers before restoring run the
+ * source through `validateRestoreRow()` themselves.
  */
 export type RestoreResult = {
-  /** Number of rows written to the rebuilt store (or that WOULD be written in dry-run). */
+  /** Number of rows written to the rebuilt store. */
   readonly kept: number;
-  /** Wall-clock duration of the restore call, in milliseconds. */
+  /** Wall-clock duration of the call, in milliseconds. */
   readonly duration_ms: number;
   /**
    * Per-category drop counters. Only `snapshots` is wired in v1;
@@ -198,20 +167,6 @@ export type RestoreResult = {
     readonly snapshots: number;
     readonly empty_streams: number;
   };
-  /**
-   * `true` when the call ran in dry-run / blocker-scan mode — the
-   * store is unchanged.
-   */
-  readonly dry_run: boolean;
-  /**
-   * Per-row blockers found during a dry-run scan. Empty in live
-   * mode (live restore throws on the first error). Categories:
-   * duplicate `id`, version-contiguity gap within a stream, malformed
-   * `created`, negative `version`. Causation refs pointing at ids
-   * not in the source are **not** blockers — they pass through
-   * unchanged per #783's contract.
-   */
-  readonly errors: ReadonlyArray<{ row: number; reason: string }>;
 };
 
 /**

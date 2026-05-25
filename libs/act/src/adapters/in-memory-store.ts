@@ -9,7 +9,6 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
-import { runRestoreDryRun } from "../restore-validate.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -954,7 +953,6 @@ export class InMemoryStore implements Store {
   ): Promise<RestoreResult> {
     await sleep();
     const started = Date.now();
-    if (opts.dry_run) return runRestoreDryRun(source, opts);
     const { drop_snapshots = false, on_progress } = opts;
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;
@@ -1035,8 +1033,6 @@ export class InMemoryStore implements Store {
           snapshots: droppedSnapshots,
           empty_streams: 0,
         },
-        dry_run: false,
-        errors: [],
       };
     } catch (err) {
       // Roll back to the captured snapshot — every index restored
