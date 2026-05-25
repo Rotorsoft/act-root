@@ -18,7 +18,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { runRestore } from "@rotorsoft/act";
+import { scan } from "@rotorsoft/act";
 
 /**
  * SQLite store configuration
@@ -1060,7 +1060,7 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const partial = await runRestore(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (row, meta) => {
         const createdIso =
           row.created instanceof Date
             ? row.created.toISOString()

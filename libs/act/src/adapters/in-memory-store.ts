@@ -9,7 +9,7 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
-import { runRestore } from "../restore.js";
+import { scan } from "../restore.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -967,7 +967,7 @@ export class InMemoryStore implements Store {
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
     try {
-      const partial = await runRestore(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (row, meta) => {
         const id = this._events.length;
         const created =
           row.created instanceof Date ? row.created : new Date(row.created);

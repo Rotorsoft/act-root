@@ -25,8 +25,8 @@ import type {
 import {
   ConcurrencyError,
   log,
-  runRestore,
   SNAP_EVENT,
+  scan,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import pg from "pg";
@@ -1574,7 +1574,7 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
-      const partial = await runRestore(source, opts, async (row, meta) => {
+      const partial = await scan(source, opts, async (row, meta) => {
         const created =
           row.created instanceof Date ? row.created : new Date(row.created);
         const { rows } = await client.query<{ id: number }>(

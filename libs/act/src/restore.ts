@@ -86,7 +86,7 @@ export type RestoreRowWriter = (
  * }
  * ```
  */
-export async function runRestore(
+export async function scan(
   source: AsyncIterable<RestoreRow>,
   opts: RestoreOptions,
   writeRow: RestoreRowWriter
