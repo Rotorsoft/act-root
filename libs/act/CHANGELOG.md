@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.0.0...@rotorsoft/act-v1.1.0) (2026-05-25)
+
+
+### Features
+
+* **act:** store.restore port method + tck + adapter impls (ACT-1124) ([104db4b](https://github.com/rotorsoft/act-root/commit/104db4bd18389f2e14e6be96337ed9aa62b6318a)), closes [#786](https://github.com/rotorsoft/act-root/issues/786) [#784](https://github.com/rotorsoft/act-root/issues/784) [#785](https://github.com/rotorsoft/act-root/issues/785) [#784](https://github.com/rotorsoft/act-root/issues/784) [#784](https://github.com/rotorsoft/act-root/issues/784) [#789](https://github.com/rotorsoft/act-root/issues/789) [#802](https://github.com/rotorsoft/act-root/issues/802) [#783](https://github.com/rotorsoft/act-root/issues/783)
+
 # [@rotorsoft/act-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v0.46.0...@rotorsoft/act-v1.0.0) (2026-05-21)
 
 
