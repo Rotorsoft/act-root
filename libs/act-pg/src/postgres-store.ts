@@ -11,6 +11,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreOptions,
+  RestoreResult,
+  RestoreRow,
   Schema,
   Schemas,
   Store,
@@ -1531,6 +1534,80 @@ export class PostgresStore implements Store {
       }
       await client.query("COMMIT");
       return result;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   *
+   * Wraps the entire rebuild in a single `BEGIN`/`COMMIT` transaction
+   * — on any throw the transaction rolls back and the store ends
+   * byte-for-byte unchanged. `TRUNCATE ... RESTART IDENTITY CASCADE`
+   * wipes events + resets the serial sequence to 1; the streams
+   * table is cleared in the same statement via `CASCADE`-like
+   * `DELETE`. Rows are inserted one at a time with explicit columns
+   * (skipping `id`) so the serial assigns dense ids from 1.
+   *
+   * Causation refs in `meta.causation.event.id` are remapped through
+   * the `old → new` table built as rows land. References to ids not
+   * in the source pass through unchanged.
+   *
+   * `created` is preserved verbatim from the source.
+   */
+  async restore(
+    source: AsyncIterable<RestoreRow>,
+    _opts: RestoreOptions = {}
+  ): Promise<RestoreResult> {
+    const started = Date.now();
+    const client = await this._pool.connect();
+    try {
+      await client.query("BEGIN");
+      // RESTART IDENTITY resets the id sequence; CASCADE handles any
+      // future FK refs (none today, but cheap insurance).
+      await client.query(
+        `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
+      );
+      await client.query(`TRUNCATE TABLE ${this._fqs}`);
+      const idMap = new Map<number, number>();
+      let kept = 0;
+      for await (const row of source) {
+        // Rewrite causation refs to the new id space before insert.
+        let meta = row.meta;
+        const causedBy = meta.causation.event?.id;
+        if (causedBy !== undefined) {
+          const remapped = idMap.get(causedBy);
+          if (remapped !== undefined && remapped !== causedBy) {
+            meta = {
+              ...meta,
+              causation: {
+                ...meta.causation,
+                event: { ...meta.causation.event!, id: remapped },
+              },
+            };
+          }
+        }
+        const created =
+          row.created instanceof Date ? row.created : new Date(row.created);
+        const { rows } = await client.query<{ id: number }>(
+          `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
+           VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
+          [row.name, row.data, row.stream, row.version, created, meta]
+        );
+        idMap.set(row.id, rows[0]!.id);
+        kept++;
+      }
+      await client.query("COMMIT");
+      return {
+        kept,
+        duration_ms: Date.now() - started,
+        dropped: { closed_streams: 0, snapshots: 0, empty_streams: 0 },
+        dry_run: false,
+      };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;

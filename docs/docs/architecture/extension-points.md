@@ -33,7 +33,7 @@ The `dispose()` port collects cleanup callbacks. Adapters' `dispose()` methods a
 
 ## Store contract
 
-The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these twelve things:
+The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these things:
 
 ```ts
 interface Store extends Disposable {
@@ -51,6 +51,9 @@ interface Store extends Disposable {
   truncate(targets): Promise<Map<stream, { deleted; committed }>>;
   query_streams(callback, query?): Promise<QueryStreamsResult>;
   query_stats(input, options?): Promise<Map<stream, StreamStats>>;
+  // Optional, capability-gated:
+  notify?(handler): NotifyDisposer | Promise<NotifyDisposer>;
+  restore?(source: AsyncIterable<RestoreRow>, opts?): Promise<RestoreResult>;
 }
 ```
 
@@ -60,12 +63,15 @@ interface Store extends Disposable {
 
 `query_stats` is the per-stream-aggregate primitive (added in [ACT-639](https://github.com/Rotorsoft/act-root/issues/639)). Default returns the head event per stream via an indexed path; opt-in `count`/`tail`/`names` trigger a full scan but share it. Input is `string[]` for an enumerated set or `Pick<StreamFilter, "stream" | "stream_exact">` for pattern selection — subscription-level filters (`source`, `blocked`) live on `query_streams`; compose the two for "stats for blocked subscriptions" workflows.
 
+`restore` is the offline wipe-and-rebuild primitive (added in [ACT-1124](https://github.com/Rotorsoft/act-root/issues/783)). Capability-gated — adapters that can't atomically wipe and reinsert in one transaction don't have to implement it. The TCK exercises the suite only when the adapter passes `capabilities: { restore: true }`. Source is an `AsyncIterable<RestoreRow>` so multi-million-row backups don't OOM; each row carries the original `id` so the adapter can build a per-call `old → new` map and rewrite `meta.causation.event.id` on insert (causation chains survive the renumber). `created` is preserved verbatim — distinct from `commit`, which always stamps `now()`. The events table is reseeded with dense ids from 1 (PG `RESTART IDENTITY`, SQLite `sqlite_sequence` reset); the streams/subscriptions table is wiped and reactions re-subscribe on the next settle cycle. `RestoreOptions` is empty in v1; #784 and #785 extend it with compaction toggles and a migration overlay respectively.
+
 ### Invariants an adapter must hold
 
 - **Per-stream version monotonicity**: every event for a given stream has a `version` that's strictly greater than the previous event's `version` for that stream, starting at 0.
 - **Optimistic concurrency**: when `expectedVersion` is provided, `commit` MUST throw `ConcurrencyError` if the stream's current head version doesn't match. This includes catching adapter-specific unique-constraint violations and re-throwing as `ConcurrencyError`. Callers cannot retry correctly on adapter-specific errors.
 - **Atomic commits**: a multi-event commit is all-or-nothing. Either all events land or none do.
 - **Atomic truncate**: `truncate` deletes all events for a stream and inserts the seed event in a single transaction. Partial states are not observable.
+- **Atomic restore** (when implemented): `restore` wipes events + streams and rewrites the source rows in a single transaction. On any throw mid-iteration, the store reverts byte-for-byte to its pre-call state. Cache invalidation after restore is the caller's responsibility — restore does not touch the `Cache` port.
 - **Lease exclusivity**: a successful `claim` returns leases that no concurrent `claim()` can return again until released by `ack`/`block`/timeout.
 - **Tombstone semantics**: a tombstone event is a regular event with `name === TOMBSTONE_EVENT`. Adapters don't need to know what it means — the framework's `action()` reads the head event to decide. Adapters just need to return tombstones in queries like any other event.
 

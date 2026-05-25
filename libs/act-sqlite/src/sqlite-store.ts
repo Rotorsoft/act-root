@@ -9,6 +9,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreOptions,
+  RestoreResult,
+  RestoreRow,
   Schemas,
   Store,
   StreamFilter,
@@ -1025,5 +1028,83 @@ export class SqliteStore implements Store {
     }
 
     return result;
+  }
+
+  /**
+   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   *
+   * Wraps the entire rebuild in a single libsql `write` transaction
+   * — on any throw the transaction rolls back and the store is
+   * byte-for-byte unchanged. `DELETE FROM events` + `DELETE FROM
+   * streams` wipe both tables; `DELETE FROM sqlite_sequence WHERE
+   * name = 'events'` resets the autoincrement counter so the new
+   * sequence is dense from 1.
+   *
+   * Causation refs in `meta.causation.event.id` are remapped through
+   * the `old → new` table built as rows land. References to ids not
+   * in the source pass through unchanged.
+   *
+   * `created` is preserved verbatim from the source.
+   */
+  async restore(
+    source: AsyncIterable<RestoreRow>,
+    _opts: RestoreOptions = {}
+  ): Promise<RestoreResult> {
+    const started = Date.now();
+    const tx = await this.client.transaction("write");
+    try {
+      await tx.execute("DELETE FROM events");
+      await tx.execute("DELETE FROM streams");
+      // Reset the autoincrement counter so the new sequence is dense
+      // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
+      // canonical SQLite reset; safe even if the row doesn't exist.
+      await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
+      const idMap = new Map<number, number>();
+      let kept = 0;
+      for await (const row of source) {
+        // Rewrite causation refs to the new id space before insert.
+        let meta = row.meta;
+        const causedBy = meta.causation.event?.id;
+        if (causedBy !== undefined) {
+          const remapped = idMap.get(causedBy);
+          if (remapped !== undefined && remapped !== causedBy) {
+            meta = {
+              ...meta,
+              causation: {
+                ...meta.causation,
+                event: { ...meta.causation.event!, id: remapped },
+              },
+            };
+          }
+        }
+        const createdIso =
+          row.created instanceof Date
+            ? row.created.toISOString()
+            : new Date(row.created).toISOString();
+        const ins = await tx.execute({
+          sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
+          args: [
+            row.stream,
+            row.version,
+            row.name,
+            JSON.stringify(row.data),
+            JSON.stringify(meta),
+            createdIso,
+          ],
+        });
+        idMap.set(row.id, Number(ins.lastInsertRowid));
+        kept++;
+      }
+      await tx.commit();
+      return {
+        kept,
+        duration_ms: Date.now() - started,
+        dropped: { closed_streams: 0, snapshots: 0, empty_streams: 0 },
+        dry_run: false,
+      };
+    } catch (error) {
+      await tx.rollback();
+      throw error;
+    }
   }
 }

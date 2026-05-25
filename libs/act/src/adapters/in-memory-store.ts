@@ -20,6 +20,9 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
+  RestoreOptions,
+  RestoreResult,
+  RestoreRow,
   Schema,
   Schemas,
   Store,
@@ -927,5 +930,107 @@ export class InMemoryStore implements Store {
     for (const id of this._maxEventIdByStream.values()) if (id > max) max = id;
     this._maxNonSnapEventId = max;
     return result;
+  }
+
+  /**
+   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   *
+   * Captures every index state up front, clears it, then iterates the
+   * source. Any throw mid-iteration restores the snapshot, leaving
+   * the store byte-for-byte unchanged from the operator's
+   * perspective.
+   *
+   * `id`s are reassigned `0..N-1` as rows arrive (matching the
+   * adapter's commit-id convention — InMemory uses `_events.length`).
+   * `created` is preserved verbatim from the source. Causation
+   * references in `meta.causation.event.id` are remapped via the
+   * `old → new` table that's built as rows land — references to ids
+   * not in the source pass through unchanged.
+   */
+  async restore(
+    source: AsyncIterable<RestoreRow>,
+    _opts: RestoreOptions = {}
+  ): Promise<RestoreResult> {
+    await sleep();
+    const started = Date.now();
+    // Snapshot every index so we can roll back on throw.
+    const prevEvents = this._events;
+    const prevStreams = this._streams;
+    const prevStreamVersions = this._streamVersions;
+    const prevMaxEventIdByStream = this._maxEventIdByStream;
+    const prevMaxNonSnapEventId = this._maxNonSnapEventId;
+    // Swap in fresh state for the duration of the rebuild.
+    this._events = [];
+    this._streams = new Map();
+    this._streamVersions = new Map();
+    this._maxEventIdByStream = new Map();
+    this._maxNonSnapEventId = -1;
+    // `old_id → new_id` map for causation remap. Populated as rows
+    // land so causation chains that quote earlier events resolve
+    // naturally (causation always points at lower ids).
+    const idMap = new Map<number, number>();
+    try {
+      let kept = 0;
+      for await (const row of source) {
+        const id = this._events.length;
+        const created =
+          row.created instanceof Date ? row.created : new Date(row.created);
+        // Rewrite causation refs to the new id space.
+        let meta = row.meta;
+        const causedBy = meta.causation.event?.id;
+        if (causedBy !== undefined) {
+          const remapped = idMap.get(causedBy);
+          if (remapped !== undefined && remapped !== causedBy) {
+            meta = {
+              ...meta,
+              causation: {
+                ...meta.causation,
+                event: { ...meta.causation.event!, id: remapped },
+              },
+            };
+          }
+        }
+        const committed: Committed<Schemas, keyof Schemas> = {
+          id,
+          stream: row.stream,
+          version: row.version,
+          created,
+          name: row.name,
+          data: row.data as Schemas[keyof Schemas],
+          meta,
+        };
+        this._events.push(committed);
+        idMap.set(row.id, id);
+        // Last row per stream wins for the version watermark — the
+        // source is expected to be in commit order, so this is also
+        // the highest version. We don't comparison-guard because the
+        // source contract is "give me events in order"; out-of-order
+        // sources get last-wins, which is no worse than the legacy
+        // raw-SQL restore.
+        this._streamVersions.set(row.stream, row.version);
+        if (row.name !== SNAP_EVENT) {
+          this._maxEventIdByStream.set(row.stream, id);
+          // `id` is `_events.length` post-push; monotonically grows
+          // within the restore loop. No `>` comparison needed.
+          this._maxNonSnapEventId = id;
+        }
+        kept++;
+      }
+      return {
+        kept,
+        duration_ms: Date.now() - started,
+        dropped: { closed_streams: 0, snapshots: 0, empty_streams: 0 },
+        dry_run: false,
+      };
+    } catch (err) {
+      // Roll back to the captured snapshot — every index restored
+      // exactly as it was before the call started.
+      this._events = prevEvents;
+      this._streams = prevStreams;
+      this._streamVersions = prevStreamVersions;
+      this._maxEventIdByStream = prevMaxEventIdByStream;
+      this._maxNonSnapEventId = prevMaxNonSnapEventId;
+      throw err;
+    }
   }
 }
