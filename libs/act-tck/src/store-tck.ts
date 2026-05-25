@@ -1,4 +1,9 @@
-import { ConcurrencyError, SNAP_EVENT, TOMBSTONE_EVENT } from "@rotorsoft/act";
+import {
+  ConcurrencyError,
+  SNAP_EVENT,
+  TOMBSTONE_EVENT,
+  validateRestoreRow,
+} from "@rotorsoft/act";
 import type {
   BlockedLease,
   Committed,
@@ -2053,7 +2058,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             row(1, s, 0, "Incremented", t, { amount: 1 }),
             row(2, s, 1, "Incremented", t, { amount: 2 }),
           ]),
-          { dry_run: true, on_progress: (p) => progressCalls.push(p.processed) }
+          {
+            dry_run: true,
+            on_progress: (p) => progressCalls.push(p.processed),
+            // Pass the default validator so blocker reporting is
+            // exercised end-to-end through the option callback.
+            validate: validateRestoreRow(),
+          }
         );
         expect(result.dry_run).toBe(true);
         expect(result.kept).toBe(2);
@@ -2087,13 +2098,24 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               meta: { correlation: "c", causation: {} },
             },
           ]),
-          { dry_run: true }
+          { dry_run: true, validate: validateRestoreRow() }
         );
         const reasons = result.errors.map((e) => e.reason).join("\n");
         expect(reasons).toMatch(/Duplicate id: 1/);
         expect(reasons).toMatch(/Version gap on /);
         expect(reasons).toMatch(/Negative version: -1/);
         expect(reasons).toMatch(/Malformed created: not-a-date/);
+      });
+
+      it("dry_run without validate: empty errors (validation is caller-driven)", async () => {
+        const s = `restore-no-validator-${uid()}`;
+        const t = new Date("2021-04-01T00:00:00.000Z");
+        const result = await store.restore!(
+          asSource([row(1, s, 0, "Incremented", t, { amount: 1 })]),
+          { dry_run: true }
+        );
+        expect(result.dry_run).toBe(true);
+        expect(result.errors).toEqual([]);
       });
 
       it("live restore returns empty errors", async () => {

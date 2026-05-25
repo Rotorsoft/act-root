@@ -27,7 +27,6 @@ import {
   log,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
-  validateRestoreRow,
 } from "@rotorsoft/act";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
@@ -1565,26 +1564,28 @@ export class PostgresStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    const { drop_snapshots = false, dry_run = false, on_progress } = opts;
-    // Dry-run path — validate the source without opening a transaction.
-    // We never TRUNCATE; the store stays exactly as it was.
+    const {
+      drop_snapshots = false,
+      dry_run = false,
+      on_progress,
+      validate,
+    } = opts;
+    // Dry-run path — iterate without opening a transaction. Adapters
+    // don't know validation policy; if the caller passed `validate`,
+    // we collect per-row blockers and surface them on the result.
+    // The store is never touched in this branch.
     if (dry_run) {
       const errors: Array<{ row: number; reason: string }> = [];
-      const seenIds = new Set<number>();
-      const expectedVersionByStream = new Map<string, number>();
       let kept = 0;
       let droppedSnapshots = 0;
       let rowIdx = 0;
       for await (const row of source) {
         rowIdx++;
         if (on_progress) on_progress({ processed: rowIdx });
-        validateRestoreRow(
-          row,
-          rowIdx,
-          seenIds,
-          expectedVersionByStream,
-          errors
-        );
+        if (validate) {
+          for (const r of validate(row, rowIdx))
+            errors.push({ row: rowIdx, reason: r.reason });
+        }
         if (drop_snapshots && row.name === SNAP_EVENT) {
           droppedSnapshots++;
           continue;

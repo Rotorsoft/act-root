@@ -148,6 +148,29 @@ export type RestoreOptions = {
    * reporting get it without a config knob.
    */
   readonly on_progress?: (p: { processed: number; total?: number }) => void;
+
+  /**
+   * Optional dry-run validator. When `dry_run: true` and this is
+   * provided, the adapter calls it once per row and threads the
+   * returned blockers into {@link RestoreResult.errors} (with the
+   * row index attached). Has no effect when `dry_run` is false.
+   *
+   * The default `validateRestoreRow()` factory exported from
+   * `@rotorsoft/act` builds a closure covering the four standard
+   * blocker categories (duplicate id, version-contiguity gap,
+   * malformed `created`, negative version). Callers wanting to add
+   * custom checks compose around it.
+   *
+   * **Adapters don't define validation policy.** Keeping the
+   * validator in caller-land means the blocker contract lives in
+   * one place (the framework), and adapter implementations stay
+   * focused on the wipe-and-rebuild mechanics. Third-party
+   * adapters get this behavior for free.
+   */
+  readonly validate?: (
+    row: RestoreRow,
+    rowIdx: number
+  ) => ReadonlyArray<{ reason: string }>;
 };
 
 /**

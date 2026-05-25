@@ -9,7 +9,6 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
-import { validateRestoreRow } from "../restore-validate.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -954,27 +953,29 @@ export class InMemoryStore implements Store {
   ): Promise<RestoreResult> {
     await sleep();
     const started = Date.now();
-    const { drop_snapshots = false, dry_run = false, on_progress } = opts;
-    // Dry-run path — validate without mutating. Single pass, no
+    const {
+      drop_snapshots = false,
+      dry_run = false,
+      on_progress,
+      validate,
+    } = opts;
+    // Dry-run path — iterate without mutating. Adapters don't know
+    // validation policy; if the caller passed `validate`, we collect
+    // per-row blockers and surface them on the result. No
     // snapshot/rollback bookkeeping needed because we never touch
     // `this._*` indexes.
     if (dry_run) {
       const errors: Array<{ row: number; reason: string }> = [];
-      const seenIds = new Set<number>();
-      const expectedVersionByStream = new Map<string, number>();
       let kept = 0;
       let droppedSnapshots = 0;
       let rowIdx = 0;
       for await (const row of source) {
         rowIdx++;
         if (on_progress) on_progress({ processed: rowIdx });
-        validateRestoreRow(
-          row,
-          rowIdx,
-          seenIds,
-          expectedVersionByStream,
-          errors
-        );
+        if (validate) {
+          for (const r of validate(row, rowIdx))
+            errors.push({ row: rowIdx, reason: r.reason });
+        }
         if (drop_snapshots && row.name === SNAP_EVENT) {
           droppedSnapshots++;
           continue;
