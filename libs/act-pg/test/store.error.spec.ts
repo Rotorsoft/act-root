@@ -317,4 +317,36 @@ describe("PostgresStore", () => {
       expect(result).toBe(0);
     });
   });
+
+  describe("restore", () => {
+    it("swallows ROLLBACK error after a failed restore", async () => {
+      // BEGIN succeeds, first TRUNCATE throws, then ROLLBACK ITSELF
+      // throws — the catch in `restore` wraps ROLLBACK in
+      // `.catch(() => {})` so the original error propagates rather
+      // than the rollback's. Without this swallow path being
+      // exercised, the function would never be called and coverage
+      // would dip below 100% on PostgresStore.
+      const queryMock = vi
+        .fn()
+        .mockResolvedValueOnce(undefined) // BEGIN
+        .mockRejectedValueOnce(new Error("truncate fail")) // TRUNCATE events
+        .mockRejectedValueOnce(new Error("rollback fail")); // ROLLBACK
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(
+        // @ts-expect-error mock
+        makeClient(queryMock)
+      );
+      const empty: AsyncIterable<{
+        id: number;
+        name: string;
+        data: unknown;
+        stream: string;
+        version: number;
+        created: Date;
+        meta: { correlation: string; causation: Record<string, never> };
+      }> = (async function* () {
+        // never yields — TRUNCATE fails before we get here
+      })();
+      await expect(store.restore(empty)).rejects.toThrow("truncate fail");
+    });
+  });
 });

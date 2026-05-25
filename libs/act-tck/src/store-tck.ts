@@ -3,6 +3,7 @@ import type {
   BlockedLease,
   Committed,
   Lease,
+  RestoreRow,
   Store,
   StoreNotification,
 } from "@rotorsoft/act/types";
@@ -32,6 +33,14 @@ export type StoreCapabilities = {
    * in the adapter's own suite.
    */
   readonly notify?: boolean;
+  /**
+   * Adapter implements {@link Store.restore}. When `true`, the TCK
+   * runs the full restore suite — empty-source / single-stream /
+   * multi-stream happy paths, ISO-string `created`, pre-existing
+   * wipe, subscription clearing, causation remap, and atomic
+   * rollback on mid-iteration throw.
+   */
+  readonly restore?: boolean;
 };
 
 /**
@@ -96,7 +105,10 @@ export type StoreTckOptions = {
 export const runStoreTck = (options: StoreTckOptions): void => {
   describe(`TCK / Store / ${options.name}`, () => {
     let store: Store;
-    const caps = options.capabilities ?? {};
+    // Spread (rather than `?? {}`) so the default-empty path doesn't
+    // create a branch every adapter has to disprove. `{ ...undefined }`
+    // is a runtime no-op that yields `{}`.
+    const caps: StoreCapabilities = { ...options.capabilities };
 
     beforeAll(async () => {
       store = await options.factory();
@@ -1621,6 +1633,371 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         for (let i = 1; i < committed.length; i++) {
           expect(committed[i].id).toBeGreaterThan(committed[i - 1].id);
         }
+      });
+    });
+
+    // Use `describe.skipIf` rather than `if (caps.restore) { describe(...) }`
+    // so the gating lives inside vitest's skip mechanism instead of an
+    // `if` branch every consumer would have to disprove (all three
+    // in-tree adapters opt in to restore).
+    describe.skipIf(!caps.restore)("restore (capability)", () => {
+      // Restore wipes the whole store — every test starts from a
+      // freshly-dropped + seeded baseline so no test inherits
+      // another's post-restore state and so subsequent TCK blocks
+      // (notify) get a predictable empty store.
+      beforeEach(async () => {
+        await store.drop();
+        await store.seed();
+      });
+
+      /** Adapt a row array into the AsyncIterable contract. */
+      const asSource = (rows: RestoreRow[]): AsyncIterable<RestoreRow> =>
+        (async function* () {
+          for (const r of rows) yield r;
+        })();
+
+      /**
+       * Build a RestoreRow with stub meta + the given created date.
+       * `originalId` populates `RestoreRow.id` — used by the adapter
+       * to key the causation remap. Tests pass arbitrary values
+       * (often a counter) since they're only consumed by the map.
+       */
+      const row = (
+        originalId: number,
+        stream: string,
+        version: number,
+        name: string,
+        created: Date,
+        data: Record<string, unknown> = {}
+      ): RestoreRow => ({
+        id: originalId,
+        name,
+        data,
+        stream,
+        version,
+        created,
+        meta: { correlation: "restore-tck", causation: {} },
+      });
+
+      it("returns kept=0 on an empty source", async () => {
+        const result = await store.restore!(asSource([]));
+        expect(result.kept).toBe(0);
+        expect(result.duration_ms).toBeGreaterThanOrEqual(0);
+        expect(result.dry_run).toBe(false);
+        expect(result.dropped).toEqual({
+          closed_streams: 0,
+          snapshots: 0,
+          empty_streams: 0,
+        });
+        // Store ends empty.
+        const events = await collect(store, { limit: 10 });
+        expect(events).toHaveLength(0);
+      });
+
+      it("rebuilds a single stream and preserves `created` verbatim", async () => {
+        const s = `restore-single-${uid()}`;
+        const t0 = new Date("2020-01-01T00:00:00.000Z");
+        const t1 = new Date("2020-01-02T00:00:00.000Z");
+        const t2 = new Date("2020-01-03T00:00:00.000Z");
+        const rows = [
+          row(1, s, 0, "Incremented", t0, { amount: 1 }),
+          row(2, s, 1, "Incremented", t1, { amount: 2 }),
+          row(3, s, 2, "Decremented", t2, { amount: 1 }),
+        ];
+        const result = await store.restore!(asSource(rows));
+        expect(result.kept).toBe(3);
+        const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            back.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(back).toHaveLength(3);
+        expect(
+          back.map((e) => ({
+            stream: e.stream,
+            version: e.version,
+            name: e.name,
+            created: e.created.toISOString(),
+            data: e.data,
+          }))
+        ).toEqual([
+          {
+            stream: s,
+            version: 0,
+            name: "Incremented",
+            created: t0.toISOString(),
+            data: { amount: 1 },
+          },
+          {
+            stream: s,
+            version: 1,
+            name: "Incremented",
+            created: t1.toISOString(),
+            data: { amount: 2 },
+          },
+          {
+            stream: s,
+            version: 2,
+            name: "Decremented",
+            created: t2.toISOString(),
+            data: { amount: 1 },
+          },
+        ]);
+      });
+
+      it("rebuilds multiple streams interleaved", async () => {
+        const a = `restore-multi-a-${uid()}`;
+        const b = `restore-multi-b-${uid()}`;
+        const t = new Date("2020-06-01T00:00:00.000Z");
+        const rows = [
+          row(1, a, 0, "Incremented", t, { amount: 10 }),
+          row(2, b, 0, "Incremented", t, { amount: 20 }),
+          row(3, a, 1, "Decremented", t, { amount: 5 }),
+          row(4, b, 1, "Incremented", t, { amount: 30 }),
+        ];
+        const result = await store.restore!(asSource(rows));
+        expect(result.kept).toBe(4);
+        const aBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        const bBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            aBack.push(e);
+          },
+          { stream: a, stream_exact: true }
+        );
+        await store.query<CounterEvents>(
+          (e) => {
+            bBack.push(e);
+          },
+          { stream: b, stream_exact: true }
+        );
+        expect(aBack.map((e) => e.version)).toEqual([0, 1]);
+        expect(bBack.map((e) => e.version)).toEqual([0, 1]);
+      });
+
+      it("accepts ISO string `created` and parses to Date", async () => {
+        const s = `restore-isoc-${uid()}`;
+        const iso = "2021-07-15T12:34:56.789Z";
+        await store.restore!(
+          asSource([
+            {
+              id: 1,
+              stream: s,
+              version: 0,
+              name: "Incremented",
+              data: { amount: 1 },
+              created: iso,
+              meta: { correlation: "restore-tck", causation: {} },
+            },
+          ])
+        );
+        const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            back.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(back).toHaveLength(1);
+        expect(back[0].created.toISOString()).toBe(iso);
+      });
+
+      it("wipes pre-existing events before inserting", async () => {
+        const old = `restore-old-${uid()}`;
+        await store.commit<CounterEvents>(
+          old,
+          [inc(1), inc(2)],
+          makeMeta({ stream: old })
+        );
+        const fresh = `restore-fresh-${uid()}`;
+        const t = new Date("2020-01-01T00:00:00.000Z");
+        await store.restore!(
+          asSource([row(1, fresh, 0, "Incremented", t, { amount: 99 })])
+        );
+        // The old stream is gone.
+        const oldBack = await collect(store, {
+          stream: old,
+          stream_exact: true,
+        });
+        expect(oldBack).toHaveLength(0);
+        // Only the fresh stream remains.
+        const freshBack = await collect(store, {
+          stream: fresh,
+          stream_exact: true,
+        });
+        expect(freshBack).toHaveLength(1);
+      });
+
+      it("clears subscription/stream-position metadata", async () => {
+        const sub = `restore-sub-${uid()}`;
+        await store.subscribe([{ stream: sub, source: "anything" }]);
+        const collectStreams = async () => {
+          const out: string[] = [];
+          await store.query_streams((p) => {
+            out.push(p.stream);
+          });
+          return out;
+        };
+        const before = await collectStreams();
+        expect(before.includes(sub)).toBe(true);
+        await store.restore!(asSource([]));
+        const after = await collectStreams();
+        expect(after.includes(sub)).toBe(false);
+      });
+
+      it("preserves snapshot events through restore", async () => {
+        // SNAP_EVENT is a framework marker — restore writes it
+        // through but skips updating the max-non-snap-id indexes.
+        // Covers the `row.name !== SNAP_EVENT` false branch.
+        const s = `restore-snap-${uid()}`;
+        const t = new Date("2020-04-01T00:00:00.000Z");
+        await store.restore!(
+          asSource([
+            {
+              id: 1,
+              stream: s,
+              version: 0,
+              name: SNAP_EVENT,
+              data: { count: 42 },
+              created: t,
+              meta: { correlation: "snap", causation: {} },
+            },
+          ])
+        );
+        const back = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        expect(back).toHaveLength(1);
+        expect((back[0] as { name: string }).name).toBe(SNAP_EVENT);
+      });
+
+      it("rewrites causation refs through the old→new id map", async () => {
+        // Sparse source ids (5, 7, 9) — adapter renumbers densely;
+        // the row whose causation pointed at original id 5 must end
+        // up pointing at the new id assigned to that same row.
+        const s = `restore-caus-${uid()}`;
+        const t = new Date("2020-08-01T00:00:00.000Z");
+        const rows: RestoreRow[] = [
+          {
+            id: 5,
+            stream: s,
+            version: 0,
+            name: "Incremented",
+            data: { amount: 1 },
+            created: t,
+            meta: { correlation: "c", causation: {} },
+          },
+          {
+            id: 7,
+            stream: s,
+            version: 1,
+            name: "Incremented",
+            data: { amount: 2 },
+            created: t,
+            meta: {
+              correlation: "c",
+              causation: {
+                event: { id: 5, name: "Incremented", stream: s },
+              },
+            },
+          },
+          {
+            id: 9,
+            stream: s,
+            version: 2,
+            name: "Decremented",
+            data: { amount: 1 },
+            created: t,
+            meta: {
+              correlation: "c",
+              causation: {
+                event: { id: 7, name: "Incremented", stream: s },
+              },
+            },
+          },
+        ];
+        await store.restore!(asSource(rows));
+        const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            back.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(back).toHaveLength(3);
+        // First row's causation is empty.
+        expect(back[0].meta.causation.event).toBeUndefined();
+        // Second row's causation pointed at original id 5 → new id of row 0.
+        expect(back[1].meta.causation.event?.id).toBe(back[0].id);
+        // Third row's causation pointed at original id 7 → new id of row 1.
+        expect(back[2].meta.causation.event?.id).toBe(back[1].id);
+      });
+
+      it("leaves causation refs unmapped when the target isn't in the source", async () => {
+        const s = `restore-orphan-${uid()}`;
+        const t = new Date("2020-09-01T00:00:00.000Z");
+        await store.restore!(
+          asSource([
+            {
+              id: 1,
+              stream: s,
+              version: 0,
+              name: "Incremented",
+              data: { amount: 1 },
+              created: t,
+              meta: {
+                correlation: "c",
+                causation: {
+                  event: { id: 999, name: "Phantom", stream: "ghost" },
+                },
+              },
+            },
+          ])
+        );
+        const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            back.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(back[0].meta.causation.event?.id).toBe(999);
+      });
+
+      it("rolls back atomically when the source throws mid-iteration", async () => {
+        // Pre-seed some events the rollback must restore.
+        const original = `restore-pre-${uid()}`;
+        const committed = await store.commit<CounterEvents>(
+          original,
+          [inc(1), inc(2), inc(3)],
+          makeMeta({ stream: original })
+        );
+        const explosive: AsyncIterable<RestoreRow> = (async function* () {
+          yield row(
+            1,
+            `restore-explode-${uid()}`,
+            0,
+            "Incremented",
+            new Date(),
+            { amount: 1 }
+          );
+          throw new Error("boom");
+        })();
+        await expect(store.restore!(explosive)).rejects.toThrow("boom");
+        // Pre-call events still there.
+        const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            back.push(e);
+          },
+          { stream: original, stream_exact: true }
+        );
+        expect(back).toHaveLength(3);
+        expect(back.map((e) => e.id)).toEqual(committed.map((c) => c.id));
       });
     });
 
