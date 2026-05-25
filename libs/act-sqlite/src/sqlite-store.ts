@@ -18,6 +18,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
+import { runRestore } from "@rotorsoft/act";
 
 /**
  * SQLite store configuration
@@ -1051,7 +1052,6 @@ export class SqliteStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    const { drop_snapshots = false, on_progress } = opts;
     const tx = await this.client.transaction("write");
     try {
       await tx.execute("DELETE FROM events");
@@ -1060,32 +1060,7 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const idMap = new Map<number, number>();
-      let kept = 0;
-      let droppedSnapshots = 0;
-      let rowIdx = 0;
-      for await (const row of source) {
-        rowIdx++;
-        if (on_progress) on_progress({ processed: rowIdx });
-        if (drop_snapshots && row.name === "__snapshot__") {
-          droppedSnapshots++;
-          continue;
-        }
-        // Rewrite causation refs to the new id space before insert.
-        let meta = row.meta;
-        const causedBy = meta.causation.event?.id;
-        if (causedBy !== undefined) {
-          const remapped = idMap.get(causedBy);
-          if (remapped !== undefined && remapped !== causedBy) {
-            meta = {
-              ...meta,
-              causation: {
-                ...meta.causation,
-                event: { ...meta.causation.event!, id: remapped },
-              },
-            };
-          }
-        }
+      const partial = await runRestore(source, opts, async (row, meta) => {
         const createdIso =
           row.created instanceof Date
             ? row.created.toISOString()
@@ -1101,19 +1076,10 @@ export class SqliteStore implements Store {
             createdIso,
           ],
         });
-        idMap.set(row.id, Number(ins.lastInsertRowid));
-        kept++;
-      }
+        return Number(ins.lastInsertRowid);
+      });
       await tx.commit();
-      return {
-        kept,
-        duration_ms: Date.now() - started,
-        dropped: {
-          closed_streams: 0,
-          snapshots: droppedSnapshots,
-          empty_streams: 0,
-        },
-      };
+      return { ...partial, duration_ms: Date.now() - started };
     } catch (error) {
       await tx.rollback();
       throw error;

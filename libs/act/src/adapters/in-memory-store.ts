@@ -9,6 +9,7 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
+import { runRestore } from "../restore-validate.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -953,7 +954,6 @@ export class InMemoryStore implements Store {
   ): Promise<RestoreResult> {
     await sleep();
     const started = Date.now();
-    const { drop_snapshots = false, on_progress } = opts;
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;
     const prevStreams = this._streams;
@@ -966,39 +966,11 @@ export class InMemoryStore implements Store {
     this._streamVersions = new Map();
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
-    // `old_id → new_id` map for causation remap. Populated as rows
-    // land so causation chains that quote earlier events resolve
-    // naturally (causation always points at lower ids).
-    const idMap = new Map<number, number>();
     try {
-      let kept = 0;
-      let droppedSnapshots = 0;
-      let rowIdx = 0;
-      for await (const row of source) {
-        rowIdx++;
-        if (on_progress) on_progress({ processed: rowIdx });
-        if (drop_snapshots && row.name === SNAP_EVENT) {
-          droppedSnapshots++;
-          continue;
-        }
+      const partial = await runRestore(source, opts, async (row, meta) => {
         const id = this._events.length;
         const created =
           row.created instanceof Date ? row.created : new Date(row.created);
-        // Rewrite causation refs to the new id space.
-        let meta = row.meta;
-        const causedBy = meta.causation.event?.id;
-        if (causedBy !== undefined) {
-          const remapped = idMap.get(causedBy);
-          if (remapped !== undefined && remapped !== causedBy) {
-            meta = {
-              ...meta,
-              causation: {
-                ...meta.causation,
-                event: { ...meta.causation.event!, id: remapped },
-              },
-            };
-          }
-        }
         const committed: Committed<Schemas, keyof Schemas> = {
           id,
           stream: row.stream,
@@ -1009,31 +981,18 @@ export class InMemoryStore implements Store {
           meta,
         };
         this._events.push(committed);
-        idMap.set(row.id, id);
         // Last row per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also
-        // the highest version. We don't comparison-guard because the
-        // source contract is "give me events in order"; out-of-order
-        // sources get last-wins, which is no worse than the legacy
-        // raw-SQL restore.
+        // the highest version. Out-of-order sources get last-wins,
+        // matching the legacy raw-SQL restore.
         this._streamVersions.set(row.stream, row.version);
         if (row.name !== SNAP_EVENT) {
           this._maxEventIdByStream.set(row.stream, id);
-          // `id` is `_events.length` post-push; monotonically grows
-          // within the restore loop. No `>` comparison needed.
           this._maxNonSnapEventId = id;
         }
-        kept++;
-      }
-      return {
-        kept,
-        duration_ms: Date.now() - started,
-        dropped: {
-          closed_streams: 0,
-          snapshots: droppedSnapshots,
-          empty_streams: 0,
-        },
-      };
+        return id;
+      });
+      return { ...partial, duration_ms: Date.now() - started };
     } catch (err) {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.

@@ -26,7 +26,13 @@
  * validating a CSV is a source operation, not a store operation.
  * Adapters own only the destructive live-write path.
  */
-import type { RestoreRow } from "./types/ports.js";
+import { SNAP_EVENT } from "./ports.js";
+import type { EventMeta } from "./types/action.js";
+import type {
+  RestoreOptions,
+  RestoreResult,
+  RestoreRow,
+} from "./types/ports.js";
 
 /**
  * Per-row validator. Returns the blockers for that row (empty array
@@ -38,6 +44,94 @@ export type RestoreValidator = (
   row: RestoreRow,
   rowIdx: number
 ) => ReadonlyArray<{ reason: string }>;
+
+/**
+ * Adapter-provided write hook. Called by {@link runRestore} once per
+ * non-dropped row, with the causation-rewritten `meta` already
+ * applied. Returns the new id the adapter assigned to the row — the
+ * loop adds it to the `old → new` map so subsequent rows' causation
+ * refs resolve correctly.
+ */
+export type RestoreRowWriter = (
+  row: RestoreRow,
+  meta: EventMeta
+) => Promise<number>;
+
+/**
+ * Drive the restore iteration loop. The framework owns iteration,
+ * `drop_snapshots` filtering, `on_progress` callbacks, causation
+ * remap, and kept/dropped counting. The adapter owns only the
+ * transaction setup/wipe/commit around the call and the `writeRow`
+ * hook that performs the actual insert.
+ *
+ * Returns the partial {@link RestoreResult} (without `duration_ms`)
+ * — the caller wraps with its own timing because the duration
+ * should cover transaction setup and commit, not just the
+ * iteration window.
+ *
+ * ```typescript
+ * const started = Date.now();
+ * await openTx();
+ * await wipeAll();
+ * try {
+ *   const partial = await runRestore(source, opts, async (row, meta) => {
+ *     const newId = await insert(row, meta);
+ *     return newId;
+ *   });
+ *   await commit();
+ *   return { ...partial, duration_ms: Date.now() - started };
+ * } catch (err) {
+ *   await rollback();
+ *   throw err;
+ * }
+ * ```
+ */
+export async function runRestore(
+  source: AsyncIterable<RestoreRow>,
+  opts: RestoreOptions,
+  writeRow: RestoreRowWriter
+): Promise<Omit<RestoreResult, "duration_ms">> {
+  const { drop_snapshots = false, on_progress } = opts;
+  const idMap = new Map<number, number>();
+  let kept = 0;
+  let droppedSnapshots = 0;
+  let rowIdx = 0;
+  for await (const row of source) {
+    rowIdx++;
+    if (on_progress) on_progress({ processed: rowIdx });
+    if (drop_snapshots && row.name === SNAP_EVENT) {
+      droppedSnapshots++;
+      continue;
+    }
+    // Causation remap — rewrite `meta.causation.event.id` to the new
+    // id space if the source pointed at an earlier row's old id.
+    let meta = row.meta;
+    const causedBy = meta.causation.event?.id;
+    if (causedBy !== undefined) {
+      const remapped = idMap.get(causedBy);
+      if (remapped !== undefined && remapped !== causedBy) {
+        meta = {
+          ...meta,
+          causation: {
+            ...meta.causation,
+            event: { ...meta.causation.event!, id: remapped },
+          },
+        };
+      }
+    }
+    const newId = await writeRow(row, meta);
+    idMap.set(row.id, newId);
+    kept++;
+  }
+  return {
+    kept,
+    dropped: {
+      closed_streams: 0,
+      snapshots: droppedSnapshots,
+      empty_streams: 0,
+    },
+  };
+}
 
 /**
  * Build the default {@link RestoreValidator} closure.

@@ -25,6 +25,7 @@ import type {
 import {
   ConcurrencyError,
   log,
+  runRestore,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
@@ -1564,7 +1565,6 @@ export class PostgresStore implements Store {
     opts: RestoreOptions = {}
   ): Promise<RestoreResult> {
     const started = Date.now();
-    const { drop_snapshots = false, on_progress } = opts;
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
@@ -1574,32 +1574,7 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
-      const idMap = new Map<number, number>();
-      let kept = 0;
-      let droppedSnapshots = 0;
-      let rowIdx = 0;
-      for await (const row of source) {
-        rowIdx++;
-        if (on_progress) on_progress({ processed: rowIdx });
-        if (drop_snapshots && row.name === SNAP_EVENT) {
-          droppedSnapshots++;
-          continue;
-        }
-        // Rewrite causation refs to the new id space before insert.
-        let meta = row.meta;
-        const causedBy = meta.causation.event?.id;
-        if (causedBy !== undefined) {
-          const remapped = idMap.get(causedBy);
-          if (remapped !== undefined && remapped !== causedBy) {
-            meta = {
-              ...meta,
-              causation: {
-                ...meta.causation,
-                event: { ...meta.causation.event!, id: remapped },
-              },
-            };
-          }
-        }
+      const partial = await runRestore(source, opts, async (row, meta) => {
         const created =
           row.created instanceof Date ? row.created : new Date(row.created);
         const { rows } = await client.query<{ id: number }>(
@@ -1607,19 +1582,10 @@ export class PostgresStore implements Store {
            VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
           [row.name, row.data, row.stream, row.version, created, meta]
         );
-        idMap.set(row.id, rows[0]!.id);
-        kept++;
-      }
+        return rows[0]!.id;
+      });
       await client.query("COMMIT");
-      return {
-        kept,
-        duration_ms: Date.now() - started,
-        dropped: {
-          closed_streams: 0,
-          snapshots: droppedSnapshots,
-          empty_streams: 0,
-        },
-      };
+      return { ...partial, duration_ms: Date.now() - started };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;
