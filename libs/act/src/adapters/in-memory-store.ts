@@ -20,7 +20,6 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreResult,
   Schema,
   Schemas,
   Store,
@@ -945,8 +944,8 @@ export class InMemoryStore implements Store {
   async restore(
     driver: (
       commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
-    ) => Promise<Omit<RestoreResult, "duration_ms">>
-  ): Promise<Omit<RestoreResult, "duration_ms">> {
+    ) => Promise<void>
+  ): Promise<void> {
     await sleep();
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;
@@ -961,7 +960,7 @@ export class InMemoryStore implements Store {
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
     try {
-      return await driver(async (event) => {
+      await driver(async (event) => {
         const id = this._events.length;
         const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
         this._events.push(committed);

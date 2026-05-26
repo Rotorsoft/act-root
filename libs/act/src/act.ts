@@ -1178,10 +1178,14 @@ export class Act<
       const s = store();
       if (!s.restore) throw new Error("adapter has no restore capability");
       const started = Date.now();
-      const partial = await s.restore(async (commit) =>
-        scan(source, opts, commit)
-      );
-      return { ...partial, duration_ms: Date.now() - started };
+      let kept = 0;
+      let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
+      await s.restore(async (commit) => {
+        const partial = await scan(source, opts, commit);
+        kept = partial.kept;
+        dropped = partial.dropped;
+      });
+      return { kept, dropped, duration_ms: Date.now() - started };
     });
   }
 

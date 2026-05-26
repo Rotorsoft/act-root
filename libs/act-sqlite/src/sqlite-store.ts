@@ -9,7 +9,6 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreResult,
   Schemas,
   Store,
   StreamFilter,
@@ -1042,8 +1041,8 @@ export class SqliteStore implements Store {
   async restore(
     driver: (
       commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
-    ) => Promise<Omit<RestoreResult, "duration_ms">>
-  ): Promise<Omit<RestoreResult, "duration_ms">> {
+    ) => Promise<void>
+  ): Promise<void> {
     const tx = await this.client.transaction("write");
     try {
       await tx.execute("DELETE FROM events");
@@ -1052,7 +1051,7 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const result = await driver(async (event) => {
+      await driver(async (event) => {
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
           args: [
@@ -1067,7 +1066,6 @@ export class SqliteStore implements Store {
         return Number(ins.lastInsertRowid);
       });
       await tx.commit();
-      return result;
     } catch (error) {
       await tx.rollback();
       throw error;

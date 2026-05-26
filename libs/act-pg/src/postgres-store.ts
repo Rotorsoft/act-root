@@ -11,7 +11,6 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreResult,
   Schema,
   Schemas,
   Store,
@@ -1555,8 +1554,8 @@ export class PostgresStore implements Store {
   async restore(
     driver: (
       commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
-    ) => Promise<Omit<RestoreResult, "duration_ms">>
-  ): Promise<Omit<RestoreResult, "duration_ms">> {
+    ) => Promise<void>
+  ): Promise<void> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
@@ -1566,7 +1565,7 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
-      const result = await driver(async (event) => {
+      await driver(async (event) => {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -1582,7 +1581,6 @@ export class PostgresStore implements Store {
         return rows[0]!.id;
       });
       await client.query("COMMIT");
-      return result;
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
       throw error;

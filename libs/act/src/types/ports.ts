@@ -861,11 +861,11 @@ export interface Store extends Disposable {
    * @param driver - Orchestrator-supplied iteration callback. The
    *   adapter calls `driver(commit)` exactly once, from inside its
    *   transaction. The `commit` argument is the adapter's per-event
-   *   insert hook — it receives the event with `meta.causation` already
-   *   rewritten to the new id space and returns the new id the adapter
-   *   assigned. The driver returns the kept/dropped counts when
-   *   iteration is done; the adapter passes that result through
-   *   unchanged, and `Act.restore` wraps it with `duration_ms`.
+   *   insert hook — it receives the event with `meta.causation`
+   *   already rewritten to the new id space and returns the new id
+   *   the adapter assigned. The driver is purely transactional from
+   *   the adapter's perspective — kept/dropped counts and timing live
+   *   in `Act.restore`.
    *
    * @see {@link Act.restore} for the public entry point.
    * @see {@link truncate} for the single-stream snapshot/tombstone
@@ -874,8 +874,8 @@ export interface Store extends Disposable {
   restore?: (
     driver: (
       commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
-    ) => Promise<Omit<RestoreResult, "duration_ms">>
-  ) => Promise<Omit<RestoreResult, "duration_ms">>;
+    ) => Promise<void>
+  ) => Promise<void>;
 
   /**
    * Streams registered subscription positions to a callback, plus the

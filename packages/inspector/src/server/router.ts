@@ -1074,11 +1074,16 @@ export const inspectorRouter = t.router({
         );
       try {
         const started = Date.now();
-        const partial = await s.restore(async (commit) =>
-          scan(parseCsvRows(input.csv), {}, commit)
-        );
+        let kept = 0;
+        let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
+        await s.restore(async (commit) => {
+          const partial = await scan(parseCsvRows(input.csv), {}, commit);
+          kept = partial.kept;
+          dropped = partial.dropped;
+        });
         const result: RestoreResult = {
-          ...partial,
+          kept,
+          dropped,
           duration_ms: Date.now() - started,
         };
         recordAudit({
