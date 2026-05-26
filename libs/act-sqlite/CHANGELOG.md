@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.1.0...@rotorsoft/act-sqlite-v1.2.0) (2026-05-26)
+
+
+### Features
+
+* **act:** restoreoptions compaction + dry-run + progress (ACT-1125) ([51164c6](https://github.com/rotorsoft/act-root/commit/51164c6c8c33e8f4dac192d0d5c0a1120340e0b1)), closes [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#784](https://github.com/rotorsoft/act-root/issues/784)
+
 # [@rotorsoft/act-sqlite-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.0.1...@rotorsoft/act-sqlite-v1.1.0) (2026-05-25)
 
 
