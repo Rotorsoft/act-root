@@ -1562,7 +1562,7 @@ export class PostgresStore implements Store {
         `TRUNCATE TABLE ${this._fqt} RESTART IDENTITY CASCADE`
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
-      const result = await driver(async (event, meta) => {
+      const result = await driver(async (event) => {
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO ${this._fqt}(name, data, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6) RETURNING id`,
@@ -1572,7 +1572,7 @@ export class PostgresStore implements Store {
             event.stream,
             event.version,
             event.created,
-            meta,
+            event.meta,
           ]
         );
         return rows[0]!.id;

@@ -1048,7 +1048,7 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const result = await driver(async (event, meta) => {
+      const result = await driver(async (event) => {
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
           args: [
@@ -1056,7 +1056,7 @@ export class SqliteStore implements Store {
             event.version,
             event.name,
             JSON.stringify(event.data),
-            JSON.stringify(meta),
+            JSON.stringify(event.meta),
             event.created.toISOString(),
           ],
         });

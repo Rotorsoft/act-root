@@ -146,11 +146,11 @@ describe("scan (with committer)", () => {
         }),
       ]),
       {},
-      async (e, meta) => {
+      async (e) => {
         const newId = nextId++;
         seen.push({
           id: (e as E).id,
-          causationId: meta.causation.event?.id,
+          causationId: e.meta.causation.event?.id,
         });
         return newId;
       }
@@ -171,8 +171,8 @@ describe("scan (with committer)", () => {
         }),
       ]),
       {},
-      async (_e, meta) => {
-        causationIds.push(meta.causation.event?.id);
+      async (e) => {
+        causationIds.push(e.meta.causation.event?.id);
         return 1;
       }
     );

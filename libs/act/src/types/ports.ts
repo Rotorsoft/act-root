@@ -76,14 +76,14 @@ export type TruncateResult = Map<
  * Per-event commit hook handed by the orchestrator's restore loop to
  * the adapter's {@link Store.restore} driver. Adapters call this once
  * per event from inside their transaction; the framework owns the
- * source iteration, validation, and causation remap around it.
- * Returns the new id the adapter assigned — the framework records it
- * so subsequent events' causation refs can be rewritten to the new
- * id space.
+ * source iteration, validation, and causation remap around it. The
+ * passed event already has its `meta.causation.event.id` rewritten
+ * to the new id space (when applicable). Returns the new id the
+ * adapter assigned — the framework records it so subsequent events'
+ * causation refs can be rewritten too.
  */
 export type RestoreCommit = (
-  event: Committed<Schemas, keyof Schemas>,
-  meta: EventMeta
+  event: Committed<Schemas, keyof Schemas>
 ) => Promise<number>;
 
 /**
@@ -875,16 +875,19 @@ export interface Store extends Disposable {
    * @param driver - Orchestrator-supplied iteration callback. The
    *   adapter calls `driver(commit)` exactly once, from inside its
    *   transaction. The `commit` argument is the adapter's per-event
-   *   insert hook; the driver returns when iteration is done.
-   * @returns The value returned by `driver` (the orchestrator wraps
-   *   it with `duration_ms`). Generic so the orchestrator can shape
-   *   the result however it likes without churning this contract.
+   *   insert hook; the driver returns the kept/dropped counts when
+   *   iteration is done. The adapter passes that result through
+   *   unchanged; `Act.restore` wraps it with `duration_ms`.
    *
    * @see {@link Act.restore} for the public entry point.
    * @see {@link truncate} for the single-stream snapshot/tombstone
    *   primitive (different operation — restore wipes the whole store)
    */
-  restore?: <T>(driver: (commit: RestoreCommit) => Promise<T>) => Promise<T>;
+  restore?: (
+    driver: (
+      commit: RestoreCommit
+    ) => Promise<Omit<RestoreResult, "duration_ms">>
+  ) => Promise<Omit<RestoreResult, "duration_ms">>;
 
   /**
    * Streams registered subscription positions to a callback, plus the

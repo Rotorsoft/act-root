@@ -198,21 +198,24 @@ export async function scan(
     }
     // Causation remap — rewrite `meta.causation.event.id` to the new
     // id space if the source pointed at an earlier event's old id.
-    let meta = event.meta;
-    const causedBy = meta.causation.event?.id;
+    let toCommit = event;
+    const causedBy = event.meta.causation.event?.id;
     if (causedBy !== undefined) {
       const remapped = idMap.get(causedBy);
       if (remapped !== undefined && remapped !== causedBy) {
-        meta = {
-          ...meta,
-          causation: {
-            ...meta.causation,
-            event: { ...meta.causation.event!, id: remapped },
+        toCommit = {
+          ...event,
+          meta: {
+            ...event.meta,
+            causation: {
+              ...event.meta.causation,
+              event: { ...event.meta.causation.event!, id: remapped },
+            },
           },
         };
       }
     }
-    const newId = await commit(event, meta);
+    const newId = await commit(toCommit);
     idMap.set(event.id, newId);
     kept++;
   }

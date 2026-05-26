@@ -957,17 +957,9 @@ export class InMemoryStore implements Store {
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
     try {
-      return await driver(async (event, meta) => {
+      return await driver(async (event) => {
         const id = this._events.length;
-        const committed: Committed<Schemas, keyof Schemas> = {
-          id,
-          stream: event.stream,
-          version: event.version,
-          created: event.created,
-          name: event.name,
-          data: event.data as Schemas[keyof Schemas],
-          meta,
-        };
+        const committed: Committed<Schemas, keyof Schemas> = { ...event, id };
         this._events.push(committed);
         // Last event per stream wins for the version watermark — the
         // source is expected to be in commit order, so this is also

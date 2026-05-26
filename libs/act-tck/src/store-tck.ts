@@ -1657,10 +1657,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.seed();
       });
 
-      type Restorable = Committed<Schemas, keyof Schemas>;
-
       /** Adapt an event array into the AsyncIterable contract. */
-      const asSource = (events: Restorable[]): AsyncIterable<Restorable> =>
+      const asSource = (
+        events: Committed<Schemas, keyof Schemas>[]
+      ): AsyncIterable<Committed<Schemas, keyof Schemas>> =>
         (async function* () {
           for (const e of events) yield e;
         })();
@@ -1679,7 +1679,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         name: string,
         created: Date,
         data: Record<string, unknown> = {}
-      ): Restorable => ({
+      ): Committed<Schemas, keyof Schemas> => ({
         id: originalId,
         name,
         data,
@@ -1697,7 +1697,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        * pulling in the orchestrator.
        */
       const restore = async (
-        source: AsyncIterable<Restorable>,
+        source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
         opts: RestoreOptions = {}
       ): Promise<RestoreResult> => {
         const started = Date.now();
@@ -1908,7 +1908,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // up pointing at the new id assigned to that same row.
         const s = `restore-caus-${uid()}`;
         const t = new Date("2020-08-01T00:00:00.000Z");
-        const events: Restorable[] = [
+        const events: Committed<Schemas, keyof Schemas>[] = [
           {
             id: 5,
             stream: s,
@@ -2003,17 +2003,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1), inc(2), inc(3)],
           makeMeta({ stream: original })
         );
-        const explosive: AsyncIterable<Restorable> = (async function* () {
-          yield event(
-            1,
-            `restore-explode-${uid()}`,
-            0,
-            "Incremented",
-            new Date(),
-            { amount: 1 }
-          );
-          throw new Error("boom");
-        })();
+        const explosive: AsyncIterable<Committed<Schemas, keyof Schemas>> =
+          (async function* () {
+            yield event(
+              1,
+              `restore-explode-${uid()}`,
+              0,
+              "Incremented",
+              new Date(),
+              { amount: 1 }
+            );
+            throw new Error("boom");
+          })();
         await expect(restore(explosive)).rejects.toThrow("boom");
         // Pre-call events still there.
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
