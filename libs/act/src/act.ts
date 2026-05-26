@@ -42,8 +42,8 @@ import type {
   Logger,
   Query,
   Registry,
-  RestoreOptions,
-  RestoreResult,
+  ScanOptions,
+  ScanResult,
   Schema,
   SchemaRegister,
   Schemas,
@@ -1145,10 +1145,10 @@ export class Act<
    *   rather than buffered so multi-million-event backups don't OOM.
    *   Each event's original `id` is used as a causation lookup key but
    *   never written through — adapters renumber densely.
-   * @param opts - {@link RestoreOptions}. `drop_snapshots` skips
+   * @param opts - {@link ScanOptions}. `drop_snapshots` skips
    *   `__snapshot__` events (counted in the result); `on_progress`
    *   fires once per event.
-   * @returns {@link RestoreResult} with `kept`, `duration_ms`, and
+   * @returns {@link ScanResult} with `kept`, `duration_ms`, and
    *   `dropped` per-category counters.
    *
    * @example Round-trip a CSV backup
@@ -1172,8 +1172,8 @@ export class Act<
    */
   async restore(
     source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
-    opts: RestoreOptions = {}
-  ): Promise<RestoreResult> {
+    opts: ScanOptions = {}
+  ): Promise<ScanResult> {
     return this._scoped(async () => {
       const s = store();
       if (!s.restore) throw new Error("adapter has no restore capability");

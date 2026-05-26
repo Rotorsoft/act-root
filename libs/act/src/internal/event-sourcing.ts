@@ -28,8 +28,8 @@ import type {
   Correlator,
   Emitted,
   EventMeta,
-  RestoreOptions,
-  RestoreResult,
+  ScanOptions,
+  ScanResult,
   Schema,
   Schemas,
   Snapshot,
@@ -167,7 +167,7 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
  * Throws on the first invalid event (negative version, malformed
  * `created`) with the running index in the message.
  *
- * Returns the partial {@link RestoreResult} (without `duration_ms`)
+ * Returns the partial {@link ScanResult} (without `duration_ms`)
  * — {@link Act.restore} wraps the call with its own timing so the
  * duration covers transaction setup and commit, not just iteration.
  *
@@ -175,9 +175,9 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
  */
 export async function scan(
   source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
-  opts: RestoreOptions = {},
+  opts: ScanOptions = {},
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
-): Promise<Omit<RestoreResult, "duration_ms">> {
+): Promise<Omit<ScanResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
   const idMap = new Map<number, number>();
   let kept = 0;

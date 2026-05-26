@@ -9,8 +9,8 @@ import type {
   BlockedLease,
   Committed,
   Lease,
-  RestoreOptions,
-  RestoreResult,
+  ScanOptions,
+  ScanResult,
   Schemas,
   Store,
   StoreNotification,
@@ -1699,8 +1699,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        */
       const restore = async (
         source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
-        opts: RestoreOptions = {}
-      ): Promise<RestoreResult> => {
+        opts: ScanOptions = {}
+      ): Promise<ScanResult> => {
         const cache = new InMemoryCache();
         const app = act().build({ scoped: { store, cache } });
         try {

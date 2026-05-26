@@ -1,7 +1,7 @@
 import {
   act,
   type Committed,
-  type RestoreOptions,
+  type ScanOptions,
   type Schemas,
 } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
@@ -237,10 +237,7 @@ describe("Act.restore (orchestrator)", () => {
       await expect(
         (
           ctx.app as unknown as {
-            restore: (
-              s: AsyncIterable<E>,
-              o?: RestoreOptions
-            ) => Promise<unknown>;
+            restore: (s: AsyncIterable<E>, o?: ScanOptions) => Promise<unknown>;
           }
         ).restore(calc([]))
       ).rejects.toThrow(/has no restore capability/);

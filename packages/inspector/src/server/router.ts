@@ -3,7 +3,7 @@ import {
   type Committed,
   InMemoryCache,
   InMemoryStore,
-  type RestoreResult,
+  type ScanResult,
   type Schemas,
   type Store,
   type StreamPosition,
@@ -52,7 +52,7 @@ type AuditEntry =
       readonly timestamp: string;
       readonly action: "restore";
       readonly adapter: AdapterConfig["adapter"];
-      readonly result: RestoreResult;
+      readonly result: ScanResult;
     };
 const AUDIT_CAPACITY = 100;
 const auditLog: AuditEntry[] = [];
@@ -1062,7 +1062,7 @@ export const inspectorRouter = t.router({
    * the result in its audit log.
    *
    * Return shape carries both `count` (back-compat with pre-1127
-   * callers) and the full `RestoreResult` (for #787's UI to render
+   * callers) and the full `ScanResult` (for #787's UI to render
    * `duration_ms`, `dropped` counters, etc.).
    */
   restore: t.procedure
