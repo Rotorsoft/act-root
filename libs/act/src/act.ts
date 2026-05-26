@@ -1175,9 +1175,16 @@ export class Act<
     opts: ScanOptions = {}
   ): Promise<ScanResult> {
     return this._scoped(async () => {
+      const started = Date.now();
+      // Dry-run: validate the source without touching the store —
+      // same scan loop, no callback, no transaction, no capability
+      // check. Returns the counts a destructive restore would land.
+      if (opts.dry_run) {
+        const partial = await scan(source, opts);
+        return { ...partial, duration_ms: Date.now() - started };
+      }
       const s = store();
       if (!s.restore) throw new Error("adapter has no restore capability");
-      const started = Date.now();
       let kept = 0;
       let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
       await s.restore(async (callback) => {

@@ -246,4 +246,58 @@ describe("Act.restore (orchestrator)", () => {
       await ctx.dispose();
     }
   });
+
+  it("dry_run validates the source without touching the store", async () => {
+    const ctx = await sandbox(act().withState(Calculator));
+    const stream = `restore-dry-${Date.now()}`;
+    const t = new Date("2024-04-01T00:00:00.000Z");
+    // Spy on the store's restore so we can prove it was never invoked.
+    let restoreCalls = 0;
+    const realRestore = ctx.store.restore!.bind(ctx.store);
+    (ctx.store as { restore: unknown }).restore = async (driver: unknown) => {
+      restoreCalls++;
+      // biome-ignore lint/suspicious/noExplicitAny: test spy
+      return realRestore(driver as any);
+    };
+    try {
+      const result = await ctx.app.restore(
+        calc([
+          baseEvent({ id: 1, stream, version: 0, name: "Tick", created: t }),
+          baseEvent({ id: 2, stream, version: 1, name: "Tick", created: t }),
+        ]),
+        { dry_run: true }
+      );
+      expect(result.kept).toBe(2);
+      expect(restoreCalls).toBe(0);
+    } finally {
+      (ctx.store as { restore?: unknown }).restore = realRestore;
+      await ctx.dispose();
+    }
+  });
+
+  it("dry_run works on an adapter with no restore capability", async () => {
+    const ctx = await sandbox(act().withState(Calculator));
+    const savedRestore = ctx.store.restore;
+    (ctx.store as { restore?: unknown }).restore = undefined;
+    try {
+      const result = await ctx.app.restore(calc([baseEvent()]), {
+        dry_run: true,
+      });
+      expect(result.kept).toBe(1);
+    } finally {
+      (ctx.store as { restore?: unknown }).restore = savedRestore;
+      await ctx.dispose();
+    }
+  });
+
+  it("dry_run surfaces validation errors without touching the store", async () => {
+    const ctx = await sandbox(act().withState(Calculator));
+    try {
+      await expect(
+        ctx.app.restore(calc([baseEvent({ version: -1 })]), { dry_run: true })
+      ).rejects.toThrow(/Invalid event at index 1/);
+    } finally {
+      await ctx.dispose();
+    }
+  });
 });

@@ -1066,10 +1066,12 @@ export const inspectorRouter = t.router({
    * `duration_ms`, `dropped` counters, etc.).
    */
   restore: t.procedure
-    .input(z.object({ csv: z.string() }))
+    .input(z.object({ csv: z.string(), dry_run: z.boolean().optional() }))
     .mutation(async ({ input }) => {
       const s = getStore();
-      if (!s.restore)
+      // Dry-run skips the store contract entirely (no transaction, no
+      // capability check). Only the live path requires `Store.restore`.
+      if (!input.dry_run && !s.restore)
         throw new Error(
           "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
@@ -1080,14 +1082,19 @@ export const inspectorRouter = t.router({
         // type-erased and the Act exists purely to host the scan loop.
         const cache = new InMemoryCache();
         const app = act().build({ scoped: { store: s, cache } });
-        const result = await app.restore(parseCsvRows(input.csv));
-        await cache.dispose();
-        recordAudit({
-          timestamp: new Date().toISOString(),
-          action: "restore",
-          adapter: currentConfig!.adapter,
-          result,
+        const result = await app.restore(parseCsvRows(input.csv), {
+          dry_run: input.dry_run,
         });
+        await cache.dispose();
+        // Only the destructive path leaves an operational trace —
+        // dry-runs are diagnostic and shouldn't pollute the audit log.
+        if (!input.dry_run)
+          recordAudit({
+            timestamp: new Date().toISOString(),
+            action: "restore",
+            adapter: currentConfig!.adapter,
+            result,
+          });
         return { ok: true as const, count: result.kept, result };
       } catch (error) {
         throw new Error(

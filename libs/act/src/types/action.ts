@@ -582,6 +582,19 @@ export type ScanOptions = {
    * config knob.
    */
   readonly on_progress?: (p: { processed: number; total?: number }) => void;
+
+  /**
+   * When `true`, {@link IAct.restore} runs the scan loop without
+   * touching the store — events are validated and counted but no
+   * transaction is opened and no rows are written. Returned `kept` /
+   * `dropped` reflect what a subsequent destructive restore against
+   * the same source would land; a throw means the source has a
+   * blocker (the running index pinpoints it).
+   *
+   * No `Store.restore` capability is required for a dry-run — the
+   * adapter is never called. Default `false`.
+   */
+  readonly dry_run?: boolean;
 };
 
 /**
