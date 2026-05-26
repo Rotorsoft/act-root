@@ -144,7 +144,6 @@ describe("restore via Store.restore (ACT-1127)", () => {
     expect(result.count).toBe(2);
     expect(result.result.kept).toBe(2);
     expect(result.result.duration_ms).toBeGreaterThanOrEqual(0);
-    expect(result.result.dry_run).toBe(false);
     // Verify the post-restore store has the events back.
     const verify = await caller.query({});
     expect(verify.events).toHaveLength(2);

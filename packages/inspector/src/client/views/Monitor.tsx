@@ -217,7 +217,7 @@ export function Monitor({ onStream, onBlockedCount }: MonitorProps) {
  * not a compliance log.
  */
 // ACT-1127 widened the audit log to a discriminated union — restore
-// entries carry the full RestoreResult instead of priority/affected.
+// entries carry the full ScanResult instead of priority/affected.
 type AuditEntry =
   | {
       timestamp: string;
@@ -238,7 +238,6 @@ type AuditEntry =
           snapshots: number;
           empty_streams: number;
         };
-        dry_run: boolean;
       };
     };
 

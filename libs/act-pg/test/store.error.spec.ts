@@ -335,18 +335,14 @@ describe("PostgresStore", () => {
         // @ts-expect-error mock
         makeClient(queryMock)
       );
-      const empty: AsyncIterable<{
-        id: number;
-        name: string;
-        data: unknown;
-        stream: string;
-        version: number;
-        created: Date;
-        meta: { correlation: string; causation: Record<string, never> };
-      }> = (async function* () {
-        // never yields — TRUNCATE fails before we get here
-      })();
-      await expect(store.restore(empty)).rejects.toThrow("truncate fail");
+      // Driver that would write one event, but TRUNCATE fails first
+      // so the driver body never runs. The rollback then itself fails,
+      // which the `.catch(() => {})` in the adapter swallows.
+      await expect(
+        store.restore(async () => {
+          throw new Error("driver should not be reached");
+        })
+      ).rejects.toThrow("truncate fail");
     });
   });
 });

@@ -1,8 +1,9 @@
 import {
+  act,
   type Committed,
+  InMemoryCache,
   InMemoryStore,
-  type RestoreResult,
-  type RestoreRow,
+  type ScanResult,
   type Schemas,
   type Store,
   type StreamPosition,
@@ -51,7 +52,7 @@ type AuditEntry =
       readonly timestamp: string;
       readonly action: "restore";
       readonly adapter: AdapterConfig["adapter"];
-      readonly result: RestoreResult;
+      readonly result: ScanResult;
     };
 const AUDIT_CAPACITY = 100;
 const auditLog: AuditEntry[] = [];
@@ -276,14 +277,18 @@ function csvParseLine(line: string): string[] {
 }
 
 /**
- * Stream a CSV blob into `AsyncIterable<RestoreRow>` consumed by
- * `Store.restore` (#786). The blob still arrives as a single string
- * from the tRPC input, but the parser yields one row at a time so
- * the adapter never holds the full parsed array in memory alongside
- * the source. The header row format matches `backup`'s output —
- * round-tripping is the primary use case.
+ * Stream a CSV blob into `AsyncIterable<Committed<Schemas, keyof
+ * Schemas>>` consumed by `Store.restore` via the scan driver (#786).
+ * The blob still arrives as a single string from the tRPC input, but
+ * the parser yields one event at a time so the adapter never holds
+ * the full parsed array in memory alongside the source. The header
+ * row format matches `backup`'s output — round-tripping is the
+ * primary use case. `created` is parsed to `Date` here so downstream
+ * consumers see the unified `Committed` shape.
  */
-async function* parseCsvRows(csv: string): AsyncIterable<RestoreRow> {
+async function* parseCsvRows(
+  csv: string
+): AsyncIterable<Committed<Schemas, keyof Schemas>> {
   const lines = csv.split("\n");
   if (lines.length < 2)
     throw new Error("CSV must have a header and at least one row");
@@ -304,7 +309,7 @@ async function* parseCsvRows(csv: string): AsyncIterable<RestoreRow> {
       data: JSON.parse(fields[2]!),
       stream: fields[3]!,
       version: Number.parseInt(fields[4]!, 10),
-      created: fields[5]!,
+      created: new Date(fields[5]!),
       meta: JSON.parse(fields[6]!),
     };
   }
@@ -1057,25 +1062,39 @@ export const inspectorRouter = t.router({
    * the result in its audit log.
    *
    * Return shape carries both `count` (back-compat with pre-1127
-   * callers) and the full `RestoreResult` (for #787's UI to render
+   * callers) and the full `ScanResult` (for #787's UI to render
    * `duration_ms`, `dropped` counters, etc.).
    */
   restore: t.procedure
-    .input(z.object({ csv: z.string() }))
+    .input(z.object({ csv: z.string(), dry_run: z.boolean().optional() }))
     .mutation(async ({ input }) => {
       const s = getStore();
-      if (!s.restore)
+      // Dry-run skips the store contract entirely (no transaction, no
+      // capability check). Only the live path requires `Store.restore`.
+      if (!input.dry_run && !s.restore)
         throw new Error(
           "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
       try {
-        const result = await s.restore(parseCsvRows(input.csv), {});
-        recordAudit({
-          timestamp: new Date().toISOString(),
-          action: "restore",
-          adapter: currentConfig!.adapter,
-          result,
+        // Build an empty scoped Act around the connected store so we
+        // can go through the orchestrator's public `Act.restore` path.
+        // No state/slice registration is needed — restore is
+        // type-erased and the Act exists purely to host the scan loop.
+        const cache = new InMemoryCache();
+        const app = act().build({ scoped: { store: s, cache } });
+        const result = await app.restore(parseCsvRows(input.csv), {
+          dry_run: input.dry_run,
         });
+        await cache.dispose();
+        // Only the destructive path leaves an operational trace —
+        // dry-runs are diagnostic and shouldn't pollute the audit log.
+        if (!input.dry_run)
+          recordAudit({
+            timestamp: new Date().toISOString(),
+            action: "restore",
+            adapter: currentConfig!.adapter,
+            result,
+          });
         return { ok: true as const, count: result.kept, result };
       } catch (error) {
         throw new Error(

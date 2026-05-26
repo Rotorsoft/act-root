@@ -73,81 +73,6 @@ export type TruncateResult = Map<
 >;
 
 /**
- * Source row consumed by {@link Store.restore}.
- *
- * Each row carries the columns adapters need to rebuild a Committed
- * event: stream, version, name, data, meta, and the original
- * `created` timestamp.
- *
- * `id` is the **original** event id from the source. Adapters do not
- * write this value through — restore renumbers ids densely (`1..N`
- * on PG/SQLite, `0..N-1` on InMemory). The original id is retained
- * here purely as a lookup key so adapters can build a per-call
- * `old → new` map and rewrite causation references in `meta` that
- * pointed at other events in the source.
- *
- * `created` accepts a `Date` or an ISO string so callers can stream
- * CSV / JSONL rows without parsing dates eagerly.
- */
-export type RestoreRow = {
-  /** Original event id from the source — used only for causation remap. */
-  readonly id: number;
-  readonly name: string;
-  readonly data: unknown;
-  readonly stream: string;
-  readonly version: number;
-  readonly created: string | Date;
-  readonly meta: EventMeta;
-};
-
-/**
- * Options for {@link Store.restore}.
- *
- * Empty in v1 — the type is declared so {@link Store.restore} ships
- * with a stable shape that #784 and #785 can extend additively. Those
- * tickets own the design of the extension fields; this file does not
- * preempt them.
- */
-export type RestoreOptions = {
-  /**
-   * Reserved for future fields. Empty in the v1 surface so the call
-   * site (`store.restore(source, {})`) is forward-compatible.
-   */
-  readonly _reserved?: never;
-};
-
-/**
- * Result of {@link Store.restore}.
- *
- * `kept` and `duration_ms` are populated in v1. The other fields
- * (`dropped`, `dry_run`) are placeholders kept stable so #784 can
- * light them up without changing the response shape; they're always
- * zero / `false` on the v1 path. The semantics of `dry_run` will be
- * defined by #784 (specifically: a pre-flight scan that surfaces
- * blockers — version-contiguity gaps, broken causation refs,
- * duplicate ids, malformed timestamps — without writing).
- */
-export type RestoreResult = {
-  /** Number of rows written to the rebuilt store. */
-  readonly kept: number;
-  /** Wall-clock duration of the restore call, in milliseconds. */
-  readonly duration_ms: number;
-  /**
-   * Compaction-drop counters. All zero in v1; #784 populates.
-   */
-  readonly dropped: {
-    readonly closed_streams: number;
-    readonly snapshots: number;
-    readonly empty_streams: number;
-  };
-  /**
-   * `true` when the call ran in dry-run / blocker-scan mode. Always
-   * `false` in v1; #784 wires up the option that flips it.
-   */
-  readonly dry_run: boolean;
-};
-
-/**
  * Payload delivered by {@link Store.notify} when a **different process**
  * commits one or more events to the same backing store.
  *
@@ -822,74 +747,68 @@ export interface Store extends Disposable {
   ) => Promise<TruncateResult>;
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreRow}.
+   * Atomically wipe the store and commit a fresh sequence of events
+   * inside a single transaction.
    *
    * **Capability-gated.** Adapters may or may not implement restore.
-   * Callers must guard (`if (store.restore) …`) or rely on the TCK
-   * `restore` capability flag. All three in-tree adapters (InMemory,
-   * PG, SQLite) ship it; third-party stores that can't atomically
-   * wipe-and-rebuild can omit.
+   * Third-party stores that can't atomically wipe-and-rebuild in one
+   * transaction can omit it.
    *
-   * Wipes every event and every subscription/stream-position row
-   * before inserting the source. The whole call runs inside a
-   * transaction (PG `BEGIN`/`COMMIT`, SQLite `BEGIN IMMEDIATE`, an
-   * in-process snapshot for {@link InMemoryStore}) — any error during
-   * the rebuild rolls back to the pre-call state.
+   * **Driver pattern.** The adapter is a thin transactional wrapper:
+   * open the transaction (PG `BEGIN`, SQLite `BEGIN IMMEDIATE`, an
+   * in-process snapshot for {@link InMemoryStore}), truncate the
+   * events + streams/subscriptions tables, hand the orchestrator a
+   * per-event insert callback by invoking `driver(callback)`, then
+   * commit or roll back. Any throw inside `driver` rolls back the
+   * transaction — the store ends byte-for-byte unchanged from the
+   * pre-call state.
    *
-   * **Lossless `created`.** Source rows carry their original
-   * timestamp; adapters write it through verbatim. This is the
-   * property that makes restore a viable backup/migration primitive
-   * — distinct from {@link commit}, which always stamps `now()`.
+   * The framework's scan loop (in `internal/event-sourcing.ts`) is
+   * what calls `callback` repeatedly: it iterates the source,
+   * validates each event, applies `drop_snapshots`, fires
+   * `on_progress`, rewrites `meta.causation.event.id` through the
+   * per-call `old → new` map, and counts kept/dropped. Adapters
+   * never see that logic — their job is the transaction lifecycle
+   * plus the adapter-specific `callback` body.
    *
-   * **Renumbered `id` + causation remap.** Restore reseeds ids
-   * densely (`1..N` on PG/SQLite, `0..N-1` on InMemory). The
-   * source's original ids are not written, but they are used as
-   * lookup keys: as each row is inserted, the adapter records
-   * `old → new` and rewrites `meta.causation.event.id` on subsequent
-   * rows so causation chains stay intact across the renumber.
-   * References to ids that don't appear in the source (partial
-   * backups) are left as-is.
+   * **Lossless `created`.** The `callback` receives the event's
+   * original timestamp; adapters write it through verbatim. This is
+   * the property that makes restore a viable backup/migration
+   * primitive — distinct from {@link commit}, which always stamps
+   * `now()`.
+   *
+   * **Renumbered `id`.** Adapters reseed ids densely (`1..N` on
+   * PG/SQLite, `0..N-1` on InMemory). The source's original ids are
+   * used by the orchestrator as causation lookup keys but never
+   * written through.
    *
    * **No subscription preservation.** Both the events and the
    * streams/subscriptions tables are wiped. Reactions re-subscribe
    * via the orchestrator's normal `correlate()` path on the next
-   * settle cycle; operators may need to `unblock`/`reset` projections
-   * that were tracking pre-restore watermarks.
+   * settle cycle.
    *
    * **Cache.** Restore does not touch the {@link Cache} port —
    * callers must `cache().clear()` after restore to avoid serving
    * stale snapshots. Documented; not enforced.
    *
-   * @param source - Async stream of rows in target order. Streamed
-   *   rather than buffered so multi-million-row backups don't OOM
-   *   the server.
-   * @param opts - {@link RestoreOptions}. Empty in v1; #784 / #785
-   *   extend.
-   * @returns {@link RestoreResult} with `kept` count + `duration_ms`.
+   * @param driver - Orchestrator-supplied iteration callback. The
+   *   adapter calls `driver(callback)` exactly once, from inside its
+   *   transaction. The `callback` argument is the adapter's per-event
+   *   insert hook — it receives the event with `meta.causation`
+   *   already rewritten to the new id space and returns the new id
+   *   the adapter assigned. The driver is purely transactional from
+   *   the adapter's perspective — kept/dropped counts and timing live
+   *   in `Act.restore`.
    *
-   * @example Round-trip a CSV backup
-   * ```typescript
-   * async function* parseCsv(blob: string): AsyncIterable<RestoreRow> {
-   *   for (const line of blob.split("\n").slice(1)) {
-   *     const [id, name, data, stream, version, created, meta] = parse(line);
-   *     yield { id: +id, name, data: JSON.parse(data), stream,
-   *             version: +version, created, meta: JSON.parse(meta) };
-   *   }
-   * }
-   * if (!store().restore) throw new Error("adapter has no restore");
-   * const result = await store().restore!(parseCsv(csvBlob), {});
-   * console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
-   * await cache().clear();   // operator's responsibility
-   * ```
-   *
-   * @see {@link RestoreRow}, {@link RestoreOptions}, {@link RestoreResult}
+   * @see {@link Act.restore} for the public entry point.
    * @see {@link truncate} for the single-stream snapshot/tombstone
    *   primitive (different operation — restore wipes the whole store)
    */
   restore?: (
-    source: AsyncIterable<RestoreRow>,
-    opts?: RestoreOptions
-  ) => Promise<RestoreResult>;
+    driver: (
+      callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+    ) => Promise<void>
+  ) => Promise<void>;
 
   /**
    * Streams registered subscription positions to a callback, plus the

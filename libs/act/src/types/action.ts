@@ -545,6 +545,84 @@ export type CloseResult = {
  * }
  * ```
  */
+/**
+ * Options for the orchestrator's restore scan loop, consumed by
+ * {@link IAct.restore} (and threaded through to the internal `scan`).
+ * Adapters never see these — they're entirely interpreted on the
+ * orchestrator side.
+ *
+ * Two more flags reserved for a future follow-up
+ * (`drop_closed_streams`, `drop_empty_streams`) need a pre-pass over
+ * the source — they wait on the source-shape decision (re-iterable
+ * factory vs. buffer in memory).
+ */
+export type ScanOptions = {
+  /**
+   * Skip events with `name === SNAP_EVENT`. The next snap policy
+   * regenerates snapshots against current code; useful for backups
+   * that should compact stale snapshot bytes. Counted in
+   * {@link ScanResult.dropped}`.snapshots`.
+   *
+   * Single-pass: no source-shape implications. Default `false`.
+   */
+  readonly drop_snapshots?: boolean;
+
+  /**
+   * Optional progress callback. The scan loop fires it once per event
+   * during iteration. The callback receives the running `processed`
+   * count; `total` is left `undefined` because the source is
+   * async-iterable and the orchestrator doesn't know its length up
+   * front.
+   *
+   * Synchronous handler — the scan loop calls it directly.
+   * **Throttling / batching is the caller's responsibility**: for a
+   * million-event restore, debounce in the handler rather than
+   * expecting the loop to coalesce calls. Keeping it unthrottled
+   * means callers that want every-event reporting get it without a
+   * config knob.
+   */
+  readonly on_progress?: (p: { processed: number; total?: number }) => void;
+
+  /**
+   * When `true`, {@link IAct.restore} runs the scan loop without
+   * touching the store — events are validated and counted but no
+   * transaction is opened and no rows are written. Returned `kept` /
+   * `dropped` reflect what a subsequent destructive restore against
+   * the same source would land; a throw means the source has a
+   * blocker (the running index pinpoints it).
+   *
+   * No `Store.restore` capability is required for a dry-run — the
+   * adapter is never called. Default `false`.
+   */
+  readonly dry_run?: boolean;
+};
+
+/**
+ * Result of {@link IAct.restore}.
+ *
+ * `kept` and `duration_ms` are always populated. `dropped` carries
+ * per-category counters when {@link ScanOptions.drop_snapshots} (or
+ * future compaction flags) trigger drops; otherwise zeros. Live
+ * restore is atomic — any error throws and rolls back, so there's no
+ * per-event error reporting on the result.
+ */
+export type ScanResult = {
+  /** Number of events written to the rebuilt store. */
+  readonly kept: number;
+  /** Wall-clock duration of the call, in milliseconds. */
+  readonly duration_ms: number;
+  /**
+   * Per-category drop counters. Only `snapshots` is wired in v1;
+   * `closed_streams` and `empty_streams` are reserved for the
+   * follow-up that introduces those flags.
+   */
+  readonly dropped: {
+    readonly closed_streams: number;
+    readonly snapshots: number;
+    readonly empty_streams: number;
+  };
+};
+
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
