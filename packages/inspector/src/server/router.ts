@@ -1076,8 +1076,8 @@ export const inspectorRouter = t.router({
         const started = Date.now();
         let kept = 0;
         let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
-        await s.restore(async (commit) => {
-          const partial = await scan(parseCsvRows(input.csv), {}, commit);
+        await s.restore(async (callback) => {
+          const partial = await scan(parseCsvRows(input.csv), {}, callback);
           kept = partial.kept;
           dropped = partial.dropped;
         });

@@ -1040,7 +1040,7 @@ export class SqliteStore implements Store {
    */
   async restore(
     driver: (
-      commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+      callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
     ) => Promise<void>
   ): Promise<void> {
     const tx = await this.client.transaction("write");

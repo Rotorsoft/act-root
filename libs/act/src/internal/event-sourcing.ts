@@ -176,7 +176,7 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
 export async function scan(
   source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
   opts: RestoreOptions = {},
-  commit?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+  callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<RestoreResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
   const idMap = new Map<number, number>();
@@ -191,30 +191,30 @@ export async function scan(
       droppedSnapshots++;
       continue;
     }
-    if (!commit) {
+    if (!callback) {
       kept++;
       continue;
     }
     // Causation remap — rewrite `meta.causation.event.id` to the new
     // id space if the source pointed at an earlier event's old id.
-    let toCommit = event;
+    let remapped = event;
     const causedBy = event.meta.causation.event?.id;
     if (causedBy !== undefined) {
-      const remapped = idMap.get(causedBy);
-      if (remapped !== undefined && remapped !== causedBy) {
-        toCommit = {
+      const newCausedBy = idMap.get(causedBy);
+      if (newCausedBy !== undefined && newCausedBy !== causedBy) {
+        remapped = {
           ...event,
           meta: {
             ...event.meta,
             causation: {
               ...event.meta.causation,
-              event: { ...event.meta.causation.event!, id: remapped },
+              event: { ...event.meta.causation.event!, id: newCausedBy },
             },
           },
         };
       }
     }
-    const newId = await commit(toCommit);
+    const newId = await callback(remapped);
     idMap.set(event.id, newId);
     kept++;
   }

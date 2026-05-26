@@ -1703,8 +1703,8 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const started = Date.now();
         let kept = 0;
         let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
-        await store.restore!(async (commit) => {
-          const partial = await scan(source, opts, commit);
+        await store.restore!(async (callback) => {
+          const partial = await scan(source, opts, callback);
           kept = partial.kept;
           dropped = partial.dropped;
         });
