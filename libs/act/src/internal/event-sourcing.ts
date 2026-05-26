@@ -161,8 +161,8 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
 /**
  * Scan a restore source event by event. Owns iteration, validation,
  * the `drop_snapshots` filter, the `on_progress` callback, and the
- * causation remap; adapters supply only `commit` via the driver
- * pattern (see {@link Store.restore}).
+ * causation remap; adapters supply only the per-event insert
+ * `callback` via the driver pattern (see {@link Store.restore}).
  *
  * Throws on the first invalid event (negative version, malformed
  * `created`) with the running index in the message.

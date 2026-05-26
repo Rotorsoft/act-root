@@ -933,7 +933,7 @@ export class InMemoryStore implements Store {
    * Atomically wipe-and-rebuild the store under an in-process snapshot.
    *
    * Captures every index state up front, clears it, then hands the
-   * orchestrator a per-event `commit` callback via the driver. Any
+   * orchestrator a per-event insert `callback` via the driver. Any
    * throw inside the driver restores the snapshot, leaving the store
    * byte-for-byte unchanged from the operator's perspective.
    *

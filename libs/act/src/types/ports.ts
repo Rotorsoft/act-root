@@ -758,22 +758,22 @@ export interface Store extends Disposable {
    * open the transaction (PG `BEGIN`, SQLite `BEGIN IMMEDIATE`, an
    * in-process snapshot for {@link InMemoryStore}), truncate the
    * events + streams/subscriptions tables, hand the orchestrator a
-   * per-event `commit` callback by invoking `driver(commit)`, then
+   * per-event insert callback by invoking `driver(callback)`, then
    * commit or roll back. Any throw inside `driver` rolls back the
    * transaction — the store ends byte-for-byte unchanged from the
    * pre-call state.
    *
    * The framework's scan loop (in `internal/event-sourcing.ts`) is
-   * what calls `commit` repeatedly: it iterates the source, validates
-   * each event, applies `drop_snapshots`, fires `on_progress`,
-   * rewrites `meta.causation.event.id` through the per-call
-   * `old → new` map, and counts kept/dropped. Adapters never see
-   * that logic — their job is the transaction lifecycle plus the
-   * adapter-specific `commit` body.
+   * what calls `callback` repeatedly: it iterates the source,
+   * validates each event, applies `drop_snapshots`, fires
+   * `on_progress`, rewrites `meta.causation.event.id` through the
+   * per-call `old → new` map, and counts kept/dropped. Adapters
+   * never see that logic — their job is the transaction lifecycle
+   * plus the adapter-specific `callback` body.
    *
-   * **Lossless `created`.** The `commit` callback receives the
-   * event's original timestamp; adapters write it through verbatim.
-   * This is the property that makes restore a viable backup/migration
+   * **Lossless `created`.** The `callback` receives the event's
+   * original timestamp; adapters write it through verbatim. This is
+   * the property that makes restore a viable backup/migration
    * primitive — distinct from {@link commit}, which always stamps
    * `now()`.
    *
@@ -792,8 +792,8 @@ export interface Store extends Disposable {
    * stale snapshots. Documented; not enforced.
    *
    * @param driver - Orchestrator-supplied iteration callback. The
-   *   adapter calls `driver(commit)` exactly once, from inside its
-   *   transaction. The `commit` argument is the adapter's per-event
+   *   adapter calls `driver(callback)` exactly once, from inside its
+   *   transaction. The `callback` argument is the adapter's per-event
    *   insert hook — it receives the event with `meta.causation`
    *   already rewritten to the new id space and returns the new id
    *   the adapter assigned. The driver is purely transactional from
