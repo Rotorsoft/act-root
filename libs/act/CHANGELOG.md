@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.1.0...@rotorsoft/act-v1.2.0) (2026-05-26)
+
+
+### Features
+
+* **act:** add dry_run flag to scanoptions for pre-flight restore validation ([60926a2](https://github.com/rotorsoft/act-root/commit/60926a29df5635750d2c057d60d56ccca95dac05))
+* **act:** restoreoptions compaction + dry-run + progress (ACT-1125) ([51164c6](https://github.com/rotorsoft/act-root/commit/51164c6c8c33e8f4dac192d0d5c0a1120340e0b1)), closes [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#783](https://github.com/rotorsoft/act-root/issues/783) [#784](https://github.com/rotorsoft/act-root/issues/784)
+
 # [@rotorsoft/act-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.0.0...@rotorsoft/act-v1.1.0) (2026-05-25)
 
 
