@@ -53,7 +53,7 @@ interface Store extends Disposable {
   query_stats(input, options?): Promise<Map<stream, StreamStats>>;
   // Optional, capability-gated:
   notify?(handler): NotifyDisposer | Promise<NotifyDisposer>;
-  restore?<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T>;
+  restore?(driver: (commit: (event: Committed) => Promise<number>) => Promise<Omit<RestoreResult, "duration_ms">>): Promise<Omit<RestoreResult, "duration_ms">>;
 }
 ```
 

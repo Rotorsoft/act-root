@@ -9,7 +9,7 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreCommit,
+  RestoreResult,
   Schemas,
   Store,
   StreamFilter,
@@ -1039,7 +1039,11 @@ export class SqliteStore implements Store {
    * new sequence is dense from 1. `created` is preserved verbatim
    * from the source.
    */
-  async restore<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T> {
+  async restore(
+    driver: (
+      commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+    ) => Promise<Omit<RestoreResult, "duration_ms">>
+  ): Promise<Omit<RestoreResult, "duration_ms">> {
     const tx = await this.client.transaction("write");
     try {
       await tx.execute("DELETE FROM events");

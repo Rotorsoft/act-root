@@ -11,7 +11,7 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreCommit,
+  RestoreResult,
   Schema,
   Schemas,
   Store,
@@ -1552,7 +1552,11 @@ export class PostgresStore implements Store {
    * explicit columns (skipping `id`) so the serial assigns dense ids
    * from 1. `created` is preserved verbatim from the source.
    */
-  async restore<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T> {
+  async restore(
+    driver: (
+      commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+    ) => Promise<Omit<RestoreResult, "duration_ms">>
+  ): Promise<Omit<RestoreResult, "duration_ms">> {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");

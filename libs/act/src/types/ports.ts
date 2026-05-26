@@ -73,20 +73,6 @@ export type TruncateResult = Map<
 >;
 
 /**
- * Per-event commit hook handed by the orchestrator's restore loop to
- * the adapter's {@link Store.restore} driver. Adapters call this once
- * per event from inside their transaction; the framework owns the
- * source iteration, validation, and causation remap around it. The
- * passed event already has its `meta.causation.event.id` rewritten
- * to the new id space (when applicable). Returns the new id the
- * adapter assigned — the framework records it so subsequent events'
- * causation refs can be rewritten too.
- */
-export type RestoreCommit = (
-  event: Committed<Schemas, keyof Schemas>
-) => Promise<number>;
-
-/**
  * Options for {@link Act.restore}.
  *
  * Two more flags reserved for a future follow-up
@@ -875,9 +861,11 @@ export interface Store extends Disposable {
    * @param driver - Orchestrator-supplied iteration callback. The
    *   adapter calls `driver(commit)` exactly once, from inside its
    *   transaction. The `commit` argument is the adapter's per-event
-   *   insert hook; the driver returns the kept/dropped counts when
-   *   iteration is done. The adapter passes that result through
-   *   unchanged; `Act.restore` wraps it with `duration_ms`.
+   *   insert hook — it receives the event with `meta.causation` already
+   *   rewritten to the new id space and returns the new id the adapter
+   *   assigned. The driver returns the kept/dropped counts when
+   *   iteration is done; the adapter passes that result through
+   *   unchanged, and `Act.restore` wraps it with `duration_ms`.
    *
    * @see {@link Act.restore} for the public entry point.
    * @see {@link truncate} for the single-stream snapshot/tombstone
@@ -885,7 +873,7 @@ export interface Store extends Disposable {
    */
   restore?: (
     driver: (
-      commit: RestoreCommit
+      commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
     ) => Promise<Omit<RestoreResult, "duration_ms">>
   ) => Promise<Omit<RestoreResult, "duration_ms">>;
 

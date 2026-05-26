@@ -20,7 +20,7 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreCommit,
+  RestoreResult,
   Schema,
   Schemas,
   Store,
@@ -942,7 +942,11 @@ export class InMemoryStore implements Store {
    * adapter's commit-id convention — InMemory uses `_events.length`).
    * `created` is preserved verbatim from the source.
    */
-  async restore<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T> {
+  async restore(
+    driver: (
+      commit: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+    ) => Promise<Omit<RestoreResult, "duration_ms">>
+  ): Promise<Omit<RestoreResult, "duration_ms">> {
     await sleep();
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;

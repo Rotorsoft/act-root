@@ -28,7 +28,6 @@ import type {
   Correlator,
   Emitted,
   EventMeta,
-  RestoreCommit,
   RestoreOptions,
   RestoreResult,
   Schema,
@@ -177,7 +176,7 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
 export async function scan(
   source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
   opts: RestoreOptions = {},
-  commit?: RestoreCommit
+  commit?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<RestoreResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
   const idMap = new Map<number, number>();
