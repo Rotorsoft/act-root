@@ -30,6 +30,7 @@ export {
   type HandleBatch,
 } from "./drain-cycle.js";
 export type { BoundAction, EsOps } from "./event-sourcing.js";
+export { scan } from "./event-sourcing.js";
 export {
   currentVersionOf,
   deprecatedEventNames,

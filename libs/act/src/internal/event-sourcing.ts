@@ -28,6 +28,9 @@ import type {
   Correlator,
   Emitted,
   EventMeta,
+  RestoreCommit,
+  RestoreOptions,
+  RestoreResult,
   Schema,
   Schemas,
   Snapshot,
@@ -131,6 +134,96 @@ export async function tombstone(
     if (error instanceof ConcurrencyError) return undefined;
     throw error;
   }
+}
+
+/**
+ * Per-event blocker check. Categories:
+ *
+ * - **Negative `version`** — versions are unsigned in the framework
+ *   contract.
+ * - **Malformed `created`** — `event.created` must be a valid Date
+ *   instance. Restore sources stream parsed events; the orchestrator
+ *   trusts the caller's iterator did the parsing.
+ *
+ * Cross-event invariants (duplicate ids, per-stream version gaps) are
+ * not the validator's job — DB `UNIQUE(stream, version)` catches
+ * duplicates at commit time, and gap detection is a caller-specific
+ * policy (partial backups intentionally have gaps).
+ *
+ * @internal
+ */
+function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
+  if (event.version < 0) return false;
+  if (!(event.created instanceof Date) || Number.isNaN(event.created.getTime()))
+    return false;
+  return true;
+}
+
+/**
+ * Scan a restore source event by event. Owns iteration, validation,
+ * the `drop_snapshots` filter, the `on_progress` callback, and the
+ * causation remap; adapters supply only `commit` via the driver
+ * pattern (see {@link Store.restore}).
+ *
+ * Throws on the first invalid event (negative version, malformed
+ * `created`) with the running index in the message.
+ *
+ * Returns the partial {@link RestoreResult} (without `duration_ms`)
+ * — {@link Act.restore} wraps the call with its own timing so the
+ * duration covers transaction setup and commit, not just iteration.
+ *
+ * @internal
+ */
+export async function scan(
+  source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
+  opts: RestoreOptions = {},
+  commit?: RestoreCommit
+): Promise<Omit<RestoreResult, "duration_ms">> {
+  const { drop_snapshots = false, on_progress } = opts;
+  const idMap = new Map<number, number>();
+  let kept = 0;
+  let droppedSnapshots = 0;
+  let processed = 0;
+  for await (const event of source) {
+    processed++;
+    if (!isValid(event)) throw new Error(`Invalid event at index ${processed}`);
+    if (on_progress) on_progress({ processed });
+    if (drop_snapshots && event.name === SNAP_EVENT) {
+      droppedSnapshots++;
+      continue;
+    }
+    if (!commit) {
+      kept++;
+      continue;
+    }
+    // Causation remap — rewrite `meta.causation.event.id` to the new
+    // id space if the source pointed at an earlier event's old id.
+    let meta = event.meta;
+    const causedBy = meta.causation.event?.id;
+    if (causedBy !== undefined) {
+      const remapped = idMap.get(causedBy);
+      if (remapped !== undefined && remapped !== causedBy) {
+        meta = {
+          ...meta,
+          causation: {
+            ...meta.causation,
+            event: { ...meta.causation.event!, id: remapped },
+          },
+        };
+      }
+    }
+    const newId = await commit(event, meta);
+    idMap.set(event.id, newId);
+    kept++;
+  }
+  return {
+    kept,
+    dropped: {
+      closed_streams: 0,
+      snapshots: droppedSnapshots,
+      empty_streams: 0,
+    },
+  };
 }
 
 /**

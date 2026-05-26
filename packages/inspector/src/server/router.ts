@@ -1,11 +1,11 @@
 import {
   type Committed,
   InMemoryStore,
-  type RestoreEvent,
   type RestoreResult,
   type Schemas,
   type Store,
   type StreamPosition,
+  scan,
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
@@ -276,14 +276,18 @@ function csvParseLine(line: string): string[] {
 }
 
 /**
- * Stream a CSV blob into `AsyncIterable<RestoreEvent>` consumed by
- * `Store.restore` (#786). The blob still arrives as a single string
- * from the tRPC input, but the parser yields one row at a time so
- * the adapter never holds the full parsed array in memory alongside
- * the source. The header row format matches `backup`'s output —
- * round-tripping is the primary use case.
+ * Stream a CSV blob into `AsyncIterable<Committed<Schemas, keyof
+ * Schemas>>` consumed by `Store.restore` via the scan driver (#786).
+ * The blob still arrives as a single string from the tRPC input, but
+ * the parser yields one event at a time so the adapter never holds
+ * the full parsed array in memory alongside the source. The header
+ * row format matches `backup`'s output — round-tripping is the
+ * primary use case. `created` is parsed to `Date` here so downstream
+ * consumers see the unified `Committed` shape.
  */
-async function* parseCsvRows(csv: string): AsyncIterable<RestoreEvent> {
+async function* parseCsvRows(
+  csv: string
+): AsyncIterable<Committed<Schemas, keyof Schemas>> {
   const lines = csv.split("\n");
   if (lines.length < 2)
     throw new Error("CSV must have a header and at least one row");
@@ -304,7 +308,7 @@ async function* parseCsvRows(csv: string): AsyncIterable<RestoreEvent> {
       data: JSON.parse(fields[2]!),
       stream: fields[3]!,
       version: Number.parseInt(fields[4]!, 10),
-      created: fields[5]!,
+      created: new Date(fields[5]!),
       meta: JSON.parse(fields[6]!),
     };
   }
@@ -1069,7 +1073,14 @@ export const inspectorRouter = t.router({
           "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
       try {
-        const result = await s.restore(parseCsvRows(input.csv), {});
+        const started = Date.now();
+        const partial = await s.restore(async (commit) =>
+          scan(parseCsvRows(input.csv), {}, commit)
+        );
+        const result: RestoreResult = {
+          ...partial,
+          duration_ms: Date.now() - started,
+        };
         recordAudit({
           timestamp: new Date().toISOString(),
           action: "restore",

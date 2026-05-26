@@ -9,16 +9,13 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreEvent,
-  RestoreOptions,
-  RestoreResult,
+  RestoreCommit,
   Schemas,
   Store,
   StreamFilter,
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { scan } from "@rotorsoft/act";
 
 /**
  * SQLite store configuration
@@ -1032,26 +1029,17 @@ export class SqliteStore implements Store {
   }
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
+   * Atomically wipe-and-rebuild the store inside a single libsql
+   * `write` transaction.
    *
-   * Wraps the entire rebuild in a single libsql `write` transaction
-   * — on any throw the transaction rolls back and the store is
-   * byte-for-byte unchanged. `DELETE FROM events` + `DELETE FROM
-   * streams` wipe both tables; `DELETE FROM sqlite_sequence WHERE
-   * name = 'events'` resets the autoincrement counter so the new
-   * sequence is dense from 1.
-   *
-   * Causation refs in `meta.causation.event.id` are remapped through
-   * the `old → new` table built as events land. References to ids not
-   * in the source pass through unchanged.
-   *
-   * `created` is preserved verbatim from the source.
+   * On any throw inside the driver the transaction rolls back and the
+   * store is byte-for-byte unchanged. `DELETE FROM events` + `DELETE
+   * FROM streams` wipe both tables; `DELETE FROM sqlite_sequence
+   * WHERE name = 'events'` resets the autoincrement counter so the
+   * new sequence is dense from 1. `created` is preserved verbatim
+   * from the source.
    */
-  async restore(
-    source: AsyncIterable<RestoreEvent>,
-    opts: RestoreOptions = {}
-  ): Promise<RestoreResult> {
-    const started = Date.now();
+  async restore<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T> {
     const tx = await this.client.transaction("write");
     try {
       await tx.execute("DELETE FROM events");
@@ -1060,11 +1048,7 @@ export class SqliteStore implements Store {
       // from 1. `DELETE FROM sqlite_sequence WHERE name = '?'` is the
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
-      const partial = await scan(source, opts, async (event, meta) => {
-        const createdIso =
-          event.created instanceof Date
-            ? event.created.toISOString()
-            : new Date(event.created).toISOString();
+      const result = await driver(async (event, meta) => {
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
           args: [
@@ -1073,13 +1057,13 @@ export class SqliteStore implements Store {
             event.name,
             JSON.stringify(event.data),
             JSON.stringify(meta),
-            createdIso,
+            event.created.toISOString(),
           ],
         });
         return Number(ins.lastInsertRowid);
       });
       await tx.commit();
-      return { ...partial, duration_ms: Date.now() - started };
+      return result;
     } catch (error) {
       await tx.rollback();
       throw error;

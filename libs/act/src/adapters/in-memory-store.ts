@@ -9,7 +9,6 @@
  * @category Adapters
  */
 import { DEFAULT_LANE, SNAP_EVENT, TOMBSTONE_EVENT } from "../ports.js";
-import { scan } from "../restore.js";
 import { ConcurrencyError } from "../types/errors.js";
 import type {
   BlockedLease,
@@ -21,9 +20,7 @@ import type {
   QueryStatsOptions,
   QueryStreams,
   QueryStreamsResult,
-  RestoreEvent,
-  RestoreOptions,
-  RestoreResult,
+  RestoreCommit,
   Schema,
   Schemas,
   Store,
@@ -934,26 +931,19 @@ export class InMemoryStore implements Store {
   }
 
   /**
-   * Atomically rebuild the store from a stream of {@link RestoreEvent}.
+   * Atomically wipe-and-rebuild the store under an in-process snapshot.
    *
-   * Captures every index state up front, clears it, then iterates the
-   * source. Any throw mid-iteration restores the snapshot, leaving
-   * the store byte-for-byte unchanged from the operator's
-   * perspective.
+   * Captures every index state up front, clears it, then hands the
+   * orchestrator a per-event `commit` callback via the driver. Any
+   * throw inside the driver restores the snapshot, leaving the store
+   * byte-for-byte unchanged from the operator's perspective.
    *
    * `id`s are reassigned `0..N-1` as events arrive (matching the
    * adapter's commit-id convention — InMemory uses `_events.length`).
-   * `created` is preserved verbatim from the source. Causation
-   * references in `meta.causation.event.id` are remapped via the
-   * `old → new` table that's built as events land — references to ids
-   * not in the source pass through unchanged.
+   * `created` is preserved verbatim from the source.
    */
-  async restore(
-    source: AsyncIterable<RestoreEvent>,
-    opts: RestoreOptions = {}
-  ): Promise<RestoreResult> {
+  async restore<T>(driver: (commit: RestoreCommit) => Promise<T>): Promise<T> {
     await sleep();
-    const started = Date.now();
     // Snapshot every index so we can roll back on throw.
     const prevEvents = this._events;
     const prevStreams = this._streams;
@@ -967,17 +957,13 @@ export class InMemoryStore implements Store {
     this._maxEventIdByStream = new Map();
     this._maxNonSnapEventId = -1;
     try {
-      const partial = await scan(source, opts, async (event, meta) => {
+      return await driver(async (event, meta) => {
         const id = this._events.length;
-        const created =
-          event.created instanceof Date
-            ? event.created
-            : new Date(event.created);
         const committed: Committed<Schemas, keyof Schemas> = {
           id,
           stream: event.stream,
           version: event.version,
-          created,
+          created: event.created,
           name: event.name,
           data: event.data as Schemas[keyof Schemas],
           meta,
@@ -994,7 +980,6 @@ export class InMemoryStore implements Store {
         }
         return id;
       });
-      return { ...partial, duration_ms: Date.now() - started };
     } catch (err) {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.

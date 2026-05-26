@@ -19,6 +19,7 @@ import {
   type HandleBatch,
   runCloseCycle,
   SettleLoop,
+  scan,
 } from "./internal/index.js";
 import { dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
@@ -41,6 +42,8 @@ import type {
   Logger,
   Query,
   Registry,
+  RestoreOptions,
+  RestoreResult,
   Schema,
   SchemaRegister,
   Schemas,
@@ -1122,6 +1125,63 @@ export class Act<
       const count = await store().unblock(input);
       if (count > 0 && this._reactive_events.size > 0) this._armAll();
       return count;
+    });
+  }
+
+  /**
+   * Atomically wipe the store and rebuild it from an async stream of
+   * committed events. The framework owns iteration, validation,
+   * `drop_snapshots` filtering, `on_progress`, and the per-call
+   * `old → new` causation remap; the adapter's {@link Store.restore}
+   * driver supplies the transaction lifecycle and per-event insert.
+   *
+   * Throws if the adapter has no restore capability. Throws on the
+   * first invalid event (negative version, malformed `created`) with
+   * the running index in the message; atomic transaction rollback in
+   * the adapter means a failing restore leaves the store byte-for-byte
+   * unchanged.
+   *
+   * @param source - Async stream of events in target order. Streamed
+   *   rather than buffered so multi-million-event backups don't OOM.
+   *   Each event's original `id` is used as a causation lookup key but
+   *   never written through — adapters renumber densely.
+   * @param opts - {@link RestoreOptions}. `drop_snapshots` skips
+   *   `__snapshot__` events (counted in the result); `on_progress`
+   *   fires once per event.
+   * @returns {@link RestoreResult} with `kept`, `duration_ms`, and
+   *   `dropped` per-category counters.
+   *
+   * @example Round-trip a CSV backup
+   * ```typescript
+   * async function* parseCsv(blob: string) {
+   *   for (const line of blob.split("\n").slice(1)) {
+   *     const [id, name, data, stream, version, created, meta] = parse(line);
+   *     yield {
+   *       id: +id, name, data: JSON.parse(data), stream,
+   *       version: +version, created: new Date(created),
+   *       meta: JSON.parse(meta),
+   *     };
+   *   }
+   * }
+   * const result = await app.restore(parseCsv(csvBlob), {});
+   * console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
+   * await cache().clear();   // operator's responsibility
+   * ```
+   *
+   * @see {@link Store.restore} for the underlying driver-pattern primitive.
+   */
+  async restore(
+    source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
+    opts: RestoreOptions = {}
+  ): Promise<RestoreResult> {
+    return this._scoped(async () => {
+      const s = store();
+      if (!s.restore) throw new Error("adapter has no restore capability");
+      const started = Date.now();
+      const partial = await s.restore(async (commit) =>
+        scan(source, opts, commit)
+      );
+      return { ...partial, duration_ms: Date.now() - started };
     });
   }
 
