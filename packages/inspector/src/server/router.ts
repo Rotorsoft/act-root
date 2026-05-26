@@ -1,11 +1,12 @@
 import {
+  act,
   type Committed,
+  InMemoryCache,
   InMemoryStore,
   type RestoreResult,
   type Schemas,
   type Store,
   type StreamPosition,
-  scan,
 } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
@@ -1073,19 +1074,14 @@ export const inspectorRouter = t.router({
           "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
       try {
-        const started = Date.now();
-        let kept = 0;
-        let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
-        await s.restore(async (callback) => {
-          const partial = await scan(parseCsvRows(input.csv), {}, callback);
-          kept = partial.kept;
-          dropped = partial.dropped;
-        });
-        const result: RestoreResult = {
-          kept,
-          dropped,
-          duration_ms: Date.now() - started,
-        };
+        // Build an empty scoped Act around the connected store so we
+        // can go through the orchestrator's public `Act.restore` path.
+        // No state/slice registration is needed — restore is
+        // type-erased and the Act exists purely to host the scan loop.
+        const cache = new InMemoryCache();
+        const app = act().build({ scoped: { store: s, cache } });
+        const result = await app.restore(parseCsvRows(input.csv));
+        await cache.dispose();
         recordAudit({
           timestamp: new Date().toISOString(),
           action: "restore",

@@ -3,9 +3,9 @@ import {
   type Committed,
   type RestoreOptions,
   type Schemas,
-  scan,
 } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
+import { scan } from "../src/internal/event-sourcing.js";
 import { sandbox } from "../src/test/index.js";
 import { Calculator } from "./calculator.js";
 

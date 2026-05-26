@@ -1,7 +1,8 @@
 import {
+  act,
   ConcurrencyError,
+  InMemoryCache,
   SNAP_EVENT,
-  scan,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import type {
@@ -1690,25 +1691,23 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
 
       /**
-       * Test-side helper that drives the new HOF `Store.restore`
-       * contract with the framework's `scan` and returns the full
-       * {@link RestoreResult}. Mirrors what `Act.restore` does — kept
-       * inline so the TCK exercises `Store.restore` directly without
-       * pulling in the orchestrator.
+       * Test-side helper that routes through the public `Act.restore`
+       * orchestrator path bound to the store-under-test via the
+       * scoped-ports bag. Validates that the adapter's `restore` HOF
+       * integrates correctly with the framework's scan loop without
+       * importing the framework's internal scan symbol directly.
        */
       const restore = async (
         source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
         opts: RestoreOptions = {}
       ): Promise<RestoreResult> => {
-        const started = Date.now();
-        let kept = 0;
-        let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
-        await store.restore!(async (callback) => {
-          const partial = await scan(source, opts, callback);
-          kept = partial.kept;
-          dropped = partial.dropped;
-        });
-        return { kept, dropped, duration_ms: Date.now() - started };
+        const cache = new InMemoryCache();
+        const app = act().build({ scoped: { store, cache } });
+        try {
+          return await app.restore(source, opts);
+        } finally {
+          await cache.dispose();
+        }
       };
 
       it("returns kept=0 on an empty source", async () => {
