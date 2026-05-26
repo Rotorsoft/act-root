@@ -6,7 +6,7 @@
  *
  * Two call modes — same loop, same validation:
  *
- * **Pre-flight (no writer)** — callers pass no `writeEvent`. `scan`
+ * **Pre-flight (no committer)** — callers pass no `commit`. `scan`
  * walks the source, validates every event, and throws on the first
  * blocker. A clean return means the source is restorable.
  *
@@ -17,9 +17,9 @@
  * await store.restore!(parseCsv(csv));  // safe to commit
  * ```
  *
- * **Restore (writer provided)** — adapters call `scan` from inside
- * their transaction, passing a `writeEvent` callback. Each non-dropped
- * event is validated, written, and the returned new id recorded for
+ * **Restore (committer provided)** — adapters call `scan` from inside
+ * their transaction, passing a `commit` callback. Each non-dropped
+ * event is validated, committed, and the returned new id recorded for
  * causation remap on later events.
  *
  * Dry-run as a `Store.restore` mode was deliberately removed —
@@ -57,13 +57,13 @@ function isValid(event: RestoreEvent): boolean {
 }
 
 /**
- * Adapter-provided write hook. Called by {@link scan} once per
+ * Adapter-provided commit hook. Called by {@link scan} once per
  * non-dropped event, with the causation-rewritten `meta` already
  * applied. Returns the new id the adapter assigned to the event —
  * the loop adds it to the `old → new` map so subsequent events'
  * causation refs resolve correctly.
  */
-export type RestoreEventWriter = (
+export type RestoreCommit = (
   event: RestoreEvent,
   meta: EventMeta
 ) => Promise<number>;
@@ -71,12 +71,12 @@ export type RestoreEventWriter = (
 /**
  * Scan a restore source event by event. The framework owns iteration,
  * validation, the `drop_snapshots` filter, the `on_progress` callback,
- * and the causation remap. Adapters supply only `writeEvent`.
+ * and the causation remap. Adapters supply only `commit`.
  *
  * Throws on the first invalid event (negative version, malformed
  * `created`) with the running index in the message.
  *
- * When called without `writeEvent`, `scan` runs as a pre-flight: it
+ * When called without `commit`, `scan` runs as a pre-flight: it
  * validates the source but writes nothing. A clean return means the
  * source is restorable.
  *
@@ -104,7 +104,7 @@ export type RestoreEventWriter = (
 export async function scan(
   source: AsyncIterable<RestoreEvent>,
   opts: RestoreOptions = {},
-  writeEvent?: RestoreEventWriter
+  commit?: RestoreCommit
 ): Promise<Omit<RestoreResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
   const idMap = new Map<number, number>();
@@ -119,7 +119,7 @@ export async function scan(
       droppedSnapshots++;
       continue;
     }
-    if (!writeEvent) {
+    if (!commit) {
       kept++;
       continue;
     }
@@ -139,7 +139,7 @@ export async function scan(
         };
       }
     }
-    const newId = await writeEvent(event, meta);
+    const newId = await commit(event, meta);
     idMap.set(event.id, newId);
     kept++;
   }

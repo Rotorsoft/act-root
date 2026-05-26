@@ -99,7 +99,7 @@ describe("scan (pre-flight, no writer)", () => {
 });
 
 describe("scan (with writer)", () => {
-  it("calls writeEvent once per non-dropped event", async () => {
+  it("calls commit once per non-dropped event", async () => {
     const writes: RestoreEvent[] = [];
     let nextId = 100;
     const result = await scan(

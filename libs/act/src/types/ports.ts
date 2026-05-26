@@ -112,7 +112,7 @@ export type RestoreEvent = {
  * `scan` helper validates each event inline (negative version,
  * malformed `created`) and throws on the first blocker. Callers that
  * want to pre-flight a backup before invoking restore call `scan`
- * directly with no `writeEvent` callback.
+ * directly with no `commit` callback.
  */
 export type RestoreOptions = {
   /**
@@ -150,7 +150,7 @@ export type RestoreOptions = {
  * Live restore is atomic per #783 — any error throws and rolls back,
  * so there's no per-event error reporting on the result. Callers that
  * want to inspect a source for blockers before restoring call `scan`
- * directly with no `writeEvent` callback.
+ * directly with no `commit` callback.
  */
 export type RestoreResult = {
   /** Number of events written to the rebuilt store. */
