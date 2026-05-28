@@ -1,8 +1,9 @@
-import { Download, Upload } from "lucide-react";
+import { ArrowRightLeft, Download, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { useFilterStore } from "../stores/filters.js";
 import { trpc } from "../trpc.js";
 import { RestoreDialog } from "./restore/index.js";
+import { TransferDialog } from "./transfer/index.js";
 
 /**
  * Toolbar entry point for backup + restore (ACT-1128).
@@ -19,6 +20,7 @@ export function BackupRestore() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [filters] = useFilterStore();
   const [file, setFile] = useState<{ name: string; csv: string } | null>(null);
+  const [transferOpen, setTransferOpen] = useState(false);
 
   const { data: status } = trpc.status.useQuery();
   const restoreEnabled = status?.connected === true;
@@ -96,6 +98,13 @@ export function BackupRestore() {
         >
           <Upload size={14} />
         </button>
+        <button
+          onClick={() => setTransferOpen(true)}
+          title="Transfer events between adapters (PG ↔ SQLite ↔ CSV)"
+          className="rounded p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
+        >
+          <ArrowRightLeft size={14} />
+        </button>
       </div>
       {file && (
         <RestoreDialog
@@ -103,6 +112,9 @@ export function BackupRestore() {
           target={target}
           onClose={() => setFile(null)}
         />
+      )}
+      {transferOpen && (
+        <TransferDialog onClose={() => setTransferOpen(false)} />
       )}
     </>
   );

@@ -172,11 +172,92 @@ type InMemoryConfig = {
   adapter: "inmemory";
 };
 
+/**
+ * CSV-file adapter config (ACT-1128 transfer endpoint). Only the
+ * `transfer` mutation uses this — the inspector's `connect` flow
+ * doesn't host CSV as a primary store because CSV files don't
+ * implement the full `Store` contract (no commit, claim, subscribe,
+ * etc.). They're transfer-only endpoints: as source you read with
+ * `Store.query`, as target you write with `Store.restore`.
+ */
+type CsvConfig = {
+  adapter: "csv";
+  file: string;
+};
+
 type AdapterConfig = PgConfig | SqliteConfig | InMemoryConfig;
+type TransferConfig = PgConfig | SqliteConfig | CsvConfig;
 
 /** Managed store instance — not the singleton, so we can reconnect */
 let currentStore: Store | null = null;
 let currentConfig: AdapterConfig | null = null;
+
+/**
+ * Build an `EventSource & EventSink`-shaped adapter from a transfer
+ * config (ACT-1128 transfer mutation). Hides the per-adapter
+ * construction so the transfer endpoint stays a one-liner per side.
+ *
+ * Adapters returned here are **ephemeral** — the caller is
+ * responsible for disposing them after the transfer (or in a
+ * `finally`). They are **not** registered with the inspector's
+ * `currentStore` slot; the connected store is unaffected.
+ *
+ * CSV-target callers should pass an already-resolved absolute path
+ * — this helper doesn't sandbox or normalize paths. Operator-typed
+ * paths arrive here only via the transfer-UI's confirmation flow.
+ */
+function buildAdapter(config: TransferConfig): Store {
+  switch (config.adapter) {
+    case "csv":
+      // `CsvFile` doesn't satisfy the full `Store` interface (no
+      // commit/claim/subscribe — it's transfer-only). The cast is
+      // safe because the transfer pipeline only calls `query` and
+      // `restore` on the value; the other Store methods are never
+      // touched. Documented as part of `CsvFile`'s contract.
+      return new CsvFile({ path: config.file }) as unknown as Store;
+    case "pg":
+      return new PostgresStore({
+        host: config.host,
+        port: config.port,
+        database: config.database,
+        user: config.user,
+        password: config.password,
+        schema: config.schema,
+        table: config.table,
+      });
+    case "sqlite":
+      return new SqliteStore({ url: `file:${config.file}` });
+  }
+}
+
+/**
+ * Structural-equality identity check for two transfer configs.
+ * Returns `true` when both sides resolve to the same on-disk store
+ * — used by `transfer` to refuse no-op or destructive self-copies
+ * (e.g. PG → same-PG would wipe the source and try to restore from
+ * itself mid-transaction).
+ *
+ * Different adapter kinds are never equal. Within an adapter:
+ * - PG: host/port/database/schema/table all match
+ * - SQLite / CSV: same `file` path (no absolute-path normalization;
+ *   the typed-name confirmation in the UI catches operator mistakes
+ *   before the request reaches here)
+ */
+function sameAdapter(a: TransferConfig, b: TransferConfig): boolean {
+  if (a.adapter !== b.adapter) return false;
+  if (a.adapter === "pg" && b.adapter === "pg")
+    return (
+      a.host === b.host &&
+      a.port === b.port &&
+      a.database === b.database &&
+      a.schema === b.schema &&
+      a.table === b.table
+    );
+  if (a.adapter === "sqlite" && b.adapter === "sqlite")
+    return a.file === b.file;
+  if (a.adapter === "csv" && b.adapter === "csv") return a.file === b.file;
+  return false;
+}
 
 /**
  * Restore progress pub-sub (ACT-1128).
@@ -1094,6 +1175,11 @@ export const inspectorRouter = t.router({
    * mutation and renders the running `processed` count on a
    * progress bar; closing the connection cancels via `AbortSignal`
    * which detaches the listener cleanly.
+   *
+   * Both `restore` (CSV → connected store) and `transfer` (any →
+   * any) wire their `on_progress` to the same emitter, so the
+   * client uses one subscription regardless of which mutation
+   * fired.
    */
   restoreProgress: t.procedure.subscription(async function* (opts) {
     for await (const [event] of on(restoreProgressEmitter, "progress", {
@@ -1102,6 +1188,133 @@ export const inspectorRouter = t.router({
       yield event as { processed: number; total?: number };
     }
   }),
+
+  /**
+   * Cross-source / cross-target transfer (ACT-1128 + #788). Reads
+   * events from `source` via `EventSource.query`, writes them
+   * atomically into `target` via `EventSink.restore`. Source and
+   * target are independent adapters — neither has to be the
+   * inspector's connected store. Useful flows:
+   *
+   *   - PG → SQLite migration (and vice versa)
+   *   - Store → CSV-on-disk backup
+   *   - CSV-on-disk → Store rebuild from external dump
+   *
+   * Both ends are built ephemerally from the input configs and
+   * disposed in a `finally`. The `currentStore` slot is untouched
+   * so the operator can keep their inspector session pointing at a
+   * third adapter while a transfer runs.
+   *
+   * Rejects:
+   *   - source-config equals target-config (deep structural match
+   *     on the discriminating fields) — would wipe the source
+   *   - target adapter has no `restore` capability — the cast on
+   *     `buildAdapter` for non-CSV adapters succeeds; this catches
+   *     the rare case where someone wires a Store that omitted the
+   *     optional `restore` method
+   *
+   * Progress events fan out through the same `restoreProgress`
+   * subscription used by `restore`.
+   */
+  transfer: t.procedure
+    .input(
+      z.object({
+        source: z.union([
+          z.object({
+            adapter: z.literal("pg"),
+            host: z.string(),
+            port: z.number(),
+            database: z.string(),
+            user: z.string(),
+            password: z.string(),
+            schema: z.string(),
+            table: z.string(),
+          }),
+          z.object({
+            adapter: z.literal("sqlite"),
+            file: z.string().min(1),
+            table: z.string().default("events"),
+          }),
+          z.object({
+            adapter: z.literal("csv"),
+            file: z.string().min(1),
+          }),
+        ]),
+        target: z.union([
+          z.object({
+            adapter: z.literal("pg"),
+            host: z.string(),
+            port: z.number(),
+            database: z.string(),
+            user: z.string(),
+            password: z.string(),
+            schema: z.string(),
+            table: z.string(),
+          }),
+          z.object({
+            adapter: z.literal("sqlite"),
+            file: z.string().min(1),
+            table: z.string().default("events"),
+          }),
+          z.object({
+            adapter: z.literal("csv"),
+            file: z.string().min(1),
+          }),
+        ]),
+        dry_run: z.boolean().optional(),
+        drop_snapshots: z.boolean().optional(),
+      })
+    )
+    .mutation(async ({ input }) => {
+      if (sameAdapter(input.source, input.target))
+        throw new Error(
+          "Transfer source and target refer to the same store — refusing to self-overwrite"
+        );
+      const source = buildAdapter(input.source);
+      const target = buildAdapter(input.target);
+      // EventSink narrowing — every adapter we construct here
+      // implements `restore`, but the type's optional `restore?`
+      // forces an explicit guard. CsvFile guarantees it; the two
+      // Store adapters declare it as optional but always ship it
+      // in this codebase.
+      if (!target.restore)
+        throw new Error(
+          `Target adapter '${input.target.adapter}' has no restore capability`
+        );
+      // Build a transfer-only Act with no scoped store — the source
+      // and sink are passed explicitly so `Act.restore` never falls
+      // back to the singleton.
+      const app = act().build();
+      try {
+        const result = await app.restore(
+          source,
+          {
+            dry_run: input.dry_run,
+            drop_snapshots: input.drop_snapshots,
+            on_progress: (p) => {
+              restoreProgressEmitter.emit("progress", p);
+            },
+          },
+          target as Parameters<typeof app.restore>[2]
+        );
+        if (!input.dry_run)
+          recordAudit({
+            timestamp: new Date().toISOString(),
+            action: "restore",
+            adapter: currentConfig?.adapter ?? "inmemory",
+            result,
+          });
+        return { ok: true as const, count: result.kept, result };
+      } catch (error) {
+        throw new Error(
+          `Transfer failed: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error }
+        );
+      } finally {
+        await source.dispose();
+        await target.dispose();
+      }
+    }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;
