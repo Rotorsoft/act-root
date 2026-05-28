@@ -17,7 +17,6 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import { iterate } from "../transfer.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -30,6 +29,7 @@ import type {
   Emitted,
   EventMeta,
   EventSource,
+  Query,
   ScanOptions,
   ScanResult,
   Schema,
@@ -40,6 +40,88 @@ import type {
 } from "../types/index.js";
 import { validate } from "../utils.js";
 import { defaultCorrelator } from "./correlator.js";
+
+/**
+ * Bridge an {@link EventSource} into an `AsyncIterable<Committed>`
+ * with 1-event-in-flight backpressure (ACT-1128). Internal helper
+ * for the {@link scan} loop — the producer (`source.query`) awaits
+ * a promise that the bridge resolves only when the consumer takes
+ * the event from the mailbox, so memory in the bridge is bounded
+ * to exactly one event.
+ *
+ * Downstream realization of backpressure depends on the adapter's
+ * `query` implementation. Every in-tree adapter still buffers its
+ * full result set internally before calling the callback (e.g.,
+ * `pg.query` resolves with `rows[]`); the mailbox-on-top of that
+ * adds bounded buffering downstream of the result set. True
+ * cursor-based streaming on the adapter side is tracked in #814
+ * (ACT-1132).
+ *
+ * @internal
+ */
+export async function* iterate(
+  source: EventSource,
+  filter?: Query
+): AsyncIterable<Committed<Schemas, keyof Schemas>> {
+  // Wrapping the state in an object prevents TypeScript from
+  // narrowing the let-bound `null` initializer through the
+  // triple-closure-deep assignment path; behavior is unchanged.
+  type WakeFn = () => void;
+  const state: {
+    slot: Committed<Schemas, keyof Schemas> | null;
+    onProduce: WakeFn | null;
+    onConsume: WakeFn | null;
+    done: boolean;
+    error: unknown;
+  } = {
+    slot: null,
+    onProduce: null,
+    onConsume: null,
+    done: false,
+    error: undefined,
+  };
+
+  const wakeProduce = () => {
+    const fn = state.onProduce;
+    state.onProduce = null;
+    if (fn) fn();
+  };
+
+  void source
+    .query<Schemas>((event) => {
+      state.slot = event;
+      wakeProduce();
+      return new Promise<void>((resolve) => {
+        state.onConsume = () => resolve();
+      });
+    }, filter)
+    .then(
+      () => {
+        state.done = true;
+        wakeProduce();
+      },
+      (err) => {
+        state.error = err;
+        state.done = true;
+        wakeProduce();
+      }
+    );
+
+  while (true) {
+    if (state.slot === null && !state.done)
+      await new Promise<void>((resolve) => {
+        state.onProduce = resolve;
+      });
+    if (state.error) throw state.error;
+    if (state.slot === null) return;
+    const event = state.slot;
+    state.slot = null;
+    const fn = state.onConsume!;
+    state.onConsume = null;
+    fn();
+    yield event;
+  }
+}
 
 /**
  * Internal action signature seen by the orchestrator — the {@link Correlator}

@@ -2,8 +2,9 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
-import { CsvFile, iterate } from "@rotorsoft/act";
+import { CsvFile } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { iterate } from "../src/internal/event-sourcing.js";
 
 type E = Committed<Schemas, string>;
 
@@ -11,10 +12,12 @@ type E = Committed<Schemas, string>;
  * Tests for the ACT-1128 transfer primitives:
  *
  * - `iterate(source)` — 1-slot mailbox bridge from `EventSource.query`
- *   to `AsyncIterable<Committed>` with true backpressure.
+ *   to `AsyncIterable<Committed>` with true backpressure. Internal to
+ *   the framework — imported here via the deep `internal/` path the
+ *   same way `scan` is in `restore.spec.ts`.
  * - `CsvFile` — single class implementing both `EventSource` and
  *   `EventSink` (and `Disposable`) for CSV files on disk or
- *   in-memory CSV blobs.
+ *   in-memory CSV blobs. Public surface.
  */
 
 const makeEvent = (overrides: Partial<E> = {}): E =>
