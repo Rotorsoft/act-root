@@ -9,8 +9,11 @@ import { TRANSFER_DEFAULTS, type TransferEndpoint } from "./types.js";
  * muscle memory carries over.
  *
  * Stateless: parent owns the `TransferEndpoint` and pushes updates
- * via `onChange`. This keeps the source ↔ target identity check
- * (`sameEndpoint` on the server) a straightforward comparison.
+ * via `onChange`. The `disabledKinds` map lets the parent express
+ * which kinds aren't valid for the current selection on the
+ * opposite slot (e.g. `current` on the target when `current` is
+ * already the source), and the picker greys out the radio inline
+ * with a per-kind tooltip explaining why.
  */
 export function AdapterPicker({
   role,
@@ -18,12 +21,19 @@ export function AdapterPicker({
   onChange,
   disabled,
   connectedSummary,
+  disabledKinds,
 }: {
   role: "source" | "target";
   config: TransferEndpoint;
   onChange: (next: TransferEndpoint) => void;
   disabled: boolean;
   connectedSummary: string;
+  /**
+   * Per-kind disable + tooltip. Keys are adapter discriminators;
+   * values are the human-facing reason shown on hover. Kinds not
+   * present in the map render enabled.
+   */
+  disabledKinds?: Partial<Record<TransferEndpoint["adapter"], string>>;
 }) {
   // Kinds visible per slot. `upload` is source-only, `download` is
   // target-only — the slot-restricted kinds are filtered out of the
@@ -35,6 +45,7 @@ export function AdapterPicker({
 
   const swapKind = (kind: TransferEndpoint["adapter"]) => {
     if (kind === config.adapter) return;
+    if (disabledKinds?.[kind]) return;
     onChange(TRANSFER_DEFAULTS[kind]);
   };
 
@@ -44,27 +55,38 @@ export function AdapterPicker({
         {role === "source" ? "From" : "To"}
       </h4>
       <div className="mt-2 space-y-1">
-        {kinds.map((kind) => (
-          <label
-            key={kind}
-            className="flex cursor-pointer items-start gap-2 rounded p-1 text-xs text-zinc-300 hover:bg-zinc-800/40"
-          >
-            <input
-              type="radio"
-              name={`${role}-kind`}
-              checked={config.adapter === kind}
-              onChange={() => swapKind(kind)}
-              disabled={disabled}
-              className="mt-0.5 h-3 w-3"
-            />
-            <div className="flex-1">
-              <div className="font-medium text-zinc-200">{labelFor(kind)}</div>
-              <div className="mt-0.5 text-[11px] text-zinc-500">
-                {descriptionFor(kind, connectedSummary)}
+        {kinds.map((kind) => {
+          const disableReason = disabledKinds?.[kind];
+          const kindDisabled = disabled || !!disableReason;
+          return (
+            <label
+              key={kind}
+              title={disableReason}
+              className={`flex items-start gap-2 rounded p-1 text-xs ${
+                kindDisabled
+                  ? "cursor-not-allowed opacity-40"
+                  : "cursor-pointer text-zinc-300 hover:bg-zinc-800/40"
+              }`}
+            >
+              <input
+                type="radio"
+                name={`${role}-kind`}
+                checked={config.adapter === kind}
+                onChange={() => swapKind(kind)}
+                disabled={kindDisabled}
+                className="mt-0.5 h-3 w-3"
+              />
+              <div className="flex-1">
+                <div className="font-medium text-zinc-200">
+                  {labelFor(kind)}
+                </div>
+                <div className="mt-0.5 text-[11px] text-zinc-500">
+                  {disableReason ?? descriptionFor(kind, connectedSummary)}
+                </div>
               </div>
-            </div>
-          </label>
-        ))}
+            </label>
+          );
+        })}
       </div>
 
       {/* Fields show up under the selected option. */}

@@ -173,6 +173,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                   onChange={setSource}
                   disabled={inFlight}
                   connectedSummary={connectedSummary}
+                  disabledKinds={sourceDisabledKinds(target, status?.connected === true)}
                 />
                 <AdapterPicker
                   role="target"
@@ -180,6 +181,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                   onChange={setTarget}
                   disabled={inFlight}
                   connectedSummary={connectedSummary}
+                  disabledKinds={targetDisabledKinds(source, status?.connected === true)}
                 />
               </div>
 
@@ -250,6 +252,41 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
       </div>
     </>
   );
+}
+
+/**
+ * Per-kind disable reasons for the source picker, derived from
+ * what's currently selected on the target side + whether a store
+ * is connected. Keeping the predicate close to the dialog (rather
+ * than inside `AdapterPicker`) keeps the picker itself dumb and
+ * the rules visible in one place.
+ *
+ *   - `current` on the source is disabled when the target is also
+ *     `current` (would self-transfer) or when no store is connected.
+ */
+function sourceDisabledKinds(
+  target: TransferEndpoint,
+  connected: boolean
+): Partial<Record<TransferEndpoint["adapter"], string>> {
+  const out: Partial<Record<TransferEndpoint["adapter"], string>> = {};
+  if (target.adapter === "current")
+    out.current = "Already chosen as the target — pick a different source";
+  else if (!connected)
+    out.current = "Not connected to a store — open the connect form first";
+  return out;
+}
+
+/** Mirror of {@link sourceDisabledKinds} for the target picker. */
+function targetDisabledKinds(
+  source: TransferEndpoint,
+  connected: boolean
+): Partial<Record<TransferEndpoint["adapter"], string>> {
+  const out: Partial<Record<TransferEndpoint["adapter"], string>> = {};
+  if (source.adapter === "current")
+    out.current = "Already chosen as the source — pick a different target";
+  else if (!connected)
+    out.current = "Not connected to a store — open the connect form first";
+  return out;
 }
 
 /**
