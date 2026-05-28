@@ -143,23 +143,31 @@ describe("eventNames", () => {
   });
 });
 
-describe("backup", () => {
-  it("emits a header even when no rows match", async () => {
-    const result = await caller.backup({});
+describe("transfer (current → download backup)", () => {
+  it("emits a CSV header even when no events match", async () => {
+    const result = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+    });
     expect(result.count).toBe(0);
-    expect(result.csv).toBe("id,name,data,stream,version,created,meta");
+    expect(result.csv).toBe("id,name,data,stream,version,created,meta\n");
   });
 
   it("escapes commas, quotes, and newlines per RFC 4180", async () => {
     await seedAll();
-    const result = await caller.backup({ stream: "stream-c" });
+    const result = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+      filter: { stream: "stream-c", stream_exact: true },
+    });
     expect(result.count).toBe(1);
-    // The data column was JSON.stringify'd then CSV-doubled. JSON
-    // escapes the inner `"` to `\"`, then CSV doubles every `"` —
-    // producing `\""quotes\""` around the literal "quotes" identifier.
+    expect(result.csv).toBeTruthy();
+    // The data column was JSON.stringify'd, then CsvFile wrapped the
+    // result in quotes and doubled every internal `"` — producing
+    // `\""quotes\""` around the literal "quotes" identifier.
     expect(result.csv).toContain('\\""quotes\\""');
-    // The literal `,` inside the data forced csvEscape to wrap the
-    // whole column in quotes; the comma itself survives untouched.
+    // The literal `,` inside the data forced the CSV layer to wrap
+    // the whole column in quotes; the comma itself survives.
     expect(result.csv).toContain("has,");
     // The actual newline character in the source string was JSON-
     // escaped to the two-char sequence `\n`, which the CSV layer
@@ -169,9 +177,13 @@ describe("backup", () => {
 
   it("respects filter inputs", async () => {
     await seedAll();
-    const result = await caller.backup({
-      names: ["Tricky"],
-      created_after: new Date(0).toISOString(),
+    const result = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+      filter: {
+        names: ["Tricky"],
+        created_after: new Date(0).toISOString(),
+      },
     });
     expect(result.count).toBe(1);
   });

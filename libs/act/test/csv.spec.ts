@@ -183,6 +183,17 @@ describe("CsvFile (blob mode — read)", () => {
     await expect(file.query(() => {})).rejects.toThrow(/expected 7 fields/);
   });
 
+  it("handles blobs without a trailing newline", async () => {
+    // The blob-line iterator's `nl === -1` branch fires on the
+    // last line of a CSV that doesn't end with `\n`. Exercising
+    // here so the branch stays covered.
+    const blob = `${header}\n${row(42)}`;
+    const file = new CsvFile({ blob });
+    const collected: E[] = [];
+    await file.query<Schemas>((e) => collected.push(e as E));
+    expect(collected.map((e) => e.id)).toEqual([42]);
+  });
+
   it("preserves CSV-escaped commas and quotes in fields", async () => {
     // The local `row()` helper does the CSV escaping for us — pass
     // the raw tricky string and trust the round-trip. Newlines in

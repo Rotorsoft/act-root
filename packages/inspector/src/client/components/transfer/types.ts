@@ -1,47 +1,41 @@
 /**
- * Adapter config shapes accepted by the `transfer` tRPC mutation
- * (ACT-1128 + #788). Mirrors the server-side discriminated union
- * locally so the picker components don't drag a server type
- * through tRPC inference paths.
+ * Local mirrors of the server's `TransferEndpoint` shape — the
+ * unified transfer mutation accepts the same discriminated union on
+ * both sides. Some kinds are slot-restricted (`upload` only valid as
+ * source, `download` only valid as target) but the type allows both
+ * to keep the picker components symmetrical; the dialog rejects the
+ * invalid combinations client-side and the server schema enforces
+ * it again.
+ *
+ * Mirrors `TransferSource` / `TransferTarget` in router.ts.
  */
-export type TransferPgConfig = {
-  adapter: "pg";
-  host: string;
-  port: number;
-  database: string;
-  user: string;
-  password: string;
-  schema: string;
-  table: string;
-};
-
-export type TransferSqliteConfig = {
-  adapter: "sqlite";
-  file: string;
-  table: string;
-};
-
-export type TransferCsvConfig = {
-  adapter: "csv";
-  file: string;
-};
-
-export type TransferConfig =
-  | TransferPgConfig
-  | TransferSqliteConfig
-  | TransferCsvConfig;
+export type TransferEndpoint =
+  | { adapter: "current" }
+  | { adapter: "upload"; csv: string }
+  | { adapter: "download" }
+  | { adapter: "csv"; file: string }
+  | {
+      adapter: "pg";
+      host: string;
+      port: number;
+      database: string;
+      user: string;
+      password: string;
+      schema: string;
+      table: string;
+    }
+  | { adapter: "sqlite"; file: string; table: string };
 
 /**
- * Defaults used by the picker the first time the operator switches
- * to a given adapter kind. PG defaults match the existing
- * connect-form defaults; SQLite + CSV have no host/port so they
- * only carry the file slot.
+ * Default fields the picker fills in when the operator first
+ * switches to a given adapter kind. Matches the connect form's
+ * defaults so muscle memory carries over.
  */
-export const TRANSFER_DEFAULTS: {
-  pg: TransferPgConfig;
-  sqlite: TransferSqliteConfig;
-  csv: TransferCsvConfig;
-} = {
+export const TRANSFER_DEFAULTS = {
+  current: { adapter: "current" } as const,
+  upload: { adapter: "upload", csv: "" } as const,
+  download: { adapter: "download" } as const,
+  csv: { adapter: "csv", file: "" } as const,
   pg: {
     adapter: "pg",
     host: "localhost",
@@ -51,7 +45,21 @@ export const TRANSFER_DEFAULTS: {
     password: "postgres",
     schema: "public",
     table: "events",
-  },
-  sqlite: { adapter: "sqlite", file: "", table: "events" },
-  csv: { adapter: "csv", file: "" },
+  } as const,
+  sqlite: { adapter: "sqlite", file: "", table: "events" } as const,
+} satisfies Record<string, TransferEndpoint>;
+
+/**
+ * Wire-shape mirror of `ScanResult` from `@rotorsoft/act`, kept
+ * local to the transfer UI so the components don't drag the
+ * framework type through tRPC inference paths.
+ */
+export type ScanResult = {
+  kept: number;
+  duration_ms: number;
+  dropped: {
+    closed_streams: number;
+    snapshots: number;
+    empty_streams: number;
+  };
 };
