@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v1.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.2.0...@rotorsoft/act-v1.3.0) (2026-05-28)
+
+
+### Features
+
+* **act:** eventsource/eventsink interfaces + csvfile + backpressured iterate util ([738f0eb](https://github.com/rotorsoft/act-root/commit/738f0eb49944b30de0363ecf406da91bbfa069f8)), closes [#788](https://github.com/rotorsoft/act-root/issues/788) [#814](https://github.com/rotorsoft/act-root/issues/814) [#784](https://github.com/rotorsoft/act-root/issues/784) [#814](https://github.com/rotorsoft/act-root/issues/814)
+* **inspector:** restore ui with dry-run preview, toggles, reactive progress ([67f9815](https://github.com/rotorsoft/act-root/commit/67f98153566626c04029f57a3efe3a579b480643)), closes [#785](https://github.com/rotorsoft/act-root/issues/785)
+* **inspector:** unify backup/restore/transfer into a single endpoint and dialog ([e00960c](https://github.com/rotorsoft/act-root/commit/e00960cf5f90220e8d8fce42c07c888ba2b3aefb))
+
 # [@rotorsoft/act-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.1.0...@rotorsoft/act-v1.2.0) (2026-05-26)
 
 
