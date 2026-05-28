@@ -112,7 +112,7 @@ packages/inspector/
 │       ├── App.tsx      # Root with navigation history
 │       ├── trpc.ts      # tRPC client
 │       ├── stores/      # URL-synced filter state
-│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, BackupRestore, FilterBar, StatsBar, EventRow, JsonViewer, Logo
+│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, BackupRestore (transfer dialog launcher), FilterBar, StatsBar, EventRow, JsonViewer, Logo
 │       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor
 ├── public/              # favicon.svg
 ├── index.html
@@ -140,10 +140,11 @@ packages/inspector/
 | `writeMode` | query | `{ enabled, reason }` — reflects the `ACT_INSPECTOR_WRITE` env var |
 | `prioritize` | mutation | Bulk-update stream priority via `Store.prioritize(filter, n)`. Filter shape mirrors `query_streams` (stream/source/lane/blocked). Refuses when read-only. |
 | `audit` | query | Last 100 mutations performed via the inspector — in-memory ring buffer |
-| `backup` | mutation | Stream the events table to CSV for archival |
-| `restore` | mutation | Truncate + re-import events from a CSV — destructive, gated by an explicit confirmation |
+| `transfer` | mutation | Move events between any source and any target (ACT-1128 / #788). Source/target slots accept `current` (connected store), `upload`/`download` (browser CSV), `csv` (server-side file), and per-call `pg`/`sqlite` credentials. Subsumes the prior `backup` and `restore` mutations; `dry_run: true` previews counts without touching the target |
+| `restoreProgress` | subscription | SSE stream of `{ processed }` ticks fired by `scan`'s `on_progress` during an in-flight transfer — drives the reactive progress bar |
 
 - **Event data**: flows through Act's `Store.query()` interface
 - **Processing metadata**: flows through Act's `Store.query_streams()` interface — adapter-agnostic, no second connection
-- **Store management**: own `PostgresStore` instance (not the Act singleton) — enables reconnecting
-- **Mostly read-only**: every view above is non-destructive. The two exceptions are `backup` (streams the events table out to CSV) and `restore` (truncates then re-imports a CSV — guarded by an explicit confirmation in the UI).
+- **Transfer**: routes through `Act.restore(source, opts, sink?)` with the connected store wrapped in an empty Act via scoped ports — every transfer kind reuses the same `scan` validator and atomic sink driver, so PG ↔ SQLite ↔ CSV behave identically
+- **Store management**: own `PostgresStore` / `SqliteStore` instance (not the Act singleton) — enables reconnecting
+- **Mostly read-only**: every view above is non-destructive. The one mutating exception is `transfer` — when the target is `current`, the connected store is wiped and rewritten from the source. Other targets (`download`, `csv`, per-call `pg`/`sqlite`) leave the connected store untouched. The UI surfaces a dry-run preview before any destructive run.
