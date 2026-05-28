@@ -36,6 +36,8 @@ import type {
   Correlator,
   Drain,
   DrainOptions,
+  EventSink,
+  EventSource,
   IAct,
   LaneConfig,
   Lease,
@@ -1171,23 +1173,32 @@ export class Act<
    * @see {@link Store.restore} for the underlying driver-pattern primitive.
    */
   async restore(
-    source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
-    opts: ScanOptions = {}
+    source: EventSource,
+    opts: ScanOptions = {},
+    sink?: EventSink
   ): Promise<ScanResult> {
     return this._scoped(async () => {
       const started = Date.now();
-      // Dry-run: validate the source without touching the store —
-      // same scan loop, no callback, no transaction, no capability
+      // Dry-run: walk the source via scan without touching any sink
+      // — same scan loop, no callback, no transaction, no capability
       // check. Returns the counts a destructive restore would land.
       if (opts.dry_run) {
         const partial = await scan(source, opts);
         return { ...partial, duration_ms: Date.now() - started };
       }
-      const s = store();
-      if (!s.restore) throw new Error("adapter has no restore capability");
+      // Default sink is the singleton store. Explicit `sink` lets
+      // callers route to a different EventSink (another adapter, a
+      // CsvFile, etc.) without binding the singleton.
+      const target: EventSink =
+        sink ??
+        (() => {
+          const s = store();
+          if (!s.restore) throw new Error("adapter has no restore capability");
+          return s as EventSink;
+        })();
       let kept = 0;
       let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
-      await s.restore(async (callback) => {
+      await target.restore(async (callback) => {
         const partial = await scan(source, opts, callback);
         kept = partial.kept;
         dropped = partial.dropped;

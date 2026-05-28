@@ -1,8 +1,14 @@
+import { randomUUID } from "node:crypto";
+import { EventEmitter, on } from "node:events";
+import { readFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   act,
   type Committed,
-  InMemoryCache,
+  CsvFile,
   InMemoryStore,
+  type Query,
   type ScanResult,
   type Schemas,
   type Store,
@@ -172,9 +178,130 @@ type InMemoryConfig = {
 
 type AdapterConfig = PgConfig | SqliteConfig | InMemoryConfig;
 
+/**
+ * One side of a transfer (ACT-1128 / #788). The inspector's single
+ * `transfer` mutation subsumes the prior backup / restore /
+ * cross-adapter endpoints — both ends speak this discriminated
+ * union. Some kinds are source-only (`upload`) and some are
+ * target-only (`download`); the rest can be either.
+ *
+ *   - `current` — the inspector's connected store. No fields.
+ *   - `upload` — browser-uploaded CSV blob. Source only.
+ *   - `download` — write the result CSV into the response so the
+ *     browser triggers a file save. Target only.
+ *   - `csv` — server-side CSV file path. Read or write.
+ *   - `pg` / `sqlite` — connection args, same shape the inspector's
+ *     `connect` flow uses. The adapter is constructed for the call
+ *     and disposed when it completes; `currentStore` is untouched.
+ */
+type TransferSource =
+  | { adapter: "current" }
+  | { adapter: "upload"; csv: string }
+  | { adapter: "csv"; file: string }
+  | PgConfig
+  | SqliteConfig;
+
+type TransferTarget =
+  | { adapter: "current" }
+  | { adapter: "download" }
+  | { adapter: "csv"; file: string }
+  | PgConfig
+  | SqliteConfig;
+
 /** Managed store instance — not the singleton, so we can reconnect */
 let currentStore: Store | null = null;
 let currentConfig: AdapterConfig | null = null;
+
+/**
+ * Construct a per-call Store-shaped adapter for one side of a
+ * transfer (ACT-1128 / #788). Maps the typed transfer endpoint to
+ * a live adapter the pipeline can read from (`EventSource`) or
+ * write into (`EventSink`).
+ *
+ * Per-call lifecycle: the caller is responsible for disposing the
+ * returned `adapter` (typically in a `finally`). The inspector's
+ * `currentStore` slot is untouched. CSV / SQLite / PG endpoints
+ * spin up their own connection or open their own file handle for
+ * this transfer and release it on dispose.
+ *
+ * Returns `null` for upload/download endpoints because the caller
+ * needs to special-case those (upload constructs `CsvFile` from a
+ * blob; download writes to a tempfile and reads it back after the
+ * pipeline completes).
+ */
+function buildPersistentAdapter(
+  endpoint: TransferSource | TransferTarget
+): Store {
+  switch (endpoint.adapter) {
+    case "csv":
+      // `CsvFile` doesn't satisfy the full `Store` interface (no
+      // commit/claim/subscribe — it's transfer-only). The cast is
+      // safe because the transfer pipeline only calls `query` and
+      // `restore` on the value; the other Store methods are never
+      // touched.
+      return new CsvFile({ path: endpoint.file }) as unknown as Store;
+    case "pg":
+      return new PostgresStore({
+        host: endpoint.host,
+        port: endpoint.port,
+        database: endpoint.database,
+        user: endpoint.user,
+        password: endpoint.password,
+        schema: endpoint.schema,
+        table: endpoint.table,
+      });
+    case "sqlite":
+      return new SqliteStore({ url: `file:${endpoint.file}` });
+    default:
+      throw new Error(
+        `buildPersistentAdapter cannot construct '${endpoint.adapter}' — handle current/upload/download at the call site`
+      );
+  }
+}
+
+/**
+ * Structural-equality check between the source and target endpoints
+ * of a transfer. Used to refuse self-overwrites (source = target
+ * would wipe the source before restoring from it).
+ *
+ *   - Two `current` endpoints always match (both resolve to the
+ *     same `currentStore`).
+ *   - `upload` and `download` never compare-equal to anything else
+ *     (they're each present on only one side of the transfer).
+ *   - Otherwise: same adapter kind, same discriminating fields.
+ */
+function sameEndpoint(a: TransferSource, b: TransferTarget): boolean {
+  if (a.adapter !== b.adapter) return false;
+  if (a.adapter === "current") return true;
+  if (a.adapter === "pg" && b.adapter === "pg")
+    return (
+      a.host === b.host &&
+      a.port === b.port &&
+      a.database === b.database &&
+      a.schema === b.schema &&
+      a.table === b.table
+    );
+  if (a.adapter === "sqlite" && b.adapter === "sqlite")
+    return a.file === b.file;
+  if (a.adapter === "csv" && b.adapter === "csv") return a.file === b.file;
+  return false;
+}
+
+/**
+ * Restore progress pub-sub (ACT-1128).
+ *
+ * The `restore` mutation pushes a `{ processed, total? }` event each
+ * time `Act.restore`'s `on_progress` fires; the `restoreProgress`
+ * subscription is a server-sent-events stream that forwards them to
+ * the client. Reactive (no polling), single-emitter (single-user
+ * server), framework-aware (we already require Node, so `events.on`
+ * with an `AbortSignal` is free).
+ *
+ * A multi-tenant deployment would need a per-session emitter map
+ * keyed by request id; not in scope here.
+ */
+const restoreProgressEmitter = new EventEmitter();
+restoreProgressEmitter.setMaxListeners(0);
 
 /**
  * Test seam — direct read access to the connected store.
@@ -226,94 +353,11 @@ async function loadAllStreamPositions(): Promise<{
 // with a discriminated-union input that picks PG (port scan) or SQLite
 // (directory glob) at the call site.
 
-/** CSV column order for backup/restore */
-const CSV_COLUMNS = [
-  "id",
-  "name",
-  "data",
-  "stream",
-  "version",
-  "created",
-  "meta",
-] as const;
-
-/** Escape a value for CSV (RFC 4180) */
-function csvEscape(value: string): string {
-  if (value.includes('"') || value.includes(",") || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
-/** Parse a CSV line respecting quoted fields */
-function csvParseLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      fields.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  fields.push(current);
-  return fields;
-}
-
-/**
- * Stream a CSV blob into `AsyncIterable<Committed<Schemas, keyof
- * Schemas>>` consumed by `Store.restore` via the scan driver (#786).
- * The blob still arrives as a single string from the tRPC input, but
- * the parser yields one event at a time so the adapter never holds
- * the full parsed array in memory alongside the source. The header
- * row format matches `backup`'s output — round-tripping is the
- * primary use case. `created` is parsed to `Date` here so downstream
- * consumers see the unified `Committed` shape.
- */
-async function* parseCsvRows(
-  csv: string
-): AsyncIterable<Committed<Schemas, keyof Schemas>> {
-  const lines = csv.split("\n");
-  if (lines.length < 2)
-    throw new Error("CSV must have a header and at least one row");
-  const expectedHeader = CSV_COLUMNS.join(",");
-  if (lines[0] !== expectedHeader)
-    throw new Error(`Invalid CSV header. Expected: ${expectedHeader}`);
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!line.trim()) continue;
-    const fields = csvParseLine(line);
-    if (fields.length !== CSV_COLUMNS.length)
-      throw new Error(
-        `Row ${i}: expected ${CSV_COLUMNS.length} fields, got ${fields.length}`
-      );
-    yield {
-      id: Number.parseInt(fields[0]!, 10),
-      name: fields[1]!,
-      data: JSON.parse(fields[2]!),
-      stream: fields[3]!,
-      version: Number.parseInt(fields[4]!, 10),
-      created: new Date(fields[5]!),
-      meta: JSON.parse(fields[6]!),
-    };
-  }
-}
+// CSV parsing AND emission both live in the framework's `CsvFile`
+// utility (libs/act/src/csv.ts) as of ACT-1128. The inspector no
+// longer hand-rolls CSV anywhere — the unified `transfer` mutation
+// constructs `CsvFile` for upload-source, download-target, and
+// server-side file endpoints alike.
 
 export const inspectorRouter = t.router({
   /**
@@ -468,14 +512,24 @@ export const inspectorRouter = t.router({
    * Check connection status.
    *
    * `adapter` is the kind of currently-connected store (null when not
-   * connected). The UI uses this to gate adapter-specific affordances —
-   * e.g. `BackupRestore` hides the restore button on non-PG adapters
-   * since `restore` is PG-only until #786.
+   * connected). `target` is the connected store's discriminator — the
+   * database name for PG, the file path for SQLite, `"memory"` for
+   * the ephemeral InMemory adapter — used by the restore UI as the
+   * typed-name gate on destructive operations (ACT-1128).
    */
-  status: t.procedure.query(() => ({
-    connected: currentStore !== null,
-    adapter: currentConfig?.adapter ?? null,
-  })),
+  status: t.procedure.query(() => {
+    const target = ((): string | null => {
+      if (!currentConfig) return null;
+      if (currentConfig.adapter === "pg") return currentConfig.database;
+      if (currentConfig.adapter === "sqlite") return currentConfig.file;
+      return "memory";
+    })();
+    return {
+      connected: currentStore !== null,
+      adapter: currentConfig?.adapter ?? null,
+      target,
+    };
+  }),
 
   /** Query events using the Store interface */
   query: t.procedure
@@ -946,46 +1000,6 @@ export const inspectorRouter = t.router({
     }
   }),
 
-  /** Export events as CSV rows */
-  backup: t.procedure
-    .input(
-      z.object({
-        stream: z.string().optional(),
-        names: z.string().array().optional(),
-        created_before: z.string().optional(),
-        created_after: z.string().optional(),
-        correlation: z.string().optional(),
-      })
-    )
-    .mutation(async ({ input }) => {
-      const s = getStore();
-      const events: AnyEvent[] = [];
-      await s.query<Schemas>(collect(events), {
-        ...input,
-        created_before: toDate(input.created_before),
-        created_after: toDate(input.created_after),
-        with_snaps: true,
-      });
-
-      // Build CSV
-      const header = CSV_COLUMNS.join(",");
-      const rows = events.map((e) =>
-        CSV_COLUMNS.map((col) => {
-          const val = e[col];
-          if (col === "data" || col === "meta")
-            return csvEscape(JSON.stringify(val));
-          if (val instanceof Date) return csvEscape(val.toISOString());
-          return csvEscape(
-            typeof val === "object" && val !== null
-              ? JSON.stringify(val)
-              : String(val)
-          );
-        }).join(",")
-      );
-
-      return { csv: [header, ...rows].join("\n"), count: events.length };
-    }),
-
   /**
    * Inspector write-mode status (#698). Tells the UI whether mutation
    * controls should render. Read-only by default; flipped on via the
@@ -1051,56 +1065,251 @@ export const inspectorRouter = t.router({
   })),
 
   /**
-   * Restore events from a CSV blob via `Store.restore`.
+   * Server-sent stream of restore progress events (ACT-1128).
    *
-   * Pre-ACT-1127 this opened a raw `pg.Client` and ran TRUNCATE +
-   * INSERT against PG only. Now it streams the CSV into the active
-   * adapter's port-level restore, so every adapter that declares
-   * the `restore` capability (today: InMemory, PG, SQLite) is
-   * supported. The adapter handles atomicity, id-renumbering, and
-   * causation-remap; the inspector just streams rows and records
-   * the result in its audit log.
+   * Each `Act.restore` `on_progress` tick on the server pushes one
+   * `{ processed, total? }` event to every active subscriber. The
+   * client opens this subscription before kicking off the `restore`
+   * mutation and renders the running `processed` count on a
+   * progress bar; closing the connection cancels via `AbortSignal`
+   * which detaches the listener cleanly.
    *
-   * Return shape carries both `count` (back-compat with pre-1127
-   * callers) and the full `ScanResult` (for #787's UI to render
-   * `duration_ms`, `dropped` counters, etc.).
+   * Both `restore` (CSV → connected store) and `transfer` (any →
+   * any) wire their `on_progress` to the same emitter, so the
+   * client uses one subscription regardless of which mutation
+   * fired.
    */
-  restore: t.procedure
-    .input(z.object({ csv: z.string(), dry_run: z.boolean().optional() }))
+  restoreProgress: t.procedure.subscription(async function* (opts) {
+    for await (const [event] of on(restoreProgressEmitter, "progress", {
+      signal: opts.signal,
+    })) {
+      yield event as { processed: number; total?: number };
+    }
+  }),
+
+  /**
+   * One unified event-transfer mutation (ACT-1128 / #788). Subsumes
+   * the prior `backup`, `restore`, and cross-adapter `transfer`
+   * endpoints. Source and target are independent endpoints —
+   * either side can be the connected store, an uploaded CSV blob
+   * (source only), a download into the response body (target only),
+   * a server-side CSV file, or per-call PG / SQLite credentials.
+   *
+   * Common flows expressed as source/target combinations:
+   *
+   *   - **Backup** — `source: current, target: download` — events
+   *     leave the connected store, return as CSV bytes in the
+   *     response for the browser to save.
+   *   - **Restore** — `source: upload, target: current` — uploaded
+   *     CSV blob lands in the connected store, atomically.
+   *   - **Cross-adapter migration** — both sides per-call configs
+   *     (PG → SQLite, etc.).
+   *
+   * Optional `filter` (Query) applies only when the source is a
+   * Store (current / pg / sqlite). CSV and uploaded blob sources
+   * ignore it — they're already files.
+   *
+   * Audit log records the destructive path. Dry-runs and `download`
+   * targets are diagnostic / read-only on the inspector's side, so
+   * they don't pollute the trail.
+   *
+   * Progress events fan out through the existing `restoreProgress`
+   * subscription.
+   */
+  transfer: t.procedure
+    .input(
+      z.object({
+        source: z.union([
+          z.object({ adapter: z.literal("current") }),
+          z.object({
+            adapter: z.literal("upload"),
+            csv: z.string(),
+          }),
+          z.object({
+            adapter: z.literal("csv"),
+            file: z.string().min(1),
+          }),
+          z.object({
+            adapter: z.literal("pg"),
+            host: z.string(),
+            port: z.number(),
+            database: z.string(),
+            user: z.string(),
+            password: z.string(),
+            schema: z.string(),
+            table: z.string(),
+          }),
+          z.object({
+            adapter: z.literal("sqlite"),
+            file: z.string().min(1),
+            table: z.string().default("events"),
+          }),
+        ]),
+        target: z.union([
+          z.object({ adapter: z.literal("current") }),
+          z.object({ adapter: z.literal("download") }),
+          z.object({
+            adapter: z.literal("csv"),
+            file: z.string().min(1),
+          }),
+          z.object({
+            adapter: z.literal("pg"),
+            host: z.string(),
+            port: z.number(),
+            database: z.string(),
+            user: z.string(),
+            password: z.string(),
+            schema: z.string(),
+            table: z.string(),
+          }),
+          z.object({
+            adapter: z.literal("sqlite"),
+            file: z.string().min(1),
+            table: z.string().default("events"),
+          }),
+        ]),
+        filter: z
+          .object({
+            stream: z.string().optional(),
+            stream_exact: z.boolean().optional(),
+            names: z.array(z.string()).optional(),
+            created_before: z.string().optional(),
+            created_after: z.string().optional(),
+            correlation: z.string().optional(),
+          })
+          .optional(),
+        dry_run: z.boolean().optional(),
+        drop_snapshots: z.boolean().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
-      const s = getStore();
-      // Dry-run skips the store contract entirely (no transaction, no
-      // capability check). Only the live path requires `Store.restore`.
-      if (!input.dry_run && !s.restore)
+      if (sameEndpoint(input.source, input.target))
         throw new Error(
-          "Active adapter does not support restore — see ACT-1124 for the capability contract"
+          "Transfer source and target refer to the same store — refusing to self-overwrite"
         );
+
+      // Build source. Three special cases:
+      //   - `current` — use the connected store; no per-call
+      //     construction or disposal.
+      //   - `upload` — wrap the uploaded blob in a `CsvFile`.
+      //   - everything else — per-call adapter via `buildPersistentAdapter`.
+      let source: Store;
+      let disposeSource: () => Promise<void> = async () => {};
+      if (input.source.adapter === "current") {
+        if (!currentStore)
+          throw new Error("Not connected — `current` source unavailable");
+        source = currentStore;
+      } else if (input.source.adapter === "upload") {
+        source = new CsvFile({ blob: input.source.csv }) as unknown as Store;
+      } else {
+        source = buildPersistentAdapter(input.source);
+        disposeSource = () => source.dispose();
+      }
+
+      // Build target. Similar three branches; download writes to a
+      // tempfile we read back after the pipeline completes.
+      let target: Store;
+      let disposeTarget: () => Promise<void> = async () => {};
+      let downloadPath: string | null = null;
+      if (input.target.adapter === "current") {
+        if (!currentStore)
+          throw new Error("Not connected — `current` target unavailable");
+        if (!currentStore.restore)
+          throw new Error(
+            "Connected adapter has no restore capability — see ACT-1124"
+          );
+        target = currentStore;
+      } else if (input.target.adapter === "download") {
+        downloadPath = join(
+          tmpdir(),
+          `act-inspector-download-${randomUUID()}.csv`
+        );
+        target = new CsvFile({ path: downloadPath }) as unknown as Store;
+        disposeTarget = async () => {
+          await target.dispose();
+          if (downloadPath) await unlink(downloadPath).catch(() => {});
+        };
+      } else {
+        target = buildPersistentAdapter(input.target);
+        if (!target.restore)
+          throw new Error(
+            `Target adapter '${input.target.adapter}' has no restore capability`
+          );
+        disposeTarget = () => target.dispose();
+      }
+
+      // Filter only applies when source is a real Store (current /
+      // pg / sqlite). For upload / csv sources we ignore it —
+      // they're already files. Wrap the underlying source so that
+      // when scan calls `source.query(cb)` we pass the filter
+      // through; the rest of the pipeline doesn't need to know.
+      const filter: Query | undefined =
+        (input.source.adapter === "current" ||
+          input.source.adapter === "pg" ||
+          input.source.adapter === "sqlite") &&
+        input.filter
+          ? {
+              ...input.filter,
+              created_before: toDate(input.filter.created_before),
+              created_after: toDate(input.filter.created_after),
+              with_snaps: true,
+            }
+          : undefined;
+      const filteredSource: Store = filter
+        ? ({
+            ...source,
+            // Delegate to the underlying store with our filter
+            // pre-bound; scan only ever passes the callback, never
+            // its own filter, so this is the right place to apply it.
+            query: <E extends Schemas>(
+              cb: (event: Committed<E, keyof E>) => void
+            ): Promise<number> => source.query<E>(cb, filter),
+            dispose: () => source.dispose(),
+          } as Store)
+        : source;
+
+      // Transfer-only Act with no scoped store — source and sink
+      // are passed explicitly so `Act.restore` never falls back to
+      // the singleton store.
+      const app = act().build();
       try {
-        // Build an empty scoped Act around the connected store so we
-        // can go through the orchestrator's public `Act.restore` path.
-        // No state/slice registration is needed — restore is
-        // type-erased and the Act exists purely to host the scan loop.
-        const cache = new InMemoryCache();
-        const app = act().build({ scoped: { store: s, cache } });
-        const result = await app.restore(parseCsvRows(input.csv), {
-          dry_run: input.dry_run,
-        });
-        await cache.dispose();
-        // Only the destructive path leaves an operational trace —
-        // dry-runs are diagnostic and shouldn't pollute the audit log.
-        if (!input.dry_run)
+        const result = await app.restore(
+          filteredSource,
+          {
+            dry_run: input.dry_run,
+            drop_snapshots: input.drop_snapshots,
+            on_progress: (p) => {
+              restoreProgressEmitter.emit("progress", p);
+            },
+          },
+          target as Parameters<typeof app.restore>[2]
+        );
+        // Read the download tempfile back into the response. The
+        // file gets cleaned up in the `finally` below.
+        let csv: string | null = null;
+        if (downloadPath && !input.dry_run)
+          csv = await readFile(downloadPath, "utf8");
+        // Audit only the destructive paths that materially mutate
+        // operator-managed state. Dry-runs and download-only
+        // transfers don't change anything on a connected store.
+        const writesToConnectedStore =
+          input.target.adapter === "current" && !input.dry_run;
+        if (writesToConnectedStore)
           recordAudit({
             timestamp: new Date().toISOString(),
             action: "restore",
-            adapter: currentConfig!.adapter,
+            adapter: currentConfig?.adapter ?? "inmemory",
             result,
           });
-        return { ok: true as const, count: result.kept, result };
+        return { ok: true as const, count: result.kept, result, csv };
       } catch (error) {
         throw new Error(
-          `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
+          `Transfer failed: ${error instanceof Error ? error.message : String(error)}`,
           { cause: error }
         );
+      } finally {
+        await disposeSource();
+        await disposeTarget();
       }
     }),
 });

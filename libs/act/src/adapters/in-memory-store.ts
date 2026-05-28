@@ -361,7 +361,7 @@ export class InMemoryStore implements Store {
           continue;
         if (query.after && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
-        callback(e as Committed<E, keyof E>);
+        await Promise.resolve(callback(e as Committed<E, keyof E>));
         count++;
         if (query?.limit && count >= query.limit) break;
       }
@@ -373,7 +373,7 @@ export class InMemoryStore implements Store {
         if (query?.created_after && e.created <= query.created_after) continue;
         if (query?.before && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
-        callback(e as Committed<E, keyof E>);
+        await Promise.resolve(callback(e as Committed<E, keyof E>));
         count++;
         if (query?.limit && count >= query.limit) break;
       }

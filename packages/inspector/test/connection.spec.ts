@@ -22,7 +22,11 @@ afterEach(async () => {
 
 describe("status", () => {
   it("reports disconnected before connect", async () => {
-    expect(await caller.status()).toEqual({ connected: false, adapter: null });
+    expect(await caller.status()).toEqual({
+      connected: false,
+      adapter: null,
+      target: null,
+    });
   });
 
   it("reports connected + adapter kind after connect(inmemory)", async () => {
@@ -30,13 +34,18 @@ describe("status", () => {
     expect(await caller.status()).toEqual({
       connected: true,
       adapter: "inmemory",
+      target: "memory",
     });
   });
 
   it("reports disconnected again after disconnect", async () => {
     await caller.connect({ adapter: "inmemory" });
     await caller.disconnect();
-    expect(await caller.status()).toEqual({ connected: false, adapter: null });
+    expect(await caller.status()).toEqual({
+      connected: false,
+      adapter: null,
+      target: null,
+    });
   });
 });
 
@@ -108,59 +117,75 @@ describe("discover", () => {
   });
 });
 
-describe("restore via Store.restore (ACT-1127)", () => {
-  it("refuses to run before any connect", async () => {
-    await expect(caller.restore({ csv: "" })).rejects.toThrow(
-      "Not connected to a store"
-    );
+describe("transfer (unified backup / restore / cross-adapter) — ACT-1128", () => {
+  it("refuses `current` source before any connect", async () => {
+    await expect(
+      caller.transfer({
+        source: { adapter: "current" },
+        target: { adapter: "download" },
+      })
+    ).rejects.toThrow(/current.*unavailable/);
   });
 
-  it("rejects malformed CSV with a clear error", async () => {
+  it("rejects malformed upload CSV with a clear error", async () => {
     await caller.connect({ adapter: "inmemory" });
-    await expect(caller.restore({ csv: "" })).rejects.toThrow(
-      /Restore failed.*at least one row/
-    );
+    await expect(
+      caller.transfer({
+        source: { adapter: "upload", csv: "" },
+        target: { adapter: "current" },
+      })
+    ).rejects.toThrow(/at least one row/);
   });
 
-  it("round-trips a backup through the active inmemory store", async () => {
+  it("round-trips events: current → download → upload → current", async () => {
     await caller.connect({ adapter: "inmemory" });
     const store = getActiveStore()!;
-    // Seed a few events the inspector will back up.
-    const stream = "round-trip-stream";
     await store.commit(
-      stream,
+      "round-trip-stream",
       [
         { name: "Opened", data: { id: 1 } },
         { name: "Updated", data: { id: 1, field: "x" } },
       ],
       { correlation: "round-trip", causation: {} }
     );
-    const backup = await caller.backup({});
+    const backup = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+    });
     expect(backup.count).toBe(2);
-    // Reconnect (fresh inmemory store), then restore from the backup.
+    expect(backup.csv).toBeTruthy();
+    // Reconnect (fresh inmemory store), then restore from the CSV bytes.
     await caller.connect({ adapter: "inmemory" });
-    const result = await caller.restore({ csv: backup.csv });
+    const result = await caller.transfer({
+      source: { adapter: "upload", csv: backup.csv ?? "" },
+      target: { adapter: "current" },
+    });
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.result.kept).toBe(2);
     expect(result.result.duration_ms).toBeGreaterThanOrEqual(0);
-    // Verify the post-restore store has the events back.
     const verify = await caller.query({});
     expect(verify.events).toHaveLength(2);
     expect(verify.events.map((e) => e.name)).toEqual(["Opened", "Updated"]);
   });
 
-  it("records the restore in the audit log with the adapter + result", async () => {
+  it("records the destructive `current`-target path in the audit log", async () => {
     await caller.connect({ adapter: "inmemory" });
     const store = getActiveStore()!;
     await store.commit("audited-stream", [{ name: "Tick", data: {} }], {
       correlation: "audit",
       causation: {},
     });
-    const backup = await caller.backup({});
+    const backup = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+    });
     await caller.connect({ adapter: "inmemory" });
     const baselineEntries = (await caller.audit()).entries.length;
-    await caller.restore({ csv: backup.csv });
+    await caller.transfer({
+      source: { adapter: "upload", csv: backup.csv ?? "" },
+      target: { adapter: "current" },
+    });
     const audit = await caller.audit();
     expect(audit.entries.length).toBe(baselineEntries + 1);
     const entry = audit.entries[0]!;
@@ -169,6 +194,25 @@ describe("restore via Store.restore (ACT-1127)", () => {
       expect(entry.adapter).toBe("inmemory");
       expect(entry.result.kept).toBe(1);
     }
+  });
+
+  it("dry-run reports counts without touching the target", async () => {
+    await caller.connect({ adapter: "inmemory" });
+    const store = getActiveStore()!;
+    await store.commit("dry-stream", [{ name: "Tick", data: {} }], {
+      correlation: "dry",
+      causation: {},
+    });
+    const baselineEntries = (await caller.audit()).entries.length;
+    const result = await caller.transfer({
+      source: { adapter: "current" },
+      target: { adapter: "download" },
+      dry_run: true,
+    });
+    expect(result.result.kept).toBe(1);
+    expect(result.csv).toBeNull();
+    // No audit entry on a dry-run.
+    expect((await caller.audit()).entries.length).toBe(baselineEntries);
   });
 });
 
@@ -201,6 +245,7 @@ describe("connect (sqlite)", () => {
       expect(await caller.status()).toEqual({
         connected: true,
         adapter: "sqlite",
+        target: file,
       });
       expect(getActiveStore()).not.toBeNull();
     } finally {
@@ -233,21 +278,27 @@ describe("connect (sqlite)", () => {
     }
   });
 
-  it("supports restore on a SQLite-backed connection (ACT-1127)", async () => {
+  it("supports transfer on a SQLite-backed connection (ACT-1128)", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "act-inspector-conn-sqlite-rs-"));
     try {
       const file = await buildActFile();
       await caller.connect({ adapter: "sqlite", file });
       const store = getActiveStore()!;
       await store.commit("sqlite-stream", [{ name: "Tick", data: { n: 1 } }], {
-        correlation: "sqlite-restore",
+        correlation: "sqlite-transfer",
         causation: {},
       });
-      const backup = await caller.backup({});
-      // Reconnect to a fresh SQLite file, then restore.
+      const backup = await caller.transfer({
+        source: { adapter: "current" },
+        target: { adapter: "download" },
+      });
+      // Reconnect to a fresh SQLite file, then restore the CSV.
       const file2 = await buildActFile("store-2.db");
       await caller.connect({ adapter: "sqlite", file: file2 });
-      const result = await caller.restore({ csv: backup.csv });
+      const result = await caller.transfer({
+        source: { adapter: "upload", csv: backup.csv ?? "" },
+        target: { adapter: "current" },
+      });
       expect(result.ok).toBe(true);
       expect(result.count).toBe(1);
       expect(result.result.kept).toBe(1);

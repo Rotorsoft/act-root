@@ -514,7 +514,7 @@ export class PostgresStore implements Store {
     }
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
-    for (const row of result.rows) callback(row);
+    for (const row of result.rows) await Promise.resolve(callback(row));
 
     return result.rowCount ?? 0;
   }

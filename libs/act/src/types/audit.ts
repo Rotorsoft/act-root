@@ -19,6 +19,8 @@
  * loading the entire report in memory.
  */
 
+import type { Query } from "./action.js";
+
 /**
  * Audit category names. Each maps to a distinct family of findings
  * and a distinct remediation. See {@link AuditFinding} for the
@@ -68,7 +70,7 @@ export type AuditOptions = {
    * {@link Query} (stream / source / created_before / created_after /
    * before / etc.). When omitted, the audit scans the whole table.
    */
-  query?: import("./action.js").Query;
+  query?: Query;
   /** Pagination size for event scans. Default 500. */
   page_size?: number;
   /** Per-category thresholds; see {@link AuditThresholds}. */

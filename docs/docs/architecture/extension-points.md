@@ -36,11 +36,13 @@ The `dispose()` port collects cleanup callbacks. Adapters' `dispose()` methods a
 The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these things:
 
 ```ts
-interface Store extends Disposable {
+interface Store extends Disposable, EventSource {
+  // EventSource gives us:
+  // query<E>(callback: (event: Committed<E>) => void, query?: Query): Promise<number>;
+
   seed(): Promise<void>;
   drop(): Promise<void>;
   commit(stream, msgs, meta, expectedVersion?): Promise<Committed[]>;
-  query(callback, filter?): Promise<number>;
   claim(lagging, leading, by, millis, lane?): Promise<Lease[]>;
   subscribe(streams): Promise<{ subscribed; watermark }>;
   ack(leases): Promise<Lease[]>;
@@ -65,11 +67,40 @@ interface Store extends Disposable {
 
 `restore` is the offline wipe-and-rebuild primitive (added in [ACT-1124](https://github.com/Rotorsoft/act-root/issues/783), reshaped into the current HOF driver pattern by [ACT-1125](https://github.com/Rotorsoft/act-root/issues/784)). Capability-gated — adapters that can't atomically wipe and reinsert in one transaction don't have to implement it. The adapter's job is narrow: open a transaction (PG `BEGIN`, SQLite `BEGIN IMMEDIATE`, InMemory snapshot-and-swap), wipe events + streams/subscriptions, hand the orchestrator a per-event insert callback by invoking `driver(callback)`, then commit or roll back. `RESTART IDENTITY` (PG) / `sqlite_sequence` reset (SQLite) reseed dense ids from 1; InMemory uses `0..N-1`. `created` is preserved verbatim from the source — distinct from `commit`, which always stamps `now()`. Reactions re-subscribe via the orchestrator on the next settle cycle.
 
-The orchestrator-side loop lives in `scan` (`libs/act/src/internal/event-sourcing.ts`, alongside `load`/`action`/`snap`/`tombstone`) and is exposed publicly only via `Act.restore(source, opts)`. `scan` owns iteration, validates each event (negative version, malformed `created`), applies `drop_snapshots`, fires `on_progress`, and builds the per-call `old → new` id map that rewrites `meta.causation.event.id` so causation chains survive the renumber. Source is an `AsyncIterable<Committed<Schemas, keyof Schemas>>` so multi-million-event backups don't OOM. Tools that operate on a raw `Store` without app state (e.g., the inspector) wrap the store in an empty Act via the scoped-ports option and call `app.restore` — the orchestrator path stays the only door in.
+### `EventSource` / `EventSink` — the transfer surface
 
-`ScanOptions` is interpreted by `scan`, not by adapters. As of [ACT-1125](https://github.com/Rotorsoft/act-root/issues/784) it carries three flags: `drop_snapshots` (skip `__snapshot__` events so the next snap policy regenerates them), `on_progress` (one callback per event — callers throttle/debounce as needed), and `dry_run` (validate the source without touching the store). When `dry_run` is set, `Act.restore` runs the scan loop with no per-event callback — same validation, same filter, same counts — but never opens a transaction or calls `Store.restore`. Useful for pre-flighting a CSV backup before committing to the destructive path; no adapter capability required. Two more flags — `drop_closed_streams` and `drop_empty_streams` — are deferred until the source-shape question (one-pass vs. re-iterable factory) is settled. The migration overlay (event-name remap, per-event transform, stream rename) lives in #785.
+Added by [ACT-1128](https://github.com/Rotorsoft/act-root/issues/787) / [#788](https://github.com/Rotorsoft/act-root/issues/788), the public types `EventSource` and `EventSink` (in `libs/act/src/types/action.ts`) split the read end and the write end of the restore pipeline into separate interfaces, so the same `Act.restore` driver can move events between any source and any sink:
 
-**Validation is a source operation, not a store operation.** Per-event blockers (malformed `created`, negative `version`) are caught inline by the scan loop on every `Act.restore` call and throw on the first hit; atomic transaction rollback in the adapter means a failing restore leaves the store byte-for-byte unchanged. Cross-event invariants (duplicate ids, per-stream version gaps) are not the framework's job — DB `UNIQUE(stream, version)` catches dupes at commit time, and partial backups intentionally have gaps.
+```ts
+interface EventSource extends Disposable {
+  query<E>(callback: (event: Committed<E>) => void, query?: Query): Promise<number>;
+}
+interface EventSink extends Disposable {
+  restore(driver: (callback: (event: Committed) => Promise<number>) => Promise<void>): Promise<void>;
+}
+```
+
+`Store extends EventSource` — every adapter is a source for free. The optional `Store.restore` method matches the `EventSink.restore` shape, so a restore-capable store is also a sink. The framework ships `CsvFile` (in `libs/act/src/csv.ts`) as the bundled non-store implementation: it implements both ends so a CSV file can be either side of a transfer (back up a store → CSV, restore a CSV → store, or pipe one CSV to another). Construct with `new CsvFile({ path })` for an on-disk file or `new CsvFile({ blob })` for a string already in memory.
+
+The orchestrator now exposes:
+
+```ts
+app.restore(source: EventSource, opts?: ScanOptions, sink?: EventSink): Promise<ScanResult>
+```
+
+`sink` defaults to the singleton store (which must declare the `restore` capability); passing an explicit sink routes the transfer elsewhere without binding the singleton. This is how the inspector's unified transfer endpoint moves events between PG ↔ SQLite ↔ CSV without ever changing what's connected.
+
+### Backpressure: how the callback shape became an async pipeline
+
+The `EventSource.query` callback is typed `(event) => void`, but adapters wrap each invocation in `await Promise.resolve(callback(event))`. TypeScript's "any return ignored when the type says `void`" rule lets the same call site work for both sync (`e => arr.push(e)`, returns `number`) and async (`async e => …`) callbacks. The orchestrator's `iterate` utility (in `libs/act/src/internal/event-sourcing.ts`, alongside `scan`) exploits this seam: it returns a promise from its callback that resolves only when the consumer pulls the event, turning the sync-callback `query` API into an `AsyncIterable<Committed>` with a 1-slot mailbox. The producer fills the slot, the consumer drains it, and `await callback(event)` blocks the next read until the consumer is ready. Net effect: streaming a multi-million-event PG store into a CSV file (or vice versa) holds at most one event in memory regardless of how unbalanced the two sides' throughputs are. `iterate` is internal because it's a transport detail; `CsvFile`, `EventSource`, and `EventSink` are the public surface the rest of the framework speaks.
+
+### `scan`, `Act.restore`, and the destructive path
+
+The orchestrator-side validator lives in `scan` (`libs/act/src/internal/event-sourcing.ts`, alongside `load`/`action`/`snap`/`tombstone`) and is exposed publicly only via `Act.restore(source, opts, sink?)`. `scan` owns iteration over the `EventSource`, validates each event (negative version, malformed `created`), applies `drop_snapshots`, fires `on_progress`, and builds the per-call `old → new` id map that rewrites `meta.causation.event.id` so causation chains survive the renumber. Tools that operate on a raw `Store` without app state (e.g., the inspector) wrap the store in an empty Act via the scoped-ports option and call `app.restore` — the orchestrator path stays the only door in.
+
+`ScanOptions` is interpreted by `scan`, not by adapters. As of [ACT-1125](https://github.com/Rotorsoft/act-root/issues/784) it carries three flags: `drop_snapshots` (skip `__snapshot__` events so the next snap policy regenerates them), `on_progress` (one callback per event — callers throttle/debounce as needed), and `dry_run` (validate the source without touching the store). When `dry_run` is set, `Act.restore` runs the scan loop with no per-event callback — same validation, same filter, same counts — but never opens a transaction or calls the sink. Useful for pre-flighting a transfer before committing to the destructive path; no sink capability required, so a dry-run works even against a sink-less source. Two more flags — `drop_closed_streams` and `drop_empty_streams` — are deferred until the source-shape question (one-pass vs. re-iterable factory) is settled. The migration overlay (event-name remap, per-event transform, stream rename) lives in #785.
+
+**Validation is a source operation, not a store operation.** Per-event blockers (malformed `created`, negative `version`) are caught inline by the scan loop on every `Act.restore` call and throw on the first hit; atomic transaction rollback in the sink means a failing restore leaves the target byte-for-byte unchanged. Cross-event invariants (duplicate ids, per-stream version gaps) are not the framework's job — DB `UNIQUE(stream, version)` catches dupes at commit time, and partial backups intentionally have gaps.
 
 ### Invariants an adapter must hold
 
@@ -78,6 +109,7 @@ The orchestrator-side loop lives in `scan` (`libs/act/src/internal/event-sourcin
 - **Atomic commits**: a multi-event commit is all-or-nothing. Either all events land or none do.
 - **Atomic truncate**: `truncate` deletes all events for a stream and inserts the seed event in a single transaction. Partial states are not observable.
 - **Atomic restore** (when implemented): `restore` wipes events + streams and rewrites the source rows in a single transaction. On any throw mid-iteration, the store reverts byte-for-byte to its pre-call state. Cache invalidation after restore is the caller's responsibility — restore does not touch the `Cache` port.
+- **Backpressured query**: adapters MUST invoke the per-event callback as `await Promise.resolve(callback(event))`. Sync callbacks (`(e) => arr.push(e)`) resolve immediately and pay no overhead; async callbacks (`async (e) => …`) throttle the read loop, which is how `iterate` and the transfer pipeline avoid OOM on multi-million-event sources.
 - **Lease exclusivity**: a successful `claim` returns leases that no concurrent `claim()` can return again until released by `ack`/`block`/timeout.
 - **Tombstone semantics**: a tombstone event is a regular event with `name === TOMBSTONE_EVENT`. Adapters don't need to know what it means — the framework's `action()` reads the head event to decide. Adapters just need to return tombstones in queries like any other event.
 

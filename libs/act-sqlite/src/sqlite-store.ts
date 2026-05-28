@@ -283,15 +283,17 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
-      callback({
-        id: Number(row.id),
-        stream: row.stream as string,
-        version: Number(row.version),
-        created: new Date(row.created as string),
-        name: row.name as string,
-        data: JSON.parse(row.data as string),
-        meta: JSON.parse(row.meta as string),
-      });
+      await Promise.resolve(
+        callback({
+          id: Number(row.id),
+          stream: row.stream as string,
+          version: Number(row.version),
+          created: new Date(row.created as string),
+          name: row.name as string,
+          data: JSON.parse(row.data as string),
+          meta: JSON.parse(row.meta as string),
+        })
+      );
       count++;
     }
 
