@@ -352,11 +352,6 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     let count = 0;
-    // `await Promise.resolve(callback(e))` lets async callbacks
-    // (e.g., the `iterate()` async-generator bridge) backpressure
-    // the read loop without imposing a Promise<void> return type
-    // on the public callback signature. Sync callbacks resolve
-    // immediately — single microtask per event, no extra allocation.
     if (query?.backward) {
       let i = (query?.before || this._events.length) - 1;
       while (i >= 0) {

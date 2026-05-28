@@ -282,10 +282,6 @@ export class SqliteStore implements Store {
     const result = await this.client.execute({ sql, args: args as any[] });
     let count = 0;
 
-    // `await Promise.resolve(callback(...))` lets async callbacks
-    // throttle the read loop — the `iterate()` async-generator
-    // bridge relies on this for backpressure. Sync callbacks resolve
-    // immediately.
     for (const row of result.rows) {
       await Promise.resolve(
         callback({

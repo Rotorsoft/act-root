@@ -514,12 +514,6 @@ export class PostgresStore implements Store {
     }
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
-    // `await Promise.resolve(callback(...))` lets async callbacks
-    // throttle the read loop — the `iterate()` async-generator
-    // bridge relies on this for backpressure. Sync callbacks
-    // resolve immediately. The `pg` library still buffers the full
-    // result set into `result.rows` before this loop runs — true
-    // cursor-based streaming is tracked in #814 (ACT-1132).
     for (const row of result.rows) await Promise.resolve(callback(row));
 
     return result.rowCount ?? 0;
