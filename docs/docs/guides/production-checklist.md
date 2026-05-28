@@ -180,7 +180,45 @@ app.on("settled", (drain) => {
 
 The `act-inspector` workspace package gives you a UI on top of the same `query_streams` primitive metrics tools query. It's not a production runtime — run it against a snapshot DB for incident analysis.
 
-## 9. Closing the books
+## 9. Restoring a store (rare, deliberate)
+
+`app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild path: atomic replacement of a store's contents from an event source. Most production teams never call this from application code — they use the inspector's transfer dialog (or a one-off `node` script) to operate it as a tool. What matters in production is knowing when *not* to reach for it.
+
+**Restore is not your disaster-recovery plan.** `pg_dump` / `pg_restore` for Postgres and a periodic SQLite file copy are still the right tools for recovering from a lost server. They preserve every byte, run at the storage layer, and don't require the application to be running. `app.restore` is for *content-level* operations — cross-adapter migrations (PG → SQLite for a customer extract), compaction passes (drop `__snapshot__` events to shrink the log), validated re-imports from a curated CSV. If your goal is "rebuild from yesterday's snapshot because the database disk died," skip restore and use the storage-level tools.
+
+When you do use restore, plan around three follow-ups:
+
+```typescript
+import { CsvFile, cache } from "@rotorsoft/act";
+
+// 1. Run the destructive restore. Connect to the target store first; restore
+//    wipes whatever's connected before rewriting.
+const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
+logger.info({ kept: result.kept, duration_ms: result.duration_ms }, "restored");
+
+// 2. Clear the cache — restore does NOT touch the Cache port. Entries from
+//    before the restore are now pointing at stale (or renumbered) ids.
+await cache().clear();
+
+// 3. Rebuild projections. Restore replaces events; it does not replay them
+//    through reactions. If any projection lives in a database/cache outside
+//    the event log, you need an explicit reset for it.
+await app.reset({ stream: "^proj-" });
+app.settle({ eventLimit: 1000 });
+```
+
+Operator-side guardrails:
+
+- **Dry-run before destructive.** `app.restore(source, { dry_run: true })` runs the same validator, counts the same kept/dropped, but never opens the sink's transaction. Pre-flight every restore the first time you run it against a new source. The inspector's transfer dialog does this automatically via the "Preview" button.
+- **Inspector writes gated.** The inspector's transfer dialog runs the destructive path only when `ACT_INSPECTOR_WRITE=1`. Default-deny; flip it on for the duration of the migration, then flip it off.
+- **Audit the run.** The inspector audit log records every destructive transfer with `kept`, `duration_ms`, and the adapter pair. Application code calling `app.restore` directly should log the result the same way.
+- **Reactions resubscribe.** After restore, the orchestrator's next settle picks up the rewritten event log, and `subscribe()` UPSERTs every stream's watermark. No manual intervention.
+
+When a restore is genuinely the right tool — for example, "migrate the wolfdesk app from Postgres to a partitioned SQLite cluster" — the path is: stop writes to the source, run `app.restore(pgStore, {}, sqliteStore)`, flip the connection string, run `cache().clear()`, run `app.reset` against any DB-backed projections, restart. The framework owns the cross-adapter shape so the operation is the same regardless of which adapters sit on either end.
+
+See [Concepts → Restoring a store](../concepts/event-sourcing.md#restoring-a-store) for the primitive itself and how it compares with `reset` / `truncate` / `close`.
+
+## 10. Closing the books
 
 For long-running streams that accumulate events you'll never replay (year-old order history, archived chat sessions), use `app.close()` to archive and truncate:
 
@@ -208,7 +246,7 @@ app.on("closed", ({ truncated, skipped }) => {
 
 Closed streams are tombstoned — `app.do()` against them throws `StreamClosedError`. To re-open with a fresh starting state, `close()` with `restart: true`. See [Architecture → Close cycle](../architecture/close-cycle.md) for the full safety semantics.
 
-## 10. Sizing lanes
+## 11. Sizing lanes
 
 If reactions in this app have heterogeneous timing profiles — webhook delivery measured in seconds alongside metric emission measured in microseconds — split them across lanes (ACT-1103). Without lanes, every reaction shares one `leaseMillis` and one `streamLimit`, and the slowest handler dictates the budget for everyone.
 
@@ -252,5 +290,6 @@ Before pushing to production, walk this list mentally:
 - [ ] `LOG_LEVEL` and `NODE_ENV` set appropriately
 - [ ] Lifecycle metrics exported (blocked, settled, concurrency)
 - [ ] Lanes sized per latency class (or all reactions sharing one timing budget is genuinely fine)
+- [ ] Disaster-recovery plan is `pg_dump` / file copy — not `app.restore` (which is for content-level migration / compaction, not DR)
 
 Once these are in place, the framework runs itself.

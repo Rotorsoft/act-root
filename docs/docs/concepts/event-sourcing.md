@@ -281,6 +281,81 @@ const result = await app.close([
 
 After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent `app.do()`. Restarted streams are reseeded and continue normally. See [Close cycle](../architecture/close-cycle) for the full phase-by-phase semantics.
 
+## Restoring a store
+
+`app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild primitive — atomically replace the contents of a store from an event source. Use it for CSV-driven backups, cross-adapter migrations (PG → SQLite or vice versa), or compaction passes that drop `__snapshot__` events to shrink the log.
+
+```typescript
+import { CsvFile } from "@rotorsoft/act";
+
+// Restore from a CSV file on disk into the connected store
+const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
+console.log(`Restored ${result.kept} events in ${result.duration_ms}ms`);
+
+// Cache invalidation is the caller's responsibility — restore wipes events,
+// not cache entries. Always clear after a destructive restore.
+await cache().clear();
+
+// Projection rebuilds are also up to the caller — restore does not call reset
+await app.reset({ stream: "^proj-" });
+```
+
+### What `restore` is and isn't
+
+- **It is** an atomic wipe-and-rebuild: the connected store's events + streams + subscriptions are replaced byte-for-byte by the source's contents inside a single transaction. On any error mid-iteration, the transaction rolls back and the store reverts to its pre-call state.
+- **It preserves `created`** verbatim from the source — distinct from `commit`, which always stamps `now()`. Cross-adapter restores keep the original event timestamps.
+- **It renumbers `id`** densely (PG `RESTART IDENTITY`, SQLite `sqlite_sequence` reset, InMemory `0..N-1`). The framework rewrites `meta.causation.event.id` through a per-call `old → new` map so causation chains survive the renumber. Original ids never persist.
+- **It is not** a disaster-recovery primitive. `pg_dump` / `pg_restore` and SQLite file copies are still the right tool for backups you'll need to recover from in a hurry — they preserve every byte and run at the storage layer. `app.restore` is for content-level operations: cross-adapter migration, compaction, validated re-imports.
+- **It is not** transparent to the cache. The cache is a separate port; restore does not call `cache().clear()`. After a destructive restore the cache holds entries that no longer match the rebuilt store. Clearing it is the caller's job.
+
+### Source and sink
+
+The source and sink slots accept anything implementing `EventSource` and `EventSink` respectively. The framework's `Store` adapters implement both (read end is `query`, write end is the optional `restore` capability). `CsvFile` ships in `@rotorsoft/act` and implements both ends so CSV files can sit in either slot:
+
+```typescript
+import { CsvFile, store } from "@rotorsoft/act";
+import { PostgresStore } from "@rotorsoft/act-pg";
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+// PG → SQLite (cross-adapter): both endpoints constructed inline
+const pg = new PostgresStore({ /* … */ });
+const sqlite = new SqliteStore({ url: "file:./snapshot.db" });
+await app.restore(pg, {}, sqlite);
+await pg.dispose();
+await sqlite.dispose();
+
+// PG → CSV (backup)
+await app.restore(pg, {}, new CsvFile({ path: "./backup.csv" }));
+
+// CSV → connected store (default sink)
+await app.restore(new CsvFile({ path: "./backup.csv" }));
+```
+
+Omit the third argument to default to the connected store as sink. Pass an explicit sink to route the transfer elsewhere without binding the singleton.
+
+### Options
+
+`ScanOptions` is the second argument:
+
+- **`dry_run: true`** — walk the source, validate every event, count kept and dropped, but never open the sink's transaction. No `Store.restore` capability required. The kept/dropped counts match what a destructive run would land. Used by the inspector's transfer-preview affordance.
+- **`drop_snapshots: true`** — skip every `__snapshot__` event in the source. The rebuilt store has no snapshots, so the next snap policy regenerates them with the current state. Useful for compaction.
+- **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
+
+### Restore vs reset vs truncate vs close
+
+| Primitive | What it does | Atomicity |
+|---|---|---|
+| `app.restore(source, opts?, sink?)` | Wipe the sink (events + streams + subscriptions) and rebuild from the source in a single transaction. `created` preserved, `id` renumbered, causation refs rewritten. | Adapter transaction — all-or-nothing per call |
+| `app.reset(input)` | Set reaction watermarks to `-1` for matching streams, arm the orchestrator's drain flag so the next `settle()` replays every event through reactions. **Does not delete events.** | Per-stream watermark update |
+| `app.unblock(input)` | Lift the `blocked` flag from poison-message streams. Watermark preserved — the stream resumes from where it stopped, no replay. | Per-stream flag update |
+| `store().truncate(targets)` | Delete every event for the targeted streams and insert a single tombstone event. **Operator-facing, not orchestrator-aware.** Prefer `app.close(...)` for the orchestrator-coordinated variant. | Per-target transaction |
+| `app.close(targets)` | Archive + tombstone (or restart) a closed stream. Quiesces reactions, runs the archive callback, deletes events, commits the tombstone or a fresh `__snapshot__`. | Per-target transaction with reaction quiesce |
+
+Common confusions worth naming:
+
+- **`restore` is not `reset`.** Restore replaces events. Reset replays reactions over events that are already there. Using `restore` to "rewind a projection" would wipe and re-import the entire event log; using `reset` does the same job at the watermark level with zero data loss risk.
+- **`truncate` is not `close`.** Truncate deletes events for an operator-named target. Close coordinates with the orchestrator, quiesces reactions, runs an archive step, and tombstones the stream atomically with the truncation. Plain `truncate` is for tooling that already knows reactions are idle; `close` is the production path.
+
 ## Testing
 
 ```typescript
