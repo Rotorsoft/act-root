@@ -1,3 +1,4 @@
+import { EventEmitter, on } from "node:events";
 import {
   act,
   type Committed,
@@ -175,6 +176,22 @@ type AdapterConfig = PgConfig | SqliteConfig | InMemoryConfig;
 /** Managed store instance — not the singleton, so we can reconnect */
 let currentStore: Store | null = null;
 let currentConfig: AdapterConfig | null = null;
+
+/**
+ * Restore progress pub-sub (ACT-1128).
+ *
+ * The `restore` mutation pushes a `{ processed, total? }` event each
+ * time `Act.restore`'s `on_progress` fires; the `restoreProgress`
+ * subscription is a server-sent-events stream that forwards them to
+ * the client. Reactive (no polling), single-emitter (single-user
+ * server), framework-aware (we already require Node, so `events.on`
+ * with an `AbortSignal` is free).
+ *
+ * A multi-tenant deployment would need a per-session emitter map
+ * keyed by request id; not in scope here.
+ */
+const restoreProgressEmitter = new EventEmitter();
+restoreProgressEmitter.setMaxListeners(0);
 
 /**
  * Test seam — direct read access to the connected store.
@@ -468,14 +485,24 @@ export const inspectorRouter = t.router({
    * Check connection status.
    *
    * `adapter` is the kind of currently-connected store (null when not
-   * connected). The UI uses this to gate adapter-specific affordances —
-   * e.g. `BackupRestore` hides the restore button on non-PG adapters
-   * since `restore` is PG-only until #786.
+   * connected). `target` is the connected store's discriminator — the
+   * database name for PG, the file path for SQLite, `"memory"` for
+   * the ephemeral InMemory adapter — used by the restore UI as the
+   * typed-name gate on destructive operations (ACT-1128).
    */
-  status: t.procedure.query(() => ({
-    connected: currentStore !== null,
-    adapter: currentConfig?.adapter ?? null,
-  })),
+  status: t.procedure.query(() => {
+    const target = ((): string | null => {
+      if (!currentConfig) return null;
+      if (currentConfig.adapter === "pg") return currentConfig.database;
+      if (currentConfig.adapter === "sqlite") return currentConfig.file;
+      return "memory";
+    })();
+    return {
+      connected: currentStore !== null,
+      adapter: currentConfig?.adapter ?? null,
+      target,
+    };
+  }),
 
   /** Query events using the Store interface */
   query: t.procedure
@@ -1066,7 +1093,13 @@ export const inspectorRouter = t.router({
    * `duration_ms`, `dropped` counters, etc.).
    */
   restore: t.procedure
-    .input(z.object({ csv: z.string(), dry_run: z.boolean().optional() }))
+    .input(
+      z.object({
+        csv: z.string(),
+        dry_run: z.boolean().optional(),
+        drop_snapshots: z.boolean().optional(),
+      })
+    )
     .mutation(async ({ input }) => {
       const s = getStore();
       // Dry-run skips the store contract entirely (no transaction, no
@@ -1075,6 +1108,9 @@ export const inspectorRouter = t.router({
         throw new Error(
           "Active adapter does not support restore — see ACT-1124 for the capability contract"
         );
+      // ACT-1128 — `on_progress` events stream out to the client via
+      // the `restoreProgress` subscription. Reactive: subscribers
+      // receive one event per `Act.restore` `on_progress` tick.
       try {
         // Build an empty scoped Act around the connected store so we
         // can go through the orchestrator's public `Act.restore` path.
@@ -1084,6 +1120,10 @@ export const inspectorRouter = t.router({
         const app = act().build({ scoped: { store: s, cache } });
         const result = await app.restore(parseCsvRows(input.csv), {
           dry_run: input.dry_run,
+          drop_snapshots: input.drop_snapshots,
+          on_progress: (p) => {
+            restoreProgressEmitter.emit("progress", p);
+          },
         });
         await cache.dispose();
         // Only the destructive path leaves an operational trace —
@@ -1103,6 +1143,24 @@ export const inspectorRouter = t.router({
         );
       }
     }),
+
+  /**
+   * Server-sent stream of restore progress events (ACT-1128).
+   *
+   * Each `Act.restore` `on_progress` tick on the server pushes one
+   * `{ processed, total? }` event to every active subscriber. The
+   * client opens this subscription before kicking off the `restore`
+   * mutation and renders the running `processed` count on a
+   * progress bar; closing the connection cancels via `AbortSignal`
+   * which detaches the listener cleanly.
+   */
+  restoreProgress: t.procedure.subscription(async function* (opts) {
+    for await (const [event] of on(restoreProgressEmitter, "progress", {
+      signal: opts.signal,
+    })) {
+      yield event as { processed: number; total?: number };
+    }
+  }),
 });
 
 export type InspectorRouter = typeof inspectorRouter;

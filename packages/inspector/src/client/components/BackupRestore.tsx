@@ -1,23 +1,28 @@
 import { Download, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { useFilterStore } from "../stores/filters.js";
-import { queryClient, trpc } from "../trpc.js";
+import { trpc } from "../trpc.js";
+import { RestoreDialog } from "./restore/index.js";
 
+/**
+ * Toolbar entry point for backup + restore (ACT-1128).
+ *
+ * Thin shell that owns only the two toolbar buttons and the file
+ * picker. The destructive flow — compaction toggles, dry-run
+ * preview, typed-name gate, progress poll, post-restore summary —
+ * lives in {@link RestoreDialog} so each concern is its own
+ * component under `components/restore/`. Backup stays inline
+ * because it's a single `useMutation` + download — no extra
+ * components warrant their own file.
+ */
 export function BackupRestore() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [filters] = useFilterStore();
-  const [restoring, setRestoring] = useState(false);
-  const [confirm, setConfirm] = useState<{
-    fileName: string;
-    csv: string;
-  } | null>(null);
+  const [file, setFile] = useState<{ name: string; csv: string } | null>(null);
 
-  // ACT-1127 rewrote restore onto `Store.restore`, so any
-  // adapter that declares the `restore` capability is supported.
-  // The status query still drives the disabled state for the
-  // pre-connect case (no active store).
   const { data: status } = trpc.status.useQuery();
   const restoreEnabled = status?.connected === true;
+  const target = status?.target ?? "";
 
   const backupMutation = trpc.backup.useMutation({
     onSuccess(data) {
@@ -32,17 +37,6 @@ export function BackupRestore() {
     },
   });
 
-  const restoreMutation = trpc.restore.useMutation({
-    onSuccess() {
-      setConfirm(null);
-      setRestoring(false);
-      void queryClient.invalidateQueries();
-    },
-    onError() {
-      setRestoring(false);
-    },
-  });
-
   const handleBackup = () => {
     const hasFilters =
       filters.stream ||
@@ -50,7 +44,6 @@ export function BackupRestore() {
       filters.created_after ||
       filters.created_before ||
       filters.correlation;
-
     backupMutation.mutate({
       stream: filters.stream || undefined,
       names:
@@ -62,21 +55,15 @@ export function BackupRestore() {
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const f = e.target.files?.[0];
+    if (!f) return;
     const reader = new FileReader();
     reader.onload = () => {
-      setConfirm({ fileName: file.name, csv: reader.result as string });
+      setFile({ name: f.name, csv: reader.result as string });
     };
-    reader.readAsText(file);
-    // Reset so the same file can be re-selected
+    reader.readAsText(f);
+    // Reset so the same file can be re-selected after a close.
     e.target.value = "";
-  };
-
-  const handleRestore = () => {
-    if (!confirm) return;
-    setRestoring(true);
-    restoreMutation.mutate({ csv: confirm.csv });
   };
 
   return (
@@ -88,7 +75,6 @@ export function BackupRestore() {
         className="hidden"
         onChange={handleFileSelect}
       />
-
       <div className="flex items-center gap-1">
         <button
           onClick={handleBackup}
@@ -111,58 +97,12 @@ export function BackupRestore() {
           <Upload size={14} />
         </button>
       </div>
-
-      {/* Confirmation dialog */}
-      {confirm && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/60"
-            onClick={() => !restoring && setConfirm(null)}
-          />
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="w-96 rounded-lg border border-zinc-700 bg-zinc-900 p-6 shadow-xl">
-              <h3 className="text-sm font-semibold text-zinc-200">
-                Restore from CSV
-              </h3>
-              <p className="mt-2 text-xs text-zinc-400">
-                This will{" "}
-                <span className="font-semibold text-red-400">
-                  delete all existing events
-                </span>{" "}
-                and replace them with the contents of:
-              </p>
-              <p className="mt-1 text-xs font-mono text-zinc-300">
-                {confirm.fileName}
-              </p>
-              <p className="mt-2 text-xs text-zinc-500">
-                Event IDs will be re-assigned starting from 1.
-              </p>
-
-              {restoreMutation.isError && (
-                <p className="mt-2 text-xs text-red-400">
-                  {restoreMutation.error.message}
-                </p>
-              )}
-
-              <div className="mt-4 flex justify-end gap-2">
-                <button
-                  onClick={() => setConfirm(null)}
-                  disabled={restoring}
-                  className="rounded-md border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 transition hover:bg-zinc-800 disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleRestore}
-                  disabled={restoring}
-                  className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-red-500 disabled:opacity-50"
-                >
-                  {restoring ? "Restoring..." : "Delete & Restore"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </>
+      {file && (
+        <RestoreDialog
+          file={file}
+          target={target}
+          onClose={() => setFile(null)}
+        />
       )}
     </>
   );

@@ -22,7 +22,11 @@ afterEach(async () => {
 
 describe("status", () => {
   it("reports disconnected before connect", async () => {
-    expect(await caller.status()).toEqual({ connected: false, adapter: null });
+    expect(await caller.status()).toEqual({
+      connected: false,
+      adapter: null,
+      target: null,
+    });
   });
 
   it("reports connected + adapter kind after connect(inmemory)", async () => {
@@ -30,13 +34,18 @@ describe("status", () => {
     expect(await caller.status()).toEqual({
       connected: true,
       adapter: "inmemory",
+      target: "memory",
     });
   });
 
   it("reports disconnected again after disconnect", async () => {
     await caller.connect({ adapter: "inmemory" });
     await caller.disconnect();
-    expect(await caller.status()).toEqual({ connected: false, adapter: null });
+    expect(await caller.status()).toEqual({
+      connected: false,
+      adapter: null,
+      target: null,
+    });
   });
 });
 
@@ -201,6 +210,7 @@ describe("connect (sqlite)", () => {
       expect(await caller.status()).toEqual({
         connected: true,
         adapter: "sqlite",
+        target: file,
       });
       expect(getActiveStore()).not.toBeNull();
     } finally {
