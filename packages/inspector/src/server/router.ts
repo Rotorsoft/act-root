@@ -2,6 +2,7 @@ import { EventEmitter, on } from "node:events";
 import {
   act,
   type Committed,
+  CsvFile,
   InMemoryCache,
   InMemoryStore,
   type ScanResult,
@@ -262,75 +263,14 @@ function csvEscape(value: string): string {
   return value;
 }
 
-/** Parse a CSV line respecting quoted fields */
-function csvParseLine(line: string): string[] {
-  const fields: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (i + 1 < line.length && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      fields.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  fields.push(current);
-  return fields;
-}
-
-/**
- * Stream a CSV blob into `AsyncIterable<Committed<Schemas, keyof
- * Schemas>>` consumed by `Store.restore` via the scan driver (#786).
- * The blob still arrives as a single string from the tRPC input, but
- * the parser yields one event at a time so the adapter never holds
- * the full parsed array in memory alongside the source. The header
- * row format matches `backup`'s output — round-tripping is the
- * primary use case. `created` is parsed to `Date` here so downstream
- * consumers see the unified `Committed` shape.
- */
-async function* parseCsvRows(
-  csv: string
-): AsyncIterable<Committed<Schemas, keyof Schemas>> {
-  const lines = csv.split("\n");
-  if (lines.length < 2)
-    throw new Error("CSV must have a header and at least one row");
-  const expectedHeader = CSV_COLUMNS.join(",");
-  if (lines[0] !== expectedHeader)
-    throw new Error(`Invalid CSV header. Expected: ${expectedHeader}`);
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!;
-    if (!line.trim()) continue;
-    const fields = csvParseLine(line);
-    if (fields.length !== CSV_COLUMNS.length)
-      throw new Error(
-        `Row ${i}: expected ${CSV_COLUMNS.length} fields, got ${fields.length}`
-      );
-    yield {
-      id: Number.parseInt(fields[0]!, 10),
-      name: fields[1]!,
-      data: JSON.parse(fields[2]!),
-      stream: fields[3]!,
-      version: Number.parseInt(fields[4]!, 10),
-      created: new Date(fields[5]!),
-      meta: JSON.parse(fields[6]!),
-    };
-  }
-}
+// CSV parsing for restore lives in the framework's `CsvFile` utility
+// (libs/act/src/transfer.ts) as of ACT-1128. The inspector's restore
+// endpoint constructs `new CsvFile({ blob })` and passes it as the
+// source to `app.restore`. The old inline `csvParseLine` /
+// `parseCsvRows` here was removed when the framework took over the
+// shape; `csvEscape` + `CSV_COLUMNS` stay because the `backup`
+// endpoint still emits CSV on its own (store → CSV string for
+// download — distinct from the restore-source read path).
 
 export const inspectorRouter = t.router({
   /**
@@ -1118,7 +1058,8 @@ export const inspectorRouter = t.router({
         // type-erased and the Act exists purely to host the scan loop.
         const cache = new InMemoryCache();
         const app = act().build({ scoped: { store: s, cache } });
-        const result = await app.restore(parseCsvRows(input.csv), {
+        const source = new CsvFile({ blob: input.csv });
+        const result = await app.restore(source, {
           dry_run: input.dry_run,
           drop_snapshots: input.drop_snapshots,
           on_progress: (p) => {

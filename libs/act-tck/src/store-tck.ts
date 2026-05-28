@@ -8,6 +8,7 @@ import {
 import type {
   BlockedLease,
   Committed,
+  EventSource,
   Lease,
   ScanOptions,
   ScanResult,
@@ -1658,13 +1659,34 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.seed();
       });
 
-      /** Adapt an event array into the AsyncIterable contract. */
+      /**
+       * Adapt an event array into the {@link EventSource} contract.
+       * The test source's `query` walks the array and calls the
+       * callback per event, exactly like a real `Store.query`. The
+       * `await Promise.resolve(callback(...))` mirrors the adapter
+       * pattern so async-callback backpressure stays exercised
+       * even from this synthetic source.
+       */
       const asSource = (
         events: Committed<Schemas, keyof Schemas>[]
-      ): AsyncIterable<Committed<Schemas, keyof Schemas>> =>
-        (async function* () {
-          for (const e of events) yield e;
-        })();
+      ): EventSource => ({
+        async query(callback) {
+          // The cast widens our concrete schema-erased event back
+          // into the generic `E` slot the EventSource.query contract
+          // is parametrized over. Safe — the synthetic test source
+          // is intentionally schema-agnostic.
+          for (const e of events)
+            await Promise.resolve(
+              (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
+                e
+              )
+            );
+          return events.length;
+        },
+        async dispose() {
+          // no-op — synthetic in-memory source
+        },
+      });
 
       /**
        * Build a {@link Committed} event with stub meta + the given
@@ -1698,7 +1720,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        * importing the framework's internal scan symbol directly.
        */
       const restore = async (
-        source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
+        source: EventSource,
         opts: ScanOptions = {}
       ): Promise<ScanResult> => {
         const cache = new InMemoryCache();
@@ -1706,6 +1728,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         try {
           return await app.restore(source, opts);
         } finally {
+          // Dispose the source first, then the cache — mirrors how
+          // a production caller would tear down ephemeral resources.
+          // Also keeps the synthetic-source `dispose` no-op
+          // exercised by every test that runs `restore`.
+          await source.dispose();
           await cache.dispose();
         }
       };
@@ -2006,18 +2033,30 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           [inc(1), inc(2), inc(3)],
           makeMeta({ stream: original })
         );
-        const explosive: AsyncIterable<Committed<Schemas, keyof Schemas>> =
-          (async function* () {
-            yield event(
-              1,
-              `restore-explode-${uid()}`,
-              0,
-              "Incremented",
-              new Date(),
-              { amount: 1 }
+        // EventSource that fires one event then throws — exercises
+        // the rollback path on the destination store. Implemented as
+        // a query method (not an iterable) since EventSource is the
+        // shape Act.restore takes.
+        const explosive: EventSource = {
+          async query(callback) {
+            await Promise.resolve(
+              (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
+                event(
+                  1,
+                  `restore-explode-${uid()}`,
+                  0,
+                  "Incremented",
+                  new Date(),
+                  { amount: 1 }
+                )
+              )
             );
             throw new Error("boom");
-          })();
+          },
+          async dispose() {
+            // no-op
+          },
+        };
         await expect(restore(explosive)).rejects.toThrow("boom");
         // Pre-call events still there.
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];

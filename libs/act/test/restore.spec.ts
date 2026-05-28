@@ -1,6 +1,7 @@
 import {
   act,
   type Committed,
+  type EventSource,
   type ScanOptions,
   type Schemas,
 } from "@rotorsoft/act";
@@ -29,8 +30,24 @@ const baseEvent = (overrides: Partial<E> = {}): E =>
     ...overrides,
   }) as unknown as E;
 
-async function* fromArray(events: E[]): AsyncIterable<E> {
-  for (const e of events) yield e;
+/**
+ * Adapt an event array into the {@link EventSource} contract — the
+ * shape `scan` and `Act.restore` consume after the ACT-1128 source
+ * abstraction. `await Promise.resolve(callback(e))` mirrors the
+ * adapter pattern so async-callback backpressure is exercised even
+ * from this synthetic source.
+ */
+function fromArray(events: E[]): EventSource {
+  return {
+    async query(callback) {
+      for (const e of events)
+        await Promise.resolve((callback as (event: E) => void)(e));
+      return events.length;
+    },
+    async dispose() {
+      // no-op — synthetic in-memory source
+    },
+  };
 }
 
 describe("scan (pre-flight, no committer)", () => {
@@ -196,10 +213,10 @@ describe("scan (with committer)", () => {
 });
 
 describe("Act.restore (orchestrator)", () => {
-  const calc = (events: E[]) =>
-    (async function* () {
-      for (const e of events) yield e;
-    })();
+  // Calculator-events source — same EventSource shape as the
+  // synthetic `fromArray` above; aliased for readability inside
+  // the orchestrator-tier tests.
+  const calc = (events: E[]): EventSource => fromArray(events);
 
   it("delegates to store.restore via the driver and returns the result", async () => {
     const ctx = await sandbox(act().withState(Calculator));
@@ -237,7 +254,7 @@ describe("Act.restore (orchestrator)", () => {
       await expect(
         (
           ctx.app as unknown as {
-            restore: (s: AsyncIterable<E>, o?: ScanOptions) => Promise<unknown>;
+            restore: (s: EventSource, o?: ScanOptions) => Promise<unknown>;
           }
         ).restore(calc([]))
       ).rejects.toThrow(/has no restore capability/);

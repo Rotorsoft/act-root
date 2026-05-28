@@ -17,6 +17,7 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { iterate } from "../transfer.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -28,6 +29,7 @@ import type {
   Correlator,
   Emitted,
   EventMeta,
+  EventSource,
   ScanOptions,
   ScanResult,
   Schema,
@@ -174,7 +176,7 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
  * @internal
  */
 export async function scan(
-  source: AsyncIterable<Committed<Schemas, keyof Schemas>>,
+  source: EventSource,
   opts: ScanOptions = {},
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<ScanResult, "duration_ms">> {
@@ -183,7 +185,7 @@ export async function scan(
   let kept = 0;
   let droppedSnapshots = 0;
   let processed = 0;
-  for await (const event of source) {
+  for await (const event of iterate(source)) {
     processed++;
     if (!isValid(event)) throw new Error(`Invalid event at index ${processed}`);
     if (on_progress) on_progress({ processed });

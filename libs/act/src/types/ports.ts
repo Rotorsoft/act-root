@@ -7,6 +7,7 @@
 import type {
   Committed,
   EventMeta,
+  EventSource,
   Message,
   Query,
   Schema,
@@ -357,7 +358,7 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
  * @see {@link InMemoryStore} for the default implementation
  * @see {@link PostgresStore} for the PostgreSQL implementation
  */
-export interface Store extends Disposable {
+export interface Store extends Disposable, EventSource {
   /**
    * Initializes or resets the store.
    *

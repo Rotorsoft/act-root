@@ -1,6 +1,6 @@
 import type { Patch } from "@rotorsoft/act-patch";
 import type { ZodType, z } from "zod";
-import type { TruncateResult } from "./ports.js";
+import type { Disposable, TruncateResult } from "./ports.js";
 import type {
   ActorSchema,
   CausationEventSchema,
@@ -622,6 +622,52 @@ export type ScanResult = {
     readonly empty_streams: number;
   };
 };
+
+/**
+ * Read end of the transfer pipeline (ACT-1128 / #788). Anything
+ * that exposes a `Store.query`-shaped reader plus `dispose` can be
+ * used as a source for {@link IAct.restore}.
+ *
+ * `Store` extends this interface; the framework's `CsvFile` utility
+ * implements it on top of file I/O so a CSV can be a transfer
+ * source. The pipeline never sees a discriminator — both ends speak
+ * the same shape.
+ */
+export interface EventSource extends Disposable {
+  /**
+   * Read events into a per-event callback. Adapters MUST `await
+   * Promise.resolve(callback(event))` per event — sync callbacks
+   * resolve immediately (zero overhead), async callbacks throttle
+   * the read loop. This is the seam that lets `iterate()` apply
+   * backpressure without changing the callback's declared return
+   * type. Callback returns `void`, which TypeScript treats as
+   * "return value ignored" — existing call sites passing
+   * `e => arr.push(e)` (which returns `number`) keep working.
+   */
+  query<E extends Schemas>(
+    callback: (event: Committed<E, keyof E>) => void,
+    query?: Query
+  ): Promise<number>;
+}
+
+/**
+ * Write end of the transfer pipeline (ACT-1128 / #788). Anything
+ * that can host the destructive driver-pattern `restore` HOF (atomic
+ * wipe + per-event commit) is an `EventSink` — `Store` adapters
+ * that ship the optional `restore` method, plus the framework's
+ * `CsvFile` utility for "write to a file" targets.
+ *
+ * `restore` is required here (vs. optional on `Store`) because the
+ * sink slot in {@link IAct.restore} demands a writer; non-restorable
+ * stores satisfy {@link EventSource} only.
+ */
+export interface EventSink extends Disposable {
+  restore(
+    driver: (
+      callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
+    ) => Promise<void>
+  ): Promise<void>;
+}
 
 export interface IAct<
   TEvents extends Schemas = Schemas,

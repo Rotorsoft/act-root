@@ -352,6 +352,11 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     let count = 0;
+    // `await Promise.resolve(callback(e))` lets async callbacks
+    // (e.g., the `iterate()` async-generator bridge) backpressure
+    // the read loop without imposing a Promise<void> return type
+    // on the public callback signature. Sync callbacks resolve
+    // immediately — single microtask per event, no extra allocation.
     if (query?.backward) {
       let i = (query?.before || this._events.length) - 1;
       while (i >= 0) {
@@ -361,7 +366,7 @@ export class InMemoryStore implements Store {
           continue;
         if (query.after && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
-        callback(e as Committed<E, keyof E>);
+        await Promise.resolve(callback(e as Committed<E, keyof E>));
         count++;
         if (query?.limit && count >= query.limit) break;
       }
@@ -373,7 +378,7 @@ export class InMemoryStore implements Store {
         if (query?.created_after && e.created <= query.created_after) continue;
         if (query?.before && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
-        callback(e as Committed<E, keyof E>);
+        await Promise.resolve(callback(e as Committed<E, keyof E>));
         count++;
         if (query?.limit && count >= query.limit) break;
       }
