@@ -173,3 +173,92 @@ hiccup, pool exhaustion) are tolerated — the existing debounce/poll
 path still drains correctly. So you can run with a longer poll
 interval as a safety net while taking the notify happy-path latency
 for free.
+
+## ACT-1132 — cursor-backed `query` for streaming workloads
+
+The buffered `pool.query()` path materializes the full result set in
+JS memory before the per-event callback runs. That's the right
+trade-off for the framework's hot path — aggregate `load()`,
+projection scans, inspector pages all pass a bounded `limit`, and
+the round-trip cost of a single statement beats the cursor's
+`BEGIN`/`DECLARE`/`FETCH`/`CLOSE`/`COMMIT` envelope.
+
+It is the wrong trade-off for the streaming consumers added in
+ACT-1128 — `scan` (the restore source iterator) and any wide
+inspector query an operator scopes intentionally. Walking a million
+events through the buffered path means peak heap proportional to
+the full result set; the 1-slot mailbox in `iterate` keeps memory
+flat downstream, but the producer's `rows[]` allocation happens
+before the mailbox can throttle anything.
+
+ACT-1132 adds an opt-in cursor path. Callers set `streaming: true`
+on the query filter; the adapter opens a `pg-cursor` inside a
+transaction and reads `batch_size` rows at a time (default 500).
+Resident memory in the adapter stays O(`batch_size`) regardless of
+result size. `scan` sets the flag unconditionally; every other
+internal caller (`load`, `query_streams`, `query_stats`) stays on
+the buffered fast path.
+
+### Benchmark
+
+`libs/act-pg/scripts/cursor-rss.ts` seeds one stream with N events,
+takes baseline RSS + heap with `--expose-gc`, then walks the stream
+twice (buffered, then cursor) sampling `process.memoryUsage()` on a
+5 ms timer. Heap (V8 `heapUsed`) is the cleaner signal — RSS
+includes V8 heap-growth hysteresis, so once V8 has grown the
+buffered run's heap, the subsequent cursor run inherits that RSS
+ceiling even though its JS allocation is much smaller.
+
+Run: `pnpm tsx --expose-gc libs/act-pg/scripts/cursor-rss.ts`
+
+### Results
+
+Local docker PG (port 5431, `postgres:17-alpine`), `ROWS=500000`,
+small per-event payload (`{ i: number }`), node v22.18.0.
+
+| Path | Duration | Peak heap (Δ from baseline) | Peak RSS (Δ) |
+|---|---|---|---|
+| Buffered (`pool.query`) | 1,354 ms | 257.8 MB (+245.8 MB) | 457.1 MB (+247.4 MB) |
+| Cursor (`DECLARE`/`FETCH`, batch_size=500) | 1,661 ms | 64.1 MB (+52.2 MB) | 450.6 MB (+240.9 MB) |
+
+**4× smaller peak heap (245.8 MB → 52.2 MB).** The 22 % wall-clock
+penalty comes from the cursor's per-batch round trip; for the
+operations that pay it, the memory ceiling is the dominant
+constraint, not throughput.
+
+### Why heap is the cleaner number
+
+RSS only shrinks when V8 returns pages to the OS, which is lazy.
+Once the buffered run grew V8 to ~250 MB of heap, RSS stays near
+that ceiling for the rest of the process — the subsequent cursor
+run looks RSS-flat even though it allocates 4× less. `heapUsed` at
+the sample tick reflects live JS allocations and isolates the
+per-path cost.
+
+### Impact on prior `act-pg` benches
+
+None of the earlier benches (`notify-perf`, `query-stats`,
+`drain-scale`, `priority-claim`, `reaction-latency`) opt into
+streaming. Their numbers are unaffected — `streaming: false` is the
+default and the buffered code path is unchanged.
+
+### When to flip the flag
+
+- **`scan` / `Act.restore` / `Act.transfer`**: framework sets it for
+  you. No caller action needed.
+- **Inspector wide queries**: the existing `query` endpoint caps at
+  `limit ≤ 500` and stays buffered. If a future inspector affordance
+  walks the table without a limit, it should set the flag explicitly.
+- **Custom integrations** (`act-ops`-style backups, analytics jobs):
+  set `streaming: true` on any `store.query(cb, …)` whose result
+  could exceed a few thousand rows. The latency penalty is small and
+  the memory ceiling is bounded.
+
+### When not to
+
+- `app.load()` / `state.query()` / per-stream rebuilds — bounded by
+  the stream's tail. Use the default buffered path.
+- Inspector page queries, projection scans against a known-bounded
+  filter, any `query` call that already passes `limit ≤ batch_size`
+  — the cursor's BEGIN/COMMIT envelope costs more than the saved
+  allocations.

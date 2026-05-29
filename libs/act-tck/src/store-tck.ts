@@ -259,6 +259,51 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(latest[0].id).toBe(committed.at(-1)!.id);
       });
 
+      it("streaming: true returns the same result as the buffered path", async () => {
+        // ACT-1132. Adapters that support cursor-backed reads
+        // (PostgresStore) take a separate branch when this flag is
+        // set; adapters that don't (InMemory, SQLite) ignore it. The
+        // contract every adapter has to honor: same events, same
+        // order, same count, regardless of which branch ran.
+        const s = `q-stream-${uid()}`;
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(2), inc(3), dec(1), resetEvent()],
+          makeMeta({ stream: s })
+        );
+        const buffered = await collect(store, {
+          stream: s,
+          stream_exact: true,
+        });
+        const streamed = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          streaming: true,
+        });
+        expect(streamed.map((e) => e.id)).toEqual(committed.map((c) => c.id));
+        expect(streamed.map((e) => e.id)).toEqual(buffered.map((e) => e.id));
+        expect(streamed.map((e) => e.name)).toEqual(
+          buffered.map((e) => e.name)
+        );
+
+        // Streaming must also honor every filter knob — backward,
+        // limit, names — so the cursor's SQL is built from the same
+        // builder as the buffered path.
+        const backward = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          streaming: true,
+          backward: true,
+          limit: 2,
+        });
+        expect(backward.map((e) => e.id)).toEqual(
+          [...committed]
+            .reverse()
+            .slice(0, 2)
+            .map((c) => c.id)
+        );
+      });
+
       it("after/before bound the id range", async () => {
         const s = `q-bounds-${uid()}`;
         const committed = await store.commit<CounterEvents>(

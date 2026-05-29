@@ -49,13 +49,14 @@ import { defaultCorrelator } from "./correlator.js";
  * the event from the mailbox, so memory in the bridge is bounded
  * to exactly one event.
  *
- * Downstream realization of backpressure depends on the adapter's
- * `query` implementation. Every in-tree adapter still buffers its
- * full result set internally before calling the callback (e.g.,
- * `pg.query` resolves with `rows[]`); the mailbox-on-top of that
- * adds bounded buffering downstream of the result set. True
- * cursor-based streaming on the adapter side is tracked in #814
- * (ACT-1132).
+ * End-to-end memory profile depends on the source. When the source
+ * is a Store and the caller sets `streaming: true` on the filter,
+ * adapters that support it (PostgresStore) walk the result with a
+ * server-side cursor — total resident memory stays O(batchSize)
+ * regardless of result size. Without the flag, adapters buffer the
+ * full result set internally (e.g., `pg.query` resolves with
+ * `rows[]`); the mailbox adds bounded buffering downstream but the
+ * producer cost is O(rowCount).
  *
  * @internal
  */
@@ -267,7 +268,11 @@ export async function scan(
   let kept = 0;
   let droppedSnapshots = 0;
   let processed = 0;
-  for await (const event of iterate(source)) {
+  // scan is the only orchestrator path that walks a source's full
+  // result set, so it owns the streaming opt-in (ACT-1132). Adapters
+  // that honor `streaming: true` (PostgresStore) switch to a
+  // cursor-backed read; the rest ignore the flag.
+  for await (const event of iterate(source, { streaming: true })) {
     processed++;
     if (!isValid(event)) throw new Error(`Invalid event at index ${processed}`);
     if (on_progress) on_progress({ processed });

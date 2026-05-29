@@ -70,6 +70,7 @@ All fields are optional and have sensible defaults:
 | `schema` | `public` | Schema for event + streams tables |
 | `table` | `events` | Base name (`<table>` for events, `<table>_streams` for subscriptions) |
 | `notify` | `false` | Opt-in `LISTEN`/`NOTIFY` for cross-process commit wakeup (see below) |
+| `batch_size` | `500` | FETCH batch size for cursor-backed queries (`streaming: true` filter — see below) |
 | `max`, `idleTimeoutMillis`, …pg.PoolConfig | (pg defaults) | Pass-through to node-postgres pool config |
 
 ```ts
@@ -116,6 +117,20 @@ When `notify: true`: `commit()` issues one `NOTIFY act_commit_<schema>_<table>` 
 `notify` is a hint, not a contract — lost notifications fall back to the existing debounce/poll path. Correctness is preserved.
 
 **Build-time contract:** call `store(adapter)` *before* `act()…build()`. The orchestrator binds notify to whichever store is current at construction time.
+
+### Streaming reads (opt-in cursor)
+
+For wide queries that walk a potentially-unbounded result set — `Act.restore`, `Act.transfer`, inspector exports — `PostgresStore.query` supports a cursor-backed path. Callers set `streaming: true` on the query filter; the adapter opens a server-side cursor (`DECLARE`/`FETCH`) inside a transaction and reads `batch_size` rows at a time, so resident heap stays O(`batch_size`) regardless of total rows.
+
+```ts
+// Caller-side opt-in (the framework's `scan` sets this for you)
+await store.query<MyEvents>(
+  (event) => process(event),
+  { stream: "^archive-", streaming: true }
+);
+```
+
+The cursor is off by default — every existing call site (`load()`, projection scans, inspector pages) already passes a bounded `limit` and benefits from the single-statement buffered path. Flipping the flag pays for itself when the result is large enough that the buffered allocation dominates the per-batch round trip. See [`PERFORMANCE.md § ACT-1132`](PERFORMANCE.md) for the headline numbers — ~4× smaller peak heap on a 500k-row walk.
 
 ### Competing consumer (free horizontal scaling)
 

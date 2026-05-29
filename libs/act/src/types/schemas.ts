@@ -98,5 +98,23 @@ export const QuerySchema = z
     correlation: z.string().optional(),
     with_snaps: z.boolean().optional(),
     stream_exact: z.boolean().optional(),
+    /**
+     * Opt the read loop into adapter-side streaming (ACT-1132).
+     *
+     * Adapters that support it walk the result with bounded memory —
+     * PostgresStore uses a server-side cursor (DECLARE / FETCH) so
+     * resident memory stays at O(batchSize) instead of O(rowCount).
+     * Adapters that don't (InMemory, SQLite) ignore the flag — the
+     * result is identical either way; only the producer's memory
+     * profile changes.
+     *
+     * Default: `undefined` (treated as `false`). Buffered queries
+     * stay on the existing single-statement fast path, which is right
+     * for any caller that already passes a bounded `limit`. Set to
+     * `true` from callers that walk potentially-unbounded result sets
+     * — `scan` (the restore source iterator), and inspector queries
+     * that the operator has explicitly scoped wide.
+     */
+    streaming: z.boolean().optional(),
   })
   .readonly();

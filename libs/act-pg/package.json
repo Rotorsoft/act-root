@@ -48,7 +48,8 @@
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {
-    "pg": "^8.21.0"
+    "pg": "^8.21.0",
+    "pg-cursor": "^2.20.0"
   },
   "peerDependencies": {
     "@rotorsoft/act": "workspace:^",
@@ -56,6 +57,7 @@
   },
   "devDependencies": {
     "@rotorsoft/act-tck": "workspace:^",
-    "@types/pg": "^8.20.0"
+    "@types/pg": "^8.20.0",
+    "@types/pg-cursor": "^2.7.2"
   }
 }

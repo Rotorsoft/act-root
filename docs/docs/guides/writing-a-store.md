@@ -13,7 +13,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 
 - `seed()` / `drop()` — initialization and teardown
 - `commit(stream, msgs, meta, expectedVersion?)` — append events atomically with optimistic concurrency
-- `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support
+- `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Adapters may also branch on `query.streaming` to expose a bounded-memory read path (PG uses a server-side cursor); adapters whose internal representation is already bounded ignore the flag
 - `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure
@@ -143,6 +143,50 @@ runStoreTck({
 ```
 
 The TCK then runs ten cases: empty source, single stream, multi-stream, ISO `created`, pre-existing wipe, subscription clearing, snapshot preservation, causation remap, orphan-ref pass-through, and atomic rollback on mid-iteration throw. They cover the contract end-to-end; passing them means your adapter participates in every transfer flow the framework supports.
+
+### Optional: honor `Query.streaming` for bounded-memory reads
+
+`Query.streaming?: boolean` (added in [ACT-1132](https://github.com/Rotorsoft/act-root/issues/814)) lets callers signal "this result could be unbounded — read it without buffering the whole row set." The orchestrator's `scan` (used by `Act.restore` / `Act.transfer`) sets it; everyone else stays on the default buffered path.
+
+Adapters whose internal representation is already bounded — `InMemoryStore`'s in-process array, `SqliteStore`'s libsql result set — don't need to do anything. The flag is a no-op against them. The buffered path holds the source rows the adapter already had to materialize.
+
+Adapters that materialize results from a remote source (anything wire-protocol-backed) should branch on the flag. `PostgresStore` uses [`pg-cursor`](https://github.com/brianc/node-pg-cursor):
+
+```ts
+// Sketch — see libs/act-pg/src/postgres-store.ts for the full version
+if (!query?.streaming) {
+  // Single round trip, buffer the result set. Fast for bounded queries.
+  const result = await this._pool.query(sql, values);
+  for (const row of result.rows) await Promise.resolve(callback(row));
+  return result.rowCount ?? 0;
+}
+
+// Cursor path. Bounded heap regardless of result size.
+const client = await this._pool.connect();
+try {
+  await client.query("BEGIN");
+  const cursor = client.query(new Cursor(sql, values));
+  try {
+    while (true) {
+      const rows = await cursor.read(this.config.batch_size!);
+      if (rows.length === 0) break;
+      for (const row of rows) await Promise.resolve(callback(row));
+    }
+  } finally {
+    await cursor.close().catch(() => {});
+  }
+  await client.query("COMMIT");
+} catch (error) {
+  await client.query("ROLLBACK").catch(() => {});
+  throw error;
+} finally {
+  client.release();
+}
+```
+
+Expose `batch_size` as a constructor option so the operator can trade FETCH-call overhead against per-batch memory. Default to 500 unless you have a reason; deviations should be measured.
+
+The TCK includes one case that asserts streaming returns the same events in the same order as the buffered path. Adapters that ignore the flag pass it for free; adapters that branch must keep the two paths semantically identical.
 
 ### Fault-injection adjacent to the TCK
 

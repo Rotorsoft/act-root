@@ -274,6 +274,9 @@ importers:
       pg:
         specifier: ^8.21.0
         version: 8.21.0
+      pg-cursor:
+        specifier: ^2.16.0
+        version: 2.20.0(pg@8.21.0)
       zod:
         specifier: ^4.4.3
         version: 4.4.3
@@ -284,6 +287,9 @@ importers:
       '@types/pg':
         specifier: ^8.20.0
         version: 8.20.0
+      '@types/pg-cursor':
+        specifier: ^2.7.2
+        version: 2.7.2
 
   libs/act-pino:
     dependencies:
@@ -3958,6 +3964,9 @@ packages:
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
 
+  '@types/pg-cursor@2.7.2':
+    resolution: {integrity: sha512-m3xT8bVFCvx98LuzbvXyuCdT/Hjdd/v8ml4jL4K1QF70Y8clOfCFdgoaEB1FWdcSwcpoFYZTJQaMD9/GQ27efQ==}
+
   '@types/pg@8.20.0':
     resolution: {integrity: sha512-bEPFOaMAHTEP1EzpvHTbmwR8UsFyHSKsRisLIHVMXnpNefSbGA1bD6CVy+qKjGSqmZqNqBDV2azOBo8TgkcVow==}
 
@@ -7264,6 +7273,11 @@ packages:
 
   pg-connection-string@2.13.0:
     resolution: {integrity: sha512-EMnU9E2fSULdsbErBbMaXJvFeD9B4+nPcM3f+4lsiCR0BHLPrLVjv3DbyM2hgQQviKJaTWIRRTjKjWlHg3p2ig==}
+
+  pg-cursor@2.20.0:
+    resolution: {integrity: sha512-HP/EbUafheaUOs7DxlG6tda/rhmsX2hCTJJJ+gCnhljGyNEs6pBHddbNuomlW3DqEhP3zYD+GqBWkYnJPIZ4tA==}
+    peerDependencies:
+      pg: ^8
 
   pg-int8@1.0.1:
     resolution: {integrity: sha512-WCtabS6t3c8SkpDBUlb1kjOs7l66xsGdKpIPZsg4wR+B3+u9UAum2odSsF9tnvxg80h4ZxLWMy4pRjOsFIqQpw==}
@@ -13205,6 +13219,11 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
+  '@types/pg-cursor@2.7.2':
+    dependencies:
+      '@types/node': 25.9.1
+      '@types/pg': 8.20.0
+
   '@types/pg@8.20.0':
     dependencies:
       '@types/node': 25.9.1
@@ -16905,6 +16924,10 @@ snapshots:
     optional: true
 
   pg-connection-string@2.13.0: {}
+
+  pg-cursor@2.20.0(pg@8.21.0):
+    dependencies:
+      pg: 8.21.0
 
   pg-int8@1.0.1: {}
 

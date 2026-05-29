@@ -114,6 +114,97 @@ describe("PostgresStore", () => {
       );
       expect(cb).not.toHaveBeenCalled();
     });
+
+    it("rolls back the cursor transaction when the callback throws", async () => {
+      // ACT-1132 fault-injection. Exercises the streaming branch's
+      // catch/rollback path: a consumer throwing from inside the
+      // read loop must release the lease and propagate the original
+      // error, not the rollback's. The mock client records the
+      // sequence so we can assert BEGIN was followed by ROLLBACK
+      // (never COMMIT) and the original error surfaced unchanged.
+      const calls: string[] = [];
+      let reads = 0;
+      const cursor = {
+        read: vi.fn(async () => {
+          reads++;
+          return reads === 1
+            ? [{ id: 1, name: "X", data: {}, stream: "s", version: 0 }]
+            : [];
+        }),
+        close: vi.fn(async () => {}),
+      };
+      const client = {
+        // `pg-cursor` overrides `client.query` so that passing a Cursor
+        // instance returns the same instance synchronously (no Promise
+        // wrap). Plain-SQL calls keep the async Promise<Result> shape.
+        // The mock mirrors both.
+        query: vi.fn((arg: unknown) => {
+          if (typeof arg === "string") {
+            calls.push(arg);
+            return Promise.resolve({ rows: [] });
+          }
+          return cursor;
+        }),
+        release: vi.fn(),
+      };
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(client as any);
+
+      const boom = new Error("consumer exploded");
+      await expect(
+        store.query(
+          () => {
+            throw boom;
+          },
+          { streaming: true }
+        )
+      ).rejects.toBe(boom);
+      expect(calls).toContain("BEGIN");
+      expect(calls).toContain("ROLLBACK");
+      expect(calls).not.toContain("COMMIT");
+      expect(cursor.close).toHaveBeenCalled();
+      expect(client.release).toHaveBeenCalled();
+    });
+
+    it("swallows cursor.close + ROLLBACK rejections, surfaces the original error", async () => {
+      // The two `.catch(() => {})` arrows in the streaming branch
+      // exist because the connection can already be in a bad state
+      // when we reach them: cursor.close rejects when the consumer
+      // threw mid-batch, ROLLBACK rejects when the connection is
+      // already gone. Both paths must still propagate the *original*
+      // error, not the secondary failure.
+      const calls: string[] = [];
+      const cursor = {
+        read: vi.fn(async () => [
+          { id: 1, name: "X", data: {}, stream: "s", version: 0 },
+        ]),
+        close: vi.fn(() => Promise.reject(new Error("close kaput"))),
+      };
+      const client = {
+        query: vi.fn((arg: unknown) => {
+          if (typeof arg === "string") {
+            calls.push(arg);
+            if (arg === "ROLLBACK")
+              return Promise.reject(new Error("rollback kaput"));
+            return Promise.resolve({ rows: [] });
+          }
+          return cursor;
+        }),
+        release: vi.fn(),
+      };
+      vi.spyOn(pg.Pool.prototype, "connect").mockResolvedValue(client as any);
+
+      const boom = new Error("consumer exploded");
+      await expect(
+        store.query(
+          () => {
+            throw boom;
+          },
+          { streaming: true }
+        )
+      ).rejects.toBe(boom);
+      expect(calls).toContain("ROLLBACK");
+      expect(client.release).toHaveBeenCalled();
+    });
   });
 
   describe("claim", () => {

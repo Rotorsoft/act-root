@@ -26,6 +26,7 @@ import {
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import pg from "pg";
+import Cursor from "pg-cursor";
 import { dateReviver } from "./utils.js";
 
 const logger: Logger = log();
@@ -62,6 +63,19 @@ type Config = Readonly<{
    * **on every store instance** (writers and listeners both).
    */
   notify?: boolean;
+  /**
+   * FETCH batch size for cursor-backed queries (ACT-1132). When a
+   * caller sets `streaming: true` on the query filter the adapter
+   * opens a server-side cursor and reads in batches of this size,
+   * so resident memory stays O(batch_size) regardless of how large
+   * the result set is.
+   *
+   * Default `500`. Lower values trade memory for round trips; higher
+   * values approach the cost of the buffered path. Has no effect on
+   * non-streaming queries, which keep the existing single-statement
+   * fast path.
+   */
+  batch_size?: number;
 }> &
   pg.PoolConfig;
 
@@ -99,6 +113,7 @@ const DEFAULT_CONFIG: Config = {
   schema: "public",
   table: "events",
   notify: false,
+  batch_size: 500,
 };
 
 /**
@@ -513,10 +528,58 @@ export class PostgresStore implements Store {
       sql += ` LIMIT $${values.length}`;
     }
 
-    const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
-    for (const row of result.rows) await Promise.resolve(callback(row));
+    // Two paths.
+    //
+    // Buffered (default): single `pool.query`. The full result set
+    // materializes in memory before the callback runs — fastest for
+    // any caller that already passes a bounded `limit` (aggregate
+    // load, projection scan, inspector page).
+    //
+    // Cursor (`streaming: true`): server-side cursor inside a
+    // transaction. We FETCH `batch_size` rows at a time, run the
+    // callback per row, and stop when the cursor returns empty.
+    // Resident memory in the adapter stays O(batch_size) regardless
+    // of total rows — the path used by `scan` (restore source) and
+    // any inspector query the operator scoped wide. Cursors require
+    // a transaction; the BEGIN/COMMIT pair costs ~one round trip
+    // each on top of the FETCH stream, which is why this is opt-in.
+    if (!query?.streaming) {
+      const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
+      for (const row of result.rows) await Promise.resolve(callback(row));
+      return result.rowCount ?? 0;
+    }
 
-    return result.rowCount ?? 0;
+    const client = await this._pool.connect();
+    let count = 0;
+    try {
+      await client.query("BEGIN");
+      const cursor = client.query(
+        new Cursor<Committed<E, keyof E>>(sql, values)
+      );
+      try {
+        while (true) {
+          const rows = await cursor.read(this.config.batch_size!);
+          if (rows.length === 0) break;
+          for (const row of rows) {
+            await Promise.resolve(callback(row));
+            count++;
+          }
+        }
+      } finally {
+        // `pg-cursor.close()` rejects if the connection is already in a
+        // bad state from the consumer throwing inside the read loop —
+        // swallow that, the COMMIT/ROLLBACK below resolves the
+        // transaction.
+        await cursor.close().catch(() => {});
+      }
+      await client.query("COMMIT");
+      return count;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   /**
