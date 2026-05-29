@@ -341,6 +341,10 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 - **`drop_snapshots: true`** — skip every `__snapshot__` event in the source. The rebuilt store has no snapshots, so the next snap policy regenerates them with the current state. Useful for compaction.
 - **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
 
+### Memory: how restore avoids OOM on large sources
+
+`scan` walks the source through `iterate`, which paginates the existing `EventSource.query` interface — re-issuing it with `limit: 500` and a bumped `after` (or `before` for backward) per batch ([ACT-1133](https://github.com/Rotorsoft/act-root/issues/817)). Stores that respect `limit` hold at most one batch's worth of rows per round trip. Sources that ignore the filter (`CsvFile`) stream events through internal line-by-line reads and signal `iterate` to exit after one call. Combined with the 1-slot mailbox `iterate` wraps around the consumer callback, the entire restore pipeline holds at most `ITERATE_BATCH` rows in the producer adapter and one event in the bridge — independent of total source size. A multi-million-event PG → SQLite migration runs with bounded heap end-to-end with no caller-side opt-in. See [Extension points → Backpressure](../architecture/extension-points.md#backpressure-how-the-callback-shape-became-an-async-pipeline) for the full contract.
+
 ### Restore vs reset vs truncate vs close
 
 | Primitive | What it does | Atomicity |

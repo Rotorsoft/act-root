@@ -42,20 +42,39 @@ import { validate } from "../utils.js";
 import { defaultCorrelator } from "./correlator.js";
 
 /**
- * Bridge an {@link EventSource} into an `AsyncIterable<Committed>`
- * with 1-event-in-flight backpressure (ACT-1128). Internal helper
- * for the {@link scan} loop — the producer (`source.query`) awaits
- * a promise that the bridge resolves only when the consumer takes
- * the event from the mailbox, so memory in the bridge is bounded
- * to exactly one event.
+ * Per-batch row count for the iterate pagination loop (ACT-1133).
  *
- * Downstream realization of backpressure depends on the adapter's
- * `query` implementation. Every in-tree adapter still buffers its
- * full result set internally before calling the callback (e.g.,
- * `pg.query` resolves with `rows[]`); the mailbox-on-top of that
- * adds bounded buffering downstream of the result set. True
- * cursor-based streaming on the adapter side is tracked in #814
- * (ACT-1132).
+ * @internal
+ */
+export const ITERATE_BATCH = 500;
+
+/**
+ * Bridge an {@link EventSource} into an `AsyncIterable<Committed>`
+ * with bounded-memory pagination + 1-event-in-flight backpressure.
+ *
+ * Two layered mechanisms:
+ *
+ * 1. **Outer pagination loop (ACT-1133).** Re-issues `source.query`
+ *    with `limit: ITERATE_BATCH` and a bumped `after` (forward) or
+ *    `before` (backward) per batch. Stores that respect `limit`
+ *    (`PostgresStore`) return at most `ITERATE_BATCH` rows per
+ *    call — peak adapter memory stays at O(batch) instead of
+ *    O(rowCount). Sources that ignore the filter and stream
+ *    everything in one call (`CsvFile`) signal the loop to exit
+ *    after the first batch by returning more events than the
+ *    requested limit; they're already memory-safe because they
+ *    read line-by-line internally.
+ *
+ * 2. **Inner mailbox (ACT-1128).** Within each batch, the
+ *    producer (`source.query`) awaits a promise that the bridge
+ *    resolves only when the consumer takes the event, so memory
+ *    in the bridge proper is bounded to one event regardless of
+ *    how much the adapter buffers internally.
+ *
+ * The caller's `filter.limit` (if any) caps the total event count
+ * across batches. Bounded queries with `limit <= ITERATE_BATCH`
+ * pay exactly one `source.query` round trip — same cost as the
+ * pre-pagination path.
  *
  * @internal
  */
@@ -87,39 +106,86 @@ export async function* iterate(
     if (fn) fn();
   };
 
-  void source
-    .query<Schemas>((event) => {
-      state.slot = event;
-      wakeProduce();
-      return new Promise<void>((resolve) => {
-        state.onConsume = () => resolve();
-      });
-    }, filter)
-    .then(
-      () => {
-        state.done = true;
-        wakeProduce();
-      },
-      (err) => {
-        state.error = err;
-        state.done = true;
-        wakeProduce();
-      }
-    );
+  const cap = filter?.limit ?? Number.POSITIVE_INFINITY;
+  const backward = filter?.backward ?? false;
+  // Forward iteration bumps `after` past the largest id seen; backward
+  // bumps `before` past the smallest. The opposite-end user filter
+  // (e.g., user-supplied `before` while walking forward) is preserved
+  // verbatim as a permanent ceiling/floor.
+  let pagAfter = filter?.after;
+  let pagBefore = filter?.before;
+  let totalSeen = 0;
 
-  while (true) {
-    if (state.slot === null && !state.done)
-      await new Promise<void>((resolve) => {
-        state.onProduce = resolve;
-      });
-    if (state.error) throw state.error;
-    if (state.slot === null) return;
-    const event = state.slot;
+  while (totalSeen < cap) {
+    const batchLimit = Math.min(ITERATE_BATCH, cap - totalSeen);
+
+    // Reset mailbox state per batch — the previous batch's
+    // `source.query` has resolved (state.done was set) before we
+    // reach here, so the slot/onConsume/onProduce slots are quiescent.
     state.slot = null;
-    const fn = state.onConsume!;
+    state.onProduce = null;
     state.onConsume = null;
-    fn();
-    yield event;
+    state.done = false;
+    state.error = undefined;
+
+    let batchCount = 0;
+    // Captured inside the producer callback below, where `event` is
+    // typed cleanly; reading `.id` off the post-reset consumer-side
+    // `state.slot` narrows to `never` under strict null tracking.
+    let lastId: number | undefined;
+
+    void source
+      .query<Schemas>(
+        (event) => {
+          state.slot = event;
+          lastId = event.id;
+          wakeProduce();
+          return new Promise<void>((resolve) => {
+            state.onConsume = () => resolve();
+          });
+        },
+        { ...filter, after: pagAfter, before: pagBefore, limit: batchLimit }
+      )
+      .then(
+        () => {
+          state.done = true;
+          wakeProduce();
+        },
+        (err) => {
+          state.error = err;
+          state.done = true;
+          wakeProduce();
+        }
+      );
+
+    while (true) {
+      if (state.slot === null && !state.done)
+        await new Promise<void>((resolve) => {
+          state.onProduce = resolve;
+        });
+      if (state.error) throw state.error;
+      if (state.slot === null) break;
+      const event = state.slot;
+      state.slot = null;
+      const fn = state.onConsume!;
+      state.onConsume = null;
+      fn();
+      batchCount++;
+      yield event;
+    }
+
+    totalSeen += batchCount;
+
+    // Termination:
+    //   - batchCount < batchLimit: source honored limit but ran out (also
+    //     covers batchCount === 0 — past-the-end on a paginating source).
+    //   - batchCount > batchLimit: source ignored the filter (CsvFile-style).
+    //     It streamed everything in one call; nothing left to ask for.
+    //   Otherwise (batchCount === batchLimit): more events may exist, so
+    //   bump the pagination cursor and continue.
+    if (batchCount !== batchLimit) return;
+    if (backward) pagBefore = lastId;
+    else pagAfter = lastId;
   }
 }
 

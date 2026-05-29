@@ -113,6 +113,127 @@ describe("iterate", () => {
       expect(pushedAtConsume[i]! - (i + 1)).toBeLessThanOrEqual(1);
   });
 
+  it("paginates limit/after through a respecting source (ACT-1133)", async () => {
+    // Source that honors `after` and `limit` like a SQL store does.
+    // Walked over 1200 events with the default ITERATE_BATCH of 500,
+    // iterate should make three `source.query` calls
+    // (limit:500 / limit:500 / limit:500) and stop after the third
+    // returns < batchLimit. Asserts both that every event is yielded
+    // in order and that the pagination call shape matches the spec.
+    const total = 1200;
+    const all = Array.from({ length: total }, (_, i) =>
+      makeEvent({ id: i + 1 })
+    );
+    const calls: Array<{ after?: number; limit?: number }> = [];
+    const source: EventSource = {
+      async query(callback, filter?: Query) {
+        calls.push({ after: filter?.after, limit: filter?.limit });
+        const after = filter?.after ?? 0;
+        const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
+        const slice = all.filter((e) => e.id > after).slice(0, limit);
+        for (const e of slice)
+          await Promise.resolve(
+            (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
+              e as Committed<Schemas, keyof Schemas>
+            )
+          );
+        return slice.length;
+      },
+      async dispose() {
+        // no-op
+      },
+    };
+    const collected: E[] = [];
+    for await (const e of iterate(source)) collected.push(e as unknown as E);
+    expect(collected).toHaveLength(total);
+    expect(collected.map((e) => e.id)).toEqual(all.map((e) => e.id));
+    // 1200 events, batch 500 → calls at after=undefined, after=500, after=1000.
+    expect(calls).toHaveLength(3);
+    expect(calls[0]).toEqual({ after: undefined, limit: 500 });
+    expect(calls[1]).toEqual({ after: 500, limit: 500 });
+    expect(calls[2]).toEqual({ after: 1000, limit: 500 });
+  });
+
+  it("paginates backward via `before` against a respecting source (ACT-1133)", async () => {
+    // Mirror of the forward case. Source honors `before` and `limit`
+    // and returns events in DESC id order. After yielding the first
+    // 500-event batch the loop should bump `before` to the smallest
+    // id seen, not the largest.
+    const total = 1100;
+    const all = Array.from({ length: total }, (_, i) =>
+      makeEvent({ id: i + 1 })
+    );
+    const calls: Array<{ before?: number; limit?: number }> = [];
+    const source: EventSource = {
+      async query(callback, filter?: Query) {
+        calls.push({ before: filter?.before, limit: filter?.limit });
+        const before = filter?.before ?? Number.POSITIVE_INFINITY;
+        const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
+        const slice = all
+          .filter((e) => e.id < before)
+          .slice(-limit)
+          .reverse();
+        for (const e of slice)
+          await Promise.resolve(
+            (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
+              e as Committed<Schemas, keyof Schemas>
+            )
+          );
+        return slice.length;
+      },
+      async dispose() {
+        // no-op
+      },
+    };
+    const collected: E[] = [];
+    for await (const e of iterate(source, { backward: true }))
+      collected.push(e as unknown as E);
+    expect(collected).toHaveLength(total);
+    expect(collected.map((e) => e.id)).toEqual(
+      [...all].reverse().map((e) => e.id)
+    );
+    // 1100 events, batch 500 → before=∞, before=601 (smallest of batch 1),
+    // before=101 (smallest of batch 2). Third batch returns 100 < 500
+    // and the loop exits.
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.before).toBeUndefined();
+    expect(calls[1]?.before).toBe(601);
+    expect(calls[2]?.before).toBe(101);
+  });
+
+  it("honors caller's `limit` as a total cap across batches (ACT-1133)", async () => {
+    // Caller passes limit: 750 — iterate should make two calls
+    // (limit:500, then limit:250) and stop. No third call.
+    const total = 2000;
+    const all = Array.from({ length: total }, (_, i) =>
+      makeEvent({ id: i + 1 })
+    );
+    const calls: Array<{ limit?: number }> = [];
+    const source: EventSource = {
+      async query(callback, filter?: Query) {
+        calls.push({ limit: filter?.limit });
+        const after = filter?.after ?? 0;
+        const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
+        const slice = all.filter((e) => e.id > after).slice(0, limit);
+        for (const e of slice)
+          await Promise.resolve(
+            (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
+              e as Committed<Schemas, keyof Schemas>
+            )
+          );
+        return slice.length;
+      },
+      async dispose() {
+        // no-op
+      },
+    };
+    const collected: E[] = [];
+    for await (const e of iterate(source, { limit: 750 }))
+      collected.push(e as unknown as E);
+    expect(collected).toHaveLength(750);
+    expect(calls.map((c) => c.limit)).toEqual([500, 250]);
+  });
+
   it("propagates errors from the source", async () => {
     const source: EventSource = {
       async query(callback) {

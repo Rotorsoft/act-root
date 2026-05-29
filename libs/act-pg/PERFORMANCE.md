@@ -173,3 +173,72 @@ hiccup, pool exhaustion) are tolerated — the existing debounce/poll
 path still drains correctly. So you can run with a longer poll
 interval as a safety net while taking the notify happy-path latency
 for free.
+
+## ACT-1133 — bounded-memory scan via iterate pagination (no adapter changes)
+
+Background: `scan` (used by `Act.restore` / `Act.transfer`) walks
+the entire source through `iterate(source, filter)`. Pre-ACT-1133,
+`iterate` called `source.query(cb, filter)` exactly once with no
+`limit`. Stores that buffer their result set (`PostgresStore`
+materializes everything inside `pool.query`) allocated one JS
+object per row of the source before the first callback fired. A
+million-event restore peaked at hundreds of MB of heap on the
+producer side regardless of how aggressively the 1-slot mailbox
+throttled downstream consumption.
+
+ACT-1133's fix lives entirely in the orchestrator: `iterate`
+paginates by re-issuing `source.query` with `limit: ITERATE_BATCH`
+(500) and a bumped `after` (forward) or `before` (backward) per
+batch. Stores that respect `limit` — every in-tree adapter
+already does — hold at most one batch worth of rows in memory per
+round trip. Sources that ignore the filter (`CsvFile` streams all
+events via internal line-by-line reads) signal `iterate` to exit
+after one call by returning more events than the requested limit.
+
+**No new dependency. No `PostgresStore` changes. No `Query`
+schema field. No adapter capability gate.** The adapter already
+respects `limit`; the framework just stops asking for an
+unbounded result set.
+
+### Benchmark
+
+`libs/act-pg/scripts/iterate-pagination-rss.ts` seeds one stream
+with N events, takes baseline RSS + heap with `--expose-gc`, then
+walks the stream twice (single unlimited `pool.query`, then the
+paginated loop) sampling `process.memoryUsage()` on a 5 ms timer.
+
+Heap (V8 `heapUsed`) is the cleaner signal — RSS includes V8
+heap-growth hysteresis, so once the buffered run has grown V8 to
+peak, the subsequent paginated run inherits that RSS ceiling
+even though its live JS allocation is much smaller. `heapUsed`
+at the sample tick reflects current live allocations and
+isolates the per-path cost.
+
+Run: `pnpm tsx --expose-gc libs/act-pg/scripts/iterate-pagination-rss.ts`
+
+### Results
+
+Local docker PG (port 5431, `postgres:17-alpine`), `ROWS=500000`,
+small per-event payload (`{ i: number }`), node v22.18.0.
+
+| Path | Duration | Peak heap (Δ from baseline) | Peak RSS (Δ) |
+|---|---|---|---|
+| Buffered (single `pool.query`, no limit) | 1,335 ms | 258.0 MB (+246.2 MB) | 512.9 MB (+304.0 MB) |
+| Paginated (`limit:500` loop, bumped `after`) | 1,970 ms | 63.6 MB (+51.7 MB) | 511.3 MB (+302.3 MB) |
+
+**4× smaller peak heap (246.2 MB → 51.7 MB).** Wall-clock cost
+is 48 % from the per-batch re-plan; for the operations that
+pay it, the memory ceiling is the dominant constraint, not
+throughput.
+
+### Impact on existing PG benches
+
+None. Earlier benches (`notify-perf`, `query-stats`,
+`drain-scale`, `priority-claim`, `reaction-latency`) all pass
+`limit` or call `query` from the framework's hot path
+(aggregate `load`, projection scan, inspector page). In each
+case the limit is at or below `ITERATE_BATCH = 500`, so the
+pagination loop terminates after one round trip — same code
+path, same wall-clock as before. The win shows up only when
+the caller asked for an unbounded scan, which is exactly the
+restore / transfer / wide-export case the fix targets.
