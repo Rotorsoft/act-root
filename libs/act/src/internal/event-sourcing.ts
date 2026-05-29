@@ -55,8 +55,8 @@ export const ITERATE_BATCH = 500;
  * Two layered mechanisms:
  *
  * 1. **Outer pagination loop (ACT-1133).** Re-issues `source.query`
- *    with `limit: ITERATE_BATCH` and a bumped `after` (forward) or
- *    `before` (backward) per batch. Stores that respect `limit`
+ *    with `limit: ITERATE_BATCH` and `after` bumped past the
+ *    largest id seen so far. Stores that respect `limit`
  *    (`PostgresStore`) return at most `ITERATE_BATCH` rows per
  *    call — peak adapter memory stays at O(batch) instead of
  *    O(rowCount). Sources that ignore the filter and stream
@@ -76,6 +76,9 @@ export const ITERATE_BATCH = 500;
  * pay exactly one `source.query` round trip — same cost as the
  * pre-pagination path.
  *
+ * Forward-only. `scan` is the sole production caller and always
+ * walks ascending; if a future caller needs reverse, add it then.
+ *
  * @internal
  */
 export async function* iterate(
@@ -85,11 +88,11 @@ export async function* iterate(
   // Wrapping the state in an object prevents TypeScript from
   // narrowing the let-bound `null` initializer through the
   // triple-closure-deep assignment path; behavior is unchanged.
-  type WakeFn = () => void;
-  const state: {
+  type Wake = () => void;
+  const s: {
     slot: Committed<Schemas, keyof Schemas> | null;
-    onProduce: WakeFn | null;
-    onConsume: WakeFn | null;
+    onProduce: Wake | null;
+    onConsume: Wake | null;
     done: boolean;
     error: unknown;
   } = {
@@ -100,92 +103,84 @@ export async function* iterate(
     error: undefined,
   };
 
-  const wakeProduce = () => {
-    const fn = state.onProduce;
-    state.onProduce = null;
+  const wake = () => {
+    const fn = s.onProduce;
+    s.onProduce = null;
     if (fn) fn();
   };
 
   const cap = filter?.limit ?? Number.POSITIVE_INFINITY;
-  const backward = filter?.backward ?? false;
-  // Forward iteration bumps `after` past the largest id seen; backward
-  // bumps `before` past the smallest. The opposite-end user filter
-  // (e.g., user-supplied `before` while walking forward) is preserved
-  // verbatim as a permanent ceiling/floor.
-  let pagAfter = filter?.after;
-  let pagBefore = filter?.before;
-  let totalSeen = 0;
+  let at = filter?.after;
+  let n = 0;
 
-  while (totalSeen < cap) {
-    const batchLimit = Math.min(ITERATE_BATCH, cap - totalSeen);
+  while (n < cap) {
+    const take = Math.min(ITERATE_BATCH, cap - n);
 
     // Reset mailbox state per batch — the previous batch's
-    // `source.query` has resolved (state.done was set) before we
-    // reach here, so the slot/onConsume/onProduce slots are quiescent.
-    state.slot = null;
-    state.onProduce = null;
-    state.onConsume = null;
-    state.done = false;
-    state.error = undefined;
+    // `source.query` has resolved (s.done was set) before we
+    // reach here, so the slots are quiescent.
+    s.slot = null;
+    s.onProduce = null;
+    s.onConsume = null;
+    s.done = false;
+    s.error = undefined;
 
-    let batchCount = 0;
+    let got = 0;
     // Captured inside the producer callback below, where `event` is
     // typed cleanly; reading `.id` off the post-reset consumer-side
-    // `state.slot` narrows to `never` under strict null tracking.
-    let lastId: number | undefined;
+    // `s.slot` narrows to `never` under strict null tracking.
+    let id: number | undefined;
 
     void source
       .query<Schemas>(
         (event) => {
-          state.slot = event;
-          lastId = event.id;
-          wakeProduce();
+          s.slot = event;
+          id = event.id;
+          wake();
           return new Promise<void>((resolve) => {
-            state.onConsume = () => resolve();
+            s.onConsume = () => resolve();
           });
         },
-        { ...filter, after: pagAfter, before: pagBefore, limit: batchLimit }
+        { ...filter, after: at, limit: take }
       )
       .then(
         () => {
-          state.done = true;
-          wakeProduce();
+          s.done = true;
+          wake();
         },
         (err) => {
-          state.error = err;
-          state.done = true;
-          wakeProduce();
+          s.error = err;
+          s.done = true;
+          wake();
         }
       );
 
     while (true) {
-      if (state.slot === null && !state.done)
+      if (s.slot === null && !s.done)
         await new Promise<void>((resolve) => {
-          state.onProduce = resolve;
+          s.onProduce = resolve;
         });
-      if (state.error) throw state.error;
-      if (state.slot === null) break;
-      const event = state.slot;
-      state.slot = null;
-      const fn = state.onConsume!;
-      state.onConsume = null;
+      if (s.error) throw s.error;
+      if (s.slot === null) break;
+      const event = s.slot;
+      s.slot = null;
+      const fn = s.onConsume!;
+      s.onConsume = null;
       fn();
-      batchCount++;
+      got++;
       yield event;
     }
 
-    totalSeen += batchCount;
+    n += got;
 
     // Termination:
-    //   - batchCount < batchLimit: source honored limit but ran out (also
-    //     covers batchCount === 0 — past-the-end on a paginating source).
-    //   - batchCount > batchLimit: source ignored the filter (CsvFile-style).
-    //     It streamed everything in one call; nothing left to ask for.
-    //   Otherwise (batchCount === batchLimit): more events may exist, so
-    //   bump the pagination cursor and continue.
-    if (batchCount !== batchLimit) return;
-    if (backward) pagBefore = lastId;
-    else pagAfter = lastId;
+    //   - got < take: source honored limit but ran out (also covers
+    //     got === 0 — past-the-end on a paginating source).
+    //   - got > take: source ignored the filter (CsvFile-style). It
+    //     streamed everything in one call; nothing left to ask for.
+    //   Otherwise (got === take): more events may exist; bump and continue.
+    if (got !== take) return;
+    at = id;
   }
 }
 

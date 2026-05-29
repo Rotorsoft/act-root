@@ -154,53 +154,6 @@ describe("iterate", () => {
     expect(calls[2]).toEqual({ after: 1000, limit: 500 });
   });
 
-  it("paginates backward via `before` against a respecting source (ACT-1133)", async () => {
-    // Mirror of the forward case. Source honors `before` and `limit`
-    // and returns events in DESC id order. After yielding the first
-    // 500-event batch the loop should bump `before` to the smallest
-    // id seen, not the largest.
-    const total = 1100;
-    const all = Array.from({ length: total }, (_, i) =>
-      makeEvent({ id: i + 1 })
-    );
-    const calls: Array<{ before?: number; limit?: number }> = [];
-    const source: EventSource = {
-      async query(callback, filter?: Query) {
-        calls.push({ before: filter?.before, limit: filter?.limit });
-        const before = filter?.before ?? Number.POSITIVE_INFINITY;
-        const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
-        const slice = all
-          .filter((e) => e.id < before)
-          .slice(-limit)
-          .reverse();
-        for (const e of slice)
-          await Promise.resolve(
-            (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
-              e as Committed<Schemas, keyof Schemas>
-            )
-          );
-        return slice.length;
-      },
-      async dispose() {
-        // no-op
-      },
-    };
-    const collected: E[] = [];
-    for await (const e of iterate(source, { backward: true }))
-      collected.push(e as unknown as E);
-    expect(collected).toHaveLength(total);
-    expect(collected.map((e) => e.id)).toEqual(
-      [...all].reverse().map((e) => e.id)
-    );
-    // 1100 events, batch 500 → before=∞, before=601 (smallest of batch 1),
-    // before=101 (smallest of batch 2). Third batch returns 100 < 500
-    // and the loop exits.
-    expect(calls).toHaveLength(3);
-    expect(calls[0]?.before).toBeUndefined();
-    expect(calls[1]?.before).toBe(601);
-    expect(calls[2]?.before).toBe(101);
-  });
-
   it("honors caller's `limit` as a total cap across batches (ACT-1133)", async () => {
     // Caller passes limit: 750 — iterate should make two calls
     // (limit:500, then limit:250) and stop. No third call.
