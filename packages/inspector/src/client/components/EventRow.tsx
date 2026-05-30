@@ -1,5 +1,6 @@
 import { Database, GitBranch } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { JsonViewer } from "./JsonViewer.js";
 
 type EventMeta = {
@@ -105,6 +106,16 @@ export function EventRow({
   onStream,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
+  // Hover tooltip for the event-name pill. Anchored to the pill's
+  // bounding rect; portal-rendered so the scroll container's
+  // overflow doesn't clip it. Falls back above the pill near the
+  // viewport bottom so it doesn't run off-screen on the last rows.
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const [pillRect, setPillRect] = useState<DOMRect | null>(null);
+  const showDataTooltip = () => {
+    if (pillRef.current) setPillRect(pillRef.current.getBoundingClientRect());
+  };
+  const hideDataTooltip = () => setPillRect(null);
   const causation = event.meta?.causation;
   const actor = causation?.action?.actor;
   const correlation = event.meta?.correlation;
@@ -177,10 +188,13 @@ export function EventRow({
           </span>
         )}
 
-        {/* Event name pill */}
+        {/* Event name pill — hover to preview the event payload */}
         <span className="w-36 shrink-0 truncate">
           <span
-            className={`inline-block rounded-md border px-2 py-0.5 text-[11px] font-medium ${nameColor(event.name)}`}
+            ref={pillRef}
+            onMouseEnter={showDataTooltip}
+            onMouseLeave={hideDataTooltip}
+            className={`inline-block cursor-help rounded-md border px-2 py-0.5 text-[11px] font-medium ${nameColor(event.name)}`}
           >
             {event.name}
           </span>
@@ -298,6 +312,42 @@ export function EventRow({
           </div>
         </div>
       )}
+      {pillRect &&
+        !expanded &&
+        createPortal(
+          <DataTooltip rect={pillRect} data={event.data} />,
+          document.body
+        )}
+    </div>
+  );
+}
+
+/**
+ * Floating preview of an event's `data` payload, anchored to the
+ * event-name pill. Positioned just below the pill by default; flips
+ * above when there isn't enough room before the viewport bottom so
+ * the tooltip doesn't disappear off-screen for the last rows in the
+ * table. `pointer-events-none` so the tooltip never intercepts
+ * clicks on the row underneath.
+ */
+function DataTooltip({ rect, data }: { rect: DOMRect; data: unknown }) {
+  const margin = 6;
+  const estHeight = 280;
+  const flipAbove = rect.bottom + estHeight + margin > window.innerHeight;
+  const top = flipAbove ? rect.top - margin : rect.bottom + margin;
+  return (
+    <div
+      className="pointer-events-none fixed z-[100] max-h-[60vh] w-[36rem] max-w-[80vw] overflow-auto rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs shadow-xl"
+      style={{
+        top,
+        left: rect.left,
+        transform: flipAbove ? "translateY(-100%)" : undefined,
+      }}
+    >
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+        Data
+      </div>
+      <JsonViewer data={data} />
     </div>
   );
 }
