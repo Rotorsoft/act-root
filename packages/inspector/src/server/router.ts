@@ -1194,17 +1194,25 @@ export const inspectorRouter = t.router({
         // range — too small thrashes round trips; too large defeats
         // the bounded-memory point.
         batch_size: z.number().int().min(50).max(10_000).optional(),
-        // Stream rename (ACT-1126). Operator-tractable regex pair —
-        // server compiles into a per-event renaming function. Useful
-        // for tenant relocation (`^old-` → `new-`) and prefix cleanup.
-        // Pattern is anchored only as the operator writes it; the UI
-        // hints at this so accidental "match anywhere" rewrites are
-        // surfaced before the operator clicks Run.
+        // Stream rename (ACT-1126). An ordered list of regex pairs —
+        // server compiles them into a per-event renaming function that
+        // runs `acc.replace(pattern_i, replacement_i)` in sequence, so
+        // each rule sees the previous rule's output. Covers two
+        // common shapes in one mechanism:
+        //   - **Independent renames** — multiple unrelated patterns
+        //     in one restore (`^tenant-A-` → `^new-A-`, `^legacy-` → `^staging-`).
+        //   - **Chained refinement** — a complicated rewrite split
+        //     across rules, each one cleaning up what the previous
+        //     left.
+        // Empty array = no renames. Each pattern is anchored only as
+        // the operator writes it.
         stream_rename: z
-          .object({
-            pattern: z.string().min(1),
-            replacement: z.string(),
-          })
+          .array(
+            z.object({
+              pattern: z.string().min(1),
+              replacement: z.string(),
+            })
+          )
           .optional(),
         // Path (relative to the inspector server's cwd) to an
         // operator-authored migrations module — ACT-1126. The module's
@@ -1338,11 +1346,23 @@ export const inspectorRouter = t.router({
       // module. Both optional; both rejected if invalid before any
       // restore call so the operator gets a clear error instead of a
       // mid-restore failure.
-      const stream_rename = input.stream_rename
+      // Compile each rule's pattern up front so a syntactically broken
+      // regex fails fast, before any IO. Each event's stream then
+      // passes through `reduce` against the compiled rules — every
+      // rule fires in order on the running output, so independent
+      // patterns (rule A doesn't match, rule B does) and chained ones
+      // (rule B refines rule A's output) work identically.
+      const compiledRenames = input.stream_rename?.length
+        ? input.stream_rename.map((r) => ({
+            re: new RegExp(r.pattern),
+            replacement: r.replacement,
+          }))
+        : undefined;
+      const stream_rename = compiledRenames
         ? (s: string) =>
-            s.replace(
-              new RegExp(input.stream_rename!.pattern),
-              input.stream_rename!.replacement
+            compiledRenames.reduce(
+              (acc, { re, replacement }) => acc.replace(re, replacement),
+              s
             )
         : undefined;
       // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics

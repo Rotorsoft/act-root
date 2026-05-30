@@ -93,7 +93,10 @@ export function FilterBar() {
           />
         </div>
 
-        {/* Time range presets */}
+        {/* Time range presets — clicking a preset always applies it,
+            never toggles off. A separate `×` clears the time filter so
+            "click twice" can't silently undo what the operator just
+            set. */}
         <div className="flex flex-col gap-1">
           <label className="text-[10px] uppercase tracking-wider text-zinc-500">
             Time Range
@@ -108,7 +111,7 @@ export function FilterBar() {
               return (
                 <button
                   key={p.label}
-                  onClick={() => (active ? clearTime() : setTimePreset(p.ms))}
+                  onClick={() => setTimePreset(p.ms)}
                   className={`rounded-md border px-2 py-1.5 text-xs transition ${
                     active
                       ? "border-emerald-600 bg-emerald-950 text-emerald-400"
@@ -119,6 +122,15 @@ export function FilterBar() {
                 </button>
               );
             })}
+            {filters.created_after && (
+              <button
+                onClick={clearTime}
+                aria-label="Clear time filter"
+                className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-500 transition hover:border-red-800 hover:text-red-400"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
 

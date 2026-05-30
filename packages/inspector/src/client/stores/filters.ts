@@ -12,8 +12,11 @@ export type Filters = {
 };
 
 function makeDefaults(): Filters {
+  // No default `created_after` — `limit: 50` already caps the initial
+  // page, so showing all events out of the box matches the operator's
+  // expectation. The old 1h default silently hid stores whose only
+  // events were older than an hour.
   return {
-    created_after: new Date(Date.now() - 60 * 60_000).toISOString(),
     backward: true,
     limit: 50,
   };
@@ -32,7 +35,7 @@ function loadFromUrl(): Filters {
   return {
     stream: params.get("stream") || undefined,
     names: params.get("names")?.split(",").filter(Boolean) || undefined,
-    created_after: params.get("created_after") || makeDefaults().created_after,
+    created_after: params.get("created_after") || undefined,
     created_before: params.get("created_before") || undefined,
     correlation: params.get("correlation") || undefined,
     backward: params.get("backward") !== "false",

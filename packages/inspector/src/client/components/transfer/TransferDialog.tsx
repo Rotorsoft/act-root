@@ -41,10 +41,13 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   const [dropSnapshots, setDropSnapshots] = useState(false);
   const [dropClosedStreams, setDropClosedStreams] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
-  // Migration overlay (ACT-1126). Empty strings = "not set"; sent as
-  // undefined to the server so scan skips the corresponding overlay.
-  const [streamRenamePattern, setStreamRenamePattern] = useState("");
-  const [streamRenameReplacement, setStreamRenameReplacement] = useState("");
+  // Migration overlay (ACT-1126). Stream rename is an ordered list —
+  // each rule fires in turn against the running output, so independent
+  // renames and chained refinements both work. Empty list = no
+  // renames; we ship `undefined` so scan skips the overlay entirely.
+  const [streamRenameRules, setStreamRenameRules] = useState<
+    Array<{ pattern: string; replacement: string }>
+  >([]);
   const [eventMigrationsPath, setEventMigrationsPath] = useState("");
   const [preview, setPreview] = useState<{
     result: ScanResult;
@@ -109,8 +112,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
     target,
     dropSnapshots,
     dropClosedStreams,
-    streamRenamePattern,
-    streamRenameReplacement,
+    streamRenameRules,
     eventMigrationsPath,
   ]);
 
@@ -133,12 +135,16 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   // biome-ignore lint/suspicious/noExplicitAny: per-slot narrowing happens server-side
   const wireTarget = target as any;
 
-  const migrationPayload = () => ({
-    stream_rename: streamRenamePattern
-      ? { pattern: streamRenamePattern, replacement: streamRenameReplacement }
-      : undefined,
-    event_migrations_path: eventMigrationsPath || undefined,
-  });
+  // Strip empty-pattern rows on the way to the server (they're just
+  // placeholders the operator left blank); ship `undefined` if nothing
+  // is left so the server skips the overlay entirely.
+  const migrationPayload = () => {
+    const rules = streamRenameRules.filter((r) => r.pattern.trim().length > 0);
+    return {
+      stream_rename: rules.length > 0 ? rules : undefined,
+      event_migrations_path: eventMigrationsPath || undefined,
+    };
+  };
 
   const handlePreview = () => {
     setPreview(null);
@@ -270,10 +276,8 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                   onChangeDropClosedStreams={setDropClosedStreams}
                   batchSize={batchSize}
                   onChangeBatchSize={setBatchSize}
-                  streamRenamePattern={streamRenamePattern}
-                  onChangeStreamRenamePattern={setStreamRenamePattern}
-                  streamRenameReplacement={streamRenameReplacement}
-                  onChangeStreamRenameReplacement={setStreamRenameReplacement}
+                  streamRenameRules={streamRenameRules}
+                  onChangeStreamRenameRules={setStreamRenameRules}
                   eventMigrationsPath={eventMigrationsPath}
                   onChangeEventMigrationsPath={setEventMigrationsPath}
                   disabled={inFlight}
@@ -287,8 +291,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                   dropSnapshots={dropSnapshots}
                   dropClosedStreams={dropClosedStreams}
                   batchSize={batchSize}
-                  streamRenamePattern={streamRenamePattern}
-                  streamRenameReplacement={streamRenameReplacement}
+                  streamRenameRules={streamRenameRules}
                   eventMigrationsPath={eventMigrationsPath}
                   canRun={canRun}
                   inFlight={inFlight}
@@ -438,6 +441,8 @@ function TargetStep({
   );
 }
 
+type RenameRule = { pattern: string; replacement: string };
+
 function OptionsStep({
   dropSnapshots,
   onChangeDropSnapshots,
@@ -445,10 +450,8 @@ function OptionsStep({
   onChangeDropClosedStreams,
   batchSize,
   onChangeBatchSize,
-  streamRenamePattern,
-  onChangeStreamRenamePattern,
-  streamRenameReplacement,
-  onChangeStreamRenameReplacement,
+  streamRenameRules,
+  onChangeStreamRenameRules,
   eventMigrationsPath,
   onChangeEventMigrationsPath,
   disabled,
@@ -459,14 +462,26 @@ function OptionsStep({
   onChangeDropClosedStreams: (v: boolean) => void;
   batchSize: number;
   onChangeBatchSize: (v: number) => void;
-  streamRenamePattern: string;
-  onChangeStreamRenamePattern: (v: string) => void;
-  streamRenameReplacement: string;
-  onChangeStreamRenameReplacement: (v: string) => void;
+  streamRenameRules: RenameRule[];
+  onChangeStreamRenameRules: (rules: RenameRule[]) => void;
   eventMigrationsPath: string;
   onChangeEventMigrationsPath: (v: string) => void;
   disabled: boolean;
 }) {
+  const updateRule = (index: number, patch: Partial<RenameRule>) => {
+    onChangeStreamRenameRules(
+      streamRenameRules.map((r, i) => (i === index ? { ...r, ...patch } : r))
+    );
+  };
+  const addRule = () =>
+    onChangeStreamRenameRules([
+      ...streamRenameRules,
+      { pattern: "", replacement: "" },
+    ]);
+  const removeRule = (index: number) =>
+    onChangeStreamRenameRules(
+      streamRenameRules.filter((_, i) => i !== index)
+    );
   return (
     <div className="space-y-3">
       <p className="text-xs text-zinc-500">
@@ -512,28 +527,56 @@ function OptionsStep({
             </div>
             <div className="mt-0.5 text-[11px] text-zinc-500">
               Regex find/replace applied per event's stream (e.g.{" "}
-              <code>^tenant-old-</code> → <code>tenant-new-</code>). Leave
-              blank to skip.
+              <code>^tenant-old-</code> → <code>tenant-new-</code>). Rules
+              run in order, each one seeing the previous rule's output —
+              good for both independent renames and chained refinement.
             </div>
-            <div className="mt-2 flex gap-2">
-              <input
-                type="text"
-                placeholder="pattern (regex)"
-                value={streamRenamePattern}
+            <div className="mt-2 space-y-2">
+              {streamRenameRules.map((rule, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: row identity is positional
+                <div key={i} className="flex items-center gap-2">
+                  <span className="w-4 shrink-0 text-center font-mono text-[10px] text-zinc-600">
+                    {i + 1}
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="pattern (regex)"
+                    value={rule.pattern}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateRule(i, { pattern: e.target.value })
+                    }
+                    className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                  />
+                  <input
+                    type="text"
+                    placeholder="replacement"
+                    value={rule.replacement}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateRule(i, { replacement: e.target.value })
+                    }
+                    className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => removeRule(i)}
+                    disabled={disabled}
+                    aria-label={`Remove rule ${i + 1}`}
+                    className="shrink-0 rounded border border-zinc-800 px-2 py-1 text-xs text-zinc-500 transition hover:border-red-900/60 hover:bg-red-950/30 hover:text-red-300 disabled:opacity-40"
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                onClick={addRule}
                 disabled={disabled}
-                onChange={(e) => onChangeStreamRenamePattern(e.target.value)}
-                className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-              />
-              <input
-                type="text"
-                placeholder="replacement"
-                value={streamRenameReplacement}
-                disabled={disabled}
-                onChange={(e) =>
-                  onChangeStreamRenameReplacement(e.target.value)
-                }
-                className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
-              />
+                className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-300 transition hover:bg-zinc-800 disabled:opacity-40"
+              >
+                + Add rule
+              </button>
             </div>
           </div>
           <div>
@@ -567,8 +610,7 @@ function SummaryStep({
   dropSnapshots,
   dropClosedStreams,
   batchSize,
-  streamRenamePattern,
-  streamRenameReplacement,
+  streamRenameRules,
   eventMigrationsPath,
   canRun,
   inFlight,
@@ -585,8 +627,7 @@ function SummaryStep({
   dropSnapshots: boolean;
   dropClosedStreams: boolean;
   batchSize: number;
-  streamRenamePattern: string;
-  streamRenameReplacement: string;
+  streamRenameRules: RenameRule[];
   eventMigrationsPath: string;
   canRun: boolean;
   inFlight: boolean;
@@ -602,11 +643,16 @@ function SummaryStep({
   if (dropSnapshots) opts.push(["Drop snapshots", "yes"]);
   if (dropClosedStreams) opts.push(["Drop closed streams", "yes"]);
   opts.push(["Batch size", String(batchSize)]);
-  if (streamRenamePattern)
+  const activeRules = streamRenameRules.filter((r) => r.pattern.trim());
+  if (activeRules.length === 1) {
+    const r = activeRules[0];
     opts.push([
       "Stream rename",
-      `${streamRenamePattern} → ${streamRenameReplacement || "(empty)"}`,
+      `${r.pattern} → ${r.replacement || "(empty)"}`,
     ]);
+  } else if (activeRules.length > 1) {
+    opts.push(["Stream rename", `${activeRules.length} rules`]);
+  }
   if (eventMigrationsPath) opts.push(["Event migrations", eventMigrationsPath]);
 
   return (
