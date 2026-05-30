@@ -340,6 +340,43 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 - **`dry_run: true`** — walk the source, validate every event, count kept and dropped, but never open the sink's transaction. No `Store.restore` capability required. The kept/dropped counts match what a destructive run would land. Used by the inspector's transfer-preview affordance.
 - **`drop_snapshots: true`** — skip every `__snapshot__` event in the source. The rebuilt store has no snapshots, so the next snap policy regenerates them with the current state. Useful for compaction.
 - **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
+- **`event_migrations`** — per-event schema migration applied during the scan ([ACT-1126](https://github.com/Rotorsoft/act-root/issues/785)). Keys are source event names; values describe how to rewrite them. See [Migration overlay](#migration-overlay) below.
+- **`stream_rename`** — function that returns a new stream name per event, for tenant relocation and prefix cleanup. See [Migration overlay](#migration-overlay).
+
+### Migration overlay
+
+Transfer-time migrations let you reshape events as part of a `Act.restore(source, opts, sink)` call — typically when moving from an old store to a new (empty) store via the inspector. The connected (live) store is never modified; migrations apply only to the events that flow through `scan` into `sink`.
+
+```typescript
+import { z } from "zod";
+import type { EventMigration } from "@rotorsoft/act";
+
+const OrderPaidMigration: EventMigration<
+  { amount: number },
+  { amount_cents: number }
+> = {
+  to: "OrderPaid_v2",
+  from_schema: z.object({ amount: z.number() }),
+  to_schema: z.object({ amount_cents: z.number() }),
+  migrate: (old) => ({ amount_cents: old.amount * 100 }),
+};
+
+await app.restore(source, {
+  event_migrations: { OrderPaid: OrderPaidMigration },
+  stream_rename: (s) => s.replace(/^tenant-old-/, "tenant-new-"),
+}, sink);
+```
+
+Per matched event, `scan`:
+
+1. Parses `event.data` against `from_schema` — fails fast if the stored payload doesn't match what you said you were migrating from.
+2. Runs `migrate(parsed)` to transform the data.
+3. Parses the result against `to_schema` — verifies the migration produced a valid new-version payload.
+4. Rewrites the event with `name = to` and `data = migrated`, increments `ScanResult.migrated`.
+
+Then `stream_rename` runs (after the event migration, so it sees the migrated event). Any throw aborts the whole scan — atomic transaction rollback in the sink means a failing migration leaves the target byte-for-byte unchanged.
+
+**Why this is restore-only, not a builder option.** Migrations are operator-driven cleanups, not codebase schema declarations. The `_v<n>` event-versioning convention already handles forward compatibility on the live store: old events stay readable through their original reducers. Use the migration overlay only when you want to physically rewrite the stored payload — typically a one-time transfer to a new, migrated store, after which the new store has no deprecated events at all.
 
 ### Memory: how restore avoids OOM on large sources
 

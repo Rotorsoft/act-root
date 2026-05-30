@@ -166,6 +166,142 @@ describe("scan (pre-flight, no committer)", () => {
     ]);
   });
 
+  it("event_migrations rewrites name + data with schema validation (ACT-1126)", async () => {
+    // Three events of two types; only the first type has a migration.
+    // Migrated events get the new name + transformed data. Untouched
+    // events flow through verbatim.
+    const events: E[] = [
+      baseEvent({ id: 1, name: "OrderPaid", data: { amount: 50 } }),
+      baseEvent({ id: 2, name: "OrderShipped", data: { tracking: "X" } }),
+      baseEvent({ id: 3, name: "OrderPaid", data: { amount: 75 } }),
+    ];
+    const seen: Array<{ name: string; data: unknown }> = [];
+    const result = await scan(
+      fromArray(events),
+      {
+        event_migrations: {
+          OrderPaid: {
+            to: "OrderPaid_v2",
+            from_schema: { parse: (d) => d as { amount: number } },
+            to_schema: { parse: (d) => d as { amount_cents: number } },
+            migrate: (d: { amount: number }) => ({
+              amount_cents: d.amount * 100,
+            }),
+          },
+        },
+      },
+      async (e) => {
+        seen.push({ name: e.name as string, data: e.data });
+        return e.id;
+      }
+    );
+    expect(result.kept).toBe(3);
+    expect(result.migrated).toBe(2);
+    expect(seen).toEqual([
+      { name: "OrderPaid_v2", data: { amount_cents: 5000 } },
+      { name: "OrderShipped", data: { tracking: "X" } },
+      { name: "OrderPaid_v2", data: { amount_cents: 7500 } },
+    ]);
+  });
+
+  it("event_migrations aborts the scan when from_schema rejects (ACT-1126)", async () => {
+    // The first OrderPaid row has the documented shape; the second
+    // does not. from_schema.parse throws → scan throws → in a real
+    // restore the sink transaction rolls back. Operator finds out
+    // BEFORE any rows land instead of mid-migration.
+    const events: E[] = [
+      baseEvent({ id: 1, name: "OrderPaid", data: { amount: 10 } }),
+      baseEvent({ id: 2, name: "OrderPaid", data: { totally_wrong: true } }),
+    ];
+    await expect(
+      scan(
+        fromArray(events),
+        {
+          event_migrations: {
+            OrderPaid: {
+              to: "OrderPaid_v2",
+              from_schema: {
+                parse: (d) => {
+                  const v = d as { amount?: number };
+                  if (typeof v.amount !== "number")
+                    throw new Error("missing amount");
+                  return v as { amount: number };
+                },
+              },
+              to_schema: { parse: (d) => d as { amount_cents: number } },
+              migrate: (d: { amount: number }) => ({
+                amount_cents: d.amount * 100,
+              }),
+            },
+          },
+        },
+        async (e) => e.id
+      )
+    ).rejects.toThrow(/missing amount/);
+  });
+
+  it("stream_rename rewrites the stream per event (ACT-1126)", async () => {
+    const events: E[] = [
+      baseEvent({ id: 1, stream: "tenant-old-acme" }),
+      baseEvent({ id: 2, stream: "tenant-old-globex" }),
+      baseEvent({ id: 3, stream: "tenant-new-already" }),
+    ];
+    const seen: string[] = [];
+    const result = await scan(
+      fromArray(events),
+      {
+        stream_rename: (s) => s.replace(/^tenant-old-/, "tenant-new-"),
+      },
+      async (e) => {
+        seen.push(e.stream);
+        return e.id;
+      }
+    );
+    expect(result.kept).toBe(3);
+    expect(seen).toEqual([
+      "tenant-new-acme",
+      "tenant-new-globex",
+      "tenant-new-already",
+    ]);
+  });
+
+  it("event_migrations + stream_rename compose, migration runs first (ACT-1126)", async () => {
+    // The migration's `migrate(...)` sees the ORIGINAL stream name
+    // because stream_rename runs after. Important for migrations that
+    // key off the source stream (e.g., per-tenant transforms).
+    const seen_in_migrate: string[] = [];
+    const seen_at_sink: Array<{ name: string; stream: string }> = [];
+    const result = await scan(
+      fromArray([
+        baseEvent({ id: 1, name: "X", stream: "old-a", data: { v: 1 } }),
+      ]),
+      {
+        event_migrations: {
+          X: {
+            to: "X_v2",
+            from_schema: { parse: (d) => d as { v: number } },
+            to_schema: { parse: (d) => d as { v: number } },
+            migrate: (d: { v: number }) => {
+              // No way to see stream name from migrate (by design — it
+              // only gets `data`). Just sanity-check we ran.
+              seen_in_migrate.push("ran");
+              return { v: d.v + 100 };
+            },
+          },
+        },
+        stream_rename: (s) => s.replace(/^old-/, "new-"),
+      },
+      async (e) => {
+        seen_at_sink.push({ name: e.name as string, stream: e.stream });
+        return e.id;
+      }
+    );
+    expect(result.kept).toBe(1);
+    expect(result.migrated).toBe(1);
+    expect(seen_in_migrate).toEqual(["ran"]);
+    expect(seen_at_sink).toEqual([{ name: "X_v2", stream: "new-a" }]);
+  });
+
   it("counts dropped snapshots when drop_snapshots is true", async () => {
     const result = await scan(
       fromArray([

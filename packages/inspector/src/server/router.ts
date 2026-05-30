@@ -2,11 +2,12 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter, on } from "node:events";
 import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   act,
   type Committed,
   CsvFile,
+  type EventMigration,
   InMemoryStore,
   type Query,
   type ScanResult,
@@ -1186,6 +1187,26 @@ export const inspectorRouter = t.router({
         // range — too small thrashes round trips; too large defeats
         // the bounded-memory point.
         batch_size: z.number().int().min(50).max(10_000).optional(),
+        // Stream rename (ACT-1126). Operator-tractable regex pair —
+        // server compiles into a per-event renaming function. Useful
+        // for tenant relocation (`^old-` → `new-`) and prefix cleanup.
+        // Pattern is anchored only as the operator writes it; the UI
+        // hints at this so accidental "match anywhere" rewrites are
+        // surfaced before the operator clicks Run.
+        stream_rename: z
+          .object({
+            pattern: z.string().min(1),
+            replacement: z.string(),
+          })
+          .optional(),
+        // Path (relative to the inspector server's cwd) to an
+        // operator-authored migrations module — ACT-1126. The module's
+        // default export is `Record<string, EventMigration>`. Zod
+        // schemas + transform functions can't be JSON-encoded for a
+        // tRPC input, so the file-on-disk indirection is the honest
+        // shape. Server resolves the path under cwd and dynamic-
+        // imports; absolute paths and `..` traversal are rejected.
+        event_migrations_path: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -1284,6 +1305,45 @@ export const inspectorRouter = t.router({
       // are passed explicitly so `Act.restore` never falls back to
       // the singleton store.
       const app = act().build();
+      // Migration overlay (ACT-1126) — compile the regex pair into a
+      // function, dynamic-import the operator-authored migrations
+      // module. Both optional; both rejected if invalid before any
+      // restore call so the operator gets a clear error instead of a
+      // mid-restore failure.
+      const stream_rename = input.stream_rename
+        ? (s: string) =>
+            s.replace(
+              new RegExp(input.stream_rename!.pattern),
+              input.stream_rename!.replacement
+            )
+        : undefined;
+      // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+      let event_migrations:
+        | Record<string, EventMigration<any, any>>
+        | undefined;
+      if (input.event_migrations_path) {
+        // Resolve under cwd; reject absolute paths and `..` traversal
+        // so an operator can't import arbitrary modules off the
+        // filesystem. The inspector is intentionally a thin tool; if
+        // the migrations live elsewhere the operator can stage them
+        // under cwd first.
+        const root = process.cwd();
+        const abs = resolve(root, input.event_migrations_path);
+        const rel = relative(root, abs);
+        if (isAbsolute(input.event_migrations_path) || rel.startsWith(".."))
+          throw new Error(
+            "event_migrations_path must be a relative path under the inspector cwd"
+          );
+        const mod = (await import(abs)) as {
+          // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+          default?: Record<string, EventMigration<any, any>>;
+        };
+        if (!mod.default || typeof mod.default !== "object")
+          throw new Error(
+            `event_migrations module ${input.event_migrations_path} must default-export Record<string, EventMigration>`
+          );
+        event_migrations = mod.default;
+      }
       try {
         const result = await app.restore(
           filteredSource,
@@ -1291,6 +1351,8 @@ export const inspectorRouter = t.router({
             dry_run: input.dry_run,
             drop_snapshots: input.drop_snapshots,
             batch_size: input.batch_size,
+            event_migrations,
+            stream_rename,
             on_progress: (p) => {
               restoreProgressEmitter.emit("progress", p);
             },

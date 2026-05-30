@@ -202,11 +202,17 @@ export async function scan(
   opts: ScanOptions = {},
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<ScanResult, "duration_ms">> {
-  const { drop_snapshots = false, on_progress } = opts;
+  const {
+    drop_snapshots = false,
+    on_progress,
+    event_migrations,
+    stream_rename,
+  } = opts;
   const limit = opts.batch_size ?? DEFAULT_BATCH;
   const id_map = new Map<number, number>();
   let kept = 0;
   let dropped_snaps = 0;
+  let migrated_count = 0;
   let processed = 0;
   let at: number | undefined;
 
@@ -241,6 +247,30 @@ export async function scan(
           dropped_snaps++;
           return;
         }
+        // Migration overlay (ACT-1126): rename + schema-guarded data
+        // transform, then optional stream rename. Applied BEFORE the
+        // causation remap so the id_map (keyed by source id) stays
+        // valid and migrated events land at the new name/data with
+        // their causation chains intact.
+        let migrated: typeof event = event;
+        const migration = event_migrations?.[event.name as string];
+        if (migration) {
+          const old_data = migration.from_schema.parse(event.data);
+          const new_data = migration.migrate(old_data);
+          migration.to_schema.parse(new_data);
+          migrated = {
+            ...event,
+            name: migration.to as typeof event.name,
+            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
+            data: new_data as any,
+          };
+          migrated_count++;
+        }
+        if (stream_rename) {
+          const renamed = stream_rename(migrated.stream);
+          if (renamed !== migrated.stream)
+            migrated = { ...migrated, stream: renamed };
+        }
         if (!callback) {
           kept++;
           return;
@@ -248,8 +278,8 @@ export async function scan(
         // Causation remap — rewrite `meta.causation.event.id` to the
         // new id space if the source pointed at an earlier event's
         // old id.
-        let remapped = event;
-        const caused_by = event.meta.causation.event?.id;
+        let remapped = migrated;
+        const caused_by = migrated.meta.causation.event?.id;
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
@@ -284,6 +314,7 @@ export async function scan(
 
   return {
     kept,
+    migrated: migrated_count,
     dropped: {
       closed_streams: 0,
       snapshots: dropped_snaps,

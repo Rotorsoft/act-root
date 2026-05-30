@@ -37,6 +37,12 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   );
   const [dropSnapshots, setDropSnapshots] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
+  // Migration overlay (ACT-1126). Empty strings = "not set"; sent as
+  // undefined to the server so scan skips the corresponding overlay.
+  const [streamRenamePattern, setStreamRenamePattern] = useState("");
+  const [streamRenameReplacement, setStreamRenameReplacement] = useState("");
+  const [eventMigrationsPath, setEventMigrationsPath] = useState("");
+  const [migrationOpen, setMigrationOpen] = useState(false);
   const [preview, setPreview] = useState<ScanResult | null>(null);
   const [summary, setSummary] = useState<{
     result: ScanResult;
@@ -120,6 +126,17 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   // biome-ignore lint/suspicious/noExplicitAny: see comment above
   const wireTarget = target as any;
 
+  // Migration overlay payload (ACT-1126). Empty fields = "not set"
+  // so scan skips the corresponding overlay. Both options apply to
+  // dry-run too — operators want to validate the migration before
+  // committing to a destructive transfer.
+  const migrationPayload = () => ({
+    stream_rename: streamRenamePattern
+      ? { pattern: streamRenamePattern, replacement: streamRenameReplacement }
+      : undefined,
+    event_migrations_path: eventMigrationsPath || undefined,
+  });
+
   const handlePreview = () => {
     setPreview(null);
     previewMutation.mutate({
@@ -127,6 +144,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
       target: wireTarget,
       dry_run: true,
       drop_snapshots: dropSnapshots,
+      ...migrationPayload(),
     });
   };
 
@@ -139,6 +157,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
       target: wireTarget,
       drop_snapshots: dropSnapshots,
       batch_size: batchSize,
+      ...migrationPayload(),
     });
   };
 
@@ -226,6 +245,74 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                     className="w-24 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-right font-mono text-xs text-zinc-200 focus:border-blue-500 focus:outline-none disabled:opacity-50"
                   />
                 </label>
+              </div>
+
+              <div className="mt-3 rounded-md border border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setMigrationOpen((v) => !v)}
+                  className="flex w-full items-center justify-between gap-3 p-3 text-xs text-zinc-300 hover:bg-zinc-800/40"
+                >
+                  <span className="font-medium">
+                    Migration {migrationOpen ? "▾" : "▸"}
+                  </span>
+                  <span className="text-[11px] text-zinc-500">
+                    Optional — rename streams / migrate event schemas as part of this transfer
+                  </span>
+                </button>
+                {migrationOpen && (
+                  <div className="space-y-3 border-t border-zinc-800 p-3">
+                    <div>
+                      <div className="text-xs font-medium text-zinc-300">
+                        Stream rename
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-zinc-500">
+                        Regex find/replace applied per event's stream
+                        (e.g. <code>^tenant-old-</code> → <code>tenant-new-</code>).
+                        Leave blank to skip.
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <input
+                          type="text"
+                          placeholder="pattern (regex)"
+                          value={streamRenamePattern}
+                          disabled={inFlight}
+                          onChange={(e) => setStreamRenamePattern(e.target.value)}
+                          className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                        />
+                        <input
+                          type="text"
+                          placeholder="replacement"
+                          value={streamRenameReplacement}
+                          disabled={inFlight}
+                          onChange={(e) =>
+                            setStreamRenameReplacement(e.target.value)
+                          }
+                          className="flex-1 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-300">
+                        Event migrations
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-zinc-500">
+                        Path (relative to the inspector cwd) to a module
+                        exporting <code>Record&lt;string, EventMigration&gt;</code> as default.
+                        Migrations validate source + target schemas; any
+                        mismatch aborts the transfer.
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="migrations/2026-05-rename.ts"
+                        value={eventMigrationsPath}
+                        disabled={inFlight}
+                        onChange={(e) => setEventMigrationsPath(e.target.value)}
+                        className="mt-2 w-full rounded border border-zinc-700 bg-zinc-950 px-2 py-1 font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4">
