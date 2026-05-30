@@ -337,7 +337,7 @@ export class Act<
    * and projections in one pass.
    *
    * @param registry  Schemas for every event and action across registered states
-   * @param _states   Merged map of state name → state definition
+   * @param states    Merged map of state name → state definition
    * @param batchHandlers Static-target projection batch handlers (target → handler)
    * @param options   Tuning knobs — see {@link ActOptions}
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects

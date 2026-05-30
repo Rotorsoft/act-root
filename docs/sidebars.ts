@@ -77,11 +77,6 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
-          label: "@rotorsoft/act-sse",
-          href: "/docs/api/act-sse/src",
-        },
-        {
-          type: "link",
           label: "@rotorsoft/act-http",
           href: "/docs/api/act-http/src/webhook",
         },
