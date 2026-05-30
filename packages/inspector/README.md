@@ -70,7 +70,25 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
     - "Copy app.close()" — ready-to-paste snippet you run from your own application code.
   - The modal **does not** close streams directly; the inspector has no Act orchestrator (it's a standalone tool pointed at a Postgres store) and can't safely run `app.close()`. The copy affordance is the honest middle ground — inspector surfaces the data, your app runs the close.
 - **CSV** — browse a local `.csv` event dump without landing it in a store first. Browser file picker; bytes never leave the client, the parser is identical to `CsvFile`'s blob mode so any framework-emitted backup is readable. Same `EventRow` chrome as the Event Log, so rows from disk read identically to live events.
-- **Restore** — toolbar wizard for moving events between any source and any target (the connected store, an uploaded CSV blob, a server-side CSV file, or per-call PG / SQLite credentials). Four steps — Source → Target → Options → Summary — with a dry-run preview that captures the first 50 post-transform events into an in-memory sink and opens a full-screen modal showing both counts and the sample event table. The configured target is never touched on a dry-run: no file written, no transaction opened. Migration overlay (transfer-time only): an ordered list of `{ pattern, replacement }` stream-rename rules — each fires in turn against the running output, so independent renames and chained refinement both work — plus a server-side file path to an `event_migrations` module for schema-guarded payload rewrites.
+- **Restore** — toolbar wizard for moving events between any source and any target (the connected store, an uploaded CSV blob, a server-side CSV file, or per-call PG / SQLite credentials). Four steps — Source → Target → Options → Summary — with a dry-run preview that captures the first 50 post-transform events into an in-memory sink and opens a full-screen modal showing both counts and the sample event table. The configured target is never touched on a dry-run: no file written, no transaction opened. Migration overlay (transfer-time only): an ordered list of `{ pattern, replacement }` stream-rename rules plus a server-side file path to an `event_migrations` module for schema-guarded payload rewrites.
+
+  **Stream rename rules** run in order via chained `String.prototype.replace` — each rule sees the previous rule's output, so a single list can mix independent renames and chained refinement:
+
+  ```jsonc
+  [
+    // 1. Independent: rewrite one tenant's prefix
+    { "pattern": "^tenant-acme-",   "replacement": "tenant-acme-prod-" },
+    // 2. Independent: a different prefix; the rewrites in (1) don't
+    //    match here, so this fires on the original stream name
+    { "pattern": "^legacy-orders-", "replacement": "orders-" },
+    // 3. Chained refinement: applies to *whatever the previous rules
+    //    produced* — e.g. "orders-foo-v1" → "orders-foo-v2" right
+    //    after rule (2) renamed it from "legacy-orders-foo-v1"
+    { "pattern": "-v1$",            "replacement": "-v2" }
+  ]
+  ```
+
+  A rule whose pattern doesn't match the current name is a no-op (the replace returns the input unchanged), so independent rules trivially compose. Patterns are anchored only as written — no implicit `^…$` — so `^` / `$` is required when the operator wants prefix/suffix-only matching. A broken regex fails fast at the top of the mutation, before any IO.
 
 ### Mutations (write mode)
 
