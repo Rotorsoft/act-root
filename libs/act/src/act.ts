@@ -1252,7 +1252,7 @@ export class Act<
         })();
       let kept = 0;
       let migrated = 0;
-      let dropped = { closed_streams: 0, snapshots: 0, empty_streams: 0 };
+      let dropped = { closed_streams: 0, snapshots: 0 };
       await target.restore(async (callback) => {
         const partial = await scan(source, opts, callback);
         kept = partial.kept;

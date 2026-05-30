@@ -557,10 +557,6 @@ export type CloseResult = {
  * anything. Any throw aborts the whole scan — atomic rollback in the
  * sink means a failing transform leaves the target byte-for-byte
  * unchanged.
- *
- * There is no `drop_empty_streams` counterpart to
- * {@link drop_closed_streams} — empty streams have zero events and
- * never appear in an event scan to begin with.
  */
 export type ScanOptions = {
   /**
@@ -623,18 +619,19 @@ export type ScanOptions = {
   readonly dry_run?: boolean;
 
   /**
-   * Drop every event from streams that have been closed (tombstoned)
-   * via {@link IAct.close} (ACT-1126). The scan walks the source once
+   * Compact streams that have been closed (tombstoned) via
+   * {@link IAct.close} (ACT-1126). The scan walks the source once
    * upfront to collect streams with a `__tombstone__` event, then
-   * the main loop skips every event whose stream is in that set —
-   * including the tombstones themselves and any pre-close events.
+   * the main loop drops every **pre-close event** whose stream is in
+   * that set. The tombstone itself is **kept** — it's the gate that
+   * makes {@link IAct.do} throw `StreamClosedError` in the rebuilt
+   * store, so dropping it would silently reopen the stream.
    *
    * Useful for compaction during transfer: the new (migrated) store
-   * gets only currently-live streams.
+   * keeps the close gate but drops the historical detail.
    *
-   * Counted in {@link ScanResult.dropped}`.closed_streams`. There is
-   * no `drop_empty_streams` counterpart — empty streams have zero
-   * events and never appear in an event scan.
+   * Counted in {@link ScanResult.dropped}`.closed_streams` (pre-close
+   * events only; the tombstone is counted in `kept`).
    *
    * Default `false`.
    */
@@ -706,15 +703,10 @@ export type ScanResult = {
   readonly kept: number;
   /** Wall-clock duration of the call, in milliseconds. */
   readonly duration_ms: number;
-  /**
-   * Per-category drop counters. Only `snapshots` is wired in v1;
-   * `closed_streams` and `empty_streams` are reserved for the
-   * follow-up that introduces those flags.
-   */
+  /** Per-category drop counters. */
   readonly dropped: {
     readonly closed_streams: number;
     readonly snapshots: number;
-    readonly empty_streams: number;
   };
   /** Events rewritten by {@link ScanOptions.event_migrations}. */
   readonly migrated: number;

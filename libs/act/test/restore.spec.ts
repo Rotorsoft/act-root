@@ -68,7 +68,6 @@ describe("scan (pre-flight, no committer)", () => {
     expect(result.dropped).toEqual({
       closed_streams: 0,
       snapshots: 0,
-      empty_streams: 0,
     });
   });
 
@@ -302,10 +301,13 @@ describe("scan (pre-flight, no committer)", () => {
     expect(seen_at_sink).toEqual([{ name: "X_v2", stream: "new-a" }]);
   });
 
-  it("drop_closed_streams drops tombstones + all pre-close events (ACT-1126)", async () => {
+  it("drop_closed_streams drops pre-close events but keeps the tombstone (ACT-1126)", async () => {
     // stream-a is closed (tombstone at id 4); stream-b is live.
-    // Operator opts into drop_closed_streams → all four events for
-    // stream-a are dropped, both events on stream-b are kept.
+    // With drop_closed_streams:
+    //   - stream-a's two pre-close events are dropped (compaction)
+    //   - stream-a's tombstone is KEPT so the rebuilt store still
+    //     rejects future writes to that stream with StreamClosedError
+    //   - stream-b's events flow through unchanged.
     const events: E[] = [
       baseEvent({ id: 1, stream: "stream-a", name: "Tick", version: 0 }),
       baseEvent({ id: 2, stream: "stream-b", name: "Tick", version: 0 }),
@@ -323,20 +325,27 @@ describe("scan (pre-flight, no committer)", () => {
       fromArray(events),
       { drop_closed_streams: true },
       async (e) => {
-        kept_events.push(`${e.stream}@${e.id}`);
+        kept_events.push(`${e.stream}@${e.id}/${e.name as string}`);
         return e.id;
       }
     );
-    expect(result.kept).toBe(2);
-    expect(result.dropped.closed_streams).toBe(3);
-    expect(kept_events).toEqual(["stream-b@2", "stream-b@5"]);
+    // 2 stream-b events + 1 stream-a tombstone kept
+    expect(result.kept).toBe(3);
+    // 2 stream-a pre-close ticks dropped
+    expect(result.dropped.closed_streams).toBe(2);
+    expect(kept_events).toEqual([
+      "stream-b@2/Tick",
+      "stream-a@4/__tombstone__",
+      "stream-b@5/Tick",
+    ]);
   });
 
   it("drop_closed_streams + drop_snapshots compose (ACT-1126)", async () => {
-    // Same stream-a close, plus a snapshot. With both flags on:
-    // - stream-a events dropped under closed_streams
-    // - stream-b snapshot dropped under snapshots
-    // - stream-b regular events kept.
+    // Same stream-a close, plus a snapshot on stream-b. With both flags:
+    //   - stream-a pre-close events dropped under closed_streams
+    //   - stream-a tombstone kept (the close gate)
+    //   - stream-b snapshot dropped under snapshots
+    //   - stream-b regular event kept.
     const events: E[] = [
       baseEvent({ id: 1, stream: "stream-a", name: "Tick", version: 0 }),
       baseEvent({
@@ -358,8 +367,11 @@ describe("scan (pre-flight, no committer)", () => {
       { drop_closed_streams: true, drop_snapshots: true },
       async (e) => e.id
     );
-    expect(result.kept).toBe(1);
-    expect(result.dropped.closed_streams).toBe(2);
+    // 1 stream-b Tick + 1 stream-a tombstone kept
+    expect(result.kept).toBe(2);
+    // 1 stream-a pre-close Tick dropped
+    expect(result.dropped.closed_streams).toBe(1);
+    // 1 stream-b snapshot dropped
     expect(result.dropped.snapshots).toBe(1);
   });
 
@@ -502,7 +514,6 @@ describe("Act.restore (orchestrator)", () => {
     expect(result.dropped).toEqual({
       closed_streams: 0,
       snapshots: 0,
-      empty_streams: 0,
     });
     await ctx.dispose();
   });

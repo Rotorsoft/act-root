@@ -8,6 +8,7 @@ import {
   type Committed,
   CsvFile,
   type EventMigration,
+  type EventSink,
   InMemoryStore,
   type Query,
   type ScanResult,
@@ -1239,12 +1240,33 @@ export const inspectorRouter = t.router({
         disposeSource = () => source.dispose();
       }
 
-      // Build target. Similar three branches; download writes to a
-      // tempfile we read back after the pipeline completes.
-      let target: Store;
+      // Build target. Dry-run swaps the configured target for an
+      // in-memory `PreviewSink` that collects up to 50 post-transform
+      // events; the live target (current store / download tempfile /
+      // PG / SQLite) is never opened — nothing gets written anywhere,
+      // not even to disk. Operators get the *shape* of the result
+      // (kept/dropped counts plus the first N events with migrations
+      // applied) before committing to a destructive run.
+      const previewSample: Committed<Schemas, keyof Schemas>[] = [];
+      const PREVIEW_LIMIT = 50;
+      // biome-ignore lint/suspicious/noExplicitAny: target gets cast through to app.restore
+      let target: any;
       let disposeTarget: () => Promise<void> = async () => {};
       let downloadPath: string | null = null;
-      if (input.target.adapter === "current") {
+      if (input.dry_run) {
+        target = {
+          async restore(driver) {
+            await driver(async (event) => {
+              if (previewSample.length < PREVIEW_LIMIT)
+                previewSample.push(event);
+              // Return the source id — no real id space, no causation
+              // remap needed for a discarded preview.
+              return event.id;
+            });
+          },
+          async dispose() {},
+        } satisfies EventSink;
+      } else if (input.target.adapter === "current") {
         if (!currentStore)
           throw new Error("Not connected — `current` target unavailable");
         if (!currentStore.restore)
@@ -1354,7 +1376,10 @@ export const inspectorRouter = t.router({
         const result = await app.restore(
           filteredSource,
           {
-            dry_run: input.dry_run,
+            // Dry-run is driven by the in-memory PreviewSink above, not
+            // by the framework's `dry_run` flag — we want scan's sink
+            // callback to fire so the migration overlay is applied to
+            // the captured sample events.
             drop_snapshots: input.drop_snapshots,
             drop_closed_streams: input.drop_closed_streams,
             batch_size: input.batch_size,
@@ -1383,7 +1408,15 @@ export const inspectorRouter = t.router({
             adapter: currentConfig?.adapter ?? "inmemory",
             result,
           });
-        return { ok: true as const, count: result.kept, result, csv };
+        return {
+          ok: true as const,
+          count: result.kept,
+          result,
+          csv,
+          // Only populated on dry-run; the live path leaves it empty so
+          // the response shape stays stable across modes.
+          sample: input.dry_run ? previewSample : [],
+        };
       } catch (error) {
         throw new Error(
           `Transfer failed: ${error instanceof Error ? error.message : String(error)}`,

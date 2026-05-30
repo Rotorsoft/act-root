@@ -236,7 +236,6 @@ type AuditEntry =
         dropped: {
           closed_streams: number;
           snapshots: number;
-          empty_streams: number;
         };
       };
     };

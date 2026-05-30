@@ -265,8 +265,14 @@ export async function scan(
           dropped_snaps++;
           return;
         }
-        if (closed_streams.has(event.stream)) {
-          // Includes the tombstone itself and any pre-close events.
+        if (
+          closed_streams.has(event.stream) &&
+          event.name !== TOMBSTONE_EVENT
+        ) {
+          // Drop pre-close events but KEEP the tombstone — it's what
+          // makes the stream "closed" in the rebuilt store. Without
+          // it, a future `app.do(...)` against this stream name would
+          // succeed because nothing gates it.
           dropped_closed++;
           return;
         }
@@ -341,7 +347,6 @@ export async function scan(
     dropped: {
       closed_streams: dropped_closed,
       snapshots: dropped_snaps,
-      empty_streams: 0,
     },
   };
 }
