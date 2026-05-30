@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.3.0...@rotorsoft/act-tck-v1.4.0) (2026-05-30)
+
+
+### Features
+
+* **inspector:** restore wizard, csv viewer, dry-run preview modal ([3809025](https://github.com/rotorsoft/act-root/commit/3809025f75e79846c23e2f8da49a1a68afdeb8d1)), closes [#785](https://github.com/rotorsoft/act-root/issues/785)
+
 # [@rotorsoft/act-tck-v1.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.2.0...@rotorsoft/act-tck-v1.3.0) (2026-05-28)
 
 
