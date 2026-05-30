@@ -8,6 +8,8 @@
     "jsx": "react-jsx",
     "paths": {
       "@rotorsoft/act": ["../libs/act/src/index.ts"],
+      "@rotorsoft/act/types": ["../libs/act/src/types/index.ts"],
+      "@rotorsoft/act/test": ["../libs/act/src/test/index.ts"],
       "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],
       "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
       "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],

@@ -1123,7 +1123,7 @@ export class Act<
    * fully catches up paginated streams without forcing callers to roll
    * their own loop.
    *
-   * @param streams - Reaction target streams (e.g., projection names) to reset
+   * @param input - Reaction target streams (e.g., projection names) to reset, or a {@link StreamFilter} for bulk operations
    * @returns Count of streams that were actually reset
    *
    * @example Rebuild a projection (production)
@@ -1164,7 +1164,7 @@ export class Act<
    * directly, but `store().unblock(...)` alone leaves the flag
    * untouched.
    *
-   * @param streams - Stream names to unblock
+   * @param input - Stream names to unblock, or a {@link StreamFilter} for bulk recovery
    * @returns Count of streams that were actually flipped (were blocked)
    *
    * @example Recover from a 4xx webhook after fixing the bug

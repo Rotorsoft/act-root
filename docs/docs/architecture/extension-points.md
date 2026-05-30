@@ -302,7 +302,7 @@ Concrete scenarios:
 - **Notify subscriptions bind to the scoped store at construction.** `Store.notify` is wired once per Act, against `options.scoped.store` when scoped or the singleton otherwise. Same as the singleton case: late injection after `build()` doesn't take effect.
 - **Lifecycle is the operator's.** Scoped adapters are *not* registered with the framework's `dispose()` registry. You own them — dispose them explicitly (or wrap your own `dispose()` callback that does). The singleton registry only tracks adapters installed via `store(adapter)` / `cache(adapter)` / `log(adapter)`.
 - **Logger stays singleton.** `ActOptions.scoped` doesn't include a logger; all Acts in a process share `log()`. Per-Act logger overrides aren't required by current scenarios — add via child binding (`log().child({ tenant: ... })`) at the call site if you need correlation.
-- **Performance.** ALS adds no measurable overhead in modern Node — the port getter is ~65 ns whether scoped or not, and `app.do()` / `app.load()` show no difference between scoped and unscoped Acts. See [`libs/act/PERFORMANCE.md` § Per-Act scoped ports](../../../libs/act/PERFORMANCE.md).
+- **Performance.** ALS adds no measurable overhead in modern Node — the port getter is ~65 ns whether scoped or not, and `app.do()` / `app.load()` show no difference between scoped and unscoped Acts. See [`libs/act/PERFORMANCE.md` § Per-Act scoped ports](https://github.com/Rotorsoft/act-root/blob/master/libs/act/PERFORMANCE.md).
 
 ## Pointers
 

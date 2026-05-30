@@ -405,7 +405,7 @@ The migration itself is cheap: replace the inline reaction's body with a `bus.pu
 
 ## Related
 
-- [Webhook helper](../../../../../libs/act-http/README.md) — the `@rotorsoft/act-http/webhook` package and its `timeoutMs`/`leaseMillis` constraint
+- [Webhook helper](https://github.com/Rotorsoft/act-root/blob/master/libs/act-http/README.md) — the `@rotorsoft/act-http/webhook` package and its `timeoutMs`/`leaseMillis` constraint
 - [Error handling](../concepts/error-handling.md) — backoff, non-retryable errors, blocked streams, `unblock`
 - [Cross-process reactions](../architecture/cross-process-reactions.md) — `Store.notify`, competing consumers, topology shapes
 - [Concurrency model](../architecture/concurrency-model.md) — lease lifecycle, `claim`/`ack`/`block`/timeout transitions
