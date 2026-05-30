@@ -1181,6 +1181,12 @@ export const inspectorRouter = t.router({
           .optional(),
         dry_run: z.boolean().optional(),
         drop_snapshots: z.boolean().optional(),
+        // Compaction (ACT-1126). Pre-pass collects tombstoned streams
+        // and the main scan drops every event from those streams,
+        // including the tombstones themselves and any pre-close
+        // events. Useful when an operator wants the new (migrated)
+        // store to contain only currently-live streams.
+        drop_closed_streams: z.boolean().optional(),
         // Per-batch row count for the scan pagination loop (ACT-1133).
         // Lower trades round trips for memory; higher approaches the
         // cost of an unbounded query. Bounded to a sensible operator
@@ -1350,6 +1356,7 @@ export const inspectorRouter = t.router({
           {
             dry_run: input.dry_run,
             drop_snapshots: input.drop_snapshots,
+            drop_closed_streams: input.drop_closed_streams,
             batch_size: input.batch_size,
             event_migrations,
             stream_rename,

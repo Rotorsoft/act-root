@@ -617,6 +617,24 @@ export type ScanOptions = {
   readonly dry_run?: boolean;
 
   /**
+   * Drop every event from streams that have been closed (tombstoned)
+   * via {@link IAct.close} (ACT-1126). The scan walks the source once
+   * upfront to collect streams with a `__tombstone__` event, then
+   * the main loop skips every event whose stream is in that set —
+   * including the tombstones themselves and any pre-close events.
+   *
+   * Useful for compaction during transfer: the new (migrated) store
+   * gets only currently-live streams.
+   *
+   * Counted in {@link ScanResult.dropped}`.closed_streams`. There is
+   * no `drop_empty_streams` counterpart — empty streams have zero
+   * events and never appear in an event scan.
+   *
+   * Default `false`.
+   */
+  readonly drop_closed_streams?: boolean;
+
+  /**
    * Per-event migrations applied during scan (ACT-1126). Keys are
    * source event names; values describe how to rewrite the event into
    * its current-version form before the sink writes it.

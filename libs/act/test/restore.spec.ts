@@ -302,6 +302,67 @@ describe("scan (pre-flight, no committer)", () => {
     expect(seen_at_sink).toEqual([{ name: "X_v2", stream: "new-a" }]);
   });
 
+  it("drop_closed_streams drops tombstones + all pre-close events (ACT-1126)", async () => {
+    // stream-a is closed (tombstone at id 4); stream-b is live.
+    // Operator opts into drop_closed_streams → all four events for
+    // stream-a are dropped, both events on stream-b are kept.
+    const events: E[] = [
+      baseEvent({ id: 1, stream: "stream-a", name: "Tick", version: 0 }),
+      baseEvent({ id: 2, stream: "stream-b", name: "Tick", version: 0 }),
+      baseEvent({ id: 3, stream: "stream-a", name: "Tick", version: 1 }),
+      baseEvent({
+        id: 4,
+        stream: "stream-a",
+        name: "__tombstone__",
+        version: 2,
+      }),
+      baseEvent({ id: 5, stream: "stream-b", name: "Tick", version: 1 }),
+    ];
+    const kept_events: string[] = [];
+    const result = await scan(
+      fromArray(events),
+      { drop_closed_streams: true },
+      async (e) => {
+        kept_events.push(`${e.stream}@${e.id}`);
+        return e.id;
+      }
+    );
+    expect(result.kept).toBe(2);
+    expect(result.dropped.closed_streams).toBe(3);
+    expect(kept_events).toEqual(["stream-b@2", "stream-b@5"]);
+  });
+
+  it("drop_closed_streams + drop_snapshots compose (ACT-1126)", async () => {
+    // Same stream-a close, plus a snapshot. With both flags on:
+    // - stream-a events dropped under closed_streams
+    // - stream-b snapshot dropped under snapshots
+    // - stream-b regular events kept.
+    const events: E[] = [
+      baseEvent({ id: 1, stream: "stream-a", name: "Tick", version: 0 }),
+      baseEvent({
+        id: 2,
+        stream: "stream-b",
+        name: "__snapshot__",
+        version: 0,
+      }),
+      baseEvent({
+        id: 3,
+        stream: "stream-a",
+        name: "__tombstone__",
+        version: 1,
+      }),
+      baseEvent({ id: 4, stream: "stream-b", name: "Tick", version: 1 }),
+    ];
+    const result = await scan(
+      fromArray(events),
+      { drop_closed_streams: true, drop_snapshots: true },
+      async (e) => e.id
+    );
+    expect(result.kept).toBe(1);
+    expect(result.dropped.closed_streams).toBe(2);
+    expect(result.dropped.snapshots).toBe(1);
+  });
+
   it("counts dropped snapshots when drop_snapshots is true", async () => {
     const result = await scan(
       fromArray([

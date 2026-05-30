@@ -204,6 +204,7 @@ export async function scan(
 ): Promise<Omit<ScanResult, "duration_ms">> {
   const {
     drop_snapshots = false,
+    drop_closed_streams = false,
     on_progress,
     event_migrations,
     stream_rename,
@@ -212,9 +213,26 @@ export async function scan(
   const id_map = new Map<number, number>();
   let kept = 0;
   let dropped_snaps = 0;
+  let dropped_closed = 0;
   let migrated_count = 0;
   let processed = 0;
   let at: number | undefined;
+
+  // Pre-pass for `drop_closed_streams` (ACT-1126). Walk the source
+  // once with a tombstone-name filter to collect closed streams. PG
+  // honors the filter and only the tombstone events come back; sources
+  // that ignore the filter (CsvFile) stream all events but we cheaply
+  // pick out the tombstones in the callback. Either way the cost is
+  // one extra walk, paid only when the operator opts in.
+  const closed_streams = new Set<string>();
+  if (drop_closed_streams) {
+    await source.query<Schemas>(
+      (e) => {
+        if (e.name === TOMBSTONE_EVENT) closed_streams.add(e.stream);
+      },
+      { names: [TOMBSTONE_EVENT] }
+    );
+  }
 
   // Probe the source for the highest id once up front. On indexed
   // stores (PostgresStore, SqliteStore) `{ backward: true, limit: 1 }`
@@ -245,6 +263,11 @@ export async function scan(
         if (on_progress) on_progress({ processed, id: event.id, max_id });
         if (drop_snapshots && event.name === SNAP_EVENT) {
           dropped_snaps++;
+          return;
+        }
+        if (closed_streams.has(event.stream)) {
+          // Includes the tombstone itself and any pre-close events.
+          dropped_closed++;
           return;
         }
         // Migration overlay (ACT-1126): rename + schema-guarded data
@@ -316,7 +339,7 @@ export async function scan(
     kept,
     migrated: migrated_count,
     dropped: {
-      closed_streams: 0,
+      closed_streams: dropped_closed,
       snapshots: dropped_snaps,
       empty_streams: 0,
     },

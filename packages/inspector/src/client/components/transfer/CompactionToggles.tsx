@@ -1,20 +1,25 @@
 /**
- * Compaction toggles section of the restore dialog (ACT-1128).
+ * Compaction toggles section of the restore dialog (ACT-1128, ACT-1126).
  *
- * Only `drop_snapshots` is wired today — `drop_closed_streams` and
- * `drop_empty_streams` are reserved fields in `ScanOptions` that
- * land with ACT-1126 (#785). Rendering them as disabled-with-tooltip
- * is intentional: it tells the operator the toggle exists in the UI
- * surface before the underlying flag does, and the eventual wiring
- * is a one-line change here rather than a dialog re-layout.
+ * `drop_snapshots` drops `__snapshot__` events so the next snap policy
+ * regenerates them with current state. `drop_closed_streams` walks the
+ * source once upfront for tombstone events and drops every event from
+ * those streams in the main pass (including the tombstones themselves).
+ *
+ * There is no `drop_empty_streams` — empty streams have zero events
+ * and never appear in an event scan to begin with.
  */
 export function CompactionToggles({
   dropSnapshots,
   onChangeDropSnapshots,
+  dropClosedStreams,
+  onChangeDropClosedStreams,
   disabled,
 }: {
   dropSnapshots: boolean;
   onChangeDropSnapshots: (v: boolean) => void;
+  dropClosedStreams: boolean;
+  onChangeDropClosedStreams: (v: boolean) => void;
   disabled: boolean;
 }) {
   return (
@@ -32,27 +37,15 @@ export function CompactionToggles({
         />
         Drop snapshots (regenerate on next snap policy)
       </label>
-      <label
-        className="mt-1 flex items-center gap-2 text-xs text-zinc-600"
-        title="Reserved for ACT-1126 (#785)"
-      >
+      <label className="mt-1 flex cursor-pointer items-center gap-2 text-xs text-zinc-300">
         <input
           type="checkbox"
-          disabled
-          className="h-3 w-3 cursor-not-allowed"
+          checked={dropClosedStreams}
+          onChange={(e) => onChangeDropClosedStreams(e.target.checked)}
+          disabled={disabled}
+          className="h-3 w-3"
         />
-        Drop closed streams (deferred — #785)
-      </label>
-      <label
-        className="mt-1 flex items-center gap-2 text-xs text-zinc-600"
-        title="Reserved for ACT-1126 (#785)"
-      >
-        <input
-          type="checkbox"
-          disabled
-          className="h-3 w-3 cursor-not-allowed"
-        />
-        Drop empty streams (deferred — #785)
+        Drop closed streams (tombstoned + all pre-close events)
       </label>
     </div>
   );

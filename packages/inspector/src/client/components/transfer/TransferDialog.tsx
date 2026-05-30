@@ -36,6 +36,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
     TRANSFER_DEFAULTS.download
   );
   const [dropSnapshots, setDropSnapshots] = useState(false);
+  const [dropClosedStreams, setDropClosedStreams] = useState(false);
   const [batchSize, setBatchSize] = useState(500);
   // Migration overlay (ACT-1126). Empty strings = "not set"; sent as
   // undefined to the server so scan skips the corresponding overlay.
@@ -98,7 +99,15 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   // assumed the old shape.
   useEffect(() => {
     setPreview(null);
-  }, [source, target, dropSnapshots]);
+  }, [
+    source,
+    target,
+    dropSnapshots,
+    dropClosedStreams,
+    streamRenamePattern,
+    streamRenameReplacement,
+    eventMigrationsPath,
+  ]);
 
   const inFlight = transferMutation.isPending;
   const sameStore = endpointsEqual(source, target);
@@ -144,6 +153,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
       target: wireTarget,
       dry_run: true,
       drop_snapshots: dropSnapshots,
+      drop_closed_streams: dropClosedStreams,
       ...migrationPayload(),
     });
   };
@@ -156,6 +166,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
       source: wireSource,
       target: wireTarget,
       drop_snapshots: dropSnapshots,
+      drop_closed_streams: dropClosedStreams,
       batch_size: batchSize,
       ...migrationPayload(),
     });
@@ -219,6 +230,8 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
               <CompactionToggles
                 dropSnapshots={dropSnapshots}
                 onChangeDropSnapshots={setDropSnapshots}
+                dropClosedStreams={dropClosedStreams}
+                onChangeDropClosedStreams={setDropClosedStreams}
                 disabled={inFlight}
               />
 
