@@ -157,6 +157,12 @@ export async function tombstone(
  * duplicates at commit time, and gap detection is a caller-specific
  * policy (partial backups intentionally have gaps).
  *
+ * Extension point: per-event Zod schema validation against the active
+ * registry will land here — the source-side check is the right layer
+ * for it (catches malformed payloads before the sink transaction
+ * opens), and adding it keeps the per-event blocker contract in one
+ * place.
+ *
  * @internal
  */
 function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {

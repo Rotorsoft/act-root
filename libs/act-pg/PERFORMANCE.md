@@ -174,30 +174,24 @@ path still drains correctly. So you can run with a longer poll
 interval as a safety net while taking the notify happy-path latency
 for free.
 
-## ACT-1133 — bounded-memory scan via pagination (no adapter changes)
+## ACT-1133 — bounded-memory scan via pagination
 
-Background: `scan` (used by `Act.restore` / `Act.transfer`) walks
-the entire source via `EventSource.query`. Pre-ACT-1133, `scan`
-called `source.query(cb)` exactly once with no `limit`. Stores
-that buffer their result set (`PostgresStore` materializes
-everything inside `pool.query`) allocated one JS object per row
-of the source before the first callback fired — peak heap
-proportional to total source size, regardless of consumer pace.
+`scan` (used by `Act.restore` / `Act.transfer`) walks the source
+in batches. Each call to `source.query` requests `limit: 500`
+and `after: <last id seen>`; the loop exits when a batch
+returns fewer events than requested (source paginated, ran out)
+or more than requested (`CsvFile`-style source streams
+everything in one call). Adapter memory stays at O(batch)
+regardless of total source size. The source's per-event
+`await Promise.resolve(callback(event))` provides consumer
+backpressure.
 
-ACT-1133's fix lives entirely in `scan`. It paginates by
-re-issuing `source.query` with `limit: 500` and `after: <last
-id seen>` per batch. Stores that respect `limit` — every in-tree
-adapter already does — hold at most one batch worth of rows in
-memory per round trip. Sources that ignore the filter
-(`CsvFile` streams all events via internal line-by-line reads)
-signal `scan` to exit after one call by returning more events
-than the requested limit. The source's own per-event
-`await Promise.resolve(callback(event))` provides backpressure.
-
-**No new dependency. No `PostgresStore` changes. No `Query`
-schema field. No adapter capability gate.** The adapter already
-respects `limit`; the framework just stops asking for an
-unbounded result set.
+`PostgresStore` participates in this without changes — it
+already honors `limit` in `pool.query`. Same for `SqliteStore`,
+`InMemoryStore`, and any adapter that respects the filter.
+Sources whose internal representation is already bounded
+(`CsvFile` reads line-by-line) are memory-safe regardless of
+what `limit` says.
 
 ### Benchmark
 
@@ -226,18 +220,11 @@ small per-event payload (`{ i: number }`), node v22.18.0.
 | Paginated (`limit:500` loop, bumped `after`) | 1,970 ms | 63.6 MB (+51.7 MB) | 511.3 MB (+302.3 MB) |
 
 **4× smaller peak heap (246.2 MB → 51.7 MB).** Wall-clock cost
-is 48 % from the per-batch re-plan; for the operations that
-pay it, the memory ceiling is the dominant constraint, not
+is 48 % from the per-batch re-plan; for restore / transfer /
+wide-export the memory ceiling is the dominant constraint, not
 throughput.
 
-### Impact on existing PG benches
-
-None. Earlier benches (`notify-perf`, `query-stats`,
-`drain-scale`, `priority-claim`, `reaction-latency`) all pass
-`limit` or call `query` from the framework's hot path
-(aggregate `load`, projection scan, inspector page). In each
-case the limit is at or below the 500-row batch, so the
-pagination loop terminates after one round trip — same code
-path, same wall-clock as before. The win shows up only when
-the caller asked for an unbounded scan, which is exactly the
-restore / transfer / wide-export case the fix targets.
+Callers that already pass `limit ≤ 500` (aggregate `load`,
+projection scan, inspector page — the framework's hot path) hit
+the loop once and return after one round trip, same as a bare
+`pool.query`.
