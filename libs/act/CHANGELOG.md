@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.4.0...@rotorsoft/act-v1.5.0) (2026-05-30)
+
+
+### Features
+
+* **act:** listen and drain build options for non-reactive instances ([4d04225](https://github.com/rotorsoft/act-root/commit/4d042250bc794456e87323f5852a6d5f8d2c9cab))
+
 # [@rotorsoft/act-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.3.0...@rotorsoft/act-v1.4.0) (2026-05-30)
 
 
