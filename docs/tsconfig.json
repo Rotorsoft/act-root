@@ -2,6 +2,10 @@
   // This file is not used in compilation. It is here just for a nice editor experience.
   "extends": "../tsconfig.eslint.json",
   "compilerOptions": {
+    // act-diagram ships TSX (`client/`) under its `src/**` tree —
+    // typedoc loads the whole include set into its TS program even
+    // when entryPoints stay narrow, so the JSX has to parse here.
+    "jsx": "react-jsx",
     "paths": {
       "@rotorsoft/act": ["../libs/act/src/index.ts"],
       "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],

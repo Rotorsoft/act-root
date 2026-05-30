@@ -4,7 +4,7 @@
     "../libs/act-patch/src/index.ts",
     "../libs/act-pg/src/index.ts",
     "../libs/act-sqlite/src/index.ts",
-    "../libs/act-sse/src/index.ts",
+    "../libs/act-tck/src/index.ts",
     "../libs/act-http/src/webhook/index.ts",
     "../libs/act-http/src/sse/index.ts"
   ],
