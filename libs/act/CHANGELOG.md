@@ -1,3 +1,12 @@
+# [@rotorsoft/act-v1.6.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.2...@rotorsoft/act-v1.6.0) (2026-05-30)
+
+
+### Features
+
+* **act:** drop_closed_streams in scan (ACT-1126) ([7fbad5f](https://github.com/rotorsoft/act-root/commit/7fbad5f7f9b1db372b475e2374595af1dc160880))
+* **act:** restore migration overlay — event_migrations + stream_rename ([816f2bc](https://github.com/rotorsoft/act-root/commit/816f2bc88873e9bde5ef61ff1dd216244b72a3d4)), closes [#785](https://github.com/rotorsoft/act-root/issues/785) [#790](https://github.com/rotorsoft/act-root/issues/790)
+* **inspector:** restore wizard, csv viewer, dry-run preview modal ([3809025](https://github.com/rotorsoft/act-root/commit/3809025f75e79846c23e2f8da49a1a68afdeb8d1)), closes [#785](https://github.com/rotorsoft/act-root/issues/785)
+
 # [@rotorsoft/act-v1.5.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.1...@rotorsoft/act-v1.5.2) (2026-05-30)
 
 
