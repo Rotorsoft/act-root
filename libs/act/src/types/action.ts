@@ -551,10 +551,16 @@ export type CloseResult = {
  * Adapters never see these — they're entirely interpreted on the
  * orchestrator side.
  *
- * Two more flags reserved for a future follow-up
- * (`drop_closed_streams`, `drop_empty_streams`) need a pre-pass over
- * the source — they wait on the source-shape decision (re-iterable
- * factory vs. buffer in memory).
+ * Compaction flags ({@link drop_snapshots}, {@link drop_closed_streams})
+ * and the migration overlay ({@link event_migrations},
+ * {@link stream_rename}) all apply per event before the sink writes
+ * anything. Any throw aborts the whole scan — atomic rollback in the
+ * sink means a failing transform leaves the target byte-for-byte
+ * unchanged.
+ *
+ * There is no `drop_empty_streams` counterpart to
+ * {@link drop_closed_streams} — empty streams have zero events and
+ * never appear in an event scan to begin with.
  */
 export type ScanOptions = {
   /**
