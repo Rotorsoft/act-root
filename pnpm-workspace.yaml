@@ -3,6 +3,12 @@ packages:
   - packages/**
   - docs
   - performance/act-performance
+allowBuilds:
+  '@parcel/watcher': true
+  '@swc/core': true
+  core-js: true
+  esbuild: true
+  simple-git-hooks: true
 linkWorkspacePackages: true
 onlyBuiltDependencies:
   - "@swc/core"
