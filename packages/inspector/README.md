@@ -69,7 +69,8 @@ When **SSL** is enabled, the connection uses `ssl: { rejectUnauthorized: false }
     - "Copy names" — newline-separated stream names.
     - "Copy app.close()" — ready-to-paste snippet you run from your own application code.
   - The modal **does not** close streams directly; the inspector has no Act orchestrator (it's a standalone tool pointed at a Postgres store) and can't safely run `app.close()`. The copy affordance is the honest middle ground — inspector surfaces the data, your app runs the close.
-- **Time-travel stream detail** — every stream's detail panel has an "as-of" event-id input. Enter a value → head + tail + name counts re-fetch over the prefix slice (events with `id < beforeId`). A violet `as-of < <id>` chip badges the panel so historical data never reads as live. The forensic shape: "show me what `order-123` looked like before we deprecated `OrderPaid`" — head card reveals the legacy event, confirming the migration boundary.
+- **CSV** — browse a local `.csv` event dump without landing it in a store first. Browser file picker; bytes never leave the client, the parser is identical to `CsvFile`'s blob mode so any framework-emitted backup is readable. Same `EventRow` chrome as the Event Log, so rows from disk read identically to live events.
+- **Restore** — toolbar wizard for moving events between any source and any target (the connected store, an uploaded CSV blob, a server-side CSV file, or per-call PG / SQLite credentials). Four steps — Source → Target → Options → Summary — with a dry-run preview that captures the first 50 post-transform events into an in-memory sink and opens a full-screen modal showing both counts and the sample event table. The configured target is never touched on a dry-run: no file written, no transaction opened. Migration overlay (transfer-time only): an ordered list of `{ pattern, replacement }` stream-rename rules — each fires in turn against the running output, so independent renames and chained refinement both work — plus a server-side file path to an `event_migrations` module for schema-guarded payload rewrites.
 
 ### Mutations (write mode)
 
@@ -112,8 +113,8 @@ packages/inspector/
 │       ├── App.tsx      # Root with navigation history
 │       ├── trpc.ts      # tRPC client
 │       ├── stores/      # URL-synced filter state
-│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, BackupRestore (transfer dialog launcher), FilterBar, StatsBar, EventRow, JsonViewer, Logo
-│       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor
+│       ├── components/  # Header, TabNav, ConnectDialog, ScanDialog, BackupRestore (restore wizard launcher), FilterBar, StatsBar, EventRow, EventTable, JsonViewer, Logo
+│       └── views/       # EventLog, Timeline, Streams, Correlation, Monitor, SchemaEvolution, CsvViewer
 ├── public/              # favicon.svg
 ├── index.html
 ├── vite.config.ts
@@ -132,7 +133,7 @@ packages/inspector/
 | `stats` | query | Aggregate counts for current filters |
 | `eventNames` | query | Distinct event names for filter dropdown |
 | `streams` | query | Stream list with event counts, head + tail timestamps, and version |
-| `streamStats` | query | Per-stream head + tail + count + name counts. Optional `before: <id>` for time-travel ("as-of" the prefix with `id < before`) |
+| `streamStats` | query | Per-stream head + tail + count + name counts. Procedure also accepts an optional `before: <id>` for prefix-slice aggregation; the UI doesn't currently surface it |
 | `streamMeta` | query | Subscription positions from the streams table — priority, lane, retry, lease holder |
 | `drainStatus` | query | Drain pipeline health: aggregates, blocked streams, leases, watermark histogram, priority + lane counts |
 | `schemaEvolution` | query | Workspace event-name rollup with deprecation status derived from the `_v<digits>` convention (ACT-403). Returns events + headline summary |
@@ -140,7 +141,7 @@ packages/inspector/
 | `writeMode` | query | `{ enabled, reason }` — reflects the `ACT_INSPECTOR_WRITE` env var |
 | `prioritize` | mutation | Bulk-update stream priority via `Store.prioritize(filter, n)`. Filter shape mirrors `query_streams` (stream/source/lane/blocked). Refuses when read-only. |
 | `audit` | query | Last 100 mutations performed via the inspector — in-memory ring buffer |
-| `transfer` | mutation | Move events between any source and any target (ACT-1128 / #788). Source/target slots accept `current` (connected store), `upload`/`download` (browser CSV), `csv` (server-side file), and per-call `pg`/`sqlite` credentials. Subsumes the prior `backup` and `restore` mutations; `dry_run: true` previews counts without touching the target |
+| `transfer` | mutation | Move events between any source and any target (ACT-1128 / #788). Source/target slots accept `current` (connected store), `upload`/`download` (browser CSV), `csv` (server-side file), and per-call `pg`/`sqlite` credentials. Subsumes the prior `backup` and `restore` mutations. `dry_run: true` swaps the configured target for an in-memory `PreviewSink` that collects the first 50 post-transform events — the response includes both the full `ScanResult` (counts) and `sample` (events). Migration overlay (ACT-1126): `stream_rename` accepts an ordered list of `{ pattern, replacement }` rules, applied via chained `String.prototype.replace` so independent and chained renames both work; `event_migrations_path` resolves a cwd-relative module path for schema-guarded payload rewrites |
 | `restoreProgress` | subscription | SSE stream of `{ processed }` ticks fired by `scan`'s `on_progress` during an in-flight transfer — drives the reactive progress bar |
 
 - **Event data**: flows through Act's `Store.query()` interface
