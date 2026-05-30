@@ -174,26 +174,25 @@ path still drains correctly. So you can run with a longer poll
 interval as a safety net while taking the notify happy-path latency
 for free.
 
-## ACT-1133 — bounded-memory scan via iterate pagination (no adapter changes)
+## ACT-1133 — bounded-memory scan via pagination (no adapter changes)
 
 Background: `scan` (used by `Act.restore` / `Act.transfer`) walks
-the entire source through `iterate(source, filter)`. Pre-ACT-1133,
-`iterate` called `source.query(cb, filter)` exactly once with no
-`limit`. Stores that buffer their result set (`PostgresStore`
-materializes everything inside `pool.query`) allocated one JS
-object per row of the source before the first callback fired. A
-million-event restore peaked at hundreds of MB of heap on the
-producer side regardless of how aggressively the 1-slot mailbox
-throttled downstream consumption.
+the entire source via `EventSource.query`. Pre-ACT-1133, `scan`
+called `source.query(cb)` exactly once with no `limit`. Stores
+that buffer their result set (`PostgresStore` materializes
+everything inside `pool.query`) allocated one JS object per row
+of the source before the first callback fired — peak heap
+proportional to total source size, regardless of consumer pace.
 
-ACT-1133's fix lives entirely in the orchestrator: `iterate`
-paginates by re-issuing `source.query` with `limit: ITERATE_BATCH`
-(500) and a bumped `after` (forward) or `before` (backward) per
-batch. Stores that respect `limit` — every in-tree adapter
-already does — hold at most one batch worth of rows in memory per
-round trip. Sources that ignore the filter (`CsvFile` streams all
-events via internal line-by-line reads) signal `iterate` to exit
-after one call by returning more events than the requested limit.
+ACT-1133's fix lives entirely in `scan`. It paginates by
+re-issuing `source.query` with `limit: 500` and `after: <last
+id seen>` per batch. Stores that respect `limit` — every in-tree
+adapter already does — hold at most one batch worth of rows in
+memory per round trip. Sources that ignore the filter
+(`CsvFile` streams all events via internal line-by-line reads)
+signal `scan` to exit after one call by returning more events
+than the requested limit. The source's own per-event
+`await Promise.resolve(callback(event))` provides backpressure.
 
 **No new dependency. No `PostgresStore` changes. No `Query`
 schema field. No adapter capability gate.** The adapter already
@@ -237,7 +236,7 @@ None. Earlier benches (`notify-perf`, `query-stats`,
 `drain-scale`, `priority-claim`, `reaction-latency`) all pass
 `limit` or call `query` from the framework's hot path
 (aggregate `load`, projection scan, inspector page). In each
-case the limit is at or below `ITERATE_BATCH = 500`, so the
+case the limit is at or below the 500-row batch, so the
 pagination loop terminates after one round trip — same code
 path, same wall-clock as before. The win shows up only when
 the caller asked for an unbounded scan, which is exactly the
