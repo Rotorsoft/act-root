@@ -2,11 +2,13 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter, on } from "node:events";
 import { readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   act,
   type Committed,
   CsvFile,
+  type EventMigration,
+  type EventSink,
   InMemoryStore,
   type Query,
   type ScanResult,
@@ -1180,12 +1182,46 @@ export const inspectorRouter = t.router({
           .optional(),
         dry_run: z.boolean().optional(),
         drop_snapshots: z.boolean().optional(),
+        // Compaction (ACT-1126). Pre-pass collects tombstoned streams
+        // and the main scan drops every event from those streams,
+        // including the tombstones themselves and any pre-close
+        // events. Useful when an operator wants the new (migrated)
+        // store to contain only currently-live streams.
+        drop_closed_streams: z.boolean().optional(),
         // Per-batch row count for the scan pagination loop (ACT-1133).
         // Lower trades round trips for memory; higher approaches the
         // cost of an unbounded query. Bounded to a sensible operator
         // range — too small thrashes round trips; too large defeats
         // the bounded-memory point.
         batch_size: z.number().int().min(50).max(10_000).optional(),
+        // Stream rename (ACT-1126). An ordered list of regex pairs —
+        // server compiles them into a per-event renaming function that
+        // runs `acc.replace(pattern_i, replacement_i)` in sequence, so
+        // each rule sees the previous rule's output. Covers two
+        // common shapes in one mechanism:
+        //   - **Independent renames** — multiple unrelated patterns
+        //     in one restore (`^tenant-A-` → `^new-A-`, `^legacy-` → `^staging-`).
+        //   - **Chained refinement** — a complicated rewrite split
+        //     across rules, each one cleaning up what the previous
+        //     left.
+        // Empty array = no renames. Each pattern is anchored only as
+        // the operator writes it.
+        stream_rename: z
+          .array(
+            z.object({
+              pattern: z.string().min(1),
+              replacement: z.string(),
+            })
+          )
+          .optional(),
+        // Path (relative to the inspector server's cwd) to an
+        // operator-authored migrations module — ACT-1126. The module's
+        // default export is `Record<string, EventMigration>`. Zod
+        // schemas + transform functions can't be JSON-encoded for a
+        // tRPC input, so the file-on-disk indirection is the honest
+        // shape. Server resolves the path under cwd and dynamic-
+        // imports; absolute paths and `..` traversal are rejected.
+        event_migrations_path: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -1212,12 +1248,33 @@ export const inspectorRouter = t.router({
         disposeSource = () => source.dispose();
       }
 
-      // Build target. Similar three branches; download writes to a
-      // tempfile we read back after the pipeline completes.
-      let target: Store;
+      // Build target. Dry-run swaps the configured target for an
+      // in-memory `PreviewSink` that collects up to 50 post-transform
+      // events; the live target (current store / download tempfile /
+      // PG / SQLite) is never opened — nothing gets written anywhere,
+      // not even to disk. Operators get the *shape* of the result
+      // (kept/dropped counts plus the first N events with migrations
+      // applied) before committing to a destructive run.
+      const previewSample: Committed<Schemas, keyof Schemas>[] = [];
+      const PREVIEW_LIMIT = 50;
+      // biome-ignore lint/suspicious/noExplicitAny: target gets cast through to app.restore
+      let target: any;
       let disposeTarget: () => Promise<void> = async () => {};
       let downloadPath: string | null = null;
-      if (input.target.adapter === "current") {
+      if (input.dry_run) {
+        target = {
+          async restore(driver) {
+            await driver(async (event) => {
+              if (previewSample.length < PREVIEW_LIMIT)
+                previewSample.push(event);
+              // Return the source id — no real id space, no causation
+              // remap needed for a discarded preview.
+              return event.id;
+            });
+          },
+          async dispose() {},
+        } satisfies EventSink;
+      } else if (input.target.adapter === "current") {
         if (!currentStore)
           throw new Error("Not connected — `current` target unavailable");
         if (!currentStore.restore)
@@ -1284,13 +1341,70 @@ export const inspectorRouter = t.router({
       // are passed explicitly so `Act.restore` never falls back to
       // the singleton store.
       const app = act().build();
+      // Migration overlay (ACT-1126) — compile the regex pair into a
+      // function, dynamic-import the operator-authored migrations
+      // module. Both optional; both rejected if invalid before any
+      // restore call so the operator gets a clear error instead of a
+      // mid-restore failure.
+      // Compile each rule's pattern up front so a syntactically broken
+      // regex fails fast, before any IO. Each event's stream then
+      // passes through `reduce` against the compiled rules — every
+      // rule fires in order on the running output, so independent
+      // patterns (rule A doesn't match, rule B does) and chained ones
+      // (rule B refines rule A's output) work identically.
+      const compiledRenames = input.stream_rename?.length
+        ? input.stream_rename.map((r) => ({
+            re: new RegExp(r.pattern),
+            replacement: r.replacement,
+          }))
+        : undefined;
+      const stream_rename = compiledRenames
+        ? (s: string) =>
+            compiledRenames.reduce(
+              (acc, { re, replacement }) => acc.replace(re, replacement),
+              s
+            )
+        : undefined;
+      // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+      let event_migrations:
+        | Record<string, EventMigration<any, any>>
+        | undefined;
+      if (input.event_migrations_path) {
+        // Resolve under cwd; reject absolute paths and `..` traversal
+        // so an operator can't import arbitrary modules off the
+        // filesystem. The inspector is intentionally a thin tool; if
+        // the migrations live elsewhere the operator can stage them
+        // under cwd first.
+        const root = process.cwd();
+        const abs = resolve(root, input.event_migrations_path);
+        const rel = relative(root, abs);
+        if (isAbsolute(input.event_migrations_path) || rel.startsWith(".."))
+          throw new Error(
+            "event_migrations_path must be a relative path under the inspector cwd"
+          );
+        const mod = (await import(abs)) as {
+          // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+          default?: Record<string, EventMigration<any, any>>;
+        };
+        if (!mod.default || typeof mod.default !== "object")
+          throw new Error(
+            `event_migrations module ${input.event_migrations_path} must default-export Record<string, EventMigration>`
+          );
+        event_migrations = mod.default;
+      }
       try {
         const result = await app.restore(
           filteredSource,
           {
-            dry_run: input.dry_run,
+            // Dry-run is driven by the in-memory PreviewSink above, not
+            // by the framework's `dry_run` flag — we want scan's sink
+            // callback to fire so the migration overlay is applied to
+            // the captured sample events.
             drop_snapshots: input.drop_snapshots,
+            drop_closed_streams: input.drop_closed_streams,
             batch_size: input.batch_size,
+            event_migrations,
+            stream_rename,
             on_progress: (p) => {
               restoreProgressEmitter.emit("progress", p);
             },
@@ -1314,7 +1428,15 @@ export const inspectorRouter = t.router({
             adapter: currentConfig?.adapter ?? "inmemory",
             result,
           });
-        return { ok: true as const, count: result.kept, result, csv };
+        return {
+          ok: true as const,
+          count: result.kept,
+          result,
+          csv,
+          // Only populated on dry-run; the live path leaves it empty so
+          // the response shape stays stable across modes.
+          sample: input.dry_run ? previewSample : [],
+        };
       } catch (error) {
         throw new Error(
           `Transfer failed: ${error instanceof Error ? error.message : String(error)}`,

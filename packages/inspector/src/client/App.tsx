@@ -5,6 +5,7 @@ import { Header } from "./components/Header.js";
 import { TabNav, type Tab } from "./components/TabNav.js";
 import { queryClient, trpc, trpcClient } from "./trpc.js";
 import { Correlation } from "./views/Correlation.js";
+import { CsvViewer } from "./views/CsvViewer.js";
 import { EventLog } from "./views/EventLog.js";
 import { Monitor } from "./views/Monitor.js";
 import { SchemaEvolution } from "./views/SchemaEvolution.js";
@@ -33,6 +34,7 @@ export function viewCaption(v: ViewState): string {
     correlation: "Correlation",
     monitor: "Monitor",
     schema: "Schema Evolution",
+    csv: "CSV Viewer",
   };
   return labels[v.tab];
 }
@@ -165,6 +167,7 @@ export default function App() {
                   />
                 )}
                 {view.tab === "schema" && <SchemaEvolution />}
+                {view.tab === "csv" && <CsvViewer />}
               </div>
             </>
           )}

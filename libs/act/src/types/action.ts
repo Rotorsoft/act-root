@@ -551,10 +551,12 @@ export type CloseResult = {
  * Adapters never see these — they're entirely interpreted on the
  * orchestrator side.
  *
- * Two more flags reserved for a future follow-up
- * (`drop_closed_streams`, `drop_empty_streams`) need a pre-pass over
- * the source — they wait on the source-shape decision (re-iterable
- * factory vs. buffer in memory).
+ * Compaction flags ({@link drop_snapshots}, {@link drop_closed_streams})
+ * and the migration overlay ({@link event_migrations},
+ * {@link stream_rename}) all apply per event before the sink writes
+ * anything. Any throw aborts the whole scan — atomic rollback in the
+ * sink means a failing transform leaves the target byte-for-byte
+ * unchanged.
  */
 export type ScanOptions = {
   /**
@@ -615,6 +617,76 @@ export type ScanOptions = {
    * adapter is never called. Default `false`.
    */
   readonly dry_run?: boolean;
+
+  /**
+   * Compact streams that have been closed (tombstoned) via
+   * {@link IAct.close} (ACT-1126). The scan walks the source once
+   * upfront to collect streams with a `__tombstone__` event, then
+   * the main loop drops every **pre-close event** whose stream is in
+   * that set. The tombstone itself is **kept** — it's the gate that
+   * makes {@link IAct.do} throw `StreamClosedError` in the rebuilt
+   * store, so dropping it would silently reopen the stream.
+   *
+   * Useful for compaction during transfer: the new (migrated) store
+   * keeps the close gate but drops the historical detail.
+   *
+   * Counted in {@link ScanResult.dropped}`.closed_streams` (pre-close
+   * events only; the tombstone is counted in `kept`).
+   *
+   * Default `false`.
+   */
+  readonly drop_closed_streams?: boolean;
+
+  /**
+   * Per-event migrations applied during scan (ACT-1126). Keys are
+   * source event names; values describe how to rewrite the event into
+   * its current-version form before the sink writes it.
+   *
+   * Transfer-time only — never registered at app build time and never
+   * auto-applied to a live store. Operators configure migrations
+   * explicitly per-call (typically through the inspector's transfer
+   * dialog when moving from an old store to a new one).
+   *
+   * Each row that matches a key:
+   *   1. parses `event.data` against `from_schema` (validates source);
+   *   2. runs `migrate(parsed)` to transform the payload;
+   *   3. parses the result against `to_schema` (validates target);
+   *   4. is rewritten with `name = to` and `data = migrated`.
+   *
+   * Any throw aborts the whole scan — atomic transaction rollback in
+   * the sink means a failing migration leaves the target byte-for-byte
+   * unchanged.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: heterogeneous per-key migrations
+  readonly event_migrations?: Record<string, EventMigration<any, any>>;
+
+  /**
+   * Per-stream rename applied during scan (ACT-1126). Called once per
+   * event; the returned string replaces `event.stream`. Useful for
+   * tenant relocation (`s => s.replace(/^old-tenant-/, "new-tenant-")`)
+   * or prefix cleanup.
+   *
+   * Applied AFTER {@link event_migrations} so the migration sees the
+   * original stream name (in case the migration's `migrate` function
+   * inspects it).
+   */
+  readonly stream_rename?: (stream: string) => string;
+};
+
+/**
+ * Per-event migration definition for {@link ScanOptions.event_migrations}.
+ * Carries both the rename target and the schema-guarded transform that
+ * rewrites the event's `data` payload (ACT-1126).
+ */
+export type EventMigration<TOld, TNew> = {
+  /** Target event name (the current version). */
+  readonly to: string;
+  /** Schema of the source event's `data`. Throws on mismatch. */
+  readonly from_schema: { parse: (data: unknown) => TOld };
+  /** Schema of the migrated event's `data`. Throws on mismatch. */
+  readonly to_schema: { parse: (data: unknown) => TNew };
+  /** Pure data transformer. */
+  readonly migrate: (data: TOld) => TNew;
 };
 
 /**
@@ -631,16 +703,13 @@ export type ScanResult = {
   readonly kept: number;
   /** Wall-clock duration of the call, in milliseconds. */
   readonly duration_ms: number;
-  /**
-   * Per-category drop counters. Only `snapshots` is wired in v1;
-   * `closed_streams` and `empty_streams` are reserved for the
-   * follow-up that introduces those flags.
-   */
+  /** Per-category drop counters. */
   readonly dropped: {
     readonly closed_streams: number;
     readonly snapshots: number;
-    readonly empty_streams: number;
   };
+  /** Events rewritten by {@link ScanOptions.event_migrations}. */
+  readonly migrated: number;
 };
 
 /**

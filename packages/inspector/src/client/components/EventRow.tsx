@@ -1,5 +1,6 @@
 import { Database, GitBranch } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { JsonViewer } from "./JsonViewer.js";
 
 type EventMeta = {
@@ -61,22 +62,15 @@ function nameColor(name: string): string {
   return colors[Math.abs(hash) % colors.length];
 }
 
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 1000) return "just now";
-  if (ms < 60_000) return `${Math.floor(ms / 1000)}s ago`;
-  if (ms < 3_600_000) return `${Math.floor(ms / 60_000)}m ago`;
-  if (ms < 86_400_000) return `${Math.floor(ms / 3_600_000)}h ago`;
-  return `${Math.floor(ms / 86_400_000)}d ago`;
-}
+const eventDateFormatter = new Intl.DateTimeFormat("en-US", {
+  dateStyle: "short",
+});
+const eventTimeFormatter = new Intl.DateTimeFormat("en-US", {
+  timeStyle: "medium",
+});
 
 function copyToClipboard(text: string) {
   void navigator.clipboard.writeText(text);
-}
-
-/** Short ID: first 8 chars */
-function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
 }
 
 /** Inline clickable link — small, subtle */
@@ -112,8 +106,49 @@ export function EventRow({
   onStream,
 }: EventRowProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  const actor = event.meta?.causation?.action?.actor;
+  // Hover tooltip for the event-name pill. Anchored to the pill's
+  // bounding rect; portal-rendered so the scroll container's
+  // overflow doesn't clip it. Falls back above the pill near the
+  // viewport bottom so it doesn't run off-screen on the last rows.
+  const pillRef = useRef<HTMLSpanElement>(null);
+  const [pillRect, setPillRect] = useState<DOMRect | null>(null);
+  const showDataTooltip = () => {
+    if (pillRef.current) setPillRect(pillRef.current.getBoundingClientRect());
+  };
+  const hideDataTooltip = () => setPillRect(null);
+  const causation = event.meta?.causation;
+  const actor = causation?.action?.actor;
   const correlation = event.meta?.correlation;
+  // Reactions to upstream events show the source event's name + id
+  // (+ stream when present); root-cause actions show the action name
+  // (+ target stream). The full causation object stays in the tooltip
+  // so operators can still see actor details / extra fields without
+  // expanding the row. Actor lives in its own column, so it's omitted
+  // here to avoid the duplicate.
+  const causedByEvent = causation?.event;
+  const causedByAction = causation?.action;
+  // Split into two visual segments so the action/event name pops in
+  // blue while the destination stream stays muted — same row reads as
+  // "what" (highlighted) "where" (muted).
+  const causationParts: { name: string; suffix: string } = (() => {
+    if (causedByEvent?.name) {
+      const id = causedByEvent.id != null ? ` #${causedByEvent.id}` : "";
+      return {
+        name: `${causedByEvent.name}${id}`,
+        suffix: causedByEvent.stream ? ` → ${causedByEvent.stream}` : "",
+      };
+    }
+    if (causedByAction?.name) {
+      return {
+        name: causedByAction.name,
+        suffix: causedByAction.stream ? ` → ${causedByAction.stream}` : "",
+      };
+    }
+    return { name: "", suffix: "" };
+  })();
+  const causationTitle = causation
+    ? JSON.stringify(causation, null, 2)
+    : "";
 
   return (
     <div className="border-b border-zinc-800/50 transition hover:bg-zinc-900/50">
@@ -127,28 +162,17 @@ export function EventRow({
           #{event.id}
         </span>
 
-        {/* Actor */}
-        <span className="w-24 shrink-0 truncate text-zinc-500">
-          {actor?.name ?? ""}
-        </span>
-
         {/* Version */}
         <span className="w-12 shrink-0 text-right font-mono text-zinc-500">
-          v{event.version}
-        </span>
-
-        {/* Event name pill */}
-        <span className="w-36 shrink-0 truncate">
-          <span
-            className={`inline-block rounded-md border px-2 py-0.5 text-[11px] font-medium ${nameColor(event.name)}`}
-          >
-            {event.name}
-          </span>
+          {event.version}
         </span>
 
         {/* Stream */}
         {!hideStream && (
-          <span className="min-w-0 flex-1 truncate font-mono text-zinc-300">
+          <span
+            className="w-64 shrink-0 truncate font-mono text-zinc-300"
+            title={event.stream}
+          >
             {event.stream}
             {onStream && (
               <>
@@ -164,13 +188,40 @@ export function EventRow({
           </span>
         )}
 
+        {/* Event name pill — hover to preview the event payload */}
+        <span className="w-36 shrink-0 truncate">
+          <span
+            ref={pillRef}
+            onMouseEnter={showDataTooltip}
+            onMouseLeave={hideDataTooltip}
+            className={`inline-block cursor-help rounded-md border px-2 py-0.5 text-[11px] font-medium ${nameColor(event.name)}`}
+          >
+            {event.name}
+          </span>
+        </span>
+
+        {/* Date + time (split colors so the time-of-day pops against
+            the muted date; no comma between them — the color shift is
+            the separator). */}
+        <span
+          className="w-36 shrink-0 truncate text-right font-mono"
+          title={new Date(event.created).toISOString()}
+        >
+          <span className="text-violet-300">
+            {eventDateFormatter.format(new Date(event.created))}
+          </span>{" "}
+          <span className="text-emerald-300">
+            {eventTimeFormatter.format(new Date(event.created))}
+          </span>
+        </span>
+
         {/* Correlation */}
         {correlation && (
           <span
-            className="w-20 shrink-0 truncate font-mono text-zinc-500"
+            className="w-80 shrink-0 truncate font-mono text-zinc-500"
             title={correlation}
           >
-            {shortId(correlation)}
+            {correlation}
             {onTrace && (
               <>
                 {" "}
@@ -184,15 +235,23 @@ export function EventRow({
             )}
           </span>
         )}
-        {!correlation && <span className="w-20 shrink-0" />}
+        {!correlation && <span className="w-80 shrink-0" />}
 
-        {/* Time */}
-        <span
-          className="w-20 shrink-0 text-right text-zinc-500"
-          title={new Date(event.created).toLocaleString()}
-        >
-          {relativeTime(event.created)}
+        {/* Actor */}
+        <span className="w-24 shrink-0 truncate text-amber-300">
+          {actor?.name ?? ""}
         </span>
+
+        {/* Causation — action/event name in blue, `→ stream` muted */}
+        <span
+          className="w-64 shrink-0 truncate font-mono"
+          title={causationTitle}
+        >
+          <span className="text-sky-300">{causationParts.name}</span>
+          <span className="text-zinc-500">{causationParts.suffix}</span>
+        </span>
+
+        <span className="min-w-0 flex-1" />
 
         {/* Expand indicator */}
         <span className="w-4 shrink-0 text-zinc-600">
@@ -253,6 +312,42 @@ export function EventRow({
           </div>
         </div>
       )}
+      {pillRect &&
+        !expanded &&
+        createPortal(
+          <DataTooltip rect={pillRect} data={event.data} />,
+          document.body
+        )}
+    </div>
+  );
+}
+
+/**
+ * Floating preview of an event's `data` payload, anchored to the
+ * event-name pill. Positioned just below the pill by default; flips
+ * above when there isn't enough room before the viewport bottom so
+ * the tooltip doesn't disappear off-screen for the last rows in the
+ * table. `pointer-events-none` so the tooltip never intercepts
+ * clicks on the row underneath.
+ */
+function DataTooltip({ rect, data }: { rect: DOMRect; data: unknown }) {
+  const margin = 6;
+  const estHeight = 280;
+  const flipAbove = rect.bottom + estHeight + margin > window.innerHeight;
+  const top = flipAbove ? rect.top - margin : rect.bottom + margin;
+  return (
+    <div
+      className="pointer-events-none fixed z-[100] max-h-[60vh] w-[36rem] max-w-[80vw] overflow-auto rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs shadow-xl"
+      style={{
+        top,
+        left: rect.left,
+        transform: flipAbove ? "translateY(-100%)" : undefined,
+      }}
+    >
+      <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+        Data
+      </div>
+      <JsonViewer data={data} />
     </div>
   );
 }

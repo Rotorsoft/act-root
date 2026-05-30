@@ -1,6 +1,15 @@
+import { unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { type Committed, dispose, type Schemas, store } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 import { actor, app, buildApp, setApp } from "./app.js";
+
+// Co-locate the SQLite scratch file with the test that owns it so
+// the WAL/SHM sidecars don't leak into the repo root. The whole
+// test/ folder is the package's working set; vitest happens to run
+// from the workspace root, which is why `file:test-store.db` was
+// landing files in `/Users/.../act/`.
+const DB_PATH = join(import.meta.dirname, "test-store.db");
 
 // Contract-level cases live in `store-tck.spec.ts` (via the shared
 // Store TCK in `@rotorsoft/act-tck`). This file only covers
@@ -9,7 +18,7 @@ import { actor, app, buildApp, setApp } from "./app.js";
 
 describe("sqlite store (adapter-specific)", () => {
   beforeAll(async () => {
-    store(new SqliteStore({ url: "file:test-store.db" }));
+    store(new SqliteStore({ url: `file:${DB_PATH}` }));
     await store().drop();
     await store().seed();
     // Build orchestrator AFTER injecting the store (notify wiring binds
@@ -19,11 +28,14 @@ describe("sqlite store (adapter-specific)", () => {
 
   afterAll(async () => {
     await dispose()();
-    const fs = await import("node:fs");
-    try {
-      fs.unlinkSync("test-store.db");
-    } catch {
-      // file may not exist
+    // Unlink the .db AND the WAL/SHM sidecars — WAL mode produces all
+    // three and only deleting `.db` leaves the journal files behind.
+    for (const ext of ["", "-wal", "-shm"]) {
+      try {
+        unlinkSync(DB_PATH + ext);
+      } catch {
+        // file may not exist
+      }
     }
   });
 

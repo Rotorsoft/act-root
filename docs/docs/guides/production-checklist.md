@@ -184,7 +184,14 @@ The `act-inspector` workspace package gives you a UI on top of the same `query_s
 
 `app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild path: atomic replacement of a store's contents from an event source. Most production teams never call this from application code — they use the inspector's transfer dialog (or a one-off `node` script) to operate it as a tool. What matters in production is knowing when *not* to reach for it.
 
-**Restore is not your disaster-recovery plan.** `pg_dump` / `pg_restore` for Postgres and a periodic SQLite file copy are still the right tools for recovering from a lost server. They preserve every byte, run at the storage layer, and don't require the application to be running. `app.restore` is for *content-level* operations — cross-adapter migrations (PG → SQLite for a customer extract), compaction passes (drop `__snapshot__` events to shrink the log), validated re-imports from a curated CSV. If your goal is "rebuild from yesterday's snapshot because the database disk died," skip restore and use the storage-level tools.
+**Restore is not your disaster-recovery plan.** `pg_dump` / `pg_restore` for Postgres and a periodic SQLite file copy are still the right tools for recovering from a lost server. They preserve every byte, run at the storage layer, and don't require the application to be running. `app.restore` is for *content-level* operations:
+
+- **Cross-adapter migration** (PG → SQLite for a customer extract, or vice versa)
+- **Compaction** — drop `__snapshot__` events (`drop_snapshots`) so the next snap policy regenerates them, drop entire closed streams (`drop_closed_streams`) so the new store contains only currently-live streams
+- **Schema migration** — schema-guarded event rewrites via `event_migrations` (rename + transform old payloads into their current-version shape), bulk stream rename via `stream_rename` (tenant relocation, prefix cleanup). All transfer-time only; the connected store is never modified
+- **Validated re-imports** from a curated CSV
+
+If your goal is "rebuild from yesterday's snapshot because the database disk died," skip restore and use the storage-level tools.
 
 When you do use restore, plan around three follow-ups:
 

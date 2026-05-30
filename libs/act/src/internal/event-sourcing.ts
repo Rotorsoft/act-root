@@ -202,13 +202,37 @@ export async function scan(
   opts: ScanOptions = {},
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<ScanResult, "duration_ms">> {
-  const { drop_snapshots = false, on_progress } = opts;
+  const {
+    drop_snapshots = false,
+    drop_closed_streams = false,
+    on_progress,
+    event_migrations,
+    stream_rename,
+  } = opts;
   const limit = opts.batch_size ?? DEFAULT_BATCH;
   const id_map = new Map<number, number>();
   let kept = 0;
   let dropped_snaps = 0;
+  let dropped_closed = 0;
+  let migrated_count = 0;
   let processed = 0;
   let at: number | undefined;
+
+  // Pre-pass for `drop_closed_streams` (ACT-1126). Walk the source
+  // once with a tombstone-name filter to collect closed streams. PG
+  // honors the filter and only the tombstone events come back; sources
+  // that ignore the filter (CsvFile) stream all events but we cheaply
+  // pick out the tombstones in the callback. Either way the cost is
+  // one extra walk, paid only when the operator opts in.
+  const closed_streams = new Set<string>();
+  if (drop_closed_streams) {
+    await source.query<Schemas>(
+      (e) => {
+        if (e.name === TOMBSTONE_EVENT) closed_streams.add(e.stream);
+      },
+      { names: [TOMBSTONE_EVENT] }
+    );
+  }
 
   // Probe the source for the highest id once up front. On indexed
   // stores (PostgresStore, SqliteStore) `{ backward: true, limit: 1 }`
@@ -241,6 +265,41 @@ export async function scan(
           dropped_snaps++;
           return;
         }
+        if (
+          closed_streams.has(event.stream) &&
+          event.name !== TOMBSTONE_EVENT
+        ) {
+          // Drop pre-close events but KEEP the tombstone — it's what
+          // makes the stream "closed" in the rebuilt store. Without
+          // it, a future `app.do(...)` against this stream name would
+          // succeed because nothing gates it.
+          dropped_closed++;
+          return;
+        }
+        // Migration overlay (ACT-1126): rename + schema-guarded data
+        // transform, then optional stream rename. Applied BEFORE the
+        // causation remap so the id_map (keyed by source id) stays
+        // valid and migrated events land at the new name/data with
+        // their causation chains intact.
+        let migrated: typeof event = event;
+        const migration = event_migrations?.[event.name as string];
+        if (migration) {
+          const old_data = migration.from_schema.parse(event.data);
+          const new_data = migration.migrate(old_data);
+          migration.to_schema.parse(new_data);
+          migrated = {
+            ...event,
+            name: migration.to as typeof event.name,
+            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
+            data: new_data as any,
+          };
+          migrated_count++;
+        }
+        if (stream_rename) {
+          const renamed = stream_rename(migrated.stream);
+          if (renamed !== migrated.stream)
+            migrated = { ...migrated, stream: renamed };
+        }
         if (!callback) {
           kept++;
           return;
@@ -248,8 +307,8 @@ export async function scan(
         // Causation remap — rewrite `meta.causation.event.id` to the
         // new id space if the source pointed at an earlier event's
         // old id.
-        let remapped = event;
-        const caused_by = event.meta.causation.event?.id;
+        let remapped = migrated;
+        const caused_by = migrated.meta.causation.event?.id;
         if (caused_by !== undefined) {
           const new_caused_by = id_map.get(caused_by);
           if (new_caused_by !== undefined && new_caused_by !== caused_by) {
@@ -284,10 +343,10 @@ export async function scan(
 
   return {
     kept,
+    migrated: migrated_count,
     dropped: {
-      closed_streams: 0,
+      closed_streams: dropped_closed,
       snapshots: dropped_snaps,
-      empty_streams: 0,
     },
   };
 }

@@ -1744,7 +1744,6 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(result.dropped).toEqual({
           closed_streams: 0,
           snapshots: 0,
-          empty_streams: 0,
         });
         // Store ends empty.
         const events = await collect(store, { limit: 10 });

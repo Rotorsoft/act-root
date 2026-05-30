@@ -18,7 +18,7 @@ export function BackupRestore() {
     <>
       <button
         onClick={() => setOpen(true)}
-        title="Transfer events (backup, restore, or cross-adapter migration)"
+        title="Restore — rebuild a store from a source (backup, migrate, or transfer)"
         className="rounded p-1.5 text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-300"
       >
         <ArrowRightLeft size={14} />

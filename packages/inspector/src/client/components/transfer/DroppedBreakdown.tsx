@@ -16,7 +16,6 @@ export function DroppedBreakdown({
   const items = [
     { label: "Snapshots", n: dropped.snapshots },
     { label: "Closed streams", n: dropped.closed_streams },
-    { label: "Empty streams", n: dropped.empty_streams },
   ].filter((d) => d.n > 0);
   if (items.length === 0) return null;
   return (

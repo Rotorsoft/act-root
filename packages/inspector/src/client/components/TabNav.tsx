@@ -1,6 +1,7 @@
 import {
   Activity,
   Database,
+  FileText,
   GanttChart,
   GitBranch,
   Layers,
@@ -14,7 +15,8 @@ export type Tab =
   | "streams"
   | "correlation"
   | "monitor"
-  | "schema";
+  | "schema"
+  | "csv";
 
 type TabDef = { id: Tab; label: string; icon: ReactNode };
 
@@ -25,6 +27,7 @@ const tabs: TabDef[] = [
   { id: "correlation", label: "Correlation", icon: <GitBranch size={14} /> },
   { id: "monitor", label: "Monitor", icon: <Activity size={14} /> },
   { id: "schema", label: "Schema", icon: <Layers size={14} /> },
+  { id: "csv", label: "CSV", icon: <FileText size={14} /> },
 ];
 
 type TabNavProps = {

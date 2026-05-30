@@ -23,9 +23,7 @@ export function TransferSummary({
   targetTouchedConnected: boolean;
 }) {
   const totalDropped =
-    result.dropped.closed_streams +
-    result.dropped.snapshots +
-    result.dropped.empty_streams;
+    result.dropped.closed_streams + result.dropped.snapshots;
   return (
     <>
       <div className="flex items-center gap-2">

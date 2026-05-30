@@ -60,6 +60,5 @@ export type ScanResult = {
   dropped: {
     closed_streams: number;
     snapshots: number;
-    empty_streams: number;
   };
 };

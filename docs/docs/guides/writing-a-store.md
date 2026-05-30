@@ -127,6 +127,10 @@ Why this matters: causation references in `meta` point at events by `id`. If you
 
 Unlike `commit` (which stamps `now()` on every event), restore writes the source's `created` timestamp directly. This is what makes cross-adapter migration lossless — a PG store restored into a SQLite file keeps every event's original commit time.
 
+### Scan-time options your adapter is implicitly party to
+
+The compaction (`drop_snapshots`, `drop_closed_streams`) and migration (`event_migrations`, `stream_rename`) options on `ScanOptions` are interpreted entirely on the orchestrator side — your `restore` driver never sees them. But the source path of a transfer (where your adapter implements `Store.query`) does see one related concern: `drop_closed_streams` works by walking the source once upfront with a `{ names: ["__tombstone__"] }` filter to collect closed-stream names cheaply. Adapters that honor the `names` filter in `query` (PG, SQLite, InMemory) make the pre-pass O(K) where K is the number of closed streams. Adapters that ignore the filter (CsvFile streams every event for any filter) still work correctly — the orchestrator falls back to checking each event's name in the callback — but pay an O(N) full source scan for the pre-pass. Honoring `names` is a meaningful performance win for any adapter that can support it via an index lookup.
+
 ### TCK opt-in
 
 Once you've implemented the method, flip the capability flag:
