@@ -113,6 +113,32 @@ const app = act()
 - **`maxSubscribedStreams`** (default `1000`) — cap for the LRU set tracking already-subscribed reaction targets. Apps that mint many dynamic targets (e.g. one stream per user activity) should raise this; the LRU is a memory bound, not a correctness mechanism — eviction at most causes a redundant `subscribe()` call.
 - **`settleDebounceMs`** (default `10`) — debounce window used by `settle()` when no per-call `debounceMs` is given. Coalesces commits in the same tick into a single correlate→drain pass. Lower for tight tests; raise for bursty production traffic.
 - **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
+- **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
+- **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
+
+### Deployment shapes via `listen` / `drain`
+
+The two flags are orthogonal — independent costs, independent toggles:
+
+| `listen` | `drain` | Use case |
+|---|---|---|
+| `true` | `true` | Default. Reactive instance in a multi-process cluster. |
+| `false` | `true` | Single-instance app. Nothing else to listen to, but own commits still trigger reactions. Minor optimization. |
+| `false` | `false` | Pure writer fleet (write-heavy frontend, ingest worker, API server). Notifies on commit but doesn't react. |
+| `true` | `false` | Observability sidecar. Sees every cross-process commit via the `notified` lifecycle event without processing it. |
+
+```typescript
+// Writer fleet — scales horizontally without touching the subscriber budget.
+const writer = act().withState(Order).build({ listen: false, drain: false });
+
+// Reactive fleet — same codebase, opposite flags. Sized to the reaction workload.
+const reactor = act()
+  .withState(Order)
+  .on("OrderPlaced").do(reduceInventory).to("inventory")
+  .build(); // defaults: listen + drain
+```
+
+Commits from the writer fleet emit notifications (that's part of the store's commit protocol); the reactor fleet picks them up via its `Store.notify` subscription and runs reactions locally.
 
 ## Lanes
 

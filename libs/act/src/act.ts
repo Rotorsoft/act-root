@@ -165,6 +165,25 @@ export type ActOptions<TLanes extends string = string> = {
   readonly correlator?: Correlator;
   /** Restrict this process to a subset of declared lanes (ACT-1103). */
   readonly onlyLanes?: ReadonlyArray<TLanes>;
+  /**
+   * Subscribe to {@link Store.notify} on this instance (#803). Defaults
+   * to `true`. Set `false` on instances that only commit and never
+   * react — the subscriber-connection budget is the practical scaling
+   * ceiling for the notify/listen pattern, and writer-only fleets
+   * spend it for nothing when they subscribe to a channel they never
+   * read. Commits still emit notifications (that's part of the
+   * store's commit protocol); only the subscriber side is gated.
+   */
+  readonly listen?: boolean;
+  /**
+   * Run the local reaction pipeline on this instance (#803). Defaults
+   * to `true`. Set `false` on writer-only or sidecar instances: drain
+   * controllers' auto-cycle workers don't start, `correlate()` /
+   * `drain()` / `settle()` become no-ops, and the notify handler
+   * skips its drain-wakeup arm (but still emits the `notified`
+   * lifecycle event so observability sidecars work).
+   */
+  readonly drain?: boolean;
 };
 
 export class Act<
@@ -176,6 +195,10 @@ export class Act<
 > implements IAct<TEvents, TActions, TActor>
 {
   private _emitter = new EventEmitter();
+  /** #803: gate the `Store.notify` subscription side. */
+  private readonly _listen: boolean;
+  /** #803: gate the local reaction pipeline (drain controllers, settle, correlate). */
+  private readonly _drain: boolean;
   /** Event names with at least one registered reaction (computed at build time) */
   private readonly _reactive_events: ReadonlySet<string>;
   /** One DrainController per active lane, keyed by lane name. */
@@ -362,6 +385,8 @@ export class Act<
       eventToLanes,
     } = classifyRegistry(this.registry, this._states);
     this._reactive_events = reactiveEvents;
+    this._listen = options.listen !== false;
+    this._drain = options.drain !== false;
     this._event_to_state = eventToState;
     this._event_to_lanes = eventToLanes;
 
@@ -406,7 +431,11 @@ export class Act<
       // cycleMs — the intent of `withLane({cycleMs: 100})` is "drive
       // this lane every 100 ms," independent of the Act-level settle
       // loop. unref()'d so the timer doesn't keep the process alive.
-      if (cfg?.cycleMs !== undefined) controller.start(cfg.cycleMs);
+      // #803: skip the auto-start on writer-only instances
+      // (`drain: false`) — they construct the controller but never
+      // run reactions locally.
+      if (cfg?.cycleMs !== undefined && options.drain !== false)
+        controller.start(cfg.cycleMs);
       this._drain_controllers.set(name, controller);
     }
 
@@ -430,9 +459,10 @@ export class Act<
       hasDynamicResolvers,
       this._cd,
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
-      // Cold start: assume drain is needed (historical events may need processing)
+      // Cold start: assume drain is needed (historical events may need processing).
+      // #803: writer-only instances skip the cold-start arm.
       () => {
-        if (this._reactive_events.size > 0) this._armAll();
+        if (this._drain && this._reactive_events.size > 0) this._armAll();
       }
     );
     this._settle = new SettleLoop<TEvents>(
@@ -495,6 +525,10 @@ export class Act<
   ): Promise<(() => void | Promise<void>) | undefined> {
     if (this._reactive_events.size === 0) return undefined;
     if (!s.notify) return undefined;
+    // #803: writer-only / single-instance deployments opt out of the
+    // subscriber-connection cost. Commits still notify (that's the
+    // store's commit protocol); only the subscriber side is gated.
+    if (!this._listen) return undefined;
     try {
       return await s.notify((notification) => {
         // Generic concerns (lifecycle emit, drain wakeup, listener
@@ -509,10 +543,15 @@ export class Act<
           // belonging to bounded contexts this process doesn't react to.
           // ACT-1103: selective arming via the shared helper — only the
           // lanes whose reactions match the notified events.
-          const armed = this._armForEventNames(
-            notification.events.map((e) => e.name)
-          );
-          if (armed) this._settle.schedule({ debounceMs: 0 });
+          // #803: the sidecar pattern (listen: true, drain: false)
+          // wants the `notified` lifecycle event for observability
+          // without engaging the local reaction pipeline.
+          if (this._drain) {
+            const armed = this._armForEventNames(
+              notification.events.map((e) => e.name)
+            );
+            if (armed) this._settle.schedule({ debounceMs: 0 });
+          }
         } catch (err) {
           this._logger.error(err, "notified handler threw");
         }
@@ -853,6 +892,11 @@ export class Act<
    * @see {@link start_correlations} for automatic correlation
    */
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
+    // #803: writer-only instances skip the local reaction pipeline.
+    // Return an empty Drain result so call sites that aggregate (e.g.,
+    // `settle` listeners) keep working without special-casing.
+    if (!this._drain)
+      return { fetched: [], leased: [], acked: [], blocked: [] };
     return this._scoped(() => this._drainAll(options));
   }
 
@@ -959,6 +1003,10 @@ export class Act<
   async correlate(
     query: Query = { after: -1, limit: 10 }
   ): Promise<{ subscribed: number; last_id: number }> {
+    // #803: writer-only instances skip dynamic stream discovery. The
+    // {subscribed, last_id} pair returns the no-op result; the
+    // checkpoint stays where it was.
+    if (!this._drain) return { subscribed: 0, last_id: -1 };
     return this._scoped(() => this._correlate.correlate(query));
   }
 
@@ -1424,6 +1472,10 @@ export class Act<
    * @see {@link correlate} for manual correlation
    */
   settle(options: SettleOptions = {}): void {
+    // #803: writer-only instances skip settle entirely. The bootstrap
+    // pattern `app.on("committed", () => app.settle())` keeps working —
+    // it just runs zero work on writers.
+    if (!this._drain) return;
     this._settle.schedule(options);
   }
 }
