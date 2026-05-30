@@ -12,6 +12,7 @@
     "skipLibCheck": true,
     "noUncheckedSideEffectImports": true,
     "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "types": ["node", "vitest/globals"],
     "paths": {
       "@rotorsoft/*": ["./*/src/index.ts"]

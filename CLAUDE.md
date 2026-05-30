@@ -231,6 +231,7 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged; the pre-push hook runs tests on master. Bypassing either ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 - **Naming new public API.** Match existing analogs over inventing new patterns. Fields/methods short snake_case (`reset`, `unblock`, `blocked_streams`). Factories camelCase (`act`, `state`, `webhook`). Types PascalCase, with `XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable.
+- **Class field naming.** Private/protected fields are `_snake_case` with an underscore prefix (`_drain_controllers`, `_reactive_events`, `_static_targets`). Public fields are plain snake_case (or a single word) with no prefix (`registry`, `stream`, `payload`). Parameter properties (`constructor(private readonly x: T) {}`) are banned by `erasableSyntaxOnly`; declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
 
 ## Troubleshooting
 

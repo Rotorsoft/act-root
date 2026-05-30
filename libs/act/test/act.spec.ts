@@ -602,10 +602,10 @@ describe("act", () => {
       .to("my-static-target") // static resolver — covers constructor branch
       .build();
 
-    // staticTargets and subscribed-streams LRU populated at build time
+    // _static_targets and subscribed-streams LRU populated at build time
     const correlate = (staticApp as any)._correlate;
-    expect(correlate.staticTargets.length).toBe(1);
-    expect(correlate.staticTargets[0].stream).toBe("my-static-target");
+    expect(correlate._static_targets.length).toBe(1);
+    expect(correlate._static_targets[0].stream).toBe("my-static-target");
 
     // Correlate initializes subscriptions for static targets (covers LRU add)
     await staticApp.correlate();

@@ -67,16 +67,19 @@ export const Errors = {
  * @see {@link https://zod.dev | Zod documentation} for validation details
  */
 export class ValidationError extends Error {
-  constructor(
-    /** The type of target being validated (e.g., "action", "event") */
-    public readonly target: string,
-    /** The invalid payload that failed validation */
-    public readonly payload: any,
-    /** Zod validation error details */
-    public readonly details: any
-  ) {
+  /** The type of target being validated (e.g., "action", "event") */
+  public readonly target: string;
+  /** The invalid payload that failed validation */
+  public readonly payload: any;
+  /** Zod validation error details */
+  public readonly details: any;
+
+  constructor(target: string, payload: any, details: any) {
     super(`Invalid ${target} payload`);
     this.name = Errors.ValidationError;
+    this.target = target;
+    this.payload = payload;
+    this.details = details;
   }
 }
 
@@ -156,20 +159,31 @@ export class InvariantError<
   TKey extends keyof TActions,
   TActor extends Actor = Actor,
 > extends Error {
+  /** The action that was attempted */
+  readonly action: TKey;
+  /** The action payload that was provided */
+  readonly payload: Readonly<TActions[TKey]>;
+  /** The target stream and actor context */
+  readonly target: Target<TActor>;
+  /** The current state snapshot when invariant was checked */
+  readonly snapshot: Snapshot<TState, TEvents>;
+  /** Human-readable description of why the invariant failed */
+  readonly description: string;
+
   constructor(
-    /** The action that was attempted */
-    readonly action: TKey,
-    /** The action payload that was provided */
-    readonly payload: Readonly<TActions[TKey]>,
-    /** The target stream and actor context */
-    readonly target: Target<TActor>,
-    /** The current state snapshot when invariant was checked */
-    readonly snapshot: Snapshot<TState, TEvents>,
-    /** Human-readable description of why the invariant failed */
-    readonly description: string
+    action: TKey,
+    payload: Readonly<TActions[TKey]>,
+    target: Target<TActor>,
+    snapshot: Snapshot<TState, TEvents>,
+    description: string
   ) {
     super(`${action as string} failed invariant: ${description}`);
     this.name = Errors.InvariantError;
+    this.action = action;
+    this.payload = payload;
+    this.target = target;
+    this.snapshot = snapshot;
+    this.description = description;
   }
 }
 
@@ -243,15 +257,20 @@ export class InvariantError<
  * @see {@link Store.commit} for version checking details
  */
 export class ConcurrencyError extends Error {
+  /** The stream that had the concurrent modification */
+  public readonly stream: string;
+  /** The actual current version in the store */
+  public readonly lastVersion: number;
+  /** The events that were being committed */
+  public readonly events: Message<Schemas, keyof Schemas>[];
+  /** The version number that was expected */
+  public readonly expectedVersion: number;
+
   constructor(
-    /** The stream that had the concurrent modification */
-    public readonly stream: string,
-    /** The actual current version in the store */
-    public readonly lastVersion: number,
-    /** The events that were being committed */
-    public readonly events: Message<Schemas, keyof Schemas>[],
-    /** The version number that was expected */
-    public readonly expectedVersion: number
+    stream: string,
+    lastVersion: number,
+    events: Message<Schemas, keyof Schemas>[],
+    expectedVersion: number
   ) {
     // Message lists stream + event names only. Payloads remain accessible
     // via `error.events` for callers who need them — keeping them out of
@@ -265,6 +284,10 @@ export class ConcurrencyError extends Error {
         )}". Expected version ${expectedVersion} but found version ${lastVersion}.`
     );
     this.name = Errors.ConcurrencyError;
+    this.stream = stream;
+    this.lastVersion = lastVersion;
+    this.events = events;
+    this.expectedVersion = expectedVersion;
   }
 }
 
@@ -292,12 +315,13 @@ export class ConcurrencyError extends Error {
  * @see {@link Act.close} for closing streams
  */
 export class StreamClosedError extends Error {
-  constructor(
-    /** The stream that is closed */
-    public readonly stream: string
-  ) {
+  /** The stream that is closed */
+  public readonly stream: string;
+
+  constructor(stream: string) {
     super(`Stream "${stream}" is closed (tombstoned)`);
     this.name = Errors.StreamClosedError;
+    this.stream = stream;
   }
 }
 

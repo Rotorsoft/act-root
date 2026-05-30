@@ -49,12 +49,14 @@ export type SettleDeps<TEvents extends Schemas> = {
 export class SettleLoop<TEvents extends Schemas> {
   private _timer: ReturnType<typeof setTimeout> | undefined = undefined;
   private _running = false;
+  private readonly _deps: SettleDeps<TEvents>;
+  /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
+  private readonly _default_debounce_ms: number;
 
-  constructor(
-    private readonly deps: SettleDeps<TEvents>,
-    /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
-    private readonly defaultDebounceMs: number
-  ) {}
+  constructor(deps: SettleDeps<TEvents>, defaultDebounceMs: number) {
+    this._deps = deps;
+    this._default_debounce_ms = defaultDebounceMs;
+  }
 
   /**
    * Schedule a settle pass. Multiple calls inside the debounce window
@@ -65,7 +67,7 @@ export class SettleLoop<TEvents extends Schemas> {
    */
   schedule(options: SettleOptions = {}): void {
     const {
-      debounceMs = this.defaultDebounceMs,
+      debounceMs = this._default_debounce_ms,
       correlate: correlateQuery = { after: -1, limit: 100 },
       maxPasses = Infinity,
       ...drainOptions
@@ -78,27 +80,27 @@ export class SettleLoop<TEvents extends Schemas> {
       this._running = true;
 
       (async () => {
-        await this.deps.init();
+        await this._deps.init();
         let lastDrain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
         // projection) without forcing callers to roll their own loop.
         // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
-          const { subscribed } = await this.deps.correlate({
+          const { subscribed } = await this._deps.correlate({
             ...correlateQuery,
-            after: this.deps.checkpoint(),
+            after: this._deps.checkpoint(),
           });
-          lastDrain = await this.deps.drain(drainOptions);
+          lastDrain = await this._deps.drain(drainOptions);
           const made_progress =
             subscribed > 0 ||
             lastDrain.acked.length > 0 ||
             lastDrain.blocked.length > 0;
           if (!made_progress) break;
         }
-        if (lastDrain) this.deps.onSettled(lastDrain);
+        if (lastDrain) this._deps.onSettled(lastDrain);
       })()
-        .catch((err) => this.deps.logger.error(err))
+        .catch((err) => this._deps.logger.error(err))
         .finally(() => {
           this._running = false;
         });

@@ -17,16 +17,19 @@ import { z } from "zod";
 import { projection, state } from "../src/index.js";
 import type { Invariant } from "../src/types/index.js";
 
-// Realistic-shaped Zod schemas: a TS enum fed through `z.enum(...)` plus
-// ~10 fields with mixed required / optional / default modifiers. Smaller
-// schemas don't reproduce the inference degradation even with the same
-// chain shape, so the regression repro keeps the surface honest.
-enum InvoiceSchedule {
-  Weekly = "weekly",
-  Biweekly = "biweekly",
-  Semimonthly = "semimonthly",
-  Monthly = "monthly",
-}
+// Realistic-shaped Zod schemas: a string-literal union fed through
+// `z.enum(...)` plus ~10 fields with mixed required / optional /
+// default modifiers. Smaller schemas don't reproduce the inference
+// degradation even with the same chain shape, so the regression repro
+// keeps the surface honest. The original repro used a TS enum, but
+// enums are banned under `erasableSyntaxOnly` — a const object with
+// a derived union is the type-equivalent erasable form.
+const InvoiceSchedule = {
+  Weekly: "weekly",
+  Biweekly: "biweekly",
+  Semimonthly: "semimonthly",
+  Monthly: "monthly",
+} as const;
 
 const ClientFields = z.object({
   name: z.string().min(1),

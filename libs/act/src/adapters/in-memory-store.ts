@@ -34,6 +34,8 @@ import { sleep } from "../utils.js";
  * Represents an in-memory stream for event processing and leasing.
  */
 class InMemoryStream {
+  readonly stream: string;
+  readonly source: string | undefined;
   private _at = -1;
   private _retry = -1;
   private _blocked = false;
@@ -44,11 +46,13 @@ class InMemoryStream {
   private _lane: string = DEFAULT_LANE;
 
   constructor(
-    readonly stream: string,
-    readonly source: string | undefined,
+    stream: string,
+    source: string | undefined,
     priority = 0,
     lane: string = DEFAULT_LANE
   ) {
+    this.stream = stream;
+    this.source = source;
     this._priority = priority;
     this._lane = lane;
   }
