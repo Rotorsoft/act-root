@@ -1,3 +1,11 @@
+# [@rotorsoft/act-pg-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.3.0...@rotorsoft/act-pg-v1.4.0) (2026-05-30)
+
+
+### Features
+
+* **act:** batch_size + max_id probe for determinate progress (ACT-1133) ([ab78103](https://github.com/rotorsoft/act-root/commit/ab78103cbc674918413752c531f5ccaee83ebe53))
+* **act:** iterate paginates source.query for bounded-memory scan (ACT-1133) ([f97b103](https://github.com/rotorsoft/act-root/commit/f97b10343b7a47b08468ac9169e13db09c5a3f90)), closes [#817](https://github.com/rotorsoft/act-root/issues/817)
+
 # [@rotorsoft/act-pg-v1.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.2.0...@rotorsoft/act-pg-v1.3.0) (2026-05-28)
 
 
