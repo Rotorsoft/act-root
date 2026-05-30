@@ -313,9 +313,11 @@ export class DrainController<
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
 
-  constructor(
-    private readonly deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>
-  ) {}
+  private readonly _deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>;
+
+  constructor(deps: DrainControllerDeps<TEvents, TActions, TSchemaReg>) {
+    this._deps = deps;
+  }
 
   /**
    * Signal that a commit (or reset / cold-start) may have produced work.
@@ -369,7 +371,7 @@ export class DrainController<
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
   get lane(): string | undefined {
-    return this.deps.lane;
+    return this._deps.lane;
   }
 
   /**
@@ -413,7 +415,7 @@ export class DrainController<
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
 
-    const d = this.deps.defaults ?? {};
+    const d = this._deps.defaults ?? {};
     // Per-lane config wins over caller options (ACT-1103). The whole
     // point of `withLane({leaseMillis: 30_000})` is to give the slow
     // lane its own budget — a caller-level drain({leaseMillis}) would
@@ -429,17 +431,17 @@ export class DrainController<
       const leading = streamLimit - lagging;
 
       const cycle = await runDrainCycle(
-        this.deps.ops,
-        this.deps.registry,
-        this.deps.batchHandlers,
-        this.deps.handle,
-        this.deps.handleBatch,
+        this._deps.ops,
+        this._deps.registry,
+        this._deps.batchHandlers,
+        this._deps.handle,
+        this._deps.handleBatch,
         lagging,
         leading,
         eventLimit,
         leaseMillis,
         this._backoff.size > 0 ? this.isDeferred : undefined,
-        this.deps.lane
+        this._deps.lane
       );
 
       if (!cycle) {
@@ -454,7 +456,7 @@ export class DrainController<
       // claim + fetch + outcomes folded together so the operator sees
       // a single atomic narrative for each cycle. No-op when the
       // logger isn't at trace level.
-      traceCycle(this.deps.logger, leased, fetched, handled, acked, blocked);
+      traceCycle(this._deps.logger, leased, fetched, handled, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = computeLagLeadRatio(handled, lagging, leading);
@@ -471,8 +473,8 @@ export class DrainController<
       }
       if (this._backoff.size > 0) this.scheduleBackoffWake();
 
-      if (acked.length) this.deps.onAcked(acked);
-      if (blocked.length) this.deps.onBlocked(blocked);
+      if (acked.length) this._deps.onAcked(acked);
+      if (blocked.length) this._deps.onBlocked(blocked);
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
@@ -481,7 +483,7 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      this.deps.logger.error(error);
+      this._deps.logger.error(error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;

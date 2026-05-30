@@ -57,16 +57,26 @@ export class CorrelateCycle<
   private _initialized = false;
   private _timer: ReturnType<typeof setInterval> | undefined = undefined;
   private readonly _subscribed: LruSet<string>;
+  private readonly _registry: Registry<TSchemaReg, TEvents, TActions>;
+  private readonly _static_targets: ReadonlyArray<StaticTarget>;
+  private readonly _has_dynamic_resolvers: boolean;
+  private readonly _cd: DrainOps<TEvents>;
+  private readonly _on_init: (() => void) | undefined;
 
   constructor(
-    private readonly registry: Registry<TSchemaReg, TEvents, TActions>,
-    private readonly staticTargets: ReadonlyArray<StaticTarget>,
-    private readonly hasDynamicResolvers: boolean,
-    private readonly cd: DrainOps<TEvents>,
+    registry: Registry<TSchemaReg, TEvents, TActions>,
+    staticTargets: ReadonlyArray<StaticTarget>,
+    hasDynamicResolvers: boolean,
+    cd: DrainOps<TEvents>,
     maxSubscribedStreams: number,
-    private readonly onInit?: () => void
+    onInit?: () => void
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
+    this._registry = registry;
+    this._static_targets = staticTargets;
+    this._has_dynamic_resolvers = hasDynamicResolvers;
+    this._cd = cd;
+    this._on_init = onInit;
   }
 
   /** Last correlated event id. */
@@ -85,10 +95,10 @@ export class CorrelateCycle<
     if (this._initialized) return;
     this._initialized = true;
 
-    const { watermark } = await store().subscribe([...this.staticTargets]);
+    const { watermark } = await store().subscribe([...this._static_targets]);
     this._checkpoint = watermark;
-    this.onInit?.();
-    for (const { stream } of this.staticTargets) {
+    this._on_init?.();
+    for (const { stream } of this._static_targets) {
       this._subscribed.add(stream);
     }
   }
@@ -104,7 +114,7 @@ export class CorrelateCycle<
     await this.init();
 
     // No dynamic resolvers — nothing to discover
-    if (!this.hasDynamicResolvers)
+    if (!this._has_dynamic_resolvers)
       return { subscribed: 0, last_id: this._checkpoint };
 
     // Use checkpoint as floor, allow explicit query.after to override upward
@@ -122,7 +132,7 @@ export class CorrelateCycle<
     await store().query<TEvents>(
       (event) => {
         last_id = event.id;
-        const register = this.registry.events[event.name];
+        const register = this._registry.events[event.name];
         // skip events with no registered reactions
         if (register) {
           for (const reaction of register.reactions.values()) {
@@ -165,7 +175,7 @@ export class CorrelateCycle<
           lane,
         })
       );
-      const { subscribed } = await this.cd.subscribe(streams);
+      const { subscribed } = await this._cd.subscribe(streams);
       // Advance checkpoint only after subscribe succeeds
       this._checkpoint = last_id;
       if (subscribed) {

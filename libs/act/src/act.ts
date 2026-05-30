@@ -226,6 +226,10 @@ export class Act<
   private readonly _notify_disposer: Promise<
     (() => void | Promise<void>) | undefined
   >;
+  /** Public registry — kept as-is per the no-prefix-on-public convention. */
+  public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
+  /** Map of state name → state definition; populated by the builder. */
+  private readonly _states: Map<string, State<any, any, any>>;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -341,12 +345,14 @@ export class Act<
    *   instance; later slices fan out one `DrainController` per lane.
    */
   constructor(
-    public readonly registry: Registry<TSchemaReg, TEvents, TActions>,
-    private readonly _states: Map<string, State<any, any, any>> = new Map(),
+    registry: Registry<TSchemaReg, TEvents, TActions>,
+    states: Map<string, State<any, any, any>> = new Map(),
     batchHandlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
     lanes: ReadonlyArray<LaneConfig> = []
   ) {
+    this.registry = registry;
+    this._states = states;
     this._batch_handlers = batchHandlers;
     this._lanes = lanes;
     if (options.onlyLanes && options.onlyLanes.length > 0) {

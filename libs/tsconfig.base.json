@@ -9,12 +9,13 @@
     "declarationMap": true,
     "sourceMap": true,
     "esModuleInterop": true,
-    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
+    "noUncheckedSideEffectImports": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
     "types": ["node", "vitest/globals"],
-    "baseUrl": ".",
     "paths": {
-      "@rotorsoft/*": ["*/src/index.ts"]
+      "@rotorsoft/*": ["./*/src/index.ts"]
     }
   }
 }

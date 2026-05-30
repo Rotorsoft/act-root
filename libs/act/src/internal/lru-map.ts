@@ -23,8 +23,11 @@
  */
 export class LruMap<K, V> {
   private readonly _entries = new Map<K, V>();
+  private readonly _max_size: number;
 
-  constructor(private readonly _maxSize: number) {}
+  constructor(maxSize: number) {
+    this._max_size = maxSize;
+  }
 
   get(key: K): V | undefined {
     const v = this._entries.get(key);
@@ -41,7 +44,7 @@ export class LruMap<K, V> {
 
   set(key: K, value: V): void {
     this._entries.delete(key);
-    if (this._entries.size >= this._maxSize) {
+    if (this._entries.size >= this._max_size) {
       // size >= maxSize ≥ 1 → at least one entry exists → next().value
       // is the oldest key (asserted with `!`).
       const oldest = this._entries.keys().next().value!;
