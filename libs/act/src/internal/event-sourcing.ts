@@ -41,11 +41,12 @@ import { validate } from "../utils.js";
 import { defaultCorrelator } from "./correlator.js";
 
 /**
- * Per-batch row count for the {@link scan} pagination loop (ACT-1133).
+ * Default per-batch row count for the {@link scan} pagination loop
+ * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
  *
  * @internal
  */
-const BATCH = 500;
+const DEFAULT_BATCH = 500;
 
 /**
  * Internal action signature seen by the orchestrator — the {@link Correlator}
@@ -202,11 +203,27 @@ export async function scan(
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<ScanResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
+  const limit = opts.batch_size ?? DEFAULT_BATCH;
   const id_map = new Map<number, number>();
   let kept = 0;
   let dropped_snaps = 0;
   let processed = 0;
   let at: number | undefined;
+
+  // Probe the source for the highest id once up front. On indexed
+  // stores (PostgresStore, SqliteStore) `{ backward: true, limit: 1 }`
+  // is an index-only seek — O(1) on the (id) index. Sources that
+  // ignore the filter (CsvFile) stream every event from this one
+  // call; we detect that via the returned count and leave max_id
+  // undefined rather than reporting an unreliable value.
+  let max_id: number | undefined;
+  const probed = await source.query<Schemas>(
+    (e) => {
+      max_id = e.id;
+    },
+    { backward: true, limit: 1 }
+  );
+  if (probed !== 1) max_id = undefined;
 
   while (true) {
     let got = 0;
@@ -219,7 +236,7 @@ export async function scan(
         processed++;
         if (!is_valid(event))
           throw new Error(`Invalid event at index ${processed}`);
-        if (on_progress) on_progress({ processed });
+        if (on_progress) on_progress({ processed, id: event.id, max_id });
         if (drop_snapshots && event.name === SNAP_EVENT) {
           dropped_snaps++;
           return;
@@ -252,16 +269,16 @@ export async function scan(
         id_map.set(event.id, new_id);
         kept++;
       },
-      { after: at, limit: BATCH }
+      { after: at, limit }
     );
 
     // Termination:
-    //   - got < BATCH: source honored limit but ran out (also covers
+    //   - got < batch: source honored limit but ran out (also covers
     //     got === 0 — past-the-end on a paginating source).
-    //   - got > BATCH: source ignored the filter (CsvFile-style). It
+    //   - got > batch: source ignored the filter (CsvFile-style). It
     //     streamed everything in one call; nothing left to ask for.
-    //   Otherwise (got === BATCH): more events may exist; bump and continue.
-    if (got !== BATCH) break;
+    //   Otherwise (got === batch): more events may exist; bump and continue.
+    if (got !== limit) break;
     at = id;
   }
 

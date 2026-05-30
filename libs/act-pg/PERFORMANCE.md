@@ -177,12 +177,14 @@ for free.
 ## ACT-1133 — bounded-memory scan via pagination
 
 `scan` (used by `Act.restore` / `Act.transfer`) walks the source
-in batches. Each call to `source.query` requests `limit: 500`
-and `after: <last id seen>`; the loop exits when a batch
-returns fewer events than requested (source paginated, ran out)
-or more than requested (`CsvFile`-style source streams
-everything in one call). Adapter memory stays at O(batch)
-regardless of total source size. The source's per-event
+in batches. Each call to `source.query` requests
+`limit: ScanOptions.batch_size` (default 500, caller-tunable
+per-call via `Act.restore(source, { batch_size })`) and
+`after: <last id seen>`; the loop exits when a batch returns
+fewer events than requested (source paginated, ran out) or more
+than requested (`CsvFile`-style source streams everything in one
+call). Adapter memory stays at O(`batch_size`) regardless of
+total source size. The source's per-event
 `await Promise.resolve(callback(event))` provides consumer
 backpressure.
 
@@ -217,14 +219,15 @@ small per-event payload (`{ i: number }`), node v22.18.0.
 | Path | Duration | Peak heap (Δ from baseline) | Peak RSS (Δ) |
 |---|---|---|---|
 | Buffered (single `pool.query`, no limit) | 1,335 ms | 258.0 MB (+246.2 MB) | 512.9 MB (+304.0 MB) |
-| Paginated (`limit:500` loop, bumped `after`) | 1,970 ms | 63.6 MB (+51.7 MB) | 511.3 MB (+302.3 MB) |
+| Paginated (`batch_size: 500` loop) | 1,970 ms | 63.6 MB (+51.7 MB) | 511.3 MB (+302.3 MB) |
 
 **4× smaller peak heap (246.2 MB → 51.7 MB).** Wall-clock cost
 is 48 % from the per-batch re-plan; for restore / transfer /
 wide-export the memory ceiling is the dominant constraint, not
 throughput.
 
-Callers that already pass `limit ≤ 500` (aggregate `load`,
-projection scan, inspector page — the framework's hot path) hit
-the loop once and return after one round trip, same as a bare
-`pool.query`.
+Callers that already pass `limit ≤ batch_size` (aggregate
+`load`, projection scan, inspector page — the framework's hot
+path) hit the loop once and return after one round trip, same
+as a bare `pool.query`. Operators can tune `batch_size` per
+`Act.restore` call to trade round trips against memory.

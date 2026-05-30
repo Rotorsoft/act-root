@@ -46,8 +46,11 @@ function fromArray(events: E[]): EventSource {
   return {
     async query(callback, filter?) {
       const after = filter?.after ?? 0;
+      const before = filter?.before ?? Number.POSITIVE_INFINITY;
       const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
-      const slice = events.filter((e) => e.id > after).slice(0, limit);
+      let slice = events.filter((e) => e.id > after && e.id < before);
+      if (filter?.backward) slice = [...slice].reverse();
+      slice = slice.slice(0, limit);
       for (const e of slice)
         await Promise.resolve((callback as (event: E) => void)(e));
       return slice.length;
@@ -117,13 +120,24 @@ describe("scan (pre-flight, no committer)", () => {
     const events: E[] = Array.from({ length: total }, (_, i) =>
       baseEvent({ id: i + 1, version: i })
     );
-    const calls: Array<{ after?: number; limit?: number }> = [];
+    const calls: Array<{
+      after?: number;
+      limit?: number;
+      backward?: boolean;
+    }> = [];
     const source: EventSource = {
       async query(callback, filter?) {
-        calls.push({ after: filter?.after, limit: filter?.limit });
+        calls.push({
+          after: filter?.after,
+          limit: filter?.limit,
+          backward: filter?.backward,
+        });
         const after = filter?.after ?? 0;
+        const before = filter?.before ?? Number.POSITIVE_INFINITY;
         const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
-        const slice = events.filter((e) => e.id > after).slice(0, limit);
+        let slice = events.filter((e) => e.id > after && e.id < before);
+        if (filter?.backward) slice = [...slice].reverse();
+        slice = slice.slice(0, limit);
         for (const e of slice)
           await Promise.resolve((callback as (event: E) => void)(e));
         return slice.length;
@@ -133,18 +147,22 @@ describe("scan (pre-flight, no committer)", () => {
       },
     };
     let lastProcessed = 0;
+    let lastMaxId: number | undefined;
     const result = await scan(source, {
       on_progress: (p) => {
         lastProcessed = p.processed;
+        lastMaxId = p.max_id;
       },
     });
     expect(result.kept).toBe(total);
     expect(lastProcessed).toBe(total);
-    // Two batches: after=undefined limit=500, then after=500 limit=500
-    // (returns 100, terminates).
+    // max_id probe at scan start (backward+limit:1, returns 1 row),
+    // then two forward batches.
+    expect(lastMaxId).toBe(total);
     expect(calls).toEqual([
-      { after: undefined, limit: 500 },
-      { after: 500, limit: 500 },
+      { after: undefined, limit: 1, backward: true },
+      { after: undefined, limit: 500, backward: undefined },
+      { after: 500, limit: 500, backward: undefined },
     ]);
   });
 
