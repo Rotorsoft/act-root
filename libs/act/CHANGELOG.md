@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.5.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.1...@rotorsoft/act-v1.5.2) (2026-05-30)
+
+
+### Bug Fixes
+
+* **docs:** silence remaining typedoc + docusaurus warnings ([2c3bf2f](https://github.com/rotorsoft/act-root/commit/2c3bf2f7e98b34ab94ad143fb4a7f900cefe38ee))
+
 # [@rotorsoft/act-v1.5.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.0...@rotorsoft/act-v1.5.1) (2026-05-30)
 
 
