@@ -36,6 +36,7 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
     TRANSFER_DEFAULTS.download
   );
   const [dropSnapshots, setDropSnapshots] = useState(false);
+  const [batchSize, setBatchSize] = useState(500);
   const [preview, setPreview] = useState<ScanResult | null>(null);
   const [summary, setSummary] = useState<{
     result: ScanResult;
@@ -72,11 +73,19 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
   });
 
   // Reactive progress — same SSE subscription as everything else
-  // that calls `Act.restore` server-side.
+  // that calls `Act.restore` server-side. The server-side `scan`
+  // probes `max_id` once up front (ACT-1133) so a UI can render a
+  // determinate bar; `currentId` advances per event.
   const [processed, setProcessed] = useState(0);
+  const [currentId, setCurrentId] = useState<number | undefined>();
+  const [maxId, setMaxId] = useState<number | undefined>();
   trpc.restoreProgress.useSubscription(undefined, {
     enabled: transferMutation.isPending,
-    onData: (event) => setProcessed(event.processed),
+    onData: (event) => {
+      setProcessed(event.processed);
+      setCurrentId(event.id);
+      setMaxId(event.max_id);
+    },
   });
 
   // Invalidate the preview if any input changes — the counts
@@ -123,10 +132,13 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
 
   const handleRun = () => {
     setProcessed(0);
+    setCurrentId(undefined);
+    setMaxId(undefined);
     transferMutation.mutate({
       source: wireSource,
       target: wireTarget,
       drop_snapshots: dropSnapshots,
+      batch_size: batchSize,
     });
   };
 
@@ -191,6 +203,31 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                 disabled={inFlight}
               />
 
+              <div className="mt-3 rounded-md border border-zinc-800 p-3">
+                <label className="flex items-center justify-between gap-3 text-xs text-zinc-300">
+                  <div className="flex flex-col">
+                    <span className="font-medium">Batch size</span>
+                    <span className="mt-0.5 text-[11px] text-zinc-500">
+                      Per-batch row count passed to `scan` — lower trades
+                      round trips for memory. Default 500.
+                    </span>
+                  </div>
+                  <input
+                    type="number"
+                    min={50}
+                    max={10_000}
+                    step={50}
+                    value={batchSize}
+                    disabled={inFlight}
+                    onChange={(e) => {
+                      const v = Number.parseInt(e.target.value, 10);
+                      if (!Number.isNaN(v)) setBatchSize(v);
+                    }}
+                    className="w-24 rounded border border-zinc-700 bg-zinc-950 px-2 py-1 text-right font-mono text-xs text-zinc-200 focus:border-blue-500 focus:outline-none disabled:opacity-50"
+                  />
+                </label>
+              </div>
+
               <div className="mt-4">
                 <button
                   onClick={handlePreview}
@@ -222,7 +259,13 @@ export function TransferDialog({ onClose }: { onClose: () => void }) {
                 </p>
               )}
 
-              {inFlight && <ProgressBar processed={processed} />}
+              {inFlight && (
+                <ProgressBar
+                  processed={processed}
+                  id={currentId}
+                  max_id={maxId}
+                />
+              )}
 
               {transferMutation.isError && (
                 <p className="mt-2 text-xs text-red-400">

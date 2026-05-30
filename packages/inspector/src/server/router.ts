@@ -1083,7 +1083,7 @@ export const inspectorRouter = t.router({
     for await (const [event] of on(restoreProgressEmitter, "progress", {
       signal: opts.signal,
     })) {
-      yield event as { processed: number; total?: number };
+      yield event as { processed: number; id: number; max_id?: number };
     }
   }),
 
@@ -1180,6 +1180,12 @@ export const inspectorRouter = t.router({
           .optional(),
         dry_run: z.boolean().optional(),
         drop_snapshots: z.boolean().optional(),
+        // Per-batch row count for the scan pagination loop (ACT-1133).
+        // Lower trades round trips for memory; higher approaches the
+        // cost of an unbounded query. Bounded to a sensible operator
+        // range — too small thrashes round trips; too large defeats
+        // the bounded-memory point.
+        batch_size: z.number().int().min(50).max(10_000).optional(),
       })
     )
     .mutation(async ({ input }) => {
@@ -1258,12 +1264,18 @@ export const inspectorRouter = t.router({
       const filteredSource: Store = filter
         ? ({
             ...source,
-            // Delegate to the underlying store with our filter
-            // pre-bound; scan only ever passes the callback, never
-            // its own filter, so this is the right place to apply it.
+            // Delegate to the underlying store with the user's
+            // content filter merged with whatever filter `scan`
+            // passes per batch (the upfront max-id probe with
+            // `{backward, limit:1}`, then `{after, limit:500}` per
+            // forward batch). Scan's pagination knobs win on overlap
+            // — the user's filter narrows by content; pagination
+            // walks the narrowed result set.
             query: <E extends Schemas>(
-              cb: (event: Committed<E, keyof E>) => void
-            ): Promise<number> => source.query<E>(cb, filter),
+              cb: (event: Committed<E, keyof E>) => void,
+              scan_filter?: Query
+            ): Promise<number> =>
+              source.query<E>(cb, { ...filter, ...scan_filter }),
             dispose: () => source.dispose(),
           } as Store)
         : source;
@@ -1278,6 +1290,7 @@ export const inspectorRouter = t.router({
           {
             dry_run: input.dry_run,
             drop_snapshots: input.drop_snapshots,
+            batch_size: input.batch_size,
             on_progress: (p) => {
               restoreProgressEmitter.emit("progress", p);
             },

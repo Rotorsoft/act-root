@@ -90,9 +90,13 @@ app.restore(source: EventSource, opts?: ScanOptions, sink?: EventSink): Promise<
 
 `sink` defaults to the singleton store (which must declare the `restore` capability); passing an explicit sink routes the transfer elsewhere without binding the singleton. This is how the inspector's unified transfer endpoint moves events between PG ↔ SQLite ↔ CSV without ever changing what's connected.
 
-### Backpressure: how the callback shape became an async pipeline
+### Backpressure
 
-The `EventSource.query` callback is typed `(event) => void`, but adapters wrap each invocation in `await Promise.resolve(callback(event))`. TypeScript's "any return ignored when the type says `void`" rule lets the same call site work for both sync (`e => arr.push(e)`, returns `number`) and async (`async e => …`) callbacks. The orchestrator's `iterate` utility (in `libs/act/src/internal/event-sourcing.ts`, alongside `scan`) exploits this seam: it returns a promise from its callback that resolves only when the consumer pulls the event, turning the sync-callback `query` API into an `AsyncIterable<Committed>` with a 1-slot mailbox. The producer fills the slot, the consumer drains it, and `await callback(event)` blocks the next read until the consumer is ready. Net effect: streaming a multi-million-event PG store into a CSV file (or vice versa) holds at most one event in memory regardless of how unbalanced the two sides' throughputs are. `iterate` is internal because it's a transport detail; `CsvFile`, `EventSource`, and `EventSink` are the public surface the rest of the framework speaks.
+The `EventSource.query` callback is typed `(event) => void`, and adapters wrap each invocation in `await Promise.resolve(callback(event))`. TypeScript's "any return ignored when the type says `void`" rule lets the same call site accept both sync (`e => arr.push(e)`, returns `number`) and async (`async e => …`) callbacks. The orchestrator's `scan` (in `libs/act/src/internal/event-sourcing.ts`) puts its per-event work directly inside the source's callback, so the adapter's per-event await throttles the producer to the consumer's pace.
+
+`scan` paginates the source. Each batch calls `source.query` with `limit: ScanOptions.batch_size` (default 500, caller-tunable per `Act.restore` invocation) and `after: <last id seen>`. Stores that respect `limit` (`PostgresStore`'s `pool.query` honors it natively) hold one batch's worth of rows in memory per round trip — adapter cost is O(`batch_size`) regardless of total result size. Sources that ignore the filter and stream everything in one call (`CsvFile`) signal the loop to exit by returning more events than the requested limit; they're memory-safe because they read line-by-line internally.
+
+A million-event PG → CSV transfer holds at most `batch_size` rows in the adapter, one event in flight through the source's callback, and whatever the consumer accumulates downstream — independent of total source size. `CsvFile`, `EventSource`, and `EventSink` are the public surface the rest of the framework speaks.
 
 ### `scan`, `Act.restore`, and the destructive path
 
@@ -109,7 +113,7 @@ The orchestrator-side validator lives in `scan` (`libs/act/src/internal/event-so
 - **Atomic commits**: a multi-event commit is all-or-nothing. Either all events land or none do.
 - **Atomic truncate**: `truncate` deletes all events for a stream and inserts the seed event in a single transaction. Partial states are not observable.
 - **Atomic restore** (when implemented): `restore` wipes events + streams and rewrites the source rows in a single transaction. On any throw mid-iteration, the store reverts byte-for-byte to its pre-call state. Cache invalidation after restore is the caller's responsibility — restore does not touch the `Cache` port.
-- **Backpressured query**: adapters MUST invoke the per-event callback as `await Promise.resolve(callback(event))`. Sync callbacks (`(e) => arr.push(e)`) resolve immediately and pay no overhead; async callbacks (`async (e) => …`) throttle the read loop, which is how `iterate` and the transfer pipeline avoid OOM on multi-million-event sources.
+- **Backpressured query**: adapters MUST invoke the per-event callback as `await Promise.resolve(callback(event))`. Sync callbacks (`(e) => arr.push(e)`) resolve immediately and pay no overhead; async callbacks (`async (e) => …`) throttle the read loop, which is how `scan` and the transfer pipeline avoid OOM on multi-million-event sources.
 - **Lease exclusivity**: a successful `claim` returns leases that no concurrent `claim()` can return again until released by `ack`/`block`/timeout.
 - **Tombstone semantics**: a tombstone event is a regular event with `name === TOMBSTONE_EVENT`. Adapters don't need to know what it means — the framework's `action()` reads the head event to decide. Adapters just need to return tombstones in queries like any other event.
 

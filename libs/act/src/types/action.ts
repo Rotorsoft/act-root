@@ -569,10 +569,18 @@ export type ScanOptions = {
 
   /**
    * Optional progress callback. The scan loop fires it once per event
-   * during iteration. The callback receives the running `processed`
-   * count; `total` is left `undefined` because the source is
-   * async-iterable and the orchestrator doesn't know its length up
-   * front.
+   * during iteration. Three fields:
+   *
+   *   - `processed` — running 1-based count of events processed.
+   *   - `id` — current event's id.
+   *   - `max_id` — highest id in the source, probed once at scan start
+   *     via `source.query(noop, { backward: true, limit: 1 })`. O(1) on
+   *     indexed stores. Left `undefined` when the probe can't determine
+   *     it (e.g. `CsvFile`-style sources that ignore the filter and
+   *     stream more than one event from the probe call).
+   *
+   * UIs render either `processed / ?` (event count) or `id / max_id`
+   * (position through the id space) depending on need.
    *
    * Synchronous handler — the scan loop calls it directly.
    * **Throttling / batching is the caller's responsibility**: for a
@@ -581,7 +589,19 @@ export type ScanOptions = {
    * means callers that want every-event reporting get it without a
    * config knob.
    */
-  readonly on_progress?: (p: { processed: number; total?: number }) => void;
+  readonly on_progress?: (p: {
+    processed: number;
+    id: number;
+    max_id?: number;
+  }) => void;
+
+  /**
+   * Per-batch row count for the scan pagination loop (ACT-1133). Each
+   * call to `source.query` requests `limit: batch_size` and `after:
+   * <last id seen>`. Default `500`. Lower values trade round trips for
+   * memory; higher values approach the cost of an unbounded query.
+   */
+  readonly batch_size?: number;
 
   /**
    * When `true`, {@link IAct.restore} runs the scan loop without

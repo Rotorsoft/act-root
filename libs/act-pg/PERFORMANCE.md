@@ -173,3 +173,61 @@ hiccup, pool exhaustion) are tolerated — the existing debounce/poll
 path still drains correctly. So you can run with a longer poll
 interval as a safety net while taking the notify happy-path latency
 for free.
+
+## ACT-1133 — bounded-memory scan via pagination
+
+`scan` (used by `Act.restore` / `Act.transfer`) walks the source
+in batches. Each call to `source.query` requests
+`limit: ScanOptions.batch_size` (default 500, caller-tunable
+per-call via `Act.restore(source, { batch_size })`) and
+`after: <last id seen>`; the loop exits when a batch returns
+fewer events than requested (source paginated, ran out) or more
+than requested (`CsvFile`-style source streams everything in one
+call). Adapter memory stays at O(`batch_size`) regardless of
+total source size. The source's per-event
+`await Promise.resolve(callback(event))` provides consumer
+backpressure.
+
+`PostgresStore` participates in this without changes — it
+already honors `limit` in `pool.query`. Same for `SqliteStore`,
+`InMemoryStore`, and any adapter that respects the filter.
+Sources whose internal representation is already bounded
+(`CsvFile` reads line-by-line) are memory-safe regardless of
+what `limit` says.
+
+### Benchmark
+
+`libs/act-pg/scripts/iterate-pagination-rss.ts` seeds one stream
+with N events, takes baseline RSS + heap with `--expose-gc`, then
+walks the stream twice (single unlimited `pool.query`, then the
+paginated loop) sampling `process.memoryUsage()` on a 5 ms timer.
+
+Heap (V8 `heapUsed`) is the cleaner signal — RSS includes V8
+heap-growth hysteresis, so once the buffered run has grown V8 to
+peak, the subsequent paginated run inherits that RSS ceiling
+even though its live JS allocation is much smaller. `heapUsed`
+at the sample tick reflects current live allocations and
+isolates the per-path cost.
+
+Run: `pnpm tsx --expose-gc libs/act-pg/scripts/iterate-pagination-rss.ts`
+
+### Results
+
+Local docker PG (port 5431, `postgres:17-alpine`), `ROWS=500000`,
+small per-event payload (`{ i: number }`), node v22.18.0.
+
+| Path | Duration | Peak heap (Δ from baseline) | Peak RSS (Δ) |
+|---|---|---|---|
+| Buffered (single `pool.query`, no limit) | 1,335 ms | 258.0 MB (+246.2 MB) | 512.9 MB (+304.0 MB) |
+| Paginated (`batch_size: 500` loop) | 1,970 ms | 63.6 MB (+51.7 MB) | 511.3 MB (+302.3 MB) |
+
+**4× smaller peak heap (246.2 MB → 51.7 MB).** Wall-clock cost
+is 48 % from the per-batch re-plan; for restore / transfer /
+wide-export the memory ceiling is the dominant constraint, not
+throughput.
+
+Callers that already pass `limit ≤ batch_size` (aggregate
+`load`, projection scan, inspector page — the framework's hot
+path) hit the loop once and return after one round trip, same
+as a bare `pool.query`. Operators can tune `batch_size` per
+`Act.restore` call to trade round trips against memory.

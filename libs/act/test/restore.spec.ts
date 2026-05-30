@@ -36,13 +36,24 @@ const baseEvent = (overrides: Partial<E> = {}): E =>
  * abstraction. `await Promise.resolve(callback(e))` mirrors the
  * adapter pattern so async-callback backpressure is exercised even
  * from this synthetic source.
+ *
+ * Honors `after`/`limit` filters because `scan` paginates
+ * (ACT-1133) — it asks for events with `id > after` up to `limit`.
+ * Sources that ignore the filter (CsvFile-style) get tested
+ * separately in `csv.spec.ts`.
  */
 function fromArray(events: E[]): EventSource {
   return {
-    async query(callback) {
-      for (const e of events)
+    async query(callback, filter?) {
+      const after = filter?.after ?? 0;
+      const before = filter?.before ?? Number.POSITIVE_INFINITY;
+      const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
+      let slice = events.filter((e) => e.id > after && e.id < before);
+      if (filter?.backward) slice = [...slice].reverse();
+      slice = slice.slice(0, limit);
+      for (const e of slice)
         await Promise.resolve((callback as (event: E) => void)(e));
-      return events.length;
+      return slice.length;
     },
     async dispose() {
       // no-op — synthetic in-memory source
@@ -98,6 +109,61 @@ describe("scan (pre-flight, no committer)", () => {
       on_progress: (p) => calls.push(p.processed),
     });
     expect(calls).toEqual([1, 2]);
+  });
+
+  it("paginates source.query across the 500-row internal batch (ACT-1133)", async () => {
+    // Force scan's pagination loop to fire by feeding it 600 events —
+    // batch 1 returns exactly 500 (continue, bump `at`), batch 2
+    // returns 100 (got < BATCH → exit). Verifies every event is
+    // counted exactly once and on_progress reports the full total.
+    const total = 600;
+    const events: E[] = Array.from({ length: total }, (_, i) =>
+      baseEvent({ id: i + 1, version: i })
+    );
+    const calls: Array<{
+      after?: number;
+      limit?: number;
+      backward?: boolean;
+    }> = [];
+    const source: EventSource = {
+      async query(callback, filter?) {
+        calls.push({
+          after: filter?.after,
+          limit: filter?.limit,
+          backward: filter?.backward,
+        });
+        const after = filter?.after ?? 0;
+        const before = filter?.before ?? Number.POSITIVE_INFINITY;
+        const limit = filter?.limit ?? Number.POSITIVE_INFINITY;
+        let slice = events.filter((e) => e.id > after && e.id < before);
+        if (filter?.backward) slice = [...slice].reverse();
+        slice = slice.slice(0, limit);
+        for (const e of slice)
+          await Promise.resolve((callback as (event: E) => void)(e));
+        return slice.length;
+      },
+      async dispose() {
+        // no-op
+      },
+    };
+    let lastProcessed = 0;
+    let lastMaxId: number | undefined;
+    const result = await scan(source, {
+      on_progress: (p) => {
+        lastProcessed = p.processed;
+        lastMaxId = p.max_id;
+      },
+    });
+    expect(result.kept).toBe(total);
+    expect(lastProcessed).toBe(total);
+    // max_id probe at scan start (backward+limit:1, returns 1 row),
+    // then two forward batches.
+    expect(lastMaxId).toBe(total);
+    expect(calls).toEqual([
+      { after: undefined, limit: 1, backward: true },
+      { after: undefined, limit: 500, backward: undefined },
+      { after: 500, limit: 500, backward: undefined },
+    ]);
   });
 
   it("counts dropped snapshots when drop_snapshots is true", async () => {

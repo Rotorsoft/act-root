@@ -4,20 +4,17 @@ import { join } from "node:path";
 import type { Committed, EventSource, Query, Schemas } from "@rotorsoft/act";
 import { CsvFile } from "@rotorsoft/act";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { iterate } from "../src/internal/event-sourcing.js";
 
 type E = Committed<Schemas, string>;
 
 /**
- * Tests for the ACT-1128 transfer primitives:
+ * Tests for `CsvFile` (ACT-1128) — single class implementing both
+ * `EventSource` and `EventSink` (and `Disposable`) for CSV files
+ * on disk or in-memory CSV blobs. Public surface.
  *
- * - `iterate(source)` — 1-slot mailbox bridge from `EventSource.query`
- *   to `AsyncIterable<Committed>` with true backpressure. Internal to
- *   the framework — imported here via the deep `internal/` path the
- *   same way `scan` is in `restore.spec.ts`.
- * - `CsvFile` — single class implementing both `EventSource` and
- *   `EventSink` (and `Disposable`) for CSV files on disk or
- *   in-memory CSV blobs. Public surface.
+ * The pagination behavior introduced in ACT-1133 lives in `scan`
+ * directly (no separate `iterate` helper), so it's covered by the
+ * scan tests in `restore.spec.ts` against real adapters.
  */
 
 const makeEvent = (overrides: Partial<E> = {}): E =>
@@ -33,9 +30,8 @@ const makeEvent = (overrides: Partial<E> = {}): E =>
   }) as unknown as E;
 
 /**
- * Synthetic `EventSource` that walks an array. Identical shape to
- * the TCK's `asSource` helper — kept inline so this spec doesn't
- * depend on cross-package wiring.
+ * Synthetic `EventSource` that walks an array. Used by the round-trip
+ * tests below to feed events into a `CsvFile` sink.
  */
 function arraySource(events: E[]): EventSource {
   return {
@@ -53,87 +49,6 @@ function arraySource(events: E[]): EventSource {
     },
   };
 }
-
-describe("iterate", () => {
-  it("yields every event from a synchronous-callback source", async () => {
-    const events = [makeEvent(), makeEvent({ id: 2 }), makeEvent({ id: 3 })];
-    const collected: E[] = [];
-    for await (const e of iterate(arraySource(events)))
-      collected.push(e as unknown as E);
-    expect(collected.map((e) => e.id)).toEqual([1, 2, 3]);
-  });
-
-  it("returns immediately for an empty source", async () => {
-    const collected: E[] = [];
-    for await (const e of iterate(arraySource([])))
-      collected.push(e as unknown as E);
-    expect(collected).toEqual([]);
-  });
-
-  it("backpressures the producer to one event in flight", async () => {
-    // Build a source that records how many events the producer has
-    // pushed at the point each consumer iteration runs. Without
-    // backpressure the source would drain all events before the
-    // consumer's first `await` returns; with the 1-slot mailbox
-    // it stays in lockstep.
-    const totalEvents = 5;
-    const pushedAtConsume: number[] = [];
-    let pushed = 0;
-    const source: EventSource = {
-      async query(callback) {
-        for (let i = 0; i < totalEvents; i++) {
-          pushed++;
-          await Promise.resolve(
-            (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
-              makeEvent({ id: i + 1 }) as Committed<Schemas, keyof Schemas>
-            )
-          );
-        }
-        return totalEvents;
-      },
-      async dispose() {
-        // no-op
-      },
-    };
-    let consumed = 0;
-    for await (const _ of iterate(source)) {
-      consumed++;
-      // Producer should be at most one event ahead of consumer.
-      pushedAtConsume.push(pushed);
-    }
-    expect(consumed).toBe(totalEvents);
-    // 1-slot mailbox: at the point the consumer's body runs for
-    // event N, the producer has had a microtask to load event N+1
-    // into the slot (and parked awaiting the consumer to take it).
-    // So `pushed` is exactly `consumed + 1`, capped at totalEvents
-    // for the final iteration. Critically, `pushed - consumed` is
-    // never > 1 — that's the backpressure invariant.
-    expect(pushedAtConsume).toEqual([2, 3, 4, 5, 5]);
-    for (let i = 0; i < pushedAtConsume.length; i++)
-      expect(pushedAtConsume[i]! - (i + 1)).toBeLessThanOrEqual(1);
-  });
-
-  it("propagates errors from the source", async () => {
-    const source: EventSource = {
-      async query(callback) {
-        await Promise.resolve(
-          (callback as (event: Committed<Schemas, keyof Schemas>) => void)(
-            makeEvent() as Committed<Schemas, keyof Schemas>
-          )
-        );
-        throw new Error("source blew up");
-      },
-      async dispose() {
-        // no-op
-      },
-    };
-    const collected: E[] = [];
-    await expect(async () => {
-      for await (const e of iterate(source)) collected.push(e as unknown as E);
-    }).rejects.toThrow(/source blew up/);
-    expect(collected).toHaveLength(1);
-  });
-});
 
 describe("CsvFile (blob mode — read)", () => {
   const header = "id,name,data,stream,version,created,meta";

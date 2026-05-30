@@ -13,7 +13,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 
 - `seed()` / `drop()` — initialization and teardown
 - `commit(stream, msgs, meta, expectedVersion?)` — append events atomically with optimistic concurrency
-- `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support
+- `query(callback, query?)` — stream events to a callback with filter, range, regex, and `with_snaps` support. Respecting the `after` / `limit` pair is what gives `scan` bounded-memory restore: the framework paginates by re-issuing `query` per batch, so any adapter that already honors those filters gets memory-safe scans for free
 - `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure

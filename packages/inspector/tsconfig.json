@@ -6,8 +6,8 @@
   },
   "include": ["src"],
   "references": [
-    { "path": "../../libs/act" },
-    { "path": "../../libs/act-pg" },
-    { "path": "../../libs/act-sqlite" }
+    { "path": "../../libs/act/tsconfig.build.json" },
+    { "path": "../../libs/act-pg/tsconfig.build.json" },
+    { "path": "../../libs/act-sqlite/tsconfig.build.json" }
   ]
 }

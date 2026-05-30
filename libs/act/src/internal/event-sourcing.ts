@@ -29,7 +29,6 @@ import type {
   Emitted,
   EventMeta,
   EventSource,
-  Query,
   ScanOptions,
   ScanResult,
   Schema,
@@ -42,86 +41,12 @@ import { validate } from "../utils.js";
 import { defaultCorrelator } from "./correlator.js";
 
 /**
- * Bridge an {@link EventSource} into an `AsyncIterable<Committed>`
- * with 1-event-in-flight backpressure (ACT-1128). Internal helper
- * for the {@link scan} loop — the producer (`source.query`) awaits
- * a promise that the bridge resolves only when the consumer takes
- * the event from the mailbox, so memory in the bridge is bounded
- * to exactly one event.
- *
- * Downstream realization of backpressure depends on the adapter's
- * `query` implementation. Every in-tree adapter still buffers its
- * full result set internally before calling the callback (e.g.,
- * `pg.query` resolves with `rows[]`); the mailbox-on-top of that
- * adds bounded buffering downstream of the result set. True
- * cursor-based streaming on the adapter side is tracked in #814
- * (ACT-1132).
+ * Default per-batch row count for the {@link scan} pagination loop
+ * (ACT-1133). Callers override via {@link ScanOptions.batch_size}.
  *
  * @internal
  */
-export async function* iterate(
-  source: EventSource,
-  filter?: Query
-): AsyncIterable<Committed<Schemas, keyof Schemas>> {
-  // Wrapping the state in an object prevents TypeScript from
-  // narrowing the let-bound `null` initializer through the
-  // triple-closure-deep assignment path; behavior is unchanged.
-  type WakeFn = () => void;
-  const state: {
-    slot: Committed<Schemas, keyof Schemas> | null;
-    onProduce: WakeFn | null;
-    onConsume: WakeFn | null;
-    done: boolean;
-    error: unknown;
-  } = {
-    slot: null,
-    onProduce: null,
-    onConsume: null,
-    done: false,
-    error: undefined,
-  };
-
-  const wakeProduce = () => {
-    const fn = state.onProduce;
-    state.onProduce = null;
-    if (fn) fn();
-  };
-
-  void source
-    .query<Schemas>((event) => {
-      state.slot = event;
-      wakeProduce();
-      return new Promise<void>((resolve) => {
-        state.onConsume = () => resolve();
-      });
-    }, filter)
-    .then(
-      () => {
-        state.done = true;
-        wakeProduce();
-      },
-      (err) => {
-        state.error = err;
-        state.done = true;
-        wakeProduce();
-      }
-    );
-
-  while (true) {
-    if (state.slot === null && !state.done)
-      await new Promise<void>((resolve) => {
-        state.onProduce = resolve;
-      });
-    if (state.error) throw state.error;
-    if (state.slot === null) return;
-    const event = state.slot;
-    state.slot = null;
-    const fn = state.onConsume!;
-    state.onConsume = null;
-    fn();
-    yield event;
-  }
-}
+const DEFAULT_BATCH = 500;
 
 /**
  * Internal action signature seen by the orchestrator — the {@link Correlator}
@@ -233,9 +158,15 @@ export async function tombstone(
  * duplicates at commit time, and gap detection is a caller-specific
  * policy (partial backups intentionally have gaps).
  *
+ * Extension point: per-event Zod schema validation against the active
+ * registry will land here — the source-side check is the right layer
+ * for it (catches malformed payloads before the sink transaction
+ * opens), and adding it keeps the per-event blocker contract in one
+ * place.
+ *
  * @internal
  */
-function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
+function is_valid(event: Committed<Schemas, keyof Schemas>): boolean {
   if (event.version < 0) return false;
   if (!(event.created instanceof Date) || Number.isNaN(event.created.getTime()))
     return false;
@@ -243,10 +174,19 @@ function isValid(event: Committed<Schemas, keyof Schemas>): boolean {
 }
 
 /**
- * Scan a restore source event by event. Owns iteration, validation,
+ * Scan a restore source event by event. Owns pagination, validation,
  * the `drop_snapshots` filter, the `on_progress` callback, and the
  * causation remap; adapters supply only the per-event insert
  * `callback` via the driver pattern (see {@link Store.restore}).
+ *
+ * Walks the source in chunks of {@link BATCH} via the existing
+ * `EventSource.query` interface — `limit: BATCH` and `after: <last
+ * id seen>` per batch (ACT-1133). Stores that respect `limit`
+ * (`PostgresStore`) return at most `BATCH` rows per call; sources
+ * that ignore the filter (`CsvFile`) stream everything in one call
+ * and the loop exits after the first batch when `got > BATCH`. The
+ * source's own per-event `await Promise.resolve(callback(event))`
+ * provides backpressure — no separate mailbox needed.
  *
  * Throws on the first invalid event (negative version, malformed
  * `created`) with the running index in the message.
@@ -263,50 +203,90 @@ export async function scan(
   callback?: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
 ): Promise<Omit<ScanResult, "duration_ms">> {
   const { drop_snapshots = false, on_progress } = opts;
-  const idMap = new Map<number, number>();
+  const limit = opts.batch_size ?? DEFAULT_BATCH;
+  const id_map = new Map<number, number>();
   let kept = 0;
-  let droppedSnapshots = 0;
+  let dropped_snaps = 0;
   let processed = 0;
-  for await (const event of iterate(source)) {
-    processed++;
-    if (!isValid(event)) throw new Error(`Invalid event at index ${processed}`);
-    if (on_progress) on_progress({ processed });
-    if (drop_snapshots && event.name === SNAP_EVENT) {
-      droppedSnapshots++;
-      continue;
-    }
-    if (!callback) {
-      kept++;
-      continue;
-    }
-    // Causation remap — rewrite `meta.causation.event.id` to the new
-    // id space if the source pointed at an earlier event's old id.
-    let remapped = event;
-    const causedBy = event.meta.causation.event?.id;
-    if (causedBy !== undefined) {
-      const newCausedBy = idMap.get(causedBy);
-      if (newCausedBy !== undefined && newCausedBy !== causedBy) {
-        remapped = {
-          ...event,
-          meta: {
-            ...event.meta,
-            causation: {
-              ...event.meta.causation,
-              event: { ...event.meta.causation.event!, id: newCausedBy },
-            },
-          },
-        };
-      }
-    }
-    const newId = await callback(remapped);
-    idMap.set(event.id, newId);
-    kept++;
+  let at: number | undefined;
+
+  // Probe the source for the highest id once up front. On indexed
+  // stores (PostgresStore, SqliteStore) `{ backward: true, limit: 1 }`
+  // is an index-only seek — O(1) on the (id) index. Sources that
+  // ignore the filter (CsvFile) stream every event from this one
+  // call; we detect that via the returned count and leave max_id
+  // undefined rather than reporting an unreliable value.
+  let max_id: number | undefined;
+  const probed = await source.query<Schemas>(
+    (e) => {
+      max_id = e.id;
+    },
+    { backward: true, limit: 1 }
+  );
+  if (probed !== 1) max_id = undefined;
+
+  while (true) {
+    let got = 0;
+    let id: number | undefined;
+
+    await source.query<Schemas>(
+      async (event) => {
+        got++;
+        id = event.id;
+        processed++;
+        if (!is_valid(event))
+          throw new Error(`Invalid event at index ${processed}`);
+        if (on_progress) on_progress({ processed, id: event.id, max_id });
+        if (drop_snapshots && event.name === SNAP_EVENT) {
+          dropped_snaps++;
+          return;
+        }
+        if (!callback) {
+          kept++;
+          return;
+        }
+        // Causation remap — rewrite `meta.causation.event.id` to the
+        // new id space if the source pointed at an earlier event's
+        // old id.
+        let remapped = event;
+        const caused_by = event.meta.causation.event?.id;
+        if (caused_by !== undefined) {
+          const new_caused_by = id_map.get(caused_by);
+          if (new_caused_by !== undefined && new_caused_by !== caused_by) {
+            remapped = {
+              ...event,
+              meta: {
+                ...event.meta,
+                causation: {
+                  ...event.meta.causation,
+                  event: { ...event.meta.causation.event!, id: new_caused_by },
+                },
+              },
+            };
+          }
+        }
+        const new_id = await callback(remapped);
+        id_map.set(event.id, new_id);
+        kept++;
+      },
+      { after: at, limit }
+    );
+
+    // Termination:
+    //   - got < batch: source honored limit but ran out (also covers
+    //     got === 0 — past-the-end on a paginating source).
+    //   - got > batch: source ignored the filter (CsvFile-style). It
+    //     streamed everything in one call; nothing left to ask for.
+    //   Otherwise (got === batch): more events may exist; bump and continue.
+    if (got !== limit) break;
+    at = id;
   }
+
   return {
     kept,
     dropped: {
       closed_streams: 0,
-      snapshots: droppedSnapshots,
+      snapshots: dropped_snaps,
       empty_streams: 0,
     },
   };

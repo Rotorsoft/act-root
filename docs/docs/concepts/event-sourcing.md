@@ -341,6 +341,10 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 - **`drop_snapshots: true`** — skip every `__snapshot__` event in the source. The rebuilt store has no snapshots, so the next snap policy regenerates them with the current state. Useful for compaction.
 - **`on_progress(p)`** — fired once per event with `{ processed }`. Callers throttle/debounce as needed. Powers the inspector's reactive progress bar.
 
+### Memory: how restore avoids OOM on large sources
+
+`scan` paginates the `EventSource.query` interface — re-issuing it with `limit: ScanOptions.batch_size` (default 500, caller-tunable via `Act.restore(source, { batch_size })`) and `after: <last id seen>` per batch. Stores that respect `limit` hold at most one batch's worth of rows per round trip. Sources that ignore the filter (`CsvFile`) stream events through internal line-by-line reads and signal `scan` to exit after one call by returning more events than the requested limit. Combined with the source's per-event `await Promise.resolve(callback(event))`, the restore pipeline holds at most `batch_size` rows in the producer adapter and one event in flight through the callback — independent of total source size. A multi-million-event PG → SQLite migration runs with bounded heap end-to-end. See [Extension points → Backpressure](../architecture/extension-points.md#backpressure) for the full contract.
+
 ### Restore vs reset vs truncate vs close
 
 | Primitive | What it does | Atomicity |
