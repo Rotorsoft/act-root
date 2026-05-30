@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.5.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.0...@rotorsoft/act-v1.5.1) (2026-05-30)
+
+
+### Bug Fixes
+
+* **docs:** docusaurus deploy — jsx flag + drop dead act-sse references ([ae68f30](https://github.com/rotorsoft/act-root/commit/ae68f30cea334cbe1514100bda3a8cfde6ea45ba)), closes [#823](https://github.com/rotorsoft/act-root/issues/823)
+
 # [@rotorsoft/act-v1.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.4.0...@rotorsoft/act-v1.5.0) (2026-05-30)
 
 
