@@ -8,6 +8,7 @@
   ],
   "dependencyDashboard": true,
   "enabledManagers": ["npm", "github-actions"],
+  "minimumReleaseAge": "3 days",
   "packageRules": [
     {
       "groupName": "Types packages",
