@@ -8,10 +8,9 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"],
-    "baseUrl": ".",
     "paths": {
-      "@rotorsoft/*": ["libs/*/src/index.ts"],
-      "@act/*": ["packages/*/src/index.ts"]
+      "@rotorsoft/*": ["./libs/*/src/index.ts"],
+      "@act/*": ["./packages/*/src/index.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
