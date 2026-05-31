@@ -9,12 +9,20 @@ import { TicketOperations } from "./ticket-operations.js";
  * human operator gets paged, an external incident tracker opens a
  * record, etc. `webhook` from `@rotorsoft/act-http/webhook` is the
  * canonical fire-and-forget delivery path: short timeout, auto
- * `Idempotency-Key`, retry with exponential backoff via ACT-601.
+ * `Idempotency-Key`, retry with exponential backoff via ACT-601,
+ * optional HMAC-SHA256 signing when `WEBHOOK_SECRET` is set.
  *
  * URL is env-driven so the example runs against a stub by default.
+ * `WEBHOOK_SECRET` is read at module load — set it on both the
+ * sender (this slice) and the receiver (the standalone receiver in
+ * `packages/server/src/webhook-receiver.ts`) to exercise the
+ * end-to-end signed delivery path. When unset, both sides run
+ * unsigned.
  */
 const ESCALATION_WEBHOOK_URL =
   process.env.WOLFDESK_ESCALATION_WEBHOOK ?? "https://example.com/escalations";
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
 
 /**
  * Webhook delivery rides on its own drain lane (ACT-1103). The lane
@@ -43,6 +51,7 @@ export const TicketWebhooksSlice = slice()
         escalationId: (event.data as { escalationId: string }).escalationId,
       }),
       timeoutMs: 2_000,
+      secret: WEBHOOK_SECRET,
     }),
     {
       maxRetries: 3,

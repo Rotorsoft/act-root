@@ -9,10 +9,10 @@
       "path": "../../libs/act"
     },
     {
-      "path": "../../libs/act-pg"
+      "path": "../../libs/act-pg/tsconfig.build.json"
     },
     {
-      "path": "../../libs/act-http"
+      "path": "../../libs/act-http/tsconfig.build.json"
     }
   ],
   "include": ["src", "test"],
