@@ -13,8 +13,8 @@ describe("delta", () => {
       expect(delta<Schema>({ a: 1, b: 2 }, { a: 10, b: 2 })).toEqual({ a: 10 });
     });
 
-    it("computes shallow delete", () => {
-      expect(delta<Schema>({ a: 1, b: 2 }, { a: 1 })).toEqual({ b: null });
+    it("omits keys present in before but missing in after", () => {
+      expect(delta<Schema>({ a: 1, b: 2 }, { a: 1 })).toEqual({});
     });
 
     it("returns empty result on equality", () => {
@@ -47,10 +47,16 @@ describe("delta", () => {
       expect(delta<Schema>(before, after)).toEqual({ nested: { x: 1 } });
     });
 
-    it("deletes nested via null when key is missing in after", () => {
+    it("omits a nested object whose key is missing in after", () => {
       const before = { config: { feature: true } };
       const after = {};
-      expect(delta<Schema>(before, after)).toEqual({ config: null });
+      expect(delta<Schema>(before, after)).toEqual({});
+    });
+
+    it("omits a missing key at depth ≥ 2", () => {
+      const before = { l1: { kept: 1, dropped: { inner: true } } };
+      const after = { l1: { kept: 1 } };
+      expect(delta<Schema>(before, after)).toEqual({});
     });
 
     it("returns {} for deeply-equal-but-distinct plain inputs (recursion bottoms out)", () => {
@@ -81,12 +87,22 @@ describe("delta", () => {
     });
   });
 
-  describe("deletion via missing keys", () => {
-    it("emits null for keys present only in before", () => {
-      expect(delta<Schema>({ a: 1, b: 2, c: 3 }, { a: 1 })).toEqual({
-        b: null,
-        c: null,
-      });
+  describe("missing keys — event-payload shape", () => {
+    it("omits every key present only in before (no null sentinel)", () => {
+      expect(delta<Schema>({ a: 1, b: 2, c: 3 }, { a: 1 })).toEqual({});
+    });
+
+    it("never produces null at any depth", () => {
+      const before = {
+        keep: 1,
+        drop: 2,
+        nested: { keep: "x", drop: "y", deeper: { drop: true } },
+      };
+      const after = { keep: 1, nested: { keep: "x" } };
+      const result = delta<Schema>(before, after);
+      expect(result).toEqual({});
+      const stringified = JSON.stringify(result);
+      expect(stringified).not.toContain("null");
     });
   });
 
@@ -189,27 +205,33 @@ describe("delta", () => {
       expect(delta(before, after)).toEqual({ k10: 999 });
     });
 
-    it("emits a single-key null delta for one deleted key", () => {
+    it("emits an empty delta when only a single key was removed", () => {
       const before = buildWide();
       const after = { ...before };
       delete after.k5;
-      expect(delta(before, after)).toEqual({ k5: null });
+      expect(delta(before, after)).toEqual({});
     });
   });
 
-  describe("mixed adds/deletes/changes at the same level", () => {
-    it("combines all three operations", () => {
+  describe("mixed adds/changes/removes at the same level", () => {
+    it("records adds + changes and omits removes", () => {
       const before = { keep: 1, change: "old", remove: true };
       const after = { keep: 1, change: "new", add: 42 };
       expect(delta<Schema>(before, after)).toEqual({
         change: "new",
-        remove: null,
         add: 42,
       });
     });
   });
 
-  describe("round-trip property — patch(before, delta(before, after)) ≡ after", () => {
+  // Round-trip holds when `before` and `after` share the same key set —
+  // the common shape for event payloads against a stable state schema.
+  // Shrinking shapes (deletion fixtures) are intentionally excluded:
+  // `delta` omits the missing key rather than encoding a null sentinel,
+  // and `patch` treats omission as "no change", so the dropped key
+  // survives the replay. Express deletion as a direct `patch` instruction
+  // (`patch(before, { key: null })`), not as a delta output.
+  describe("round-trip property — equal-shape: patch(before, delta(before, after)) ≡ after", () => {
     type Fixture = { name: string; before: Schema; patches: Schema };
     const fixtures: Fixture[] = [
       {
@@ -246,21 +268,6 @@ describe("delta", () => {
         name: "replaces booleans",
         before: { flag: true },
         patches: { flag: false },
-      },
-      {
-        name: "deletes keys set to null",
-        before: { a: 1, b: 2 },
-        patches: { b: null },
-      },
-      {
-        name: "deletes all keys",
-        before: { a: 1, b: 2 },
-        patches: { a: null, b: null },
-      },
-      {
-        name: "deletes nested via undefined on parent",
-        before: { config: { feature: true } },
-        patches: { config: null },
       },
       {
         name: "replaces arrays entirely",
@@ -310,15 +317,6 @@ describe("delta", () => {
           return o;
         })(),
         patches: { k10: 999 },
-      },
-      {
-        name: "wide single-key delete",
-        before: (() => {
-          const o: Schema = {};
-          for (let i = 0; i < 20; i++) o[`k${i}`] = i;
-          return o;
-        })(),
-        patches: { k5: null },
       },
       {
         name: "wide deep-merge nested value",
