@@ -82,6 +82,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-ops",
+          href: "/docs/api/act-ops/src",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-tck",
           href: "/docs/api/act-tck/src",
         },

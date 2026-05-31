@@ -6,7 +6,8 @@
     "../libs/act-sqlite/src/index.ts",
     "../libs/act-tck/src/index.ts",
     "../libs/act-http/src/webhook/index.ts",
-    "../libs/act-http/src/sse/index.ts"
+    "../libs/act-http/src/sse/index.ts",
+    "../libs/act-ops/src/index.ts"
   ],
   "out": "docs/api",
   "excludePrivate": true,
