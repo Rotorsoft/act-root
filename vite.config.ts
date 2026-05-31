@@ -20,6 +20,26 @@ export default defineConfig({
         __dirname,
         "libs/act-http/src/sse/index.ts"
       ),
+      "@rotorsoft/act-http/receiver/trpc": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/trpc/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/express": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/express/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/fastify": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/fastify/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/hono": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/hono/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/index.ts"
+      ),
       "@rotorsoft/act-pino": path.resolve(
         __dirname,
         "libs/act-pino/src/index.ts"
@@ -27,6 +47,10 @@ export default defineConfig({
       "@rotorsoft/act-ops/idempotency": path.resolve(
         __dirname,
         "libs/act-ops/src/idempotency/index.ts"
+      ),
+      "@rotorsoft/act-ops/receiver": path.resolve(
+        __dirname,
+        "libs/act-ops/src/receiver/index.ts"
       ),
       "@rotorsoft/act-sqlite": path.resolve(
         __dirname,

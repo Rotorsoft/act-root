@@ -10,6 +10,9 @@
       "path": "../../libs/act"
     },
     {
+      "path": "../../libs/act-http/tsconfig.build.json"
+    },
+    {
       "path": "../../libs/act-ops/tsconfig.build.json"
     },
     {

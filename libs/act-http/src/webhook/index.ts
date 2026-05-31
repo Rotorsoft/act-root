@@ -26,14 +26,32 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
+import { classifyHttpResponse } from "./classify.js";
+import { signRequest } from "./sign.js";
 import {
   NonRetryableWebhookError,
   type WebhookConfig,
   WebhookError,
 } from "./types.js";
 
-export type { WebhookBody, WebhookConfig, WebhookResolver } from "./types.js";
-export { NonRetryableWebhookError, WebhookError } from "./types.js";
+export {
+  classifyHttpResponse,
+  type HttpDisposition,
+  type TryOkOptions,
+  tryOk,
+} from "./classify.js";
+export type {
+  HttpDeliveryErrorInit,
+  WebhookBody,
+  WebhookConfig,
+  WebhookResolver,
+} from "./types.js";
+export {
+  NonRetryableHttpError,
+  NonRetryableWebhookError,
+  RetryableHttpError,
+  WebhookError,
+} from "./types.js";
 
 function resolve<TEvents extends Schemas, T>(
   resolver: T | ((e: Committed<TEvents, keyof TEvents>) => T) | undefined,
@@ -102,6 +120,14 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const body =
       typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
 
+    if (config.secret && !hasHeader(headers, "x-webhook-signature")) {
+      const { signature, timestamp } = signRequest(body, config.secret);
+      headers["X-Webhook-Signature"] = signature;
+      if (!hasHeader(headers, "x-webhook-timestamp")) {
+        headers["X-Webhook-Timestamp"] = timestamp;
+      }
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -125,7 +151,8 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    if (response.ok) return;
+    const disposition = classifyHttpResponse(response);
+    if (disposition === "ok") return;
 
     let responseBody: string | undefined;
     try {
@@ -135,7 +162,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
     }
 
     const ErrorClass =
-      response.status >= 500 ? WebhookError : NonRetryableWebhookError;
+      disposition === "retry" ? WebhookError : NonRetryableWebhookError;
     throw new ErrorClass(
       `webhook ${method} ${url} responded ${response.status}`,
       { status: response.status, url, responseBody }

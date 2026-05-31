@@ -308,50 +308,197 @@ The by-hand math, kept as a teaching aid — work through it once so you trust t
 
 Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s × 6 = 12s. Bare envelope: 18.2s. With `safetyFactor: 4`, the store sizes the window at 72.8s. Round up further if you want the cache to survive operator-driven retry during incident review — **most apps land at 24h regardless of what the math says**, and the derivation's job is to confirm 24h is generous enough, not to argue against it.
 
-### End-to-end example — tRPC receiver
+### End-to-end example — the high-level adapter (canonical path)
 
-A small idempotent receiver, mirroring the `packages/server` tRPC setup. The middleware checks `Idempotency-Key` and short-circuits duplicates:
+For most receivers, the `receiver` builder from `@rotorsoft/act-http/receiver` is the recommended path. Declare typed handlers fluently with Zod schemas, configure the store + optional secret, call `.build()` to freeze the builder into the `Receiver` runtime, then `.listen()` (long-running Node) or `.fetch(request)` (Lambda / edge). The builder uses Hono internally — one code path covers Node, AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, and Deno.
 
 ```ts
-// packages/server/src/webhook-receiver.ts (excerpt)
+import { receiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { initTRPC, TRPCError } from "@trpc/server";
+import { z } from "zod";
 
-const dedup = new InMemoryIdempotencyStore();
-const t = initTRPC.context<{ headers: Record<string, string> }>().create();
-
-export const idempotent = t.procedure.use(({ ctx, next }) => {
-  const key = ctx.headers["idempotency-key"];
-  if (!key) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Missing Idempotency-Key header",
-    });
-  }
-  const fresh = dedup.claim(key);
-  return next({ ctx: { ...ctx, key, deduped: !fresh } });
+const OrderConfirmedSchema = z.object({
+  orderId: z.string(),
+  total: z.number(),
 });
+
+const escalations = receiver({
+  port: 4001,
+  store: new InMemoryIdempotencyStore(),
+  secret: process.env.WEBHOOK_SECRET,
+})
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => {
+    // event.orderId and event.total are typed via Zod inference
+    // ctx.key is the deduplicated Idempotency-Key
+    await processOrder(event.orderId, event.total);
+  })
+  .on("OrderShipped", OrderShippedSchema, async (event, ctx) => {
+    await processShipment(event);
+  })
+  .build();
+
+await escalations.listen();
 ```
 
-Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
+Naming convention: the type is `Receiver` (PascalCase), the factory is `receiver` (lowercase), matching Act's existing builder analogs (`act`, `state`, `slice`, `projection`). The builder mounts each handler at `POST /<eventName>`. Failure responses are uniform across deployment targets:
 
-A handler using the middleware returns success on both first-attempt and dedup-hit, distinguishing them only for telemetry:
+| Status | Body | When |
+|---:|---|---|
+| **204** | (empty) | Handler ran successfully, or dedup-skipped silently. Sender stops retrying. |
+| **400** | `{ "error": "missing-key" }` | No `Idempotency-Key` header |
+| **401** | `{ "error": "missing-signature" \| "missing-timestamp" \| "stale" \| "future" \| "bad-signature" }` | Signature/timestamp verification failed |
+| **422** | `{ "error": "validation-failed", "detail": "..." }` | Schema rejected the body |
+| **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — sender retries |
+
+Successful first-time processing and dedup-skipped re-sends both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them.
+
+A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch verification + dedup work end-to-end.
+
+### Deployment targets
+
+The built `Receiver` is fetch-shaped under the hood — same code runs on every Hono-supported runtime:
+
+**Long-running Node server** (the example above) — call `listen()`. `@hono/node-server` is lazy-loaded so other runtimes don't need it installed.
+
+**AWS Lambda**:
 
 ```ts
-export const webhookRouter = t.router({
-  orderConfirmed: idempotent
-    .input(OrderConfirmedSchema)
-    .mutation(async ({ input, ctx }) => {
-      if (ctx.deduped) {
-        return { status: "dedup-skipped", key: ctx.key };
-      }
-      await processOrder(input);
-      return { status: "processed", key: ctx.key };
-    }),
-});
+import { receiver } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import { handle } from "hono/aws-lambda";
+
+const built = receiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ })
+  .build();
+
+export const handler = handle({ fetch: built.fetch });
 ```
 
-A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch dedup work end-to-end.
+**Cloudflare Workers**:
+
+```ts
+import { receiver } from "@rotorsoft/act-http/receiver";
+
+const built = receiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ })
+  .build();
+
+export default { fetch: built.fetch };
+```
+
+**Vercel Edge Functions** (Next.js App Router):
+
+```ts
+// app/api/webhooks/[name]/route.ts
+export const POST = async (request: Request) => built.fetch(request);
+```
+
+**Bun / Deno** — same as Cloudflare Workers; export `{ fetch }`.
+
+### Composing into an existing app — low-level middleware
+
+When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the lower-level `webhookMiddleware` factory:
+
+```ts
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
+
+// In an existing Hono app — composes with your own routes
+app.post(
+  "/webhooks/orders",
+  authMiddleware,
+  webhookMiddleware({ store, secret }),
+  async (c) => {
+    const { key, deduped } = c.get("idempotency");
+    const body = await c.req.json();
+    // …
+  }
+);
+```
+
+Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`/receiver/fastify`), and Hono (`/receiver/hono`). Each exposes `webhookMiddleware(options)` that returns the framework's native middleware shape. Use these when the high-level `receiver` builder is too opinionated for your stack.
+
+For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported:
+
+```ts
+import { checkWebhook } from "@rotorsoft/act-http/receiver";
+
+const result = await checkWebhook(req.headers, rawBody, { store, secret });
+if (!result.ok) reply(result.status, { error: result.reason });
+else handle({ key: result.key, deduped: result.deduped });
+```
+
+Swap `InMemoryIdempotencyStore` for a Redis or Postgres adapter — every layer above stays the same, because every adapter implements the same `IdempotencyStore` port.
+
+### Authenticated delivery — HMAC-SHA256 signing
+
+Idempotency stops you from processing the same event twice. It doesn't stop a third party from sending events you never sent. For receivers that need to verify the request actually came from your Act app — or for any production deployment where the receiver lives on the public internet — pair `webhook({ secret })` on the sender with `verifyWebhook` on the receiver.
+
+**Sender** — add a `secret` to the webhook config:
+
+```ts
+import { webhook } from "@rotorsoft/act-http/webhook";
+
+.on("OrderConfirmed")
+  .do(
+    webhook({
+      url: "https://api.example.com/webhooks/orders",
+      body: (e) => ({ orderId: e.stream, total: e.data.total }),
+      secret: process.env.WEBHOOK_SECRET!,  // ← signs every request
+      timeoutMs: 2_000,
+    }),
+    { maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 } }
+  )
+  .to(resolver)
+```
+
+The helper computes HMAC-SHA256 over `${timestamp}.${body}` (where `body` is the final serialized bytes) and attaches two headers:
+
+- `X-Webhook-Signature: sha256=<64-char-hex>`
+- `X-Webhook-Timestamp: <unix-seconds>`
+
+The format mirrors the Stripe / GitHub / Slack convention modulo the `X-Webhook-*` prefix. When `secret` is omitted, the helper sends unsigned (back-compat with consumers that don't need signing).
+
+**Receiver** — call `verifyWebhook` before processing:
+
+```ts
+import { verifyWebhook } from "@rotorsoft/act-http/receiver";
+
+const SECRET = process.env.WEBHOOK_SECRET!;
+
+const rawBody = await readRawBody(req);  // raw bytes; framework-specific
+const result = verifyWebhook(req.headers, rawBody, SECRET);
+if (!result.ok) {
+  log.warn({ reason: result.reason }, "webhook verification failed");
+  return reply.status(401).send({ error: result.reason });
+}
+// signature + timestamp window are good — proceed to dedup + handle
+```
+
+The result is a discriminated union with five distinct failure reasons, each mapping to an operator-meaningful telemetry bucket:
+
+| Reason | Meaning | Likely cause |
+|---|---|---|
+| `missing-signature` | `X-Webhook-Signature` header absent or unusable | Sender misconfigured (no `secret`), proxy stripped headers |
+| `missing-timestamp` | `X-Webhook-Timestamp` header absent or not a parseable integer | Sender misconfigured, header rewrite |
+| `stale` | Timestamp older than `maxAgeSeconds` (default 300) | Replay attempt, or client clock badly skewed backwards |
+| `future` | Timestamp newer than `now + maxAgeSeconds` | Client clock badly skewed forwards |
+| `bad-signature` | Recomputed HMAC didn't match | Wrong secret, tampered body, signature truncation |
+
+Separating the reasons lets your dashboards distinguish "clients losing secrets" from "clients with broken clocks" from "active replay attacks." Constant-time comparison via `crypto.timingSafeEqual` defeats signature-equality timing attacks.
+
+#### Why the receiver needs the raw body, not the parsed one
+
+The signature is over the bytes the sender wrote. Pre-parse normalization on the receiver — JSON re-stringification, whitespace trimming, key reordering — produces a different byte sequence, so the recomputed HMAC won't match. Framework adapters in #744 (tRPC / Express / Fastify / Hono) will provide the raw body alongside the parsed one; until then, capture the raw body in your framework's first middleware (`req.rawBody` in most ecosystems) and pass it to `verifyWebhook` directly.
+
+#### Timestamp window sizing
+
+The default `maxAgeSeconds: 300` (±5 minutes) covers most use cases — it tolerates the worst case of NTP-synced clocks drifting plus normal network latency. Tighten via `verifyWebhook(headers, body, secret, { maxAgeSeconds: 60 })` for stricter replay protection; loosen for clients with worse clock sync. The bound is two-sided: requests too far in the future are rejected too, since a future-dated request smells like clock manipulation.
+
+#### What signing does *not* give you
+
+- **No replay protection beyond the timestamp window.** Two valid requests at the same timestamp are both accepted. Layer `IdempotencyStore.claim` from `@rotorsoft/act-ops/idempotency` on top to dedup at the application level.
+- **No payload encryption.** The body is in plaintext; signing protects integrity and authenticity, not confidentiality. Use TLS (you should be doing this anyway).
+- **No protection against compromised secrets.** If the secret leaks, the attacker can sign valid requests. Rotate by configuring both sender and receiver with a new secret simultaneously. Stripe-style multi-secret rotation (accept two valid signatures during overlap) is parked for a future ticket — out of scope today.
 
 ---
 

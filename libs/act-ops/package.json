@@ -30,6 +30,11 @@
       "types": "./dist/@types/idempotency/index.d.ts",
       "import": "./dist/idempotency/index.js",
       "require": "./dist/idempotency/index.cjs"
+    },
+    "./receiver": {
+      "types": "./dist/@types/receiver/index.d.ts",
+      "import": "./dist/receiver/index.js",
+      "require": "./dist/receiver/index.cjs"
     }
   },
   "sideEffects": false,

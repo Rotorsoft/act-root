@@ -224,6 +224,7 @@ When the app receives webhooks (or forwarded bus events) and needs the receiver-
 
 ```typescript
 // packages/app/src/api/webhook-receiver.ts
+import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 // Size the dedup window from the sender's retry profile — don't
@@ -243,7 +244,7 @@ export const webhookRouter = router({
   inbound: t.procedure
     .input(InboundEventSchema)
     .mutation(async ({ input, ctx }) => {
-      const key = ctx.headers["idempotency-key"];
+      const key = extractIdempotencyKey(ctx.headers);
       if (!key) throw new TRPCError({ code: "BAD_REQUEST", message: "Missing Idempotency-Key" });
 
       const fresh = dedup.claim(key);

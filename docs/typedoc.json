@@ -7,7 +7,13 @@
     "../libs/act-tck/src/index.ts",
     "../libs/act-http/src/webhook/index.ts",
     "../libs/act-http/src/sse/index.ts",
-    "../libs/act-ops/src/idempotency/index.ts"
+    "../libs/act-http/src/receiver/index.ts",
+    "../libs/act-http/src/receiver/trpc/index.ts",
+    "../libs/act-http/src/receiver/express/index.ts",
+    "../libs/act-http/src/receiver/fastify/index.ts",
+    "../libs/act-http/src/receiver/hono/index.ts",
+    "../libs/act-ops/src/idempotency/index.ts",
+    "../libs/act-ops/src/receiver/index.ts"
   ],
   "out": "docs/api",
   "excludePrivate": true,

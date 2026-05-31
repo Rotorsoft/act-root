@@ -20,12 +20,17 @@ Most Act apps reach beyond their own process eventually — POSTing committed ev
 pnpm add @rotorsoft/act-http
 ```
 
-Two independent subpath exports:
+Three independent subpath exports:
 
 | Import path | What you get |
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
+| `@rotorsoft/act-http/receiver` | `receiver()` builder (high-level Hono-backed runtime) + `extractIdempotencyKey` + `verifyWebhook` + `checkWebhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
+| `@rotorsoft/act-http/receiver/trpc` | `webhookMiddleware` — tRPC middleware adapter. |
+| `@rotorsoft/act-http/receiver/express` | `webhookMiddleware` — Express middleware adapter. |
+| `@rotorsoft/act-http/receiver/fastify` | `webhookMiddleware` — Fastify `preHandler` adapter. |
+| `@rotorsoft/act-http/receiver/hono` | `webhookMiddleware` — Hono middleware adapter. |
 
 ## Quick start
 
@@ -49,6 +54,85 @@ import { webhook } from "@rotorsoft/act-http/webhook";
   )
   .to(resolver)
 ```
+
+### `receiver` — high-level builder (the canonical path)
+
+The `receiver` builder from `@rotorsoft/act-http/receiver` is Hono-backed and runs on every fetch-shaped runtime — long-running Node (via `.listen()`), AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, Deno (all via `.fetch()`). Declare typed handlers with Zod schemas, call `.build()`, and the runtime handles signature verification, dedup, raw-body capture, schema validation, and HTTP server lifecycle:
+
+```ts
+import { receiver } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import { z } from "zod";
+
+const escalations = receiver({
+  port: 4001,
+  store: new InMemoryIdempotencyStore(),
+  secret: process.env.WEBHOOK_SECRET,
+})
+  .on("OrderConfirmed", z.object({ orderId: z.string(), total: z.number() }),
+      async (event, ctx) => { await processOrder(event.orderId, event.total); })
+  .build();
+
+await escalations.listen();           // Node
+// export default { fetch: escalations.fetch };  // Cloudflare / Vercel / Bun / Deno
+```
+
+Naming convention: type `Receiver` (PascalCase), factory `receiver` (lowercase) — matches Act's existing `act` / `state` / `slice` / `projection` builder analogs.
+
+### `receiver/<framework>` — low-level middleware
+
+When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the per-framework `webhookMiddleware` factories. They compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` and translate the result into the framework's idiomatic 400/401 response:
+
+```ts
+// tRPC
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/trpc";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+const dedup = new InMemoryIdempotencyStore();
+const idempotent = t.procedure.use(
+  webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+);
+
+const router = t.router({
+  webhook: idempotent.input(Schema).mutation(({ input, ctx }) => {
+    const { key, deduped } = ctx.idempotency;
+    if (deduped) return { status: "dedup-skipped", key };
+    return { status: "processed", key };
+  }),
+});
+```
+
+Each adapter follows the same shape:
+
+```ts
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/express";
+app.post("/webhook", webhookMiddleware({ store, secret }), (req, res) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+```
+
+```ts
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/fastify";
+app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async (req) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+```
+
+```ts
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
+app.post("/webhook", webhookMiddleware({ store, secret }), (c) => {
+  const { key, deduped } = c.get("idempotency");
+  // …
+});
+```
+
+On failure: the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of five verification reasons — `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature`) and short-circuits the handler. On success: `{ key, deduped }` is injected into the request context.
+
+### `receiver` primitives — when neither builder nor middleware fits
+
+The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the `receiver` builder when you can; fall back to the framework `webhookMiddleware`, then the primitives.
 
 ### `sse` — live state broadcast
 
@@ -75,9 +159,34 @@ onData: (msg) => {
 ### `/webhook` subpath
 
 - **`webhook(config)`** — reaction-handler factory. Returns a function compatible with `.do(handler, opts)`.
-- **`WebhookError`** — thrown on 5xx, network errors, and timeouts. Carries `status` (`0` for network/timeout) and `url`. Retryable by drain.
-- **`NonRetryableWebhookError`** — thrown on 4xx. Extends `NonRetryableError` from `@rotorsoft/act`; the drain finalizer blocks the stream on first attempt without consuming the retry budget.
+- **`tryOk(response, { url, label? })`** — collapses the classify-and-throw block to one line for **custom HTTP-like reactions** (gRPC bridges, SDK-based deliveries). Returns void on 2xx; throws `RetryableHttpError` on 5xx; throws `NonRetryableHttpError` on 3xx/4xx. Captures the response body (best-effort) onto the thrown error.
+- **`classifyHttpResponse(response)`** — the underlying `"ok" | "retry" | "block"` classifier. Reach for it directly when you need custom error classes; otherwise `tryOk` wraps it.
+- **`RetryableHttpError`** — generic retryable delivery error. Extends `Error`. Thrown by `tryOk` on 5xx. `WebhookError` extends it.
+- **`NonRetryableHttpError`** — generic non-retryable delivery error. Extends `NonRetryableError` from `@rotorsoft/act`, so the drain finalizer blocks the stream on first failed attempt. Thrown by `tryOk` on 3xx/4xx. `NonRetryableWebhookError` extends it.
+- **`WebhookError`** — webhook-specific subclass of `RetryableHttpError`, thrown by the `webhook` helper. Existing `instanceof WebhookError` checks continue to work; new code targeting any HTTP integration can catch `RetryableHttpError` to handle both webhook + custom-integration errors uniformly.
+- **`NonRetryableWebhookError`** — webhook-specific subclass of `NonRetryableHttpError`, thrown by `webhook` on 3xx/4xx. Same backward-compat story as `WebhookError`.
 - **`WebhookConfig`** — TypeScript type for the helper options.
+- **`HttpDisposition`** — the `"ok" | "retry" | "block"` discriminator returned by `classifyHttpResponse`.
+- **`HttpDeliveryErrorInit`** — common `{ status, url, responseBody? }` shape passed to every HTTP error class.
+- **`TryOkOptions`** — `{ url, label? }` shape passed to `tryOk`.
+
+### `/receiver` subpath
+
+- **`checkWebhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim`. Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
+- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope.
+- **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` or `{ ok: false; reason }` where reason is one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
+- **Types**: `CheckResult`, `CheckWebhookOptions`, `CheckFailureReason`, `VerifyResult`, `VerifyOptions`.
+
+### `/receiver/<framework>` subpaths
+
+Each framework adapter exports a single function `webhookMiddleware(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped }` is injected:
+
+| Subpath | Injection site | Failure response |
+|---|---|---|
+| `/receiver/trpc` | `ctx.idempotency` | throws `TRPCError({ code, message: reason })` |
+| `/receiver/express` | `req.idempotency` | `res.status(...).json({ error: reason })` |
+| `/receiver/fastify` | `request.idempotency` | `reply.status(...).send({ error: reason })` |
+| `/receiver/hono` | `c.get("idempotency")` (typed via `Variables`) | `c.json({ error: reason }, status)` |
 
 ### `/sse` subpath
 
@@ -100,11 +209,14 @@ onData: (msg) => {
 | `body` | `unknown` or `(event) => unknown` | the committed event (JSON-serialized) |
 | `timeoutMs` | `number` | `5000` |
 | `idempotencyKey` | `(event) => string | null` | `String(event.id)` |
+| `secret` | `string` | unset (unsigned) |
 | `fetch` | `typeof fetch` | `globalThis.fetch` |
 
 Strings as `body` are sent as-is; anything else is `JSON.stringify`'d and `Content-Type: application/json` is set automatically (unless the caller supplies it).
 
 A caller-supplied `Idempotency-Key` header (case-insensitive) always wins; the auto-derived `event.id` is only applied when the header is absent. `event.id` is the framework's immutable, per-event monotonic integer — well-suited to downstream dedup.
+
+When `secret` is set, the helper signs each request with HMAC-SHA256 over `${timestamp}.${body}` (the final serialized body) and attaches `X-Webhook-Signature: sha256=<hex>` + `X-Webhook-Timestamp: <unix-seconds>`. Caller-supplied versions of either header (case-insensitive) win, the same way the `Idempotency-Key` and `Content-Type` defaults yield to caller intent. Pair with `verifyWebhook` from `@rotorsoft/act-http/receiver` on the receiving side — the protocol matches Stripe / GitHub / Slack conventions modulo the `X-Webhook-*` prefix.
 
 ## Common patterns
 
