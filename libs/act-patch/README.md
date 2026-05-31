@@ -44,8 +44,41 @@ That's the whole surface — two functions plus the type-level helpers. Everythi
 ## API
 
 - **`patch(original, patches)`** — immutably deep-merges `patches` into `original`. Returns a new state object with structural sharing of unchanged subtrees. Accepts `Patch<S>` (positive changes plus `null`/`undefined` deletion sentinels).
-- **`delta(before, after)`** — computes the smallest `DeepPartial<S>` describing what changed from `before` to `after`. Designed for event payloads — never emits `null`; missing keys in `after` are omitted from the result rather than encoded as deletion sentinels.
-- **Types**: `Patch<T>` (operator-facing recursive partial with `null` deletion), `DeepPartial<T>` (event-payload shape returned by `delta`, no `null` arms), `Schema` (plain-object shape).
+- **`delta(before, after)`** — computes the smallest `DeepPartial<S>` describing what changed from `before` to `after`. Designed for event payloads — never *synthesizes* `null` for a missing key, but always *propagates* `null` when the caller put one in `after`. See [Modeling deletions](#modeling-deletions) for how that asymmetry carries a clear-this-field action all the way to the aggregate.
+- **Types**: `Patch<T>` (operator-facing recursive partial with `null` deletion), `DeepPartial<T>` (event-payload shape returned by `delta`, includes `null` only where the schema declares `T[K]` as nullable), `Schema` (plain-object shape).
+
+## Modeling deletions
+
+The end-to-end deletion flow — action signals "clear this field" → event records it → reducer applies it to state — works through `delta` without you having to switch tools. The rule is short: **`delta` never invents a `null`, but it forwards every `null` the caller put in `after`.** That means the *action* drives the runtime, and the *schema* controls the type:
+
+| What the caller put in `after` for key `k` | What `delta` returns for `k` | What `patch` does on replay |
+|---|---|---|
+| (key omitted)                              | (key omitted)                | leaves `state[k]` alone |
+| explicit `null` (schema permits)           | `null`                       | deletes `state[k]` (null is `patch`'s deletion sentinel) |
+| new value                                  | the new value                | sets `state[k]` |
+| same reference as `before[k]`              | (key omitted)                | leaves `state[k]` alone |
+
+```ts
+// 1) Action with a deletable field — schema declares it `.nullable()`
+const state = { bio: "old", name: "Alice" };
+const data  = { bio: null, name: "Alice" };
+
+const eventPayload = delta(state, data);
+// → { bio: null }      ← propagated, not synthesized
+
+patch(state, eventPayload);
+// → { name: "Alice" }  ← state.bio is gone
+
+// 2) Action that just doesn't touch a field — non-nullable schema is fine
+const data2 = { name: "Bob" };  // no `bio` key at all
+const eventPayload2 = delta(state, data2);
+// → { name: "Bob" }    ← bio is omitted because the action didn't mention it
+
+patch(state, eventPayload2);
+// → { bio: "old", name: "Bob" }  ← bio left alone
+```
+
+The asymmetry is what keeps the konsult-style scenario clean: a schema with no `.nullable()` fields produces a `DeepPartial<S>` with no `| null` arms, an action that conforms to that schema can't carry `null`, and `delta` can't put one in the output because there was nothing in `after` to propagate. The type and the runtime agree: no nulls anywhere. As soon as a schema opts into `.nullable()` on a field, the type widens to admit `null`, the action can carry it, and `delta` carries it through. Same code path, both behaviors, driven by the schema.
 
 ## Common patterns
 
@@ -84,11 +117,14 @@ This is safe in event sourcing because state is typed `Readonly<S>` (compiler pr
 ### Round-trip identity
 
 ```
-patch(before, delta(before, after))  ≡  after        // when keys(after) ⊇ keys(before)
+patch(before, delta(before, after))  ≡  after
+   // when keys(after) ⊇ keys(before),  OR
+   // when every key in before \ after is set to null in after
+
 delta(before, before)                ≡  {}           // idempotent
 ```
 
-The round-trip holds for the equal-shape case (the common shape for event payloads against a stable state schema): every key in `before` is still in `after`, so `delta` records only the changes and `patch` reconstructs `after` faithfully. When `after` has fewer keys than `before`, the missing keys are omitted from `delta`'s output — `patch` then treats the omission as "no change", so the dropped keys survive the replay. This is intentional: `delta` produces event payloads, which record positive facts, not deletion instructions. Express a deletion directly as `patch(state, { key: null })`.
+The round-trip holds whenever `after` faithfully expresses the intended end-state — either by retaining every original key (the equal-shape case, common for event payloads against a stable state schema) or by setting the to-be-removed keys to `null` (the caller-driven deletion case from [Modeling deletions](#modeling-deletions)). If `after` silently *omits* a key that was in `before`, `delta` reads that as "no change" and the dropped key survives the replay — express the deletion as `null` instead, or instruct `patch` directly (`patch(before, { key: null })`).
 
 In Act's event sourcing model, an event's data *is* the (event-shaped) patch. Either direction works: emit `delta(prev, next)` as event data and let the framework apply it via `patch`, or hand-write a `Patch<S>` and emit it directly. No diff/merge logic on the application side.
 
@@ -101,8 +137,9 @@ In Act's event sourcing model, an event's data *is* the (event-shaped) patch. Ei
 | Same reference (`Object.is`) | omit (mirrors patch's structural sharing) |
 | Both plain objects | recurse |
 | Different references, any other diff | set to `after[K]` (wholesale replace) |
-| Key in `before` only | omit (event payloads record changes, not deletions — at any depth) |
-| Key in `after` only | set to `after[K]` |
+| Key in `before` only — *omitted* from `after` | omit (no synthesized null at any depth) |
+| Key in `after` set explicitly to `null` | set to `null` (caller-driven deletion — propagated, see [Modeling deletions](#modeling-deletions)) |
+| Key in `after` only (introduced) | set to `after[K]` |
 
 Two structurally-equal-but-distinct values (e.g. two `Date` instances with the same `getTime()`) emit a replacement — safe semantically, just slightly less compact. `Object.is` handles `NaN === NaN` and distinguishes `+0` from `-0` correctly.
 
