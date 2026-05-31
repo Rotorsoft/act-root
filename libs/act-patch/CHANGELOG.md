@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.2...@rotorsoft/act-patch-v1.2.3) (2026-05-31)
+
+
+### Bug Fixes
+
+* **act-patch:** delta returns DeepPartial, not Patch — no null in event payloads ([eb101b4](https://github.com/rotorsoft/act-root/commit/eb101b47a552036f3e075f0f5979e457dc6777a0))
+
 # [@rotorsoft/act-patch-v1.2.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.1...@rotorsoft/act-patch-v1.2.2) (2026-05-10)
 
 
