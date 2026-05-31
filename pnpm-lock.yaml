@@ -264,6 +264,8 @@ importers:
         specifier: workspace:^
         version: link:../act-patch
 
+  libs/act-ops: {}
+
   libs/act-patch: {}
 
   libs/act-pg:

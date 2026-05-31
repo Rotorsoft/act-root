@@ -29,6 +29,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-sse` — Server-Sent Events for incremental state broadcast
   - `@rotorsoft/act-http` — HTTP integrations (umbrella): `webhook` for reaction-driven POST delivery, plus an `sse` submodule that mirrors `@rotorsoft/act-sse`
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
+  - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
   - `@rotorsoft/act-tck` — Test Compatibility Kit for Store/Cache/Logger ports
 
 - **`/packages`** — example applications

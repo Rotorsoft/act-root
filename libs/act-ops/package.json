@@ -1,0 +1,50 @@
+{
+  "name": "@rotorsoft/act-ops",
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Operational primitives for act apps and act-independent receivers — idempotency, retry budgets, poison-message classifiers",
+  "keywords": [
+    "typescript",
+    "operational",
+    "idempotency",
+    "dedup",
+    "retry",
+    "receiver"
+  ],
+  "author": "rotorsoft",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rotorsoft/act-root.git",
+    "directory": "libs/act-ops"
+  },
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-ops#readme",
+  "bugs": {
+    "url": "https://github.com/rotorsoft/act-root/issues"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/@types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/@types/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
+    "build": "pnpm clean && tsup && pnpm types"
+  }
+}

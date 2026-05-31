@@ -16,6 +16,7 @@
       "@rotorsoft/act-patch": ["../libs/act-patch/src/index.ts"],
       "@rotorsoft/act-pg": ["../libs/act-pg/src/index.ts"],
       "@rotorsoft/act-pino": ["../libs/act-pino/src/index.ts"],
+      "@rotorsoft/act-ops": ["../libs/act-ops/src/index.ts"],
       "@rotorsoft/act-sqlite": ["../libs/act-sqlite/src/index.ts"],
       "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"]
     }
@@ -25,6 +26,7 @@
     "../libs/act-diagram/src/**/*",
     "../libs/act-http/src/**/*",
     "../libs/act-patch/src/**/*",
+    "../libs/act-ops/src/**/*",
     "../libs/act-pg/src/**/*",
     "../libs/act-pino/src/**/*",
     "../libs/act-sqlite/src/**/*",
