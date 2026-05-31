@@ -76,8 +76,10 @@ describe("webhook-receiver", () => {
       escalationId: "e-3",
     });
     // tRPC error responses come back as 400 with an `error` envelope.
+    // The middleware's structured `reason` codes flow through as the
+    // error message — `missing-key` rather than a human-readable string.
     expect(res.status).toBeGreaterThanOrEqual(400);
-    expect(res.body.error?.message).toMatch(/Idempotency-Key/);
+    expect(res.body.error?.message).toBe("missing-key");
   });
 
   it("returns case-insensitive on the Idempotency-Key header", async () => {

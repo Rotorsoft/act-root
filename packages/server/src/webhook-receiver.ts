@@ -1,25 +1,35 @@
 /**
  * Standalone webhook receiver demonstrating the receiver-side
- * idempotency contract. Pair with the wolfdesk sender by setting:
+ * contract end-to-end. Pair with the wolfdesk sender by setting:
  *   WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations
  *
- * The handler distinguishes fresh requests from duplicates so operators
- * can confirm dedup is working — first delivery returns
- * `{ status: "processed" }`, retries return `{ status: "dedup-skipped" }`.
+ * Composes the framework-agnostic `checkWebhook` core with the tRPC
+ * adapter from `@rotorsoft/act-http/receiver/trpc`. The middleware
+ * does three things: verify the signature (when configured), enforce
+ * `Idempotency-Key`, claim the key on the in-memory store. Failures
+ * become tRPC errors; the handler runs only when all three pass and
+ * sees `ctx.idempotency = { key, deduped }`.
  *
- * The middleware is composed inline against the local `t.procedure` so
- * tRPC's generic inference can flow `key` and `deduped` into downstream
- * handlers without manual `as` casts.
+ * Set `WEBHOOK_SECRET` to enable HMAC verification. The wolfdesk
+ * sender (when configured with the same secret) will sign every
+ * request; the receiver will reject unsigned, stale, or tampered
+ * deliveries with 401.
  */
 
-import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { initTRPC, TRPCError } from "@trpc/server";
+import { initTRPC } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { z } from "zod";
 
-/** tRPC context shape: just the raw request headers. */
-type Ctx = { headers: Record<string, string | string[] | undefined> };
+/**
+ * tRPC context shape — the receiver middleware requires `headers`
+ * and `rawBody`. `rawBody` is captured in `createContext` below.
+ */
+type Ctx = {
+  headers: Record<string, string | string[] | undefined>;
+  rawBody: string;
+};
 
 const t = initTRPC.context<Ctx>().create();
 
@@ -30,23 +40,14 @@ const dedup = new InMemoryIdempotencyStore({
   maxEntries: 50_000,
 });
 
-/**
- * The idempotency middleware. Refuses requests without an
- * `Idempotency-Key`; injects `{ key, deduped }` into context so the
- * downstream handler can short-circuit duplicates without re-executing
- * its side effect.
- */
-const idempotent = t.procedure.use(({ ctx, next }) => {
-  const key = extractIdempotencyKey(ctx.headers);
-  if (!key) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Missing Idempotency-Key header",
-    });
-  }
-  const deduped = !dedup.claim(key);
-  return next({ ctx: { ...ctx, key, deduped } });
-});
+const idempotent = t.procedure.use(
+  webhookReceiver({
+    store: dedup,
+    // When set, sign every request on the wolfdesk side with the same
+    // value. Leave unset for unsigned mode.
+    secret: process.env.WEBHOOK_SECRET,
+  })
+);
 
 const EscalationPayload = z.object({
   ticket: z.string(),
@@ -55,28 +56,32 @@ const EscalationPayload = z.object({
 
 export const webhookRouter = t.router({
   /**
-   * Inbound webhook for ticket escalations. Idempotent: a re-sent
-   * request with the same `Idempotency-Key` returns a `deduped` marker
-   * without re-executing side effects.
+   * Inbound webhook for ticket escalations. The middleware has
+   * already verified + dedup'd by the time this runs.
    */
   escalations: idempotent
     .input(EscalationPayload)
     .mutation(async ({ input, ctx }) => {
-      if (ctx.deduped) {
+      const idem = (
+        ctx as Ctx & {
+          idempotency: { key: string; deduped: boolean };
+        }
+      ).idempotency;
+      if (idem.deduped) {
         return {
           status: "dedup-skipped" as const,
-          key: ctx.key,
+          key: idem.key,
           ticket: input.ticket,
         };
       }
       // Real handlers would: page operator, open incident, send email.
       // Demo prints to stdout so the wolfdesk run-through is visible.
       console.log(
-        `[webhook] ticket=${input.ticket} escalation=${input.escalationId} key=${ctx.key}`
+        `[webhook] ticket=${input.ticket} escalation=${input.escalationId} key=${idem.key}`
       );
       return {
         status: "processed" as const,
-        key: ctx.key,
+        key: idem.key,
         ticket: input.ticket,
       };
     }),
@@ -93,7 +98,16 @@ export function startWebhookReceiver(port = 4001): {
 } {
   const server = createHTTPServer({
     router: webhookRouter,
-    createContext: ({ req }) => ({ headers: req.headers }),
+    createContext: async ({ req }) => {
+      // Buffer the raw request body so the receiver middleware can
+      // verify the signature against the exact bytes that came over
+      // the wire. tRPC's standalone HTTP adapter exposes req as a
+      // Node IncomingMessage; we drain it here.
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) chunks.push(chunk as Buffer);
+      const rawBody = Buffer.concat(chunks).toString("utf8");
+      return { headers: req.headers, rawBody };
+    },
   });
   server.listen(port);
   return {

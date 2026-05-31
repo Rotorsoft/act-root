@@ -308,35 +308,67 @@ The by-hand math, kept as a teaching aid — work through it once so you trust t
 
 Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s × 6 = 12s. Bare envelope: 18.2s. With `safetyFactor: 4`, the store sizes the window at 72.8s. Round up further if you want the cache to survive operator-driven retry during incident review — **most apps land at 24h regardless of what the math says**, and the derivation's job is to confirm 24h is generous enough, not to argue against it.
 
-### End-to-end example — tRPC receiver
+### End-to-end example — using the middleware
 
-A small idempotent receiver, mirroring the `packages/server` tRPC setup. The middleware checks `Idempotency-Key` and short-circuits duplicates:
+The framework-agnostic middleware composes `verifyWebhook` (when a secret is configured) + `extractIdempotencyKey` + `IdempotencyStore.claim` and translates the result into the framework's idiomatic 400/401 response. Per-framework adapters ship from `@rotorsoft/act-http/receiver/<framework>` — pick one:
 
 ```ts
-// packages/server/src/webhook-receiver.ts (excerpt)
-import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
+// packages/server/src/webhook-receiver.ts (excerpt) — tRPC
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { initTRPC, TRPCError } from "@trpc/server";
+import { initTRPC } from "@trpc/server";
 
 const dedup = new InMemoryIdempotencyStore();
-const t = initTRPC.context<{ headers: Record<string, string | string[] | undefined> }>().create();
+const t = initTRPC.context<{
+  headers: Record<string, string | string[] | undefined>;
+  rawBody: string;
+}>().create();
 
-export const idempotent = t.procedure.use(({ ctx, next }) => {
-  const key = extractIdempotencyKey(ctx.headers);
-  if (!key) {
-    throw new TRPCError({
-      code: "BAD_REQUEST",
-      message: "Missing Idempotency-Key header",
-    });
-  }
-  const fresh = dedup.claim(key);
-  return next({ ctx: { ...ctx, key, deduped: !fresh } });
+const idempotent = t.procedure.use(
+  webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+);
+```
+
+The same shape applies for Express, Fastify, and Hono — only the framework import changes:
+
+```ts
+// Express
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/express";
+app.use(express.raw({ type: "application/json" }));
+app.post("/webhook", webhookReceiver({ store, secret }), (req, res) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+
+// Fastify
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/fastify";
+app.post("/webhook", {
+  preHandler: webhookReceiver({ store, secret }),
+}, async (req) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+
+// Hono
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/hono";
+app.post("/webhook", webhookReceiver({ store, secret }), (c) => {
+  const { key, deduped } = c.get("idempotency");
+  // …
 });
 ```
 
-`extractIdempotencyKey` from `@rotorsoft/act-http/receiver` does the case-insensitive header lookup and returns `undefined` for the three cases where there's no usable key: missing header, array-valued header (ambiguous — Node's raw header bag allows it), or empty-string value (carries no idempotency information). One import line replaces the by-hand lookup every receiver was writing.
+On failure the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`) and short-circuits the handler. On success it injects `{ key, deduped }` into the request context so the handler can short-circuit duplicates without re-running side effects.
 
-Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
+For receivers whose framework isn't in the adapter list (Bun's native HTTP, Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy ("missing key falls back to body-derived dedup"), the framework-agnostic core is also exported:
+
+```ts
+import { checkWebhook } from "@rotorsoft/act-http/receiver";
+const result = await checkWebhook(req.headers, rawBody, { store, secret });
+if (!result.ok) reply(result.status, { error: result.reason });
+else handle({ key: result.key, deduped: result.deduped });
+```
+
+Swap `InMemoryIdempotencyStore` for a Redis or Postgres adapter — the middleware doesn't change, because every adapter implements the same `IdempotencyStore` port.
 
 A handler using the middleware returns success on both first-attempt and dedup-hit, distinguishing them only for telemetry:
 

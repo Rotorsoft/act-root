@@ -8,6 +8,9 @@
       "path": "../act/tsconfig.build.json"
     },
     {
+      "path": "../act-ops/tsconfig.build.json"
+    },
+    {
       "path": "../act-patch/tsconfig.build.json"
     }
   ],

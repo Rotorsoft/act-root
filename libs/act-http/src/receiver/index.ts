@@ -33,6 +33,12 @@
  * `@rotorsoft/act-ops/idempotency`.
  */
 
+export {
+  type CheckFailureReason,
+  type CheckResult,
+  type CheckWebhookOptions,
+  checkWebhook,
+} from "./check.js";
 export { extractIdempotencyKey } from "./extract.js";
 export {
   type VerifyOptions,

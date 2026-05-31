@@ -40,6 +40,26 @@
       "types": "./dist/@types/receiver/index.d.ts",
       "import": "./dist/receiver/index.js",
       "require": "./dist/receiver/index.cjs"
+    },
+    "./receiver/trpc": {
+      "types": "./dist/@types/receiver/trpc/index.d.ts",
+      "import": "./dist/receiver/trpc/index.js",
+      "require": "./dist/receiver/trpc/index.cjs"
+    },
+    "./receiver/express": {
+      "types": "./dist/@types/receiver/express/index.d.ts",
+      "import": "./dist/receiver/express/index.js",
+      "require": "./dist/receiver/express/index.cjs"
+    },
+    "./receiver/fastify": {
+      "types": "./dist/@types/receiver/fastify/index.d.ts",
+      "import": "./dist/receiver/fastify/index.js",
+      "require": "./dist/receiver/fastify/index.cjs"
+    },
+    "./receiver/hono": {
+      "types": "./dist/@types/receiver/hono/index.d.ts",
+      "import": "./dist/receiver/hono/index.js",
+      "require": "./dist/receiver/hono/index.cjs"
     }
   },
   "sideEffects": false,
@@ -55,9 +75,26 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@rotorsoft/act": "workspace:^"
+    "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-ops": "workspace:^",
+    "@trpc/server": ">=11"
+  },
+  "peerDependenciesMeta": {
+    "@rotorsoft/act-ops": {
+      "optional": true
+    },
+    "@trpc/server": {
+      "optional": true
+    }
   },
   "dependencies": {
     "@rotorsoft/act-patch": "workspace:^"
+  },
+  "devDependencies": {
+    "@rotorsoft/act-ops": "workspace:^",
+    "@trpc/server": "^11.17.0",
+    "@types/express": "^5",
+    "fastify": "^5",
+    "hono": "^4"
   }
 }

@@ -20,6 +20,22 @@ export default defineConfig({
         __dirname,
         "libs/act-http/src/sse/index.ts"
       ),
+      "@rotorsoft/act-http/receiver/trpc": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/trpc/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/express": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/express/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/fastify": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/fastify/index.ts"
+      ),
+      "@rotorsoft/act-http/receiver/hono": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/hono/index.ts"
+      ),
       "@rotorsoft/act-http/receiver": path.resolve(
         __dirname,
         "libs/act-http/src/receiver/index.ts"

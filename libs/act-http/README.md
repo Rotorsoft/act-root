@@ -26,7 +26,11 @@ Three independent subpath exports:
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
-| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` (case-insensitive header parse) + `verifyWebhook` (HMAC-SHA256 signature + timestamp window). Server-side helpers for the inbound HTTP role; pair with `@rotorsoft/act-ops/idempotency` for dedup and `webhook({ secret })` for authenticated delivery. Framework-agnostic middleware + per-framework adapters (tRPC / Express / Fastify / Hono) land in #744. |
+| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` + `verifyWebhook` + `checkWebhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
+| `@rotorsoft/act-http/receiver/trpc` | `webhookReceiver` — tRPC middleware adapter. |
+| `@rotorsoft/act-http/receiver/express` | `webhookReceiver` — Express middleware adapter. |
+| `@rotorsoft/act-http/receiver/fastify` | `webhookReceiver` — Fastify `preHandler` adapter. |
+| `@rotorsoft/act-http/receiver/hono` | `webhookReceiver` — Hono middleware adapter. |
 
 ## Quick start
 
@@ -51,39 +55,60 @@ import { webhook } from "@rotorsoft/act-http/webhook";
   .to(resolver)
 ```
 
-### `receiver` — parse the dedup header, verify the signature
+### `receiver/<framework>` — the canonical path
+
+The framework adapters compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` and translate the result into the framework's idiomatic 400/401 response. The application code shrinks to one import line plus the framework's normal wiring:
 
 ```ts
-import { extractIdempotencyKey, verifyWebhook } from "@rotorsoft/act-http/receiver";
+// tRPC
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
-const dedup = new InMemoryIdempotencyStore({
-  retryProfile: {
-    maxRetries: 5,
-    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
-    timeoutMs: 2_000,
-  },
+const dedup = new InMemoryIdempotencyStore();
+const idempotent = t.procedure.use(
+  webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+);
+
+const router = t.router({
+  webhook: idempotent.input(Schema).mutation(({ input, ctx }) => {
+    const { key, deduped } = ctx.idempotency;
+    if (deduped) return { status: "dedup-skipped", key };
+    return { status: "processed", key };
+  }),
 });
-
-const SECRET = process.env.WEBHOOK_SECRET!;
-
-// In any HTTP handler (tRPC, Express, Fastify, Hono, …)
-const rawBody = await readRawBody(req);  // framework-specific
-const result = verifyWebhook(req.headers, rawBody, SECRET);
-if (!result.ok) {
-  return reply.status(401).send({ error: result.reason });
-}
-
-const key = extractIdempotencyKey(req.headers);
-if (!key) return reply.status(400).send("Missing Idempotency-Key");
-const fresh = dedup.claim(key);
-if (!fresh) return reply.send({ status: "dedup-skipped" });
-// …process the inbound event…
 ```
 
-`verifyWebhook` enforces HMAC-SHA256 against the same secret you passed to `webhook({ secret })` on the sender, plus a ±5-minute timestamp window (configurable) to bound replays. Returns a discriminated union with one of five reasons on failure: `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature` — each maps to a distinct telemetry bucket so dashboards can tell "client lost its secret" from "client clock is wrong" from "replay attempt."
+Each adapter follows the same shape:
 
-The framework-agnostic middleware that wires `extractIdempotencyKey` + `verifyWebhook` + `dedup.claim` together, plus per-framework adapters (tRPC / Express / Fastify / Hono), ships in #744.
+```ts
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/express";
+app.post("/webhook", webhookReceiver({ store, secret }), (req, res) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+```
+
+```ts
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/fastify";
+app.post("/webhook", { preHandler: webhookReceiver({ store, secret }) }, async (req) => {
+  const { key, deduped } = (req as any).idempotency;
+  // …
+});
+```
+
+```ts
+import { webhookReceiver } from "@rotorsoft/act-http/receiver/hono";
+app.post("/webhook", webhookReceiver({ store, secret }), (c) => {
+  const { key, deduped } = c.get("idempotency");
+  // …
+});
+```
+
+On failure: the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of five verification reasons — `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature`) and short-circuits the handler. On success: `{ key, deduped }` is injected into the request context.
+
+### `receiver` — primitives, when the adapter doesn't fit
+
+The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Bun's native HTTP, Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the adapters when you can; reach for the primitives when you can't.
 
 ### `sse` — live state broadcast
 
@@ -116,9 +141,21 @@ onData: (msg) => {
 
 ### `/receiver` subpath
 
-- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string (carries no idempotency information). Anything else is the raw value. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope — pair with your own checks or wait for #744's middleware to ship opinionated defaults.
-- **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` on success or `{ ok: false; reason }` where reason is `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
-- **Types**: `VerifyResult`, `VerifyOptions`.
+- **`checkWebhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim`. Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
+- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope.
+- **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` or `{ ok: false; reason }` where reason is one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
+- **Types**: `CheckResult`, `CheckWebhookOptions`, `CheckFailureReason`, `VerifyResult`, `VerifyOptions`.
+
+### `/receiver/<framework>` subpaths
+
+Each framework adapter exports a single function `webhookReceiver(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped }` is injected:
+
+| Subpath | Injection site | Failure response |
+|---|---|---|
+| `/receiver/trpc` | `ctx.idempotency` | throws `TRPCError({ code, message: reason })` |
+| `/receiver/express` | `req.idempotency` | `res.status(...).json({ error: reason })` |
+| `/receiver/fastify` | `request.idempotency` | `reply.status(...).send({ error: reason })` |
+| `/receiver/hono` | `c.get("idempotency")` (typed via `Variables`) | `c.json({ error: reason }, status)` |
 
 ### `/sse` subpath
 
