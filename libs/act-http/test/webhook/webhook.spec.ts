@@ -320,6 +320,85 @@ describe("webhook", () => {
     });
   });
 
+  describe("signing", () => {
+    it("does not add signature headers when secret is undefined", async () => {
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://x.example/webhook",
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const headers = calls[0]?.init.headers as Record<string, string>;
+      expect(headers["X-Webhook-Signature"]).toBeUndefined();
+      expect(headers["X-Webhook-Timestamp"]).toBeUndefined();
+    });
+
+    it("attaches X-Webhook-Signature + X-Webhook-Timestamp when secret is set", async () => {
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://x.example/webhook",
+        secret: "shared-secret",
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const headers = calls[0]?.init.headers as Record<string, string>;
+      expect(headers["X-Webhook-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+      expect(headers["X-Webhook-Timestamp"]).toMatch(/^\d+$/);
+    });
+
+    it("signs the final serialized body, not the resolver's input", async () => {
+      // A receiver verifying the request will hash the raw bytes sent
+      // over the wire — that's the JSON string, not the original object.
+      // We assert the signature header is present and the body shape is
+      // what the verifier would expect to reproduce.
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://x.example/webhook",
+        body: (e) => ({ orderId: e.stream, total: e.data.total }),
+        secret: "shared-secret",
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const init = calls[0]?.init;
+      expect(init?.body).toBe(
+        JSON.stringify({ orderId: "order-7", total: 99.5 })
+      );
+      const headers = init?.headers as Record<string, string>;
+      expect(headers["X-Webhook-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    });
+
+    it("yields to caller-supplied X-Webhook-Signature header", async () => {
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://x.example/webhook",
+        secret: "shared-secret",
+        headers: () => ({ "X-Webhook-Signature": "sha256=caller-override" }),
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const headers = calls[0]?.init.headers as Record<string, string>;
+      expect(headers["X-Webhook-Signature"]).toBe("sha256=caller-override");
+    });
+
+    it("yields to caller-supplied X-Webhook-Timestamp header", async () => {
+      const { fetch, calls } = makeFetch({ status: 200 });
+      const handler = webhook<Events>({
+        url: "https://x.example/webhook",
+        secret: "shared-secret",
+        headers: () => ({ "X-Webhook-Timestamp": "1234567890" }),
+        fetch,
+      });
+      await handler(makeEvent(), "stream-1", {} as never);
+      const headers = calls[0]?.init.headers as Record<string, string>;
+      // The caller's timestamp wins; the auto-signature still ships
+      // because the signature header wasn't overridden. (The receiver
+      // will reject this composition because the signed timestamp
+      // differs from the sent one — caller intent dictates the trade.)
+      expect(headers["X-Webhook-Timestamp"]).toBe("1234567890");
+      expect(headers["X-Webhook-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    });
+  });
+
   describe("error classes", () => {
     it("WebhookError exposes url and status fields", () => {
       const err = new WebhookError("boom", {

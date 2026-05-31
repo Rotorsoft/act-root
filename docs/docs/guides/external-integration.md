@@ -356,6 +356,77 @@ export const webhookRouter = t.router({
 
 A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch dedup work end-to-end.
 
+### Authenticated delivery — HMAC-SHA256 signing
+
+Idempotency stops you from processing the same event twice. It doesn't stop a third party from sending events you never sent. For receivers that need to verify the request actually came from your Act app — or for any production deployment where the receiver lives on the public internet — pair `webhook({ secret })` on the sender with `verifyWebhook` on the receiver.
+
+**Sender** — add a `secret` to the webhook config:
+
+```ts
+import { webhook } from "@rotorsoft/act-http/webhook";
+
+.on("OrderConfirmed")
+  .do(
+    webhook({
+      url: "https://api.example.com/webhooks/orders",
+      body: (e) => ({ orderId: e.stream, total: e.data.total }),
+      secret: process.env.WEBHOOK_SECRET!,  // ← signs every request
+      timeoutMs: 2_000,
+    }),
+    { maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 } }
+  )
+  .to(resolver)
+```
+
+The helper computes HMAC-SHA256 over `${timestamp}.${body}` (where `body` is the final serialized bytes) and attaches two headers:
+
+- `X-Webhook-Signature: sha256=<64-char-hex>`
+- `X-Webhook-Timestamp: <unix-seconds>`
+
+The format mirrors the Stripe / GitHub / Slack convention modulo the `X-Webhook-*` prefix. When `secret` is omitted, the helper sends unsigned (back-compat with consumers that don't need signing).
+
+**Receiver** — call `verifyWebhook` before processing:
+
+```ts
+import { verifyWebhook } from "@rotorsoft/act-http/receiver";
+
+const SECRET = process.env.WEBHOOK_SECRET!;
+
+const rawBody = await readRawBody(req);  // raw bytes; framework-specific
+const result = verifyWebhook(req.headers, rawBody, SECRET);
+if (!result.ok) {
+  log.warn({ reason: result.reason }, "webhook verification failed");
+  return reply.status(401).send({ error: result.reason });
+}
+// signature + timestamp window are good — proceed to dedup + handle
+```
+
+The result is a discriminated union with five distinct failure reasons, each mapping to an operator-meaningful telemetry bucket:
+
+| Reason | Meaning | Likely cause |
+|---|---|---|
+| `missing-signature` | `X-Webhook-Signature` header absent or unusable | Sender misconfigured (no `secret`), proxy stripped headers |
+| `missing-timestamp` | `X-Webhook-Timestamp` header absent or not a parseable integer | Sender misconfigured, header rewrite |
+| `stale` | Timestamp older than `maxAgeSeconds` (default 300) | Replay attempt, or client clock badly skewed backwards |
+| `future` | Timestamp newer than `now + maxAgeSeconds` | Client clock badly skewed forwards |
+| `bad-signature` | Recomputed HMAC didn't match | Wrong secret, tampered body, signature truncation |
+
+Separating the reasons lets your dashboards distinguish "clients losing secrets" from "clients with broken clocks" from "active replay attacks." Constant-time comparison via `crypto.timingSafeEqual` defeats signature-equality timing attacks.
+
+#### Why the receiver needs the raw body, not the parsed one
+
+The signature is over the bytes the sender wrote. Pre-parse normalization on the receiver — JSON re-stringification, whitespace trimming, key reordering — produces a different byte sequence, so the recomputed HMAC won't match. Framework adapters in #744 (tRPC / Express / Fastify / Hono) will provide the raw body alongside the parsed one; until then, capture the raw body in your framework's first middleware (`req.rawBody` in most ecosystems) and pass it to `verifyWebhook` directly.
+
+#### Timestamp window sizing
+
+The default `maxAgeSeconds: 300` (±5 minutes) covers most use cases — it tolerates the worst case of NTP-synced clocks drifting plus normal network latency. Tighten via `verifyWebhook(headers, body, secret, { maxAgeSeconds: 60 })` for stricter replay protection; loosen for clients with worse clock sync. The bound is two-sided: requests too far in the future are rejected too, since a future-dated request smells like clock manipulation.
+
+#### What signing does *not* give you
+
+- **No replay protection beyond the timestamp window.** Two valid requests at the same timestamp are both accepted. Layer `IdempotencyStore.claim` from `@rotorsoft/act-ops/idempotency` on top to dedup at the application level.
+- **No payload encryption.** The body is in plaintext; signing protects integrity and authenticity, not confidentiality. Use TLS (you should be doing this anyway).
+- **No protection against compromised secrets.** If the secret leaks, the attacker can sign valid requests. Rotate by configuring both sender and receiver with a new secret simultaneously. Stripe-style multi-secret rotation (accept two valid signatures during overlap) is parked for a future ticket — out of scope today.
+
 ---
 
 ## 4. Operational checklist

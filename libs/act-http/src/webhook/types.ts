@@ -68,6 +68,24 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
    * Injection point for tests. Defaults to global `fetch`.
    */
   readonly fetch?: typeof fetch;
+  /**
+   * HMAC-SHA256 signing key. When set, the webhook helper attaches
+   * two headers to every request:
+   *
+   * - `X-Webhook-Signature: sha256=<hex>` — HMAC of
+   *   `${timestamp}.${body}` (`body` is the final serialized payload)
+   * - `X-Webhook-Timestamp: <unix-seconds>`
+   *
+   * Pair with `verifyWebhook` from `@rotorsoft/act-http/receiver` on
+   * the receiving side. When undefined, no signature headers are
+   * added — back-compat with consumers that don't need signing.
+   *
+   * Callers can override either header by returning it from the
+   * `headers` resolver (case-insensitive), the same way the
+   * `Idempotency-Key` and `Content-Type` defaults yield to caller
+   * intent.
+   */
+  readonly secret?: string;
 };
 
 /**

@@ -26,7 +26,7 @@ Three independent subpath exports:
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
-| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` — server-side helpers for the inbound HTTP role. Pair with `@rotorsoft/act-ops/idempotency` for receiver-side dedup. Framework-agnostic middleware + per-framework adapters (tRPC / Express / Fastify / Hono) land in #744. |
+| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` (case-insensitive header parse) + `verifyWebhook` (HMAC-SHA256 signature + timestamp window). Server-side helpers for the inbound HTTP role; pair with `@rotorsoft/act-ops/idempotency` for dedup and `webhook({ secret })` for authenticated delivery. Framework-agnostic middleware + per-framework adapters (tRPC / Express / Fastify / Hono) land in #744. |
 
 ## Quick start
 
@@ -51,10 +51,10 @@ import { webhook } from "@rotorsoft/act-http/webhook";
   .to(resolver)
 ```
 
-### `receiver` — parse the inbound dedup header
+### `receiver` — parse the dedup header, verify the signature
 
 ```ts
-import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
+import { extractIdempotencyKey, verifyWebhook } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore({
@@ -65,7 +65,15 @@ const dedup = new InMemoryIdempotencyStore({
   },
 });
 
+const SECRET = process.env.WEBHOOK_SECRET!;
+
 // In any HTTP handler (tRPC, Express, Fastify, Hono, …)
+const rawBody = await readRawBody(req);  // framework-specific
+const result = verifyWebhook(req.headers, rawBody, SECRET);
+if (!result.ok) {
+  return reply.status(401).send({ error: result.reason });
+}
+
 const key = extractIdempotencyKey(req.headers);
 if (!key) return reply.status(400).send("Missing Idempotency-Key");
 const fresh = dedup.claim(key);
@@ -73,7 +81,9 @@ if (!fresh) return reply.send({ status: "dedup-skipped" });
 // …process the inbound event…
 ```
 
-The framework-agnostic middleware that wires `extractIdempotencyKey` + `dedup.claim` together, plus per-framework adapters (tRPC / Express / Fastify / Hono), ships in #744.
+`verifyWebhook` enforces HMAC-SHA256 against the same secret you passed to `webhook({ secret })` on the sender, plus a ±5-minute timestamp window (configurable) to bound replays. Returns a discriminated union with one of five reasons on failure: `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature` — each maps to a distinct telemetry bucket so dashboards can tell "client lost its secret" from "client clock is wrong" from "replay attempt."
+
+The framework-agnostic middleware that wires `extractIdempotencyKey` + `verifyWebhook` + `dedup.claim` together, plus per-framework adapters (tRPC / Express / Fastify / Hono), ships in #744.
 
 ### `sse` — live state broadcast
 
@@ -107,6 +117,8 @@ onData: (msg) => {
 ### `/receiver` subpath
 
 - **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string (carries no idempotency information). Anything else is the raw value. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope — pair with your own checks or wait for #744's middleware to ship opinionated defaults.
+- **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` on success or `{ ok: false; reason }` where reason is `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
+- **Types**: `VerifyResult`, `VerifyOptions`.
 
 ### `/sse` subpath
 
@@ -129,11 +141,14 @@ onData: (msg) => {
 | `body` | `unknown` or `(event) => unknown` | the committed event (JSON-serialized) |
 | `timeoutMs` | `number` | `5000` |
 | `idempotencyKey` | `(event) => string | null` | `String(event.id)` |
+| `secret` | `string` | unset (unsigned) |
 | `fetch` | `typeof fetch` | `globalThis.fetch` |
 
 Strings as `body` are sent as-is; anything else is `JSON.stringify`'d and `Content-Type: application/json` is set automatically (unless the caller supplies it).
 
 A caller-supplied `Idempotency-Key` header (case-insensitive) always wins; the auto-derived `event.id` is only applied when the header is absent. `event.id` is the framework's immutable, per-event monotonic integer — well-suited to downstream dedup.
+
+When `secret` is set, the helper signs each request with HMAC-SHA256 over `${timestamp}.${body}` (the final serialized body) and attaches `X-Webhook-Signature: sha256=<hex>` + `X-Webhook-Timestamp: <unix-seconds>`. Caller-supplied versions of either header (case-insensitive) win, the same way the `Idempotency-Key` and `Content-Type` defaults yield to caller intent. Pair with `verifyWebhook` from `@rotorsoft/act-http/receiver` on the receiving side — the protocol matches Stripe / GitHub / Slack conventions modulo the `X-Webhook-*` prefix.
 
 ## Common patterns
 

@@ -5,16 +5,25 @@
  * Server-side helpers for the inbound HTTP role — the receiver that
  * sits on the other end of an `@rotorsoft/act-http/webhook` POST.
  *
- * Today the subpath hosts the case-insensitive `Idempotency-Key`
- * parser. The framework-agnostic middleware that consumes
- * `IdempotencyStore.claim` from `@rotorsoft/act-ops/idempotency`
- * lands in #744 (ACT-1116) alongside per-framework adapters
- * (tRPC / Express / Fastify / Hono).
+ * The subpath hosts two primitives today:
+ *
+ * - {@link extractIdempotencyKey} — case-insensitive
+ *   `Idempotency-Key` parser; pair with `IdempotencyStore.claim`
+ *   from `@rotorsoft/act-ops/idempotency` for dedup.
+ * - {@link verifyWebhook} — HMAC-SHA256 signature + timestamp
+ *   verifier; pair with `webhook({ secret })` from
+ *   `@rotorsoft/act-http/webhook` for authenticated, replay-resistant
+ *   delivery.
+ *
+ * The framework-agnostic middleware that wires these into request
+ * handlers, plus per-framework adapters (tRPC / Express / Fastify /
+ * Hono), lands in #744 (ACT-1116).
  *
  * Sibling subpaths in the same package:
  *
  * - `@rotorsoft/act-http/webhook` — the sender side: outbound POSTs,
- *   automatic `Idempotency-Key`, status-classified retries.
+ *   automatic `Idempotency-Key`, status-classified retries, optional
+ *   HMAC signing.
  * - `@rotorsoft/act-http/sse` — incremental state broadcast over
  *   Server-Sent Events.
  *
@@ -25,3 +34,8 @@
  */
 
 export { extractIdempotencyKey } from "./extract.js";
+export {
+  type VerifyOptions,
+  type VerifyResult,
+  verifyWebhook,
+} from "./verify.js";
