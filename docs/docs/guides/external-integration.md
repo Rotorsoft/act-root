@@ -183,57 +183,60 @@ Both are normal — they're not bugs to fix in the sender. The fix is on the rec
 
 For custom callers — non-`webhook` reactions, queue forwarders, anything — pass `String(event.id)` (or your bus's dedup key field) as the idempotency token. Don't derive from event content or hash the payload; collisions and changes both bite you.
 
-### Cache shapes
+### The `IdempotencyStore` port
 
-Three implementations of the dedup cache, ordered by deployment complexity:
-
-#### In-memory bounded LRU
+The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. One method, by design:
 
 ```ts
-class IdempotencyCache {
-  private seen = new Map<string, number>(); // key → expiresAt epoch
-  constructor(
-    private readonly ttlMs = 24 * 60 * 60 * 1000,
-    private readonly maxEntries = 100_000
-  ) {}
+import type { IdempotencyStore } from "@rotorsoft/act-ops";
 
-  /** Returns true if the key was unseen and is now recorded. */
-  recordIfFresh(key: string): boolean {
-    const now = Date.now();
-    this.gc(now);
-    if (this.seen.has(key)) return false;
-    this.seen.set(key, now + this.ttlMs);
-    if (this.seen.size > this.maxEntries) {
-      // Map iteration is insertion-ordered; oldest entry is at the head.
-      this.seen.delete(this.seen.keys().next().value!);
-    }
-    return true;
-  }
-
-  private gc(now: number) {
-    for (const [key, expiresAt] of this.seen) {
-      if (expiresAt > now) break; // Insertion order ⇒ first non-expired ends the sweep.
-      this.seen.delete(key);
-    }
-  }
+export interface IdempotencyStore {
+  claim(key: string, now?: number): boolean | Promise<boolean>;
 }
 ```
 
-Use when: receiver is single-process, dedup window is short (under a day), keys fit in RAM.
+`true` means the key was fresh (and is now recorded); `false` means it was already present and the caller should treat the request as a duplicate. The union return type lets sync (in-memory) and async (durable) adapters share the same call site. The middleware that consumes the port (`#744`) awaits unconditionally.
 
-#### Redis SETNX with TTL
+> **Not a Cache.** In this codebase `Cache` means "rebuildable from a source of truth" (snapshot cache). Dedup state is authoritative — losing it allows duplicate side effects, not just a rebuild. Hence `Store`. The naming distinction matters when you swap implementations: the durable adapter's *persistence* is the load-bearing property, not its hit rate.
+
+`@rotorsoft/act-ops` ships with no peer dep on `@rotorsoft/act`, so a non-Act receiver (a Kafka consumer processing forwarded events, an Express endpoint behind a queue, …) can install the port without dragging the orchestrator along. Act apps and non-Act apps speak the same contract.
+
+### Implementations
+
+Three implementations of the dedup store, ordered by deployment complexity. The first ships in `@rotorsoft/act-ops`; the next two are sketches that follow the same `IdempotencyStore` contract — they're not packaged yet but slot in unchanged once you wire them.
+
+#### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops`
 
 ```ts
-async function recordIfFresh(key: string, ttlSeconds: number): Promise<boolean> {
-  // SET ... NX EX is atomic: returns "OK" only when the key didn't exist.
-  const result = await redis.set(`idem:${key}`, "1", "EX", ttlSeconds, "NX");
-  return result === "OK";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+
+const dedup = new InMemoryIdempotencyStore({
+  ttlMs: 24 * 60 * 60 * 1000,  // dedup window (default: 24h)
+  maxEntries: 50_000,           // memory bound (default: 100_000)
+});
+
+const fresh = dedup.claim(key);
+```
+
+Bounded LRU + TTL. Sync return. Use when: receiver is single-process, dedup window is short (under a day), keys fit in RAM. The wolfdesk demo at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) uses this implementation end-to-end.
+
+#### Redis `SET NX EX` (sketch — port not yet packaged)
+
+```ts
+class RedisIdempotencyStore implements IdempotencyStore {
+  constructor(private readonly redis: RedisClient, private readonly ttlSeconds: number) {}
+
+  async claim(key: string): Promise<boolean> {
+    // SET ... NX EX is atomic: returns "OK" only when the key didn't exist.
+    const result = await this.redis.set(`idem:${key}`, "1", "EX", this.ttlSeconds, "NX");
+    return result === "OK";
+  }
 }
 ```
 
 Use when: receiver is multi-process, dedup window is hours-to-days, Redis is already in the stack.
 
-#### Postgres unique index
+#### Postgres unique index (sketch — port not yet packaged)
 
 ```sql
 CREATE TABLE idempotency_keys (
@@ -247,18 +250,22 @@ DELETE FROM idempotency_keys WHERE seen_at < NOW() - INTERVAL '7 days';
 ```
 
 ```ts
-async function recordIfFresh(key: string): Promise<boolean> {
-  try {
-    await db.query(`INSERT INTO idempotency_keys(key) VALUES ($1)`, [key]);
-    return true;
-  } catch (err) {
-    if (isUniqueViolation(err)) return false;
-    throw err;
+class PostgresIdempotencyStore implements IdempotencyStore {
+  constructor(private readonly db: Database) {}
+
+  async claim(key: string): Promise<boolean> {
+    try {
+      await this.db.query(`INSERT INTO idempotency_keys(key) VALUES ($1)`, [key]);
+      return true;
+    } catch (err) {
+      if (isUniqueViolation(err)) return false;
+      throw err;
+    }
   }
 }
 ```
 
-Use when: receiver already has Postgres in its stack, dedup needs are durable (survive process restarts), TTL can be relaxed in favor of audit trail.
+Use when: receiver already has Postgres in its stack, dedup needs are durable (survive process restarts), TTL can be relaxed in favor of audit trail. A `PostgresIdempotencyStore` adapter is parked for milestone 1.2; until it ships, copy the shape above.
 
 ### TTL sizing
 
@@ -284,10 +291,11 @@ Don't undersize. If a key expires before the sender finishes retrying, dedup fai
 A small idempotent receiver, mirroring the `packages/server` tRPC setup. The middleware checks `Idempotency-Key` and short-circuits duplicates:
 
 ```ts
-// packages/server/src/idempotency.ts
+// packages/server/src/webhook-receiver.ts (excerpt)
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
 import { initTRPC, TRPCError } from "@trpc/server";
 
-const cache = new IdempotencyCache();
+const dedup = new InMemoryIdempotencyStore();
 const t = initTRPC.context<{ headers: Record<string, string> }>().create();
 
 export const idempotent = t.procedure.use(({ ctx, next }) => {
@@ -298,10 +306,12 @@ export const idempotent = t.procedure.use(({ ctx, next }) => {
       message: "Missing Idempotency-Key header",
     });
   }
-  const fresh = cache.recordIfFresh(key);
+  const fresh = dedup.claim(key);
   return next({ ctx: { ...ctx, key, deduped: !fresh } });
 });
 ```
+
+Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
 
 A handler using the middleware returns success on both first-attempt and dedup-hit, distinguishing them only for telemetry:
 
