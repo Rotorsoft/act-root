@@ -26,11 +26,11 @@ Three independent subpath exports:
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
-| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` + `verifyWebhook` + `checkWebhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
-| `@rotorsoft/act-http/receiver/trpc` | `webhookReceiver` — tRPC middleware adapter. |
-| `@rotorsoft/act-http/receiver/express` | `webhookReceiver` — Express middleware adapter. |
-| `@rotorsoft/act-http/receiver/fastify` | `webhookReceiver` — Fastify `preHandler` adapter. |
-| `@rotorsoft/act-http/receiver/hono` | `webhookReceiver` — Hono middleware adapter. |
+| `@rotorsoft/act-http/receiver` | `receiver()` builder (high-level Hono-backed runtime) + `extractIdempotencyKey` + `verifyWebhook` + `checkWebhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
+| `@rotorsoft/act-http/receiver/trpc` | `webhookMiddleware` — tRPC middleware adapter. |
+| `@rotorsoft/act-http/receiver/express` | `webhookMiddleware` — Express middleware adapter. |
+| `@rotorsoft/act-http/receiver/fastify` | `webhookMiddleware` — Fastify `preHandler` adapter. |
+| `@rotorsoft/act-http/receiver/hono` | `webhookMiddleware` — Hono middleware adapter. |
 
 ## Quick start
 
@@ -55,18 +55,42 @@ import { webhook } from "@rotorsoft/act-http/webhook";
   .to(resolver)
 ```
 
-### `receiver/<framework>` — the canonical path
+### `receiver` — high-level builder (the canonical path)
 
-The framework adapters compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` and translate the result into the framework's idiomatic 400/401 response. The application code shrinks to one import line plus the framework's normal wiring:
+The `receiver` builder from `@rotorsoft/act-http/receiver` is Hono-backed and runs on every fetch-shaped runtime — long-running Node (via `.listen()`), AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, Deno (all via `.fetch()`). Declare typed handlers with Zod schemas, call `.build()`, and the runtime handles signature verification, dedup, raw-body capture, schema validation, and HTTP server lifecycle:
+
+```ts
+import { receiver } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import { z } from "zod";
+
+const escalations = receiver({
+  port: 4001,
+  store: new InMemoryIdempotencyStore(),
+  secret: process.env.WEBHOOK_SECRET,
+})
+  .on("OrderConfirmed", z.object({ orderId: z.string(), total: z.number() }),
+      async (event, ctx) => { await processOrder(event.orderId, event.total); })
+  .build();
+
+await escalations.listen();           // Node
+// export default { fetch: escalations.fetch };  // Cloudflare / Vercel / Bun / Deno
+```
+
+Naming convention: type `Receiver` (PascalCase), factory `receiver` (lowercase) — matches Act's existing `act` / `state` / `slice` / `projection` builder analogs.
+
+### `receiver/<framework>` — low-level middleware
+
+When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the per-framework `webhookMiddleware` factories. They compose `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim` and translate the result into the framework's idiomatic 400/401 response:
 
 ```ts
 // tRPC
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/trpc";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore();
 const idempotent = t.procedure.use(
-  webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+  webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
 );
 
 const router = t.router({
@@ -81,24 +105,24 @@ const router = t.router({
 Each adapter follows the same shape:
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/express";
-app.post("/webhook", webhookReceiver({ store, secret }), (req, res) => {
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/express";
+app.post("/webhook", webhookMiddleware({ store, secret }), (req, res) => {
   const { key, deduped } = (req as any).idempotency;
   // …
 });
 ```
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/fastify";
-app.post("/webhook", { preHandler: webhookReceiver({ store, secret }) }, async (req) => {
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/fastify";
+app.post("/webhook", { preHandler: webhookMiddleware({ store, secret }) }, async (req) => {
   const { key, deduped } = (req as any).idempotency;
   // …
 });
 ```
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/hono";
-app.post("/webhook", webhookReceiver({ store, secret }), (c) => {
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
+app.post("/webhook", webhookMiddleware({ store, secret }), (c) => {
   const { key, deduped } = c.get("idempotency");
   // …
 });
@@ -106,9 +130,9 @@ app.post("/webhook", webhookReceiver({ store, secret }), (c) => {
 
 On failure: the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of five verification reasons — `missing-signature`, `missing-timestamp`, `stale`, `future`, `bad-signature`) and short-circuits the handler. On success: `{ key, deduped }` is injected into the request context.
 
-### `receiver` — primitives, when the adapter doesn't fit
+### `receiver` primitives — when neither builder nor middleware fits
 
-The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Bun's native HTTP, Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the adapters when you can; reach for the primitives when you can't.
+The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the `receiver` builder when you can; fall back to the framework `webhookMiddleware`, then the primitives.
 
 ### `sse` — live state broadcast
 
@@ -155,7 +179,7 @@ onData: (msg) => {
 
 ### `/receiver/<framework>` subpaths
 
-Each framework adapter exports a single function `webhookReceiver(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped }` is injected:
+Each framework adapter exports a single function `webhookMiddleware(options)` that returns the framework's native middleware shape. Options are `{ store, secret?, verify? }` — the same `CheckWebhookOptions` as the core. Failure → 400/401 with `{ error: <reason> }`; success → `{ key, deduped }` is injected:
 
 | Subpath | Injection site | Failure response |
 |---|---|---|

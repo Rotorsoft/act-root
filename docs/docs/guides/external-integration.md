@@ -310,10 +310,10 @@ Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s ×
 
 ### End-to-end example — the high-level adapter (canonical path)
 
-For most receivers, `webhookReceiver` from `@rotorsoft/act-http/receiver` is the recommended path. Declare typed handlers fluently with Zod schemas, configure the store + optional secret, call `.listen()` (long-running Node) or `.fetch(request)` (Lambda / edge). The adapter uses Hono internally — one code path covers Node, AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, and Deno.
+For most receivers, the `receiver` builder from `@rotorsoft/act-http/receiver` is the recommended path. Declare typed handlers fluently with Zod schemas, configure the store + optional secret, call `.build()` to freeze the builder into the `Receiver` runtime, then `.listen()` (long-running Node) or `.fetch(request)` (Lambda / edge). The builder uses Hono internally — one code path covers Node, AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, and Deno.
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+import { receiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { z } from "zod";
 
@@ -322,7 +322,7 @@ const OrderConfirmedSchema = z.object({
   total: z.number(),
 });
 
-const receiver = webhookReceiver({
+const escalations = receiver({
   port: 4001,
   store: new InMemoryIdempotencyStore(),
   secret: process.env.WEBHOOK_SECRET,
@@ -334,12 +334,13 @@ const receiver = webhookReceiver({
   })
   .on("OrderShipped", OrderShippedSchema, async (event, ctx) => {
     await processShipment(event);
-  });
+  })
+  .build();
 
-await receiver.listen();
+await escalations.listen();
 ```
 
-The adapter mounts each handler at `POST /<eventName>`. Failure responses are uniform across deployment targets:
+Naming convention: the type is `Receiver` (PascalCase), the factory is `receiver` (lowercase), matching Act's existing builder analogs (`act`, `state`, `slice`, `projection`). The builder mounts each handler at `POST /<eventName>`. Failure responses are uniform across deployment targets:
 
 | Status | Body | When |
 |---:|---|---|
@@ -355,39 +356,41 @@ A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](
 
 ### Deployment targets
 
-The high-level adapter is fetch-shaped under the hood — same code runs on every Hono-supported runtime:
+The built `Receiver` is fetch-shaped under the hood — same code runs on every Hono-supported runtime:
 
 **Long-running Node server** (the example above) — call `listen()`. `@hono/node-server` is lazy-loaded so other runtimes don't need it installed.
 
 **AWS Lambda**:
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+import { receiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { handle } from "hono/aws-lambda";
 
-const receiver = webhookReceiver({ port: 0, store: new InMemoryIdempotencyStore() })
-  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ });
+const built = receiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ })
+  .build();
 
-export const handler = handle({ fetch: receiver.fetch });
+export const handler = handle({ fetch: built.fetch });
 ```
 
 **Cloudflare Workers**:
 
 ```ts
-import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+import { receiver } from "@rotorsoft/act-http/receiver";
 
-const receiver = webhookReceiver({ port: 0, store: new InMemoryIdempotencyStore() })
-  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ });
+const built = receiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ })
+  .build();
 
-export default { fetch: receiver.fetch };
+export default { fetch: built.fetch };
 ```
 
 **Vercel Edge Functions** (Next.js App Router):
 
 ```ts
 // app/api/webhooks/[name]/route.ts
-export const POST = async (request: Request) => receiver.fetch(request);
+export const POST = async (request: Request) => built.fetch(request);
 ```
 
 **Bun / Deno** — same as Cloudflare Workers; export `{ fetch }`.
@@ -412,7 +415,7 @@ app.post(
 );
 ```
 
-Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`/receiver/fastify`), and Hono (`/receiver/hono`). Each exposes `webhookMiddleware(options)` that returns the framework's native middleware shape. Use these when the high-level `webhookReceiver` is too opinionated for your stack.
+Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`/receiver/fastify`), and Hono (`/receiver/hono`). Each exposes `webhookMiddleware(options)` that returns the framework's native middleware shape. Use these when the high-level `receiver` builder is too opinionated for your stack.
 
 For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported:
 
