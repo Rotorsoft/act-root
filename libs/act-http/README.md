@@ -137,7 +137,9 @@ onData: (msg) => {
 - **`webhook(config)`** — reaction-handler factory. Returns a function compatible with `.do(handler, opts)`.
 - **`WebhookError`** — thrown on 5xx, network errors, and timeouts. Carries `status` (`0` for network/timeout) and `url`. Retryable by drain.
 - **`NonRetryableWebhookError`** — thrown on 4xx. Extends `NonRetryableError` from `@rotorsoft/act`; the drain finalizer blocks the stream on first attempt without consuming the retry budget.
+- **`classifyHttpResponse(response)`** — classifies an HTTP response as `"ok"` (2xx), `"retry"` (5xx), or `"block"` (3xx, 4xx). The classification `webhook` uses internally, lifted so custom integrations (gRPC bridges, SDK-based reactions, …) can apply the same retry semantics without inventing a parallel rule.
 - **`WebhookConfig`** — TypeScript type for the helper options.
+- **`HttpDisposition`** — the `"ok" | "retry" | "block"` discriminator returned by `classifyHttpResponse`.
 
 ### `/receiver` subpath
 

@@ -26,6 +26,7 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
+import { classifyHttpResponse } from "./classify.js";
 import { signRequest } from "./sign.js";
 import {
   NonRetryableWebhookError,
@@ -33,6 +34,10 @@ import {
   WebhookError,
 } from "./types.js";
 
+export {
+  classifyHttpResponse,
+  type HttpDisposition,
+} from "./classify.js";
 export type { WebhookBody, WebhookConfig, WebhookResolver } from "./types.js";
 export { NonRetryableWebhookError, WebhookError } from "./types.js";
 
@@ -134,7 +139,8 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    if (response.ok) return;
+    const disposition = classifyHttpResponse(response);
+    if (disposition === "ok") return;
 
     let responseBody: string | undefined;
     try {
@@ -144,7 +150,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
     }
 
     const ErrorClass =
-      response.status >= 500 ? WebhookError : NonRetryableWebhookError;
+      disposition === "retry" ? WebhookError : NonRetryableWebhookError;
     throw new ErrorClass(
       `webhook ${method} ${url} responded ${response.status}`,
       { status: response.status, url, responseBody }
