@@ -226,8 +226,16 @@ When the app receives webhooks (or forwarded bus events) and needs the receiver-
 // packages/app/src/api/webhook-receiver.ts
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
 
+// Size the dedup window from the sender's retry profile — don't
+// guess. The store applies a 4× safety factor by default and honors
+// `jitter: true` (worst-case 1.5× backoff multiplier). Pass `ttlMs`
+// directly instead if you want to skip the derivation.
 const dedup = new InMemoryIdempotencyStore({
-  ttlMs: 24 * 60 * 60 * 1000,
+  retryProfile: {
+    maxRetries: 5,
+    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
+    timeoutMs: 2_000,
+  },
   maxEntries: 50_000,
 });
 
@@ -254,6 +262,8 @@ For multi-process receivers, swap `InMemoryIdempotencyStore` for a durable adapt
 ### API-edge response replay (inline)
 
 API-edge request-level idempotency (where the *response* itself must be replayed for client retries) is a different shape from receiver-side dedup. There's no shipped primitive for it — `@rotorsoft/act-ops`'s `claim` returns a boolean, not a stored response. Use a small per-app middleware:
+
+
 
 ```typescript
 // packages/app/src/api/middleware.ts

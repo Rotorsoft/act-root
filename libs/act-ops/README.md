@@ -27,9 +27,22 @@ No peer dependencies. Drop it next to whatever framework — or no framework at 
 ```ts
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
 
+// Either set ttlMs explicitly…
 const dedup = new InMemoryIdempotencyStore({
-  ttlMs: 24 * 60 * 60 * 1000,  // dedup window (default: 24h)
-  maxEntries: 50_000,           // memory bound (default: 100_000)
+  ttlMs: 24 * 60 * 60 * 1000,  // 24h covers any reasonable retry envelope
+  maxEntries: 50_000,
+});
+
+// …or describe the sender's retry profile and let the store size
+// the dedup window correctly (per-retry backoff + per-attempt
+// timeouts × default 4× safety factor; jitter honored).
+const sized = new InMemoryIdempotencyStore({
+  retryProfile: {
+    maxRetries: 5,
+    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
+    timeoutMs: 2_000,
+  },
+  maxEntries: 50_000,
 });
 
 // In any receiver — tRPC, Express, Fastify, Hono, a Kafka consumer, …
@@ -43,11 +56,14 @@ await applyEventToAggregate(event);
 
 The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
 
+The `retryProfile` option captures the math that every receiver otherwise computes by hand and many get wrong — the dedup window has to outlast the sender's full retry envelope, otherwise a key expires before the sender finishes retrying and the side effect runs twice. Pass the sender's `{ maxRetries, backoff?, timeoutMs }` and the store sizes the window for you. The full math (per-retry sums per strategy, jitter worst-case 1.5×, default 4× safety factor) is documented inline on `RetryProfile` and worked through in the [external integration guide](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing).
+
 ## API
 
 - **`IdempotencyStore`** — the contract. One method, `claim(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
 - **`InMemoryIdempotencyStore`** — bounded LRU + TTL reference implementation. Single-process only; for multi-process receivers swap for a durable adapter (Postgres unique index, Redis `SET NX`, …) without changing the call site.
-- **`InMemoryIdempotencyStoreOptions`** — TypeScript type for the constructor's options bag.
+- **`InMemoryIdempotencyStoreOptions`** — `{ ttlMs?, retryProfile?, maxEntries? }`. Set `ttlMs` directly, or pass `retryProfile` and the store derives the safe window. When both are supplied, `ttlMs` wins.
+- **`RetryProfile`** — `{ maxRetries, backoff?, timeoutMs, safetyFactor? }`. The sender's retry shape, used by `InMemoryIdempotencyStore` to derive its window. The `backoff` field is typed structurally inline so it accepts the framework's `BackoffOptions` without a cast — but this package doesn't reinvent or re-export the type, preserving the zero-act-dep property.
 
 ## Why a Store and not a Cache
 
