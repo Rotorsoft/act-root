@@ -30,4 +30,12 @@ describe("extractIdempotencyKey", () => {
       extractIdempotencyKey({ "idempotency-key": undefined })
     ).toBeUndefined();
   });
+
+  it("returns undefined when header value is the empty string", () => {
+    // An empty Idempotency-Key carries no idempotency information —
+    // every empty-keyed request would dedup against every other
+    // empty-keyed request, almost certainly a client bug. Treat as
+    // missing.
+    expect(extractIdempotencyKey({ "idempotency-key": "" })).toBeUndefined();
+  });
 });

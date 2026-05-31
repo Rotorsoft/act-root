@@ -106,7 +106,7 @@ onData: (msg) => {
 
 ### `/receiver` subpath
 
-- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header is missing or its value is an array (ambiguous — no policy for picking one). Pair with `IdempotencyStore.claim` from `@rotorsoft/act-ops/idempotency`.
+- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string (carries no idempotency information). Anything else is the raw value. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope — pair with your own checks or wait for #744's middleware to ship opinionated defaults.
 
 ### `/sse` subpath
 

@@ -334,7 +334,7 @@ export const idempotent = t.procedure.use(({ ctx, next }) => {
 });
 ```
 
-`extractIdempotencyKey` from `@rotorsoft/act-http/receiver` does the case-insensitive header lookup and returns `undefined` when the header is missing or its value is an array (the ambiguous case Node's raw header bag allows). One import line replaces the by-hand lookup every receiver was writing.
+`extractIdempotencyKey` from `@rotorsoft/act-http/receiver` does the case-insensitive header lookup and returns `undefined` for the three cases where there's no usable key: missing header, array-valued header (ambiguous — Node's raw header bag allows it), or empty-string value (carries no idempotency information). One import line replaces the by-hand lookup every receiver was writing.
 
 Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
 
