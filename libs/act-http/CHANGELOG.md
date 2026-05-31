@@ -1,3 +1,16 @@
+# [@rotorsoft/act-http-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.0.0...@rotorsoft/act-http-v1.1.0) (2026-05-31)
+
+
+### Features
+
+* **act-http:** add /receiver subpath with extractIdempotencyKey ([d423565](https://github.com/rotorsoft/act-root/commit/d423565511c8721dc36ef9cb1a9c75b1600fcce4)), closes [#832](https://github.com/rotorsoft/act-root/issues/832) [#832](https://github.com/rotorsoft/act-root/issues/832) [#832](https://github.com/rotorsoft/act-root/issues/832) [#833](https://github.com/rotorsoft/act-root/issues/833) [#743](https://github.com/rotorsoft/act-root/issues/743)
+* **act-http:** extract classifyHttpResponse helper from webhook ([1f56c60](https://github.com/rotorsoft/act-root/commit/1f56c60b125b178a18a00d194ffc7820c1ebc518)), closes [#742](https://github.com/rotorsoft/act-root/issues/742)
+* **act-http:** paired HMAC-SHA256 webhook signing + verification ([298ef82](https://github.com/rotorsoft/act-root/commit/298ef824c714ae15209de745e77d0eefa957888e))
+* **act-http:** receiver middleware — core + tRPC/Express/Fastify/Hono adapters ([87a4ee5](https://github.com/rotorsoft/act-root/commit/87a4ee56de38b048a48b3d0c0274933b8a2bfb6b)), closes [#744](https://github.com/rotorsoft/act-root/issues/744) [#743](https://github.com/rotorsoft/act-root/issues/743) [833/#834](https://github.com/rotorsoft/act-root/issues/834) [#743](https://github.com/rotorsoft/act-root/issues/743) [#744](https://github.com/rotorsoft/act-root/issues/744)
+* **act-http:** treat empty Idempotency-Key as missing in extractIdempotencyKey ([f91b628](https://github.com/rotorsoft/act-root/commit/f91b62812d6edc22e380b62c08dea3738e91bff5))
+* **act-http:** tryOk helper + generic Retryable/NonRetryable HTTP error classes ([017d93c](https://github.com/rotorsoft/act-root/commit/017d93c3812dc2a6aa828aa3709e5d2a84552110))
+* **act-ops, act-http:** high-level WebhookReceiver port + Hono-based adapter ([49d4799](https://github.com/rotorsoft/act-root/commit/49d479990f5f377f8c9a47254746ea356f01bdba)), closes [hi#level](https://github.com/hi/issues/level) [hi#level](https://github.com/hi/issues/level) [Hi#level](https://github.com/Hi/issues/level) [hi#level](https://github.com/hi/issues/level) [hi#level](https://github.com/hi/issues/level) [#742](https://github.com/rotorsoft/act-root/issues/742) [#743](https://github.com/rotorsoft/act-root/issues/743) [#744](https://github.com/rotorsoft/act-root/issues/744) [hi#level](https://github.com/hi/issues/level)
+
 # [@rotorsoft/act-http-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v0.2.0...@rotorsoft/act-http-v1.0.0) (2026-05-21)
 
 
