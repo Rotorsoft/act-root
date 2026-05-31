@@ -12,17 +12,18 @@
  * handlers without manual `as` casts.
  */
 
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { z } from "zod";
-import { extractIdempotencyKey, IdempotencyCache } from "./idempotency.js";
+import { extractIdempotencyKey } from "./idempotency.js";
 
 /** tRPC context shape: just the raw request headers. */
 type Ctx = { headers: Record<string, string | string[] | undefined> };
 
 const t = initTRPC.context<Ctx>().create();
 
-const cache = new IdempotencyCache({
+const dedup = new InMemoryIdempotencyStore({
   // 24h dedup window — covers any reasonable retry+backoff envelope
   // from a sender using ACT-601 `exponential` backoff up to maxMs=30s.
   ttlMs: 24 * 60 * 60 * 1000,
@@ -43,7 +44,7 @@ const idempotent = t.procedure.use(({ ctx, next }) => {
       message: "Missing Idempotency-Key header",
     });
   }
-  const deduped = !cache.recordIfFresh(key);
+  const deduped = !dedup.record_if_fresh(key);
   return next({ ctx: { ...ctx, key, deduped } });
 });
 

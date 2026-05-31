@@ -88,11 +88,13 @@ describe("delta", () => {
   });
 
   describe("missing keys — event-payload shape", () => {
-    it("omits every key present only in before (no null sentinel)", () => {
+    it("omits every key present only in before (no synthesized null)", () => {
       expect(delta<Schema>({ a: 1, b: 2, c: 3 }, { a: 1 })).toEqual({});
     });
 
-    it("never produces null at any depth", () => {
+    it("never synthesizes null for missing keys at any depth", () => {
+      // `delta` doesn't *invent* a null for an absent key. (Explicit
+      // nulls in `after` are propagated — see the next describe block.)
       const before = {
         keep: 1,
         drop: 2,
@@ -103,6 +105,53 @@ describe("delta", () => {
       expect(result).toEqual({});
       const stringified = JSON.stringify(result);
       expect(stringified).not.toContain("null");
+    });
+  });
+
+  // Locks in the asymmetry: `delta` never *synthesizes* null for a
+  // missing key, but it always *propagates* null when the caller put
+  // one in `after`. That's the contract that makes the deletion flow
+  // work end-to-end: nullable-schema action carries `{ field: null }`
+  // → delta emits `{ field: null }` → reducer's `patch(state, data)`
+  // reads the null as the deletion sentinel and removes the key.
+  describe("explicit nulls in `after` — caller-driven deletion", () => {
+    it("propagates a shallow explicit null from after", () => {
+      const before = { bio: "old", name: "Alice" };
+      const after = { bio: null, name: "Alice" };
+      expect(delta<Schema>(before, after)).toEqual({ bio: null });
+    });
+
+    it("propagates a nested explicit null from after", () => {
+      const before = {
+        profile: { bio: "old", avatar: "u.png" },
+      };
+      const after = {
+        profile: { bio: null, avatar: "u.png" },
+      };
+      expect(delta<Schema>(before, after)).toEqual({
+        profile: { bio: null },
+      });
+    });
+
+    it("propagates an explicit null introducing a new key", () => {
+      expect(delta<Schema>({ a: 1 }, { a: 1, b: null })).toEqual({ b: null });
+    });
+
+    it("recognizes Object.is(null, null) → omits an unchanged null", () => {
+      expect(delta<Schema>({ b: null }, { b: null })).toEqual({});
+    });
+
+    it("treats null → non-null as a wholesale replace (not a recurse)", () => {
+      expect(delta<Schema>({ x: null }, { x: { nested: 1 } })).toEqual({
+        x: { nested: 1 },
+      });
+    });
+
+    it("round-trips through patch — caller-supplied null deletes the field", () => {
+      const before = { bio: "old", name: "Alice" };
+      const data = { bio: null, name: "Alice" };
+      const d = delta<Schema>(before, data);
+      expect(patch(before, d)).toEqual({ name: "Alice" });
     });
   });
 

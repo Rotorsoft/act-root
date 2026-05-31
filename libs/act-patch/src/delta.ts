@@ -2,24 +2,44 @@ import type { DeepPartial, Schema } from "./types.js";
 
 /**
  * Compute the smallest `DeepPartial<S>` describing what changed between
- * `before` and `after`. Designed for event payloads — records positive
- * facts (what changed) rather than `patch` instructions (which include a
- * `null` deletion sentinel).
+ * `before` and `after`. Designed for event payloads — records what the
+ * caller put in `after`, rather than synthesizing `patch` instructions
+ * on the caller's behalf.
  *
- * **Rules** (mirror `patch`'s merging rules for the *change* cases):
- * - Same reference (`Object.is`)            → omit (mirrors structural sharing)
- * - Both plain objects                      → recurse (mirrors deep merge)
- * - Otherwise (any other diff)              → set to `after[K]` (mirrors wholesale replace)
- * - Key in `before` only (missing in after) → omit
+ * ## How `delta` reacts to what's in `after`
  *
- * **Round-trip property**: when `before` and `after` share the same key
- * set (the common case for event payloads against a stable state schema),
- * `patch(before, delta(before, after))` deeply equals `after`. When `after`
- * has fewer keys than `before`, the missing key is omitted from the output
- * rather than encoded as a deletion sentinel — `patch` treats the omission
- * as "no change," so the dropped key survives the round-trip. Use
- * `patch(before, { key: null })` directly if you need to express deletion
- * as an instruction; `delta` is for events.
+ * | What the caller put in `after` for key `k` | What `delta` returns for `k` | What `patch` does on replay |
+ * |---|---|---|
+ * | (key omitted)                              | (key omitted)                | leaves `state[k]` alone |
+ * | explicit `null` (schema permits)           | `null`                       | deletes `state[k]` (null is `patch`'s deletion sentinel) |
+ * | new value                                  | the new value                | sets `state[k]` |
+ * | same reference as `before[k]`              | (key omitted)                | leaves `state[k]` alone |
+ *
+ * The asymmetry that matters: **`delta` never *synthesizes* `null` for a
+ * missing key, but it always *propagates* `null` when the caller put one
+ * in `after`**. So nullable-schema actions can express a deletion as
+ * `{ field: null }`, and the deletion travels through delta → event →
+ * reducer-side `patch(state, eventData)` all the way to the aggregate.
+ * Non-nullable schemas (no `.nullable()` fields) never see `null` in the
+ * type or at runtime — the konsult case.
+ *
+ * ## Recursion
+ *
+ * - Same reference (`Object.is`)                          → omit
+ * - Both plain objects                                    → recurse
+ * - Any other diff (value, type, reference)               → set to `after[K]`
+ * - Key in `before` only (missing in `after`)             → omit
+ * - Key in `after` only, or explicit `null` in `after`    → set to `after[K]` (so an explicit `null` flows through)
+ *
+ * ## Round-trip property
+ *
+ * `patch(before, delta(before, after))` deeply equals `after` when the
+ * key set in `after` is a superset of the key set in `before` (or the
+ * shrinkages are encoded as explicit nulls in `after`). If `after`
+ * silently *omits* keys that were present in `before`, the dropped key
+ * survives the round-trip — `delta` reads the omission as "no change,"
+ * not "delete." Express deletion in `after` (as `null`) or instruct
+ * `patch` directly (`patch(before, { key: null })`).
  *
  * Equality is reference-based, matching `patch`'s structural-sharing model.
  * Two structurally-equal-but-distinct values (e.g. two `Date` instances with
@@ -29,9 +49,9 @@ import type { DeepPartial, Schema } from "./types.js";
  *
  * @param before - The original state object
  * @param after - The desired state object
- * @returns The smallest deep-partial that, when merged onto `before`,
- *   produces an object structurally matching `after` (modulo deletions —
- *   see the round-trip caveat above).
+ * @returns The smallest deep-partial describing what `after` says changed
+ *   relative to `before`. May contain `null` only when `after` itself
+ *   contained `null` at the same path.
  */
 export const delta = <S extends Schema>(
   before: Readonly<S>,

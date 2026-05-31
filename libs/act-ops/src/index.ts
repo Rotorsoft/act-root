@@ -4,18 +4,23 @@
  *
  * Operational primitives for act apps and act-independent receivers.
  *
- * This package is the home for cross-cutting operational concerns —
- * receiver-side idempotency, retry-budget sizing, poison-message
- * classification — that need to ship without a hard dependency on
- * `@rotorsoft/act`. The forwarded-shape bus consumers from ACT-603
- * are the motivating example: a service that processes events off a
- * Kafka topic doesn't run an Act orchestrator, but it still needs
- * the same dedup contract the inline `webhook` reaction enforces.
+ * The package's first surface is the **receiver-side idempotency
+ * contract**: an {@link IdempotencyStore} port plus an
+ * {@link InMemoryIdempotencyStore} reference implementation. Both Act
+ * apps and non-Act receivers (forwarded-bus consumers, framework-
+ * agnostic HTTP endpoints) install `@rotorsoft/act-ops` to speak the
+ * dedup contract — the package has no runtime or peer dependency on
+ * `@rotorsoft/act`, so non-Act consumers don't pay for the orchestrator
+ * just to honor an `Idempotency-Key`.
  *
- * The contract lives here so both sides can speak it.
- *
- * Scope is intentionally narrow: ports + small framework-agnostic
- * helpers. Durable adapters (Postgres, Redis) ship in their own
- * packages and depend on the port declared here.
+ * Durable adapters (Postgres, Redis) implement the same port in their
+ * own packages and slot in transparently. The framework-agnostic
+ * receiver middleware (`#744`) consumes the port from here without
+ * binding to a specific adapter.
  */
-export {};
+
+export {
+  InMemoryIdempotencyStore,
+  type InMemoryIdempotencyStoreOptions,
+} from "./idempotency/in-memory.js";
+export type { IdempotencyStore } from "./idempotency/port.js";

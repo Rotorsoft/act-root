@@ -209,11 +209,51 @@ try {
 
 Error constants: `Errors.ValidationError = "ERR_VALIDATION"`, `Errors.InvariantError = "ERR_INVARIANT"`, `Errors.ConcurrencyError = "ERR_CONCURRENCY"`.
 
-## Idempotent API Requests
+## Idempotency
 
-Request-level idempotency belongs in API middleware, not in the event sourcing framework. Act uses optimistic concurrency (`expectedVersion`) for conflict detection at the store level.
+Two distinct idempotency shapes show up in real apps. They share a header (`Idempotency-Key` or an equivalent input field) and a goal (make retries safe) but their storage primitives differ:
 
-For safe client retries, add a tRPC middleware with a dedicated cache:
+- **Receiver-side dedup** — inbound webhooks / bus events. The contract is "did I already process this `Idempotency-Key`?" → return cached *outcome marker*, don't re-execute the side effect. Storage primitive: `IdempotencyStore.record_if_fresh(key) → boolean`. Use `@rotorsoft/act-ops` (see below).
+- **API-edge request dedup** — client-originated tRPC calls where retries should *replay the original response* verbatim. The contract is "did I already answer this `idempotencyKey`?" → return cached *response value*. Storage primitive: key → response cache. Inline implementation below.
+
+If the scaffolded app exposes a webhook receiver, reach for `@rotorsoft/act-ops`. If it only handles API-edge retries, the inline pattern below is enough.
+
+### Receiver-side dedup with `@rotorsoft/act-ops`
+
+When the app receives webhooks (or forwarded bus events) and needs the receiver-side idempotency contract documented in [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration), use the shipped port + reference implementation:
+
+```typescript
+// packages/app/src/api/webhook-receiver.ts
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+
+const dedup = new InMemoryIdempotencyStore({
+  ttlMs: 24 * 60 * 60 * 1000,
+  maxEntries: 50_000,
+});
+
+export const webhookRouter = router({
+  inbound: t.procedure
+    .input(InboundEventSchema)
+    .mutation(async ({ input, ctx }) => {
+      const key = ctx.headers["idempotency-key"];
+      if (!key) throw new TRPCError({ code: "BAD_REQUEST", message: "Missing Idempotency-Key" });
+
+      const fresh = dedup.record_if_fresh(key);
+      if (!fresh) return { status: "dedup-skipped" as const, key };
+
+      await app.do(/* … apply the inbound event … */);
+      return { status: "processed" as const, key };
+    }),
+});
+```
+
+For multi-process receivers, swap `InMemoryIdempotencyStore` for a durable adapter (Postgres unique index, Redis `SET NX EX`) implementing the same `IdempotencyStore` port — the middleware body doesn't change. Working examples in [external integration § implementations](https://rotorsoft.github.io/act-root/docs/guides/external-integration#implementations).
+
+> Add `@rotorsoft/act-ops` to the workspace package's dependencies (`workspace:^`). It has no peer dep on `@rotorsoft/act`, so non-Act services in the same monorepo (a Kafka consumer, an Express endpoint) can install it without dragging the orchestrator along.
+
+### API-edge response replay (inline)
+
+API-edge request-level idempotency (where the *response* itself must be replayed for client retries) is a different shape from receiver-side dedup. There's no shipped primitive for it — `@rotorsoft/act-ops`'s `record_if_fresh` returns a boolean, not a stored response. Use a small per-app middleware:
 
 ```typescript
 // packages/app/src/api/middleware.ts

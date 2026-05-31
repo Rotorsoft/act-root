@@ -6,8 +6,6 @@
 
 _Operational primitives for [@rotorsoft/act](https://www.npmjs.com/package/@rotorsoft/act) apps and act-independent receivers — idempotency, retry budgets, poison-message classification._
 
-> **Note.** Package is currently at `0.0.0` — the scaffold is in place but no primitives have shipped yet. The first surface lands with the [ACT-1110 helper extraction tracker](https://github.com/Rotorsoft/act-root/issues/748) (`IdempotencyStore` port + `InMemoryIdempotencyStore`, then `computeMinSafeTtl`). This README will fill in as primitives land — track progress on the [milestone 1.1 board](https://github.com/Rotorsoft/act-root/milestone/4).
-
 ## Why this package
 
 Operational concerns that pair with Act — receiver-side idempotency, retry-budget sizing, poison-message classification — show up on both sides of the wire. The inline `webhook` reaction from `@rotorsoft/act-http` enforces dedup with an auto-derived `Idempotency-Key`; the cooperative receiver on the other end has to actually honor it. When the receiver is itself an Act app, it can reach for the same primitives the framework uses internally. When the receiver is something else — a Kafka consumer, an Express endpoint, a queue worker — it should be able to speak the same contract without dragging the orchestrator along.
@@ -26,23 +24,34 @@ No peer dependencies. Drop it next to whatever framework — or no framework at 
 
 ## Quick start
 
-The first primitive — `IdempotencyStore` + `InMemoryIdempotencyStore` — lands with [#746 / ACT-1118](https://github.com/Rotorsoft/act-root/issues/746). Until then the `0.0.0` scaffold is published only as a placeholder for the tag chain and CI matrix; there is no runtime surface to import.
-
-Once the port is in, the shape looks like this:
-
 ```ts
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
 
-const dedup = new InMemoryIdempotencyStore({ ttlMs: 10 * 60_000 });
+const dedup = new InMemoryIdempotencyStore({
+  ttlMs: 24 * 60 * 60 * 1000,  // dedup window (default: 24h)
+  maxEntries: 50_000,           // memory bound (default: 100_000)
+});
 
-// In an Express / Fastify / Hono / tRPC receiver:
-const key = req.headers["idempotency-key"];
-if (await dedup.has(key)) return cached();
-await handleEvent(event);
-await dedup.put(key);
+// In any receiver — tRPC, Express, Fastify, Hono, a Kafka consumer, …
+const key = extractIdempotencyKeyFromHeaders(req);
+const fresh = dedup.record_if_fresh(key);
+if (!fresh) return replyDedupedWithoutSideEffects();
+await applyEventToAggregate(event);
 ```
 
-Subsequent tickets in the [ACT-1110 tracker](https://github.com/Rotorsoft/act-root/issues/748) add `computeMinSafeTtl` (deriving a safe dedup window from your reaction's backoff + lease configuration) and the framework-agnostic receiver middleware in `@rotorsoft/act-http`.
+`record_if_fresh` is the entire contract — atomically record the key and report whether the caller is processing a fresh request or a duplicate. One call. No separate `has` / `put` dance. The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
+
+## API
+
+- **`IdempotencyStore`** — the contract. One method, `record_if_fresh(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
+- **`InMemoryIdempotencyStore`** — bounded LRU + TTL reference implementation. Single-process only; for multi-process receivers swap for a durable adapter (Postgres unique index, Redis `SET NX`, …) without changing the call site.
+- **`InMemoryIdempotencyStoreOptions`** — TypeScript type for the constructor's options bag.
+
+## Why a Store and not a Cache
+
+The doc colloquially calls these "cache shapes," but structurally this is **authoritative** storage. Losing a dedup record causes a duplicate side effect — paying the same invoice twice, sending the same email twice, opening the same incident twice — not just a rebuild from a source of truth. In this codebase `Cache` is reserved for "rebuildable" state (the snapshot cache); `Store` is reserved for authoritative state. The idempotency contract sits in the second bucket. Hence `IdempotencyStore`.
+
+The practical implication: when you swap `InMemoryIdempotencyStore` for a durable adapter at deploy time, the durable adapter's *persistence* is the load-bearing property — not its hit rate.
 
 ## Compatibility
 
@@ -52,7 +61,7 @@ Subsequent tickets in the [ACT-1110 tracker](https://github.com/Rotorsoft/act-ro
 
 ## Stability
 
-Public API governed by the [Act Stability Charter](../../STABILITY.md) once primitives ship. While the package is in `0.x` everything is provisional — the surface freezes when the first `1.0.0` cuts. The milestone tracker is [milestone 1.1](https://github.com/Rotorsoft/act-root/milestone/4).
+Public API governed by the [Act Stability Charter](../../STABILITY.md) once primitives stabilise. While the package is in `0.x` everything is provisional — the surface freezes when the first `1.0.0` cuts. The milestone tracker is [milestone 1.1](https://github.com/Rotorsoft/act-root/milestone/4).
 
 ## Related packages
 
