@@ -20,6 +20,10 @@ export default defineConfig({
         __dirname,
         "libs/act-http/src/sse/index.ts"
       ),
+      "@rotorsoft/act-http/receiver": path.resolve(
+        __dirname,
+        "libs/act-http/src/receiver/index.ts"
+      ),
       "@rotorsoft/act-pino": path.resolve(
         __dirname,
         "libs/act-pino/src/index.ts"

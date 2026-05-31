@@ -15,6 +15,7 @@
   "dependencies": {
     "@act/calculator": "workspace:^",
     "@rotorsoft/act": "workspace:^",
+    "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@trpc/server": "11.17.0",

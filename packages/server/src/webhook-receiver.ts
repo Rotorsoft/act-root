@@ -12,11 +12,11 @@
  * handlers without manual `as` casts.
  */
 
+import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { z } from "zod";
-import { extractIdempotencyKey } from "./idempotency.js";
 
 /** tRPC context shape: just the raw request headers. */
 type Ctx = { headers: Record<string, string | string[] | undefined> };

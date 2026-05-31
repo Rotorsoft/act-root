@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { extractIdempotencyKey } from "../src/idempotency.js";
+import { extractIdempotencyKey } from "../../src/receiver/index.js";
 
-// The IdempotencyStore port + InMemoryIdempotencyStore impl tests
-// moved to libs/act-ops/test/in-memory.spec.ts when the class was
-// promoted to `@rotorsoft/act-ops` (#746). `extractIdempotencyKey`
-// stays here until #743 lifts it into `@rotorsoft/act-http/receiver`.
 describe("extractIdempotencyKey", () => {
   it("returns the header value (case-insensitive)", () => {
     expect(extractIdempotencyKey({ "Idempotency-Key": "abc" })).toBe("abc");
     expect(extractIdempotencyKey({ "idempotency-key": "abc" })).toBe("abc");
     expect(extractIdempotencyKey({ "IDEMPOTENCY-KEY": "abc" })).toBe("abc");
+  });
+
+  it("handles mixed-case header names", () => {
+    expect(extractIdempotencyKey({ "iDeMpOtEnCy-KeY": "abc" })).toBe("abc");
   });
 
   it("returns undefined when header is absent", () => {

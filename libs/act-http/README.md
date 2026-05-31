@@ -20,12 +20,13 @@ Most Act apps reach beyond their own process eventually — POSTing committed ev
 pnpm add @rotorsoft/act-http
 ```
 
-Two independent subpath exports:
+Three independent subpath exports:
 
 | Import path | What you get |
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
+| `@rotorsoft/act-http/receiver` | `extractIdempotencyKey` — server-side helpers for the inbound HTTP role. Pair with `@rotorsoft/act-ops/idempotency` for receiver-side dedup. Framework-agnostic middleware + per-framework adapters (tRPC / Express / Fastify / Hono) land in #744. |
 
 ## Quick start
 
@@ -49,6 +50,30 @@ import { webhook } from "@rotorsoft/act-http/webhook";
   )
   .to(resolver)
 ```
+
+### `receiver` — parse the inbound dedup header
+
+```ts
+import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+const dedup = new InMemoryIdempotencyStore({
+  retryProfile: {
+    maxRetries: 5,
+    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
+    timeoutMs: 2_000,
+  },
+});
+
+// In any HTTP handler (tRPC, Express, Fastify, Hono, …)
+const key = extractIdempotencyKey(req.headers);
+if (!key) return reply.status(400).send("Missing Idempotency-Key");
+const fresh = dedup.claim(key);
+if (!fresh) return reply.send({ status: "dedup-skipped" });
+// …process the inbound event…
+```
+
+The framework-agnostic middleware that wires `extractIdempotencyKey` + `dedup.claim` together, plus per-framework adapters (tRPC / Express / Fastify / Hono), ships in #744.
 
 ### `sse` — live state broadcast
 
@@ -78,6 +103,10 @@ onData: (msg) => {
 - **`WebhookError`** — thrown on 5xx, network errors, and timeouts. Carries `status` (`0` for network/timeout) and `url`. Retryable by drain.
 - **`NonRetryableWebhookError`** — thrown on 4xx. Extends `NonRetryableError` from `@rotorsoft/act`; the drain finalizer blocks the stream on first attempt without consuming the retry budget.
 - **`WebhookConfig`** — TypeScript type for the helper options.
+
+### `/receiver` subpath
+
+- **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header is missing or its value is an array (ambiguous — no policy for picking one). Pair with `IdempotencyStore.claim` from `@rotorsoft/act-ops/idempotency`.
 
 ### `/sse` subpath
 

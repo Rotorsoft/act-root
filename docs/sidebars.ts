@@ -77,8 +77,13 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
-          label: "@rotorsoft/act-http",
+          label: "@rotorsoft/act-http (webhook)",
           href: "/docs/api/act-http/src/webhook",
+        },
+        {
+          type: "link",
+          label: "@rotorsoft/act-http (receiver)",
+          href: "/docs/api/act-http/src/receiver",
         },
         {
           type: "link",

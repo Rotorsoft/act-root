@@ -314,14 +314,15 @@ A small idempotent receiver, mirroring the `packages/server` tRPC setup. The mid
 
 ```ts
 // packages/server/src/webhook-receiver.ts (excerpt)
+import { extractIdempotencyKey } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 
 const dedup = new InMemoryIdempotencyStore();
-const t = initTRPC.context<{ headers: Record<string, string> }>().create();
+const t = initTRPC.context<{ headers: Record<string, string | string[] | undefined> }>().create();
 
 export const idempotent = t.procedure.use(({ ctx, next }) => {
-  const key = ctx.headers["idempotency-key"];
+  const key = extractIdempotencyKey(ctx.headers);
   if (!key) {
     throw new TRPCError({
       code: "BAD_REQUEST",
@@ -332,6 +333,8 @@ export const idempotent = t.procedure.use(({ ctx, next }) => {
   return next({ ctx: { ...ctx, key, deduped: !fresh } });
 });
 ```
+
+`extractIdempotencyKey` from `@rotorsoft/act-http/receiver` does the case-insensitive header lookup and returns `undefined` when the header is missing or its value is an array (the ambiguous case Node's raw header bag allows). One import line replaces the by-hand lookup every receiver was writing.
 
 Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
 

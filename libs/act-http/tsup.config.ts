@@ -1,7 +1,7 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/webhook/index.ts", "src/sse/index.ts"],
+  entry: ["src/webhook/index.ts", "src/sse/index.ts", "src/receiver/index.ts"],
   format: ["esm", "cjs"],
   dts: false,
   outDir: "dist",

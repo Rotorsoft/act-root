@@ -504,6 +504,9 @@ importers:
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../../libs/act
+      '@rotorsoft/act-http':
+        specifier: workspace:^
+        version: link:../../libs/act-http
       '@rotorsoft/act-ops':
         specifier: workspace:^
         version: link:../../libs/act-ops

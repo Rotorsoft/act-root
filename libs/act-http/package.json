@@ -35,6 +35,11 @@
       "types": "./dist/@types/sse/index.d.ts",
       "import": "./dist/sse/index.js",
       "require": "./dist/sse/index.cjs"
+    },
+    "./receiver": {
+      "types": "./dist/@types/receiver/index.d.ts",
+      "import": "./dist/receiver/index.js",
+      "require": "./dist/receiver/index.cjs"
     }
   },
   "sideEffects": false,

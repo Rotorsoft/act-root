@@ -13,6 +13,9 @@
       "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],
       "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
       "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
+      "@rotorsoft/act-http/receiver": [
+        "../libs/act-http/src/receiver/index.ts"
+      ],
       "@rotorsoft/act-patch": ["../libs/act-patch/src/index.ts"],
       "@rotorsoft/act-pg": ["../libs/act-pg/src/index.ts"],
       "@rotorsoft/act-pino": ["../libs/act-pino/src/index.ts"],

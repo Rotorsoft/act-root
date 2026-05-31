@@ -1,18 +1,14 @@
 /**
- * Receiver-side header parser for the idempotency contract. The
- * dedup store itself — `IdempotencyStore` port +
- * `InMemoryIdempotencyStore` reference impl — now lives in
- * `@rotorsoft/act-ops`; import from there for new code.
- *
- * `extractIdempotencyKey` stays here until #743 (ACT-1115) lifts it
- * into `@rotorsoft/act-http/receiver` alongside the framework-specific
- * middleware adapters.
- */
-
-/**
  * Pull the `Idempotency-Key` header from a Node-style headers bag,
  * case-insensitive. Returns `undefined` when the header is missing or
- * malformed (an array value, which would be ambiguous).
+ * when its value is an array (ambiguous — can't pick one without a
+ * policy the receiver hasn't declared).
+ *
+ * Pair with `IdempotencyStore.claim` from
+ * `@rotorsoft/act-ops/idempotency`: extract the key from the inbound
+ * request, claim it on the store, return a `deduped` marker when the
+ * claim fails. The framework-agnostic middleware that wires these
+ * together lands in #744.
  */
 export function extractIdempotencyKey(
   headers: Record<string, string | string[] | undefined>
