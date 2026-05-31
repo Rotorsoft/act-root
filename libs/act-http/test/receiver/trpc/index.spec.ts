@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { TRPCError } from "@trpc/server";
 import { describe, expect, it, vi } from "vitest";
-import { webhookReceiver } from "../../../src/receiver/trpc/index.js";
+import { webhookMiddleware } from "../../../src/receiver/trpc/index.js";
 
 const BODY = '{"orderId":"o-1"}';
 
@@ -9,11 +9,11 @@ function freshStore() {
   return new InMemoryIdempotencyStore();
 }
 
-describe("webhookReceiver (tRPC)", () => {
+describe("webhookMiddleware (tRPC)", () => {
   it("calls next with idempotency injected on the happy path", async () => {
     const store = freshStore();
     const next = vi.fn(async () => ({ status: "processed" }));
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     const result = await middleware({
       ctx: {
         headers: { "idempotency-key": "req-1" },
@@ -34,7 +34,7 @@ describe("webhookReceiver (tRPC)", () => {
   it("injects deduped: true on a re-claim", async () => {
     const store = freshStore();
     const next = vi.fn(async () => ({ status: "ok" }));
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     const headers = { "idempotency-key": "req-1" };
     await middleware({ ctx: { headers, rawBody: BODY }, next });
     next.mockClear();
@@ -48,7 +48,7 @@ describe("webhookReceiver (tRPC)", () => {
   it("throws TRPCError BAD_REQUEST on missing-key", async () => {
     const store = freshStore();
     const next = vi.fn();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     await expect(
       middleware({ ctx: { headers: {}, rawBody: BODY }, next })
     ).rejects.toMatchObject({
@@ -61,7 +61,7 @@ describe("webhookReceiver (tRPC)", () => {
   it("throws TRPCError UNAUTHORIZED on verification failure", async () => {
     const store = freshStore();
     const next = vi.fn();
-    const middleware = webhookReceiver({ store, secret: "test-secret" });
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
     // No signature headers — verification will fail with missing-signature.
     await expect(
       middleware({
@@ -77,7 +77,7 @@ describe("webhookReceiver (tRPC)", () => {
 
   it("throws TRPCError instances (not plain Error)", async () => {
     const store = freshStore();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     try {
       await middleware({
         ctx: { headers: {}, rawBody: BODY },

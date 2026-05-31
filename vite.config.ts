@@ -48,6 +48,10 @@ export default defineConfig({
         __dirname,
         "libs/act-ops/src/idempotency/index.ts"
       ),
+      "@rotorsoft/act-ops/webhook": path.resolve(
+        __dirname,
+        "libs/act-ops/src/webhook/index.ts"
+      ),
       "@rotorsoft/act-sqlite": path.resolve(
         __dirname,
         "libs/act-sqlite/src/index.ts"

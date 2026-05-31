@@ -10,7 +10,7 @@
  *
  * ```ts
  * import { initTRPC, TRPCError } from "@trpc/server";
- * import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/trpc";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * type Ctx = {
@@ -22,7 +22,7 @@
  * const dedup = new InMemoryIdempotencyStore();
  *
  * const idempotent = t.procedure.use(
- *   webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+ *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
  * );
  * ```
  *
@@ -55,7 +55,7 @@ import { type CheckWebhookOptions, checkWebhook } from "../check.js";
  * handlers see `ctx.idempotency = { key, deduped }`.
  */
 // biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape
-export function webhookReceiver(options: CheckWebhookOptions): any {
+export function webhookMiddleware(options: CheckWebhookOptions): any {
   return async function check(opts: {
     ctx: {
       headers: Record<string, string | string[] | undefined>;

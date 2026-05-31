@@ -34,6 +34,7 @@
       "@rotorsoft/act-ops/idempotency": [
         "../libs/act-ops/src/idempotency/index.ts"
       ],
+      "@rotorsoft/act-ops/webhook": ["../libs/act-ops/src/webhook/index.ts"],
       "@rotorsoft/act-sqlite": ["../libs/act-sqlite/src/index.ts"],
       "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"]
     }

@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
-import { webhookReceiver } from "../../../src/receiver/fastify/index.js";
+import { webhookMiddleware } from "../../../src/receiver/fastify/index.js";
 
 const BODY = '{"orderId":"o-1"}';
 
@@ -27,12 +27,12 @@ function mockRequest(headers: Record<string, unknown>, rawBody?: string) {
   } as unknown as FastifyRequest;
 }
 
-describe("webhookReceiver (Fastify)", () => {
+describe("webhookMiddleware (Fastify)", () => {
   it("attaches request.idempotency on the happy path", async () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
     const { reply } = mockReply();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(
       (req as FastifyRequest & { idempotency: unknown }).idempotency
@@ -43,7 +43,7 @@ describe("webhookReceiver (Fastify)", () => {
     const store = freshStore();
     const req = mockRequest({}, BODY);
     const { reply, send } = mockReply();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(reply.status).toHaveBeenCalledWith(400);
     expect(send).toHaveBeenCalledWith({ error: "missing-key" });
@@ -53,7 +53,7 @@ describe("webhookReceiver (Fastify)", () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
     const { reply, send } = mockReply();
-    const middleware = webhookReceiver({ store, secret: "test-secret" });
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
     await middleware(req, reply);
     expect(reply.status).toHaveBeenCalledWith(401);
     expect(send).toHaveBeenCalledWith({ error: "missing-signature" });
@@ -63,7 +63,7 @@ describe("webhookReceiver (Fastify)", () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" });
     const { reply } = mockReply();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(
       (req as FastifyRequest & { idempotency: unknown }).idempotency
@@ -72,7 +72,7 @@ describe("webhookReceiver (Fastify)", () => {
 
   it("returns deduped: true on a re-claim", async () => {
     const store = freshStore();
-    const middleware = webhookReceiver({ store });
+    const middleware = webhookMiddleware({ store });
     {
       const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
       const { reply } = mockReply();

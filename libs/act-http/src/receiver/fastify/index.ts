@@ -8,7 +8,7 @@
  *
  * ```ts
  * import Fastify from "fastify";
- * import { webhookReceiver } from "@rotorsoft/act-http/receiver/fastify";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/fastify";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = Fastify();
@@ -17,7 +17,7 @@
  * app.post(
  *   "/webhooks/orders",
  *   {
- *     preHandler: webhookReceiver({
+ *     preHandler: webhookMiddleware({
  *       store: dedup,
  *       secret: process.env.WEBHOOK_SECRET,
  *     }),
@@ -57,7 +57,7 @@ type WebhookRequest = FastifyRequest & {
  * claims the key on the configured store. See the module-level docs
  * for usage.
  */
-export function webhookReceiver(
+export function webhookMiddleware(
   options: CheckWebhookOptions
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
   return async function check(

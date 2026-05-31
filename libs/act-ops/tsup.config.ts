@@ -1,7 +1,10 @@
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: { "idempotency/index": "src/idempotency/index.ts" },
+  entry: {
+    "idempotency/index": "src/idempotency/index.ts",
+    "webhook/index": "src/webhook/index.ts",
+  },
   format: ["esm", "cjs"],
   dts: false,
   outDir: "dist",

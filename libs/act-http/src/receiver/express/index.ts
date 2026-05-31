@@ -8,7 +8,7 @@
  *
  * ```ts
  * import express from "express";
- * import { webhookReceiver } from "@rotorsoft/act-http/receiver/express";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/express";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = express();
@@ -19,7 +19,7 @@
  *
  * app.post(
  *   "/webhooks/orders",
- *   webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
+ *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
  *   (req, res) => {
  *     const { key, deduped } = (req as any).idempotency;
  *     if (deduped) return res.json({ status: "dedup-skipped", key });
@@ -48,7 +48,9 @@ import { type CheckWebhookOptions, checkWebhook } from "../check.js";
  * (when `secret` is set), enforces `Idempotency-Key`, and claims the
  * key on the configured store. See the module-level docs for usage.
  */
-export function webhookReceiver(options: CheckWebhookOptions): RequestHandler {
+export function webhookMiddleware(
+  options: CheckWebhookOptions
+): RequestHandler {
   return async function check(
     req: Request,
     res: Response,

@@ -8,7 +8,7 @@
  *
  * ```ts
  * import { Hono } from "hono";
- * import { webhookReceiver } from "@rotorsoft/act-http/receiver/hono";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = new Hono();
@@ -16,7 +16,7 @@
  *
  * app.post(
  *   "/webhooks/orders",
- *   webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
+ *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
  *   async (c) => {
  *     const idem = c.get("idempotency") as { key: string; deduped: boolean };
  *     if (idem.deduped) return c.json({ status: "dedup-skipped", key: idem.key });
@@ -41,7 +41,7 @@ import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 /**
  * Variables this middleware contributes to the Hono context. The
  * generic on the returned {@link MiddlewareHandler} threads it
- * through so route handlers downstream of `app.post(..., webhookReceiver(...), handler)`
+ * through so route handlers downstream of `app.post(..., webhookMiddleware(...), handler)`
  * see `c.get("idempotency")` typed without a manual cast.
  */
 export type WebhookVariables = {
@@ -53,7 +53,7 @@ export type WebhookVariables = {
  * `secret` is set), enforces `Idempotency-Key`, and claims the key
  * on the configured store. See the module-level docs for usage.
  */
-export function webhookReceiver(
+export function webhookMiddleware(
   options: CheckWebhookOptions
 ): MiddlewareHandler<{ Variables: WebhookVariables }> {
   return async function check(c, next) {

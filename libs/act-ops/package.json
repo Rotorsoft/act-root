@@ -30,6 +30,11 @@
       "types": "./dist/@types/idempotency/index.d.ts",
       "import": "./dist/idempotency/index.js",
       "require": "./dist/idempotency/index.cjs"
+    },
+    "./webhook": {
+      "types": "./dist/@types/webhook/index.d.ts",
+      "import": "./dist/webhook/index.js",
+      "require": "./dist/webhook/index.cjs"
     }
   },
   "sideEffects": false,

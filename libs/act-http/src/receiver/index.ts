@@ -40,6 +40,7 @@ export {
   checkWebhook,
 } from "./check.js";
 export { extractIdempotencyKey } from "./extract.js";
+export { webhookReceiver } from "./start.js";
 export {
   type VerifyOptions,
   type VerifyResult,
