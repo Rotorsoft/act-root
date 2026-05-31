@@ -191,7 +191,7 @@ The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorso
 import type { IdempotencyStore } from "@rotorsoft/act-ops";
 
 export interface IdempotencyStore {
-  record_if_fresh(key: string, now?: number): boolean | Promise<boolean>;
+  claim(key: string, now?: number): boolean | Promise<boolean>;
 }
 ```
 
@@ -215,7 +215,7 @@ const dedup = new InMemoryIdempotencyStore({
   maxEntries: 50_000,           // memory bound (default: 100_000)
 });
 
-const fresh = dedup.record_if_fresh(key);
+const fresh = dedup.claim(key);
 ```
 
 Bounded LRU + TTL. Sync return. Use when: receiver is single-process, dedup window is short (under a day), keys fit in RAM. The wolfdesk demo at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) uses this implementation end-to-end.
@@ -226,7 +226,7 @@ Bounded LRU + TTL. Sync return. Use when: receiver is single-process, dedup wind
 class RedisIdempotencyStore implements IdempotencyStore {
   constructor(private readonly redis: RedisClient, private readonly ttlSeconds: number) {}
 
-  async record_if_fresh(key: string): Promise<boolean> {
+  async claim(key: string): Promise<boolean> {
     // SET ... NX EX is atomic: returns "OK" only when the key didn't exist.
     const result = await this.redis.set(`idem:${key}`, "1", "EX", this.ttlSeconds, "NX");
     return result === "OK";
@@ -253,7 +253,7 @@ DELETE FROM idempotency_keys WHERE seen_at < NOW() - INTERVAL '7 days';
 class PostgresIdempotencyStore implements IdempotencyStore {
   constructor(private readonly db: Database) {}
 
-  async record_if_fresh(key: string): Promise<boolean> {
+  async claim(key: string): Promise<boolean> {
     try {
       await this.db.query(`INSERT INTO idempotency_keys(key) VALUES ($1)`, [key]);
       return true;
@@ -306,12 +306,12 @@ export const idempotent = t.procedure.use(({ ctx, next }) => {
       message: "Missing Idempotency-Key header",
     });
   }
-  const fresh = dedup.record_if_fresh(key);
+  const fresh = dedup.claim(key);
   return next({ ctx: { ...ctx, key, deduped: !fresh } });
 });
 ```
 
-Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.record_if_fresh(key)` — the call site shape stays identical otherwise.
+Swap `InMemoryIdempotencyStore` for the Redis or Postgres sketch above — the rest of the middleware doesn't change, because both adapters implement the same `IdempotencyStore` port. For an async adapter, mark the `.use(...)` callback `async` and `await dedup.claim(key)` — the call site shape stays identical otherwise.
 
 A handler using the middleware returns success on both first-attempt and dedup-hit, distinguishing them only for telemetry:
 

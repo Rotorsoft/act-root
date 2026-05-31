@@ -44,7 +44,7 @@ const idempotent = t.procedure.use(({ ctx, next }) => {
       message: "Missing Idempotency-Key header",
     });
   }
-  const deduped = !dedup.record_if_fresh(key);
+  const deduped = !dedup.claim(key);
   return next({ ctx: { ...ctx, key, deduped } });
 });
 

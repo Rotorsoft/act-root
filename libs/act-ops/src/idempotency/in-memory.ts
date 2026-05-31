@@ -25,8 +25,8 @@ export type InMemoryIdempotencyStoreOptions = {
  * - The oldest entry sits at `keys().next().value` (cheapest to evict).
  * - GC walks until the first non-expired entry and stops.
  *
- * `record_if_fresh` is sync; durable adapters return a `Promise<boolean>`
- * — both satisfy the union return type in the port.
+ * `claim` is sync; durable adapters return a `Promise<boolean>` —
+ * both satisfy the union return type in the port.
  */
 export class InMemoryIdempotencyStore implements IdempotencyStore {
   private readonly _seen = new Map<string, number>();
@@ -38,7 +38,7 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
     this._max_entries = options?.maxEntries ?? 100_000;
   }
 
-  record_if_fresh(key: string, now: number = Date.now()): boolean {
+  claim(key: string, now: number = Date.now()): boolean {
     this._gc(now);
     if (this._seen.has(key)) return false;
     this._seen.set(key, now + this._ttl_ms);

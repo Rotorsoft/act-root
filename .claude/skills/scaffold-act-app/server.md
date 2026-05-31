@@ -213,7 +213,7 @@ Error constants: `Errors.ValidationError = "ERR_VALIDATION"`, `Errors.InvariantE
 
 Two distinct idempotency shapes show up in real apps. They share a header (`Idempotency-Key` or an equivalent input field) and a goal (make retries safe) but their storage primitives differ:
 
-- **Receiver-side dedup** — inbound webhooks / bus events. The contract is "did I already process this `Idempotency-Key`?" → return cached *outcome marker*, don't re-execute the side effect. Storage primitive: `IdempotencyStore.record_if_fresh(key) → boolean`. Use `@rotorsoft/act-ops` (see below).
+- **Receiver-side dedup** — inbound webhooks / bus events. The contract is "did I already process this `Idempotency-Key`?" → return cached *outcome marker*, don't re-execute the side effect. Storage primitive: `IdempotencyStore.claim(key) → boolean`. Use `@rotorsoft/act-ops` (see below).
 - **API-edge request dedup** — client-originated tRPC calls where retries should *replay the original response* verbatim. The contract is "did I already answer this `idempotencyKey`?" → return cached *response value*. Storage primitive: key → response cache. Inline implementation below.
 
 If the scaffolded app exposes a webhook receiver, reach for `@rotorsoft/act-ops`. If it only handles API-edge retries, the inline pattern below is enough.
@@ -238,7 +238,7 @@ export const webhookRouter = router({
       const key = ctx.headers["idempotency-key"];
       if (!key) throw new TRPCError({ code: "BAD_REQUEST", message: "Missing Idempotency-Key" });
 
-      const fresh = dedup.record_if_fresh(key);
+      const fresh = dedup.claim(key);
       if (!fresh) return { status: "dedup-skipped" as const, key };
 
       await app.do(/* … apply the inbound event … */);
@@ -253,7 +253,7 @@ For multi-process receivers, swap `InMemoryIdempotencyStore` for a durable adapt
 
 ### API-edge response replay (inline)
 
-API-edge request-level idempotency (where the *response* itself must be replayed for client retries) is a different shape from receiver-side dedup. There's no shipped primitive for it — `@rotorsoft/act-ops`'s `record_if_fresh` returns a boolean, not a stored response. Use a small per-app middleware:
+API-edge request-level idempotency (where the *response* itself must be replayed for client retries) is a different shape from receiver-side dedup. There's no shipped primitive for it — `@rotorsoft/act-ops`'s `claim` returns a boolean, not a stored response. Use a small per-app middleware:
 
 ```typescript
 // packages/app/src/api/middleware.ts

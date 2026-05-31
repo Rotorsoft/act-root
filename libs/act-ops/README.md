@@ -34,16 +34,18 @@ const dedup = new InMemoryIdempotencyStore({
 
 // In any receiver — tRPC, Express, Fastify, Hono, a Kafka consumer, …
 const key = extractIdempotencyKeyFromHeaders(req);
-const fresh = dedup.record_if_fresh(key);
+const fresh = dedup.claim(key);
 if (!fresh) return replyDedupedWithoutSideEffects();
 await applyEventToAggregate(event);
 ```
 
-`record_if_fresh` is the entire contract — atomically record the key and report whether the caller is processing a fresh request or a duplicate. One call. No separate `has` / `put` dance. The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
+`claim` is the entire contract — atomically acquire the right to process this key, return whether the caller won the claim. One call. No separate `has` / `put` dance. The verb mirrors `Store.claim`'s lease semantic from `@rotorsoft/act`: there, competing workers race for the right to drain a stream; here, competing requests race for the right to be the canonical first-time delivery for an `Idempotency-Key`. One caller wins; the others learn the claim is already taken and treat their request as a duplicate.
+
+The in-memory implementation is sync; durable adapters (Postgres, Redis) return a `Promise<boolean>` — the port's union return type covers both, so the call site is identical.
 
 ## API
 
-- **`IdempotencyStore`** — the contract. One method, `record_if_fresh(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
+- **`IdempotencyStore`** — the contract. One method, `claim(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
 - **`InMemoryIdempotencyStore`** — bounded LRU + TTL reference implementation. Single-process only; for multi-process receivers swap for a durable adapter (Postgres unique index, Redis `SET NX`, …) without changing the call site.
 - **`InMemoryIdempotencyStoreOptions`** — TypeScript type for the constructor's options bag.
 
