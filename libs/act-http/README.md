@@ -135,11 +135,16 @@ onData: (msg) => {
 ### `/webhook` subpath
 
 - **`webhook(config)`** — reaction-handler factory. Returns a function compatible with `.do(handler, opts)`.
-- **`WebhookError`** — thrown on 5xx, network errors, and timeouts. Carries `status` (`0` for network/timeout) and `url`. Retryable by drain.
-- **`NonRetryableWebhookError`** — thrown on 4xx. Extends `NonRetryableError` from `@rotorsoft/act`; the drain finalizer blocks the stream on first attempt without consuming the retry budget.
-- **`classifyHttpResponse(response)`** — classifies an HTTP response as `"ok"` (2xx), `"retry"` (5xx), or `"block"` (3xx, 4xx). The classification `webhook` uses internally, lifted so custom integrations (gRPC bridges, SDK-based reactions, …) can apply the same retry semantics without inventing a parallel rule.
+- **`tryOk(response, { url, label? })`** — collapses the classify-and-throw block to one line for **custom HTTP-like reactions** (gRPC bridges, SDK-based deliveries). Returns void on 2xx; throws `RetryableHttpError` on 5xx; throws `NonRetryableHttpError` on 3xx/4xx. Captures the response body (best-effort) onto the thrown error.
+- **`classifyHttpResponse(response)`** — the underlying `"ok" | "retry" | "block"` classifier. Reach for it directly when you need custom error classes; otherwise `tryOk` wraps it.
+- **`RetryableHttpError`** — generic retryable delivery error. Extends `Error`. Thrown by `tryOk` on 5xx. `WebhookError` extends it.
+- **`NonRetryableHttpError`** — generic non-retryable delivery error. Extends `NonRetryableError` from `@rotorsoft/act`, so the drain finalizer blocks the stream on first failed attempt. Thrown by `tryOk` on 3xx/4xx. `NonRetryableWebhookError` extends it.
+- **`WebhookError`** — webhook-specific subclass of `RetryableHttpError`, thrown by the `webhook` helper. Existing `instanceof WebhookError` checks continue to work; new code targeting any HTTP integration can catch `RetryableHttpError` to handle both webhook + custom-integration errors uniformly.
+- **`NonRetryableWebhookError`** — webhook-specific subclass of `NonRetryableHttpError`, thrown by `webhook` on 3xx/4xx. Same backward-compat story as `WebhookError`.
 - **`WebhookConfig`** — TypeScript type for the helper options.
 - **`HttpDisposition`** — the `"ok" | "retry" | "block"` discriminator returned by `classifyHttpResponse`.
+- **`HttpDeliveryErrorInit`** — common `{ status, url, responseBody? }` shape passed to every HTTP error class.
+- **`TryOkOptions`** — `{ url, label? }` shape passed to `tryOk`.
 
 ### `/receiver` subpath
 

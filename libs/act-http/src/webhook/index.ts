@@ -37,9 +37,21 @@ import {
 export {
   classifyHttpResponse,
   type HttpDisposition,
+  type TryOkOptions,
+  tryOk,
 } from "./classify.js";
-export type { WebhookBody, WebhookConfig, WebhookResolver } from "./types.js";
-export { NonRetryableWebhookError, WebhookError } from "./types.js";
+export type {
+  HttpDeliveryErrorInit,
+  WebhookBody,
+  WebhookConfig,
+  WebhookResolver,
+} from "./types.js";
+export {
+  NonRetryableHttpError,
+  NonRetryableWebhookError,
+  RetryableHttpError,
+  WebhookError,
+} from "./types.js";
 
 function resolve<TEvents extends Schemas, T>(
   resolver: T | ((e: Committed<TEvents, keyof TEvents>) => T) | undefined,
