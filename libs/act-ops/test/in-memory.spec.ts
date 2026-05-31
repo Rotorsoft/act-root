@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryIdempotencyStore } from "../src/index.js";
+import { InMemoryIdempotencyStore } from "../src/idempotency/index.js";
 
 describe("InMemoryIdempotencyStore", () => {
   it("claim returns true the first time, false on re-claim", () => {

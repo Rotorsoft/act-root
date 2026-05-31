@@ -24,9 +24,9 @@ export default defineConfig({
         __dirname,
         "libs/act-pino/src/index.ts"
       ),
-      "@rotorsoft/act-ops": path.resolve(
+      "@rotorsoft/act-ops/idempotency": path.resolve(
         __dirname,
-        "libs/act-ops/src/index.ts"
+        "libs/act-ops/src/idempotency/index.ts"
       ),
       "@rotorsoft/act-sqlite": path.resolve(
         __dirname,

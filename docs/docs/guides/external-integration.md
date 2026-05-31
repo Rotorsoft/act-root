@@ -188,7 +188,7 @@ For custom callers — non-`webhook` reactions, queue forwarders, anything — p
 The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. One method, by design:
 
 ```ts
-import type { IdempotencyStore } from "@rotorsoft/act-ops";
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 export interface IdempotencyStore {
   claim(key: string, now?: number): boolean | Promise<boolean>;
@@ -205,10 +205,10 @@ export interface IdempotencyStore {
 
 Three implementations of the dedup store, ordered by deployment complexity. The first ships in `@rotorsoft/act-ops`; the next two are sketches that follow the same `IdempotencyStore` contract — they're not packaged yet but slot in unchanged once you wire them.
 
-#### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops`
+#### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops/idempotency`
 
 ```ts
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore({
   ttlMs: 24 * 60 * 60 * 1000,  // dedup window (default: 24h)
@@ -274,7 +274,7 @@ The dedup window has one hard floor: **it must be longer than the longest possib
 `@rotorsoft/act-ops` bakes the math into the store. Pass the sender's `{ maxRetries, backoff, timeoutMs }` as a `retryProfile` and the store sizes its window for you:
 
 ```ts
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore({
   retryProfile: {
@@ -285,7 +285,7 @@ const dedup = new InMemoryIdempotencyStore({
 });
 ```
 
-The derived window is the bare envelope (per-retry backoff + per-attempt timeouts) multiplied by `safetyFactor` (default 4× — operators almost always want headroom over the bare math because slow networks, clock skew, and incident-window retries stretch the real-world maximum past the computed one). When the sender enables `jitter`, the store multiplies the backoff sum by 1.5 — the worst-case multiplier in `[0.5, 1.5)`. Future durable adapters (`PostgresIdempotencyStore`, `RedisIdempotencyStore`) accept the same `retryProfile` option and apply the same math.
+The derived window is the bare envelope (per-retry backoff + per-attempt timeouts) multiplied by `safetyFactor` (default 4× — operators almost always want headroom over the bare math because slow networks, clock skew, and incident-window retries stretch the real-world maximum past the computed one). When the sender enables `jitter`, the store multiplies the backoff sum by 1.5 — the worst-case multiplier in `[0.5, 1.5)`. The derivation is also exported as `minSafeTtl` from the same subpath, so future durable adapters (`PostgresIdempotencyStore`, `RedisIdempotencyStore`) accept the same `retryProfile` option and call the same function — single source of truth for the math across every implementation.
 
 If you'd rather skip the derivation and pick a generous round number, pass `ttlMs` directly — that's the "use 24h regardless" path most apps land on:
 
@@ -314,7 +314,7 @@ A small idempotent receiver, mirroring the `packages/server` tRPC setup. The mid
 
 ```ts
 // packages/server/src/webhook-receiver.ts (excerpt)
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 
 const dedup = new InMemoryIdempotencyStore();

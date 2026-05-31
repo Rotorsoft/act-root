@@ -12,7 +12,7 @@
  * handlers without manual `as` casts.
  */
 
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 import { createHTTPServer } from "@trpc/server/adapters/standalone";
 import { z } from "zod";

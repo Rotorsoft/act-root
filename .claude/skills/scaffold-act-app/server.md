@@ -224,7 +224,7 @@ When the app receives webhooks (or forwarded bus events) and needs the receiver-
 
 ```typescript
 // packages/app/src/api/webhook-receiver.ts
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 // Size the dedup window from the sender's retry profile — don't
 // guess. The store applies a 4× safety factor by default and honors

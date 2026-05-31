@@ -25,14 +25,11 @@
   "files": [
     "dist"
   ],
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/@types/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/@types/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+    "./idempotency": {
+      "types": "./dist/@types/idempotency/index.d.ts",
+      "import": "./dist/idempotency/index.js",
+      "require": "./dist/idempotency/index.cjs"
     }
   },
   "sideEffects": false,

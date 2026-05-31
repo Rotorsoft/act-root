@@ -82,8 +82,8 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
-          label: "@rotorsoft/act-ops",
-          href: "/docs/api/act-ops/src",
+          label: "@rotorsoft/act-ops/idempotency",
+          href: "/docs/api/act-ops/src/idempotency",
         },
         {
           type: "link",

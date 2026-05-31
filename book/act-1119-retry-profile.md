@@ -26,7 +26,7 @@ The user's intuition cut through it in one question: *why not pass more options 
 
 That's the right factoring. The math goes where it's actually used. The function disappears from the public surface. The operator's mental model collapses to "configure the store" instead of "call this helper, then configure the store with its result."
 
-## What landed
+## What landed (after one more correction)
 
 `InMemoryIdempotencyStoreOptions` gains a `retryProfile` field alongside the existing `ttlMs`:
 
@@ -40,9 +40,21 @@ type InMemoryIdempotencyStoreOptions = {
 
 The store's constructor resolves the window in priority order: `ttlMs` if provided, otherwise derive from `retryProfile` if provided, otherwise the 24-hour default. When both are supplied, `ttlMs` wins — explicit beats derived, which is the right default for the awkward case where someone passes both by mistake.
 
-The math itself moved to `libs/act-ops/src/idempotency/min-safe-ttl.ts` as an internal function. It's `export`ed at the module level (so tests can import it directly via `../src/idempotency/min-safe-ttl.js`), but not re-exported from `libs/act-ops/src/index.ts`. The package's `exports` map only exposes `.`, so external consumers can only see what `index.ts` re-exports. The math is reachable from within the package's test tree and invisible from outside. That's the cleanest privacy mechanism TypeScript packages have — no special test-subpath, no internal-marker convention, just an unreferenced module.
+The first version of the PR tried to keep the math entirely hidden: `minSafeTtl` lived inside the package's source tree but wasn't re-exported, on the theory that "the math is an implementation detail of the in-memory store, nothing outside should see it." That theory broke as soon as the user asked the obvious follow-up: *what happens when `PostgresIdempotencyStore` lands and wants the same derivation?*
 
-When `PostgresIdempotencyStore` and `RedisIdempotencyStore` land in milestone 1.2, both accept the same `retryProfile` option and call the same `minSafeTtl(profile)` — the math gets lifted to `internal/min-safe-ttl.ts` then, with both adapters importing it from there. No code change in the function itself; just a file move. Single source of truth, zero exposed surface.
+Adapter packages can't reach into another package's internal paths. `@rotorsoft/act-pg`'s `PostgresIdempotencyStore` would not be able to `import { minSafeTtl } from "@rotorsoft/act-ops/src/idempotency/min-safe-ttl.js"` — that path isn't in `act-ops`'s `exports` map and Node's resolver refuses it. The only options were exposing the function through the package's exports map, duplicating the math in every adapter, or accepting that durable adapters lose the `retryProfile` ergonomics and force operators to pre-compute `ttlMs` themselves. The first option is the only one that's actually consistent with "single source of truth for the math."
+
+So `minSafeTtl` ships from `@rotorsoft/act-ops/idempotency` after all — but only for adapter authors. The README, the integration guide, and the scaffold skill all keep the `new InMemoryIdempotencyStore({ retryProfile })` example as the application-developer-facing path. The function is documented as the low-level primitive durable adapters import; application developers pass `retryProfile` to whatever store they're using and let the store call the math. The recommendation stays the same; the surface area earns its keep through cross-adapter sharing.
+
+The math being public does not *encourage* freestanding helpers to proliferate — it just acknowledges that for a primitive multiple packages will implement, the math has to be reachable. The earlier rejection of `computeMinSafeTtl` as "a helper that composes with one consumer" was right at the time, when the only consumer was `InMemoryIdempotencyStore`. As soon as a second consumer (any durable adapter) exists, the same function composes with multiple — that's the threshold that flips it from doc material to library material.
+
+## The subpath restructure
+
+That same conversation surfaced another mistake in the original layout: `@rotorsoft/act-ops` exposed everything from the package root (`.`). That's fine for a single-domain package like `act-pino` or `act-patch`, but `act-ops` is explicitly multi-domain — idempotency now, retry-budget helpers and poison-message classifiers planned. Sticking everything at the root commits to a flat namespace that won't scale.
+
+Following `@rotorsoft/act-http`'s precedent, the package now ships subpath exports per domain: `@rotorsoft/act-ops/idempotency` for everything in this PR; future `@rotorsoft/act-ops/poison` and `@rotorsoft/act-ops/retry` for the next domains as they land. The root `.` export is gone — pre-1.0 we can move freely, and consuming code on the act-ops `0.1.0` baseline updates one import line in exchange for a layout that makes sense as the package grows.
+
+This is the same shape decision `act-http` made when it absorbed `act-sse`: subpaths organize a package by what it does, not where it sits in the tree. The package's surface becomes self-documenting — "what does act-ops do?" answers itself with the list of subpaths.
 
 ## The `RetryProfile` type, and why it's the only new export
 
@@ -56,22 +68,23 @@ The lesson is small but worth repeating: when a sibling package needs a type tha
 
 ## What this teaches about act-ops's shape
 
-`@rotorsoft/act-ops` is now two PRs in (`#828` bootstrapped the package, `#832` shipped the port + reference impl) and the shape is settling into something coherent. The package exports:
+`@rotorsoft/act-ops` is now three PRs in (`#828` bootstrapped the package, `#832` shipped the port + reference impl, this PR adds the retry-profile derivation and the subpath layout) and the shape is settling into something coherent. From `@rotorsoft/act-ops/idempotency`:
 
 - a port (`IdempotencyStore`)
 - a reference implementation (`InMemoryIdempotencyStore`)
 - the implementation's options type (`InMemoryIdempotencyStoreOptions`)
 - one supporting domain type (`RetryProfile`)
+- one derivation function (`minSafeTtl`) used by the in-memory store internally and exposed for durable adapters to share
 
 It does *not* export:
 
-- the math that the implementation uses internally
-- a freestanding TTL helper
+- a freestanding helper compose-with-one-consumer would justify (the function ships because durable adapters share it, not because operators are expected to call it directly)
 - a parallel `BackoffOptions` to the framework's
 - a parallel `safetyFactor` constant
+- anything from the package root `.` (multi-domain packages organize by subpath)
 
-The pattern emerging is: ports define contracts, implementations implement them, domain types are exposed only when they appear in public signatures. Math and helpers stay private to the implementation that consumes them. When a sibling implementation lands (Postgres, Redis), the shared math gets extracted into a non-exported internal module — same API surface, same compute, more implementations.
+The pattern emerging is: subpaths define domains. Each domain exports its ports, reference implementations, supporting types, and any derivation primitives that multiple implementations of the port will reuse. The third category — derivation primitives — earns its keep through cross-implementation sharing, not by being convenient at any single call site. If a function would compose with exactly one consumer, it stays private. If it composes with N consumers across multiple packages, it ships through the subpath that owns it.
 
-That's a healthier shape than the first draft suggested. The first draft was treating act-ops as a grab-bag of operational helpers, and the temptation to add "one more useful function" never ends in a grab bag. The second draft — which the user's question forced — treats it as a contract package. The contract package's surface is much smaller than the grab bag's, and the work is in maintaining the contracts honestly. That's the work we actually want to be doing.
+That's a healthier shape than either of the earlier drafts suggested. The first draft (freestanding `computeMinSafeTtl` from the package root) was treating act-ops as a grab bag of operational helpers, and the temptation to add "one more useful function" never ends in a grab bag. The second draft (math hidden, even from sibling packages) overcorrected — it would have forced every durable adapter to duplicate the function or accept worse ergonomics. The third draft, which is what landed, splits the difference cleanly: domain-organized subpaths, derivations exposed only when they're genuinely shared, application-facing ergonomics routed through the store's options.
 
 The next ticket in the sequence is [ACT-1116](https://github.com/Rotorsoft/act-root/issues/744), the framework-agnostic idempotency middleware. It consumes `IdempotencyStore` and lives in `@rotorsoft/act-http/receiver`. Per the same principle: the middleware is contract-shaped, the per-framework adapters are tiny, no orphan helpers. The trajectory holds.

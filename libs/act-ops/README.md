@@ -25,7 +25,7 @@ No peer dependencies. Drop it next to whatever framework — or no framework at 
 ## Quick start
 
 ```ts
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 // Either set ttlMs explicitly…
 const dedup = new InMemoryIdempotencyStore({
@@ -58,12 +58,17 @@ The in-memory implementation is sync; durable adapters (Postgres, Redis) return 
 
 The `retryProfile` option captures the math that every receiver otherwise computes by hand and many get wrong — the dedup window has to outlast the sender's full retry envelope, otherwise a key expires before the sender finishes retrying and the side effect runs twice. Pass the sender's `{ maxRetries, backoff?, timeoutMs }` and the store sizes the window for you. The full math (per-retry sums per strategy, jitter worst-case 1.5×, default 4× safety factor) is documented inline on `RetryProfile` and worked through in the [external integration guide](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing).
 
-## API
+## Subpath layout
+
+The package follows a subpath-export-per-domain shape, matching `@rotorsoft/act-http`. All idempotency primitives ship from `@rotorsoft/act-ops/idempotency`; future domains (poison-message classifiers, retry-budget helpers, …) will land on their own subpaths (`@rotorsoft/act-ops/poison`, `@rotorsoft/act-ops/retry`). Each subpath is its own ESM/CJS entry — pay for what you import.
+
+## API — `@rotorsoft/act-ops/idempotency`
 
 - **`IdempotencyStore`** — the contract. One method, `claim(key, now?): boolean | Promise<boolean>`. Returns `true` when the key was fresh (and is now recorded), `false` when it was already present. Implementations should preserve records for at least the sender's full retry envelope.
 - **`InMemoryIdempotencyStore`** — bounded LRU + TTL reference implementation. Single-process only; for multi-process receivers swap for a durable adapter (Postgres unique index, Redis `SET NX`, …) without changing the call site.
 - **`InMemoryIdempotencyStoreOptions`** — `{ ttlMs?, retryProfile?, maxEntries? }`. Set `ttlMs` directly, or pass `retryProfile` and the store derives the safe window. When both are supplied, `ttlMs` wins.
 - **`RetryProfile`** — `{ maxRetries, backoff?, timeoutMs, safetyFactor? }`. The sender's retry shape, used by `InMemoryIdempotencyStore` to derive its window. The `backoff` field is typed structurally inline so it accepts the framework's `BackoffOptions` without a cast — but this package doesn't reinvent or re-export the type, preserving the zero-act-dep property.
+- **`minSafeTtl(profile): number`** — the derivation the in-memory store uses internally, exported for **adapter authors**. Durable adapters (e.g. the future `PostgresIdempotencyStore`) import this from `@rotorsoft/act-ops/idempotency` so every adapter applies the same math when given a `retryProfile` option. Application developers don't typically call this directly — they pass `retryProfile` to the store and let the store call it.
 
 ## Why a Store and not a Cache
 
