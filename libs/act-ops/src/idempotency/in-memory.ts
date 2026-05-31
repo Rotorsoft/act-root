@@ -1,25 +1,43 @@
+import { minSafeTtl, type RetryProfile } from "./min-safe-ttl.js";
 import type { IdempotencyStore } from "./port.js";
 
 /**
- * Options for {@link InMemoryIdempotencyStore}. Both defaults are sized
+ * Options for {@link InMemoryIdempotencyStore}. Defaults are sized
  * for a single-process receiver paired with a sender using the
- * standard `webhook` backoff envelope (`exponential` up to `maxMs: 30_000`,
- * `maxRetries: 5`); larger envelopes should bump `ttlMs` accordingly
- * (see `computeMinSafeTtl` once #747 ships).
+ * standard `webhook` backoff envelope (`exponential` up to
+ * `maxMs: 30_000`, `maxRetries: 5`).
+ *
+ * The dedup window is set in one of two ways:
+ *
+ * - {@link ttlMs} — pass a number directly when you've already
+ *   computed the window, or just want the 24-hour default that
+ *   covers any reasonable sender retry envelope.
+ * - {@link retryProfile} — pass the sender's retry profile and the
+ *   store derives the minimum safe window for you. The math
+ *   (per-retry backoff sums, per-attempt timeouts, jitter
+ *   worst-case 1.5×, default 4× safety factor) is hidden inside the
+ *   store — see [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing)
+ *   for the math explained.
+ *
+ * When both are supplied, {@link ttlMs} wins — an explicit number
+ * overrides a derived one.
  */
 export type InMemoryIdempotencyStoreOptions = {
-  /** Dedup window. Default: 24 hours. */
+  /** Direct dedup window. Default: 24 hours. */
   ttlMs?: number;
+  /** Sender's retry profile — used to derive `ttlMs` when not supplied. */
+  retryProfile?: RetryProfile;
   /** Memory bound — oldest entries are evicted past this size. Default: 100,000. */
   maxEntries?: number;
 };
 
 /**
  * Bounded LRU + TTL implementation of {@link IdempotencyStore} for
- * single-process receivers (the wolfdesk demo, integration tests, dev
- * loops). Multi-process receivers should swap for a durable adapter
- * (Postgres unique index, Redis `SET NX`) — the {@link IdempotencyStore}
- * contract stays the same so the call site doesn't change.
+ * single-process receivers (the wolfdesk demo, integration tests,
+ * dev loops). Multi-process receivers should swap for a durable
+ * adapter (Postgres unique index, Redis `SET NX`) — the
+ * {@link IdempotencyStore} contract stays the same so the call site
+ * doesn't change.
  *
  * Map iteration is insertion-ordered, so:
  * - The oldest entry sits at `keys().next().value` (cheapest to evict).
@@ -34,7 +52,11 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   private readonly _max_entries: number;
 
   constructor(options?: InMemoryIdempotencyStoreOptions) {
-    this._ttl_ms = options?.ttlMs ?? 24 * 60 * 60 * 1000;
+    this._ttl_ms =
+      options?.ttlMs ??
+      (options?.retryProfile !== undefined
+        ? minSafeTtl(options.retryProfile)
+        : 24 * 60 * 60 * 1000);
     this._max_entries = options?.maxEntries ?? 100_000;
   }
 

@@ -188,7 +188,7 @@ For custom callers — non-`webhook` reactions, queue forwarders, anything — p
 The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. One method, by design:
 
 ```ts
-import type { IdempotencyStore } from "@rotorsoft/act-ops";
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 export interface IdempotencyStore {
   claim(key: string, now?: number): boolean | Promise<boolean>;
@@ -205,10 +205,10 @@ export interface IdempotencyStore {
 
 Three implementations of the dedup store, ordered by deployment complexity. The first ships in `@rotorsoft/act-ops`; the next two are sketches that follow the same `IdempotencyStore` contract — they're not packaged yet but slot in unchanged once you wire them.
 
-#### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops`
+#### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops/idempotency`
 
 ```ts
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore({
   ttlMs: 24 * 60 * 60 * 1000,  // dedup window (default: 24h)
@@ -269,9 +269,33 @@ Use when: receiver already has Postgres in its stack, dedup needs are durable (s
 
 ### TTL sizing
 
-The dedup window has one hard floor: **it must be longer than the longest possible retry+backoff window from the sender**.
+The dedup window has one hard floor: **it must be longer than the longest possible retry+backoff window from the sender**. Undersize it and a key expires before the sender finishes retrying, the duplicate request looks fresh to the receiver, and the side effect runs twice — silently. No error log. You see it in the data.
 
-For a reaction configured with `maxRetries: 5` and `backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 }`:
+`@rotorsoft/act-ops` bakes the math into the store. Pass the sender's `{ maxRetries, backoff, timeoutMs }` as a `retryProfile` and the store sizes its window for you:
+
+```ts
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+const dedup = new InMemoryIdempotencyStore({
+  retryProfile: {
+    maxRetries: 5,
+    backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 },
+    timeoutMs: 2_000,
+  },
+});
+```
+
+The derived window is the bare envelope (per-retry backoff + per-attempt timeouts) multiplied by `safetyFactor` (default 4× — operators almost always want headroom over the bare math because slow networks, clock skew, and incident-window retries stretch the real-world maximum past the computed one). When the sender enables `jitter`, the store multiplies the backoff sum by 1.5 — the worst-case multiplier in `[0.5, 1.5)`. The derivation is also exported as `minSafeTtl` from the same subpath, so future durable adapters (`PostgresIdempotencyStore`, `RedisIdempotencyStore`) accept the same `retryProfile` option and call the same function — single source of truth for the math across every implementation.
+
+If you'd rather skip the derivation and pick a generous round number, pass `ttlMs` directly — that's the "use 24h regardless" path most apps land on:
+
+```ts
+const dedup = new InMemoryIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
+```
+
+When both `ttlMs` and `retryProfile` are supplied, `ttlMs` wins (explicit beats derived).
+
+The by-hand math, kept as a teaching aid — work through it once so you trust the derived number:
 
 | Attempt | Wait before |
 |---|---|
@@ -282,9 +306,7 @@ For a reaction configured with `maxRetries: 5` and `backoff: { strategy: "expone
 | 4 | 1.6s |
 | 5 | 3.2s (then block) |
 
-Total: ~6 seconds. Add the per-attempt `timeoutMs` (say 2s × 6 = 12s). Round up generously: **a 24-hour TTL handles any reasonable retry window**. Most apps land at 24h–7d depending on whether they want the cache to survive incident review.
-
-Don't undersize. If a key expires before the sender finishes retrying, dedup fails silently — you'll see "exactly once" turn into "actually twice" in the data, not in any error log.
+Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s × 6 = 12s. Bare envelope: 18.2s. With `safetyFactor: 4`, the store sizes the window at 72.8s. Round up further if you want the cache to survive operator-driven retry during incident review — **most apps land at 24h regardless of what the math says**, and the derivation's job is to confirm 24h is generous enough, not to argue against it.
 
 ### End-to-end example — tRPC receiver
 
@@ -292,7 +314,7 @@ A small idempotent receiver, mirroring the `packages/server` tRPC setup. The mid
 
 ```ts
 // packages/server/src/webhook-receiver.ts (excerpt)
-import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { initTRPC, TRPCError } from "@trpc/server";
 
 const dedup = new InMemoryIdempotencyStore();
