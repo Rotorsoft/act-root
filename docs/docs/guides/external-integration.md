@@ -308,85 +308,123 @@ The by-hand math, kept as a teaching aid — work through it once so you trust t
 
 Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s × 6 = 12s. Bare envelope: 18.2s. With `safetyFactor: 4`, the store sizes the window at 72.8s. Round up further if you want the cache to survive operator-driven retry during incident review — **most apps land at 24h regardless of what the math says**, and the derivation's job is to confirm 24h is generous enough, not to argue against it.
 
-### End-to-end example — using the middleware
+### End-to-end example — the high-level adapter (canonical path)
 
-The framework-agnostic middleware composes `verifyWebhook` (when a secret is configured) + `extractIdempotencyKey` + `IdempotencyStore.claim` and translates the result into the framework's idiomatic 400/401 response. Per-framework adapters ship from `@rotorsoft/act-http/receiver/<framework>` — pick one:
+For most receivers, `webhookReceiver` from `@rotorsoft/act-http/receiver` is the recommended path. Declare typed handlers fluently with Zod schemas, configure the store + optional secret, call `.listen()` (long-running Node) or `.fetch(request)` (Lambda / edge). The adapter uses Hono internally — one code path covers Node, AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, and Deno.
 
 ```ts
-// packages/server/src/webhook-receiver.ts (excerpt) — tRPC
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/trpc";
+import { webhookReceiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { initTRPC } from "@trpc/server";
+import { z } from "zod";
 
-const dedup = new InMemoryIdempotencyStore();
-const t = initTRPC.context<{
-  headers: Record<string, string | string[] | undefined>;
-  rawBody: string;
-}>().create();
+const OrderConfirmedSchema = z.object({
+  orderId: z.string(),
+  total: z.number(),
+});
 
-const idempotent = t.procedure.use(
-  webhookReceiver({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+const receiver = webhookReceiver({
+  port: 4001,
+  store: new InMemoryIdempotencyStore(),
+  secret: process.env.WEBHOOK_SECRET,
+})
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => {
+    // event.orderId and event.total are typed via Zod inference
+    // ctx.key is the deduplicated Idempotency-Key
+    await processOrder(event.orderId, event.total);
+  })
+  .on("OrderShipped", OrderShippedSchema, async (event, ctx) => {
+    await processShipment(event);
+  });
+
+await receiver.listen();
+```
+
+The adapter mounts each handler at `POST /<eventName>`. Failure responses are uniform across deployment targets:
+
+| Status | Body | When |
+|---:|---|---|
+| **204** | (empty) | Handler ran successfully, or dedup-skipped silently. Sender stops retrying. |
+| **400** | `{ "error": "missing-key" }` | No `Idempotency-Key` header |
+| **401** | `{ "error": "missing-signature" \| "missing-timestamp" \| "stale" \| "future" \| "bad-signature" }` | Signature/timestamp verification failed |
+| **422** | `{ "error": "validation-failed", "detail": "..." }` | Schema rejected the body |
+| **500** | `{ "error": "handler-failed", "detail": "..." }` | Handler threw — sender retries |
+
+Successful first-time processing and dedup-skipped re-sends both return 204 — the sender treats both as "accepted, stop retrying." The receiver's logs distinguish them.
+
+A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch verification + dedup work end-to-end.
+
+### Deployment targets
+
+The high-level adapter is fetch-shaped under the hood — same code runs on every Hono-supported runtime:
+
+**Long-running Node server** (the example above) — call `listen()`. `@hono/node-server` is lazy-loaded so other runtimes don't need it installed.
+
+**AWS Lambda**:
+
+```ts
+import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import { handle } from "hono/aws-lambda";
+
+const receiver = webhookReceiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ });
+
+export const handler = handle({ fetch: receiver.fetch });
+```
+
+**Cloudflare Workers**:
+
+```ts
+import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+
+const receiver = webhookReceiver({ port: 0, store: new InMemoryIdempotencyStore() })
+  .on("OrderConfirmed", OrderConfirmedSchema, async (event, ctx) => { /* … */ });
+
+export default { fetch: receiver.fetch };
+```
+
+**Vercel Edge Functions** (Next.js App Router):
+
+```ts
+// app/api/webhooks/[name]/route.ts
+export const POST = async (request: Request) => receiver.fetch(request);
+```
+
+**Bun / Deno** — same as Cloudflare Workers; export `{ fetch }`.
+
+### Composing into an existing app — low-level middleware
+
+When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the lower-level `webhookMiddleware` factory:
+
+```ts
+import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
+
+// In an existing Hono app — composes with your own routes
+app.post(
+  "/webhooks/orders",
+  authMiddleware,
+  webhookMiddleware({ store, secret }),
+  async (c) => {
+    const { key, deduped } = c.get("idempotency");
+    const body = await c.req.json();
+    // …
+  }
 );
 ```
 
-The same shape applies for Express, Fastify, and Hono — only the framework import changes:
+Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`/receiver/fastify`), and Hono (`/receiver/hono`). Each exposes `webhookMiddleware(options)` that returns the framework's native middleware shape. Use these when the high-level `webhookReceiver` is too opinionated for your stack.
 
-```ts
-// Express
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/express";
-app.use(express.raw({ type: "application/json" }));
-app.post("/webhook", webhookReceiver({ store, secret }), (req, res) => {
-  const { key, deduped } = (req as any).idempotency;
-  // …
-});
-
-// Fastify
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/fastify";
-app.post("/webhook", {
-  preHandler: webhookReceiver({ store, secret }),
-}, async (req) => {
-  const { key, deduped } = (req as any).idempotency;
-  // …
-});
-
-// Hono
-import { webhookReceiver } from "@rotorsoft/act-http/receiver/hono";
-app.post("/webhook", webhookReceiver({ store, secret }), (c) => {
-  const { key, deduped } = c.get("idempotency");
-  // …
-});
-```
-
-On failure the adapter responds with the framework's idiomatic 400 (`missing-key`) or 401 (one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`) and short-circuits the handler. On success it injects `{ key, deduped }` into the request context so the handler can short-circuit duplicates without re-running side effects.
-
-For receivers whose framework isn't in the adapter list (Bun's native HTTP, Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy ("missing key falls back to body-derived dedup"), the framework-agnostic core is also exported:
+For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported:
 
 ```ts
 import { checkWebhook } from "@rotorsoft/act-http/receiver";
+
 const result = await checkWebhook(req.headers, rawBody, { store, secret });
 if (!result.ok) reply(result.status, { error: result.reason });
 else handle({ key: result.key, deduped: result.deduped });
 ```
 
-Swap `InMemoryIdempotencyStore` for a Redis or Postgres adapter — the middleware doesn't change, because every adapter implements the same `IdempotencyStore` port.
-
-A handler using the middleware returns success on both first-attempt and dedup-hit, distinguishing them only for telemetry:
-
-```ts
-export const webhookRouter = t.router({
-  orderConfirmed: idempotent
-    .input(OrderConfirmedSchema)
-    .mutation(async ({ input, ctx }) => {
-      if (ctx.deduped) {
-        return { status: "dedup-skipped", key: ctx.key };
-      }
-      await processOrder(input);
-      return { status: "processed", key: ctx.key };
-    }),
-});
-```
-
-A runnable version of this lives at [`packages/server/src/webhook-receiver.ts`](https://github.com/Rotorsoft/act-root/blob/master/packages/server/src/webhook-receiver.ts) — point the wolfdesk webhook sender at it (`WOLFDESK_ESCALATION_WEBHOOK=http://localhost:4001/escalations`) and watch dedup work end-to-end.
+Swap `InMemoryIdempotencyStore` for a Redis or Postgres adapter — every layer above stays the same, because every adapter implements the same `IdempotencyStore` port.
 
 ### Authenticated delivery — HMAC-SHA256 signing
 

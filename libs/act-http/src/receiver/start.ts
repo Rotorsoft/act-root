@@ -1,37 +1,23 @@
 import type {
+  Receiver,
+  ReceiverBuilder,
+  ReceiverContext,
+  ReceiverOptions,
   Validator,
-  WebhookContext,
-  WebhookReceiver,
-  WebhookReceiverOptions,
-} from "@rotorsoft/act-ops/webhook";
+} from "@rotorsoft/act-ops/receiver";
 import { Hono } from "hono";
 import { webhookMiddleware } from "./hono/index.js";
 
 /**
- * Recommended path for "I want to receive webhooks." Returns a
- * {@link WebhookReceiver} the operator configures fluently and
- * starts with `.listen()` (long-running Node server) or
- * `.fetch(request)` (Lambda / Cloudflare Workers / Vercel Edge /
- * Bun / Deno — any fetch-shaped runtime).
+ * Recommended factory for "I want to receive webhooks." Returns a
+ * {@link ReceiverBuilder} the operator configures fluently:
  *
- * Internally uses Hono for routing — the universal-runtime choice
- * that gives one code path coverage across every deployment target.
- * For operators with an existing tRPC / Express / Fastify / Hono app
- * who need to compose the receiver with their own middleware stack,
- * the lower-level `webhookMiddleware` from
- * `@rotorsoft/act-http/receiver/<framework>` is the escape hatch.
- *
- * `@hono/node-server` is imported lazily inside `.listen()` so
- * Lambda / edge consumers (who never call `.listen()`) don't need
- * it installed.
- *
- * @example
  * ```ts
- * import { webhookReceiver } from "@rotorsoft/act-http/receiver";
+ * import { receiver } from "@rotorsoft/act-http/receiver";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  * import { z } from "zod";
  *
- * const receiver = webhookReceiver({
+ * const r = receiver({
  *   port: 4001,
  *   store: new InMemoryIdempotencyStore(),
  *   secret: process.env.WEBHOOK_SECRET,
@@ -43,14 +29,31 @@ import { webhookMiddleware } from "./hono/index.js";
  *     // event.orderId and event.total are typed
  *     // ctx.key is the deduplicated Idempotency-Key
  *     await processOrder(event.orderId, event.total);
- *   });
+ *   })
+ *   .build();
  *
- * await receiver.listen();
+ * await r.listen();
  * ```
+ *
+ * Matches Act's builder pattern: `receiver(...)` is the factory,
+ * `.on()` registers handlers fluently, `.build()` finalizes and
+ * produces an immutable {@link Receiver} — at which point the type
+ * loses `.on()` and gains the runtime methods (`listen` / `close` /
+ * `fetch`). The lifecycle phases are split at the type level.
+ *
+ * Internally uses Hono for routing — the universal-runtime choice
+ * that gives one code path coverage across Node, AWS Lambda,
+ * Cloudflare Workers, Vercel Edge, Bun, and Deno. For operators
+ * with an existing tRPC / Express / Fastify / Hono app who need to
+ * compose the receiver with their own middleware stack, the
+ * lower-level `webhookMiddleware` from
+ * `@rotorsoft/act-http/receiver/<framework>` is the escape hatch.
+ *
+ * `@hono/node-server` is imported lazily inside `.listen()` so
+ * Lambda / edge consumers (who never call `.listen()`) don't need
+ * it installed.
  */
-export function webhookReceiver(
-  options: WebhookReceiverOptions
-): WebhookReceiver {
+export function receiver(options: ReceiverOptions): ReceiverBuilder {
   const app = new Hono<{
     Variables: { idempotency: { key: string; deduped: boolean } };
   }>();
@@ -60,19 +63,17 @@ export function webhookReceiver(
     secret: options.secret,
   });
 
-  // biome-ignore lint/suspicious/noExplicitAny: server lifecycle handle from @hono/node-server
-  let server: any | undefined;
-  let listening = false;
+  let built = false;
 
-  const receiver: WebhookReceiver = {
+  const builder: ReceiverBuilder = {
     on<T>(
       name: string,
       schema: Validator<T>,
-      handler: (event: T, ctx: WebhookContext) => Promise<void>
-    ): WebhookReceiver {
-      if (listening) {
+      handler: (event: T, ctx: ReceiverContext) => Promise<void>
+    ): ReceiverBuilder {
+      if (built) {
         throw new Error(
-          `Cannot register handler "${name}" after listen() — handlers are frozen once the receiver starts serving.`
+          `Cannot register handler "${name}" after .build() — handlers are frozen once the receiver is built.`
         );
       }
 
@@ -96,9 +97,6 @@ export function webhookReceiver(
           try {
             await handler(validated, { key: idem.key });
           } catch (err) {
-            // Handler threw — surface as 500 so the sender retries.
-            // The handler's exception is the sender's signal that
-            // delivery hasn't succeeded yet.
             return c.json(
               {
                 error: "handler-failed",
@@ -109,43 +107,41 @@ export function webhookReceiver(
           }
         }
 
-        // 204 No Content for both successful first-time processing
-        // and dedup-skipped replays — the sender treats both as
-        // "accepted; stop retrying."
         return c.body(null, 204);
       });
 
-      return receiver;
+      return builder;
     },
 
-    async listen(): Promise<void> {
-      // Lazy-load @hono/node-server so Lambda / edge consumers that
-      // only call .fetch() don't need it installed.
-      const { serve } = await import("@hono/node-server");
-      listening = true;
-      const launched = serve({ fetch: app.fetch, port: options.port });
-      server = launched;
-      // Wait for the server to be bound to its port.
-      await new Promise<void>((resolve) => {
-        launched.once("listening", () => resolve());
-      });
-    },
+    build(): Receiver {
+      built = true;
 
-    async close(): Promise<void> {
-      if (!server) return;
-      const s = server;
-      server = undefined;
-      listening = false;
-      // server.close() always invokes the callback; we resolve
-      // unconditionally — a close error here would already have
-      // surfaced via the server's "error" event upstream.
-      await new Promise<void>((resolve) => s.close(() => resolve()));
-    },
+      // biome-ignore lint/suspicious/noExplicitAny: server lifecycle handle from @hono/node-server
+      let server: any | undefined;
 
-    async fetch(request: Request): Promise<Response> {
-      return app.fetch(request);
+      return {
+        async listen(): Promise<void> {
+          const { serve } = await import("@hono/node-server");
+          const launched = serve({ fetch: app.fetch, port: options.port });
+          server = launched;
+          await new Promise<void>((resolve) => {
+            launched.once("listening", () => resolve());
+          });
+        },
+
+        async close(): Promise<void> {
+          if (!server) return;
+          const s = server;
+          server = undefined;
+          await new Promise<void>((resolve) => s.close(() => resolve()));
+        },
+
+        async fetch(request: Request): Promise<Response> {
+          return app.fetch(request);
+        },
+      };
     },
   };
 
-  return receiver;
+  return builder;
 }

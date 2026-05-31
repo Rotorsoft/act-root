@@ -37,7 +37,7 @@
       "@rotorsoft/act-ops/idempotency": [
         "../libs/act-ops/src/idempotency/index.ts"
       ],
-      "@rotorsoft/act-ops/webhook": ["../libs/act-ops/src/webhook/index.ts"],
+      "@rotorsoft/act-ops/receiver": ["../libs/act-ops/src/receiver/index.ts"],
       "@rotorsoft/*": ["../libs/*/src/index.ts"],
       "@act/*": ["./*/src/index.ts"]
     }

@@ -1,19 +1,36 @@
+import { receiver } from "@rotorsoft/act-http/receiver";
+import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { startWebhookReceiver } from "../src/webhook-receiver.js";
+import { z } from "zod";
 
 // Choose a high port to avoid stomping local dev servers; tests run
 // against the receiver via fetch end-to-end.
 const PORT = 14_001;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-let receiver: { close: () => Promise<void> };
+const EscalationPayload = z.object({
+  ticket: z.string(),
+  escalationId: z.string(),
+});
+
+const escalations = receiver({
+  port: PORT,
+  store: new InMemoryIdempotencyStore({
+    ttlMs: 24 * 60 * 60 * 1000,
+    maxEntries: 50_000,
+  }),
+})
+  .on("escalations", EscalationPayload, async () => {
+    // Demo handler — the tests only need the HTTP envelope.
+  })
+  .build();
 
 beforeAll(async () => {
-  receiver = await startWebhookReceiver(PORT);
+  await escalations.listen();
 });
 
 afterAll(async () => {
-  await receiver.close();
+  await escalations.close();
 });
 
 /**

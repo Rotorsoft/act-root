@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { webhookReceiver } from "../../src/receiver/start.js";
+import { receiver } from "../../src/receiver/start.js";
 import { signRequest } from "../../src/webhook/sign.js";
 
 const OrderSchema = z.object({
@@ -18,18 +18,20 @@ afterEach(async () => {
   }
 });
 
-describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
+describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
   it("routes POST /<eventName> to the registered handler with a typed event", async () => {
     let called: { orderId: string; total: number; key: string } | undefined;
 
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0, // not used in fetch mode
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async (event, ctx) => {
-      called = { ...event, key: ctx.key };
-    });
+    })
+      .on("OrderConfirmed", OrderSchema, async (event, ctx) => {
+        called = { ...event, key: ctx.key };
+      })
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -46,15 +48,17 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
 
   it("returns 204 without calling the handler on a deduplicated re-send", async () => {
     let callCount = 0;
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {
-      callCount++;
-    });
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        callCount++;
+      })
+      .build();
 
     const fire = () =>
-      receiver.fetch(
+      r.fetch(
         new Request("http://localhost/OrderConfirmed", {
           method: "POST",
           headers: {
@@ -71,12 +75,14 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
   });
 
   it("returns 400 missing-key on requests without Idempotency-Key", async () => {
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {});
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -89,12 +95,14 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
   });
 
   it("returns 422 validation-failed when the body doesn't match the schema", async () => {
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {});
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -111,13 +119,15 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
   });
 
   it("returns 401 with the verify reason when signature is missing/bad", async () => {
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
       secret: "test-secret",
-    }).on("OrderConfirmed", OrderSchema, async () => {});
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {})
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -138,16 +148,18 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
     const { signature, timestamp } = signRequest(body, SECRET);
 
     let called = false;
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
       secret: SECRET,
-    }).on("OrderConfirmed", OrderSchema, async (event) => {
-      expect(event.orderId).toBe("o-7");
-      called = true;
-    });
+    })
+      .on("OrderConfirmed", OrderSchema, async (event) => {
+        expect(event.orderId).toBe("o-7");
+        called = true;
+      })
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -165,14 +177,16 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
   });
 
   it("returns 500 handler-failed when the handler throws", async () => {
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {
-      throw new Error("downstream service unreachable");
-    });
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        throw new Error("downstream service unreachable");
+      })
+      .build();
 
-    const response = await receiver.fetch(
+    const response = await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -184,12 +198,12 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
     );
 
     expect(response.status).toBe(500);
-    const body = (await response.json()) as {
+    const responseBody = (await response.json()) as {
       error: string;
       detail: string;
     };
-    expect(body.error).toBe("handler-failed");
-    expect(body.detail).toContain("downstream service unreachable");
+    expect(responseBody.error).toBe("handler-failed");
+    expect(responseBody.detail).toContain("downstream service unreachable");
   });
 
   it("supports chaining multiple .on() calls with independent handler types", async () => {
@@ -197,7 +211,7 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
     let order: { orderId: string } | undefined;
     let shipment: { trackingId: string } | undefined;
 
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 0,
       store: new InMemoryIdempotencyStore(),
     })
@@ -206,9 +220,10 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
       })
       .on("OrderShipped", ShipmentSchema, async (event) => {
         shipment = { trackingId: event.trackingId };
-      });
+      })
+      .build();
 
-    await receiver.fetch(
+    await r.fetch(
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: {
@@ -219,7 +234,7 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
       })
     );
 
-    await receiver.fetch(
+    await r.fetch(
       new Request("http://localhost/OrderShipped", {
         method: "POST",
         headers: {
@@ -235,29 +250,20 @@ describe("webhookReceiver — fetch mode (Lambda / edge / serverless)", () => {
   });
 });
 
-describe("webhookReceiver — listen mode (long-running Node server)", () => {
-  it("binds to a port, accepts a signed request, and closes cleanly", async () => {
+describe("receiver — listen mode (long-running Node server)", () => {
+  it("binds to a port, accepts a request, and closes cleanly", async () => {
     let called = false;
-    const receiver = webhookReceiver({
-      port: 0, // any free port — set after listen via the underlying server
-      store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {
-      called = true;
-    });
-    receiverRef = receiver;
-
-    // Use a known high port instead of 0 since @hono/node-server's
-    // typed API may not expose the bound port back. 14_002 chosen to
-    // avoid conflicts with the existing demo test on 14_001.
-    const receiverWithPort = webhookReceiver({
+    const r = receiver({
       port: 14_002,
       store: new InMemoryIdempotencyStore(),
-    }).on("OrderConfirmed", OrderSchema, async () => {
-      called = true;
-    });
-    receiverRef = receiverWithPort;
+    })
+      .on("OrderConfirmed", OrderSchema, async () => {
+        called = true;
+      })
+      .build();
+    receiverRef = r;
 
-    await receiverWithPort.listen();
+    await r.listen();
     const response = await fetch("http://127.0.0.1:14002/OrderConfirmed", {
       method: "POST",
       headers: {
@@ -270,24 +276,22 @@ describe("webhookReceiver — listen mode (long-running Node server)", () => {
     expect(called).toBe(true);
   });
 
-  it("throws when .on() is called after .listen()", async () => {
-    const receiver = webhookReceiver({
+  it("throws when .on() is called after .build() (builder is frozen)", () => {
+    const builder = receiver({
       port: 14_003,
       store: new InMemoryIdempotencyStore(),
     });
-    receiverRef = receiver;
-
-    await receiver.listen();
-    expect(() => receiver.on("Late", OrderSchema, async () => {})).toThrow(
+    builder.build();
+    expect(() => builder.on("Late", OrderSchema, async () => {})).toThrow(
       /Cannot register handler/
     );
   });
 
   it("close() is a no-op when called before listen()", async () => {
-    const receiver = webhookReceiver({
+    const r = receiver({
       port: 14_004,
       store: new InMemoryIdempotencyStore(),
-    });
-    await expect(receiver.close()).resolves.toBeUndefined();
+    }).build();
+    await expect(r.close()).resolves.toBeUndefined();
   });
 });

@@ -31,10 +31,10 @@
       "import": "./dist/idempotency/index.js",
       "require": "./dist/idempotency/index.cjs"
     },
-    "./webhook": {
-      "types": "./dist/@types/webhook/index.d.ts",
-      "import": "./dist/webhook/index.js",
-      "require": "./dist/webhook/index.cjs"
+    "./receiver": {
+      "types": "./dist/@types/receiver/index.d.ts",
+      "import": "./dist/receiver/index.js",
+      "require": "./dist/receiver/index.cjs"
     }
   },
   "sideEffects": false,
