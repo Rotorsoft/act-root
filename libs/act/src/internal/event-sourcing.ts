@@ -37,7 +37,8 @@ import type {
   State,
   Target,
 } from "../types/index.js";
-import { validate } from "../utils.js";
+import { sleep, validate } from "../utils.js";
+import { computeBackoffDelay } from "./backoff.js";
 import { defaultCorrelator } from "./correlator.js";
 
 /**
@@ -457,7 +458,17 @@ export async function load<
 /**
  * Executes an action and emits an event to be committed by the store.
  *
- * This function validates the action, applies business invariants, emits events, and commits them to the event store.
+ * Validates the action, applies business invariants, emits events, and
+ * commits them to the event store. When the action's
+ * {@link ActionOptions} declare a retry budget, the orchestrator owns
+ * the loop on {@link ConcurrencyError}: cache is invalidated, optional
+ * `backoff` delay is applied, and the action re-runs from `load`. Any
+ * other error rethrows immediately and does not consume the budget.
+ *
+ * Reactions skip optimistic concurrency (commit below passes
+ * `undefined` as `expectedVersion` when `reactingTo` is set), so
+ * `ConcurrencyError` cannot fire on the reaction-driven path — the
+ * loop is naturally a no-op there.
  *
  * @template TState The type of state
  * @template TEvents The type of events
@@ -495,155 +506,169 @@ export async function action<
     ? payload
     : validate(action as string, payload, me.actions[action]);
 
-  const snapshot = await load(me, stream);
-  if (snapshot.event?.name === TOMBSTONE_EVENT)
-    throw new StreamClosedError(stream);
-  const expected = expectedVersion ?? snapshot.event?.version;
+  const opts = me.options?.[action];
+  const maxRetries = opts?.maxRetries ?? 0;
 
-  if (me.given) {
-    const invariants = me.given[action] || [];
-    invariants.forEach(({ valid, description }) => {
-      if (!valid(snapshot.state, actor))
-        throw new InvariantError(
-          action,
-          validated,
-          target,
-          snapshot,
-          description
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const snapshot = await load(me, stream);
+      if (snapshot.event?.name === TOMBSTONE_EVENT)
+        throw new StreamClosedError(stream);
+      const expected = expectedVersion ?? snapshot.event?.version;
+
+      if (me.given) {
+        const invariants = me.given[action] || [];
+        invariants.forEach(({ valid, description }) => {
+          if (!valid(snapshot.state, actor))
+            throw new InvariantError(
+              action,
+              validated,
+              target,
+              snapshot,
+              description
+            );
+        });
+      }
+
+      const result = me.on[action](validated, snapshot, target);
+      if (!result) return [snapshot];
+
+      // An empty array means no events were emitted
+      if (Array.isArray(result) && result.length === 0) {
+        return [snapshot];
+      }
+
+      const tuples = Array.isArray(result[0])
+        ? (result as Emitted<TEvents>[]) // array of tuples
+        : ([result] as Emitted<TEvents>[]); // single tuple
+
+      // ACT-403: warn once per process per event name when a dynamic
+      // `.emit((a) => ["X", ...])` produces a deprecated event. Static
+      // `.emit("X")` is already caught at build time by act-builder; this
+      // is the runtime safety net for the dynamic form, which the static
+      // checker can't inspect. The `_warned` set lives on the state so
+      // multiple Act instances over the same merged state share idempotency.
+      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
+      if (deprecated && deprecated.size > 0) {
+        const me_ = me as { _warned?: Set<string> };
+        const warned = me_._warned ?? (me_._warned = new Set<string>());
+        for (const [name] of tuples) {
+          const evt = name as string;
+          if (deprecated.has(evt) && !warned.has(evt)) {
+            warned.add(evt);
+            log().warn(
+              `Action "${String(action)}" emitted deprecated event "${evt}". ` +
+                `A newer version exists in the registry — update the action's ` +
+                `.emit() to target the current version. (warned once per process)`
+            );
+          }
+        }
+      }
+
+      const emitted = tuples.map(([name, data]) => ({
+        name,
+        data: skipValidation
+          ? data
+          : validate(name as string, data, me.events[name]),
+      }));
+
+      const meta: EventMeta = {
+        correlation:
+          reactingTo?.meta.correlation ||
+          correlator({
+            action: action as string,
+            state: me.name,
+            stream,
+            actor: target.actor,
+          }),
+        causation: {
+          action: {
+            name: action as string,
+            ...target,
+            // payload intentionally omitted: it can be large or contain PII,
+            // and callers correlate via the correlation id when they need it.
+          },
+          event: reactingTo
+            ? {
+                id: reactingTo.id,
+                name: reactingTo.name,
+                stream: reactingTo.stream,
+              }
+            : undefined,
+        },
+      };
+
+      let committed: Committed<TEvents, keyof TEvents>[];
+      try {
+        committed = await store().commit(
+          stream,
+          emitted,
+          meta,
+          // Reactions skip optimistic concurrency: they always append against the
+          // current head. Stream leasing already serializes concurrent reactions,
+          // and forcing version checks here would turn ordinary catch-up into
+          // spurious retries.
+          reactingTo ? undefined : expected
         );
-    });
-  }
+      } catch (error) {
+        // Invalidate cache on concurrency errors — cached state is stale
+        if (error instanceof ConcurrencyError) {
+          await cache().invalidate(stream);
+        }
+        throw error;
+      }
 
-  const result = me.on[action](validated, snapshot, target);
-  if (!result) return [snapshot];
+      let { state, patches } = snapshot;
+      const snapshots = committed.map((event) => {
+        const p = me.patch[event.name](event, state);
+        state = patch(state, p);
+        patches++;
+        // cache_hit / replayed propagate from the initial load — these
+        // post-commit snapshots all derive from the same loaded state.
+        // version advances per committed event (each is a new stream head).
+        return {
+          event,
+          state,
+          version: event.version,
+          patches,
+          snaps: snapshot.snaps,
+          patch: p,
+          cache_hit: snapshot.cache_hit,
+          replayed: snapshot.replayed,
+        };
+      });
 
-  // An empty array means no events were emitted
-  if (Array.isArray(result) && result.length === 0) {
-    return [snapshot];
-  }
+      // fire and forget snaps
+      const last = snapshots.at(-1)!;
+      const snapped = me.snap?.(last);
 
-  const tuples = Array.isArray(result[0])
-    ? (result as Emitted<TEvents>[]) // array of tuples
-    : ([result] as Emitted<TEvents>[]); // single tuple
+      // Update cache with post-commit state (reset patches if snapped).
+      // Fire-and-forget — log but don't fail the action on cache write errors
+      // (e.g., transient network failures in a custom Cache adapter).
+      cache()
+        .set<TState>(stream, {
+          state: last.state,
+          version: last.event.version,
+          event_id: last.event.id,
+          patches: snapped ? 0 : last.patches,
+          snaps: snapped ? last.snaps + 1 : last.snaps,
+        })
+        .catch((err) => log().error(err));
 
-  // ACT-403: warn once per process per event name when a dynamic
-  // `.emit((a) => ["X", ...])` produces a deprecated event. Static
-  // `.emit("X")` is already caught at build time by act-builder; this
-  // is the runtime safety net for the dynamic form, which the static
-  // checker can't inspect. The `_warned` set lives on the state so
-  // multiple Act instances over the same merged state share idempotency.
-  const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-  if (deprecated && deprecated.size > 0) {
-    const me_ = me as { _warned?: Set<string> };
-    const warned = me_._warned ?? (me_._warned = new Set<string>());
-    for (const [name] of tuples) {
-      const evt = name as string;
-      if (deprecated.has(evt) && !warned.has(evt)) {
-        warned.add(evt);
-        log().warn(
-          `Action "${String(action)}" emitted deprecated event "${evt}". ` +
-            `A newer version exists in the registry — update the action's ` +
-            `.emit() to target the current version. (warned once per process)`
-        );
+      // Persist snap to store for cold-start durability. Fire-and-forget:
+      // snap() has its own try/catch that logs failures, so the rejection
+      // can never escape — `void` is just to silence the floating-promise
+      // lint (action() doesn't await store durability for the snapshot).
+      if (snapped) void snap(last);
+
+      return snapshots;
+    } catch (error) {
+      if (!(error instanceof ConcurrencyError)) throw error;
+      if (attempt >= maxRetries) throw error;
+      if (opts?.backoff) {
+        const delayMs = computeBackoffDelay(attempt, opts.backoff);
+        if (delayMs > 0) await sleep(delayMs);
       }
     }
   }
-
-  const emitted = tuples.map(([name, data]) => ({
-    name,
-    data: skipValidation
-      ? data
-      : validate(name as string, data, me.events[name]),
-  }));
-
-  const meta: EventMeta = {
-    correlation:
-      reactingTo?.meta.correlation ||
-      correlator({
-        action: action as string,
-        state: me.name,
-        stream,
-        actor: target.actor,
-      }),
-    causation: {
-      action: {
-        name: action as string,
-        ...target,
-        // payload intentionally omitted: it can be large or contain PII,
-        // and callers correlate via the correlation id when they need it.
-      },
-      event: reactingTo
-        ? {
-            id: reactingTo.id,
-            name: reactingTo.name,
-            stream: reactingTo.stream,
-          }
-        : undefined,
-    },
-  };
-
-  let committed: Committed<TEvents, keyof TEvents>[];
-  try {
-    committed = await store().commit(
-      stream,
-      emitted,
-      meta,
-      // Reactions skip optimistic concurrency: they always append against the
-      // current head. Stream leasing already serializes concurrent reactions,
-      // and forcing version checks here would turn ordinary catch-up into
-      // spurious retries.
-      reactingTo ? undefined : expected
-    );
-  } catch (error) {
-    // Invalidate cache on concurrency errors — cached state is stale
-    if (error instanceof ConcurrencyError) {
-      await cache().invalidate(stream);
-    }
-    throw error;
-  }
-
-  let { state, patches } = snapshot;
-  const snapshots = committed.map((event) => {
-    const p = me.patch[event.name](event, state);
-    state = patch(state, p);
-    patches++;
-    // cache_hit / replayed propagate from the initial load — these
-    // post-commit snapshots all derive from the same loaded state.
-    // version advances per committed event (each is a new stream head).
-    return {
-      event,
-      state,
-      version: event.version,
-      patches,
-      snaps: snapshot.snaps,
-      patch: p,
-      cache_hit: snapshot.cache_hit,
-      replayed: snapshot.replayed,
-    };
-  });
-
-  // fire and forget snaps
-  const last = snapshots.at(-1)!;
-  const snapped = me.snap?.(last);
-
-  // Update cache with post-commit state (reset patches if snapped).
-  // Fire-and-forget — log but don't fail the action on cache write errors
-  // (e.g., transient network failures in a custom Cache adapter).
-  cache()
-    .set<TState>(stream, {
-      state: last.state,
-      version: last.event.version,
-      event_id: last.event.id,
-      patches: snapped ? 0 : last.patches,
-      snaps: snapped ? last.snaps + 1 : last.snaps,
-    })
-    .catch((err) => log().error(err));
-
-  // Persist snap to store for cold-start durability. Fire-and-forget:
-  // snap() has its own try/catch that logs failures, so the rejection
-  // can never escape — `void` is just to silence the floating-promise
-  // lint (action() doesn't await store durability for the snapshot).
-  if (snapped) void snap(last);
-
-  return snapshots;
 }

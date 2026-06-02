@@ -42,7 +42,7 @@ caller                  framework                   store
   │  ◄───────────────────── │
 ```
 
-If two callers race on the same stream, only one wins. The loser sees `ConcurrencyError` with `expectedVersion` and `lastVersion` (the actual head). Standard pattern is to reload state and retry.
+If two callers race on the same stream, only one wins. The loser sees `ConcurrencyError` with `expectedVersion` and `lastVersion` (the actual head). The standard remedy is per-action retry policy — `state.on(entry, { maxRetries, backoff? })` — which lets the orchestrator absorb the conflict and re-run from `load()`. See [`ActionOptions` in Error Handling](../concepts/error-handling.md#retry-pattern--per-action-policy).
 
 ### Two failure modes the framework handles
 

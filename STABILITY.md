@@ -12,7 +12,7 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.patch`, `.snap`, `.given`, `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.build`
 - `slice(...)` — including `.actions`, `.given`, `.build`
 - `projection(...)` — including `.from`, `.on`, `.build`
 - `act(...)` — including `.with`, `.build`

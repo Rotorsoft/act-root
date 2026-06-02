@@ -7,6 +7,7 @@
 import type { ZodType } from "zod";
 import type {
   ActionHandler,
+  ActionOptions,
   GivenHandlers,
   Invariant,
   PassthroughPatchHandler,
@@ -151,15 +152,36 @@ export type ActionBuilder<
    * when the variable name matches the action name. The key becomes the
    * action name, the value the Zod schema.
    *
+   * Pass an optional second argument to declare a per-action retry
+   * policy — the orchestrator retries this action on
+   * {@link ConcurrencyError} up to `maxRetries` extra times, applying
+   * `backoff` between attempts when set. Omit the argument to keep the
+   * current single-attempt behavior (`ConcurrencyError` surfaces on
+   * first conflict).
+   *
    * @template TKey - Action name (string literal type)
    * @template TNewActions - Action payload schema type
    * @param entry - Single-key record `{ ActionName: schema }`
+   * @param options - Optional per-action retry policy
+   *   ({@link ActionOptions}).
    * @returns An object with `.given()` and `.emit()` for further configuration
    *
    * @example Simple action without invariants
    * ```typescript
    * .on({ increment: z.object({ by: z.number() }) })
    *   .emit((action) => ["Incremented", { amount: action.by }])
+   * ```
+   *
+   * @example Hot-stream action with retry + jittered exponential backoff
+   * ```typescript
+   * .on(
+   *   { transfer: z.object({ amount: z.number() }) },
+   *   {
+   *     maxRetries: 5,
+   *     backoff: { strategy: "exponential", baseMs: 10, maxMs: 200, jitter: true },
+   *   }
+   * )
+   *   .emit((action) => ["Transferred", { amount: action.amount }])
    * ```
    *
    * @example Action with business rules
@@ -180,7 +202,8 @@ export type ActionBuilder<
    * ```
    */
   on: <TKey extends string, TNewActions extends Schema>(
-    entry: ActionEntry<TKey, TNewActions>
+    entry: ActionEntry<TKey, TNewActions>,
+    options?: ActionOptions
   ) => {
     /**
      * Adds business rule invariants that must hold before the action can execute.
@@ -556,7 +579,8 @@ function action_builder<
 
   const builder: ActionBuilder<TState, TEvents, TActions, TName> = {
     on<TKey extends string, TNewActions extends Schema>(
-      entry: ActionEntry<TKey, TNewActions>
+      entry: ActionEntry<TKey, TNewActions>,
+      options?: ActionOptions
     ) {
       const keys = Object.keys(entry);
       if (keys.length !== 1) throw new Error(".on() requires exactly one key");
@@ -568,6 +592,10 @@ function action_builder<
 
       type MergedActions = TActions & { [P in TKey]: TNewActions };
       (internal.actions as Record<string, ZodType<Schema>>)[action] = schema;
+      if (options) {
+        internal.options ??= {};
+        (internal.options as Record<string, ActionOptions>)[action] = options;
+      }
 
       function given(rules: Invariant<TState>[]) {
         internal.given ??= {} as GivenHandlers<TState, Schemas>;
