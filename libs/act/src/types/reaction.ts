@@ -6,6 +6,7 @@
  */
 import type {
   Actor,
+  BackoffOptions,
   Committed,
   IAct,
   Query,
@@ -159,48 +160,19 @@ export type LaneConfig<TName extends string = string> = {
 };
 
 /**
- * Backoff strategy for delaying the next retry attempt after a reaction
- * handler throws.
- *
- * - `fixed` — wait `baseMs` between attempts
- * - `linear` — wait `baseMs * (retry + 1)`
- * - `exponential` — wait `baseMs * 2^retry`, capped at `maxMs` if provided
- *
- * `retry` is the lease's retry counter at finalize time, where `0` is the
- * first attempt that just failed. So the delay applies *before* the next
- * attempt.
- */
-export type BackoffStrategy = "fixed" | "linear" | "exponential";
-
-/**
- * Per-reaction retry backoff configuration. When set, the drain controller
- * defers the next attempt at this stream until the computed delay has
- * elapsed.
- *
- * Backoff state lives in process memory on the {@link DrainController}.
- * With N competing workers (each running its own controller), retries
- * escalate at most N× faster than configured — the shared `retry` counter
- * on the stream watermark climbs across workers, reaching the
- * `blockOnError` threshold sooner. This is intentional: per-worker pacing
- * speeds up recovery on transient per-worker faults, and poison messages
- * still get quarantined.
- *
- * @property strategy - {@link BackoffStrategy}
- * @property baseMs - Base delay (must be ≥ 0)
- * @property maxMs - Optional cap; only used by `exponential`
- * @property jitter - Multiply final delay by `0.5 + random()` (range
- *   `[0.5, 1.5)`) to avoid thundering herds when many streams retry in
- *   lockstep
- */
-export type BackoffOptions = {
-  readonly strategy: BackoffStrategy;
-  readonly baseMs: number;
-  readonly maxMs?: number;
-  readonly jitter?: boolean;
-};
-
-/**
  * Options for reaction processing.
+ *
+ * For the shared retry-pacing shape see {@link BackoffOptions} and
+ * {@link BackoffStrategy} in `./action.js`.
+ *
+ * Reaction-side note on `backoff`: backoff state lives in process memory
+ * on the {@link DrainController}. With N competing workers (each running
+ * its own controller), retries escalate at most N× faster than configured
+ * — the shared `retry` counter on the stream watermark climbs across
+ * workers, reaching the `blockOnError` threshold sooner. This is
+ * intentional: per-worker pacing speeds up recovery on transient
+ * per-worker faults, and poison messages still get quarantined.
+ *
  * @property blockOnError - Whether to block on error.
  * @property maxRetries - Maximum number of retries.
  * @property backoff - Optional retry pacing. When omitted, retries run as

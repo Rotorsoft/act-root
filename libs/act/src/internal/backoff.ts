@@ -8,7 +8,7 @@
  * @internal
  */
 
-import type { BackoffOptions } from "../types/reaction.js";
+import type { BackoffOptions } from "../types/action.js";
 
 /**
  * Compute the wall-clock delay (in ms) to wait before the next attempt on

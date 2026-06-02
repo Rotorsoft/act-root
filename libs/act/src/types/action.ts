@@ -423,6 +423,65 @@ export type GivenHandlers<TState extends Schema, TActions extends Schemas> = {
   [TKey in keyof TActions]?: Invariant<TState>[];
 };
 
+// ---------------------------------------------------------------------------
+// Retry pacing — generic, shared by every consumer that defers retries
+// (reactions on the drain side, actions on the command side, future ops
+// primitives). The runtime delay math lives in `internal/backoff.ts`.
+// ---------------------------------------------------------------------------
+
+/**
+ * Backoff strategy for delaying the next retry attempt after a handler
+ * throws.
+ *
+ * - `fixed` — wait `baseMs` between attempts
+ * - `linear` — wait `baseMs * (retry + 1)`
+ * - `exponential` — wait `baseMs * 2^retry`, capped at `maxMs` if provided
+ *
+ * `retry` is the attempt counter at finalize time, where `0` is the first
+ * attempt that just failed. The delay applies *before* the next attempt.
+ */
+export type BackoffStrategy = "fixed" | "linear" | "exponential";
+
+/**
+ * Retry backoff configuration.
+ *
+ * @property strategy - {@link BackoffStrategy}
+ * @property baseMs - Base delay (must be ≥ 0)
+ * @property maxMs - Optional cap; only used by `exponential`
+ * @property jitter - Multiply final delay by `0.5 + random()` (range
+ *   `[0.5, 1.5)`) to avoid thundering herds when many callers retry in
+ *   lockstep
+ */
+export type BackoffOptions = {
+  readonly strategy: BackoffStrategy;
+  readonly baseMs: number;
+  readonly maxMs?: number;
+  readonly jitter?: boolean;
+};
+
+/**
+ * Per-action retry policy, declared on `state.on(entry, options)`. The
+ * orchestrator owns the loop on the command path: on
+ * {@link ConcurrencyError} the cache is invalidated, an optional
+ * `backoff` delay is applied, and the action re-runs from `load`. Any
+ * other error rethrows immediately and does not consume the budget.
+ *
+ * No `blockOnError` field — commands surface errors to callers; they do
+ * not block streams.
+ *
+ * @property maxRetries - Additional attempts after the initial call.
+ *   Default `0` (single attempt, current behavior). Total invocations
+ *   equal `1 + maxRetries`.
+ * @property backoff - Optional retry pacing. When omitted, retries run
+ *   immediately — fine at low contention. Set to `{ strategy:
+ *   "exponential", baseMs, jitter: true }` on hot streams where many
+ *   writers contend for the same version.
+ */
+export type ActionOptions = {
+  readonly maxRetries?: number;
+  readonly backoff?: BackoffOptions;
+};
+
 /**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
@@ -442,6 +501,13 @@ export type State<
   on: ActionHandlers<TState, TEvents, TActions>;
   given?: GivenHandlers<TState, TActions>;
   snap?: (snapshot: Snapshot<TState, TEvents>) => boolean;
+  /**
+   * Per-action retry policy keyed by action name. Set by
+   * `state.on(entry, options)`; consumed by the orchestrator's command
+   * path. Actions without an entry behave as if `{ maxRetries: 0 }` —
+   * `ConcurrencyError` surfaces on first conflict.
+   */
+  options?: { [TKey in keyof TActions]?: ActionOptions };
 };
 
 /**

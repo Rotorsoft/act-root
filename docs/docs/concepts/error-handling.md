@@ -62,22 +62,55 @@ try {
 
 **Resolution:** Retry with fresh state. The cache is invalidated automatically on concurrency errors.
 
-### Retry Pattern
+### Retry Pattern — per-action policy
+
+Declare the retry budget on the action itself. The orchestrator owns the loop: on `ConcurrencyError` it invalidates the cache, applies an optional `backoff`, and re-runs from `load()`. Any other error rethrows immediately and does not consume the budget.
 
 ```typescript
-async function withRetry(action, target, payload, maxRetries = 3) {
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const BankAccount = state({ BankAccount: z.object({ balance: z.number() }) })
+  .init(() => ({ balance: 0 }))
+  .emits({ Transferred: z.object({ amount: z.number() }) })
+  .on(
+    { transfer: z.object({ amount: z.number() }) },
+    {
+      maxRetries: 5,
+      backoff: { strategy: "exponential", baseMs: 10, maxMs: 200, jitter: true },
+    },
+  )
+    .emit((action) => ["Transferred", { amount: action.amount }])
+  .build();
+
+// Caller is unchanged — the retry is invisible to them.
+await app.do("transfer", target, { amount: 100 });
+```
+
+The action author knows whether the action contends for a hot stream; the caller shouldn't have to. The same call site works for low-contention actions (omit options, surface `ConcurrencyError` on first conflict) and hot-stream actions (declare a budget, retry transparently).
+
+`maxRetries` defaults to `0` (single attempt, current behavior). When `backoff` is omitted, retries run immediately — fine at low contention. On hot streams, jittered exponential backoff avoids the thundering herd of N writers re-racing in lockstep.
+
+#### When to wrap manually instead
+
+If you need different retry behavior than what the action declares — for instance, a UI mutation that should fail fast and surface to the user even on a hot action — wrap the call:
+
+```typescript
+async function withRetry(action, target, payload, maxRetries) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await app.do(action, target, payload);
     } catch (error) {
       if (error instanceof ConcurrencyError && attempt < maxRetries) {
-        continue; // cache was invalidated, next load() gets fresh state
+        continue;
       }
       throw error;
     }
   }
 }
 ```
+
+This is an escape hatch — the declarative form on the action is the primary mechanism.
 
 ## StreamClosedError
 
