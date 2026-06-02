@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.7.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.6.0...@rotorsoft/act-v1.7.0) (2026-06-02)
+
+
+### Features
+
+* **act:** per-action retry policy for ConcurrencyError ([5e45422](https://github.com/rotorsoft/act-root/commit/5e45422c77c7ca48c2c6baebe7dff4ca25cf6fca)), closes [#739](https://github.com/rotorsoft/act-root/issues/739)
+
 # [@rotorsoft/act-v1.6.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.5.2...@rotorsoft/act-v1.6.0) (2026-05-30)
 
 
