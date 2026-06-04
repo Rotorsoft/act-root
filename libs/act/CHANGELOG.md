@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.8.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.7.0...@rotorsoft/act-v1.8.0) (2026-06-04)
+
+
+### Features
+
+* **act:** pii_isolation Store contract — capability + forget_pii + TCK ([#868](https://github.com/rotorsoft/act-root/issues/868)) ([eced65c](https://github.com/rotorsoft/act-root/commit/eced65c4777547edd9876253fca1e8f92c75a950)), closes [#566](https://github.com/rotorsoft/act-root/issues/566) [#855](https://github.com/rotorsoft/act-root/issues/855) [870/#871](https://github.com/rotorsoft/act-root/issues/871)
+
 # [@rotorsoft/act-v1.7.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.6.0...@rotorsoft/act-v1.7.0) (2026-06-02)
 
 
