@@ -203,6 +203,26 @@ export type Message<TEvents extends Schemas, TKey extends keyof TEvents> = {
   readonly name: TKey;
   /** The event or action payload */
   readonly data: Readonly<TEvents[TKey]>;
+  /**
+   * Sensitive-data payload (#566). Carries fields the framework extracted
+   * from `data` at commit-interception time, routed to a separate
+   * `events.pii` column by adapters that declare the `pii_isolation`
+   * capability.
+   *
+   * Populated by the framework's commit interception (foundation #855) —
+   * action handlers do not set this. On commit input it carries the
+   * extracted sensitive fields; on load output it carries the merged
+   * fields read from the adapter's pii column (or `null` after
+   * `Store.forget_pii(stream)`).
+   *
+   * Adapters without `pii_isolation` ignore the field; the framework only
+   * populates it when the adapter declares capability support and the
+   * event's schema has `sensitive(...)`-marked fields. (Read-time
+   * visibility gating — who sees plaintext vs `[REDACTED]` — is the
+   * separate concern of `state(...).discloses(predicate)` and lives in
+   * the orchestrator's load path, not on the Store contract.)
+   */
+  readonly pii?: Readonly<Record<string, unknown>> | null;
 };
 
 /**

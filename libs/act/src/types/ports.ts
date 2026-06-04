@@ -1000,6 +1000,37 @@ export interface Store extends Disposable, EventSource {
   notify?: (
     handler: (notification: StoreNotification) => void
   ) => NotifyDisposer | Promise<NotifyDisposer>;
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — the
+   * physical-erasure side of the sensitive-data epic (#566). Sets the
+   * adapter's PII column (or equivalent) to `NULL` for the stream's
+   * events; `events.data` and the rest of the row are never touched.
+   *
+   * Returns the count of rows wiped. Idempotent: a second call on an
+   * already-wiped stream returns `0` without error.
+   *
+   * Capability-gated via `pii_isolation` in `@rotorsoft/act-tck`'s
+   * `StoreCapabilities`. Adapters that can't UPDATE rows (Kafka,
+   * append-only object-storage logs) declare `pii_isolation: false`
+   * and omit this method; `app.forget(stream)` throws on those
+   * adapters at orchestrator level.
+   *
+   * Append-only invariant on `events.data` is preserved — only the
+   * separately-isolated PII column is mutated. Disk reclamation is
+   * adapter-dependent (PG autovacuum reclaims lazily; SQLite needs
+   * `PRAGMA incremental_vacuum` or `VACUUM`). For strict-deletion
+   * jurisdictions the production checklist documents the operator
+   * step.
+   *
+   * Encryption-at-rest is the operator's DB-layer concern (pgcrypto,
+   * RDS TDE, Cloud SQL TDE, SQLite SEE) — not an application-level
+   * port. The framework's job is isolation + erasure.
+   *
+   * @param stream Target stream
+   * @returns Count of events whose PII column was set to NULL
+   */
+  forget_pii?: (stream: string) => Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
