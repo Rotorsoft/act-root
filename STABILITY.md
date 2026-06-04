@@ -30,17 +30,19 @@ The runtime surface returned from `act(...).build()`:
 
 The signatures, return shapes, and behavioral contracts of these methods are stable. Additive new methods on `IAct` are not breaking. Changing the meaning of an existing call (e.g., what `settle()` guarantees) is.
 
-### Store, Cache, and Logger adapter contracts
+### Store, Cache, Logger, and Encryptor adapter contracts
 
-The `Store`, `Cache`, and `Logger` interfaces in `libs/act/src/types/` define what an adapter must implement. The contracts are **executable** — [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck) exposes `runStoreTck`, `runCacheTck`, and `runLoggerTck` that exercise every method on each interface against any factory you point them at. If your adapter passes the TCK, it honors the contract; if the contract changes in a way that affects you, the TCK fails first.
+The `Store`, `Cache`, `Logger`, and `Encryptor` interfaces in `libs/act/src/types/` define what an adapter must implement. The first three contracts are **executable** — [`@rotorsoft/act-tck`](https://www.npmjs.com/package/@rotorsoft/act-tck) exposes `runStoreTck`, `runCacheTck`, and `runLoggerTck` that exercise every method on each interface against any factory you point them at. If your adapter passes the TCK, it honors the contract; if the contract changes in a way that affects you, the TCK fails first. (The `Encryptor` port is small enough — 3 methods — that operators typically write their own adapter; the built-in `InMemoryEncryptor` doubles as the reference.)
 
 Once 1.0 ships:
 
-- Adding a **required** method to `Store`, `Cache`, or `Logger` is a breaking change.
+- Adding a **required** method to `Store`, `Cache`, `Logger`, or `Encryptor` is a breaking change.
 - Adding an **optional** method (with a default fallback in the orchestrator) is not. Optional surface is gated behind a `Capabilities` flag in the TCK so existing adapters keep passing until they opt in.
 - Changing the semantics of an existing method (return shape, error contract, ordering guarantees) is breaking.
 
 In-tree adapters are validated against the TCK across multiple backend versions in [`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) — PostgreSQL 14/15/16/17 and `@libsql/client` pinned + latest. A regression in any cell surfaces before it reaches users.
+
+The `encryptor()` port is opt-in by wiring — unlike `store()` / `cache()` / `log()`, there is no built-in default. When unwired, `encryptor()` returns `undefined` and the sensitive-data path (`.sensitive({...})` declarations, `app.forget(...)`) treats sensitive fields as plaintext-and-metadata-only. This "no default" semantic is part of the covered contract — changing it (e.g. installing a default adapter implicitly) would be breaking.
 
 We will be explicit in release notes when this surface changes.
 

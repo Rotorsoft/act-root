@@ -7,6 +7,7 @@ import type {
   Cache,
   Disposable,
   Disposer,
+  Encryptor,
   Logger,
   Store,
 } from "./types/index.js";
@@ -210,6 +211,52 @@ const _cache = port(function cache(adapter?: Cache) {
 export const cache = ((adapter?: Cache): Cache => {
   return scoped.getStore()?.cache ?? _cache(adapter);
 }) as (adapter?: Cache) => Cache;
+
+// ---------------------------------------------------------------------------
+// Ports: encryptor (no default)
+// ---------------------------------------------------------------------------
+
+/**
+ * Gets or injects the singleton encryptor — the sensitive-data port (#566).
+ *
+ * **No default.** Unlike `store()` / `cache()` / `log()`, calling `encryptor()`
+ * before any adapter has been wired returns `undefined`. The framework treats
+ * `.sensitive({...})` declarations as metadata-only in that state — sensitive
+ * fields stay plaintext in `events.data` (consumed only by OpenAPI as
+ * `x-sensitive` and by loggers for redaction). `app.forget(stream)` throws
+ * when called without an encryptor because there's no mechanism to make the
+ * plaintext unreadable.
+ *
+ * To enable encryption + crypto-shredding, wire an adapter before building
+ * any Act instance:
+ *
+ * ```typescript
+ * import { encryptor } from "@rotorsoft/act";
+ * import { InMemoryEncryptor } from "@rotorsoft/act";
+ * import { randomBytes } from "node:crypto";
+ *
+ * encryptor(new InMemoryEncryptor({
+ *   masterKey: Buffer.from(process.env.ENCRYPTOR_MASTER_KEY!, "base64"),
+ * }));
+ * ```
+ *
+ * The wired adapter is registered for graceful shutdown alongside the
+ * standard ports, so `dispose()()` clears the key cache and the shredded
+ * set during teardown.
+ *
+ * @param adapter - Optional encryptor implementation to inject
+ * @returns The wired encryptor, or `undefined` if none has been wired yet
+ *
+ * @see {@link Encryptor} for the port contract
+ * @see {@link InMemoryEncryptor} for the in-tree adapter
+ */
+export function encryptor(adapter?: Encryptor): Encryptor | undefined {
+  if (adapter && !adapters.has("encryptor")) {
+    adapters.set("encryptor", adapter);
+    log().info(`[act] + encryptor:${adapter.constructor.name}`);
+  }
+  return adapters.get("encryptor") as Encryptor | undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Disposal

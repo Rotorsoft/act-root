@@ -1038,3 +1038,57 @@ export interface Cache extends Disposable {
   invalidate(stream: string): Promise<void>;
   clear(): Promise<void>;
 }
+
+// ---------------------------------------------------------------------------
+// Encryptor
+// ---------------------------------------------------------------------------
+
+/**
+ * Port for stream-scoped symmetric encryption + crypto-shredding.
+ *
+ * Sensitive-data handling (`act-ops` sensitive epic #566) works by intercepting
+ * commit and load in the orchestrator: when an encryptor is wired AND a state
+ * has declared `.sensitive({...})`, the framework calls {@link Encryptor.encrypt}
+ * on each declared field at commit and {@link Encryptor.decrypt} at load. The
+ * Store sees ciphertext as opaque JSON-string field values and does not know
+ * there's PII.
+ *
+ * Erasure is then a single operation: {@link Encryptor.shred} deletes the
+ * stream's encryption key. Subsequent decrypts on that stream return
+ * `undefined`; the framework substitutes `"[REDACTED]"` for the field value
+ * before the read path hands the event to reducers/handlers/projections.
+ *
+ * Unlike `Store`, `Cache`, and `Logger`, the framework ships **no default**
+ * encryptor — `.sensitive(...)` declarations are metadata-only when no
+ * encryptor is wired (consumed by OpenAPI as `x-sensitive`, by loggers for
+ * redaction). Operators opt into encryption by wiring an adapter.
+ *
+ * The default in-tree adapter is `InMemoryEncryptor` (AES-256-GCM with
+ * HKDF-SHA-256 per-stream key derivation). Production deployments wire KMS-,
+ * Vault-, or file-backed adapters; the port is small enough (3 methods) that
+ * operators write their own.
+ */
+export interface Encryptor extends Disposable {
+  /**
+   * Encrypt a sensitive field value using the stream's key. Returns a
+   * self-describing ciphertext string (the in-tree default uses base64
+   * `iv || ct || tag`). The framework treats the return value as opaque.
+   */
+  encrypt(stream: string, plaintext: string): Promise<string>;
+
+  /**
+   * Decrypt a sensitive field value. Returns `undefined` when the stream's
+   * key has been shredded (the framework substitutes `"[REDACTED]"` for the
+   * field). Throws on authentication failure (tampered ciphertext, wrong
+   * key) — that's a data-integrity error, not erasure.
+   */
+  decrypt(stream: string, ciphertext: string): Promise<string | undefined>;
+
+  /**
+   * Delete the stream's encryption key — crypto-shredding. Irreversible
+   * by contract: the port deliberately exposes no `restore()` or `undo()`
+   * because the security property depends on absoluteness. Idempotent:
+   * shredding an already-shredded stream is a no-op.
+   */
+  shred(stream: string): Promise<void>;
+}
