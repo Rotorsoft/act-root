@@ -50,6 +50,15 @@ export type StoreCapabilities = {
    * rollback on mid-iteration throw.
    */
   readonly restore?: boolean;
+  /**
+   * Adapter supports sensitive-data isolation (#566): accepts the
+   * optional `pii` field on commit messages, returns it on load
+   * outputs, and implements {@link Store.forget_pii}. When `true`,
+   * the TCK runs the PII isolation suite — commit-with-pii
+   * round-trip, commit-without-pii passthrough, `forget_pii` happy
+   * path, idempotency, and isolation across streams.
+   */
+  readonly pii_isolation?: boolean;
 };
 
 /**
@@ -2117,6 +2126,174 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         // One callback per event; values monotonic.
         expect(calls).toEqual([1, 2]);
+      });
+    });
+
+    // PII isolation — sensitive-data epic (#566). Same `skipIf` pattern as
+    // restore: gated on `caps.pii_isolation`, exercises commit-with-pii
+    // round-trip, the no-pii passthrough, `forget_pii` happy path +
+    // idempotency, and isolation across streams.
+    describe.skipIf(!caps.pii_isolation)("pii_isolation (capability)", () => {
+      it("commits and loads pii alongside data", async () => {
+        const s = `pii-roundtrip-${uid()}`;
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "u@example.com", name: "Ursula" },
+            },
+          ],
+          makeMeta({ stream: s })
+        );
+        expect(committed).toHaveLength(1);
+        expect(committed[0].pii).toEqual({
+          email: "u@example.com",
+          name: "Ursula",
+        });
+
+        // Re-read via query to confirm the adapter persists pii.
+        const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            seen.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toHaveLength(1);
+        expect(seen[0].pii).toEqual({ email: "u@example.com", name: "Ursula" });
+        // Non-pii fields untouched.
+        expect(seen[0].data).toEqual({ amount: 1 });
+      });
+
+      it("passes through events without pii (pii is null or undefined on load)", async () => {
+        const s = `pii-none-${uid()}`;
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            seen.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toHaveLength(1);
+        // Either undefined or null is acceptable — adapters that store
+        // `pii TEXT NULL` round-trip as null; in-memory may return
+        // undefined for the missing key. Both forms mean "no PII."
+        expect(seen[0].pii == null).toBe(true);
+      });
+
+      it("wipes pii for every event on the stream via forget_pii", async () => {
+        const s = `pii-forget-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "a@example.com" },
+            },
+            {
+              name: "Incremented",
+              data: { amount: 2 },
+              pii: { email: "b@example.com" },
+            },
+          ],
+          makeMeta({ stream: s })
+        );
+
+        const forget = store.forget_pii;
+        expect(forget).toBeDefined();
+        const wiped = await forget!.call(store, s);
+        expect(wiped).toBe(2);
+
+        const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            seen.push(e);
+          },
+          { stream: s, stream_exact: true }
+        );
+        expect(seen).toHaveLength(2);
+        // PII is gone — adapters return null. Data is intact.
+        for (const e of seen) {
+          expect(e.pii == null).toBe(true);
+          expect(e.data).toBeDefined();
+        }
+      });
+
+      it("is idempotent — second forget_pii returns 0, no error", async () => {
+        const s = `pii-forget-idem-${uid()}`;
+        await store.commit<CounterEvents>(
+          s,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "u@example.com" },
+            },
+          ],
+          makeMeta({ stream: s })
+        );
+        const forget = store.forget_pii!;
+        const first = await forget.call(store, s);
+        expect(first).toBe(1);
+        const second = await forget.call(store, s);
+        expect(second).toBe(0);
+      });
+
+      it("only wipes the targeted stream — siblings untouched", async () => {
+        const sA = `pii-iso-a-${uid()}`;
+        const sB = `pii-iso-b-${uid()}`;
+        await store.commit<CounterEvents>(
+          sA,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "alice@example.com" },
+            },
+          ],
+          makeMeta({ stream: sA })
+        );
+        await store.commit<CounterEvents>(
+          sB,
+          [
+            {
+              name: "Incremented",
+              data: { amount: 1 },
+              pii: { email: "bob@example.com" },
+            },
+          ],
+          makeMeta({ stream: sB })
+        );
+        await store.forget_pii!.call(store, sA);
+
+        const a: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            a.push(e);
+          },
+          { stream: sA, stream_exact: true }
+        );
+        expect(a[0].pii == null).toBe(true);
+
+        const b: Committed<CounterEvents, keyof CounterEvents>[] = [];
+        await store.query<CounterEvents>(
+          (e) => {
+            b.push(e);
+          },
+          { stream: sB, stream_exact: true }
+        );
+        expect(b[0].pii).toEqual({ email: "bob@example.com" });
+      });
+
+      it("forget_pii on a stream with no pii events returns 0", async () => {
+        const s = `pii-forget-empty-${uid()}`;
+        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        const wiped = await store.forget_pii!.call(store, s);
+        expect(wiped).toBe(0);
       });
     });
 
