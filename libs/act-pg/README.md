@@ -138,6 +138,12 @@ Created by `seed()`:
 - **Events** (`{schema}.{table}`): `id` (serial PK), `name`, `data` (jsonb), `stream`, `version`, `created` (timestamptz), `meta` (jsonb). Unique index on `(stream, version)`.
 - **Streams** (`{schema}.{table}_streams`): `stream` (PK), `source`, `at`, `retry`, `blocked`, `error`, `leased_by`, `leased_until`, `priority`. Composite index on `(blocked, priority DESC, at)` for the saturated-claim ordering.
 
+## Operational concerns
+
+The unpartitioned default schema is the right shape for almost every Act application. If you find yourself wondering whether your `events` table needs partitioning, the first answer is almost always `Act.close()` — see the [Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist) and the [auto-close epic (#802)](https://github.com/Rotorsoft/act-root/issues/802) for the policies that keep a steady-state events table without partitioning.
+
+For the narrow set of workloads where `close()` genuinely can't help (regulated append-only audit logs, single-aggregate giants, retention-window bulk archival, parallel-rebuild bottlenecks), see [PARTITIONING.md](./PARTITIONING.md). The page leads with "don't" — read it before reaching for the SQL.
+
 ## When to use this vs `act-sqlite`
 
 | You want… | Use |
@@ -175,6 +181,7 @@ Public API governed by the [Act Stability Charter](../../STABILITY.md). `Postgre
 - **[Concurrency model](https://rotorsoft.github.io/act-root/docs/architecture/concurrency-model)** — lease lifecycle, `claim`/`ack`/`block`/timeout, optimistic concurrency.
 - **[Writing a custom Store adapter](https://rotorsoft.github.io/act-root/docs/guides/writing-a-store)** — the recipe `PostgresStore` itself follows, for authors building against other databases.
 - **[PERFORMANCE.md](./PERFORMANCE.md)** — measured throughput numbers, including the `notify` latency benchmark.
+- **[PARTITIONING.md](./PARTITIONING.md)** — extreme-case escape valve when `close()` isn't enough. The page leads with reasons not to partition.
 
 ## License
 
