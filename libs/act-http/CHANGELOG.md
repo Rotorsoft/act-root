@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.1.0...@rotorsoft/act-http-v1.2.0) (2026-06-04)
+
+
+### Features
+
+* **act-http:** shared utilities for the auto-generated API ([#842](https://github.com/rotorsoft/act-root/issues/842)) ([99350e7](https://github.com/rotorsoft/act-root/commit/99350e7102b165ae92e605f376ca736872f49e21)), closes [#843](https://github.com/rotorsoft/act-root/issues/843) [#844](https://github.com/rotorsoft/act-root/issues/844) [#845](https://github.com/rotorsoft/act-root/issues/845)
+
 # [@rotorsoft/act-http-v1.1.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.0.0...@rotorsoft/act-http-v1.1.0) (2026-05-31)
 
 
