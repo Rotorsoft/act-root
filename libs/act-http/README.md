@@ -31,6 +31,7 @@ Three independent subpath exports:
 | `@rotorsoft/act-http/receiver/express` | `webhookMiddleware` — Express middleware adapter. |
 | `@rotorsoft/act-http/receiver/fastify` | `webhookMiddleware` — Fastify `preHandler` adapter. |
 | `@rotorsoft/act-http/receiver/hono` | `webhookMiddleware` — Hono middleware adapter. |
+| `@rotorsoft/act-http/api` | `ActorExtractor` type, `ApiError` + `ERROR_MAP` + `toApiError` envelope mapping, `withIdempotency` wrapper. Shared utilities for the auto-generated API surfaces (`/trpc`, `/hono`, `/openapi` subpaths, landing under issues #843/#844/#845). |
 
 ## Quick start
 
@@ -187,6 +188,17 @@ Each framework adapter exports a single function `webhookMiddleware(options)` th
 | `/receiver/express` | `req.idempotency` | `res.status(...).json({ error: reason })` |
 | `/receiver/fastify` | `request.idempotency` | `reply.status(...).send({ error: reason })` |
 | `/receiver/hono` | `c.get("idempotency")` (typed via `Variables`) | `c.json({ error: reason }, status)` |
+
+### `/api` subpath
+
+Shared utilities consumed by every transport in the auto-generated API umbrella (act-http-api epic #835). Three concerns surfaced once, not per-transport:
+
+- **`ActorExtractor`** — type alias `(request: unknown) => Actor | Promise<Actor>`. The host-supplied closure resolving an `Actor` from an incoming request. Required on every transport (`trpc(app, { actor })`, `hono(app, { actor })`). Auth (JWT, session, API key) stays in the host; the package only asks for this function.
+- **`ApiError`** — uniform envelope `{ error, detail?, code? }` shipped over the wire by every transport. Hosts get the same shape from REST, tRPC, and OpenAPI.
+- **`ERROR_MAP`** — `as const` table mapping framework error types to `{ status, code }`. `ValidationError → 422 / VALIDATION`, `InvariantError → 409 / INVARIANT`, `ConcurrencyError → 412 / CONCURRENCY`, `StreamClosedError → 410 / STREAM_CLOSED`, `NonRetryableError → 400 / NON_RETRYABLE`.
+- **`toApiError(err) → { status, body }`** — the single mapping helper every transport calls in its error boundary. Known framework errors map per `ERROR_MAP`; everything else surfaces as 500 / `INTERNAL` (with `detail` only when the throw was an `Error` — thrown strings or objects don't leak payloads).
+- **`withIdempotency(store, key, handler)`** — wraps an action handler in an `Idempotency-Key` claim. Reuses `@rotorsoft/act-ops/idempotency` — same contract `@rotorsoft/act-http/receiver` already speaks, so one `IdempotencyStore` covers both halves of the "Act over the wire" surface. Returns `{ deduped: false, result }` on fresh claim, `{ deduped: true }` on duplicate (handler is not called).
+- **Types**: `IdempotencyResult<T>`, `ErrorMapEntry`.
 
 ### `/sse` subpath
 
