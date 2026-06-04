@@ -217,8 +217,10 @@ export type Message<TEvents extends Schemas, TKey extends keyof TEvents> = {
    *
    * Adapters without `pii_isolation` ignore the field; the framework only
    * populates it when the adapter declares capability support and the
-   * state declares `.discloses(...)` / has `sensitive(...)`-marked schema
-   * fields.
+   * event's schema has `sensitive(...)`-marked fields. (Read-time
+   * visibility gating — who sees plaintext vs `[REDACTED]` — is the
+   * separate concern of `state(...).discloses(predicate)` and lives in
+   * the orchestrator's load path, not on the Store contract.)
    */
   readonly pii?: Readonly<Record<string, unknown>> | null;
 };
