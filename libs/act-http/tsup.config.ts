@@ -9,6 +9,7 @@ export default defineConfig({
     "src/receiver/express/index.ts",
     "src/receiver/fastify/index.ts",
     "src/receiver/hono/index.ts",
+    "src/api/index.ts",
   ],
   format: ["esm", "cjs"],
   dts: false,

@@ -60,6 +60,11 @@
       "types": "./dist/@types/receiver/hono/index.d.ts",
       "import": "./dist/receiver/hono/index.js",
       "require": "./dist/receiver/hono/index.cjs"
+    },
+    "./api": {
+      "types": "./dist/@types/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "require": "./dist/api/index.cjs"
     }
   },
   "sideEffects": false,
