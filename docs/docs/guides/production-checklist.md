@@ -253,6 +253,8 @@ app.on("closed", ({ truncated, skipped }) => {
 
 Closed streams are tombstoned — `app.do()` against them throws `StreamClosedError`. To re-open with a fresh starting state, `close()` with `restart: true`. See [Architecture → Close cycle](../architecture/close-cycle.md) for the full safety semantics.
 
+**Don't reach for `events`-table partitioning before exhausting `close()`.** Partitioning is an extreme-case escape valve for workloads where `close()` genuinely can't keep the table in steady state (regulated append-only audit logs, single-aggregate giants, retention-window bulk archival). It fights against event sourcing's global-`id` ordering on the cross-stream read path — every drain query and every `app.reset()` pays MergeAppend across partitions. For the dominant Act workload it costs more than it saves. If you've ruled close out and still believe you need to partition, see `libs/act-pg/PARTITIONING.md` — the page leads with reasons not to.
+
 ## 11. Sizing lanes
 
 If reactions in this app have heterogeneous timing profiles — webhook delivery measured in seconds alongside metric emission measured in microseconds — split them across lanes (ACT-1103). Without lanes, every reaction shares one `leaseMillis` and one `streamLimit`, and the slowest handler dictates the budget for everyone.
