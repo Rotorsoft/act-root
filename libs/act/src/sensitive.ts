@@ -32,7 +32,7 @@ import { z } from "zod";
  * `.default()`) that chain off a marked schema produce *new* schema instances
  * the registry doesn't track; the field walker handles those via unwrap.
  */
-const sensitiveRegistry = z.registry<{ sensitive: true }>();
+const _registry = z.registry<{ sensitive: true }>();
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the
@@ -46,7 +46,7 @@ const sensitiveRegistry = z.registry<{ sensitive: true }>();
  * @returns The same schema instance, unmodified at the type level.
  */
 export function sensitive<T extends z.ZodType>(schema: T): T {
-  sensitiveRegistry.add(schema, { sensitive: true });
+  _registry.add(schema, { sensitive: true });
   return schema;
 }
 
@@ -61,10 +61,10 @@ export function sensitive<T extends z.ZodType>(schema: T): T {
  *
  * @internal
  */
-function isSensitiveSchema(schema: z.ZodType): boolean {
+function is_pii(schema: z.ZodType): boolean {
   let cur: z.ZodType = schema;
   while (true) {
-    if (sensitiveRegistry.has(cur)) return true;
+    if (_registry.has(cur)) return true;
     const inner = (cur as { _def?: { innerType?: z.ZodType } })._def?.innerType;
     if (!inner || inner === cur) return false;
     cur = inner;
@@ -85,12 +85,12 @@ function isSensitiveSchema(schema: z.ZodType): boolean {
  *
  * @internal — consumed by the registry's `sensitive_fields(eventName)` lookup.
  */
-export function getSensitiveFields(schema: z.ZodType): readonly string[] {
+export function pii_fields(schema: z.ZodType): readonly string[] {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
   if (!shape || typeof shape !== "object") return [];
   const fields: string[] = [];
   for (const key of Object.keys(shape)) {
-    if (isSensitiveSchema(shape[key])) fields.push(key);
+    if (is_pii(shape[key])) fields.push(key);
   }
   return fields;
 }

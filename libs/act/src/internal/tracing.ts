@@ -169,12 +169,12 @@ const traced = <F extends AsyncFn>(
 export function buildEs(
   logger: Logger,
   correlator: Correlator = defaultCorrelator,
-  sensitiveFields: (eventName: string) => readonly string[] = () => []
+  pii_fields: (eventName: string) => readonly string[] = () => []
 ): EsOps {
-  // `es.action` takes `correlator` and `sensitiveFields` as its last two
-  // positional args; the orchestrator never wants to plumb them through every
-  // call site, so we bind them once here and present an `EsOps.action` with
-  // the original 6-arg signature.
+  // `es.action` takes `correlator` and `pii_fields` as its last two positional
+  // args; the orchestrator never wants to plumb them through every call site,
+  // so we bind them once here and present an `EsOps.action` with the original
+  // 6-arg signature.
   const boundAction: EsOps["action"] = (
     me,
     actionName,
@@ -191,7 +191,7 @@ export function buildEs(
       reactingTo,
       skipValidation,
       correlator,
-      sensitiveFields
+      pii_fields
     );
   if (logger.level !== "trace") {
     return {

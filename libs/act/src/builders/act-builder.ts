@@ -14,7 +14,7 @@ import {
   registerState,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
-import { getSensitiveFields } from "../sensitive.js";
+import { pii_fields } from "../sensitive.js";
 import type {
   Actor,
   BatchHandler,
@@ -349,19 +349,14 @@ export function act<
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate.
-  // Populated by finalize_sensitive_lookups() on the first .build() call.
-  const sensitive_fields_cache = new Map<string, readonly string[]>();
-  const disclosure_predicate_cache = new Map<
-    string,
-    (event: any, actor: Actor) => boolean
-  >();
+  // Populated on the first .build() call.
+  const _sf = new Map<string, readonly string[]>();
+  const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (eventName) =>
-      sensitive_fields_cache.get(eventName) ?? [],
-    disclosure_predicate: (stateName) =>
-      disclosure_predicate_cache.get(stateName) ?? null,
+    sensitive_fields: (eventName) => _sf.get(eventName) ?? [],
+    disclosure_predicate: (stateName) => _dp.get(stateName) ?? null,
   };
   const pendingProjections: Projection<any>[] = [];
   const batchHandlers = new Map<string, BatchHandler<any>>();
@@ -545,14 +540,12 @@ export function act<
           for (const [eventName, reg] of Object.entries(
             registry.events as Record<string, { schema: import("zod").ZodType }>
           )) {
-            const fields = getSensitiveFields(reg.schema);
-            if (fields.length > 0)
-              sensitive_fields_cache.set(eventName, fields);
+            const fields = pii_fields(reg.schema);
+            if (fields.length > 0) _sf.set(eventName, fields);
           }
           // Snapshot the per-state disclosure predicates.
           for (const state of states.values()) {
-            if (state.disclose)
-              disclosure_predicate_cache.set(state.name, state.disclose);
+            if (state.disclose) _dp.set(state.name, state.disclose);
           }
           _built = true;
         }

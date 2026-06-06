@@ -498,7 +498,7 @@ export async function action<
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false,
   correlator: Correlator = defaultCorrelator,
-  sensitiveFields: (eventName: string) => readonly string[] = () => []
+  pii_fields: (eventName: string) => readonly string[] = () => []
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -575,22 +575,22 @@ export async function action<
         // declarative-only, the orchestrator is responsible for the split.
         // Zero-cost short-circuit when the event has no sensitive fields,
         // which is the common case.
-        const fields = sensitiveFields(name as string);
+        const fields = pii_fields(name as string);
         if (fields.length === 0) return { name, data: validated };
         // Single forward pass over the validated keys, building both
         // partitions in one go. Avoids the spread-and-delete dance — `delete`
-        // would force V8 to transition `cleanData` from hidden-class to
-        // dictionary mode, slowing every downstream read of `event.data`.
-        // For typical sensitive-field counts (1–3 per event) the `includes`
-        // probe is faster than allocating a Set per commit.
-        const validatedRec = validated as Record<string, unknown>;
-        const cleanData: Record<string, unknown> = {};
+        // would force V8 to transition `clean` from hidden-class to dictionary
+        // mode, slowing every downstream read of `event.data`. For typical
+        // sensitive-field counts (1–3 per event) the `includes` probe is
+        // faster than allocating a Set per commit.
+        const rec = validated as Record<string, unknown>;
+        const clean: Record<string, unknown> = {};
         const pii: Record<string, unknown> = {};
-        for (const k of Object.keys(validatedRec)) {
-          if (fields.includes(k)) pii[k] = validatedRec[k];
-          else cleanData[k] = validatedRec[k];
+        for (const k of Object.keys(rec)) {
+          if (fields.includes(k)) pii[k] = rec[k];
+          else clean[k] = rec[k];
         }
-        return { name, data: cleanData as typeof validated, pii };
+        return { name, data: clean as typeof validated, pii };
       });
 
       const meta: EventMeta = {
