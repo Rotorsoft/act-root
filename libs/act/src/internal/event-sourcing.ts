@@ -41,7 +41,6 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { computeBackoffDelay } from "./backoff.js";
 import { defaultCorrelator } from "./correlator.js";
-import { gate_external, merge_for_reducer } from "./sensitive.js";
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -381,8 +380,7 @@ export async function load<
   stream: string,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
   asOf?: AsOf,
-  actor?: Actor,
-  pii_lookup: (eventName: string) => readonly string[] = () => []
+  actor?: Actor
 ): Promise<Snapshot<TState, TEvents>> {
   const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
@@ -402,22 +400,16 @@ export async function load<
   await store().query(
     (e) => {
       version = e.version;
-      // Split per-event handling into two views:
-      //   - reducer view: pii merged into data (or [SHREDDED] post-forget) so
-      //     the reducer always sees plaintext; the source of truth for state.
-      //   - external view: gated by `.discloses` + actor; what we return to
-      //     callers and place in snapshot.event.
-      const fields = pii_lookup(e.name as string);
-      const reducer_view = merge_for_reducer(
-        e as Committed<TEvents, string>,
-        fields
-      );
-      const external_view = gate_external(
-        e as Committed<TEvents, string>,
-        fields,
-        me.disclose ?? null,
-        actor
-      );
+      // Split per-event handling into two views via the State's PII
+      // decorators (attached at build time on states with sensitive events):
+      //   - reducer view: pii merged into data (or [SHREDDED] post-forget)
+      //     so the reducer always sees plaintext.
+      //   - external view: gated by `.discloses` + actor; what callers see.
+      // PII-free states have no decorators attached; the optional-chain
+      // short-circuits to `e` for both, zero PII machinery per event.
+      const typed = e as Committed<TEvents, string>;
+      const reducer_view = me._merge_for_reducer?.(typed) ?? typed;
+      const external_view = me._gate_external?.(typed, actor) ?? typed;
       event = external_view;
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
@@ -517,8 +509,7 @@ export async function action<
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false,
-  correlator: Correlator = defaultCorrelator,
-  pii_fields: (eventName: string) => readonly string[] = () => []
+  correlator: Correlator = defaultCorrelator
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -532,17 +523,17 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      // Pass the action target's actor and the same pii_fields lookup down
-      // — action()'s reducer needs plaintext (handled inside load), and the
-      // snapshot.event returned to the caller is gated by `.discloses` with
-      // the action's actor.
+      // Pass the action target's actor down so load() can gate snapshot.event
+      // via the State's `_gate_external` decorator. The reducer's plaintext
+      // view is also handled inside load(), via the same State's
+      // `_merge_for_reducer` decorator. States without sensitive events have
+      // no decorators attached → load() short-circuits at zero cost.
       const snapshot = await load(
         me,
         stream,
         undefined,
         undefined,
-        target.actor,
-        pii_fields
+        target.actor
       );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
@@ -601,27 +592,14 @@ export async function action<
         const validated = skipValidation
           ? data
           : validate(name as string, data, me.events[name]);
-        // Split sensitive fields off `data` and into `pii` before the event
-        // reaches the Store — the Store's pii_isolation contract is
-        // declarative-only, the orchestrator is responsible for the split.
-        // Zero-cost short-circuit when the event has no sensitive fields,
-        // which is the common case.
-        const fields = pii_fields(name as string);
-        if (fields.length === 0) return { name, data: validated };
-        // Single forward pass over the validated keys, building both
-        // partitions in one go. Avoids the spread-and-delete dance — `delete`
-        // would force V8 to transition `clean` from hidden-class to dictionary
-        // mode, slowing every downstream read of `event.data`. For typical
-        // sensitive-field counts (1–3 per event) the `includes` probe is
-        // faster than allocating a Set per commit.
-        const rec = validated as Record<string, unknown>;
-        const clean: Record<string, unknown> = {};
-        const pii: Record<string, unknown> = {};
-        for (const k of Object.keys(rec)) {
-          if (fields.includes(k)) pii[k] = rec[k];
-          else clean[k] = rec[k];
-        }
-        return { name, data: clean as typeof validated, pii };
+        const base = { name, data: validated };
+        // Delegate the sensitive split to the State's `_split_emitted`
+        // decorator — attached by `act().build()` only on states with at
+        // least one sensitive event. PII-free states have no decorator;
+        // the optional-chain short-circuits and we hand `base` straight
+        // through. The Store's pii_isolation contract sees `pii` already
+        // peeled off `data` when the split fired.
+        return me._split_emitted?.(base) ?? base;
       });
 
       const meta: EventMeta = {
@@ -672,19 +650,13 @@ export async function action<
 
       let { state, patches } = snapshot;
       const snapshots = committed.map((event) => {
-        // Reducers run against the plaintext-merged view (so derived state is
-        // correct even for sensitive events); the snapshot.event returned to
-        // the .do() caller is the gated view (so external visibility tracks
-        // the action target's actor).
-        const fields = pii_fields(event.name as string);
-        const ev = event as Committed<TEvents, keyof TEvents & string>;
-        const reducer_view = merge_for_reducer(ev, fields);
-        const external_view = gate_external(
-          ev,
-          fields,
-          me.disclose ?? null,
-          target.actor
-        );
+        // Reducers run against the plaintext-merged view; the snapshot.event
+        // returned to the .do() caller is the gated view. Both decorators
+        // are attached by `act().build()` only on PII-aware states; PII-free
+        // states short-circuit at the optional-chain and hand the event
+        // straight through.
+        const reducer_view = me._merge_for_reducer?.(event) ?? event;
+        const external_view = me._gate_external?.(event, target.actor) ?? event;
         const p = me.patch[event.name](reducer_view, state);
         state = patch(state, p);
         patches++;

@@ -32,7 +32,6 @@ import {
 } from "../types/index.js";
 import { computeBackoffDelay } from "./backoff.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
-import { strip_for_handler } from "./sensitive.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger
@@ -52,12 +51,6 @@ export type ReactionDeps<
   readonly bound_query: IAct<TEvents, TActions, TActor>["query"];
   readonly bound_query_array: IAct<TEvents, TActions, TActor>["query_array"];
   readonly bound_forget: IAct<TEvents, TActions, TActor>["forget"];
-  /**
-   * Registry-backed lookup of sensitive field names per event. Reaction and
-   * batch handlers receive the event with these keys stripped from
-   * `data` and the `pii` field dropped (#855 slice 5).
-   */
-  readonly pii_fields: (eventName: string) => readonly string[];
 };
 
 /**
@@ -131,7 +124,6 @@ export function buildHandle<
     bound_query,
     bound_query_array,
     bound_forget,
-    pii_fields,
   } = deps;
   return async (lease, payloads) => {
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
@@ -153,14 +145,11 @@ export function buildHandle<
 
     for (const payload of payloads) {
       const { event, handler } = payload;
-      // Strip sensitive fields before the handler ever sees the event —
-      // reactions that genuinely need PII opt back in via `app.load(stream,
-      // { actor: systemActor })` inside the handler, making the
-      // security-relevant path explicit at the call site.
-      const handler_event = strip_for_handler(
-        event as Committed<TEvents, keyof TEvents & string>,
-        pii_fields(event.name as string)
-      );
+      // PII strip is wrapped into the handler itself at build time (#855):
+      // reactions registered against an event with `sensitive(...)` fields
+      // get a stripping handler closure during `act().build()`; reactions
+      // against non-PII events keep their original handler reference.
+      // The dispatcher is PII-unaware — zero per-event branching here.
       scopedApp.do = <TKey extends keyof TActions & string>(
         action: TKey,
         target: Target<TActor>,
@@ -176,7 +165,7 @@ export function buildHandle<
           skipValidation
         );
       try {
-        await handler(handler_event, stream, scopedApp);
+        await handler(event, stream, scopedApp);
         at = event.id;
         handled++;
       } catch (error) {
@@ -203,8 +192,7 @@ export function buildHandle<
  * @internal
  */
 export function buildHandleBatch<TEvents extends Schemas>(
-  logger: Logger,
-  pii_fields: (eventName: string) => readonly string[]
+  logger: Logger
 ): HandleBatch<TEvents> {
   return async (
     lease: Lease,
@@ -212,13 +200,10 @@ export function buildHandleBatch<TEvents extends Schemas>(
     batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
-    // Same handler-stripping rule applies to batch handlers as to per-event
-    // reactions: projections see events without sensitive keys.
-    const events = payloads.map((p) =>
-      strip_for_handler(
-        p.event as Committed<TEvents, keyof TEvents & string>,
-        pii_fields(p.event.name as string)
-      )
+    // PII strip happens inside `batchHandler` when needed — wrapped at build
+    // time per `act-builder.ts`. The dispatcher hands raw events through.
+    const events = payloads.map(
+      (p) => p.event as Committed<TEvents, keyof TEvents & string>
     );
     const options = payloads[0].options;
 

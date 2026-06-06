@@ -542,6 +542,28 @@ export type State<
   // builder keeps the narrow signature so users still get type-checked predicates.
   // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
   disclose?: (event: any, actor: Actor) => boolean;
+  /**
+   * Build-time decorators for the sensitive-data foundation (#855). Attached
+   * by `act().build()` on states whose events declare `sensitive(...)`
+   * fields; absent on states without PII. The orchestrator's hot paths use
+   * `me._x?.(arg) ?? arg` — for PII-free states the optional-chain
+   * short-circuits and zero PII machinery is touched per event.
+   *
+   * Internal, decided at build time, never set by user code. Underscore
+   * prefix follows the project's private-field convention.
+   *
+   * @internal
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: internal decorator, event payload varies per state
+  _split_emitted?: (e: { name: any; data: any }) => {
+    name: any;
+    data: any;
+    pii?: Record<string, unknown>;
+  };
+  // biome-ignore lint/suspicious/noExplicitAny: same
+  _merge_for_reducer?: (event: any) => any;
+  // biome-ignore lint/suspicious/noExplicitAny: same
+  _gate_external?: (event: any, actor: Actor | undefined) => any;
 };
 
 /**

@@ -49,6 +49,7 @@ export {
   pii_fields,
   REDACTED,
   SHREDDED,
+  split_payload,
   strip_for_handler,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";

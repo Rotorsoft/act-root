@@ -168,13 +168,12 @@ const traced = <F extends AsyncFn>(
  */
 export function buildEs(
   logger: Logger,
-  correlator: Correlator = defaultCorrelator,
-  pii_fields: (eventName: string) => readonly string[] = () => []
+  correlator: Correlator = defaultCorrelator
 ): EsOps {
-  // `es.action` takes `correlator` and `pii_fields` as its last two positional
-  // args; the orchestrator never wants to plumb them through every call site,
-  // so we bind them once here and present an `EsOps.action` with the original
-  // 6-arg signature.
+  // `es.action` takes `correlator` as its last positional arg; bind it once
+  // here so the orchestrator's `EsOps.action` keeps the original 6-arg
+  // signature. The PII split (#855) moved off the action signature onto the
+  // State's `_split_emitted` decorator — buildEs no longer threads it.
   const bound_action: EsOps["action"] = (
     me,
     actionName,
@@ -190,18 +189,12 @@ export function buildEs(
       payload,
       reactingTo,
       skipValidation,
-      correlator,
-      pii_fields
+      correlator
     );
-  // load takes `pii_lookup` as its last positional arg — same binding pattern
-  // as action's `pii_fields`. EsOps.load presents the original 5-arg signature
-  // (`actor` stays positional so callers can pass it through).
-  const bound_load: EsOps["load"] = (me, stream, cb, asOf, actor) =>
-    es.load(me, stream, cb, asOf, actor, pii_fields);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: bound_load,
+      load: es.load,
       action: bound_action,
       tombstone: es.tombstone,
     };
@@ -216,7 +209,7 @@ export function buildEs(
         )
       );
     }),
-    load: traced(bound_load, (result, _me, stream, _cb, asOf) => {
+    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
       const stats = stats_marker(
         result.version,
         result.replayed,

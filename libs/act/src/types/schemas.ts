@@ -1,5 +1,9 @@
 import { type ZodObject, type ZodRawShape, z } from "zod";
-import { _registry } from "../internal/index.js";
+// Deep-path import (vs `../internal/index.js`) is deliberate — `_registry` is
+// a side-effect-free leaf, and going through the internal barrel would pull
+// tracing.ts → config.ts in at type-schema load time and crash on TDZ when a
+// test imports a public schema before config is initialized.
+import { _registry } from "../internal/sensitive.js";
 
 /**
  * @packageDocumentation
@@ -21,7 +25,7 @@ export const ZodEmpty = z.record(z.string(), z.never());
  *
  * Part of the sensitive-data foundation (#855 / epic #566).
  */
-export { REDACTED, SHREDDED } from "../internal/index.js";
+export { REDACTED, SHREDDED } from "../internal/sensitive.js";
 
 /**
  * Mark a Zod schema as sensitive. Returns the same schema instance — the

@@ -104,6 +104,32 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
 }
 
 /**
+ * Split an emitted event's `data` into `data` (non-sensitive) + `pii`
+ * (sensitive) using the field list precomputed at build time. Used by the
+ * State's `_split_emitted` decorator just before `Store.commit`.
+ *
+ * Single forward pass over `Object.keys(validated)` — same shape as the
+ * spread-and-delete-free implementation in slice 3, just hoisted out of the
+ * orchestrator hot path so it's only invoked when the State actually has a
+ * sensitive event.
+ *
+ * @internal
+ */
+export function split_payload(
+  emitted: { name: unknown; data: unknown },
+  fields: readonly string[]
+): { name: unknown; data: unknown; pii: Record<string, unknown> } {
+  const rec = emitted.data as Record<string, unknown>;
+  const clean: Record<string, unknown> = {};
+  const pii: Record<string, unknown> = {};
+  for (const k of Object.keys(rec)) {
+    if (fields.includes(k)) pii[k] = rec[k];
+    else clean[k] = rec[k];
+  }
+  return { name: emitted.name, data: clean, pii };
+}
+
+/**
  * Build the **reducer view** of a committed event — sensitive fields merged
  * back into `data` so per-state reducers always see plaintext.
  *
@@ -126,7 +152,9 @@ export function merge_for_reducer<
   event: Committed<TEvents, TKey>,
   fields: readonly string[]
 ): Committed<TEvents, TKey> {
-  if (fields.length === 0) return event;
+  // Contract: `fields` is non-empty. Callers (the State's `_merge_for_reducer`
+  // decorator) filter on `fields_by_event.get(name)` before invocation, so the
+  // empty-fields short-circuit lives at the caller, not here.
   const data = event.data as Record<string, unknown>;
   const pii = event.pii;
   if (pii != null) {
@@ -170,7 +198,8 @@ export function gate_external<
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  if (fields.length === 0) return event;
+  // Contract: `fields` is non-empty. The State's `_gate_external` decorator
+  // filters on `fields_by_event.get(name)` before invocation.
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
     const shredded: Record<string, unknown> = { ...data };
@@ -225,7 +254,8 @@ export function strip_for_handler<
   event: Committed<TEvents, TKey>,
   fields: readonly string[]
 ): Committed<TEvents, TKey> {
-  if (fields.length === 0) return event;
+  // Contract: `fields` is non-empty. `buildHandle` / `buildHandleBatch`
+  // filter on `fields.length > 0` before invocation.
   const data = event.data as Record<string, unknown>;
   const stripped: Record<string, unknown> = {};
   for (const k of Object.keys(data)) {

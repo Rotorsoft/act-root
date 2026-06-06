@@ -52,14 +52,15 @@ describe("tracing", () => {
   });
 
   describe("buildEs", () => {
-    it("returns bare ops for non-trace levels (action+load still wrapped to bind correlator/pii_fields)", () => {
+    it("returns bare ops for non-trace levels (action still wrapped to bind correlator)", () => {
       const ops = buildEs(withLevel("info"));
       expect(ops.snap).toBe(es.snap);
-      // ACT-404 + #855: action carries a bound correlator AND pii_fields;
-      // load carries a bound pii_fields. Both are closures regardless of
-      // trace level — the bare-vs-traced split now only governs snap +
-      // tombstone.
-      expect(ops.load).not.toBe(es.load);
+      // ACT-404: action always carries a bound correlator, so it's a
+      // closure regardless of trace level. After the #855 decorator
+      // refactor moved the PII machinery off the action/load signatures
+      // onto per-state closures, load no longer needs a buildEs binding
+      // and is bare at non-trace levels.
+      expect(ops.load).toBe(es.load);
       expect(ops.action).not.toBe(es.action);
     });
 

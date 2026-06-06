@@ -9,10 +9,14 @@ import {
   _this_,
   currentVersionOf,
   deprecatedEventNames,
+  gate_external,
+  merge_for_reducer,
   mergeEventRegister,
   mergeProjection,
   pii_fields,
   registerState,
+  split_payload,
+  strip_for_handler,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -565,6 +569,77 @@ export function act<
                   "Remove .snap() or remove sensitive(...) markers."
               );
             }
+          }
+          // Wrap reaction handlers whose triggering event has sensitive
+          // fields (#855). Done once at build time per registered reaction —
+          // `buildHandle` itself stays PII-unaware. Reactions for non-PII
+          // events keep their original handler reference unchanged.
+          for (const [eventName, reg] of Object.entries(
+            registry.events as Record<
+              string,
+              { reactions: Map<string, { handler: any }> }
+            >
+          )) {
+            const fields = _sf.get(eventName);
+            if (!fields) continue;
+            for (const [name, reaction] of reg.reactions) {
+              const inner = reaction.handler;
+              const wrapped = (event: any, stream: string, app: any) =>
+                inner(strip_for_handler(event, fields), stream, app);
+              // Preserve handler.name — buildHandle asserts on named functions.
+              Object.defineProperty(wrapped, "name", { value: inner.name });
+              reaction.handler = wrapped;
+              reg.reactions.set(name, reaction as never);
+            }
+          }
+          // Same idea for batch projections — wrap once at build time so the
+          // batch dispatcher stays PII-unaware. Sensitive events get stripped
+          // per event inside the wrap (the batch may mix sensitive and
+          // non-sensitive event types). When `_sf` is empty the inner Map.get
+          // returns undefined for every event and the wrap is identity — but
+          // we only enter the loop when there are batch handlers, and the
+          // wrap itself is a one-time build cost, so leaving the wrap on
+          // unconditionally avoids a redundant outer guard.
+          for (const [target, original] of batchHandlers) {
+            const wrapped = async (events: any[], stream: string) => {
+              const stripped = events.map((e) => {
+                const f = _sf.get(e.name as string);
+                return f ? strip_for_handler(e, f) : e;
+              });
+              return original(stripped as never, stream);
+            };
+            batchHandlers.set(target, wrapped as never);
+          }
+          // Attach the per-state PII decorators (#855). States with at least
+          // one sensitive event get three closures bound over the per-event
+          // field list + the disclosure predicate; states without sensitive
+          // events get nothing attached so the orchestrator's hot path
+          // short-circuits at `me._x?.(arg) ?? arg` with zero work.
+          for (const state of states.values()) {
+            const fields_by_event = new Map<string, readonly string[]>();
+            for (const eventName of Object.keys(state.events)) {
+              const fields = _sf.get(eventName);
+              if (fields) fields_by_event.set(eventName, fields);
+            }
+            if (fields_by_event.size === 0) continue;
+            const disclose = state.disclose ?? null;
+            state._split_emitted = (e) => {
+              const fields = fields_by_event.get(e.name as string);
+              if (!fields) return e;
+              return split_payload(e, fields) as typeof e & {
+                pii: Record<string, unknown>;
+              };
+            };
+            state._merge_for_reducer = (event) => {
+              const fields = fields_by_event.get(event.name as string);
+              if (!fields) return event;
+              return merge_for_reducer(event, fields);
+            };
+            state._gate_external = (event, actor) => {
+              const fields = fields_by_event.get(event.name as string);
+              if (!fields) return event;
+              return gate_external(event, fields, disclose, actor);
+            };
           }
           _built = true;
         }

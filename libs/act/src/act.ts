@@ -385,12 +385,12 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? defaultCorrelator;
-    this._es = buildEs(
-      this._logger,
-      this._correlator,
-      this.registry.sensitive_fields
-    );
+    this._es = buildEs(this._logger, this._correlator);
     this._cd = buildDrain<TEvents>(this._logger);
+    // Reaction-level PII wrapping happens at build time inside `act-builder`:
+    // reactions registered against an event with `sensitive(...)` fields get
+    // a stripping handler closure; reactions against non-PII events keep
+    // their original handler reference. So the dispatcher is PII-unaware.
     this._handle = buildHandle<TEvents, TActions, TActor>({
       logger: this._logger,
       bound_do: this._bound_do,
@@ -398,12 +398,8 @@ export class Act<
       bound_query: this._bound_query,
       bound_query_array: this._bound_query_array,
       bound_forget: this._bound_forget,
-      pii_fields: this.registry.sensitive_fields,
     });
-    this._handle_batch = buildHandleBatch<TEvents>(
-      this._logger,
-      this.registry.sensitive_fields
-    );
+    this._handle_batch = buildHandleBatch<TEvents>(this._logger);
 
     const {
       staticTargets,

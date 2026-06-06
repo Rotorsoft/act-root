@@ -132,3 +132,61 @@ describe("registry.disclosure_predicate", () => {
     expect(app.registry.disclosure_predicate("NeverDeclared")).toBeNull();
   });
 });
+
+// State with mixed sensitive + non-sensitive events. Exercises the
+// State decorators' "this event isn't in the per-state PII map" branch —
+// the inner fallback `if (!fields) return event;` that fires per event
+// when a sensitive state emits a non-sensitive event type alongside its
+// sensitive ones.
+describe("state with mixed sensitive + non-sensitive events", () => {
+  const Mixed = state({ Mixed: userSchema })
+    .init(() => ({}))
+    // UserRegistered carries PII; UserClicked carries an analytics number
+    // with no sensitive fields. Both are emitted by the same state.
+    .emits({
+      UserRegistered: userRegisteredSchema,
+      UserClicked: z.object({ ts: z.number() }),
+    })
+    .patch({
+      UserRegistered: ({ data }) => ({ email: data.email }),
+      UserClicked: () => ({}),
+    })
+    .on({ register: userRegisteredSchema })
+    .emit((p) => ["UserRegistered", p])
+    .on({ click: z.object({ ts: z.number() }) })
+    .emit((p) => ["UserClicked", p])
+    .discloses(() => true)
+    .build();
+
+  it("registry.sensitive_fields lists the PII event but not the analytics event", () => {
+    const app = act().withState(Mixed).build();
+    expect([...app.registry.sensitive_fields("UserRegistered")]).toEqual([
+      "email",
+      "name",
+    ]);
+    expect(app.registry.sensitive_fields("UserClicked")).toEqual([]);
+  });
+
+  it("commit splits PII for UserRegistered but passes UserClicked through", async () => {
+    const app = act().withState(Mixed).build();
+    const actor = { id: "x", name: "x" };
+    const [reg] = await app.do(
+      "register",
+      { stream: "mix-1", actor },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    expect(reg.event?.pii).toEqual({
+      email: "u@example.com",
+      name: "Ursula",
+    });
+    const [click] = await app.do(
+      "click",
+      { stream: "mix-1", actor },
+      { ts: 42 }
+    );
+    expect(click.event?.data).toEqual({ ts: 42 });
+    // No pii payload on the non-sensitive event — the State's
+    // `_split_emitted` decorator returned the input unchanged.
+    expect(click.event?.pii).toBeUndefined();
+  });
+});
