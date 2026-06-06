@@ -296,11 +296,12 @@ export class InMemoryStore implements Store {
   private _maxEventIdByStream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
   private _maxNonSnapEventId = -1;
-  // event_id → cloned sensitive payload. Separate from `_events` so `forget_pii`
-  // can wipe PII without touching the event log — mirrors the `events.pii`
-  // column on durable adapters. Entries exist only for events committed with a
-  // non-null `pii` field; absence means "no PII" (returned as `null` on load).
-  private _pii: Map<number, Record<string, unknown>> = new Map();
+  // stream → (event_id → cloned sensitive payload). Two-level so `forget_pii`
+  // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
+  // the `DELETE WHERE stream = ?` scope that durable adapters get from their
+  // stream index. Entries exist only for events committed with a non-null
+  // `pii` field; absence means "no PII" (returned as `null` on load).
+  private _pii: Map<string, Map<number, Record<string, unknown>>> = new Map();
 
   private _resetIndexes() {
     this._events.length = 0;
@@ -315,7 +316,7 @@ export class InMemoryStore implements Store {
   private _withPii<E extends Schemas>(
     e: Committed<E, keyof E>
   ): Committed<E, keyof E> {
-    const pii = this._pii.get(e.id);
+    const pii = this._pii.get(e.stream)?.get(e.id);
     return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
 
@@ -446,11 +447,16 @@ export class InMemoryStore implements Store {
         meta,
       };
       // The stored event is the pii-less view — `forget_pii` only has to
-      // clear the `_pii` entry, never the event row. Mandatory clone on the
-      // pii payload defends against caller-side mutation.
+      // drop the inner Map for the stream, never the event row. Mandatory
+      // clone on the pii payload defends against caller-side mutation.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
       if (pii != null) {
-        this._pii.set(c.id, structuredClone(pii) as Record<string, unknown>);
+        let perStream = this._pii.get(stream);
+        if (!perStream) {
+          perStream = new Map();
+          this._pii.set(stream, perStream);
+        }
+        perStream.set(c.id, structuredClone(pii) as Record<string, unknown>);
       }
       if (name !== SNAP_EVENT) lastNonSnapId = c.id;
       version++;
@@ -696,21 +702,17 @@ export class InMemoryStore implements Store {
    */
   /**
    * Wipe the sensitive-data payload for every event on the stream — see
-   * {@link Store.forget_pii}. The InMemoryStore implementation walks events
-   * once filtering on `stream`, deletes any matching entry in `_pii`, and
-   * returns the count of entries actually removed. Idempotent: a second call
-   * on an already-wiped stream returns `0`.
+   * {@link Store.forget_pii}. O(1) drop of the stream's inner Map; the size of
+   * that Map is the count of events that had PII. Idempotent: a second call
+   * finds no inner Map and returns `0`.
    *
    * @param stream - Target stream.
    * @returns Count of events whose isolated PII payload was deleted.
    */
   async forget_pii(stream: string): Promise<number> {
     await sleep();
-    let count = 0;
-    for (const e of this._events) {
-      if (e.stream !== stream) continue;
-      if (this._pii.delete(e.id)) count++;
-    }
+    const count = this._pii.get(stream)?.size ?? 0;
+    this._pii.delete(stream);
     return count;
   }
 
