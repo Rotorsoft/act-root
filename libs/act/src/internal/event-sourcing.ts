@@ -363,9 +363,19 @@ export async function scan(
  * @template TState The type of state
  * @template TEvents The type of events
  * @template TActions The type of actions
- * @param me The state machine definition
+ * @param me The state machine definition. May carry the optional PII
+ *   decorators (`_merge_for_reducer`, `_gate_external`) attached at build
+ *   time on states with at least one `sensitive(...)` event; states without
+ *   them take the bare replay path with no PII machinery.
  * @param stream The stream (instance) to load
  * @param callback (Optional) Callback to receive the loaded snapshot as it is built
+ * @param asOf (Optional) Time-travel cursor; bypasses the cache.
+ * @param actor (Optional) When supplied AND the state has sensitive events,
+ *   gates the **external** view of each event via `.discloses(predicate)` —
+ *   authorized callers see plaintext, unauthorized see `"[REDACTED]"`. The
+ *   reducer view is always plaintext-merged regardless of actor so derived
+ *   state stays correct. When the state has no sensitive events, the
+ *   parameter is ignored.
  * @returns The snapshot of the loaded state
  *
  * @example
@@ -397,27 +407,33 @@ export async function load<
   let replayed = 0;
   let event: Committed<TEvents, string> | undefined;
 
+  // Bind the PII transforms once at load entry. The decorator trio
+  // (`_split_emitted` / `_merge_for_reducer` / `_gate_external`) is attached
+  // together at build time on states that declared at least one
+  // `sensitive(...)` event — so a single null-check on any one of them is
+  // the per-state "has PII?" predicate. PII-aware states get real
+  // closures; PII-free states get identity arrows that V8 inlines into the
+  // call site. Either way the per-event body is the same shape — no
+  // per-event optional-chain probe, no duplicated loop body.
+  const identity = <T>(x: T) => x;
+  const pii_aware = me._merge_for_reducer;
+  const reducer_view = pii_aware ?? identity;
+  const external_view = pii_aware
+    ? (e: Committed<TEvents, string>) => me._gate_external!(e, actor)
+    : identity;
+
   await store().query(
     (e) => {
       version = e.version;
-      // Split per-event handling into two views via the State's PII
-      // decorators (attached at build time on states with sensitive events):
-      //   - reducer view: pii merged into data (or [SHREDDED] post-forget)
-      //     so the reducer always sees plaintext.
-      //   - external view: gated by `.discloses` + actor; what callers see.
-      // PII-free states have no decorators attached; the optional-chain
-      // short-circuits to `e` for both, zero PII machinery per event.
       const typed = e as Committed<TEvents, string>;
-      const reducer_view = me._merge_for_reducer?.(typed) ?? typed;
-      const external_view = me._gate_external?.(typed, actor) ?? typed;
-      event = external_view;
+      event = external_view(typed);
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
         snaps++;
         patches = 0;
         replayed++;
       } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](reducer_view, state));
+        state = patch(state, me.patch[e.name](reducer_view(typed), state));
         patches++;
         replayed++;
       } else if (e.name !== TOMBSTONE_EVENT) {
@@ -588,18 +604,15 @@ export async function action<
         }
       }
 
+      // Same bind-once-then-call pattern as load(). For PII-aware states
+      // `split` is the per-event splitter that moves sensitive fields into
+      // `pii`; for PII-free states it's identity. One loop body either way.
+      const split = me._split_emitted ?? ((e: { name: any; data: any }) => e);
       const emitted = tuples.map(([name, data]) => {
         const validated = skipValidation
           ? data
           : validate(name as string, data, me.events[name]);
-        const base = { name, data: validated };
-        // Delegate the sensitive split to the State's `_split_emitted`
-        // decorator — attached by `act().build()` only on states with at
-        // least one sensitive event. PII-free states have no decorator;
-        // the optional-chain short-circuits and we hand `base` straight
-        // through. The Store's pii_isolation contract sees `pii` already
-        // peeled off `data` when the split fired.
-        return me._split_emitted?.(base) ?? base;
+        return split({ name, data: validated });
       });
 
       const meta: EventMeta = {
@@ -649,22 +662,21 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
+      // Same bind-once-then-call pattern as load(). Single null-check on
+      // `_merge_for_reducer` is the per-state "has PII?" predicate — the
+      // decorator trio is attached together at build.
+      const post_identity = <T>(x: T) => x;
+      const post_pii_aware = me._merge_for_reducer;
+      const reducer_after = post_pii_aware ?? post_identity;
+      const external_after = post_pii_aware
+        ? (e: (typeof committed)[number]) => me._gate_external!(e, target.actor)
+        : post_identity;
       const snapshots = committed.map((event) => {
-        // Reducers run against the plaintext-merged view; the snapshot.event
-        // returned to the .do() caller is the gated view. Both decorators
-        // are attached by `act().build()` only on PII-aware states; PII-free
-        // states short-circuit at the optional-chain and hand the event
-        // straight through.
-        const reducer_view = me._merge_for_reducer?.(event) ?? event;
-        const external_view = me._gate_external?.(event, target.actor) ?? event;
-        const p = me.patch[event.name](reducer_view, state);
+        const p = me.patch[event.name](reducer_after(event), state);
         state = patch(state, p);
         patches++;
-        // cache_hit / replayed propagate from the initial load — these
-        // post-commit snapshots all derive from the same loaded state.
-        // version advances per committed event (each is a new stream head).
         return {
-          event: external_view,
+          event: external_after(event),
           state,
           version: event.version,
           patches,
