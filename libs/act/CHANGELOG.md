@@ -1,3 +1,22 @@
+# [@rotorsoft/act-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.9.0...@rotorsoft/act-v1.10.0) (2026-06-06)
+
+
+### Features
+
+* **act:** .discloses() + registry sensitive_fields/disclosure_predicate ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 2) ([90bc8eb](https://github.com/rotorsoft/act-root/commit/90bc8ebdca22e7d2c02fe8b965afac853a912648))
+* **act:** app.forget(stream) + forgotten lifecycle event ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 7) ([ba3ba5a](https://github.com/rotorsoft/act-root/commit/ba3ba5ac2bdc6291f3f69836ddc8d1563ac448c2)), closes [#868](https://github.com/rotorsoft/act-root/issues/868) [#869](https://github.com/rotorsoft/act-root/issues/869) [#882](https://github.com/rotorsoft/act-root/issues/882)
+* **act:** build-time guard against sensitive states with snapshots ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 6) ([67ee1fa](https://github.com/rotorsoft/act-root/commit/67ee1fa3c7d49c5a1adc9f0d1e61e1b5e43ef216))
+* **act:** commit-path pii split using sensitive_fields ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 3) ([0020ccc](https://github.com/rotorsoft/act-root/commit/0020ccc700410e967d52ef391392f2692de838a4)), closes [#868](https://github.com/rotorsoft/act-root/issues/868)
+* **act:** read-path pii gate + REDACTED/SHREDDED sentinels ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 4) ([b2d9eec](https://github.com/rotorsoft/act-root/commit/b2d9eecbc0399da2070599fa337b885c60e2efee))
+* **act:** sensitive() helper + field walker ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 1) ([1fe56fb](https://github.com/rotorsoft/act-root/commit/1fe56fb808b6df74a342d0cae4632a3c8e9c3d38)), closes [#566](https://github.com/rotorsoft/act-root/issues/566)
+* **act:** strip pii from projection + reaction handlers ([#855](https://github.com/rotorsoft/act-root/issues/855) slice 5) ([b8ea48f](https://github.com/rotorsoft/act-root/commit/b8ea48f650518908431a6d3f886e9c217f1995c7))
+
+
+### Performance Improvements
+
+* **act:** measure [#855](https://github.com/rotorsoft/act-root/issues/855) orchestrator overhead — within noise on non-sensitive workloads ([b7bb39b](https://github.com/rotorsoft/act-root/commit/b7bb39bfc5b2c792d2ecfe8d08b470207dba319b))
+* **act:** single-pass pii split — avoid spread + delete ([36a39ce](https://github.com/rotorsoft/act-root/commit/36a39ce8ed8e1e012deaa3c51bff1c5a92d15605))
+
 # [@rotorsoft/act-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.8.0...@rotorsoft/act-v1.9.0) (2026-06-06)
 
 
