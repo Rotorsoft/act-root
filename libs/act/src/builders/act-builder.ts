@@ -540,48 +540,46 @@ export function act<
           // Precompute the sensitive-field lookup. Iterates each registered
           // event's Zod schema exactly once at build; later commit/load paths
           // hit the cache in O(1). Events with no sensitive fields don't get
-          // an entry — registry.sensitive_fields returns the empty array.
-          for (const [eventName, reg] of Object.entries(
-            registry.events as Record<string, { schema: import("zod").ZodType }>
-          )) {
-            const fields = pii_fields(reg.schema);
-            if (fields.length > 0) _sf.set(eventName, fields);
-          }
-          // Snapshot the per-state disclosure predicates.
-          for (const state of states.values()) {
-            if (state.disclose) _dp.set(state.name, state.disclose);
-          }
-          // Reject snapshot policies on sensitive-bearing states (#855).
-          // Snapshots write derived state into `__snapshot__.data`, which
-          // `forget_pii` cannot reach. Caught at build so the misconfiguration
-          // surfaces in dev/CI, not as a silent leak past the GDPR boundary
-          // months later.
-          for (const state of states.values()) {
-            if (!state.snap) continue;
-            const offending: string[] = [];
-            for (const eventName of Object.keys(state.events)) {
-              if (_sf.has(eventName)) offending.push(eventName);
-            }
-            if (offending.length > 0) {
-              throw new Error(
-                `State "${state.name}" cannot snapshot — events {${offending.join(", ")}} carry sensitive fields. ` +
-                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
-                  "Remove .snap() or remove sensitive(...) markers."
-              );
-            }
-          }
-          // Wrap reaction handlers whose triggering event has sensitive
-          // fields (#855). Done once at build time per registered reaction —
-          // `buildHandle` itself stays PII-unaware. Reactions for non-PII
-          // events keep their original handler reference unchanged.
+          // Build the sensitive-data wiring in three passes (#855):
+          //
+          // - events pass: precompute the sensitive-field lookup `_sf` from
+          //   each event's Zod schema; while we're already walking events,
+          //   wrap their registered reaction handlers so `buildHandle`
+          //   stays PII-unaware.
+          // - states pass: snapshot the disclosure predicates into `_dp`,
+          //   reject `.snap()` on sensitive-bearing states, and build the
+          //   per-state step delegates the orchestrator calls (`me.view`,
+          //   `me.message`, wrapped `me.patch[name]`).
+          // - batchHandlers pass: wrap each batch handler so the batch
+          //   dispatcher stays PII-unaware.
+          //
+          // The orchestrator calls three step delegates per event:
+          //   - `me.message(validated)` — produces the commit-bound shape
+          //     (`{name, data, pii?}`) from a validated emit.
+          //   - `me.patch[eventName](event, state)` — the reducer that
+          //     derives the next state from the committed event.
+          //   - `me.view(event, actor)` — produces the caller-visible form
+          //     (snapshot.event).
+          //
+          // For PII-free states (the common case) `view` and `message` are
+          // bound to identity in `state-builder.ts` and `patch` is the
+          // user-declared reducer; the orchestrator's hot path is identical
+          // to the pre-#855 code at runtime. For PII-aware states (≥1
+          // `sensitive(...)` event), each delegate is rebound to fold the
+          // gate / split / merge into the step itself.
           for (const [eventName, reg] of Object.entries(
             registry.events as Record<
               string,
-              { reactions: Map<string, { handler: any }> }
+              {
+                schema: import("zod").ZodType;
+                reactions: Map<string, { handler: any }>;
+              }
             >
           )) {
-            const fields = _sf.get(eventName);
-            if (!fields) continue;
+            const fields = pii_fields(reg.schema);
+            if (fields.length === 0) continue;
+            _sf.set(eventName, fields);
+            // Strip PII from the event payload before reactions see it.
             for (const [name, reaction] of reg.reactions) {
               const inner = reaction.handler;
               const wrapped = (event: any, stream: string, app: any) =>
@@ -592,62 +590,26 @@ export function act<
               reg.reactions.set(name, reaction as never);
             }
           }
-          // Same idea for batch projections — wrap once at build time so the
-          // batch dispatcher stays PII-unaware. Sensitive events get stripped
-          // per event inside the wrap (the batch may mix sensitive and
-          // non-sensitive event types). When `_sf` is empty the inner Map.get
-          // returns undefined for every event and the wrap is identity — but
-          // we only enter the loop when there are batch handlers, and the
-          // wrap itself is a one-time build cost, so leaving the wrap on
-          // unconditionally avoids a redundant outer guard.
-          for (const [target, original] of batchHandlers) {
-            const wrapped = async (events: any[], stream: string) => {
-              const stripped = events.map((e) => {
-                const f = _sf.get(e.name as string);
-                return f ? pii_strip(e, f) : e;
-              });
-              return original(stripped as never, stream);
-            };
-            batchHandlers.set(target, wrapped as never);
-          }
-          // Build the per-state step delegates (#855).
-          //
-          // The orchestrator calls three step delegates per event:
-          //   - `me.message(validated)` — produces the commit-bound
-          //     `{name, data, pii?}` from a validated emit. Called once
-          //     per emitted event in `action()` before `Store.commit`.
-          //   - `me.patch[eventName](event, state)` — the reducer that
-          //     derives the next state from the committed event. Called
-          //     during load() replay and action()'s post-commit fold.
-          //   - `me.view(event, actor)` — produces the caller-visible
-          //     form of a committed event (snapshot.event). Called in
-          //     load() and action()'s snapshot builder.
-          //
-          // For PII-free states (the common case) `view` and `message`
-          // are bound to identity in `state-builder.ts` and `patch` is
-          // the user-declared reducer; the orchestrator's hot path is
-          // identical to the pre-#855 code at runtime.
-          //
-          // For PII-aware states (at least one `sensitive(...)` event)
-          // each delegate is rebound here to bake the PII work into the
-          // step itself: `view` gates per `.discloses`, `message` peels
-          // sensitive fields off `data` into `pii`, and each per-event
-          // `patch[eventName]` for a sensitive event is wrapped to merge
-          // PII back into `data` before the user's reducer sees it.
           for (const state of states.values()) {
+            if (state.disclose) _dp.set(state.name, state.disclose);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const eventName of Object.keys(state.events)) {
               const fields = _sf.get(eventName);
               if (fields) fields_by_event.set(eventName, fields);
             }
-            if (fields_by_event.size === 0) {
-              // Pure state — `view` and `message` are identity, `patch`
-              // is the user's reducer as-declared.
-              state.view = (event) => event;
-              state.message = (validated) => validated;
-              continue;
+            if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
+            // Snapshots write derived state into `__snapshot__.data`, which
+            // `forget_pii` cannot reach. Reject the combination at build so
+            // the misconfiguration surfaces in dev/CI, not as a silent leak
+            // past the GDPR boundary months later.
+            if (state.snap) {
+              const offending = [...fields_by_event.keys()];
+              throw new Error(
+                `State "${state.name}" cannot snapshot — events {${offending.join(", ")}} carry sensitive fields. ` +
+                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
+                  "Remove .snap() or remove sensitive(...) markers."
+              );
             }
-            // PII-aware state — bake PII work into each step delegate.
             const disclose = state.disclose ?? null;
             state.view = (event, actor) => {
               const fields = fields_by_event.get(event.name as string);
@@ -657,16 +619,24 @@ export function act<
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
             };
-            // Wrap the per-event reducer to merge PII before the user's
-            // patch sees it. Plain reducers (for non-sensitive events on
-            // this state) stay unwrapped. `state-builder` guarantees a
-            // passthrough reducer for every declared event, so the lookup
-            // is never undefined here.
+            // `state-builder` guarantees a passthrough reducer per declared
+            // event, so the lookup is never undefined here. Plain reducers
+            // (for this state's non-sensitive events) stay unwrapped.
             for (const [eventName, fields] of fields_by_event) {
               const original = state.patch[eventName];
               state.patch[eventName] = (event, s) =>
                 original(pii_merge(event, fields), s);
             }
+          }
+          for (const [target, original] of batchHandlers) {
+            const wrapped = async (events: any[], stream: string) => {
+              const stripped = events.map((e) => {
+                const f = _sf.get(e.name as string);
+                return f ? pii_strip(e, f) : e;
+              });
+              return original(stripped as never, stream);
+            };
+            batchHandlers.set(target, wrapped as never);
           }
           _built = true;
         }
