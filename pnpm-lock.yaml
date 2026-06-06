@@ -265,7 +265,7 @@ importers:
         version: link:../act-patch
     devDependencies:
       '@hono/node-server':
-        specifier: ^1
+        specifier: ^1.19.14
         version: 1.19.14(hono@4.12.23)
       '@rotorsoft/act-ops':
         specifier: workspace:^
@@ -274,16 +274,19 @@ importers:
         specifier: ^11.17.0
         version: 11.17.0(typescript@6.0.3)
       '@types/express':
-        specifier: ^5
+        specifier: ^5.0.6
         version: 5.0.6
+      express:
+        specifier: ^5.2.1
+        version: 5.2.1
       fastify:
-        specifier: ^5
+        specifier: ^5.8.5
         version: 5.8.5
       hono:
-        specifier: ^4
+        specifier: ^4.12.23
         version: 4.12.23
       zod:
-        specifier: ^4
+        specifier: ^4.4.3
         version: 4.4.3
 
   libs/act-ops: {}

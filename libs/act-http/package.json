@@ -82,13 +82,29 @@
   "peerDependencies": {
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
-    "@trpc/server": ">=11"
+    "@trpc/server": ">=11",
+    "@hono/node-server": "^1",
+    "express": "^5",
+    "fastify": "^5",
+    "hono": "^4"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
       "optional": true
     },
     "@trpc/server": {
+      "optional": true
+    },
+    "@hono/node-server": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    },
+    "hono": {
       "optional": true
     }
   },
@@ -97,11 +113,12 @@
   },
   "devDependencies": {
     "@rotorsoft/act-ops": "workspace:^",
-    "@hono/node-server": "^1",
+    "@hono/node-server": "^1.19.14",
     "@trpc/server": "^11.17.0",
-    "@types/express": "^5",
-    "fastify": "^5",
-    "hono": "^4",
-    "zod": "^4"
+    "@types/express": "^5.0.6",
+    "express": "^5.2.1",
+    "fastify": "^5.8.5",
+    "hono": "^4.12.23",
+    "zod": "^4.4.3"
   }
 }
