@@ -547,6 +547,25 @@ export function act<
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
           }
+          // Reject snapshot policies on sensitive-bearing states (#855).
+          // Snapshots write derived state into `__snapshot__.data`, which
+          // `forget_pii` cannot reach. Caught at build so the misconfiguration
+          // surfaces in dev/CI, not as a silent leak past the GDPR boundary
+          // months later.
+          for (const state of states.values()) {
+            if (!state.snap) continue;
+            const offending: string[] = [];
+            for (const eventName of Object.keys(state.events)) {
+              if (_sf.has(eventName)) offending.push(eventName);
+            }
+            if (offending.length > 0) {
+              throw new Error(
+                `State "${state.name}" cannot snapshot — events {${offending.join(", ")}} carry sensitive fields. ` +
+                  "Snapshots write derived state into __snapshot__.data, which forget_pii cannot reach. " +
+                  "Remove .snap() or remove sensitive(...) markers."
+              );
+            }
+          }
           _built = true;
         }
 
