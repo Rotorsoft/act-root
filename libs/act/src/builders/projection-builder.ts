@@ -30,7 +30,7 @@ export type Projection<TEvents extends Schemas> = {
   readonly _tag: "Projection";
   readonly events: EventRegister<TEvents>;
   readonly target?: string;
-  readonly batchHandler?: BatchHandler<TEvents>;
+  readonly batch_handler?: BatchHandler<TEvents>;
 };
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
@@ -162,7 +162,7 @@ function _projection<
   TTarget extends string | undefined,
 >(target: TTarget): ProjectionBuilder<TEvents, TTarget> {
   const events = {} as EventRegister<TEvents>;
-  const defaultResolver: { target: string } | undefined =
+  const default_resolver: { target: string } | undefined =
     typeof target === "string" ? { target } : undefined;
 
   // Mutable runtime bag — typed loosely; the public projection() return
@@ -194,7 +194,7 @@ function _projection<
         ) => {
           const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
             handler: handler,
-            resolver: defaultResolver ?? _this_,
+            resolver: default_resolver ?? _this_,
             options: {
               blockOnError: true,
               maxRetries: 3,
@@ -243,7 +243,7 @@ function _projection<
           _tag: "Projection" as const,
           events,
           target,
-          batchHandler: handler,
+          batch_handler: handler,
         }),
       }),
     }) as ProjectionBuilder<TEvents, TTarget>;

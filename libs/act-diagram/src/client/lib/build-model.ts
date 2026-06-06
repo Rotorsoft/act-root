@@ -45,25 +45,25 @@ function buildState(
   const uniqueKey = `${domainName}:${_stateIdx++}`;
 
   const eventNodes: EventNode[] = [];
-  for (const eventName of Object.keys(events)) {
+  for (const event_name of Object.keys(events)) {
     eventNodes.push({
-      name: eventName,
-      hasCustomPatch: st.patches?.has(eventName) ?? false,
+      name: event_name,
+      hasCustomPatch: st.patches?.has(event_name) ?? false,
       // Stash the runtime Zod schema so the JSON Schema exporter can
       // call `z.toJSONSchema(zod)` later without re-running the parser.
-      zod: events[eventName],
+      zod: events[event_name],
     });
   }
 
   const actionNodes: ActionNode[] = [];
-  for (const actionName of Object.keys(rawActions)) {
-    if (actionName.startsWith("__emits_")) continue;
+  for (const action_name of Object.keys(rawActions)) {
+    if (action_name.startsWith("__emits_")) continue;
     const emits: string[] =
-      (rawActions[`__emits_${actionName}`] as string[]) ?? [];
-    const invariants = (st.given?.[actionName] ?? []).map(
+      (rawActions[`__emits_${action_name}`] as string[]) ?? [];
+    const invariants = (st.given?.[action_name] ?? []).map(
       (inv: any) => inv.description ?? ""
     );
-    actionNodes.push({ name: actionName, emits, invariants });
+    actionNodes.push({ name: action_name, emits, invariants });
   }
 
   const node: StateNode = {
@@ -93,11 +93,11 @@ function fixupReactions(
     /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(?:\w+\.)?(\w+))?/g;
   let dm: RegExpExecArray | null;
   while ((dm = doRe.exec(src)) !== null) {
-    const eventName = dm[1];
+    const event_name = dm[1];
     const handlerName = dm[2] || dm[3];
     if (!handlerName) continue;
     const r = fallbacks.find(
-      (r) => r.event === eventName && r.handlerName === `on ${eventName}`
+      (r) => r.event === event_name && r.handlerName === `on ${event_name}`
     );
     if (r) r.handlerName = handlerName;
   }

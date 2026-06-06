@@ -65,7 +65,7 @@ function resolve<TEvents extends Schemas, T>(
 }
 
 /** Case-insensitive lookup; returns true if a header is already set. */
-function hasHeader(headers: Record<string, string>, name: string): boolean {
+function has_header(headers: Record<string, string>, name: string): boolean {
   const lower = name.toLowerCase();
   for (const k of Object.keys(headers)) {
     if (k.toLowerCase() === lower) return true;
@@ -106,10 +106,10 @@ export function webhook<TEvents extends Schemas = Schemas>(
     );
     const headers: Record<string, string> = { ...customHeaders };
 
-    if (!hasHeader(headers, "content-type")) {
+    if (!has_header(headers, "content-type")) {
       headers["Content-Type"] = "application/json";
     }
-    if (!hasHeader(headers, "idempotency-key")) {
+    if (!has_header(headers, "idempotency-key")) {
       const key = config.idempotencyKey
         ? config.idempotencyKey(event)
         : String(event.id);
@@ -120,10 +120,10 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const body =
       typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
 
-    if (config.secret && !hasHeader(headers, "x-webhook-signature")) {
+    if (config.secret && !has_header(headers, "x-webhook-signature")) {
       const { signature, timestamp } = signRequest(body, config.secret);
       headers["X-Webhook-Signature"] = signature;
-      if (!hasHeader(headers, "x-webhook-timestamp")) {
+      if (!has_header(headers, "x-webhook-timestamp")) {
         headers["X-Webhook-Timestamp"] = timestamp;
       }
     }

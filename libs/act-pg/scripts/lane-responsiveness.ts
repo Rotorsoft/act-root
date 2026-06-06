@@ -9,7 +9,7 @@
  *   A) No `withLane(...)` — one DrainController, shared between all
  *      reactions. The current pre-1103 behavior.
  *   B) Two lanes (`slow` + `fast`) — one controller per lane.
- *      `Act._drainAll` calls each controller's drain in parallel
+ *      `Act._drain_all` calls each controller's drain in parallel
  *      (Promise.all), so a slow handler holding the slow lane's
  *      lease doesn't block the fast lane's claim.
  *

@@ -426,7 +426,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       const eventColX = stateColX + STATE_W + GAP;
 
       // ── Pre-calculate sizes ────────────────────────────────────
-      const eventRows: { eventName: string; actionName: string }[] = [];
+      const eventRows: { event_name: string; action_name: string }[] = [];
       const actionEmitted = new Set<string>();
       for (const action of st.actions) {
         for (const en of action.emits) {
@@ -438,24 +438,24 @@ export function computeLayout(viewModel: DomainModel): Layout {
       // their downstream events so the full serial chain is detected
       for (const ev of st.events) {
         if (!actionEmitted.has(ev.name)) {
-          eventRows.push({ eventName: ev.name, actionName: "" });
+          eventRows.push({ event_name: ev.name, action_name: "" });
         }
       }
       for (const action of st.actions) {
         for (const en of action.emits) {
-          eventRows.push({ eventName: en, actionName: action.name });
+          eventRows.push({ event_name: en, action_name: action.name });
         }
       }
       // ── Measure per-event heights (including sub-chains) ─────
       type EventMeasure = {
-        eventName: string;
-        actionName: string;
+        event_name: string;
+        action_name: string;
         h: number;
         chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }>;
       };
       const measuredEvents: EventMeasure[] = [];
       let evtBlockH = 0;
-      for (const { eventName: en, actionName } of eventRows) {
+      for (const { event_name: en, action_name } of eventRows) {
         const chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }> =
           [];
         if (!visitedEvents.has(en)) {
@@ -474,8 +474,8 @@ export function computeLayout(viewModel: DomainModel): Layout {
           if (rDefs.length > 0) visitedEvents.add(en);
         }
         measuredEvents.push({
-          eventName: en,
-          actionName,
+          event_name: en,
+          action_name,
           h: H,
           chains,
         });
@@ -507,9 +507,9 @@ export function computeLayout(viewModel: DomainModel): Layout {
       const eventYMap = new Map<string, number>();
 
       for (let ei = 0; ei < measuredEvents.length; ei++) {
-        const { eventName: en, actionName, chains } = measuredEvents[ei];
+        const { event_name: en, action_name, chains } = measuredEvents[ei];
         ns.push({
-          key: `e:${en}:${slice.name}:${actionName}`,
+          key: `e:${en}:${slice.name}:${action_name}`,
           pos: { x: eventColX, y: evtY },
           type: "event",
           label: en,
@@ -565,7 +565,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       // ── Projections below events ──────────────────────────────
       const seenProj = new Set<string>();
       for (const me of measuredEvents) {
-        const projs = eventProjections.get(me.eventName);
+        const projs = eventProjections.get(me.event_name);
         if (!projs) continue;
         for (const pn of projs) {
           if (seenProj.has(pn)) continue;

@@ -109,9 +109,9 @@ describe("mockState", () => {
     const built: any[] = [];
 
     // The event name that Strategy 1 won't find in handler source
-    const eventName = "Cre" + "ated"; // concatenated so string search won't find it
+    const event_name = "Cre" + "ated"; // concatenated so string search won't find it
     const events: Record<string, any> = {};
-    events[eventName] = {};
+    events[event_name] = {};
 
     mockState({ S: {} }, (info) => built.push(info))
       .init()
@@ -141,9 +141,9 @@ describe("mockState", () => {
     // When the handler accesses a Symbol property on dummyArg,
     // the get trap returns undefined (not proxyFn)
     const built: any[] = [];
-    const eventName = "Fin" + "ished";
+    const event_name = "Fin" + "ished";
     const events: Record<string, any> = {};
-    events[eventName] = {};
+    events[event_name] = {};
 
     mockState({ S: {} }, (info) => built.push(info))
       .init()
@@ -165,9 +165,9 @@ describe("mockState", () => {
     // When handler accesses a property on proxyFn (returned by dummyArg.get),
     // proxyFn.get returns deepProxy
     const built: any[] = [];
-    const eventName = "Up" + "dated";
+    const event_name = "Up" + "dated";
     const events: Record<string, any> = {};
-    events[eventName] = {};
+    events[event_name] = {};
 
     mockState({ S: {} }, (info) => built.push(info))
       .init()

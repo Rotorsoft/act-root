@@ -59,24 +59,24 @@ export type RetryProfile = {
  */
 export function minSafeTtl(profile: RetryProfile): number {
   const safetyFactor = profile.safetyFactor ?? 4;
-  const backoffSum = sumBackoff(profile.maxRetries, profile.backoff);
+  const backoffSum = sum_backoff(profile.maxRetries, profile.backoff);
   const timeoutSum = (profile.maxRetries + 1) * profile.timeoutMs;
   return (backoffSum + timeoutSum) * safetyFactor;
 }
 
-function sumBackoff(
+function sum_backoff(
   maxRetries: number,
   backoff: RetryProfile["backoff"]
 ): number {
   if (!backoff) return 0;
   let sum = 0;
   for (let retry = 0; retry < maxRetries; retry++) {
-    sum += delayFor(retry, backoff);
+    sum += delay_for(retry, backoff);
   }
   return backoff.jitter ? sum * 1.5 : sum;
 }
 
-function delayFor(
+function delay_for(
   retry: number,
   backoff: NonNullable<RetryProfile["backoff"]>
 ): number {

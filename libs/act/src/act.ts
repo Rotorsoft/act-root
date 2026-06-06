@@ -3,21 +3,21 @@ import {
   ALL_LANES,
   type AuditDeps,
   audit,
-  buildDrain,
-  buildEs,
-  buildHandle,
-  buildHandleBatch,
+  build_drain,
+  build_es,
+  build_handle,
+  build_handle_batch,
   CorrelateCycle,
-  classifyRegistry,
-  closeCorrelation,
+  classify_registry,
+  close_correlation,
   DrainController,
   type DrainOps,
-  defaultCorrelator,
+  default_correlator,
   type EsOps,
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  runCloseCycle,
+  run_close_cycle,
   SettleLoop,
   scan,
 } from "./internal/index.js";
@@ -132,7 +132,7 @@ export type ActLifecycleEvents<
   /**
    * A stream's sensitive-data payload was wiped via {@link Act.forget}.
    * Fires exactly once per successful `forget(stream)` call — idempotent
-   * second calls (no PII left on the stream) return `eventCount: 0` and
+   * second calls (no PII left on the stream) return `event_count: 0` and
    * do NOT re-emit. Apps that never call `forget()` never see this event.
    *
    * Listeners use it for the compliance side of GDPR / CCPA: audit log,
@@ -140,7 +140,7 @@ export type ActLifecycleEvents<
    * doesn't reach (e.g., search indexes, ETL caches). The framework's own
    * cache is invalidated by `forget()` itself before the event fires.
    */
-  forgotten: { stream: string; at: Date; eventCount: number };
+  forgotten: { stream: string; at: Date; event_count: number };
 };
 
 /**
@@ -166,7 +166,7 @@ export type ActOptions<TLanes extends string = string> = {
   readonly scoped?: Scoped;
   /**
    * Correlation-id generator for originating actions (ACT-404). When
-   * omitted, Act uses {@link defaultCorrelator}, which produces a
+   * omitted, Act uses {@link default_correlator}, which produces a
    * readable, time-monotonic-within-window, lowercase id of the form
    * `{state[:4]}-{action[:4]}-{ts}{rnd}` (18 chars).
    *
@@ -296,7 +296,7 @@ export class Act<
   private readonly _event_to_state: ReadonlyMap<string, State<any, any, any>>;
   /**
    * Event-name → lane fan-in for selective arming (ACT-1103). Built by
-   * `classifyRegistry` once per build. `"all"` means at least one of
+   * `classify_registry` once per build. `"all"` means at least one of
    * the event's reactions is a dynamic resolver (lane opaque until
    * runtime); a `Set<string>` lists the static lanes only that event's
    * reactions target.
@@ -320,9 +320,9 @@ export class Act<
 
   /**
    * Correlation-id generator for originating actions. Bound at
-   * construction from `options.correlator ?? defaultCorrelator`. The
+   * construction from `options.correlator ?? default_correlator`. The
    * `do()` path passes this into the `_es.action` closure; close-cycle
-   * uses it via {@link closeCorrelation}.
+   * uses it via {@link close_correlation}.
    */
   private readonly _correlator: Correlator;
   /** Pre-bound IAct methods reused across drain cycles. Only `do` varies per
@@ -332,7 +332,7 @@ export class Act<
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
   private readonly _bound_forget = this.forget.bind(this);
-  /** Reaction dispatchers built once and handed to runDrainCycle each cycle. */
+  /** Reaction dispatchers built once and handed to run_drain_cycle each cycle. */
   private readonly _handle: Handle<TEvents>;
   private readonly _handle_batch: HandleBatch<TEvents>;
   /** Declared drain lanes (ACT-1103). */
@@ -351,7 +351,7 @@ export class Act<
    *
    * @param registry  Schemas for every event and action across registered states
    * @param states    Merged map of state name → state definition
-   * @param batchHandlers Static-target projection batch handlers (target → handler)
+   * @param batch_handlers Static-target projection batch handlers (target → handler)
    * @param options   Tuning knobs — see {@link ActOptions}
    * @param lanes     Declared drain lanes (ACT-1103). The builder collects
    *   these from `.withLane(...)` calls. Slice 1 records them on the
@@ -360,13 +360,13 @@ export class Act<
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions>,
     states: Map<string, State<any, any, any>> = new Map(),
-    batchHandlers: Map<string, BatchHandler<any>> = new Map(),
+    batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
     lanes: ReadonlyArray<LaneConfig> = []
   ) {
     this.registry = registry;
     this._states = states;
-    this._batch_handlers = batchHandlers;
+    this._batch_handlers = batch_handlers;
     this._lanes = lanes;
     if (options.onlyLanes && options.onlyLanes.length > 0) {
       const declared = new Set<string>([
@@ -384,14 +384,14 @@ export class Act<
     this._scoped = options.scoped
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
-    this._correlator = options.correlator ?? defaultCorrelator;
-    this._es = buildEs(this._logger, this._correlator);
-    this._cd = buildDrain<TEvents>(this._logger);
+    this._correlator = options.correlator ?? default_correlator;
+    this._es = build_es(this._logger, this._correlator);
+    this._cd = build_drain<TEvents>(this._logger);
     // Reaction-level PII wrapping happens at build time inside `act-builder`:
     // reactions registered against an event with `sensitive(...)` fields get
     // a stripping handler closure; reactions against non-PII events keep
     // their original handler reference. So the dispatcher is PII-unaware.
-    this._handle = buildHandle<TEvents, TActions, TActor>({
+    this._handle = build_handle<TEvents, TActions, TActor>({
       logger: this._logger,
       bound_do: this._bound_do,
       bound_load: this._bound_load,
@@ -399,20 +399,20 @@ export class Act<
       bound_query_array: this._bound_query_array,
       bound_forget: this._bound_forget,
     });
-    this._handle_batch = buildHandleBatch<TEvents>(this._logger);
+    this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
     const {
-      staticTargets,
-      hasDynamicResolvers,
-      reactiveEvents,
-      eventToState,
-      eventToLanes,
-    } = classifyRegistry(this.registry, this._states);
-    this._reactive_events = reactiveEvents;
+      static_targets,
+      has_dynamic_resolvers,
+      reactive_events,
+      event_to_state,
+      event_to_lanes,
+    } = classify_registry(this.registry, this._states);
+    this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
-    this._event_to_state = eventToState;
-    this._event_to_lanes = eventToLanes;
+    this._event_to_state = event_to_state;
+    this._event_to_lanes = event_to_lanes;
 
     // Build one DrainController per active lane (ACT-1103). The implicit
     // "default" lane is always present unless onlyLanes excludes it. Each
@@ -420,32 +420,32 @@ export class Act<
     // single-controller path is the active set === { "default" } case
     // with `lane: undefined` deps so claim() doesn't filter (preserves
     // pre-1103 SQL planner behavior for apps that never call withLane).
-    const allLanes = ["default", ...lanes.map((l) => l.name)];
-    const onlySet =
+    const all_lanes = ["default", ...lanes.map((l) => l.name)];
+    const only_set =
       options.onlyLanes && options.onlyLanes.length > 0
         ? new Set<string>(options.onlyLanes as readonly string[])
         : undefined;
-    const activeLanes = onlySet
-      ? allLanes.filter((n) => onlySet.has(n))
-      : allLanes;
-    const singleDefaultLane =
-      activeLanes.length === 1 && activeLanes[0] === "default";
+    const active_lanes = only_set
+      ? all_lanes.filter((n) => only_set.has(n))
+      : all_lanes;
+    const single_default_lane =
+      active_lanes.length === 1 && active_lanes[0] === "default";
     this._drain_controllers = new Map();
-    for (const name of activeLanes) {
+    for (const name of active_lanes) {
       const cfg = lanes.find((l) => l.name === name);
       const controller = new DrainController({
         logger: this._logger,
         ops: this._cd,
         registry: this.registry,
-        batchHandlers: this._batch_handlers,
+        batch_handlers: this._batch_handlers,
         handle: this._handle,
-        handleBatch: this._handle_batch,
-        onAcked: (acked) => this.emit("acked", acked),
-        onBlocked: (blocked) => this.emit("blocked", blocked),
+        handle_batch: this._handle_batch,
+        on_acked: (acked) => this.emit("acked", acked),
+        on_blocked: (blocked) => this.emit("blocked", blocked),
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
         // adapter SQL collapses to the pre-1103 shape.
-        lane: singleDefaultLane ? undefined : name,
+        lane: single_default_lane ? undefined : name,
         defaults: cfg && {
           streamLimit: cfg.streamLimit,
           leaseMillis: cfg.leaseMillis,
@@ -470,23 +470,23 @@ export class Act<
     this._audit_deps = {
       store,
       logger: this._logger,
-      event_to_state: eventToState,
+      event_to_state: event_to_state,
       states: this._states,
-      known_events: new Set(eventToState.keys()),
+      known_events: new Set(event_to_state.keys()),
       declared_lanes: new Set(this._drain_controllers.keys()),
-      routed_events: new Set(eventToLanes.keys()),
+      routed_events: new Set(event_to_lanes.keys()),
     };
 
     this._correlate = new CorrelateCycle(
       this.registry,
-      staticTargets,
-      hasDynamicResolvers,
+      static_targets,
+      has_dynamic_resolvers,
       this._cd,
       options.maxSubscribedStreams ?? DEFAULT_MAX_SUBSCRIBED_STREAMS,
       // Cold start: assume drain is needed (historical events may need processing).
       // #803: writer-only instances skip the cold-start arm.
       () => {
-        if (this._drain && this._reactive_events.size > 0) this._armAll();
+        if (this._drain && this._reactive_events.size > 0) this._arm_all();
       }
     );
     this._settle = new SettleLoop<TEvents>(
@@ -496,7 +496,7 @@ export class Act<
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this.correlate(q),
         drain: (o) => this.drain(o),
-        onSettled: (drain) => this.emit("settled", drain),
+        on_settled: (drain) => this.emit("settled", drain),
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -504,7 +504,7 @@ export class Act<
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late `store(adapter)` injection after build won't
     // take effect. Scoped Acts bind against their own store.
-    this._notify_disposer = this._wireNotify(options.scoped?.store ?? store());
+    this._notify_disposer = this._wire_notify(options.scoped?.store ?? store());
 
     dispose(() => this.shutdown());
   }
@@ -529,7 +529,7 @@ export class Act<
         this.stop_correlations();
         this.stop_settling();
         for (const c of this._drain_controllers.values()) c.stop();
-        // `_wireNotify` swallows subscription errors and resolves to
+        // `_wire_notify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.
         const disposer = await this._notify_disposer;
         if (disposer) await disposer();
@@ -544,7 +544,7 @@ export class Act<
    * subscription was made). Errors during subscription are logged but
    * never thrown — `notify` is a hint, not a contract.
    */
-  private async _wireNotify(
+  private async _wire_notify(
     s: Store
   ): Promise<(() => void | Promise<void>) | undefined> {
     if (this._reactive_events.size === 0) return undefined;
@@ -571,7 +571,7 @@ export class Act<
           // wants the `notified` lifecycle event for observability
           // without engaging the local reaction pipeline.
           if (this._drain) {
-            const armed = this._armForEventNames(
+            const armed = this._arm_for_event_names(
               notification.events.map((e) => e.name)
             );
             if (armed) this._settle.schedule({ debounceMs: 0 });
@@ -602,7 +602,7 @@ export class Act<
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
    * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation (use carefully, for performance)
+   * @param skip_validation - Skip schema validation (use carefully, for performance)
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -672,7 +672,7 @@ export class Act<
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     reactingTo?: Committed<TEvents, string & keyof TEvents>,
-    skipValidation = false
+    skip_validation = false
   ) {
     return this._scoped(async () => {
       const snapshots = await this._es.action(
@@ -681,18 +681,18 @@ export class Act<
         target,
         payload,
         reactingTo,
-        skipValidation
+        skip_validation
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions
       // are all statically lane-resolved arm a subset; events with at
-      // least one dynamic resolver fall back to _armAll via the "all"
+      // least one dynamic resolver fall back to _arm_all via the "all"
       // sentinel).
       if (this._reactive_events.size > 0)
         // Snapshots produced by `action()` always carry their committed
         // event — the optional `event?` on the type is for load()
         // snapshots, which don't reach this path.
-        this._armForEventNames(
+        this._arm_for_event_names(
           snapshots.map((s) => (s.event as { name: string }).name)
         );
       this.emit("committed", snapshots as Snapshot<TSchemaReg, TEvents>[]);
@@ -889,13 +889,13 @@ export class Act<
    *
    * Throws on adapters without `Store.forget_pii`, invalidates the cache
    * entry for the stream, emits the `forgotten` lifecycle event with the
-   * row count. Idempotent: a second call returns `{eventCount: 0}` and
+   * row count. Idempotent: a second call returns `{event_count: 0}` and
    * does NOT re-emit.
    *
    * @param stream - Target stream.
-   * @returns `{eventCount}` — number of events whose PII column was wiped.
+   * @returns `{event_count}` — number of events whose PII column was wiped.
    */
-  async forget(stream: string): Promise<{ eventCount: number }> {
+  async forget(stream: string): Promise<{ event_count: number }> {
     return this._scoped(async () => {
       const s = store();
       if (!s.forget_pii) {
@@ -904,12 +904,12 @@ export class Act<
             `Use an adapter that declares pii_isolation: true (e.g. @rotorsoft/act on the in-memory store).`
         );
       }
-      const eventCount = await s.forget_pii(stream);
+      const event_count = await s.forget_pii(stream);
       await cache().invalidate(stream);
-      if (eventCount > 0) {
-        this.emit("forgotten", { stream, at: new Date(), eventCount });
+      if (event_count > 0) {
+        this.emit("forgotten", { stream, at: new Date(), event_count });
       }
-      return { eventCount };
+      return { event_count };
     });
   }
 
@@ -956,30 +956,30 @@ export class Act<
     // `settle` listeners) keep working without special-casing.
     if (!this._drain)
       return { fetched: [], leased: [], acked: [], blocked: [] };
-    return this._scoped(() => this._drainAll(options));
+    return this._scoped(() => this._drain_all(options));
   }
 
   /** Arm every active lane controller (ACT-1103). */
-  private _armAll(): void {
+  private _arm_all(): void {
     for (const c of this._drain_controllers.values()) c.arm();
   }
 
   /**
    * Arm only the lane controllers whose reactions match the supplied
    * event names (ACT-1103 selective arming). Events with any dynamic
-   * resolver fall back to `_armAll()` via the `"all"` sentinel — the
+   * resolver fall back to `_arm_all()` via the `"all"` sentinel — the
    * resolver's lane isn't known until correlate runs the function.
    * Events with no reactions are skipped; `_event_to_lanes` doesn't
    * carry them. Returns true when any controller was armed (used by
    * the notify handler to decide whether to schedule a settle).
    */
-  private _armForEventNames(names: Iterable<string>): boolean {
+  private _arm_for_event_names(names: Iterable<string>): boolean {
     const to_arm = new Set<string>();
     for (const name of names) {
       const set = this._event_to_lanes.get(name);
       if (set === undefined) continue;
       if (set === ALL_LANES) {
-        this._armAll();
+        this._arm_all();
         return true;
       }
       for (const lane of set) to_arm.add(lane);
@@ -997,7 +997,7 @@ export class Act<
    * `SKIP LOCKED` keeps cross-controller races safe. Lifecycle events
    * (`acked`, `blocked`) may interleave by lane — listeners filter via
    * `lease.lane`. */
-  private async _drainAll(options: DrainOptions): Promise<Drain<TEvents>> {
+  private async _drain_all(options: DrainOptions): Promise<Drain<TEvents>> {
     const results = await Promise.all(
       [...this._drain_controllers.values()].map((c) => c.drain(options))
     );
@@ -1128,7 +1128,7 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    return this._correlate.startPolling(query, frequency, callback);
+    return this._correlate.start_polling(query, frequency, callback);
   }
 
   /**
@@ -1149,7 +1149,7 @@ export class Act<
    * @see {@link start_correlations}
    */
   stop_correlations() {
-    this._correlate.stopPolling();
+    this._correlate.stop_polling();
   }
 
   /**
@@ -1197,7 +1197,7 @@ export class Act<
   async reset(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().reset(input);
-      if (count > 0 && this._reactive_events.size > 0) this._armAll();
+      if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
   }
@@ -1232,7 +1232,7 @@ export class Act<
   async unblock(input: string[] | StreamFilter): Promise<number> {
     return this._scoped(async () => {
       const count = await store().unblock(input);
-      if (count > 0 && this._reactive_events.size > 0) this._armAll();
+      if (count > 0 && this._reactive_events.size > 0) this._arm_all();
       return count;
     });
   }
@@ -1487,14 +1487,14 @@ export class Act<
 
       // Synthesize an actor for the close transaction so user-supplied
       // correlators can still tag tenant context / trace ids.
-      const closeActor = { id: "$close", name: "close" };
-      const result = await runCloseCycle(targets, {
-        reactiveEventsSize: this._reactive_events.size,
-        eventToState: this._event_to_state,
+      const close_actor = { id: "$close", name: "close" };
+      const result = await run_close_cycle(targets, {
+        reactive_events_size: this._reactive_events.size,
+        event_to_state: this._event_to_state,
         load: this._es.load,
         tombstone: this._es.tombstone,
         logger: this._logger,
-        correlation: closeCorrelation(this._correlator, closeActor),
+        correlation: close_correlation(this._correlator, close_actor),
       });
 
       this.emit("closed", result);

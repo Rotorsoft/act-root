@@ -39,8 +39,8 @@ import type {
   Target,
 } from "../types/index.js";
 import { sleep, validate } from "../utils.js";
-import { computeBackoffDelay } from "./backoff.js";
-import { defaultCorrelator } from "./correlator.js";
+import { compute_backoff_delay } from "./backoff.js";
+import { default_correlator } from "./correlator.js";
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop
@@ -52,7 +52,7 @@ const DEFAULT_BATCH = 500;
 
 /**
  * Internal action signature seen by the orchestrator — the {@link Correlator}
- * is bound at `buildEs` time, so callers don't pass it through.
+ * is bound at `build_es` time, so callers don't pass it through.
  *
  * @internal
  */
@@ -67,7 +67,7 @@ export type BoundAction = <
   target: Target,
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation?: boolean
+  skip_validation?: boolean
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -386,8 +386,9 @@ export async function load<
   asOf?: AsOf,
   actor?: Actor
 ): Promise<Snapshot<TState, TEvents>> {
-  const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
-  const cached = timeTravel ? undefined : await cache().get<TState>(stream);
+  const time_travel =
+    !!asOf && Object.values(asOf).some((v) => v !== undefined);
+  const cached = time_travel ? undefined : await cache().get<TState>(stream);
   const cache_hit = !!cached;
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
@@ -449,7 +450,7 @@ export async function load<
   // event_id, picks up missed events, and replays — so an "older" cache
   // write from a concurrent slower load is self-correcting on next access.
   // Time-travel loads bypass cache entirely and skip this too.
-  if (replayed > 0 && !timeTravel && event) {
+  if (replayed > 0 && !time_travel && event) {
     await cache().set(stream, {
       state,
       version,
@@ -479,14 +480,14 @@ export async function load<
  *
  * @template TState The type of state
  * @template TEvents The type of events
- * @template TActions The type of actionSchemas
+ * @template TActions The type of action_schemas
  * @template TKey The type of action to execute
  * @param me The state machine definition
  * @param action The action to execute
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
  * @param reactingTo (Optional) The event that the action is reacting to
- * @param skipValidation (Optional) Whether to skip validation (not recommended)
+ * @param skip_validation (Optional) Whether to skip validation (not recommended)
  * @returns The snapshot of the committed event
  *
  * @example
@@ -503,18 +504,18 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation = false,
-  correlator: Correlator = defaultCorrelator
+  skip_validation = false,
+  correlator: Correlator = default_correlator
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
-  const validated = skipValidation
+  const validated = skip_validation
     ? payload
     : validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
-  const maxRetries = opts?.maxRetries ?? 0;
+  const max_retries = opts?.maxRetries ?? 0;
 
   for (let attempt = 0; ; attempt++) {
     try {
@@ -579,7 +580,7 @@ export async function action<
       }
 
       const emitted = tuples.map(([name, data]) => {
-        const validated = skipValidation
+        const validated = skip_validation
           ? data
           : validate(name as string, data, me.events[name]);
         return me.message({ name, data: validated });
@@ -674,10 +675,10 @@ export async function action<
       return snapshots;
     } catch (error) {
       if (!(error instanceof ConcurrencyError)) throw error;
-      if (attempt >= maxRetries) throw error;
+      if (attempt >= max_retries) throw error;
       if (opts?.backoff) {
-        const delayMs = computeBackoffDelay(attempt, opts.backoff);
-        if (delayMs > 0) await sleep(delayMs);
+        const delay_ms = compute_backoff_delay(attempt, opts.backoff);
+        if (delay_ms > 0) await sleep(delay_ms);
       }
     }
   }

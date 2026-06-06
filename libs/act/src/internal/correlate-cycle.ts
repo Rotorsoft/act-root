@@ -65,18 +65,18 @@ export class CorrelateCycle<
 
   constructor(
     registry: Registry<TSchemaReg, TEvents, TActions>,
-    staticTargets: ReadonlyArray<StaticTarget>,
-    hasDynamicResolvers: boolean,
+    static_targets: ReadonlyArray<StaticTarget>,
+    has_dynamic_resolvers: boolean,
     cd: DrainOps<TEvents>,
     maxSubscribedStreams: number,
-    onInit?: () => void
+    on_init?: () => void
   ) {
     this._subscribed = new LruSet(maxSubscribedStreams);
     this._registry = registry;
-    this._static_targets = staticTargets;
-    this._has_dynamic_resolvers = hasDynamicResolvers;
+    this._static_targets = static_targets;
+    this._has_dynamic_resolvers = has_dynamic_resolvers;
     this._cd = cd;
-    this._on_init = onInit;
+    this._on_init = on_init;
   }
 
   /** Last correlated event id. */
@@ -89,7 +89,7 @@ export class CorrelateCycle<
    * - Reads max(at) from store as cold-start checkpoint
    * - Subscribes static resolver targets (idempotent upsert)
    * - Populates the subscribed-streams LRU
-   * - Fires `onInit` once (Act uses this to flag a cold-start drain)
+   * - Fires `on_init` once (Act uses this to flag a cold-start drain)
    */
   async init(): Promise<void> {
     if (this._initialized) return;
@@ -140,10 +140,10 @@ export class CorrelateCycle<
             if (typeof reaction.resolver !== "function") continue;
             const resolved = reaction.resolver(event);
             if (resolved && !this._subscribed.has(resolved.target)) {
-              const incomingPriority = resolved.priority ?? 0;
+              const incoming_priority = resolved.priority ?? 0;
               const entry = correlated.get(resolved.target) || {
                 source: resolved.source,
-                priority: incomingPriority,
+                priority: incoming_priority,
                 lane: resolved.lane,
                 payloads: [],
               };
@@ -151,8 +151,8 @@ export class CorrelateCycle<
               // single correlate scan — keep the max priority so the
               // highest-priority reaction sets the lane (matches the
               // subscribe-side `max()` invariant).
-              if (incomingPriority > entry.priority)
-                entry.priority = incomingPriority;
+              if (incoming_priority > entry.priority)
+                entry.priority = incoming_priority;
               entry.payloads.push({
                 ...reaction,
                 source: resolved.source,
@@ -196,7 +196,7 @@ export class CorrelateCycle<
    * running. Errors from `correlate()` are routed through `log()` so they
    * land in the configured logger (the timer keeps running on failure).
    */
-  startPolling(
+  start_polling(
     query: Query = {},
     frequency = 10_000,
     callback?: (subscribed: number) => void
@@ -217,7 +217,7 @@ export class CorrelateCycle<
   }
 
   /** Stop the periodic correlation worker. Idempotent. */
-  stopPolling(): void {
+  stop_polling(): void {
     if (this._timer) {
       clearInterval(this._timer);
       this._timer = undefined;

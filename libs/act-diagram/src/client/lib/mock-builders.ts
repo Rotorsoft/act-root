@@ -11,7 +11,7 @@ export function proxyTarget() {}
 
 function attachEmit(
   info: { actions: Record<string, any>; events: Record<string, any> },
-  actionName: string,
+  action_name: string,
   handler: any
 ) {
   const emits: string[] = [];
@@ -20,13 +20,13 @@ function attachEmit(
   } else if (typeof handler === "function") {
     // Strategy 1: string search for event names in handler source
     const src = String(handler);
-    for (const eventName of Object.keys(info.events)) {
+    for (const event_name of Object.keys(info.events)) {
       if (
-        src.includes(`"${eventName}"`) ||
-        src.includes(`'${eventName}'`) ||
-        src.includes(`\`${eventName}\``)
+        src.includes(`"${event_name}"`) ||
+        src.includes(`'${event_name}'`) ||
+        src.includes(`\`${event_name}\``)
       ) {
-        emits.push(eventName);
+        emits.push(event_name);
       }
     }
 
@@ -63,7 +63,7 @@ function attachEmit(
       }
     }
   }
-  (info.actions as any)[`__emits_${actionName}`] = emits;
+  (info.actions as any)[`__emits_${action_name}`] = emits;
 }
 
 export function mockState(
@@ -82,21 +82,21 @@ export function mockState(
 
   const actionBuilder = (_currentAction?: string): any => ({
     on(actionEntry: Record<string, any>) {
-      const actionName = Object.keys(actionEntry)[0];
-      info.actions[actionName] = actionEntry[actionName];
+      const action_name = Object.keys(actionEntry)[0];
+      info.actions[action_name] = actionEntry[action_name];
       return {
         given(rules?: any[]) {
-          if (rules) info.given[actionName] = rules;
+          if (rules) info.given[action_name] = rules;
           return {
             emit(handler: any) {
-              attachEmit(info, actionName, handler);
-              return actionBuilder(actionName);
+              attachEmit(info, action_name, handler);
+              return actionBuilder(action_name);
             },
           };
         },
         emit(handler: any) {
-          attachEmit(info, actionName, handler);
-          return actionBuilder(actionName);
+          attachEmit(info, action_name, handler);
+          return actionBuilder(action_name);
         },
       };
     },
@@ -140,9 +140,12 @@ function captureDispatches(handler: any): string[] {
     const safeProxy = (): any =>
       new Proxy({} as Record<string, unknown>, { get: () => "" });
     const mockApp = {
-      do: (actionName: string) => {
-        if (typeof actionName === "string" && !dispatches.includes(actionName))
-          dispatches.push(actionName);
+      do: (action_name: string) => {
+        if (
+          typeof action_name === "string" &&
+          !dispatches.includes(action_name)
+        )
+          dispatches.push(action_name);
         return Promise.resolve([]);
       },
       load: () => Promise.resolve({ state: safeProxy(), version: 0 }),
@@ -197,15 +200,15 @@ export function mockSlice(onBuild?: (info: any) => void) {
       if (p) info.projections.push(p);
       return builder;
     },
-    on(eventName: string) {
+    on(event_name: string) {
       return {
         do(handler: any) {
           const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
-            event: eventName,
+            event: event_name,
             handlerName:
               (typeof handler?.name === "string" && handler.name) ||
-              `on ${eventName}`,
+              `on ${event_name}`,
             dispatches,
           };
           info.reactions.push(reaction);
@@ -235,8 +238,8 @@ export function mockProjection(target?: string, onBuild?: (info: any) => void) {
 
   const builder: any = {
     on(eventEntry: Record<string, any>) {
-      const eventName = Object.keys(eventEntry)[0];
-      info.handles.push(eventName);
+      const event_name = Object.keys(eventEntry)[0];
+      info.handles.push(event_name);
       return {
         do() {
           return {
@@ -282,15 +285,15 @@ export function mockAct(onBuild?: (info: any) => void) {
       return builder;
     },
     withActor: () => builder,
-    on(eventName: string) {
+    on(event_name: string) {
       return {
         do(handler: any) {
           const dispatches = captureDispatches(handler);
           const reaction: ReactionNode = {
-            event: eventName,
+            event: event_name,
             handlerName:
               (typeof handler?.name === "string" && handler.name) ||
-              `on ${eventName}`,
+              `on ${event_name}`,
             dispatches,
           };
           info.reactions.push(reaction);

@@ -239,7 +239,7 @@ describe("projection", () => {
 
     expect(p._tag).toBe("Projection");
     expect(p.target).toBe("target");
-    expect(p.batchHandler).toBe(batchFn);
+    expect(p.batch_handler).toBe(batchFn);
   });
 
   it("should not expose .batch() on projections without static target", () => {

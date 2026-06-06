@@ -5,7 +5,7 @@
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, registerState } from "../internal/index.js";
+import { _this_, register_state } from "../internal/index.js";
 import { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
@@ -237,7 +237,7 @@ export function slice<
     TActor
   > = {
     withState: (state) => {
-      registerState(state, states, actions, events as Record<string, unknown>);
+      register_state(state, states, actions, events as Record<string, unknown>);
       return builder as never;
     },
     withProjection: (proj) => {

@@ -58,7 +58,7 @@ export function formatMatches(query: string, matches: IndexEntry[]): string {
 
 const findActionsEmitting = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{
   state: string;
   action: string;
@@ -73,7 +73,7 @@ const findActionsEmitting = (
   }> = [];
   for (const st of model.states) {
     for (const act of st.actions) {
-      if (act.emits.includes(eventName)) {
+      if (act.emits.includes(event_name)) {
         out.push({
           state: st.name,
           action: act.name,
@@ -88,7 +88,7 @@ const findActionsEmitting = (
 
 const findReactionsFor = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{
   slice?: string;
   handler: string;
@@ -105,7 +105,7 @@ const findReactionsFor = (
   }> = [];
   for (const sl of model.slices) {
     for (const r of sl.reactions) {
-      if (r.event === eventName) {
+      if (r.event === event_name) {
         out.push({
           slice: sl.name,
           handler: r.handlerName,
@@ -117,7 +117,7 @@ const findReactionsFor = (
     }
   }
   for (const r of model.reactions) {
-    if (r.event === eventName) {
+    if (r.event === event_name) {
       out.push({
         handler: r.handlerName,
         dispatches: r.dispatches,
@@ -131,10 +131,10 @@ const findReactionsFor = (
 
 const findProjectionsFor = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{ name: string; file?: string }> =>
   model.projections
-    .filter((p) => p.handles.includes(eventName))
+    .filter((p) => p.handles.includes(event_name))
     .map((p) => ({ name: p.name, file: p.file }));
 
 /** Detailed event view: schema, producers, consumers, deprecation. */
@@ -309,7 +309,7 @@ export function formatProjection(
 }
 
 export function formatReaction(idx: ContractIndex, entry: IndexEntry): string {
-  const [sliceName, eventName] = (entry.qualifier ?? "::").split("::");
+  const [sliceName, event_name] = (entry.qualifier ?? "::").split("::");
   const lines: string[] = [];
   const slice = sliceName && sliceName !== "*" ? violet(sliceName) : "";
   // Compact header: ReactionName (in SliceName) — the slice prefix gets
@@ -318,22 +318,22 @@ export function formatReaction(idx: ContractIndex, entry: IndexEntry): string {
     ? `${bold(fuchsia(entry.name))} ${dim(`(in ${slice})`)}`
     : bold(fuchsia(entry.name));
   lines.push(header);
-  if (eventName) lines.push(`  on:      ${orange(eventName)}`);
+  if (event_name) lines.push(`  on:      ${orange(event_name)}`);
   if (entry.file) lines.push(`  in:      ${dim(loc(entry.file, entry.line))}`);
 
   // Find the reaction in the model to enrich with producer/dispatch info.
   const sliceReaction = idx.model.slices
     .find((s) => s.name === sliceName)
     ?.reactions.find(
-      (r) => r.handlerName === entry.name && r.event === eventName
+      (r) => r.handlerName === entry.name && r.event === event_name
     );
   const orchReaction = idx.model.reactions.find(
-    (r) => r.handlerName === entry.name && r.event === eventName
+    (r) => r.handlerName === entry.name && r.event === event_name
   );
   const r = sliceReaction ?? orchReaction;
 
-  if (eventName) {
-    const producers = findActionsEmitting(idx.model, eventName);
+  if (event_name) {
+    const producers = findActionsEmitting(idx.model, event_name);
     if (producers.length > 0) {
       lines.push("  producers (of triggering event):");
       for (const p of producers) {

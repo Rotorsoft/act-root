@@ -37,7 +37,7 @@ export type SettleDeps<TEvents extends Schemas> = {
     query: Query
   ) => Promise<{ subscribed: number; last_id: number }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
-  readonly onSettled: (drain: Drain<TEvents>) => void;
+  readonly on_settled: (drain: Drain<TEvents>) => void;
 };
 
 /**
@@ -53,9 +53,9 @@ export class SettleLoop<TEvents extends Schemas> {
   /** Debounce window applied when the caller doesn't override via `SettleOptions.debounceMs`. */
   private readonly _default_debounce_ms: number;
 
-  constructor(deps: SettleDeps<TEvents>, defaultDebounceMs: number) {
+  constructor(deps: SettleDeps<TEvents>, default_debounce_ms: number) {
     this._deps = deps;
-    this._default_debounce_ms = defaultDebounceMs;
+    this._default_debounce_ms = default_debounce_ms;
   }
 
   /**
@@ -63,14 +63,14 @@ export class SettleLoop<TEvents extends Schemas> {
    * coalesce into one cycle. The cycle runs correlate→drain in a loop
    * until no progress is made (no new subscriptions, no acks, no blocks)
    * or `maxPasses` is reached, then emits the `"settled"` lifecycle event
-   * via {@link SettleDeps.onSettled}.
+   * via {@link SettleDeps.on_settled}.
    */
   schedule(options: SettleOptions = {}): void {
     const {
       debounceMs = this._default_debounce_ms,
-      correlate: correlateQuery = { after: -1, limit: 100 },
+      correlate: correlate_query = { after: -1, limit: 100 },
       maxPasses = Infinity,
-      ...drainOptions
+      ...drain_options
     } = options;
 
     if (this._timer) clearTimeout(this._timer);
@@ -81,24 +81,24 @@ export class SettleLoop<TEvents extends Schemas> {
 
       (async () => {
         await this._deps.init();
-        let lastDrain: Drain<TEvents> | undefined;
+        let last_drain: Drain<TEvents> | undefined;
         // Loop correlate→drain until a pass produces no work — this fully
         // catches up paginated streams (e.g. after `reset()` on a long
         // projection) without forcing callers to roll their own loop.
         // `maxPasses` caps runtime in pathological cases.
         for (let i = 0; i < maxPasses; i++) {
           const { subscribed } = await this._deps.correlate({
-            ...correlateQuery,
+            ...correlate_query,
             after: this._deps.checkpoint(),
           });
-          lastDrain = await this._deps.drain(drainOptions);
+          last_drain = await this._deps.drain(drain_options);
           const made_progress =
             subscribed > 0 ||
-            lastDrain.acked.length > 0 ||
-            lastDrain.blocked.length > 0;
+            last_drain.acked.length > 0 ||
+            last_drain.blocked.length > 0;
           if (!made_progress) break;
         }
-        if (lastDrain) this._deps.onSettled(lastDrain);
+        if (last_drain) this._deps.on_settled(last_drain);
       })()
         .catch((err) => this._deps.logger.error(err))
         .finally(() => {

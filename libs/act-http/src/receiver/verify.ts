@@ -71,10 +71,10 @@ export function verifyWebhook(
   const maxAgeSeconds = options?.maxAgeSeconds ?? 300;
   const now = options?.now ?? Math.floor(Date.now() / 1000);
 
-  const signature = pickHeader(headers, "x-webhook-signature");
+  const signature = pick_header(headers, "x-webhook-signature");
   if (!signature) return { ok: false, reason: "missing-signature" };
 
-  const timestampStr = pickHeader(headers, "x-webhook-timestamp");
+  const timestampStr = pick_header(headers, "x-webhook-timestamp");
   if (!timestampStr) return { ok: false, reason: "missing-timestamp" };
   const timestamp = Number.parseInt(timestampStr, 10);
   if (Number.isNaN(timestamp) || String(timestamp) !== timestampStr) {
@@ -106,7 +106,7 @@ export function verifyWebhook(
   return { ok: true };
 }
 
-function pickHeader(
+function pick_header(
   headers: Record<string, string | string[] | undefined>,
   lowerName: string
 ): string | undefined {

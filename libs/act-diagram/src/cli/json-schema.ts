@@ -58,11 +58,11 @@ type Report = {
   events: Record<string, EventReport>;
 };
 
-const findProducers = (model: DomainModel, eventName: string) => {
+const findProducers = (model: DomainModel, event_name: string) => {
   const out: EventReport["producers"] = [];
   for (const st of model.states) {
     for (const act of st.actions) {
-      if (act.emits.includes(eventName)) {
+      if (act.emits.includes(event_name)) {
         out.push({
           action: act.name,
           state: st.name,
@@ -77,12 +77,12 @@ const findProducers = (model: DomainModel, eventName: string) => {
 
 const findConsumers = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): EventReport["consumers"] => {
   const out: EventReport["consumers"] = [];
   for (const sl of model.slices) {
     for (const r of sl.reactions) {
-      if (r.event === eventName) {
+      if (r.event === event_name) {
         out.push({
           type: "reaction",
           slice: sl.name,
@@ -95,7 +95,7 @@ const findConsumers = (
     }
   }
   for (const r of model.reactions) {
-    if (r.event === eventName) {
+    if (r.event === event_name) {
       out.push({
         type: "reaction",
         handler: r.handlerName,
@@ -106,7 +106,7 @@ const findConsumers = (
     }
   }
   for (const p of model.projections) {
-    if (p.handles.includes(eventName)) {
+    if (p.handles.includes(event_name)) {
       out.push({ type: "projection", name: p.name, file: p.file });
     }
   }

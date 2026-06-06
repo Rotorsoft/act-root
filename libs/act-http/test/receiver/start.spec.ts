@@ -19,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
-  it("routes POST /<eventName> to the registered handler with a typed event", async () => {
+  it("routes POST /<event_name> to the registered handler with a typed event", async () => {
     let called: { orderId: string; total: number; key: string } | undefined;
 
     const r = receiver({

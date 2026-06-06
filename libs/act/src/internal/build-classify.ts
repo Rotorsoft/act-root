@@ -5,12 +5,12 @@
  * Build-time classification of the registry + state map. The Act constructor
  * needs four pre-computed inputs to wire its runtime subsystems:
  *
- * - `staticTargets`     — known-up-front reaction targets (statics get
+ * - `static_targets`     — known-up-front reaction targets (statics get
  *                         subscribed once at init; dynamics scan per event)
- * - `hasDynamicResolvers` — short-circuit flag for `correlate()`
- * - `reactiveEvents`    — event names with at least one reaction (drives
+ * - `has_dynamic_resolvers` — short-circuit flag for `correlate()`
+ * - `reactive_events`    — event names with at least one reaction (drives
  *                         the drain skip-flag in `do()` and `reset()`)
- * - `eventToState`      — event-name → owning state, for `close({restart})`
+ * - `event_to_state`      — event-name → owning state, for `close({restart})`
  *                         seed loading in multi-state apps
  *
  * Pure function — single pass over events + states, fully testable without
@@ -29,7 +29,7 @@ import type {
 import type { StaticTarget } from "./correlate-cycle.js";
 
 /**
- * Classification result. Returned by {@link classifyRegistry}; consumed
+ * Classification result. Returned by {@link classify_registry}; consumed
  * piecewise by Act's constructor.
  *
  * @internal
@@ -56,11 +56,11 @@ export const ALL_LANES: unique symbol = Symbol("act-1103/all-lanes");
 export type EventLaneSet = ReadonlySet<string> | typeof ALL_LANES;
 
 export type Classification = {
-  readonly staticTargets: StaticTarget[];
-  readonly hasDynamicResolvers: boolean;
-  readonly reactiveEvents: ReadonlySet<string>;
-  readonly eventToState: ReadonlyMap<string, State<any, any, any>>;
-  readonly eventToLanes: ReadonlyMap<string, EventLaneSet>;
+  readonly static_targets: StaticTarget[];
+  readonly has_dynamic_resolvers: boolean;
+  readonly reactive_events: ReadonlySet<string>;
+  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
+  readonly event_to_lanes: ReadonlyMap<string, EventLaneSet>;
 };
 
 /**
@@ -71,7 +71,7 @@ export type Classification = {
  *
  * @internal
  */
-export function classifyRegistry<
+export function classify_registry<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -80,28 +80,28 @@ export function classifyRegistry<
   states: ReadonlyMap<string, State<Schema, any, any>>
 ): Classification {
   const statics = new Map<string, StaticTarget>();
-  const reactiveEvents = new Set<string>();
-  const eventToLanes = new Map<string, EventLaneSet>();
-  let hasDynamicResolvers = false;
+  const reactive_events = new Set<string>();
+  const event_to_lanes = new Map<string, EventLaneSet>();
+  let has_dynamic_resolvers = false;
 
   for (const [name, register] of Object.entries(registry.events)) {
-    if (register.reactions.size > 0) reactiveEvents.add(name);
+    if (register.reactions.size > 0) reactive_events.add(name);
     for (const reaction of register.reactions.values()) {
       if (typeof reaction.resolver === "function") {
-        hasDynamicResolvers = true;
+        has_dynamic_resolvers = true;
         // Dynamic resolver — lane is opaque until runtime. Mark the
         // event as wildcard so `do()` falls back to arming every
         // controller for any commit of it.
-        eventToLanes.set(name, ALL_LANES);
+        event_to_lanes.set(name, ALL_LANES);
       } else {
         const { target, source, priority = 0, lane } = reaction.resolver;
         const lane_name = lane ?? "default";
-        const existing_lanes = eventToLanes.get(name);
+        const existing_lanes = event_to_lanes.get(name);
         if (existing_lanes !== ALL_LANES) {
           const set =
             (existing_lanes as Set<string> | undefined) ?? new Set<string>();
           set.add(lane_name);
-          eventToLanes.set(name, set);
+          event_to_lanes.set(name, set);
         }
         const key = `${target}|${source ?? ""}`;
         const existing = statics.get(key);
@@ -130,18 +130,18 @@ export function classifyRegistry<
 
   // Event-name → owning state. Duplicate event names are rejected at
   // registration time (merge.ts), so each entry is unambiguous.
-  const eventToState = new Map<string, State<any, any, any>>();
+  const event_to_state = new Map<string, State<any, any, any>>();
   for (const merged of states.values()) {
-    for (const eventName of Object.keys(merged.events)) {
-      eventToState.set(eventName, merged);
+    for (const event_name of Object.keys(merged.events)) {
+      event_to_state.set(event_name, merged);
     }
   }
 
   return {
-    staticTargets: [...statics.values()],
-    hasDynamicResolvers,
-    reactiveEvents,
-    eventToState,
-    eventToLanes,
+    static_targets: [...statics.values()],
+    has_dynamic_resolvers,
+    reactive_events,
+    event_to_state,
+    event_to_lanes,
   };
 }

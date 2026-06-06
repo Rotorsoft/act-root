@@ -82,10 +82,10 @@ const PG_UNIQUE_VIOLATION = "23505";
 // surprises.
 const NOTIFY_CHANNEL_PREFIX = "act_commit";
 
-function notifyChannel(schema: string, table: string): string {
+function notify_channel(schema: string, table: string): string {
   return `${NOTIFY_CHANNEL_PREFIX}_${schema}_${table}`;
 }
-function assertSafeIdentifier(value: string, label: string) {
+function assert_safe_identifier(value: string, label: string) {
   if (!SAFE_IDENTIFIER.test(value))
     throw new Error(`Unsafe SQL identifier for ${label}: "${value}"`);
 }
@@ -228,14 +228,14 @@ export class PostgresStore implements Store {
    */
   private readonly _channel: string;
   /** Active LISTEN client (one per `notify()` subscription). */
-  private _listenClient: pg.PoolClient | undefined;
+  private _listen_client: pg.PoolClient | undefined;
   /**
    * Notification listener attached to the active LISTEN client. Tracked
    * separately so the re-subscribe / dispose paths can detach it before
    * destroying the client — without this, a pool that reused the
    * connection would re-fire the stale handler.
    */
-  private _listenHandler: ((msg: pg.Notification) => void) | undefined;
+  private _listen_handler: ((msg: pg.Notification) => void) | undefined;
   /**
    * Cross-process commit subscription. **Present only when
    * `config.notify === true`** — the orchestrator's auto-wire path
@@ -256,18 +256,18 @@ export class PostgresStore implements Store {
    */
   constructor(config: Partial<Config> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    assertSafeIdentifier(this.config.schema, "schema");
-    assertSafeIdentifier(this.config.table, "table");
+    assert_safe_identifier(this.config.schema, "schema");
+    assert_safe_identifier(this.config.table, "table");
     const { schema: _, table: __, ...poolConfig } = this.config;
     this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
-    this._channel = notifyChannel(this.config.schema, this.config.table);
+    this._channel = notify_channel(this.config.schema, this.config.table);
     // Attach the notify subscriber only when the user opted in. With
     // notify off, `this.notify` is `undefined`, the orchestrator skips
     // its auto-wire, and no LISTEN client is ever allocated.
     if (this.config.notify) {
-      this.notify = this._subscribeNotifications.bind(this);
+      this.notify = this._subscribe_notifications.bind(this);
     }
   }
 
@@ -277,7 +277,7 @@ export class PostgresStore implements Store {
    * @returns Promise that resolves when all connections are closed
    */
   async dispose() {
-    await this._teardownListen();
+    await this._teardown_listen();
     await this._pool.end();
   }
 
@@ -288,19 +288,19 @@ export class PostgresStore implements Store {
    * destroying belt-and-braces guards against any future change in
    * pg-pool semantics that could re-issue a half-clean client).
    */
-  private async _teardownListen() {
-    if (!this._listenClient) return;
-    // _listenHandler is set in lockstep with _listenClient in notify(),
+  private async _teardown_listen() {
+    if (!this._listen_client) return;
+    // _listen_handler is set in lockstep with _listen_client in notify(),
     // so if the client is present, the handler is too.
-    this._listenClient.removeListener("notification", this._listenHandler!);
-    this._listenHandler = undefined;
+    this._listen_client.removeListener("notification", this._listen_handler!);
+    this._listen_handler = undefined;
     try {
-      await this._listenClient.query(`UNLISTEN ${this._channel}`);
+      await this._listen_client.query(`UNLISTEN ${this._channel}`);
     } catch {
       // best-effort — pool end (or destroy) tears the connection down
     }
-    this._listenClient.release(true);
-    this._listenClient = undefined;
+    this._listen_client.release(true);
+    this._listen_client = undefined;
   }
 
   /**
@@ -587,7 +587,7 @@ export class PostgresStore implements Store {
       // batch so listeners reason about atomic groups (matches reaction
       // semantics in the rest of the framework). `by` lets other
       // PostgresStore instances self-filter their own writes — see
-      // `_subscribeNotifications()`. PG NOTIFY payloads cap at 8000
+      // `_subscribe_notifications()`. PG NOTIFY payloads cap at 8000
       // bytes; for typical commits (1–10 events) this is comfortably
       // under, and the polling fallback path handles the rare overflow
       // case correctly. Skipped entirely when `config.notify === false`
@@ -639,7 +639,7 @@ export class PostgresStore implements Store {
     const client = await this._pool.connect();
     try {
       await client.query("BEGIN");
-      const laneClause = lane !== undefined ? `AND s.lane = $5` : "";
+      const lane_clause = lane !== undefined ? `AND s.lane = $5` : "";
       const params: unknown[] =
         lane !== undefined
           ? [lagging, leading, by, millis, lane]
@@ -658,7 +658,7 @@ export class PostgresStore implements Store {
           SELECT stream, source, at, priority, lane
           FROM ${this._fqs} s
           WHERE blocked = false
-            ${laneClause}
+            ${lane_clause}
             AND (leased_by IS NULL OR leased_until <= NOW())
             AND (s.at < 0 OR EXISTS (
               SELECT 1 FROM ${this._fqt} e
@@ -918,7 +918,7 @@ export class PostgresStore implements Store {
    * `WHERE` — callers compose it with any other predicates they need.
    * Returns an always-true clause (`true`) when the filter is empty.
    */
-  private _filterClause(
+  private _filter_clause(
     filter: StreamFilter,
     start: number
   ): { clause: string; values: unknown[] } {
@@ -956,19 +956,19 @@ export class PostgresStore implements Store {
   }
 
   async reset(input: string[] | StreamFilter): Promise<number> {
-    const setClause = `SET at = -1, retry = 0, blocked = false, error = NULL,
+    const set_clause = `SET at = -1, retry = 0, blocked = false, error = NULL,
                           leased_by = NULL, leased_until = NULL`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(
-        `UPDATE ${this._fqs} ${setClause} WHERE stream = ANY($1)`,
+        `UPDATE ${this._fqs} ${set_clause} WHERE stream = ANY($1)`,
         [input]
       );
       return rowCount ?? 0;
     }
-    const { clause, values } = this._filterClause(input, 1);
+    const { clause, values } = this._filter_clause(input, 1);
     const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${setClause} WHERE ${clause}`,
+      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
       values
     );
     return rowCount ?? 0;
@@ -990,12 +990,12 @@ export class PostgresStore implements Store {
    * @returns Count of streams that were actually flipped (were blocked).
    */
   async unblock(input: string[] | StreamFilter): Promise<number> {
-    const setClause = `SET retry = -1, blocked = false, error = NULL,
+    const set_clause = `SET retry = -1, blocked = false, error = NULL,
                           leased_by = NULL, leased_until = NULL`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(
-        `UPDATE ${this._fqs} ${setClause}
+        `UPDATE ${this._fqs} ${set_clause}
          WHERE stream = ANY($1) AND blocked = true`,
         [input]
       );
@@ -1004,12 +1004,12 @@ export class PostgresStore implements Store {
     // Filter form: force `blocked = true` regardless of what the
     // caller passed — there is no use case for "unblock unblocked
     // streams." A no-op overlay is the right shape here.
-    const { clause, values } = this._filterClause(
+    const { clause, values } = this._filter_clause(
       { ...input, blocked: true },
       1
     );
     const { rowCount } = await this._pool.query(
-      `UPDATE ${this._fqs} ${setClause} WHERE ${clause}`,
+      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
       values
     );
     return rowCount ?? 0;
@@ -1030,7 +1030,7 @@ export class PostgresStore implements Store {
    * @returns Count of streams whose priority changed.
    */
   async prioritize(filter: StreamFilter, priority: number): Promise<number> {
-    const { clause, values } = this._filterClause(filter, 2);
+    const { clause, values } = this._filter_clause(filter, 2);
     const sql = `UPDATE ${this._fqs} SET priority = $1
                  WHERE priority <> $1 AND ${clause}`;
     const { rowCount } = await this._pool.query(sql, [priority, ...values]);
@@ -1164,11 +1164,11 @@ export class PostgresStore implements Store {
     options?: QueryStatsOptions<E>
   ): Promise<Map<string, StreamStats<E>>> {
     const exclude = options?.exclude ?? [];
-    const wantTail = options?.tail ?? false;
-    const wantCount = options?.count ?? false;
-    const wantNames = options?.names ?? false;
+    const want_tail = options?.tail ?? false;
+    const want_count = options?.count ?? false;
+    const want_names = options?.names ?? false;
     const before = options?.before;
-    const fullScan = wantCount || wantNames;
+    const full_scan = want_count || want_names;
 
     // Empty array short-circuit — saves a round trip on a no-op.
     if (Array.isArray(input) && input.length === 0) {
@@ -1203,22 +1203,27 @@ export class PostgresStore implements Store {
       where.push(`e.id < $${params.length}`);
     }
 
-    const fromClause = `${this._fqt} e`;
+    const from_clause = `${this._fqt} e`;
     // Always emit a WHERE clause — `WHERE TRUE` short-circuits the
     // empty-filter case without a conditional branch on the generation
     // side. PG optimizes the trivial predicate out.
-    const whereClause = `WHERE ${where.length ? where.join(" AND ") : "TRUE"}`;
+    const where_clause = `WHERE ${where.length ? where.join(" AND ") : "TRUE"}`;
 
-    return fullScan
-      ? this._queryStatsFullScan<E>(
-          fromClause,
-          whereClause,
+    return full_scan
+      ? this._query_stats_full_scan<E>(
+          from_clause,
+          where_clause,
           params,
-          wantTail,
-          wantCount,
-          wantNames
+          want_tail,
+          want_count,
+          want_names
         )
-      : this._queryStatsHeadsOnly<E>(fromClause, whereClause, params, wantTail);
+      : this._query_stats_heads_only<E>(
+          from_clause,
+          where_clause,
+          params,
+          want_tail
+        );
   }
 
   /**
@@ -1226,22 +1231,22 @@ export class PostgresStore implements Store {
    * optional second query (in parallel) for the tail. K rows touched
    * per query, not N events.
    */
-  private async _queryStatsHeadsOnly<E extends Schemas>(
-    fromClause: string,
-    whereClause: string,
+  private async _query_stats_heads_only<E extends Schemas>(
+    from_clause: string,
+    where_clause: string,
     params: unknown[],
-    wantTail: boolean
+    want_tail: boolean
   ): Promise<Map<string, StreamStats<E>>> {
     const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
-    const headSql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${fromClause} ${whereClause} ORDER BY e.stream, e.version DESC`;
-    const tailSql = wantTail
-      ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${fromClause} ${whereClause} ORDER BY e.stream, e.version ASC`
+    const head_sql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version DESC`;
+    const tail_sql = want_tail
+      ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version ASC`
       : null;
 
     const [headRes, tailRes] = await Promise.all([
-      this._pool.query<Committed<E, keyof E>>(headSql, params),
-      tailSql
-        ? this._pool.query<Committed<E, keyof E>>(tailSql, params)
+      this._pool.query<Committed<E, keyof E>>(head_sql, params),
+      tail_sql
+        ? this._pool.query<Committed<E, keyof E>>(tail_sql, params)
         : Promise.resolve(null),
     ]);
 
@@ -1269,19 +1274,21 @@ export class PostgresStore implements Store {
    * `COUNT(*)` and `jsonb_object_agg(name, n)` map alongside the head
    * (and tail when requested). All extras share the single events scan.
    */
-  private async _queryStatsFullScan<E extends Schemas>(
-    fromClause: string,
-    whereClause: string,
+  private async _query_stats_full_scan<E extends Schemas>(
+    from_clause: string,
+    where_clause: string,
     params: unknown[],
-    wantTail: boolean,
-    wantCount: boolean,
-    wantNames: boolean
+    want_tail: boolean,
+    want_count: boolean,
+    want_names: boolean
   ): Promise<Map<string, StreamStats<E>>> {
-    const tailCte = wantTail
+    const tail_cte = want_tail
       ? `, tails AS (SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version ASC)`
       : "";
-    const tailJoin = wantTail ? `LEFT JOIN tails t ON t.stream = h.stream` : "";
-    const tailCols = wantTail
+    const tail_join = want_tail
+      ? `LEFT JOIN tails t ON t.stream = h.stream`
+      : "";
+    const tail_cols = want_tail
       ? `, t.id AS t_id, t.stream AS t_stream, t.version AS t_version,
            t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta`
       : "";
@@ -1289,8 +1296,8 @@ export class PostgresStore implements Store {
     const sql = `
       WITH ef AS (
         SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta
-        FROM ${fromClause}
-        ${whereClause}
+        FROM ${from_clause}
+        ${where_clause}
       ),
       agg AS (
         SELECT stream,
@@ -1306,15 +1313,15 @@ export class PostgresStore implements Store {
       heads AS (
         SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version DESC
       )
-      ${tailCte}
+      ${tail_cte}
       SELECT
         h.id, h.stream, h.version, h.name, h.data, h.created, h.meta,
         a.cnt AS agg_count,
         a.names AS agg_names
-        ${tailCols}
+        ${tail_cols}
       FROM heads h
       LEFT JOIN agg a ON a.stream = h.stream
-      ${tailJoin}
+      ${tail_join}
     `;
 
     const res = await this._pool.query<
@@ -1349,7 +1356,7 @@ export class PostgresStore implements Store {
           meta: row.meta,
         } as Committed<E, keyof E>,
       };
-      if (wantTail && row.t_id !== undefined && row.t_id !== null) {
+      if (want_tail && row.t_id !== undefined && row.t_id !== null) {
         stats.tail = {
           id: row.t_id,
           stream: row.t_stream,
@@ -1360,12 +1367,12 @@ export class PostgresStore implements Store {
           meta: row.t_meta,
         } as unknown as Committed<E, keyof E>;
       }
-      if (wantCount) stats.count = row.agg_count;
+      if (want_count) stats.count = row.agg_count;
       // `agg_names` is non-null when this row exists: heads and agg are
       // both built from the same `ef` CTE, so any stream in heads has
       // at least one matching event and `jsonb_object_agg` returns an
       // object (never null) for that group.
-      if (wantNames) stats.names = row.agg_names as Record<string, number>;
+      if (want_names) stats.names = row.agg_names as Record<string, number>;
       out.set(row.stream, stats as StreamStats<E>);
     }
     return out;
@@ -1392,14 +1399,14 @@ export class PostgresStore implements Store {
    * @param handler Called for each cross-process commit notification.
    * @returns Disposer that releases the LISTEN client.
    */
-  private async _subscribeNotifications(
+  private async _subscribe_notifications(
     handler: (notification: StoreNotification) => void
   ): Promise<NotifyDisposer> {
     // Close any prior subscription so callers don't silently double-listen.
-    await this._teardownListen();
+    await this._teardown_listen();
 
     const client = await this._pool.connect();
-    const onNotification = (msg: pg.Notification) => {
+    const on_notification = (msg: pg.Notification) => {
       // Channel filter: this client only `LISTEN`s on `this._channel`,
       // but pg-pool can in theory deliver buffered notifications when a
       // connection is reused — guard rather than trust.
@@ -1450,7 +1457,7 @@ export class PostgresStore implements Store {
       // Adapter-level robustness: a throwing handler must not tear
       // down the dedicated LISTEN client. The orchestrator wraps its
       // own `notified` emit + drain wakeup separately
-      // (`Act._wireNotify`) — defense in depth, with each layer
+      // (`Act._wire_notify`) — defense in depth, with each layer
       // protecting its own resources. Direct callers of
       // `store.notify(handler)` (tests, custom integrations) inherit
       // the adapter wrap.
@@ -1460,22 +1467,22 @@ export class PostgresStore implements Store {
         logger.error(err, "act_commit: handler threw, listener preserved");
       }
     };
-    client.on("notification", onNotification);
+    client.on("notification", on_notification);
     try {
       await client.query(`LISTEN ${this._channel}`);
     } catch (err) {
-      client.removeListener("notification", onNotification);
+      client.removeListener("notification", on_notification);
       client.release(true);
       throw err;
     }
-    this._listenClient = client;
-    this._listenHandler = onNotification;
+    this._listen_client = client;
+    this._listen_handler = on_notification;
 
     return async () => {
       // No-op when this disposer is stale (a later notify() call already
       // tore the subscription down).
-      if (this._listenClient !== client) return;
-      await this._teardownListen();
+      if (this._listen_client !== client) return;
+      await this._teardown_listen();
     };
   }
 

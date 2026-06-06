@@ -10,8 +10,8 @@
 import { z } from "zod";
 import { act, dispose, log, state, store, ZodEmpty } from "../src/index.js";
 import {
-  currentVersionOf,
-  deprecatedEventNames,
+  current_version_of,
+  deprecated_event_names,
 } from "../src/internal/event-versions.js";
 
 describe("deprecation (ACT-403)", () => {
@@ -27,68 +27,68 @@ describe("deprecation (ACT-403)", () => {
   let streamId = 0;
   const nextStream = () => `dep-${++streamId}`;
 
-  describe("deprecatedEventNames", () => {
+  describe("deprecated_event_names", () => {
     it("flags nothing when every event is a single version", () => {
-      expect([...deprecatedEventNames(["Foo", "Bar", "Baz"])]).toEqual([]);
+      expect([...deprecated_event_names(["Foo", "Bar", "Baz"])]).toEqual([]);
     });
 
     it("flags the base when a _v2 sibling exists", () => {
-      expect([...deprecatedEventNames(["Foo", "Foo_v2"])]).toEqual(["Foo"]);
+      expect([...deprecated_event_names(["Foo", "Foo_v2"])]).toEqual(["Foo"]);
     });
 
     it("flags base and v2 when v3 exists", () => {
-      const d = deprecatedEventNames(["Foo", "Foo_v2", "Foo_v3"]);
+      const d = deprecated_event_names(["Foo", "Foo_v2", "Foo_v3"]);
       expect([...d].sort()).toEqual(["Foo", "Foo_v2"]);
     });
 
     it("allows gaps — {Foo, Foo_v3} deprecates Foo only", () => {
-      const d = deprecatedEventNames(["Foo", "Foo_v3"]);
+      const d = deprecated_event_names(["Foo", "Foo_v3"]);
       expect([...d]).toEqual(["Foo"]);
     });
 
     it("treats _v1 as a literal name (no grouping with the base)", () => {
       // `Foo_v1` and `Foo` are distinct events under the convention;
       // version suffixes start at 2.
-      const d = deprecatedEventNames(["Foo", "Foo_v1"]);
+      const d = deprecated_event_names(["Foo", "Foo_v1"]);
       expect([...d]).toEqual([]);
     });
 
     it("works when only versioned siblings exist (no base)", () => {
-      const d = deprecatedEventNames(["Foo_v2", "Foo_v3"]);
+      const d = deprecated_event_names(["Foo_v2", "Foo_v3"]);
       expect([...d]).toEqual(["Foo_v2"]);
     });
   });
 
-  describe("currentVersionOf", () => {
+  describe("current_version_of", () => {
     it("returns the highest-numbered sibling for a deprecated event", () => {
-      expect(currentVersionOf("Foo", ["Foo", "Foo_v2", "Foo_v3"])).toBe(
+      expect(current_version_of("Foo", ["Foo", "Foo_v2", "Foo_v3"])).toBe(
         "Foo_v3"
       );
     });
 
     it("returns undefined when the input event is itself the highest", () => {
-      expect(currentVersionOf("Foo_v3", ["Foo", "Foo_v2", "Foo_v3"])).toBe(
+      expect(current_version_of("Foo_v3", ["Foo", "Foo_v2", "Foo_v3"])).toBe(
         undefined
       );
     });
 
     it("returns undefined for a single-version event", () => {
-      expect(currentVersionOf("Foo", ["Foo"])).toBe(undefined);
+      expect(current_version_of("Foo", ["Foo"])).toBe(undefined);
     });
 
     it("skips unrelated event names when searching for the current version", () => {
       // The "Bar" event shares the registry but not the base name —
       // it must be ignored during the version-pair lookup.
-      expect(currentVersionOf("Foo", ["Foo", "Bar", "Foo_v2", "Baz_v2"])).toBe(
-        "Foo_v2"
-      );
+      expect(
+        current_version_of("Foo", ["Foo", "Bar", "Foo_v2", "Baz_v2"])
+      ).toBe("Foo_v2");
     });
 
     it("keeps the highest when iteration encounters a lower version after a higher one", () => {
       // Map.values()/Object.keys() iteration is insertion order, but
       // we should still pick the max regardless of order. Provide a
       // non-monotonic sequence to exercise the "skip lower" branch.
-      expect(currentVersionOf("Foo", ["Foo_v3", "Foo", "Foo_v2"])).toBe(
+      expect(current_version_of("Foo", ["Foo_v3", "Foo", "Foo_v2"])).toBe(
         "Foo_v3"
       );
     });

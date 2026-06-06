@@ -7,9 +7,9 @@ import {
   store,
   ZodEmpty,
 } from "../src/index.js";
-import { defaultCorrelator } from "../src/internal/correlator.js";
+import { default_correlator } from "../src/internal/correlator.js";
 
-describe("defaultCorrelator (pure)", () => {
+describe("default_correlator (pure)", () => {
   const baseCtx = {
     action: "increment",
     state: "Counter",
@@ -18,19 +18,19 @@ describe("defaultCorrelator (pure)", () => {
   };
 
   it("produces 18-char ids with full-length names", () => {
-    const id = defaultCorrelator(baseCtx);
+    const id = default_correlator(baseCtx);
     // 4 state + 1 dash + 4 action + 1 dash + 8 suffix
     expect(id).toHaveLength(18);
     expect(id).toMatch(/^coun-incr-[0-9a-z]{8}$/);
   });
 
   it("uses short prefixes when names are below 4 chars", () => {
-    const id = defaultCorrelator({ ...baseCtx, state: "Tx", action: "go" });
+    const id = default_correlator({ ...baseCtx, state: "Tx", action: "go" });
     expect(id).toMatch(/^tx-go-[0-9a-z]{8}$/);
   });
 
   it("is always lowercase", () => {
-    const id = defaultCorrelator({
+    const id = default_correlator({
       ...baseCtx,
       state: "CamelCase",
       action: "MIXEDcase",
@@ -40,21 +40,21 @@ describe("defaultCorrelator (pure)", () => {
 
   it("generates distinct ids back-to-back at the same ms", () => {
     const ids = new Set<string>();
-    for (let i = 0; i < 1000; i++) ids.add(defaultCorrelator(baseCtx));
+    for (let i = 0; i < 1000; i++) ids.add(default_correlator(baseCtx));
     // 1000 generations against 1.68M random tail → collision rate
     // ~1000²/(2·1.68M) ≈ 0.03%. Allow up to one collision.
     expect(ids.size).toBeGreaterThanOrEqual(999);
   });
 
   it("encodes timestamp in the first 4 chars of the suffix", () => {
-    const a = defaultCorrelator(baseCtx);
+    const a = default_correlator(baseCtx);
     // Wait at least 1ms so the timestamp segment differs.
     const waitMs = 5;
     const start = Date.now();
     while (Date.now() - start < waitMs) {
       // Spin briefly — sleep would yield to vitest fake-timers if any.
     }
-    const b = defaultCorrelator(baseCtx);
+    const b = default_correlator(baseCtx);
     expect(a.slice(-8, -4)).not.toBe(b.slice(-8, -4));
   });
 });

@@ -24,15 +24,15 @@
  * which meant N requested categories → N table walks. Bad for large
  * stores. Refactored to a pass-based design: each category is a
  * factory that returns an {@link AuditPass} with optional per-row
- * callbacks (`onEvent` / `onStream` / `onStat`) and a `finalize` hook
+ * callbacks (`on_event` / `on_stream` / `on_stat`) and a `finalize` hook
  * for any second-pass work. The dispatcher determines the UNION of
  * required data sources, runs each *once*, and broadcasts each row
  * to all interested passes. Worst case: three scans total (events,
  * streams, stats) regardless of how many categories the operator
  * requested. Most categories also share state — close-candidate and
- * restart-candidate both consume the same `onStat` stream; schema,
+ * restart-candidate both consume the same `on_stat` stream; schema,
  * correlation-gaps, and clock-anomalies all hang off the same
- * `onEvent` broadcast.
+ * `on_event` broadcast.
  *
  * Categories that need follow-up work (snapshot-drift's per-stream
  * snapshot lookup, correlation-gaps' orphan-id check after collecting
@@ -62,7 +62,10 @@ import type {
   StreamPosition,
   StreamStats,
 } from "../types/index.js";
-import { currentVersionOf, deprecatedEventNames } from "./event-versions.js";
+import {
+  current_version_of,
+  deprecated_event_names,
+} from "./event-versions.js";
 
 /**
  * Snapshot of orchestrator state the audit reads. Built once at
@@ -86,7 +89,7 @@ export type AuditDeps = {
   /**
    * Event names that the registry has at least one reaction for —
    * used by routing-health to detect "registered but unrouted"
-   * events. Normalized down from the internal `eventToLanes` map
+   * events. Normalized down from the internal `event_to_lanes` map
    * (which carries lane-set details audit doesn't need).
    */
   readonly routed_events: ReadonlySet<string>;
@@ -121,7 +124,7 @@ const ALL_CATEGORIES = [
 /**
  * A single audit category, expressed as a stream-consumer:
  *
- * - `onEvent` / `onStream` / `onStat` are called by the dispatcher
+ * - `on_event` / `on_stream` / `on_stat` are called by the dispatcher
  *   during the shared scans. Each is optional; the dispatcher uses
  *   the presence/absence to decide which scans to run.
  * - `finalize` runs after all shared scans complete. Categories that
@@ -132,9 +135,9 @@ const ALL_CATEGORIES = [
  */
 type AuditPass = {
   category: AuditCategory;
-  onEvent?: (e: Committed<Schemas, string>) => void;
-  onStream?: (p: StreamPosition) => void;
-  onStat?: (stream: string, s: StreamStats<Schemas>) => void;
+  on_event?: (e: Committed<Schemas, string>) => void;
+  on_stream?: (p: StreamPosition) => void;
+  on_stat?: (stream: string, s: StreamStats<Schemas>) => void;
   finalize?: (deps: AuditDeps) => Promise<void>;
   drain: () => AuditFinding[];
 };
@@ -164,35 +167,35 @@ export async function* audit(
   // Preserve a deterministic category order (matches ALL_CATEGORIES
   // declaration) so output ordering doesn't depend on the order
   // operators list categories in their call.
-  const orderedCategories = ALL_CATEGORIES.filter((c) => requested.has(c));
-  const passes: AuditPass[] = orderedCategories.map((c) =>
+  const ordered_categories = ALL_CATEGORIES.filter((c) => requested.has(c));
+  const passes: AuditPass[] = ordered_categories.map((c) =>
     PASS_FACTORIES[c](deps, options)
   );
 
   // Determine scan needs. `some(...)` short-circuits — three trivial
   // walks at worst.
-  const needStats = passes.some((p) => p.onStat !== undefined);
-  const needStreams = passes.some((p) => p.onStream !== undefined);
-  const needEvents = passes.some((p) => p.onEvent !== undefined);
+  const need_stats = passes.some((p) => p.on_stat !== undefined);
+  const need_streams = passes.some((p) => p.on_stream !== undefined);
+  const need_events = passes.some((p) => p.on_event !== undefined);
 
-  if (needStats) {
+  if (need_stats) {
     const stats = await deps
       .store()
       .query_stats<Schemas>({}, { count: true, names: true });
     for (const [stream, s] of stats) {
-      for (const p of passes) p.onStat?.(stream, s);
+      for (const p of passes) p.on_stat?.(stream, s);
     }
   }
 
-  if (needStreams) {
+  if (need_streams) {
     await deps.store().query_streams((pos) => {
-      for (const p of passes) p.onStream?.(pos);
+      for (const p of passes) p.on_stream?.(pos);
     });
   }
 
-  if (needEvents) {
+  if (need_events) {
     await deps.store().query<Schemas>((event) => {
-      for (const p of passes) p.onEvent?.(event);
+      for (const p of passes) p.on_event?.(event);
     }, options.query);
   }
 
@@ -225,11 +228,11 @@ export async function* audit(
  * has no entry) and `schema_validation_failed` (event matches a
  * known name but fails the current Zod schema).
  */
-const makeSchemaPass: PassFactory = (deps) => {
+const make_schema_pass: PassFactory = (deps) => {
   const findings: AuditFinding[] = [];
   return {
     category: "schema",
-    onEvent(event) {
+    on_event(event) {
       const name = String(event.name);
       const state = deps.event_to_state.get(name);
       if (!state) {
@@ -263,28 +266,28 @@ const makeSchemaPass: PassFactory = (deps) => {
 
 /**
  * `deprecated-load` — workspace-wide event-name histogram classified
- * by the framework's `_v<digits>` rule. Built from the shared `onStat`
+ * by the framework's `_v<digits>` rule. Built from the shared `on_stat`
  * stream — accumulates per-name + per-stream totals in memory, then
  * emits one finding per deprecated event above the threshold during
  * `drain`.
  */
-const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
+const make_deprecated_load_pass: PassFactory = (deps, options) => {
   const share_min =
     options.thresholds?.deprecated_min ?? DEFAULTS.deprecated_min;
   const totals = new Map<string, number>();
-  const perStream = new Map<string, Map<string, number>>();
+  const per_stream = new Map<string, Map<string, number>>();
   return {
     category: "deprecated-load",
-    onStat(stream, { names }) {
+    on_stat(stream, { names }) {
       // Contract: query_stats was called with `{names: true}`,
       // so adapter populates `names` with positive integer counts.
       // No runtime fallback needed.
       for (const [name, count] of Object.entries(names!)) {
         totals.set(name, (totals.get(name) ?? 0) + count!);
-        let m = perStream.get(name);
+        let m = per_stream.get(name);
         if (!m) {
           m = new Map();
-          perStream.set(name, m);
+          per_stream.set(name, m);
         }
         m.set(stream, count!);
       }
@@ -294,28 +297,28 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
       const grand = [...totals.values()].reduce((s, n) => s + n, 0);
       if (grand === 0) return findings;
       // Registry-driven deprecation classification (not on-disk-driven).
-      const deprecated = deprecatedEventNames(deps.known_events);
+      const deprecated = deprecated_event_names(deps.known_events);
       const sorted = [...deprecated]
         .map((name) => ({ name, count: totals.get(name) ?? 0 }))
         .sort((a, b) => b.count - a.count);
       for (const { name, count } of sorted) {
         if (count === 0) continue;
         if (count / grand < share_min) continue;
-        // Contract: `deprecatedEventNames(registry)` only returns names
+        // Contract: `deprecated_event_names(registry)` only returns names
         // that have a higher version in the same family, so
-        // `currentVersionOf(name, registry)` is guaranteed defined.
-        const currentVersion = currentVersionOf(name, deps.known_events)!;
-        // perStream is populated in lockstep with totals — name is guaranteed present.
-        const topStreams = [...perStream.get(name)!.entries()]
+        // `current_version_of(name, registry)` is guaranteed defined.
+        const current_version = current_version_of(name, deps.known_events)!;
+        // per_stream is populated in lockstep with totals — name is guaranteed present.
+        const top_streams = [...per_stream.get(name)!.entries()]
           .map(([stream, c]) => ({ stream, count: c }))
           .sort((a, b) => b.count - a.count)
           .slice(0, 10);
         findings.push({
           category: "deprecated-load",
           name,
-          current_version: currentVersion,
+          current_version,
           total: count,
-          top_streams: topStreams,
+          top_streams: top_streams,
         });
       }
       return findings;
@@ -325,18 +328,18 @@ const makeDeprecatedLoadPass: PassFactory = (deps, options) => {
 
 /**
  * `close-candidate` — flags streams ripe for `app.close(...)`. Two
- * flavours: `idle` (head older than `idleDays`) and `terminal` (head
- * event name in operator-supplied `terminalEvents` list). Each
- * finding carries `restartSupported` (state has `.snap()`).
+ * flavours: `idle` (head older than `idle_days`) and `terminal` (head
+ * event name in operator-supplied `terminal_events` list). Each
+ * finding carries `restart_supported` (state has `.snap()`).
  */
-const makeCloseCandidatePass: PassFactory = (deps, options) => {
+const make_close_candidate_pass: PassFactory = (deps, options) => {
   const idle_days = options.thresholds?.idle_days ?? DEFAULTS.idle_days;
   const terminal_events = new Set(options.thresholds?.terminal_events ?? []);
   const idle_cutoff = Date.now() - idle_days * 24 * 60 * 60 * 1000;
   const findings: AuditFinding[] = [];
   return {
     category: "close-candidate",
-    onStat(stream, { head }) {
+    on_stat(stream, { head }) {
       const head_name = String(head.name);
       if (head_name.startsWith("__")) return; // already-closed or mid-truncate
       // All in-tree adapters return `created` as Date; the Date
@@ -354,7 +357,7 @@ const makeCloseCandidatePass: PassFactory = (deps, options) => {
         idle_days: is_idle
           ? Math.floor((Date.now() - head_time) / (24 * 60 * 60 * 1000))
           : undefined,
-        restart_supported: restartIsSupported(deps, head_name),
+        restart_supported: restart_is_supported(deps, head_name),
       });
     },
     drain: () => findings,
@@ -362,21 +365,21 @@ const makeCloseCandidatePass: PassFactory = (deps, options) => {
 };
 
 /**
- * `restart-candidate` — streams above `eventCountForRestart` whose
- * state declares `.snap()`. Reads from the shared `onStat` stream.
+ * `restart-candidate` — streams above `event_count_for_restart` whose
+ * state declares `.snap()`. Reads from the shared `on_stat` stream.
  */
-const makeRestartCandidatePass: PassFactory = (deps, options) => {
+const make_restart_candidate_pass: PassFactory = (deps, options) => {
   const threshold = options.thresholds?.restart_min ?? DEFAULTS.restart_min;
   const findings: AuditFinding[] = [];
   return {
     category: "restart-candidate",
-    onStat(stream, { head, count, names }) {
+    on_stat(stream, { head, count, names }) {
       // `count` / `names` always populated — query_stats is called
       // with both flags set; adapters keep them present together.
       if (count! < threshold) return;
       const head_name = String(head.name);
       if (head_name.startsWith("__")) return;
-      if (!restartIsSupported(deps, head_name)) return;
+      if (!restart_is_supported(deps, head_name)) return;
       findings.push({
         category: "restart-candidate",
         stream,
@@ -393,10 +396,10 @@ const makeRestartCandidatePass: PassFactory = (deps, options) => {
 
 /**
  * `reaction-health` — surfaces blocked / near-block / stuck-backoff
- * streams. Reads from the shared `onStream` stream-positions
+ * streams. Reads from the shared `on_stream` stream-positions
  * broadcast.
  */
-const makeReactionHealthPass: PassFactory = (_deps, options) => {
+const make_reaction_health_pass: PassFactory = (_deps, options) => {
   const near_block = options.thresholds?.near_block ?? DEFAULTS.near_block;
   const stuck_minutes =
     options.thresholds?.stuck_minutes ?? DEFAULTS.stuck_minutes;
@@ -404,7 +407,7 @@ const makeReactionHealthPass: PassFactory = (_deps, options) => {
   const findings: AuditFinding[] = [];
   return {
     category: "reaction-health",
-    onStream(p) {
+    on_stream(p) {
       if (p.blocked) {
         findings.push({
           category: "reaction-health",
@@ -448,11 +451,11 @@ const makeReactionHealthPass: PassFactory = (_deps, options) => {
 
 /**
  * `snapshot-drift` — buffers candidate streams from the shared
- * `onStat` pass (skipping non-snap states + tombstoned heads), then
+ * `on_stat` pass (skipping non-snap states + tombstoned heads), then
  * does targeted per-stream lookups in `finalize` to find the last
  * `__snapshot__` event id and count events past it.
  */
-const makeSnapshotDriftPass: PassFactory = (deps, options) => {
+const make_snapshot_drift_pass: PassFactory = (deps, options) => {
   const drift_min = options.thresholds?.drift_min ?? DEFAULTS.drift_min;
   // Streams the workspace pass identifies as drift candidates —
   // resolved in finalize with per-stream queries.
@@ -464,11 +467,11 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
   const findings: AuditFinding[] = [];
   return {
     category: "snapshot-drift",
-    onStat(stream, { head, count, names }) {
-      // restartIsSupported() already filters out framework markers
+    on_stat(stream, { head, count, names }) {
+      // restart_is_supported() already filters out framework markers
       // (__snapshot__, __tombstone__) — neither name appears in any
       // user state's events map, so the snap check rejects them.
-      if (!restartIsSupported(deps, String(head.name))) return;
+      if (!restart_is_supported(deps, String(head.name))) return;
       if (count! < drift_min) return; // upper-bound short-circuit
       candidates.push({
         stream,
@@ -524,12 +527,12 @@ const makeSnapshotDriftPass: PassFactory = (deps, options) => {
  * `routing-health` — `unknown-lane` from the streams-table pass +
  * `unrouted` from the stats pass. Reads from BOTH shared streams.
  */
-const makeRoutingHealthPass: PassFactory = (deps) => {
+const make_routing_health_pass: PassFactory = (deps) => {
   const findings: AuditFinding[] = [];
-  const seenEventNames = new Set<string>();
+  const seen_event_names = new Set<string>();
   return {
     category: "routing-health",
-    onStream(p) {
+    on_stream(p) {
       if (!p.lane) return; // default lane — never an unknown-lane finding
       if (deps.declared_lanes.has(p.lane)) return;
       findings.push({
@@ -539,13 +542,13 @@ const makeRoutingHealthPass: PassFactory = (deps) => {
         lane: p.lane,
       });
     },
-    onStat(_stream, { names }) {
+    on_stat(_stream, { names }) {
       for (const name of Object.keys(names!)) {
-        seenEventNames.add(name);
+        seen_event_names.add(name);
       }
     },
     finalize() {
-      for (const name of seenEventNames) {
+      for (const name of seen_event_names) {
         if (name.startsWith("__")) continue;
         if (deps.routed_events.has(name)) continue;
         findings.push({
@@ -565,24 +568,24 @@ const makeRoutingHealthPass: PassFactory = (deps) => {
  * event pass; flags orphans in `drain`. No second store walk — the
  * id-set + the (id, parent) buffer are both populated in one pass.
  */
-const makeCorrelationGapsPass: PassFactory = () => {
-  const seenIds = new Set<number>();
-  const checks: Array<{ stream: string; id: number; parentId: number }> = [];
+const make_correlation_gaps_pass: PassFactory = () => {
+  const seen_ids = new Set<number>();
+  const checks: Array<{ stream: string; id: number; parent_id: number }> = [];
   return {
     category: "correlation-gaps",
-    onEvent(e) {
-      seenIds.add(e.id);
+    on_event(e) {
+      seen_ids.add(e.id);
       const causation = (e.meta as Record<string, unknown> | undefined)
         ?.causation as { event?: { id?: number } } | undefined;
-      const parentId = causation?.event?.id;
-      if (parentId !== undefined) {
-        checks.push({ stream: e.stream, id: e.id, parentId });
+      const parent_id = causation?.event?.id;
+      if (parent_id !== undefined) {
+        checks.push({ stream: e.stream, id: e.id, parent_id });
       }
     },
     drain() {
       const findings: AuditFinding[] = [];
-      for (const { stream, id, parentId } of checks) {
-        if (!seenIds.has(parentId)) {
+      for (const { stream, id, parent_id } of checks) {
+        if (!seen_ids.has(parent_id)) {
           findings.push({
             category: "correlation-gaps",
             stream,
@@ -601,12 +604,12 @@ const makeCorrelationGapsPass: PassFactory = () => {
  * order `created`. Single pass, per-stream "last seen" state in a
  * Map. Cheap.
  */
-const makeClockAnomaliesPass: PassFactory = () => {
+const make_clock_anomalies_pass: PassFactory = () => {
   const findings: AuditFinding[] = [];
-  const lastPerStream = new Map<string, number>();
+  const last_per_stream = new Map<string, number>();
   return {
     category: "clock-anomalies",
-    onEvent(e) {
+    on_event(e) {
       // `created` is a Date instance per the Store contract.
       const created = e.created.getTime();
       if (created > Date.now()) {
@@ -617,7 +620,7 @@ const makeClockAnomaliesPass: PassFactory = () => {
           reason: "future-created",
         });
       }
-      const prev = lastPerStream.get(e.stream);
+      const prev = last_per_stream.get(e.stream);
       if (prev !== undefined && created < prev) {
         findings.push({
           category: "clock-anomalies",
@@ -626,27 +629,30 @@ const makeClockAnomaliesPass: PassFactory = () => {
           reason: "out-of-order",
         });
       }
-      lastPerStream.set(e.stream, created);
+      last_per_stream.set(e.stream, created);
     },
     drain: () => findings,
   };
 };
 
 /** Does the stream's owning state declare a `.snap()` reducer? */
-function restartIsSupported(deps: AuditDeps, headEventName: string): boolean {
-  const state = deps.event_to_state.get(headEventName);
+function restart_is_supported(
+  deps: AuditDeps,
+  head_event_name: string
+): boolean {
+  const state = deps.event_to_state.get(head_event_name);
   return state?.snap !== undefined;
 }
 
 /** Factory registry — pass-creation indexed by category name. */
 const PASS_FACTORIES: Record<AuditCategory, PassFactory> = {
-  schema: makeSchemaPass,
-  "deprecated-load": makeDeprecatedLoadPass,
-  "close-candidate": makeCloseCandidatePass,
-  "restart-candidate": makeRestartCandidatePass,
-  "reaction-health": makeReactionHealthPass,
-  "snapshot-drift": makeSnapshotDriftPass,
-  "routing-health": makeRoutingHealthPass,
-  "correlation-gaps": makeCorrelationGapsPass,
-  "clock-anomalies": makeClockAnomaliesPass,
+  schema: make_schema_pass,
+  "deprecated-load": make_deprecated_load_pass,
+  "close-candidate": make_close_candidate_pass,
+  "restart-candidate": make_restart_candidate_pass,
+  "reaction-health": make_reaction_health_pass,
+  "snapshot-drift": make_snapshot_drift_pass,
+  "routing-health": make_routing_health_pass,
+  "correlation-gaps": make_correlation_gaps_pass,
+  "clock-anomalies": make_clock_anomalies_pass,
 };

@@ -241,7 +241,7 @@ describe("event-sourcing", () => {
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: "invalid" } as unknown as { count: number }, // invalid payload
       undefined,
-      true // skipValidation = true
+      true // skip_validation = true
     );
     expect(validateSpy).not.toHaveBeenCalled();
   });

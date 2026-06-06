@@ -21,7 +21,7 @@ const loc = (file?: string, line?: number): string => {
 
 const findActionsEmitting = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{ state: string; action: string; file?: string; line?: number }> => {
   const out: Array<{
     state: string;
@@ -31,7 +31,7 @@ const findActionsEmitting = (
   }> = [];
   for (const st of model.states) {
     for (const act of st.actions) {
-      if (act.emits.includes(eventName)) {
+      if (act.emits.includes(event_name)) {
         out.push({
           state: st.name,
           action: act.name,
@@ -46,7 +46,7 @@ const findActionsEmitting = (
 
 const findReactionsFor = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{
   slice?: string;
   handler: string;
@@ -63,7 +63,7 @@ const findReactionsFor = (
   }> = [];
   for (const sl of model.slices) {
     for (const r of sl.reactions) {
-      if (r.event === eventName) {
+      if (r.event === event_name) {
         out.push({
           slice: sl.name,
           handler: r.handlerName,
@@ -75,7 +75,7 @@ const findReactionsFor = (
     }
   }
   for (const r of model.reactions) {
-    if (r.event === eventName) {
+    if (r.event === event_name) {
       out.push({
         handler: r.handlerName,
         dispatches: r.dispatches,
@@ -89,10 +89,10 @@ const findReactionsFor = (
 
 const findProjectionsFor = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{ name: string; file?: string }> =>
   model.projections
-    .filter((p) => p.handles.includes(eventName))
+    .filter((p) => p.handles.includes(event_name))
     .map((p) => ({ name: p.name, file: p.file }));
 
 const fileSuffix = (file?: string, line?: number): string => {
@@ -303,19 +303,19 @@ export function formatMarkdown(idx: ContractIndex): string {
   const reactions = listByKind(idx, "reaction");
   if (reactions.length === 0) lines.push("_(none)_\n");
   for (const r of reactions) {
-    const [sliceName, eventName] = (r.qualifier ?? "::").split("::");
+    const [sliceName, event_name] = (r.qualifier ?? "::").split("::");
     lines.push(`### \`${r.name}\``);
     if (sliceName && sliceName !== "*")
       lines.push(`- **in slice:** \`${sliceName}\``);
-    if (eventName) lines.push(`- **on event:** \`${eventName}\``);
+    if (event_name) lines.push(`- **on event:** \`${event_name}\``);
     if (r.file) lines.push(`- **defined in:** \`${loc(r.file, r.line)}\``);
     const sliceReaction = m.slices
       .find((x) => x.name === sliceName)
       ?.reactions.find(
-        (rr) => rr.handlerName === r.name && rr.event === eventName
+        (rr) => rr.handlerName === r.name && rr.event === event_name
       );
     const orchReaction = m.reactions.find(
-      (rr) => rr.handlerName === r.name && rr.event === eventName
+      (rr) => rr.handlerName === r.name && rr.event === event_name
     );
     const inner = sliceReaction ?? orchReaction;
     if (inner && inner.dispatches.length > 0) {

@@ -19,10 +19,10 @@
 
 export { type AuditDeps, audit } from "./audit.js";
 export type { EventLaneSet } from "./build-classify.js";
-export { ALL_LANES, classifyRegistry } from "./build-classify.js";
-export { runCloseCycle } from "./close-cycle.js";
+export { ALL_LANES, classify_registry } from "./build-classify.js";
+export { run_close_cycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
-export { closeCorrelation, defaultCorrelator } from "./correlator.js";
+export { close_correlation, default_correlator } from "./correlator.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -32,16 +32,16 @@ export {
 export type { BoundAction, EsOps } from "./event-sourcing.js";
 export { scan } from "./event-sourcing.js";
 export {
-  currentVersionOf,
-  deprecatedEventNames,
+  current_version_of,
+  deprecated_event_names,
 } from "./event-versions.js";
 export {
   _this_,
-  mergeEventRegister,
-  mergeProjection,
-  registerState,
+  merge_event_register,
+  merge_projection,
+  register_state,
 } from "./merge.js";
-export { buildHandle, buildHandleBatch } from "./reactions.js";
+export { build_handle, build_handle_batch } from "./reactions.js";
 export {
   _registry,
   pii_fields,
@@ -53,4 +53,4 @@ export {
   SHREDDED,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
-export { buildDrain, buildEs, traceCycle } from "./tracing.js";
+export { build_drain, build_es, trace_cycle } from "./tracing.js";

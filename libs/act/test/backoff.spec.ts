@@ -1,38 +1,40 @@
 import { z } from "zod";
 import { act, dispose, sleep, state, ZodEmpty } from "../src/index.js";
-import { computeBackoffDelay } from "../src/internal/backoff.js";
+import { compute_backoff_delay } from "../src/internal/backoff.js";
 import type { BackoffOptions } from "../src/types/index.js";
 
-describe("computeBackoffDelay", () => {
+describe("compute_backoff_delay", () => {
   it("returns 0 when opts is undefined", () => {
-    expect(computeBackoffDelay(0, undefined)).toBe(0);
-    expect(computeBackoffDelay(5, undefined)).toBe(0);
+    expect(compute_backoff_delay(0, undefined)).toBe(0);
+    expect(compute_backoff_delay(5, undefined)).toBe(0);
   });
 
   it("returns 0 when baseMs is non-positive", () => {
-    expect(computeBackoffDelay(3, { strategy: "fixed", baseMs: 0 })).toBe(0);
-    expect(computeBackoffDelay(3, { strategy: "fixed", baseMs: -10 })).toBe(0);
+    expect(compute_backoff_delay(3, { strategy: "fixed", baseMs: 0 })).toBe(0);
+    expect(compute_backoff_delay(3, { strategy: "fixed", baseMs: -10 })).toBe(
+      0
+    );
   });
 
   it("fixed: returns baseMs regardless of retry", () => {
     const opts: BackoffOptions = { strategy: "fixed", baseMs: 100 };
-    expect(computeBackoffDelay(0, opts)).toBe(100);
-    expect(computeBackoffDelay(3, opts)).toBe(100);
-    expect(computeBackoffDelay(99, opts)).toBe(100);
+    expect(compute_backoff_delay(0, opts)).toBe(100);
+    expect(compute_backoff_delay(3, opts)).toBe(100);
+    expect(compute_backoff_delay(99, opts)).toBe(100);
   });
 
   it("linear: scales by (retry + 1)", () => {
     const opts: BackoffOptions = { strategy: "linear", baseMs: 50 };
-    expect(computeBackoffDelay(0, opts)).toBe(50);
-    expect(computeBackoffDelay(1, opts)).toBe(100);
-    expect(computeBackoffDelay(4, opts)).toBe(250);
+    expect(compute_backoff_delay(0, opts)).toBe(50);
+    expect(compute_backoff_delay(1, opts)).toBe(100);
+    expect(compute_backoff_delay(4, opts)).toBe(250);
   });
 
   it("exponential: doubles per retry", () => {
     const opts: BackoffOptions = { strategy: "exponential", baseMs: 100 };
-    expect(computeBackoffDelay(0, opts)).toBe(100);
-    expect(computeBackoffDelay(1, opts)).toBe(200);
-    expect(computeBackoffDelay(3, opts)).toBe(800);
+    expect(compute_backoff_delay(0, opts)).toBe(100);
+    expect(compute_backoff_delay(1, opts)).toBe(200);
+    expect(compute_backoff_delay(3, opts)).toBe(800);
   });
 
   it("exponential: clamps to maxMs when provided", () => {
@@ -41,8 +43,8 @@ describe("computeBackoffDelay", () => {
       baseMs: 100,
       maxMs: 500,
     };
-    expect(computeBackoffDelay(3, opts)).toBe(500); // 800 → 500
-    expect(computeBackoffDelay(10, opts)).toBe(500);
+    expect(compute_backoff_delay(3, opts)).toBe(500); // 800 → 500
+    expect(compute_backoff_delay(10, opts)).toBe(500);
   });
 
   it("jitter: keeps delay in [floor(0.5 * d), d) bounds", () => {
@@ -52,7 +54,7 @@ describe("computeBackoffDelay", () => {
       jitter: true,
     };
     for (let i = 0; i < 100; i++) {
-      const d = computeBackoffDelay(0, opts);
+      const d = compute_backoff_delay(0, opts);
       expect(d).toBeGreaterThanOrEqual(500);
       expect(d).toBeLessThan(1500);
     }
@@ -60,8 +62,8 @@ describe("computeBackoffDelay", () => {
 
   it("clamps negative retry to 0", () => {
     const opts: BackoffOptions = { strategy: "exponential", baseMs: 100 };
-    expect(computeBackoffDelay(-1, opts)).toBe(100);
-    expect(computeBackoffDelay(-99, opts)).toBe(100);
+    expect(compute_backoff_delay(-1, opts)).toBe(100);
+    expect(compute_backoff_delay(-99, opts)).toBe(100);
   });
 });
 

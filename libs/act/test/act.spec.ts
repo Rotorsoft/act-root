@@ -309,7 +309,7 @@ describe("act", () => {
     const mockedClaim = vi.spyOn(store(), "claim").mockImplementation(() => {
       throw new Error("test");
     });
-    (app as any)._armAll();
+    (app as any)._arm_all();
     const drained = await app.drain();
     expect(drained.leased.length).toBe(0);
     mockedClaim.mockRestore();
@@ -644,7 +644,7 @@ describe("act", () => {
     const mockQuery = vi.spyOn(store(), "query").mockResolvedValue(0);
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
     // Set _needs_drain manually
-    (app as any)._armAll();
+    (app as any)._arm_all();
     const d = await app.drain();
     expect(d.acked.length).toBe(0);
     expect(d.blocked.length).toBe(0);
@@ -727,7 +727,7 @@ describe("act", () => {
 
   it("should handle leased stream with no payloads in map", async () => {
     // Claim returns two streams, but fetched only has events for one.
-    // The second stream won't have an entry in payloadsMap → `|| []` fallback.
+    // The second stream won't have an entry in payloads_map → `|| []` fallback.
     const mockClaim = vi.spyOn(store(), "claim").mockResolvedValueOnce([
       {
         stream: "has-events",
@@ -755,7 +755,7 @@ describe("act", () => {
         return []; // no events for any stream
       });
     const mockAck = vi.spyOn(store(), "ack").mockResolvedValueOnce([]);
-    (app as any)._armAll();
+    (app as any)._arm_all();
     const d = await app.drain();
     expect(d.leased.length).toBe(2);
     mockClaim.mockRestore();

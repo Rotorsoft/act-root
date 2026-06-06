@@ -32,7 +32,7 @@ import type {
  *
  * @example System actor
  * ```typescript
- * const systemActor: Actor = {
+ * const system_actor: Actor = {
  *   id: "system",
  *   name: "Background Job"
  * };
@@ -171,7 +171,7 @@ export type CorrelatorContext = {
  *
  * // Propagate an inbound trace id when present
  * const tracePropagating: Correlator = (ctx) =>
- *   currentTraceId() ?? defaultCorrelator(ctx);
+ *   currentTraceId() ?? default_correlator(ctx);
  * ```
  *
  * Other shapes:
@@ -554,7 +554,7 @@ export type State<
    * - `message(validated)` — produces the `{name, data, pii?}` shape that
    *   goes to `Store.commit` (peels sensitive fields off `data` into
    *   `pii` on PII-aware states; identity otherwise).
-   * - `patch[eventName]` — already on State as the per-event reducer.
+   * - `patch[event_name]` — already on State as the per-event reducer.
    *   Wrapped at build time to merge PII into `data` first when the
    *   event carries sensitive fields; left bare for plain reducers.
    *
@@ -896,7 +896,7 @@ export interface IAct<
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     reactingTo?: Committed<Schemas, string>,
-    skipValidation?: boolean
+    skip_validation?: boolean
   ): Promise<Snapshot<any, any>[]>;
 
   load(
@@ -929,10 +929,10 @@ export interface IAct<
    * erasure" signal before the production callsite is exercised.
    *
    * Idempotent: a second call on an already-wiped stream returns
-   * `eventCount: 0` and does NOT re-emit `forgotten`.
+   * `event_count: 0` and does NOT re-emit `forgotten`.
    *
    * @param stream - Target stream to wipe.
    * @returns Count of events whose PII column was set to NULL.
    */
-  forget(stream: string): Promise<{ eventCount: number }>;
+  forget(stream: string): Promise<{ event_count: number }>;
 }

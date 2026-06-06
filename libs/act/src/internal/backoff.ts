@@ -20,7 +20,7 @@ import type { BackoffOptions } from "../types/action.js";
  * @returns Non-negative integer milliseconds. Always `0` when `opts` is
  *   undefined or `baseMs <= 0`.
  */
-export function computeBackoffDelay(
+export function compute_backoff_delay(
   retry: number,
   opts: BackoffOptions | undefined
 ): number {

@@ -68,8 +68,8 @@ export class ConsoleLogger implements Logger {
 
     const threshold = LEVEL_VALUES[level] ?? 30;
     const write = pretty
-      ? this._prettyWrite.bind(this, bindings)
-      : this._jsonWrite.bind(this, bindings);
+      ? this._pretty_write.bind(this, bindings)
+      : this._json_write.bind(this, bindings);
 
     // Assign methods — noop when level is gated (like pino's level-based replacement)
     this.fatal = write.bind(this, "fatal", 60); // fatal is always enabled
@@ -92,33 +92,33 @@ export class ConsoleLogger implements Logger {
     });
   }
 
-  private _jsonWrite(
+  private _json_write(
     bindings: Record<string, unknown> | undefined,
     level: string,
     _num: number,
-    objOrMsg: unknown,
+    obj_or_msg: unknown,
     msg?: string
   ): void {
     let obj: Record<string, unknown>;
     let message: string | undefined;
 
-    if (typeof objOrMsg === "string") {
-      message = objOrMsg;
+    if (typeof obj_or_msg === "string") {
+      message = obj_or_msg;
       obj = {};
-    } else if (objOrMsg instanceof Error) {
+    } else if (obj_or_msg instanceof Error) {
       // Error instances spread to `{}` — capture the salient fields
       // explicitly so structured log aggregators see them.
-      message = msg ?? objOrMsg.message;
+      message = msg ?? obj_or_msg.message;
       obj = {
-        error: { message: objOrMsg.message, name: objOrMsg.name },
-        stack: objOrMsg.stack,
+        error: { message: obj_or_msg.message, name: obj_or_msg.name },
+        stack: obj_or_msg.stack,
       };
-    } else if (objOrMsg !== null && typeof objOrMsg === "object") {
+    } else if (obj_or_msg !== null && typeof obj_or_msg === "object") {
       message = msg;
-      obj = { ...(objOrMsg as Record<string, unknown>) };
+      obj = { ...(obj_or_msg as Record<string, unknown>) };
     } else {
       message = msg;
-      obj = { value: objOrMsg };
+      obj = { value: obj_or_msg };
     }
 
     const entry = Object.assign({ level, time: Date.now() }, bindings, obj);
@@ -140,11 +140,11 @@ export class ConsoleLogger implements Logger {
     process.stdout.write(line + "\n");
   }
 
-  private _prettyWrite(
+  private _pretty_write(
     bindings: Record<string, unknown> | undefined,
     level: string,
     _num: number,
-    objOrMsg: unknown,
+    obj_or_msg: unknown,
     msg?: string
   ): void {
     const color = LEVEL_COLORS[level];
@@ -154,32 +154,32 @@ export class ConsoleLogger implements Logger {
     let message: string;
     let data: string | undefined;
 
-    if (typeof objOrMsg === "string") {
-      message = objOrMsg;
-    } else if (objOrMsg instanceof Error) {
+    if (typeof obj_or_msg === "string") {
+      message = obj_or_msg;
+    } else if (obj_or_msg instanceof Error) {
       // Error instances don't serialize their `message`/`stack` via
       // JSON.stringify — `JSON.stringify(err) === "{}"`. Render the
       // message inline and the stack as the data payload so operators
       // see something useful instead of an empty object.
-      message = msg ?? objOrMsg.message;
-      data = objOrMsg.stack;
+      message = msg ?? obj_or_msg.message;
+      data = obj_or_msg.stack;
     } else {
       message = msg ?? "";
-      if (objOrMsg !== undefined && objOrMsg !== null) {
+      if (obj_or_msg !== undefined && obj_or_msg !== null) {
         try {
-          data = JSON.stringify(objOrMsg);
+          data = JSON.stringify(obj_or_msg);
         } catch {
           data = "[unserializable]";
         }
       }
     }
 
-    const bindStr =
+    const bind_str =
       bindings && Object.keys(bindings).length
         ? ` ${JSON.stringify(bindings)}`
         : "";
 
-    const parts = [ts, tag, message, data, bindStr].filter(Boolean);
+    const parts = [ts, tag, message, data, bind_str].filter(Boolean);
     process.stdout.write(parts.join(" ") + "\n");
   }
 }

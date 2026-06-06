@@ -57,7 +57,7 @@ export function webhookMiddleware(
   options: CheckWebhookOptions
 ): MiddlewareHandler<{ Variables: WebhookVariables }> {
   return async function check(c, next) {
-    const headers = headersBag(c.req.raw.headers);
+    const headers = headers_bag(c.req.raw.headers);
     const rawBody = await c.req.text();
     const result = await checkWebhook(headers, rawBody, options);
     if (!result.ok) {
@@ -68,7 +68,7 @@ export function webhookMiddleware(
   };
 }
 
-function headersBag(
+function headers_bag(
   headers: Headers
 ): Record<string, string | string[] | undefined> {
   const out: Record<string, string | string[] | undefined> = {};

@@ -56,7 +56,7 @@ export function webhookMiddleware(
     res: Response,
     next: NextFunction
   ): Promise<void> {
-    const rawBody = bufferOrString(req.body);
+    const rawBody = buffer_or_string(req.body);
     const result = await checkWebhook(
       req.headers as Record<string, string | string[] | undefined>,
       rawBody,
@@ -76,7 +76,7 @@ export function webhookMiddleware(
   };
 }
 
-function bufferOrString(body: unknown): string {
+function buffer_or_string(body: unknown): string {
   if (typeof body === "string") return body;
   if (body instanceof Uint8Array) return Buffer.from(body).toString("utf8");
   return "";

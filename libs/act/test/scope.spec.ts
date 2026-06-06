@@ -239,7 +239,7 @@ describe("scoped ports (ACT-501)", () => {
     const tenantBuilder = act().withState(Counter).withProjection(Tally);
 
     // The projection registers exactly one reaction for `Incremented`.
-    // If `mergeProjection` ran a second time on the shared registry,
+    // If `merge_projection` ran a second time on the shared registry,
     // we'd see a `_p`-suffixed duplicate key after the second build().
     const firstReactionCount =
       tenantBuilder.events.Incremented?.reactions.size ?? 0;

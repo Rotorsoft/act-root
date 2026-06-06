@@ -1,6 +1,6 @@
-import { mergeEventRegister } from "../src/internal/merge.js";
+import { merge_event_register } from "../src/internal/merge.js";
 
-describe("mergeEventRegister", () => {
+describe("merge_event_register", () => {
   it("merges reactions from source into target for matching event names", () => {
     const target = {
       Incremented: { reactions: new Map<string, unknown>([["a", "fn-a"]]) },
@@ -8,7 +8,7 @@ describe("mergeEventRegister", () => {
     const source = {
       Incremented: { reactions: new Map<string, unknown>([["b", "fn-b"]]) },
     };
-    mergeEventRegister(target, source);
+    merge_event_register(target, source);
     expect([...target.Incremented.reactions.entries()]).toEqual([
       ["a", "fn-a"],
       ["b", "fn-b"],
@@ -23,7 +23,7 @@ describe("mergeEventRegister", () => {
       Known: { reactions: new Map<string, unknown>([["x", "fn-x"]]) },
       Unknown: { reactions: new Map<string, unknown>([["y", "fn-y"]]) },
     };
-    mergeEventRegister(target, source);
+    merge_event_register(target, source);
     // Known got the reaction
     expect(target.Known.reactions.get("x")).toBe("fn-x");
     // Unknown was skipped — not added to target
@@ -37,7 +37,7 @@ describe("mergeEventRegister", () => {
     const source = {
       E: { reactions: new Map<string, unknown>([["dup", "new"]]) },
     };
-    mergeEventRegister(target, source);
+    merge_event_register(target, source);
     expect(target.E.reactions.get("dup")).toBe("new");
   });
 });

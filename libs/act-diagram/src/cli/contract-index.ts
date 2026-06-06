@@ -57,12 +57,12 @@ export type EventStatus = {
  */
 export function eventStatus(
   name: string,
-  allNames: Iterable<string>
+  all_names: Iterable<string>
 ): EventStatus {
   const me = decomposeEventName(name);
   let bestVersion = me.version;
   let bestName: string | undefined;
-  for (const other of allNames) {
+  for (const other of all_names) {
     if (other === name) continue;
     const dec = decomposeEventName(other);
     if (dec.base === me.base && dec.version > bestVersion) {

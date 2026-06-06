@@ -31,8 +31,8 @@ import type { EsOps } from "./event-sourcing.js";
  * @internal
  */
 export type CloseCycleDeps = {
-  readonly reactiveEventsSize: number;
-  readonly eventToState: ReadonlyMap<string, State<any, any, any>>;
+  readonly reactive_events_size: number;
+  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
   readonly load: EsOps["load"];
   readonly tombstone: EsOps["tombstone"];
   readonly logger: Logger;
@@ -47,14 +47,14 @@ export type CloseCycleDeps = {
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
- * `lastEventName` is always defined — the scan filters tombstones in the
+ * `last_event_name` is always defined — the scan filters tombstones in the
  * callback and queries without `with_snaps`, so any event reaching the
  * callback is a domain event whose name we capture alongside id/version.
  */
 type StreamHead = {
-  readonly maxId: number;
+  readonly max_id: number;
   readonly version: number;
-  readonly lastEventName: string;
+  readonly last_event_name: string;
 };
 
 /**
@@ -63,23 +63,23 @@ type StreamHead = {
  *
  * @internal
  */
-export async function runCloseCycle(
+export async function run_close_cycle(
   targets: CloseTarget[],
   deps: CloseCycleDeps
 ): Promise<CloseResult> {
-  // Caller (Act.close) filters empty targets; runCloseCycle assumes at
+  // Caller (Act.close) filters empty targets; run_close_cycle assumes at
   // least one target.
-  const targetMap = new Map(targets.map((t) => [t.stream, t]));
-  const streams = [...targetMap.keys()];
+  const target_map = new Map(targets.map((t) => [t.stream, t]));
+  const streams = [...target_map.keys()];
   const skipped: string[] = [];
 
   // 1. Scan: find the latest non-tombstone event per stream
-  const streamInfo = await scanStreamHeads(streams);
+  const stream_info = await scan_stream_heads(streams);
 
   // 2. Partition: skip streams with pending reactions in flight
-  const safe = await partitionBySafety(
-    streamInfo,
-    deps.reactiveEventsSize,
+  const safe = await partition_by_safety(
+    stream_info,
+    deps.reactive_events_size,
     skipped
   );
   if (!safe.length) return { truncated: new Map(), skipped };
@@ -87,9 +87,9 @@ export async function runCloseCycle(
   // 3. Guard: commit a tombstone with expectedVersion per safe stream.
   // Correlation comes from the orchestrator's configured correlator so
   // close commits share the app's id scheme — see ACT-404.
-  const { guarded, guardEvents } = await guardWithTombstones(
+  const { guarded, guard_events } = await guard_with_tombstones(
     safe,
-    streamInfo,
+    stream_info,
     deps.correlation,
     deps.tombstone,
     skipped
@@ -97,23 +97,23 @@ export async function runCloseCycle(
   if (!guarded.length) return { truncated: new Map(), skipped };
 
   // 4. Seed: load final state for restart targets through the owning state
-  const seedStates = await loadRestartSeeds(
+  const seed_states = await load_restart_seeds(
     guarded,
-    targetMap,
-    streamInfo,
-    deps.eventToState,
+    target_map,
+    stream_info,
+    deps.event_to_state,
     deps.load,
     deps.logger
   );
 
   // 5. Archive: user-provided per-stream callback while guarded
-  await runArchiveCallbacks(guarded, targetMap);
+  await run_archive_callbacks(guarded, target_map);
 
   // 6. Truncate + seed: atomic per-store transaction
-  const truncated = await truncateAndWarmCache(
+  const truncated = await truncate_and_warm_cache(
     guarded,
-    seedStates,
-    guardEvents,
+    seed_states,
+    guard_events,
     deps.correlation
   );
 
@@ -124,7 +124,7 @@ export async function runCloseCycle(
 // Phase 1 — scan stream heads
 // ---------------------------------------------------------------------------
 
-async function scanStreamHeads(
+async function scan_stream_heads(
   streams: string[]
 ): Promise<Map<string, StreamHead>> {
   // One round trip: query_stats returns the latest non-snap event per
@@ -140,9 +140,9 @@ async function scanStreamHeads(
   for (const [stream, { head }] of stats) {
     if (head.name === TOMBSTONE_EVENT) continue;
     out.set(stream, {
-      maxId: head.id,
+      max_id: head.id,
       version: head.version,
-      lastEventName: head.name as string,
+      last_event_name: head.name as string,
     });
   }
   return out;
@@ -152,28 +152,28 @@ async function scanStreamHeads(
 // Phase 2 — partition by safety
 // ---------------------------------------------------------------------------
 
-async function partitionBySafety(
-  streamInfo: Map<string, StreamHead>,
-  reactiveEventsSize: number,
+async function partition_by_safety(
+  stream_info: Map<string, StreamHead>,
+  reactive_events_size: number,
   skipped: string[]
 ): Promise<string[]> {
-  if (reactiveEventsSize === 0) return [...streamInfo.keys()];
+  if (reactive_events_size === 0) return [...stream_info.keys()];
 
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
-  const pendingSet = new Set<string>();
+  const pending_set = new Set<string>();
   await store().query_streams((position) => {
-    const sourceRe = position.source ? RegExp(position.source) : undefined;
-    for (const [stream, info] of streamInfo) {
-      if ((!sourceRe || sourceRe.test(stream)) && position.at < info.maxId) {
-        pendingSet.add(stream);
+    const source_re = position.source ? RegExp(position.source) : undefined;
+    for (const [stream, info] of stream_info) {
+      if ((!source_re || source_re.test(stream)) && position.at < info.max_id) {
+        pending_set.add(stream);
       }
     }
   });
 
   const safe: string[] = [];
-  for (const [stream] of streamInfo) {
-    if (pendingSet.has(stream)) skipped.push(stream);
+  for (const [stream] of stream_info) {
+    if (pending_set.has(stream)) skipped.push(stream);
     else safe.push(stream);
   }
   return safe;
@@ -183,83 +183,83 @@ async function partitionBySafety(
 // Phase 3 — guard with tombstones
 // ---------------------------------------------------------------------------
 
-async function guardWithTombstones(
+async function guard_with_tombstones(
   safe: string[],
-  streamInfo: Map<string, StreamHead>,
+  stream_info: Map<string, StreamHead>,
   correlation: string,
   tombstone: EsOps["tombstone"],
   skipped: string[]
 ): Promise<{
   guarded: string[];
-  guardEvents: Map<string, { id: number; stream: string }>;
+  guard_events: Map<string, { id: number; stream: string }>;
 }> {
   const guarded: string[] = [];
-  const guardEvents = new Map<string, { id: number; stream: string }>();
+  const guard_events = new Map<string, { id: number; stream: string }>();
   await Promise.all(
     safe.map(async (stream) => {
-      const info = streamInfo.get(stream)!;
+      const info = stream_info.get(stream)!;
       const committed = await tombstone(stream, info.version, correlation);
       if (committed) {
         guarded.push(stream);
-        guardEvents.set(stream, { id: committed.id, stream });
+        guard_events.set(stream, { id: committed.id, stream });
       } else {
         // ConcurrencyError → another writer beat the guard
         skipped.push(stream);
       }
     })
   );
-  return { guarded, guardEvents };
+  return { guarded, guard_events };
 }
 
 // ---------------------------------------------------------------------------
 // Phase 4 — load restart seeds
 // ---------------------------------------------------------------------------
 
-async function loadRestartSeeds(
+async function load_restart_seeds(
   guarded: string[],
-  targetMap: Map<string, CloseTarget>,
-  streamInfo: Map<string, StreamHead>,
-  eventToState: ReadonlyMap<string, State<any, any, any>>,
+  target_map: Map<string, CloseTarget>,
+  stream_info: Map<string, StreamHead>,
+  event_to_state: ReadonlyMap<string, State<any, any, any>>,
   load: EsOps["load"],
   logger: Logger
 ): Promise<Map<string, Schema>> {
-  const seedStates = new Map<string, Schema>();
+  const seed_states = new Map<string, Schema>();
   await Promise.all(
     guarded
-      .filter((s) => targetMap.get(s)?.restart)
+      .filter((s) => target_map.get(s)?.restart)
       .map(async (stream) => {
-        // streamInfo entry is guaranteed (guarded ⊆ streamInfo.keys()).
-        const lastEventName = streamInfo.get(stream)!.lastEventName;
-        const ownerState = eventToState.get(lastEventName);
-        if (!ownerState) {
+        // stream_info entry is guaranteed (guarded ⊆ stream_info.keys()).
+        const last_event_name = stream_info.get(stream)!.last_event_name;
+        const owner_state = event_to_state.get(last_event_name);
+        if (!owner_state) {
           // No registered state owns the stream's events (deleted state,
           // schema versioning gone wrong, etc.). Tombstone instead of
           // seeding a corrupted snapshot.
           logger.error(
-            `Cannot seed restart for "${stream}": no registered state owns event "${lastEventName}". Stream will be tombstoned instead.`
+            `Cannot seed restart for "${stream}": no registered state owns event "${last_event_name}". Stream will be tombstoned instead.`
           );
           return;
         }
-        const snap = await load(ownerState, stream);
-        seedStates.set(stream, snap.state as Schema);
+        const snap = await load(owner_state, stream);
+        seed_states.set(stream, snap.state as Schema);
       })
   );
-  return seedStates;
+  return seed_states;
 }
 
 // ---------------------------------------------------------------------------
 // Phase 5 — archive callbacks
 // ---------------------------------------------------------------------------
 
-async function runArchiveCallbacks(
+async function run_archive_callbacks(
   guarded: string[],
-  targetMap: Map<string, CloseTarget>
+  target_map: Map<string, CloseTarget>
 ): Promise<void> {
   // Sequential — user callbacks may share resources (S3 client, etc.) and
   // a failure should propagate to the caller without leaving partial state.
   for (const stream of guarded) {
-    const archiveFn = targetMap.get(stream)?.archive;
-    if (archiveFn) await archiveFn();
+    const archive_fn = target_map.get(stream)?.archive;
+    if (archive_fn) await archive_fn();
   }
 }
 
@@ -267,15 +267,15 @@ async function runArchiveCallbacks(
 // Phase 6 — atomic truncate + cache warm
 // ---------------------------------------------------------------------------
 
-async function truncateAndWarmCache(
+async function truncate_and_warm_cache(
   guarded: string[],
-  seedStates: Map<string, Schema>,
-  guardEvents: Map<string, { id: number; stream: string }>,
+  seed_states: Map<string, Schema>,
+  guard_events: Map<string, { id: number; stream: string }>,
   correlation: string
 ): Promise<CloseResult["truncated"]> {
-  const truncTargets = guarded.map((stream) => {
-    const snapshot = seedStates.get(stream);
-    const guard = guardEvents.get(stream)!;
+  const trunc_targets = guarded.map((stream) => {
+    const snapshot = seed_states.get(stream);
+    const guard = guard_events.get(stream)!;
     return {
       stream,
       snapshot,
@@ -287,13 +287,13 @@ async function truncateAndWarmCache(
       },
     };
   });
-  const truncated = await store().truncate(truncTargets);
+  const truncated = await store().truncate(trunc_targets);
 
   // Cache invalidate / warm — use real event IDs from committed events
   await Promise.all(
     guarded.map(async (stream) => {
       const entry = truncated.get(stream);
-      const state = seedStates.get(stream);
+      const state = seed_states.get(stream);
       if (state && entry) {
         await cache().set(stream, {
           state,

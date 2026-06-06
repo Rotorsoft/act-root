@@ -75,9 +75,9 @@ export type Registry<
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   readonly disclosure_predicate: (
-    stateName: string
+    state_name: string
   ) =>
     | ((
         event: Committed<TEvents, keyof TEvents & string>,

@@ -30,7 +30,7 @@ const RATIO_DEFAULT = 0.5;
  * the frontier sizes used to claim them. Returns `RATIO_DEFAULT` when no
  * progress was made (nothing to base a decision on).
  */
-export function computeLagLeadRatio(
+export function compute_lag_lead_ratio(
   handled: ReadonlyArray<HandleResult>,
   lagging: number,
   leading: number

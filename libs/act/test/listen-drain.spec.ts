@@ -59,7 +59,7 @@ describe("ActOptions.listen and .drain", () => {
       .do(handler)
       .to("tick-log")
       .build();
-    // Give the async _wireNotify a microtask to complete.
+    // Give the async _wire_notify a microtask to complete.
     await Promise.resolve();
     await Promise.resolve();
     expect(notifyStore.subscribed).toBe(1);

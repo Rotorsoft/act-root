@@ -91,7 +91,7 @@ function is_pii(schema: z.ZodType): boolean {
  * `z.object` declared inside the event payload would require recursive
  * descent; that's deferred until a real callsite needs it.
  *
- * @internal — consumed by the registry's `sensitive_fields(eventName)` lookup.
+ * @internal — consumed by the registry's `sensitive_fields(event_name)` lookup.
  */
 export function pii_fields(schema: z.ZodType): readonly string[] {
   const shape = (schema as { shape?: Record<string, z.ZodType> }).shape;
@@ -242,7 +242,7 @@ export function pii_gate<
  *
  * Reactions that genuinely need PII (e.g. a welcome-email reaction reading
  * `email`) opt back in by explicitly calling `app.load(stream, { actor:
- * systemActor })` inside the handler — pulling PII through the gate at the
+ * system_actor })` inside the handler — pulling PII through the gate at the
  * call site makes the security-relevant path visible in code review.
  *
  * @internal
@@ -254,7 +254,7 @@ export function pii_strip<
   event: Committed<TEvents, TKey>,
   fields: readonly string[]
 ): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. `buildHandle` / `buildHandleBatch`
+  // Contract: `fields` is non-empty. `build_handle` / `build_handle_batch`
   // filter on `fields.length > 0` before invocation.
   const data = event.data as Record<string, unknown>;
   const stripped: Record<string, unknown> = {};

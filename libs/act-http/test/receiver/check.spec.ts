@@ -143,11 +143,11 @@ describe("checkWebhook", () => {
     it("rejects on missing key after verification passes (does not claim)", async () => {
       const store = freshStore();
       const headers = signRequest(BODY, SECRET, NOW);
-      const headersBag = {
+      const headers_bag = {
         "x-webhook-signature": headers.signature,
         "x-webhook-timestamp": headers.timestamp,
       };
-      const result = await checkWebhook(headersBag, BODY, {
+      const result = await checkWebhook(headers_bag, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },

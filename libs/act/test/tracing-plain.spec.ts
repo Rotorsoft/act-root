@@ -23,7 +23,9 @@ describe("tracing — plain (production) mode", () => {
   it("uses 'caption: body' for event-sourcing logs and bare prefix for drain", async () => {
     // Imports must happen AFTER the doMock above.
     const { state } = await import("../src/builders/state-builder.js");
-    const { buildEs, buildDrain } = await import("../src/internal/tracing.js");
+    const { build_es, build_drain } = await import(
+      "../src/internal/tracing.js"
+    );
     const es = await import("../src/internal/event-sourcing.js");
     const { log, store } = await import("../src/ports.js");
 
@@ -51,7 +53,7 @@ describe("tracing — plain (production) mode", () => {
 
     // Event-sourcing trace: `caption: body` (plain mode). Load fires once
     // on exit with cache marker + version/replayed/snaps/patches inline.
-    const { action, load } = buildEs(traceLogger);
+    const { action, load } = build_es(traceLogger);
     await load(Counter, "s-plain");
     expect(traceSpy).toHaveBeenCalledWith(
       "load: s-plain miss v=-1 replayed=0 snaps=0 patches=0"
@@ -76,16 +78,16 @@ describe("tracing — plain (production) mode", () => {
     );
 
     // Drain trace: `>> caption` (no ANSI)
-    const { subscribe } = buildDrain(traceLogger);
+    const { subscribe } = build_drain(traceLogger);
     await subscribe([{ stream: "fresh-plain" }]);
     expect(traceSpy).toHaveBeenCalledWith(">> correlated fresh-plain");
 
     // Plain-mode cycle trace: lane appended without ANSI when the batch
-    // is in a non-default lane (ACT-1103). Driven via `traceCycle`
+    // is in a non-default lane (ACT-1103). Driven via `trace_cycle`
     // directly so the test stays self-contained (DrainController is the
     // runtime caller, but it's overkill to wire up here).
-    const { traceCycle } = await import("../src/internal/tracing.js");
-    traceCycle(
+    const { trace_cycle } = await import("../src/internal/tracing.js");
+    trace_cycle(
       traceLogger,
       [
         {
@@ -116,7 +118,7 @@ describe("tracing — plain (production) mode", () => {
       { stream: "s-snap-plain", actor: { id: "u", name: "u" } },
       { by: 1 }
     );
-    const { snap, tombstone } = buildEs(traceLogger);
+    const { snap, tombstone } = build_es(traceLogger);
     await snap(snapshot);
     expect(traceSpy).toHaveBeenCalledWith(
       `snap: ${snapshot.event!.stream}@${snapshot.event!.version}`

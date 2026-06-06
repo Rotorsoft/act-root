@@ -203,7 +203,7 @@ describe("per-action retry policy", () => {
   });
 
   describe("backoff", () => {
-    it("paces retries using computeBackoffDelay when backoff is declared", async () => {
+    it("paces retries using compute_backoff_delay when backoff is declared", async () => {
       const flaky = new FlakyStore(1);
       store(flaky);
       const app = act().withState(PacedCounter).build();
@@ -216,7 +216,7 @@ describe("per-action retry policy", () => {
       expect(elapsed).toBeGreaterThanOrEqual(60);
     });
 
-    it("skips sleep when baseMs is zero (computeBackoffDelay returns 0)", async () => {
+    it("skips sleep when baseMs is zero (compute_backoff_delay returns 0)", async () => {
       const flaky = new FlakyStore(1);
       store(flaky);
       const app = act().withState(ZeroBackoffCounter).build();

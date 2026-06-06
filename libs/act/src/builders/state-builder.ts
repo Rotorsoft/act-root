@@ -271,7 +271,7 @@ export type ActionBuilder<
         /** Passthrough — the action payload becomes the event data
          *  directly. Must reference an event declared in `.emits()`. */
         (
-          eventName: keyof TEvents & string
+          event_name: keyof TEvents & string
         ): ActionBuilder<
           TState,
           TEvents,
@@ -328,7 +328,7 @@ export type ActionBuilder<
         TName
       >;
       (
-        eventName: keyof TEvents & string
+        event_name: keyof TEvents & string
       ): ActionBuilder<
         TState,
         TEvents,
@@ -551,13 +551,13 @@ export function state<TName extends string, TState extends Schema>(
   const keys = Object.keys(entry);
   if (keys.length !== 1) throw new Error("state() requires exactly one key");
   const name = keys[0] as TName;
-  const stateSchema = (entry as Record<string, ZodType<TState>>)[name];
+  const state_schema = (entry as Record<string, ZodType<TState>>)[name];
   return {
     init(init) {
       return {
         emits<TEvents extends Schema>(events: ZodTypes<TEvents>) {
           // Default passthrough patches: event data merges into state
-          const defaultPatch = Object.fromEntries(
+          const default_patch = Object.fromEntries(
             Object.keys(events).map((k) => {
               const fn = Object.assign(({ data }: { data: any }) => data, {
                 _passthrough: true as const,
@@ -572,10 +572,10 @@ export function state<TName extends string, TState extends Schema>(
           const internal: State<TState, TEvents, Schemas, TName> = {
             events,
             actions: {},
-            state: stateSchema,
+            state: state_schema,
             name,
             init,
-            patch: defaultPatch,
+            patch: default_patch,
             on: {},
             // Step delegates initialized as identity. `act().build()`
             // overrides on states with `sensitive(...)` events to bake in
@@ -651,17 +651,20 @@ function action_builder<
           | (keyof TEvents & string)
       ) {
         if (typeof handler === "string") {
-          const eventName = handler;
+          const event_name = handler;
           // Tag the synthetic function with the static event name so
           // the act-builder can detect emissions of deprecated events
           // at build time (ACT-403). Dynamic forms — where the
           // returned event name is computed inside the user's
           // function — can't be inspected statically; they're caught
           // by the runtime warning in event-sourcing.ts.
-          const emitFn = Object.assign((payload: any) => [eventName, payload], {
-            _staticEmit: eventName,
-          });
-          (internal.on as Record<string, unknown>)[action] = emitFn;
+          const emit_fn = Object.assign(
+            (payload: any) => [event_name, payload],
+            {
+              _static_emit: event_name,
+            }
+          );
+          (internal.on as Record<string, unknown>)[action] = emit_fn;
         } else {
           (internal.on as Record<string, unknown>)[action] = handler;
         }

@@ -68,18 +68,18 @@ const FALLBACK_PACKAGE: Package = {
  *
  * @internal
  */
-const getPackage = (): Package => {
+const get_package = (): Package => {
   try {
     const raw = fs.readFileSync("package.json");
     return JSON.parse(raw.toString()) as Package;
   } catch (err) {
-    pkgLoadError = err;
+    pkg_load_error = err;
     return FALLBACK_PACKAGE;
   }
 };
 
-/** Stashed read/parse error from {@link getPackage}, surfaced by config(). */
-let pkgLoadError: unknown;
+/** Stashed read/parse error from {@link get_package}, surfaced by config(). */
+let pkg_load_error: unknown;
 
 /**
  * Zod schema for the full Act Framework configuration object.
@@ -110,7 +110,7 @@ const logLevel = (LOG_LEVEL ||
 const logSingleLine = (LOG_SINGLE_LINE || "true") === "true";
 const sleepMs = parseInt(NODE_ENV === "test" ? "0" : (SLEEP_MS ?? "100"), 10);
 
-const pkg = getPackage();
+const pkg = get_package();
 
 // Lazily validated on first call. Cannot run extend() at module load
 // because of a utils.ts <-> config.ts cycle (utils imports config for
@@ -182,21 +182,21 @@ export const config = (): Config => {
       { ...pkg, env, logLevel, logSingleLine, sleepMs },
       BaseSchema
     );
-    if (pkgLoadError) {
+    if (pkg_load_error) {
       // Surface the fallback once, after _validated is set so the
       // recursive log() → config() call short-circuits. log() resolves
       // through the port singleton — respects user injection and level.
       const msg =
-        pkgLoadError instanceof Error
-          ? pkgLoadError.message
-          : typeof pkgLoadError === "string"
-            ? pkgLoadError
+        pkg_load_error instanceof Error
+          ? pkg_load_error.message
+          : typeof pkg_load_error === "string"
+            ? pkg_load_error
             : "unknown error";
       log().warn(
         `[act] Could not read package.json (${msg}); using synthetic ` +
           `name="${FALLBACK_PACKAGE.name}" version="${FALLBACK_PACKAGE.version}".`
       );
-      pkgLoadError = undefined;
+      pkg_load_error = undefined;
     }
   }
   return _validated;

@@ -42,7 +42,7 @@ function seg(n: number): string {
  * Names shorter than 4 chars are used as-is (no padding) so a state named
  * `Tx` produces `tx-...` rather than `tx00-...`.
  */
-export const defaultCorrelator: Correlator = ({ state, action }) => {
+export const default_correlator: Correlator = ({ state, action }) => {
   const s = state.slice(0, SEG_WIDTH).toLowerCase();
   const a = action.slice(0, SEG_WIDTH).toLowerCase();
   const ts = seg(Date.now() % SEG_SPACE);
@@ -58,7 +58,10 @@ export const defaultCorrelator: Correlator = ({ state, action }) => {
  *
  * @internal
  */
-export function closeCorrelation(correlator: Correlator, actor: Actor): string {
+export function close_correlation(
+  correlator: Correlator,
+  actor: Actor
+): string {
   return correlator({
     state: "$close",
     action: "close",
