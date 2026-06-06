@@ -170,11 +170,10 @@ export function buildEs(
   logger: Logger,
   correlator: Correlator = defaultCorrelator
 ): EsOps {
-  // `es.action` takes `correlator` as its last positional arg; the
-  // orchestrator never wants to plumb it through every call site, so we
-  // bind it once here and present an `EsOps.action` with the original
-  // 6-arg signature.
-  const boundAction: EsOps["action"] = (
+  // `es.action` takes `correlator` as its last positional arg; bind it once
+  // here so the orchestrator's `EsOps.action` keeps the original 6-arg
+  // signature.
+  const bound_action: EsOps["action"] = (
     me,
     actionName,
     target,
@@ -195,7 +194,7 @@ export function buildEs(
     return {
       snap: es.snap,
       load: es.load,
-      action: boundAction,
+      action: bound_action,
       tombstone: es.tombstone,
     };
   }
@@ -225,7 +224,7 @@ export function buildEs(
       );
     }),
     action: traced(
-      boundAction,
+      bound_action,
       (snapshots, _me, _action, target) => {
         const committed = snapshots.filter((s) => s.event);
         if (committed.length) {

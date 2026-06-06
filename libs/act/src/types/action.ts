@@ -528,6 +528,48 @@ export type State<
    * `ConcurrencyError` surfaces on first conflict.
    */
   options?: { [TKey in keyof TActions]?: ActionOptions };
+  /**
+   * Disclosure predicate set by `.discloses(predicate)`. Gates external
+   * reads of `sensitive(...)`-marked fields — returning `true` allows the
+   * actor to see plaintext, `false` redacts. When absent, the framework
+   * default-denies on every external read (sensitive fields are always
+   * substituted with `"[REDACTED]"`). See #855 / epic #566.
+   */
+  // The stored predicate is erased — `any` for the event makes the field
+  // signature bivariant so a narrow `State<{count: number}, {Counted: ...},
+  // ...>` is assignable to `State<any, any, any>` without TypeScript blocking
+  // on contravariant function params. The public `.discloses()` method on the
+  // builder keeps the narrow signature so users still get type-checked predicates.
+  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
+  disclose?: (event: any, actor: Actor) => boolean;
+  /**
+   * Build-time step delegates wired by `act().build()`. The orchestrator
+   * calls these instead of branching on PII per event — for PII-aware
+   * states they bake the merge/gate/split into the step; for PII-free
+   * states they're identity.
+   *
+   * - `view(event, actor)` — produces the caller-visible form of a
+   *   committed event (gates `sensitive(...)` fields via `.discloses` on
+   *   PII-aware states; identity otherwise).
+   * - `message(validated)` — produces the `{name, data, pii?}` shape that
+   *   goes to `Store.commit` (peels sensitive fields off `data` into
+   *   `pii` on PII-aware states; identity otherwise).
+   * - `patch[eventName]` — already on State as the per-event reducer.
+   *   Wrapped at build time to merge PII into `data` first when the
+   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * Internal, always set after build, never assigned by user code.
+   *
+   * @internal
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
+  view: (event: any, actor: Actor | undefined) => any;
+  // biome-ignore lint/suspicious/noExplicitAny: same
+  message: (validated: { name: any; data: any }) => {
+    name: any;
+    data: any;
+    pii?: Record<string, unknown>;
+  };
 };
 
 /**
@@ -874,4 +916,23 @@ export interface IAct<
   }>;
 
   query_array(query: Query): Promise<Committed<TEvents, keyof TEvents>[]>;
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — the
+   * application-level half of the sensitive-data epic (#566). Delegates to
+   * the Store's `forget_pii(stream)`, invalidates the cache entry for the
+   * stream, then emits the `forgotten` lifecycle event.
+   *
+   * Throws at build time if the configured Store does not implement
+   * `forget_pii` (its adapter declares `pii_isolation: false` or omits the
+   * method) — operators get a clear "your adapter can't comply with GDPR
+   * erasure" signal before the production callsite is exercised.
+   *
+   * Idempotent: a second call on an already-wiped stream returns
+   * `eventCount: 0` and does NOT re-emit `forgotten`.
+   *
+   * @param stream - Target stream to wipe.
+   * @returns Count of events whose PII column was set to NULL.
+   */
+  forget(stream: string): Promise<{ eventCount: number }>;
 }

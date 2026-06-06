@@ -426,6 +426,8 @@ describe("event-sourcing", () => {
       events: {},
       patch: { Known: vi.fn() },
       on: {},
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     await store().commit(
       "stream-with-unknown",
@@ -458,6 +460,8 @@ describe("event-sourcing", () => {
       events: {},
       patch: { E: vi.fn() },
       on: {},
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     await store().commit("stream", [{ name: "E", data: {} }], {
       correlation: "c",
@@ -476,6 +480,8 @@ describe("event-sourcing", () => {
       events: {},
       patch: {},
       on: { foo: vi.fn() },
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     await expect(
       action(state, "foo", { stream: "", actor: { id: "a", name: "a" } }, {})

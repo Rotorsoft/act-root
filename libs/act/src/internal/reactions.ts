@@ -46,10 +46,11 @@ export type ReactionDeps<
   TActor extends Actor = Actor,
 > = {
   readonly logger: Logger;
-  readonly boundDo: IAct<TEvents, TActions, TActor>["do"];
-  readonly boundLoad: IAct<TEvents, TActions, TActor>["load"];
-  readonly boundQuery: IAct<TEvents, TActions, TActor>["query"];
-  readonly boundQueryArray: IAct<TEvents, TActions, TActor>["query_array"];
+  readonly bound_do: IAct<TEvents, TActions, TActor>["do"];
+  readonly bound_load: IAct<TEvents, TActions, TActor>["load"];
+  readonly bound_query: IAct<TEvents, TActions, TActor>["query"];
+  readonly bound_query_array: IAct<TEvents, TActions, TActor>["query_array"];
+  readonly bound_forget: IAct<TEvents, TActions, TActor>["forget"];
 };
 
 /**
@@ -116,7 +117,14 @@ export function buildHandle<
   TActions extends Schemas,
   TActor extends Actor = Actor,
 >(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
-  const { logger, boundDo, boundLoad, boundQuery, boundQueryArray } = deps;
+  const {
+    logger,
+    bound_do,
+    bound_load,
+    bound_query,
+    bound_query_array,
+    bound_forget,
+  } = deps;
   return async (lease, payloads) => {
     if (payloads.length === 0) return { lease, handled: 0, acked_at: lease.at };
 
@@ -128,10 +136,11 @@ export function buildHandle<
       logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     const scopedApp: IAct<TEvents, TActions, TActor> = {
-      do: boundDo,
-      load: boundLoad,
-      query: boundQuery,
-      query_array: boundQueryArray,
+      do: bound_do,
+      load: bound_load,
+      query: bound_query,
+      query_array: bound_query_array,
+      forget: bound_forget,
     };
 
     for (const payload of payloads) {
@@ -143,7 +152,7 @@ export function buildHandle<
         reactingTo?: Committed<Schemas, string>,
         skipValidation?: boolean
       ) =>
-        boundDo(
+        bound_do(
           action,
           target,
           actionPayload,
@@ -186,7 +195,9 @@ export function buildHandleBatch<TEvents extends Schemas>(
     batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
-    const events = payloads.map((p) => p.event);
+    const events = payloads.map(
+      (p) => p.event as Committed<TEvents, keyof TEvents & string>
+    );
     const options = payloads[0].options;
 
     if (lease.retry > 0)

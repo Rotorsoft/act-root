@@ -17,6 +17,7 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -362,9 +363,13 @@ export async function scan(
  * @template TState The type of state
  * @template TEvents The type of events
  * @template TActions The type of actions
- * @param me The state machine definition
+ * @param me The state machine definition.
  * @param stream The stream (instance) to load
  * @param callback (Optional) Callback to receive the loaded snapshot as it is built
+ * @param asOf (Optional) Time-travel cursor; bypasses the cache.
+ * @param actor (Optional) Passed through to the state's `view` delegate
+ *   when constructing the snapshot.event — semantics are the state's to
+ *   define (see {@link state}).
  * @returns The snapshot of the loaded state
  *
  * @example
@@ -378,7 +383,8 @@ export async function load<
   me: State<TState, TEvents, TActions>,
   stream: string,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  asOf?: AsOf
+  asOf?: AsOf,
+  actor?: Actor
 ): Promise<Snapshot<TState, TEvents>> {
   const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
@@ -397,15 +403,16 @@ export async function load<
 
   await store().query(
     (e) => {
-      event = e as Committed<TEvents, string>;
       version = e.version;
+      const typed = e as Committed<TEvents, string>;
+      event = me.view(typed, actor);
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
         snaps++;
         patches = 0;
         replayed++;
       } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](event, state));
+        state = patch(state, me.patch[e.name](typed, state));
         patches++;
         replayed++;
       } else if (e.name !== TOMBSTONE_EVENT) {
@@ -511,7 +518,13 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, stream);
+      const snapshot = await load(
+        me,
+        stream,
+        undefined,
+        undefined,
+        target.actor
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       const expected = expectedVersion ?? snapshot.event?.version;
@@ -565,12 +578,12 @@ export async function action<
         }
       }
 
-      const emitted = tuples.map(([name, data]) => ({
-        name,
-        data: skipValidation
+      const emitted = tuples.map(([name, data]) => {
+        const validated = skipValidation
           ? data
-          : validate(name as string, data, me.events[name]),
-      }));
+          : validate(name as string, data, me.events[name]);
+        return me.message({ name, data: validated });
+      });
 
       const meta: EventMeta = {
         correlation:
@@ -585,8 +598,8 @@ export async function action<
           action: {
             name: action as string,
             ...target,
-            // payload intentionally omitted: it can be large or contain PII,
-            // and callers correlate via the correlation id when they need it.
+            // payload intentionally omitted from causation metadata —
+            // callers correlate via the correlation id when they need it.
           },
           event: reactingTo
             ? {
@@ -623,11 +636,8 @@ export async function action<
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
-        // cache_hit / replayed propagate from the initial load — these
-        // post-commit snapshots all derive from the same loaded state.
-        // version advances per committed event (each is a new stream head).
         return {
-          event,
+          event: me.view(event, target.actor),
           state,
           version: event.version,
           patches,

@@ -40,6 +40,24 @@ pnpm -F @rotorsoft/act bench:update    # writes perf-baseline.json
 
 ---
 
+## Sensitive-data foundation (#855)
+
+The sensitive-data slices (#855) add machinery to every event that flows through the orchestrator — a `pii_fields(name)` registry lookup, `fields.length === 0` early-exit branches in `pii_merge`/`pii_gate`/`pii_strip`, and the gating path in `action()`'s post-commit snapshot builder. Events without `sensitive(...)` markers should pay nothing, but "should" needed measurement.
+
+`libs/act/bench/sensitive.micro.bench.ts` exercises the orchestrator's hot paths on a plain non-sensitive Counter — no `sensitive` markers, no `.discloses`, no `actor` arg on load. Ran the same bench on master (pre-#855) and on the merged #855 branch:
+
+| Scenario | Master (before) | #855 (after) | Δ |
+|---|---:|---:|---:|
+| `app.do()` single commit | 419 hz / 2.39 ms | 426 hz / 2.35 ms | +1.6% |
+| `app.load()` over 100 events | 840 hz / 1.19 ms | 856 hz / 1.17 ms | +1.8% |
+| `app.do()` + `app.load()` round-trip | 275 hz / 3.64 ms | 283 hz / 3.53 ms | +3.0% |
+
+`rme` was ±1–2% on every measurement, so the deltas are within run-to-run noise. **The PII machinery imposes no measurable overhead on non-sensitive workloads.** The early-exit short-circuits are doing their job — apps that don't opt into the feature don't pay for it.
+
+Apps that *do* mark sensitive fields pay a per-event cost that's bounded by the number of sensitive keys (1–3 typical): one `Object.keys` pass for the split, one for the gate, one for the strip. None of those routines allocate when there are no sensitive fields on the event.
+
+---
+
 ## Realistic workloads
 
 Run with `pnpm -F @rotorsoft/act bench:realistic`. These exercise the full pipeline real apps pay for: payload validation, invariant checking, multi-step workflows, reaction dispatch through `correlate→drain`, and projection updates. Numbers are not in the CI regression guard — they're for capacity planning.

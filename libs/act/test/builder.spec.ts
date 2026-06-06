@@ -74,6 +74,8 @@ describe("Builder", () => {
       events: { e: ZodEmpty },
       patch: { e: () => ({}) },
       on: { a: () => ["e", {}] as [string, object] },
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     const state2 = {
       name: "foo2",
@@ -83,6 +85,8 @@ describe("Builder", () => {
       events: { e: ZodEmpty },
       patch: { e: () => ({}) },
       on: { a: () => ["e", {}] as [string, object] },
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     builder.withState(state1);
     expect(() => builder.withState(state2)).toThrow("Duplicate action");
@@ -208,6 +212,8 @@ describe("Builder", () => {
       events: { nonE1: ZodEmpty },
       patch: { nonE1: () => ({}) },
       on: { nonA: () => ["nonE1", {}] as [string, object] },
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     const s2 = {
       name: "NonObj",
@@ -217,6 +223,8 @@ describe("Builder", () => {
       events: { nonE2: ZodEmpty },
       patch: { nonE2: () => ({}) },
       on: { nonB: () => ["nonE2", {}] as [string, object] },
+      view: (e: any) => e,
+      message: (v: any) => v,
     };
     const builder = act();
     builder.withState(s1);
