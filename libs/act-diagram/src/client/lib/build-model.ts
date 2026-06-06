@@ -55,7 +55,7 @@ function buildState(
     });
   }
 
-  const actionNodes: ActionNode[] = [];
+  const action_nodes: ActionNode[] = [];
   for (const action_name of Object.keys(rawActions)) {
     if (action_name.startsWith("__emits_")) continue;
     const emits: string[] =
@@ -63,14 +63,14 @@ function buildState(
     const invariants = (st.given?.[action_name] ?? []).map(
       (inv: any) => inv.description ?? ""
     );
-    actionNodes.push({ name: action_name, emits, invariants });
+    action_nodes.push({ name: action_name, emits, invariants });
   }
 
   const node: StateNode = {
     name: domainName,
     varName: uniqueKey,
     events: eventNodes,
-    actions: actionNodes,
+    actions: action_nodes,
     file: st._sourceFile as string | undefined,
   };
   model.states.push(node);

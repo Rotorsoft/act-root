@@ -9,7 +9,7 @@ import type { ReactionNode } from "../types/index.js";
 /** Shared no-op function used as Proxy targets (body is never reached through the proxy) */
 export function proxyTarget() {}
 
-function attachEmit(
+function attach_emit(
   info: { actions: Record<string, any>; events: Record<string, any> },
   action_name: string,
   handler: any
@@ -89,13 +89,13 @@ export function mockState(
           if (rules) info.given[action_name] = rules;
           return {
             emit(handler: any) {
-              attachEmit(info, action_name, handler);
+              attach_emit(info, action_name, handler);
               return actionBuilder(action_name);
             },
           };
         },
         emit(handler: any) {
-          attachEmit(info, action_name, handler);
+          attach_emit(info, action_name, handler);
           return actionBuilder(action_name);
         },
       };

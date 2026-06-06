@@ -27,7 +27,7 @@ export type VerifyOptions = {
    * Slack conventions. Tightening narrows the replay window;
    * loosening accommodates clients with worse clock sync.
    */
-  maxAgeSeconds?: number;
+  max_age_seconds?: number;
   /**
    * Current Unix-seconds time. Exposed for tests; production
    * callers should leave it undefined so wall-clock is used.
@@ -47,8 +47,8 @@ export type VerifyOptions = {
  *   was an array, or value was empty.
  * - `missing-timestamp` — no `X-Webhook-Timestamp` header, value
  *   was empty, or value isn't a parseable integer.
- * - `stale` — timestamp older than `maxAgeSeconds` from `now`.
- * - `future` — timestamp more than `maxAgeSeconds` ahead of `now`.
+ * - `stale` — timestamp older than `max_age_seconds` from `now`.
+ * - `future` — timestamp more than `max_age_seconds` ahead of `now`.
  * - `bad-signature` — signature header didn't start with `sha256=`,
  *   wasn't 64 hex chars, or the recomputed HMAC didn't match
  *   (constant-time compare).
@@ -68,7 +68,7 @@ export function verifyWebhook(
   secret: string,
   options?: VerifyOptions
 ): VerifyResult {
-  const maxAgeSeconds = options?.maxAgeSeconds ?? 300;
+  const max_age_seconds = options?.max_age_seconds ?? 300;
   const now = options?.now ?? Math.floor(Date.now() / 1000);
 
   const signature = pick_header(headers, "x-webhook-signature");
@@ -82,8 +82,8 @@ export function verifyWebhook(
   }
 
   const delta = now - timestamp;
-  if (delta > maxAgeSeconds) return { ok: false, reason: "stale" };
-  if (delta < -maxAgeSeconds) return { ok: false, reason: "future" };
+  if (delta > max_age_seconds) return { ok: false, reason: "stale" };
+  if (delta < -max_age_seconds) return { ok: false, reason: "future" };
 
   if (!signature.startsWith("sha256=")) {
     return { ok: false, reason: "bad-signature" };

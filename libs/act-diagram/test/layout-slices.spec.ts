@@ -717,8 +717,8 @@ describe("computeLayout — slices", () => {
       );
       expect(stateNodes).toHaveLength(1);
 
-      const actionNodes = layout.ns.filter((n) => n.type === "action");
-      const actionNames = actionNodes.map((n) => n.label);
+      const action_nodes = layout.ns.filter((n) => n.type === "action");
+      const actionNames = action_nodes.map((n) => n.label);
       expect(actionNames).toContain("OpenTicket");
       expect(actionNames).toContain("AssignTicket");
 
@@ -755,8 +755,8 @@ describe("computeLayout — slices", () => {
         ],
       });
       const layout = computeLayout(model);
-      const actionNodes = layout.ns.filter((n) => n.type === "action");
-      expect(actionNodes).toHaveLength(1);
+      const action_nodes = layout.ns.filter((n) => n.type === "action");
+      expect(action_nodes).toHaveLength(1);
     });
   });
 

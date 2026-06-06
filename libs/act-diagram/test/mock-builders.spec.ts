@@ -101,7 +101,7 @@ describe("mockState", () => {
     expect(built[0].actions.__emits_create).toContain("Created");
   });
 
-  it("exercises proxy traps directly in attachEmit Strategy 2", () => {
+  it("exercises proxy traps directly in attach_emit Strategy 2", () => {
     // Build a state where the handler function body has no string references
     // to event names, forcing proxy execution path.
     // The event name must NOT appear as a quoted string in the handler source,

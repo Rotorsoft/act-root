@@ -95,7 +95,7 @@ describe("checkWebhook", () => {
       const result = await checkWebhook(headers, BODY, {
         store,
         secret: SECRET,
-        verify: { now: NOW, maxAgeSeconds: 300 },
+        verify: { now: NOW, max_age_seconds: 300 },
       });
       expect(result).toEqual({ ok: false, status: 401, reason: "stale" });
     });

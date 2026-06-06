@@ -137,22 +137,22 @@ describe("verifyWebhook", () => {
   });
 
   describe("stale / future", () => {
-    it("rejects timestamps older than maxAgeSeconds", () => {
+    it("rejects timestamps older than max_age_seconds", () => {
       const headers = signedHeaders(NOW - 600);
       expect(
         verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          maxAgeSeconds: 300,
+          max_age_seconds: 300,
         })
       ).toEqual({ ok: false, reason: "stale" });
     });
 
-    it("rejects timestamps further in the future than maxAgeSeconds", () => {
+    it("rejects timestamps further in the future than max_age_seconds", () => {
       const headers = signedHeaders(NOW + 600);
       expect(
         verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          maxAgeSeconds: 300,
+          max_age_seconds: 300,
         })
       ).toEqual({ ok: false, reason: "future" });
     });
@@ -162,15 +162,15 @@ describe("verifyWebhook", () => {
       expect(
         verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          maxAgeSeconds: 300,
+          max_age_seconds: 300,
         })
       ).toEqual({ ok: true });
     });
 
-    it("honors caller-supplied maxAgeSeconds (tighter window)", () => {
+    it("honors caller-supplied max_age_seconds (tighter window)", () => {
       const headers = signedHeaders(NOW - 60);
       expect(
-        verifyWebhook(headers, BODY, SECRET, { now: NOW, maxAgeSeconds: 30 })
+        verifyWebhook(headers, BODY, SECRET, { now: NOW, max_age_seconds: 30 })
       ).toEqual({ ok: false, reason: "stale" });
     });
   });
@@ -258,9 +258,9 @@ describe("verifyWebhook", () => {
       expect(verifyWebhook(headers, BODY, SECRET)).toEqual({ ok: true });
     });
 
-    it("defaults maxAgeSeconds to 300", () => {
+    it("defaults max_age_seconds to 300", () => {
       const headers = signedHeaders(NOW - 299);
-      // No maxAgeSeconds passed — must still pass at 299s old.
+      // No max_age_seconds passed — must still pass at 299s old.
       expect(verifyWebhook(headers, BODY, SECRET, { now: NOW })).toEqual({
         ok: true,
       });
