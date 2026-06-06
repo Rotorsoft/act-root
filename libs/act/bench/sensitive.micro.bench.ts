@@ -1,266 +1,101 @@
 /**
- * #855: runtime cost of the sensitive-data foundation on regular workloads.
+ * #855: orchestrator overhead on non-sensitive workloads.
  *
- * Three axes:
+ * The sensitive-data foundation adds work to every event through the
+ * orchestrator — `pii_fields(name)` registry lookup, `fields.length === 0`
+ * early-exit branches in `merge_for_reducer`/`gate_external`/`strip_for_handler`,
+ * and the gating path in `action()`'s post-commit snapshot builder.
  *
- * 1. **Commit-path overhead** — `action()` splits sensitive fields off `data`
- *    into `pii` before calling `Store.commit`. Non-sensitive events
- *    short-circuit on `sensitive_fields(name).length === 0`. We compare:
- *      - baseline: action() committing a non-sensitive event
- *      - sensitive: action() committing an event with 2 sensitive fields
+ * For events with no `sensitive(...)` markers, every one of those checks
+ * should short-circuit immediately. This bench measures **whether the
+ * regular-event hot path actually pays nothing**. The workload uses a plain
+ * Counter — no sensitive markers anywhere, no `.discloses`, no `actor` arg on
+ * load.
  *
- * 2. **Load-path gate overhead** — `load()` builds the reducer view + the
- *    external view per event. Non-sensitive events short-circuit on the
- *    same field-list check. We compare:
- *      - baseline: load() over a stream of 100 non-sensitive events
- *      - sensitive: load() over a stream of 100 sensitive events with
- *        `.discloses(() => true)` (predicate fires per event)
- *
- * 3. **Handler-strip overhead** — `buildHandle` strips sensitive keys before
- *    invoking the user handler. Non-sensitive events short-circuit. We
- *    compare:
- *      - baseline: handler invocation on a non-sensitive event
- *      - sensitive: handler invocation on a sensitive event with 2 stripped
- *        keys
+ * Run this bench on master to get the **before** numbers, then on this
+ * branch (with the full PII machinery wired in) to get the **after**
+ * numbers. The delta tells you the orchestrator's added cost on real
+ * workloads that don't use the feature.
  *
  * Per CLAUDE.md: InMemory is a baseline reference, never the primary
- * production number. These benches measure orchestrator-level cost only —
- * `act-pg` adapter-level numbers belong in `libs/act-pg/bench/`.
- *
- * Results land in `libs/act/PERFORMANCE.md`.
+ * production number. These benches measure orchestrator-level cost only;
+ * adapter-level numbers belong in `libs/act-pg/bench/`.
  */
 
 /* eslint-disable @typescript-eslint/no-unsafe-argument -- bench helpers use any to avoid State name branding */
 import { afterAll, bench, describe } from "vitest";
 import { z } from "zod";
+import { act } from "../src/builders/act-builder.js";
 import { state } from "../src/builders/state-builder.js";
-import { action, load } from "../src/internal/event-sourcing.js";
-import { pii_fields, strip_for_handler } from "../src/internal/sensitive.js";
-import { dispose, store } from "../src/ports.js";
-import type { Actor, Committed } from "../src/types/index.js";
-import { sensitive } from "../src/types/schemas.js";
+import { dispose } from "../src/ports.js";
+import type { Actor } from "../src/types/index.js";
 
 const actor: Actor = { id: "u-1", name: "Bench" };
 
-// -- 1. Commit-path overhead -------------------------------------------------
-
-const NonPIIEvent = z.object({ by: z.number() });
 const Counter = state({ Counter: z.object({ count: z.number() }) })
   .init(() => ({ count: 0 }))
-  .emits({ Incremented: NonPIIEvent })
+  .emits({ Incremented: z.object({ by: z.number() }) })
   .patch({ Incremented: (event, s) => ({ count: s.count + event.data.by }) })
-  .on({ increment: NonPIIEvent })
-  .emit((a) => ["Incremented", a])
+  .on({ increment: z.object({ by: z.number() }) })
+  .emit((a) => ["Incremented", { by: a.by }])
   .build();
 
-const SensitiveEvent = z.object({
-  email: sensitive(z.string()),
-  name: sensitive(z.string()),
-  plan: z.enum(["free", "pro"]),
-});
-const SensitiveState = state({ Sensitive: z.object({}) })
-  .init(() => ({}))
-  .emits({ Registered: SensitiveEvent })
-  .patch({ Registered: () => ({}) })
-  .on({ register: SensitiveEvent })
-  .emit((p) => ["Registered", p])
-  .discloses(() => true)
-  .build();
-
-// pii_fields lookups: registry-cached versions
-const counter_lookup = (): readonly string[] => [];
-const sensitive_lookup = (name: string): readonly string[] =>
-  name === "Registered" ? ["email", "name"] : [];
-
-describe("commit-path: sensitive split overhead", () => {
-  let counter_stream = 0;
-  let sensitive_stream = 0;
+describe("orchestrator — non-sensitive workload (master vs PR baseline)", () => {
+  let stream_id = 0;
+  // biome-ignore lint/suspicious/noExplicitAny: bench-only, narrow generic preserved at runtime
+  let app: any;
 
   bench(
-    "baseline — non-sensitive event commit",
+    "app.do() — commit one Incremented per call",
     async () => {
-      await action(
-        Counter,
+      await app.do(
         "increment",
-        { stream: `c-${counter_stream++}`, actor },
-        { by: 1 },
-        undefined,
-        true,
-        undefined,
-        counter_lookup
+        { stream: `c-${stream_id++}`, actor },
+        { by: 1 }
       );
     },
     {
       setup: async () => {
         await dispose()();
-        counter_stream = 0;
+        app = act().withState(Counter).build();
+        stream_id = 0;
       },
     }
   );
 
   bench(
-    "sensitive — 2-field split + clean partition",
+    "app.load() — replay a 100-event stream",
     async () => {
-      await action(
-        SensitiveState,
-        "register",
-        { stream: `s-${sensitive_stream++}`, actor },
-        { email: "u@example.com", name: "Ursula", plan: "free" },
-        undefined,
-        true,
-        undefined,
-        sensitive_lookup
-      );
+      await app.load(Counter as any, "load-bench");
     },
     {
       setup: async () => {
         await dispose()();
-        sensitive_stream = 0;
-      },
-    }
-  );
-});
-
-// -- 2. Load-path gate overhead ----------------------------------------------
-
-const EVENTS_PER_STREAM = 100;
-
-describe("load-path: gate overhead over 100-event stream", () => {
-  bench(
-    "baseline — 100 non-sensitive events",
-    async () => {
-      await load(Counter, "load-baseline");
-    },
-    {
-      setup: async () => {
-        await dispose()();
-        for (let i = 0; i < EVENTS_PER_STREAM; i++) {
-          await action(
-            Counter,
-            "increment",
-            { stream: "load-baseline", actor },
-            { by: 1 },
-            undefined,
-            true,
-            undefined,
-            counter_lookup
-          );
+        app = act().withState(Counter).build();
+        for (let i = 0; i < 100; i++) {
+          await app.do("increment", { stream: "load-bench", actor }, { by: 1 });
         }
       },
     }
   );
 
   bench(
-    "sensitive — 100 sensitive events, discloses() => true (per-event predicate + merge)",
+    "app.do() then app.load() — round-trip per call",
     async () => {
-      await load(
-        SensitiveState,
-        "load-sensitive",
-        undefined,
-        undefined,
-        actor,
-        sensitive_lookup
-      );
+      const stream = `rt-${stream_id++}`;
+      await app.do("increment", { stream, actor }, { by: 1 });
+      await app.load(Counter as any, stream);
     },
     {
       setup: async () => {
         await dispose()();
-        for (let i = 0; i < EVENTS_PER_STREAM; i++) {
-          await action(
-            SensitiveState,
-            "register",
-            { stream: "load-sensitive", actor },
-            { email: `u${i}@example.com`, name: `User${i}`, plan: "free" },
-            undefined,
-            true,
-            undefined,
-            sensitive_lookup
-          );
-        }
+        app = act().withState(Counter).build();
+        stream_id = 0;
       },
     }
   );
 });
 
-// -- 3. Handler-strip overhead -----------------------------------------------
-
-describe("handler dispatch: strip overhead", () => {
-  // Build representative events directly so the bench measures only strip cost
-  // (not commit + queue). The Committed shape matches what the drain pipeline
-  // passes to handlers.
-  const counter_event: Committed<
-    { Incremented: { by: number } },
-    "Incremented"
-  > = {
-    id: 0,
-    stream: "c-1",
-    version: 0,
-    created: new Date(),
-    name: "Incremented",
-    data: { by: 1 },
-    meta: { correlation: "x", causation: {} },
-  };
-
-  const sensitive_event: Committed<
-    { Registered: { email: string; name: string; plan: "free" | "pro" } },
-    "Registered"
-  > = {
-    id: 0,
-    stream: "s-1",
-    version: 0,
-    created: new Date(),
-    name: "Registered",
-    data: { email: "u@example.com", name: "Ursula", plan: "free" },
-    pii: { email: "u@example.com", name: "Ursula" },
-    meta: { correlation: "x", causation: {} },
-  };
-
-  bench("baseline — non-sensitive event (short-circuit)", () => {
-    strip_for_handler(counter_event, []);
-  });
-
-  bench("sensitive — strip 2 keys + drop pii field", () => {
-    strip_for_handler(sensitive_event, ["email", "name"]);
-  });
-});
-
-// -- 4. Walker overhead at build time ----------------------------------------
-
-// Pre-build the large schema OUTSIDE the bench loop so we measure walker
-// cost, not Zod object construction.
-const LargeSchema = z.object({
-  a: z.string(),
-  b: z.number(),
-  c: sensitive(z.string()),
-  d: z.boolean(),
-  e: sensitive(z.string()),
-  f: z.string(),
-  g: z.number(),
-  h: sensitive(z.string()),
-  i: z.string(),
-  j: z.number(),
-  k: sensitive(z.string()),
-  l: z.string(),
-});
-
-describe("build time: pii_fields walker per event schema", () => {
-  bench("non-sensitive schema (1 field, none marked)", () => {
-    pii_fields(NonPIIEvent);
-  });
-
-  bench("sensitive schema (3 fields, 2 marked)", () => {
-    pii_fields(SensitiveEvent);
-  });
-
-  bench("large schema (12 fields, 4 marked)", () => {
-    pii_fields(LargeSchema);
-  });
-});
-
-// Cleanup at module teardown — Vitest invokes setup once per iteration
-// group, so a single dispose at the end keeps process state clean for the
-// next bench module.
 afterAll(async () => {
   await dispose()();
-  store();
 });
