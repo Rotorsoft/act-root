@@ -518,11 +518,6 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      // Pass the action target's actor down so load() can gate snapshot.event
-      // via the State's `_pii_gate` decorator. The reducer's plaintext
-      // view is also handled inside load(), via the same State's
-      // `_pii_merge` decorator. States without sensitive events have
-      // no decorators attached → load() short-circuits at zero cost.
       const snapshot = await load(
         me,
         stream,
@@ -583,9 +578,6 @@ export async function action<
         }
       }
 
-      // Per-event optional-chain split. PII-aware states have `_pii_split`
-      // attached at build time; PII-free states short-circuit at `?.()` and
-      // `?? base` hands the event through.
       const emitted = tuples.map(([name, data]) => {
         const validated = skipValidation
           ? data
@@ -606,8 +598,8 @@ export async function action<
           action: {
             name: action as string,
             ...target,
-            // payload intentionally omitted: it can be large or contain PII,
-            // and callers correlate via the correlation id when they need it.
+            // payload intentionally omitted from causation metadata —
+            // callers correlate via the correlation id when they need it.
           },
           event: reactingTo
             ? {

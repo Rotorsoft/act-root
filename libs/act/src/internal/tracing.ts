@@ -172,8 +172,7 @@ export function buildEs(
 ): EsOps {
   // `es.action` takes `correlator` as its last positional arg; bind it once
   // here so the orchestrator's `EsOps.action` keeps the original 6-arg
-  // signature. The PII split (#855) moved off the action signature onto the
-  // State's `_pii_split` decorator — buildEs no longer threads it.
+  // signature.
   const bound_action: EsOps["action"] = (
     me,
     actionName,

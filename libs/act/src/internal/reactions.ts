@@ -145,11 +145,6 @@ export function buildHandle<
 
     for (const payload of payloads) {
       const { event, handler } = payload;
-      // PII strip is wrapped into the handler itself at build time (#855):
-      // reactions registered against an event with `sensitive(...)` fields
-      // get a stripping handler closure during `act().build()`; reactions
-      // against non-PII events keep their original handler reference.
-      // The dispatcher is PII-unaware — zero per-event branching here.
       scopedApp.do = <TKey extends keyof TActions & string>(
         action: TKey,
         target: Target<TActor>,
@@ -200,8 +195,6 @@ export function buildHandleBatch<TEvents extends Schemas>(
     batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
-    // PII strip happens inside `batchHandler` when needed — wrapped at build
-    // time per `act-builder.ts`. The dispatcher hands raw events through.
     const events = payloads.map(
       (p) => p.event as Committed<TEvents, keyof TEvents & string>
     );
