@@ -12,12 +12,12 @@
  *   `sensitive()` adds to it; the helpers in this module read it.
  * - `pii_fields(schema)` — walk a Zod schema's top-level shape, return the
  *   keys marked via `sensitive(...)`.
- * - `merge_for_reducer(event, fields)` — produce the reducer view (pii merged
+ * - `pii_merge(event, fields)` — produce the reducer view (pii merged
  *   into data; `[SHREDDED]` if pii column is null).
- * - `gate_external(event, fields, predicate, actor)` — produce the external
+ * - `pii_gate(event, fields, predicate, actor)` — produce the external
  *   view: plaintext when authorized, `[REDACTED]` when not, `[SHREDDED]`
  *   when the underlying pii column is null.
- * - `strip_for_handler(event, fields)` — remove sensitive keys entirely
+ * - `pii_strip(event, fields)` — remove sensitive keys entirely
  *   before invoking projection / reaction handlers.
  *
  * @internal
@@ -106,7 +106,7 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
 /**
  * Split an emitted event's `data` into `data` (non-sensitive) + `pii`
  * (sensitive) using the field list precomputed at build time. Used by the
- * State's `_split_emitted` decorator just before `Store.commit`.
+ * State's `_pii_split` decorator just before `Store.commit`.
  *
  * Single forward pass over `Object.keys(validated)` — same shape as the
  * spread-and-delete-free implementation in slice 3, just hoisted out of the
@@ -115,7 +115,7 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  *
  * @internal
  */
-export function split_payload(
+export function pii_split(
   emitted: { name: unknown; data: unknown },
   fields: readonly string[]
 ): { name: unknown; data: unknown; pii: Record<string, unknown> } {
@@ -141,18 +141,18 @@ export function split_payload(
  *
  * Used inside `load()` before invoking the reducer chain. Reducer-visible PII
  * is by design — the reducer is the source of truth for derived state. The
- * external view returned to callers is separately gated by {@link gate_external}.
+ * external view returned to callers is separately gated by {@link pii_gate}.
  *
  * @internal
  */
-export function merge_for_reducer<
+export function pii_merge<
   TEvents extends Schemas,
   TKey extends keyof TEvents & string,
 >(
   event: Committed<TEvents, TKey>,
   fields: readonly string[]
 ): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. Callers (the State's `_merge_for_reducer`
+  // Contract: `fields` is non-empty. Callers (the State's `_pii_merge`
   // decorator) filter on `fields_by_event.get(name)` before invocation, so the
   // empty-fields short-circuit lives at the caller, not here.
   const data = event.data as Record<string, unknown>;
@@ -189,7 +189,7 @@ export function merge_for_reducer<
  *
  * @internal
  */
-export function gate_external<
+export function pii_gate<
   TEvents extends Schemas,
   TKey extends keyof TEvents & string,
 >(
@@ -198,7 +198,7 @@ export function gate_external<
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. The State's `_gate_external` decorator
+  // Contract: `fields` is non-empty. The State's `_pii_gate` decorator
   // filters on `fields_by_event.get(name)` before invocation.
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
@@ -234,7 +234,7 @@ export function gate_external<
  * and the `pii` field dropped from the event. Used before invoking projection
  * handlers and reaction handlers, which never see PII by framework rule.
  *
- * Different from {@link gate_external} (which substitutes {@link REDACTED} or
+ * Different from {@link pii_gate} (which substitutes {@link REDACTED} or
  * {@link SHREDDED}) — projection tables and reaction sinks shouldn't even
  * structurally observe the keys, so a handler that mistakenly writes
  * `event.data.email` into a column would get `undefined`, not a sentinel
@@ -247,7 +247,7 @@ export function gate_external<
  *
  * @internal
  */
-export function strip_for_handler<
+export function pii_strip<
   TEvents extends Schemas,
   TKey extends keyof TEvents & string,
 >(

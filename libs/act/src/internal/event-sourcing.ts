@@ -364,7 +364,7 @@ export async function scan(
  * @template TEvents The type of events
  * @template TActions The type of actions
  * @param me The state machine definition. May carry the optional PII
- *   decorators (`_merge_for_reducer`, `_gate_external`) attached at build
+ *   decorators (`_pii_merge`, `_pii_gate`) attached at build
  *   time on states with at least one `sensitive(...)` event; states without
  *   them take the bare replay path with no PII machinery.
  * @param stream The stream (instance) to load
@@ -408,18 +408,17 @@ export async function load<
   let event: Committed<TEvents, string> | undefined;
 
   // Bind the PII transforms once at load entry. The decorator trio
-  // (`_split_emitted` / `_merge_for_reducer` / `_gate_external`) is attached
+  // (`_pii_split` / `_pii_merge` / `_pii_gate`) is attached
   // together at build time on states that declared at least one
-  // `sensitive(...)` event — so a single null-check on any one of them is
-  // the per-state "has PII?" predicate. PII-aware states get real
-  // closures; PII-free states get identity arrows that V8 inlines into the
-  // call site. Either way the per-event body is the same shape — no
-  // per-event optional-chain probe, no duplicated loop body.
+  // `sensitive(...)` event, so the function reference itself IS the
+  // per-state "has PII?" predicate — no separate flag needed. PII-aware
+  // states get real closures; PII-free states get identity arrows that
+  // V8 inlines into the call site. Either way the per-event body is the
+  // same shape — no per-event optional-chain probe, no duplicated loop.
   const identity = <T>(x: T) => x;
-  const pii_aware = me._merge_for_reducer;
-  const reducer_view = pii_aware ?? identity;
-  const external_view = pii_aware
-    ? (e: Committed<TEvents, string>) => me._gate_external!(e, actor)
+  const reducer_view = me._pii_merge ?? identity;
+  const external_view = me._pii_gate
+    ? (e: Committed<TEvents, string>) => me._pii_gate!(e, actor)
     : identity;
 
   await store().query(
@@ -540,9 +539,9 @@ export async function action<
   for (let attempt = 0; ; attempt++) {
     try {
       // Pass the action target's actor down so load() can gate snapshot.event
-      // via the State's `_gate_external` decorator. The reducer's plaintext
+      // via the State's `_pii_gate` decorator. The reducer's plaintext
       // view is also handled inside load(), via the same State's
-      // `_merge_for_reducer` decorator. States without sensitive events have
+      // `_pii_merge` decorator. States without sensitive events have
       // no decorators attached → load() short-circuits at zero cost.
       const snapshot = await load(
         me,
@@ -607,7 +606,7 @@ export async function action<
       // Same bind-once-then-call pattern as load(). For PII-aware states
       // `split` is the per-event splitter that moves sensitive fields into
       // `pii`; for PII-free states it's identity. One loop body either way.
-      const split = me._split_emitted ?? ((e: { name: any; data: any }) => e);
+      const split = me._pii_split ?? ((e: { name: any; data: any }) => e);
       const emitted = tuples.map(([name, data]) => {
         const validated = skipValidation
           ? data
@@ -662,14 +661,12 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      // Same bind-once-then-call pattern as load(). Single null-check on
-      // `_merge_for_reducer` is the per-state "has PII?" predicate — the
-      // decorator trio is attached together at build.
+      // Same bind-once-then-call pattern as load() — the function
+      // reference itself is the "has PII?" predicate.
       const post_identity = <T>(x: T) => x;
-      const post_pii_aware = me._merge_for_reducer;
-      const reducer_after = post_pii_aware ?? post_identity;
-      const external_after = post_pii_aware
-        ? (e: (typeof committed)[number]) => me._gate_external!(e, target.actor)
+      const reducer_after = me._pii_merge ?? post_identity;
+      const external_after = me._pii_gate
+        ? (e: (typeof committed)[number]) => me._pii_gate!(e, target.actor)
         : post_identity;
       const snapshots = committed.map((event) => {
         const p = me.patch[event.name](reducer_after(event), state);

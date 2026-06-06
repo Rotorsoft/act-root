@@ -9,14 +9,14 @@ import {
   _this_,
   currentVersionOf,
   deprecatedEventNames,
-  gate_external,
-  merge_for_reducer,
   mergeEventRegister,
   mergeProjection,
   pii_fields,
+  pii_gate,
+  pii_merge,
+  pii_split,
+  pii_strip,
   registerState,
-  split_payload,
-  strip_for_handler,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -585,7 +585,7 @@ export function act<
             for (const [name, reaction] of reg.reactions) {
               const inner = reaction.handler;
               const wrapped = (event: any, stream: string, app: any) =>
-                inner(strip_for_handler(event, fields), stream, app);
+                inner(pii_strip(event, fields), stream, app);
               // Preserve handler.name — buildHandle asserts on named functions.
               Object.defineProperty(wrapped, "name", { value: inner.name });
               reaction.handler = wrapped;
@@ -604,7 +604,7 @@ export function act<
             const wrapped = async (events: any[], stream: string) => {
               const stripped = events.map((e) => {
                 const f = _sf.get(e.name as string);
-                return f ? strip_for_handler(e, f) : e;
+                return f ? pii_strip(e, f) : e;
               });
               return original(stripped as never, stream);
             };
@@ -623,22 +623,22 @@ export function act<
             }
             if (fields_by_event.size === 0) continue;
             const disclose = state.disclose ?? null;
-            state._split_emitted = (e) => {
+            state._pii_split = (e) => {
               const fields = fields_by_event.get(e.name as string);
               if (!fields) return e;
-              return split_payload(e, fields) as typeof e & {
+              return pii_split(e, fields) as typeof e & {
                 pii: Record<string, unknown>;
               };
             };
-            state._merge_for_reducer = (event) => {
+            state._pii_merge = (event) => {
               const fields = fields_by_event.get(event.name as string);
               if (!fields) return event;
-              return merge_for_reducer(event, fields);
+              return pii_merge(event, fields);
             };
-            state._gate_external = (event, actor) => {
+            state._pii_gate = (event, actor) => {
               const fields = fields_by_event.get(event.name as string);
               if (!fields) return event;
-              return gate_external(event, fields, disclose, actor);
+              return pii_gate(event, fields, disclose, actor);
             };
           }
           _built = true;

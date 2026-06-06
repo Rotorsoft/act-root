@@ -44,13 +44,13 @@ export {
 export { buildHandle, buildHandleBatch } from "./reactions.js";
 export {
   _registry,
-  gate_external,
-  merge_for_reducer,
   pii_fields,
+  pii_gate,
+  pii_merge,
+  pii_split,
+  pii_strip,
   REDACTED,
   SHREDDED,
-  split_payload,
-  strip_for_handler,
 } from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
 export { buildDrain, buildEs, traceCycle } from "./tracing.js";

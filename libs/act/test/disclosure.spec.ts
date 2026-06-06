@@ -186,7 +186,7 @@ describe("state with mixed sensitive + non-sensitive events", () => {
     );
     expect(click.event?.data).toEqual({ ts: 42 });
     // No pii payload on the non-sensitive event — the State's
-    // `_split_emitted` decorator returned the input unchanged.
+    // `_pii_split` decorator returned the input unchanged.
     expect(click.event?.pii).toBeUndefined();
   });
 });

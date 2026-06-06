@@ -555,15 +555,15 @@ export type State<
    * @internal
    */
   // biome-ignore lint/suspicious/noExplicitAny: internal decorator, event payload varies per state
-  _split_emitted?: (e: { name: any; data: any }) => {
+  _pii_split?: (e: { name: any; data: any }) => {
     name: any;
     data: any;
     pii?: Record<string, unknown>;
   };
   // biome-ignore lint/suspicious/noExplicitAny: same
-  _merge_for_reducer?: (event: any) => any;
+  _pii_merge?: (event: any) => any;
   // biome-ignore lint/suspicious/noExplicitAny: same
-  _gate_external?: (event: any, actor: Actor | undefined) => any;
+  _pii_gate?: (event: any, actor: Actor | undefined) => any;
 };
 
 /**

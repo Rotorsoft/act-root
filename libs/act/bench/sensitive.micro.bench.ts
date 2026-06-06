@@ -3,7 +3,7 @@
  *
  * The sensitive-data foundation adds work to every event through the
  * orchestrator — `pii_fields(name)` registry lookup, `fields.length === 0`
- * early-exit branches in `merge_for_reducer`/`gate_external`/`strip_for_handler`,
+ * early-exit branches in `pii_merge`/`pii_gate`/`pii_strip`,
  * and the gating path in `action()`'s post-commit snapshot builder.
  *
  * For events with no `sensitive(...)` markers, every one of those checks
