@@ -384,8 +384,12 @@ export class Act<
       boundLoad: this._bound_load,
       boundQuery: this._bound_query,
       boundQueryArray: this._bound_query_array,
+      pii_fields: this.registry.sensitive_fields,
     });
-    this._handle_batch = buildHandleBatch<TEvents>(this._logger);
+    this._handle_batch = buildHandleBatch<TEvents>(
+      this._logger,
+      this.registry.sensitive_fields
+    );
 
     const {
       staticTargets,

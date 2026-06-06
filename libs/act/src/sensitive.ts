@@ -207,3 +207,43 @@ export function gate_external<
     data: redacted as Committed<TEvents, TKey>["data"],
   };
 }
+
+/**
+ * Build the **handler view** — sensitive keys removed entirely from `data`
+ * and the `pii` field dropped from the event. Used before invoking projection
+ * handlers and reaction handlers, which never see PII by framework rule.
+ *
+ * Different from {@link gate_external} (which substitutes {@link REDACTED} or
+ * {@link SHREDDED}) — projection tables and reaction sinks shouldn't even
+ * structurally observe the keys, so a handler that mistakenly writes
+ * `event.data.email` into a column would get `undefined`, not a sentinel
+ * string that looks like real data. The strictness is deliberate.
+ *
+ * Reactions that genuinely need PII (e.g. a welcome-email reaction reading
+ * `email`) opt back in by explicitly calling `app.load(stream, { actor:
+ * systemActor })` inside the handler — pulling PII through the gate at the
+ * call site makes the security-relevant path visible in code review.
+ *
+ * @internal
+ */
+export function strip_for_handler<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents & string,
+>(
+  event: Committed<TEvents, TKey>,
+  fields: readonly string[]
+): Committed<TEvents, TKey> {
+  if (fields.length === 0) return event;
+  const data = event.data as Record<string, unknown>;
+  const stripped: Record<string, unknown> = {};
+  for (const k of Object.keys(data)) {
+    if (!fields.includes(k)) stripped[k] = data[k];
+  }
+  const { pii: _drop_pii, ...rest } = event as Committed<TEvents, TKey> & {
+    pii?: unknown;
+  };
+  return {
+    ...rest,
+    data: stripped as Committed<TEvents, TKey>["data"],
+  } as Committed<TEvents, TKey>;
+}
