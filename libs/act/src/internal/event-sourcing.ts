@@ -497,7 +497,8 @@ export async function action<
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
   skipValidation = false,
-  correlator: Correlator = defaultCorrelator
+  correlator: Correlator = defaultCorrelator,
+  sensitiveFields: (eventName: string) => readonly string[] = () => []
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
@@ -565,12 +566,27 @@ export async function action<
         }
       }
 
-      const emitted = tuples.map(([name, data]) => ({
-        name,
-        data: skipValidation
+      const emitted = tuples.map(([name, data]) => {
+        const validated = skipValidation
           ? data
-          : validate(name as string, data, me.events[name]),
-      }));
+          : validate(name as string, data, me.events[name]);
+        // Split sensitive fields off `data` and into `pii` before the event
+        // reaches the Store — the Store's pii_isolation contract is
+        // declarative-only, the orchestrator is responsible for the split.
+        // Zero-cost short-circuit when the event has no sensitive fields,
+        // which is the common case.
+        const fields = sensitiveFields(name as string);
+        if (fields.length === 0) return { name, data: validated };
+        const pii: Record<string, unknown> = {};
+        const cleanData: Record<string, unknown> = { ...(validated as object) };
+        for (const f of fields) {
+          if (f in cleanData) {
+            pii[f] = cleanData[f];
+            delete cleanData[f];
+          }
+        }
+        return { name, data: cleanData as typeof validated, pii };
+      });
 
       const meta: EventMeta = {
         correlation:

@@ -372,7 +372,11 @@ export class Act<
       ? (fn) => scoped.run(options.scoped!, fn)
       : (fn) => fn();
     this._correlator = options.correlator ?? defaultCorrelator;
-    this._es = buildEs(this._logger, this._correlator);
+    this._es = buildEs(
+      this._logger,
+      this._correlator,
+      this.registry.sensitive_fields
+    );
     this._cd = buildDrain<TEvents>(this._logger);
     this._handle = buildHandle<TEvents, TActions, TActor>({
       logger: this._logger,
