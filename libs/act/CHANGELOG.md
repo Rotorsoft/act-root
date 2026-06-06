@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.8.0...@rotorsoft/act-v1.9.0) (2026-06-06)
+
+
+### Features
+
+* **act:** in-memory pii_isolation impl ([5400c61](https://github.com/rotorsoft/act-root/commit/5400c61779d131d3caa8bda7de0fe3d1fedbd2e0)), closes [#868](https://github.com/rotorsoft/act-root/issues/868) [#868](https://github.com/rotorsoft/act-root/issues/868) [#566](https://github.com/rotorsoft/act-root/issues/566) [#855](https://github.com/rotorsoft/act-root/issues/855) [#864](https://github.com/rotorsoft/act-root/issues/864) [#869](https://github.com/rotorsoft/act-root/issues/869)
+
 # [@rotorsoft/act-v1.8.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.7.0...@rotorsoft/act-v1.8.0) (2026-06-04)
 
 
