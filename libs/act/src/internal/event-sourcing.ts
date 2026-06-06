@@ -577,13 +577,18 @@ export async function action<
         // which is the common case.
         const fields = sensitiveFields(name as string);
         if (fields.length === 0) return { name, data: validated };
+        // Single forward pass over the validated keys, building both
+        // partitions in one go. Avoids the spread-and-delete dance — `delete`
+        // would force V8 to transition `cleanData` from hidden-class to
+        // dictionary mode, slowing every downstream read of `event.data`.
+        // For typical sensitive-field counts (1–3 per event) the `includes`
+        // probe is faster than allocating a Set per commit.
+        const validatedRec = validated as Record<string, unknown>;
+        const cleanData: Record<string, unknown> = {};
         const pii: Record<string, unknown> = {};
-        const cleanData: Record<string, unknown> = { ...(validated as object) };
-        for (const f of fields) {
-          if (f in cleanData) {
-            pii[f] = cleanData[f];
-            delete cleanData[f];
-          }
+        for (const k of Object.keys(validatedRec)) {
+          if (fields.includes(k)) pii[k] = validatedRec[k];
+          else cleanData[k] = validatedRec[k];
         }
         return { name, data: cleanData as typeof validated, pii };
       });
