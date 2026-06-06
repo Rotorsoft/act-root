@@ -17,6 +17,8 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
+import { gate_external, merge_for_reducer } from "../sensitive.js";
+import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
   InvariantError,
@@ -378,7 +380,9 @@ export async function load<
   me: State<TState, TEvents, TActions>,
   stream: string,
   callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  asOf?: AsOf
+  asOf?: AsOf,
+  actor?: Actor,
+  pii_lookup: (eventName: string) => readonly string[] = () => []
 ): Promise<Snapshot<TState, TEvents>> {
   const timeTravel = !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = timeTravel ? undefined : await cache().get<TState>(stream);
@@ -397,15 +401,31 @@ export async function load<
 
   await store().query(
     (e) => {
-      event = e as Committed<TEvents, string>;
       version = e.version;
+      // Split per-event handling into two views:
+      //   - reducer view: pii merged into data (or [SHREDDED] post-forget) so
+      //     the reducer always sees plaintext; the source of truth for state.
+      //   - external view: gated by `.discloses` + actor; what we return to
+      //     callers and place in snapshot.event.
+      const fields = pii_lookup(e.name as string);
+      const reducer_view = merge_for_reducer(
+        e as Committed<TEvents, string>,
+        fields
+      );
+      const external_view = gate_external(
+        e as Committed<TEvents, string>,
+        fields,
+        me.disclose ?? null,
+        actor
+      );
+      event = external_view;
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
         snaps++;
         patches = 0;
         replayed++;
       } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](event, state));
+        state = patch(state, me.patch[e.name](reducer_view, state));
         patches++;
         replayed++;
       } else if (e.name !== TOMBSTONE_EVENT) {
@@ -512,7 +532,18 @@ export async function action<
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(me, stream);
+      // Pass the action target's actor and the same pii_fields lookup down
+      // — action()'s reducer needs plaintext (handled inside load), and the
+      // snapshot.event returned to the caller is gated by `.discloses` with
+      // the action's actor.
+      const snapshot = await load(
+        me,
+        stream,
+        undefined,
+        undefined,
+        target.actor,
+        pii_fields
+      );
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       const expected = expectedVersion ?? snapshot.event?.version;
@@ -641,14 +672,27 @@ export async function action<
 
       let { state, patches } = snapshot;
       const snapshots = committed.map((event) => {
-        const p = me.patch[event.name](event, state);
+        // Reducers run against the plaintext-merged view (so derived state is
+        // correct even for sensitive events); the snapshot.event returned to
+        // the .do() caller is the gated view (so external visibility tracks
+        // the action target's actor).
+        const fields = pii_fields(event.name as string);
+        const ev = event as Committed<TEvents, keyof TEvents & string>;
+        const reducer_view = merge_for_reducer(ev, fields);
+        const external_view = gate_external(
+          ev,
+          fields,
+          me.disclose ?? null,
+          target.actor
+        );
+        const p = me.patch[event.name](reducer_view, state);
         state = patch(state, p);
         patches++;
         // cache_hit / replayed propagate from the initial load — these
         // post-commit snapshots all derive from the same loaded state.
         // version advances per committed event (each is a new stream head).
         return {
-          event,
+          event: external_view,
           state,
           version: event.version,
           patches,

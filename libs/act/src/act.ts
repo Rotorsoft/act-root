@@ -735,19 +735,22 @@ export class Act<
     state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
     callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void,
-    asOf?: AsOf
+    asOf?: AsOf,
+    actor?: Actor
   ): Promise<Snapshot<TNewState, TNewEvents>>;
   async load<TKey extends keyof TStateMap & string>(
     name: TKey,
     stream: string,
     callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void,
-    asOf?: AsOf
+    asOf?: AsOf,
+    actor?: Actor
   ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
   async load<TNewState extends Schema>(
     stateOrName: State<TNewState, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void,
-    asOf?: AsOf
+    asOf?: AsOf,
+    actor?: Actor
   ): Promise<Snapshot<any, any>> {
     return this._scoped(async () => {
       let merged: State<any, any, any>;
@@ -758,7 +761,9 @@ export class Act<
       } else {
         merged = this._states.get(stateOrName.name) || stateOrName;
       }
-      return await this._es.load(merged, stream, callback, asOf);
+      // When `actor` is omitted the read default-denies — sensitive fields
+      // come back as [REDACTED] regardless of any `.discloses` predicate.
+      return await this._es.load(merged, stream, callback, asOf, actor);
     });
   }
 

@@ -22,12 +22,16 @@ const userRegisteredSchema = z.object({
   plan: z.enum(["free", "pro"]),
 });
 
+// `.discloses(() => true)` is the simplest way to confirm the slice 3 split
+// without slice 4's gate intervening — the test wants to verify the
+// underlying split mechanic, not the read-time substitution.
 const User = state({ User: userSchema })
   .init(() => ({}))
   .emits({ UserRegistered: userRegisteredSchema })
   .patch({ UserRegistered: ({ data }) => ({ email: data.email }) })
   .on({ register: userRegisteredSchema })
   .emit((payload) => ["UserRegistered", payload])
+  .discloses(() => true)
   .build();
 
 const counterSchema = z.object({ count: z.number() });
@@ -78,14 +82,23 @@ describe("commit-path PII split (#855 slice 3)", () => {
     expect(events[0].pii).toBeUndefined();
   });
 
-  it("the snapshot returned to .do() carries the split data (post-split shape)", async () => {
+  it("the snapshot returned to .do() carries the gated event — split happens underneath", async () => {
+    // User's `.discloses(() => true)` lets the actor see plaintext, so the
+    // gate merges pii back into data on the returned snapshot. The split
+    // is still real — the underlying store has data/pii separated (verified
+    // by the first test) — the gate just reassembles for the authorized
+    // caller's view.
     const app = act().withState(User).build();
     const [snapshot] = await app.do(
       "register",
       { stream: "user-2", actor },
       { email: "u@example.com", name: "Ursula", plan: "pro" }
     );
-    expect(snapshot.event?.data).toEqual({ plan: "pro" });
+    expect(snapshot.event?.data).toEqual({
+      email: "u@example.com",
+      name: "Ursula",
+      plan: "pro",
+    });
     expect(snapshot.event?.pii).toEqual({
       email: "u@example.com",
       name: "Ursula",

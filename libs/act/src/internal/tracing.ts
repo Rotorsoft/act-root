@@ -175,7 +175,7 @@ export function buildEs(
   // args; the orchestrator never wants to plumb them through every call site,
   // so we bind them once here and present an `EsOps.action` with the original
   // 6-arg signature.
-  const boundAction: EsOps["action"] = (
+  const bound_action: EsOps["action"] = (
     me,
     actionName,
     target,
@@ -193,11 +193,16 @@ export function buildEs(
       correlator,
       pii_fields
     );
+  // load takes `pii_lookup` as its last positional arg — same binding pattern
+  // as action's `pii_fields`. EsOps.load presents the original 5-arg signature
+  // (`actor` stays positional so callers can pass it through).
+  const bound_load: EsOps["load"] = (me, stream, cb, asOf, actor) =>
+    es.load(me, stream, cb, asOf, actor, pii_fields);
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
-      load: es.load,
-      action: boundAction,
+      load: bound_load,
+      action: bound_action,
       tombstone: es.tombstone,
     };
   }
@@ -211,7 +216,7 @@ export function buildEs(
         )
       );
     }),
-    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
+    load: traced(bound_load, (result, _me, stream, _cb, asOf) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -227,7 +232,7 @@ export function buildEs(
       );
     }),
     action: traced(
-      boundAction,
+      bound_action,
       (snapshots, _me, _action, target) => {
         const committed = snapshots.filter((s) => s.event);
         if (committed.length) {

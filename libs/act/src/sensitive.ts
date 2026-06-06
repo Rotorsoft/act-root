@@ -1,4 +1,20 @@
 import { z } from "zod";
+import type { Actor, Committed, Schemas } from "./types/index.js";
+
+/**
+ * Sentinel placed in `event.data[field]` when the caller isn't authorized to
+ * see the sensitive field — either `.discloses(predicate)` returned `false`,
+ * or no predicate was declared (framework default-deny). Recoverable: a
+ * properly-authorized read returns the plaintext.
+ */
+export const REDACTED = "[REDACTED]" as const;
+
+/**
+ * Sentinel placed in `event.data[field]` when the underlying PII payload has
+ * been wiped via `Store.forget_pii(stream)` — the row's pii column is `NULL`
+ * and the original plaintext is gone forever. Irrecoverable.
+ */
+export const SHREDDED = "[SHREDDED]" as const;
 
 /**
  * @packageDocumentation
@@ -93,4 +109,101 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
     if (is_pii(shape[key])) fields.push(key);
   }
   return fields;
+}
+
+/**
+ * Build the **reducer view** of a committed event — sensitive fields merged
+ * back into `data` so per-state reducers always see plaintext.
+ *
+ * - Event with no `pii` payload AND no schema-declared sensitive fields →
+ *   return the event unchanged (zero-cost path).
+ * - Event with a `pii` payload → merge into `data` (plaintext for the reducer).
+ * - Event whose schema *declares* sensitive fields but `pii` is null/undefined
+ *   (post-`forget_pii`) → substitute {@link SHREDDED} for each declared field.
+ *
+ * Used inside `load()` before invoking the reducer chain. Reducer-visible PII
+ * is by design — the reducer is the source of truth for derived state. The
+ * external view returned to callers is separately gated by {@link gate_external}.
+ *
+ * @internal
+ */
+export function merge_for_reducer<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents & string,
+>(
+  event: Committed<TEvents, TKey>,
+  fields: readonly string[]
+): Committed<TEvents, TKey> {
+  if (fields.length === 0) return event;
+  const data = event.data as Record<string, unknown>;
+  const pii = event.pii;
+  if (pii != null) {
+    return {
+      ...event,
+      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
+    };
+  }
+  // Schema declared sensitive fields but the pii payload is gone — shredded.
+  const shredded: Record<string, unknown> = { ...data };
+  for (const f of fields) shredded[f] = SHREDDED;
+  return {
+    ...event,
+    data: shredded as Committed<TEvents, TKey>["data"],
+  };
+}
+
+/**
+ * Build the **external view** of a committed event — the form returned by
+ * `load()`, `query()`, `query_array()`, and the snapshot in `do()`'s reply.
+ *
+ * - Event with no schema-declared sensitive fields → returned unchanged
+ *   (zero-cost path).
+ * - Event whose `pii` payload is null/undefined AND schema declares sensitive
+ *   fields → substitute {@link SHREDDED} for each declared field. Irrecoverable,
+ *   so no predicate check.
+ * - Event with a `pii` payload, predicate returns `true` → merge `pii` into
+ *   `data` (plaintext).
+ * - Event with a `pii` payload, predicate returns `false` OR no predicate
+ *   declared (framework default-deny) → substitute {@link REDACTED} for each
+ *   declared field.
+ *
+ * @internal
+ */
+export function gate_external<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents & string,
+>(
+  event: Committed<TEvents, TKey>,
+  fields: readonly string[],
+  predicate: ((event: any, actor: Actor) => boolean) | null,
+  actor: Actor | undefined
+): Committed<TEvents, TKey> {
+  if (fields.length === 0) return event;
+  const data = event.data as Record<string, unknown>;
+  if (event.pii == null) {
+    const shredded: Record<string, unknown> = { ...data };
+    for (const f of fields) shredded[f] = SHREDDED;
+    return {
+      ...event,
+      data: shredded as Committed<TEvents, TKey>["data"],
+    };
+  }
+  // Plaintext path requires both an actor AND a predicate that allows. Missing
+  // either → default-deny → REDACTED.
+  const allowed = !!actor && !!predicate && predicate(event, actor);
+  if (allowed) {
+    return {
+      ...event,
+      data: {
+        ...data,
+        ...(event.pii as Record<string, unknown>),
+      } as Committed<TEvents, TKey>["data"],
+    };
+  }
+  const redacted: Record<string, unknown> = { ...data };
+  for (const f of fields) redacted[f] = REDACTED;
+  return {
+    ...event,
+    data: redacted as Committed<TEvents, TKey>["data"],
+  };
 }
