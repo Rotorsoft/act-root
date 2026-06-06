@@ -407,19 +407,15 @@ export async function load<
   let replayed = 0;
   let event: Committed<TEvents, string> | undefined;
 
-  // Bind the PII transforms once at load entry. The decorator trio
-  // (`_pii_split` / `_pii_merge` / `_pii_gate`) is attached
-  // together at build time on states that declared at least one
-  // `sensitive(...)` event, so the function reference itself IS the
-  // per-state "has PII?" predicate — no separate flag needed. PII-aware
-  // states get real closures; PII-free states get identity arrows that
-  // V8 inlines into the call site. Either way the per-event body is the
-  // same shape — no per-event optional-chain probe, no duplicated loop.
-  const identity = <T>(x: T) => x;
-  const reducer_view = me._pii_merge ?? identity;
-  const external_view = me._pii_gate
-    ? (e: Committed<TEvents, string>) => me._pii_gate!(e, actor)
-    : identity;
+  // Per-event PII views via optional-chain + fallback. The decorator trio
+  // (`_pii_split` / `_pii_merge` / `_pii_gate`) is attached together at
+  // build on states that declared at least one `sensitive(...)` event;
+  // when absent the optional-chain call short-circuits and `?? e` hands
+  // the event straight through. One liner each, same body either way.
+  const reducer_view = (e: Committed<TEvents, string>) =>
+    me._pii_merge?.(e) ?? e;
+  const external_view = (e: Committed<TEvents, string>) =>
+    me._pii_gate?.(e, actor) ?? e;
 
   await store().query(
     (e) => {
@@ -603,15 +599,17 @@ export async function action<
         }
       }
 
-      // Same bind-once-then-call pattern as load(). For PII-aware states
-      // `split` is the per-event splitter that moves sensitive fields into
-      // `pii`; for PII-free states it's identity. One loop body either way.
-      const split = me._pii_split ?? ((e: { name: any; data: any }) => e);
+      // Per-event optional-chain split. PII-aware states have `_pii_split`
+      // attached at build time; PII-free states short-circuit at `?.()` and
+      // `?? base` hands the event through.
       const emitted = tuples.map(([name, data]) => {
-        const validated = skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]);
-        return split({ name, data: validated });
+        const base = {
+          name,
+          data: skipValidation
+            ? data
+            : validate(name as string, data, me.events[name]),
+        };
+        return me._pii_split?.(base) ?? base;
       });
 
       const meta: EventMeta = {
@@ -661,13 +659,13 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      // Same bind-once-then-call pattern as load() — the function
-      // reference itself is the "has PII?" predicate.
-      const post_identity = <T>(x: T) => x;
-      const reducer_after = me._pii_merge ?? post_identity;
-      const external_after = me._pii_gate
-        ? (e: (typeof committed)[number]) => me._pii_gate!(e, target.actor)
-        : post_identity;
+      // Same per-event optional-chain pattern as load() — one liner each,
+      // optional-chain short-circuits + `?? e` fallback hand the event
+      // through unchanged on PII-free states.
+      const reducer_after = (e: (typeof committed)[number]) =>
+        me._pii_merge?.(e) ?? e;
+      const external_after = (e: (typeof committed)[number]) =>
+        me._pii_gate?.(e, target.actor) ?? e;
       const snapshots = committed.map((event) => {
         const p = me.patch[event.name](reducer_after(event), state);
         state = patch(state, p);
