@@ -42,5 +42,14 @@ export {
   registerState,
 } from "./merge.js";
 export { buildHandle, buildHandleBatch } from "./reactions.js";
+export {
+  _registry,
+  gate_external,
+  merge_for_reducer,
+  pii_fields,
+  REDACTED,
+  SHREDDED,
+  strip_for_handler,
+} from "./sensitive.js";
 export { SettleLoop } from "./settle.js";
 export { buildDrain, buildEs, traceCycle } from "./tracing.js";

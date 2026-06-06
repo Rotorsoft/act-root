@@ -17,7 +17,6 @@
  * @internal
  */
 
-import { strip_for_handler } from "../sensitive.js";
 import {
   type Actor,
   type BatchHandler,
@@ -33,6 +32,7 @@ import {
 } from "../types/index.js";
 import { computeBackoffDelay } from "./backoff.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
+import { strip_for_handler } from "./sensitive.js";
 
 /**
  * Dependencies a reaction handler needs from the orchestrator: the logger

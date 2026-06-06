@@ -11,10 +11,10 @@ import {
   deprecatedEventNames,
   mergeEventRegister,
   mergeProjection,
+  pii_fields,
   registerState,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
-import { pii_fields } from "../sensitive.js";
 import type {
   Actor,
   BatchHandler,

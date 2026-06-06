@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { pii_fields, sensitive } from "../src/sensitive.js";
+import { pii_fields } from "../src/internal/sensitive.js";
+import { sensitive } from "../src/types/schemas.js";
 
 describe("sensitive()", () => {
   it("returns the same schema instance", () => {

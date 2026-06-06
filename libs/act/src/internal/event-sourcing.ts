@@ -17,7 +17,6 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import { gate_external, merge_for_reducer } from "../sensitive.js";
 import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
@@ -42,6 +41,7 @@ import type {
 import { sleep, validate } from "../utils.js";
 import { computeBackoffDelay } from "./backoff.js";
 import { defaultCorrelator } from "./correlator.js";
+import { gate_external, merge_for_reducer } from "./sensitive.js";
 
 /**
  * Default per-batch row count for the {@link scan} pagination loop

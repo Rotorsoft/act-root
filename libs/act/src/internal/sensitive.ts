@@ -1,11 +1,38 @@
+/**
+ * @module sensitive
+ * @category Internal
+ *
+ * Internal mechanics for the sensitive-data foundation (#855 / epic #566).
+ * The public surface (`sensitive(zodType)`) lives at `libs/act/src/sensitive.ts`
+ * and re-exports `REDACTED` / `SHREDDED` from here; this module holds the
+ * registry plus the helpers the orchestrator calls during commit, load, and
+ * handler dispatch.
+ *
+ * - `_registry` — process-global `z.registry<{ sensitive: true }>()`. Public
+ *   `sensitive()` adds to it; the helpers in this module read it.
+ * - `pii_fields(schema)` — walk a Zod schema's top-level shape, return the
+ *   keys marked via `sensitive(...)`.
+ * - `merge_for_reducer(event, fields)` — produce the reducer view (pii merged
+ *   into data; `[SHREDDED]` if pii column is null).
+ * - `gate_external(event, fields, predicate, actor)` — produce the external
+ *   view: plaintext when authorized, `[REDACTED]` when not, `[SHREDDED]`
+ *   when the underlying pii column is null.
+ * - `strip_for_handler(event, fields)` — remove sensitive keys entirely
+ *   before invoking projection / reaction handlers.
+ *
+ * @internal
+ */
+
 import { z } from "zod";
-import type { Actor, Committed, Schemas } from "./types/index.js";
+import type { Actor, Committed, Schemas } from "../types/index.js";
 
 /**
  * Sentinel placed in `event.data[field]` when the caller isn't authorized to
  * see the sensitive field — either `.discloses(predicate)` returned `false`,
  * or no predicate was declared (framework default-deny). Recoverable: a
  * properly-authorized read returns the plaintext.
+ *
+ * Re-exported from `libs/act/src/sensitive.ts` as part of the public surface.
  */
 export const REDACTED = "[REDACTED]" as const;
 
@@ -13,61 +40,26 @@ export const REDACTED = "[REDACTED]" as const;
  * Sentinel placed in `event.data[field]` when the underlying PII payload has
  * been wiped via `Store.forget_pii(stream)` — the row's pii column is `NULL`
  * and the original plaintext is gone forever. Irrecoverable.
+ *
+ * Re-exported from `libs/act/src/sensitive.ts` as part of the public surface.
  */
 export const SHREDDED = "[SHREDDED]" as const;
-
-/**
- * @packageDocumentation
- * @module act
- * @category Sensitive data
- *
- * Schema-level marking for sensitive (PII) event fields. The first piece of
- * the sensitive-data epic (#566) — colocates the security classification with
- * the type definition so there is one source of truth per field.
- *
- * Wrap a Zod field with `sensitive(...)` and the framework registers the
- * underlying schema in a process-global Zod registry. The wrapper is
- * type-transparent: `sensitive(z.string())` is still a `z.ZodString` from
- * TypeScript's perspective, so callers never need to know about the marker.
- *
- * @example
- * ```ts
- * import { state, sensitive } from "@rotorsoft/act";
- *
- * const UserRegistered = z.object({
- *   email: sensitive(z.string().email()),
- *   name: sensitive(z.string()),
- *   plan: z.enum(["free", "pro"]),  // not sensitive — stays in events.data
- * });
- * ```
- */
 
 /**
  * Process-global registry holding every Zod schema marked sensitive. Backed
  * by a `WeakMap`, so wrapper-created instances (`.optional()`, `.nullable()`,
  * `.default()`) that chain off a marked schema produce *new* schema instances
  * the registry doesn't track; the field walker handles those via unwrap.
+ *
+ * Exported so the public `sensitive(zodType)` wrapper can call `_registry.add`.
+ * Underscore prefix marks "framework-private, don't touch from user code."
+ *
+ * @internal
  */
-const _registry = z.registry<{ sensitive: true }>();
+export const _registry = z.registry<{ sensitive: true }>();
 
 /**
- * Mark a Zod schema as sensitive. Returns the same schema instance — the
- * marker is registered out-of-band so the static type is preserved and the
- * call site reads as a pure annotation.
- *
- * Idempotent: re-wrapping an already-sensitive schema is a no-op (the
- * registry entry already exists; `add()` overwrites with the same value).
- *
- * @param schema - The Zod schema to mark sensitive.
- * @returns The same schema instance, unmodified at the type level.
- */
-export function sensitive<T extends z.ZodType>(schema: T): T {
-  _registry.add(schema, { sensitive: true });
-  return schema;
-}
-
-/**
- * Internal — true when the given schema was marked via {@link sensitive}.
+ * True when the given schema was marked via `sensitive(...)`.
  *
  * Walks through Zod wrapper layers (`.optional()`, `.nullable()`,
  * `.default()`, `.readonly()`) by following `_def.innerType` until it reaches
@@ -92,7 +84,7 @@ function is_pii(schema: z.ZodType): boolean {
  *
  * Walks the top-level shape of a `z.object({...})` and returns the keys whose
  * schema (after unwrapping optional/nullable/default wrappers) was marked via
- * {@link sensitive}. Returns an empty array for non-object schemas or events
+ * `sensitive(...)`. Returns an empty array for non-object schemas or events
  * with no sensitive fields — the common-case zero-cost path.
  *
  * Only the top-level shape is walked. Sensitive fields nested inside a
