@@ -296,12 +296,28 @@ export class InMemoryStore implements Store {
   private _maxEventIdByStream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
   private _maxNonSnapEventId = -1;
+  // stream → (event_id → cloned sensitive payload). Two-level so `forget_pii`
+  // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
+  // the `DELETE WHERE stream = ?` scope that durable adapters get from their
+  // stream index. Entries exist only for events committed with a non-null
+  // `pii` field; absence means "no PII" (returned as `null` on load).
+  private _pii: Map<string, Map<number, Record<string, unknown>>> = new Map();
 
   private _resetIndexes() {
     this._events.length = 0;
     this._streamVersions.clear();
     this._maxEventIdByStream.clear();
     this._maxNonSnapEventId = -1;
+    this._pii.clear();
+  }
+
+  // Attach the isolated PII payload (or null) to an event before handing it to
+  // a caller. Allocation-free for events without PII — by far the common case.
+  private _withPii<E extends Schemas>(
+    e: Committed<E, keyof E>
+  ): Committed<E, keyof E> {
+    const pii = this._pii.get(e.stream)?.get(e.id);
+    return pii ? ({ ...e, pii } as Committed<E, keyof E>) : e;
   }
 
   /**
@@ -365,7 +381,9 @@ export class InMemoryStore implements Store {
           continue;
         if (query.after && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
-        await Promise.resolve(callback(e as Committed<E, keyof E>));
+        await Promise.resolve(
+          callback(this._withPii(e as Committed<E, keyof E>))
+        );
         count++;
         if (query?.limit && count >= query.limit) break;
       }
@@ -377,7 +395,9 @@ export class InMemoryStore implements Store {
         if (query?.created_after && e.created <= query.created_after) continue;
         if (query?.before && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
-        await Promise.resolve(callback(e as Committed<E, keyof E>));
+        await Promise.resolve(
+          callback(this._withPii(e as Committed<E, keyof E>))
+        );
         count++;
         if (query?.limit && count >= query.limit) break;
       }
@@ -416,7 +436,7 @@ export class InMemoryStore implements Store {
 
     let version = currentVersion + 1;
     let lastNonSnapId = -1;
-    const committed = msgs.map(({ name, data }) => {
+    const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
         id: this._events.length,
         stream,
@@ -426,10 +446,21 @@ export class InMemoryStore implements Store {
         data,
         meta,
       };
+      // The stored event is the pii-less view — `forget_pii` only has to
+      // drop the inner Map for the stream, never the event row. Mandatory
+      // clone on the pii payload defends against caller-side mutation.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
+      if (pii != null) {
+        let perStream = this._pii.get(stream);
+        if (!perStream) {
+          perStream = new Map();
+          this._pii.set(stream, perStream);
+        }
+        perStream.set(c.id, structuredClone(pii) as Record<string, unknown>);
+      }
       if (name !== SNAP_EVENT) lastNonSnapId = c.id;
       version++;
-      return c;
+      return this._withPii(c);
     });
     this._streamVersions.set(stream, version - 1);
     if (lastNonSnapId >= 0) {
@@ -669,6 +700,22 @@ export class InMemoryStore implements Store {
    * @param input - Stream names or a filter selecting the streams to unblock.
    * @returns Count of streams that were actually flipped (were blocked).
    */
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — see
+   * {@link Store.forget_pii}. O(1) drop of the stream's inner Map; the size of
+   * that Map is the count of events that had PII. Idempotent: a second call
+   * finds no inner Map and returns `0`.
+   *
+   * @param stream - Target stream.
+   * @returns Count of events whose isolated PII payload was deleted.
+   */
+  async forget_pii(stream: string): Promise<number> {
+    await sleep();
+    const count = this._pii.get(stream)?.size ?? 0;
+    this._pii.delete(stream);
+    return count;
+  }
+
   async unblock(input: string[] | StreamFilter) {
     await sleep();
     let count = 0;
