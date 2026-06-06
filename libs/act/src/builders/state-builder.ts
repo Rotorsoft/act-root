@@ -577,6 +577,11 @@ export function state<TName extends string, TState extends Schema>(
             init,
             patch: defaultPatch,
             on: {},
+            // Step delegates initialized as identity. `act().build()`
+            // overrides on states with `sensitive(...)` events to bake in
+            // the gate / split.
+            view: (event) => event,
+            message: (validated) => validated,
           };
 
           // eslint-disable-next-line @typescript-eslint/no-empty-object-type -- {} avoids string index signature

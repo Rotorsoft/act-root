@@ -610,36 +610,63 @@ export function act<
             };
             batchHandlers.set(target, wrapped as never);
           }
-          // Attach the per-state PII decorators (#855). States with at least
-          // one sensitive event get three closures bound over the per-event
-          // field list + the disclosure predicate; states without sensitive
-          // events get nothing attached so the orchestrator's hot path
-          // short-circuits at `me._x?.(arg) ?? arg` with zero work.
+          // Build the per-state step delegates (#855).
+          //
+          // The orchestrator calls three step delegates per event:
+          //   - `me.message(validated)` — produces the commit-bound
+          //     `{name, data, pii?}` from a validated emit. Called once
+          //     per emitted event in `action()` before `Store.commit`.
+          //   - `me.patch[eventName](event, state)` — the reducer that
+          //     derives the next state from the committed event. Called
+          //     during load() replay and action()'s post-commit fold.
+          //   - `me.view(event, actor)` — produces the caller-visible
+          //     form of a committed event (snapshot.event). Called in
+          //     load() and action()'s snapshot builder.
+          //
+          // For PII-free states (the common case) `view` and `message`
+          // are bound to identity in `state-builder.ts` and `patch` is
+          // the user-declared reducer; the orchestrator's hot path is
+          // identical to the pre-#855 code at runtime.
+          //
+          // For PII-aware states (at least one `sensitive(...)` event)
+          // each delegate is rebound here to bake the PII work into the
+          // step itself: `view` gates per `.discloses`, `message` peels
+          // sensitive fields off `data` into `pii`, and each per-event
+          // `patch[eventName]` for a sensitive event is wrapped to merge
+          // PII back into `data` before the user's reducer sees it.
           for (const state of states.values()) {
             const fields_by_event = new Map<string, readonly string[]>();
             for (const eventName of Object.keys(state.events)) {
               const fields = _sf.get(eventName);
               if (fields) fields_by_event.set(eventName, fields);
             }
-            if (fields_by_event.size === 0) continue;
+            if (fields_by_event.size === 0) {
+              // Pure state — `view` and `message` are identity, `patch`
+              // is the user's reducer as-declared.
+              state.view = (event) => event;
+              state.message = (validated) => validated;
+              continue;
+            }
+            // PII-aware state — bake PII work into each step delegate.
             const disclose = state.disclose ?? null;
-            state._pii_split = (e) => {
-              const fields = fields_by_event.get(e.name as string);
-              if (!fields) return e;
-              return pii_split(e, fields) as typeof e & {
-                pii: Record<string, unknown>;
-              };
-            };
-            state._pii_merge = (event) => {
+            state.view = (event, actor) => {
               const fields = fields_by_event.get(event.name as string);
-              if (!fields) return event;
-              return pii_merge(event, fields);
+              return fields ? pii_gate(event, fields, disclose, actor) : event;
             };
-            state._pii_gate = (event, actor) => {
-              const fields = fields_by_event.get(event.name as string);
-              if (!fields) return event;
-              return pii_gate(event, fields, disclose, actor);
+            state.message = (validated) => {
+              const fields = fields_by_event.get(validated.name as string);
+              return fields ? pii_split(validated, fields) : validated;
             };
+            // Wrap the per-event reducer to merge PII before the user's
+            // patch sees it. Plain reducers (for non-sensitive events on
+            // this state) stay unwrapped. `state-builder` guarantees a
+            // passthrough reducer for every declared event, so the lookup
+            // is never undefined here.
+            for (const [eventName, fields] of fields_by_event) {
+              const original = state.patch[eventName];
+              state.patch[eventName] = (event, s) =>
+                original(pii_merge(event, fields), s);
+            }
           }
           _built = true;
         }

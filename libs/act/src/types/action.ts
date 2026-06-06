@@ -543,27 +543,33 @@ export type State<
   // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
   disclose?: (event: any, actor: Actor) => boolean;
   /**
-   * Build-time decorators for the sensitive-data foundation (#855). Attached
-   * by `act().build()` on states whose events declare `sensitive(...)`
-   * fields; absent on states without PII. The orchestrator's hot paths use
-   * `me._x?.(arg) ?? arg` — for PII-free states the optional-chain
-   * short-circuits and zero PII machinery is touched per event.
+   * Build-time step delegates wired by `act().build()`. The orchestrator
+   * calls these instead of branching on PII per event — for PII-aware
+   * states they bake the merge/gate/split into the step; for PII-free
+   * states they're identity.
    *
-   * Internal, decided at build time, never set by user code. Underscore
-   * prefix follows the project's private-field convention.
+   * - `view(event, actor)` — produces the caller-visible form of a
+   *   committed event (gates `sensitive(...)` fields via `.discloses` on
+   *   PII-aware states; identity otherwise).
+   * - `message(validated)` — produces the `{name, data, pii?}` shape that
+   *   goes to `Store.commit` (peels sensitive fields off `data` into
+   *   `pii` on PII-aware states; identity otherwise).
+   * - `patch[eventName]` — already on State as the per-event reducer.
+   *   Wrapped at build time to merge PII into `data` first when the
+   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * Internal, always set after build, never assigned by user code.
    *
    * @internal
    */
-  // biome-ignore lint/suspicious/noExplicitAny: internal decorator, event payload varies per state
-  _pii_split?: (e: { name: any; data: any }) => {
+  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
+  view: (event: any, actor: Actor | undefined) => any;
+  // biome-ignore lint/suspicious/noExplicitAny: same
+  message: (validated: { name: any; data: any }) => {
     name: any;
     data: any;
     pii?: Record<string, unknown>;
   };
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  _pii_merge?: (event: any) => any;
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  _pii_gate?: (event: any, actor: Actor | undefined) => any;
 };
 
 /**

@@ -363,19 +363,13 @@ export async function scan(
  * @template TState The type of state
  * @template TEvents The type of events
  * @template TActions The type of actions
- * @param me The state machine definition. May carry the optional PII
- *   decorators (`_pii_merge`, `_pii_gate`) attached at build
- *   time on states with at least one `sensitive(...)` event; states without
- *   them take the bare replay path with no PII machinery.
+ * @param me The state machine definition.
  * @param stream The stream (instance) to load
  * @param callback (Optional) Callback to receive the loaded snapshot as it is built
  * @param asOf (Optional) Time-travel cursor; bypasses the cache.
- * @param actor (Optional) When supplied AND the state has sensitive events,
- *   gates the **external** view of each event via `.discloses(predicate)` —
- *   authorized callers see plaintext, unauthorized see `"[REDACTED]"`. The
- *   reducer view is always plaintext-merged regardless of actor so derived
- *   state stays correct. When the state has no sensitive events, the
- *   parameter is ignored.
+ * @param actor (Optional) Passed through to the state's `view` delegate
+ *   when constructing the snapshot.event — semantics are the state's to
+ *   define (see {@link state}).
  * @returns The snapshot of the loaded state
  *
  * @example
@@ -407,28 +401,18 @@ export async function load<
   let replayed = 0;
   let event: Committed<TEvents, string> | undefined;
 
-  // Per-event PII views via optional-chain + fallback. The decorator trio
-  // (`_pii_split` / `_pii_merge` / `_pii_gate`) is attached together at
-  // build on states that declared at least one `sensitive(...)` event;
-  // when absent the optional-chain call short-circuits and `?? e` hands
-  // the event straight through. One liner each, same body either way.
-  const reducer_view = (e: Committed<TEvents, string>) =>
-    me._pii_merge?.(e) ?? e;
-  const external_view = (e: Committed<TEvents, string>) =>
-    me._pii_gate?.(e, actor) ?? e;
-
   await store().query(
     (e) => {
       version = e.version;
       const typed = e as Committed<TEvents, string>;
-      event = external_view(typed);
+      event = me.view(typed, actor);
       if (e.name === SNAP_EVENT) {
         state = e.data as TState;
         snaps++;
         patches = 0;
         replayed++;
       } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](reducer_view(typed), state));
+        state = patch(state, me.patch[e.name](typed, state));
         patches++;
         replayed++;
       } else if (e.name !== TOMBSTONE_EVENT) {
@@ -603,13 +587,10 @@ export async function action<
       // attached at build time; PII-free states short-circuit at `?.()` and
       // `?? base` hands the event through.
       const emitted = tuples.map(([name, data]) => {
-        const base = {
-          name,
-          data: skipValidation
-            ? data
-            : validate(name as string, data, me.events[name]),
-        };
-        return me._pii_split?.(base) ?? base;
+        const validated = skipValidation
+          ? data
+          : validate(name as string, data, me.events[name]);
+        return me.message({ name, data: validated });
       });
 
       const meta: EventMeta = {
@@ -659,19 +640,12 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      // Same per-event optional-chain pattern as load() — one liner each,
-      // optional-chain short-circuits + `?? e` fallback hand the event
-      // through unchanged on PII-free states.
-      const reducer_after = (e: (typeof committed)[number]) =>
-        me._pii_merge?.(e) ?? e;
-      const external_after = (e: (typeof committed)[number]) =>
-        me._pii_gate?.(e, target.actor) ?? e;
       const snapshots = committed.map((event) => {
-        const p = me.patch[event.name](reducer_after(event), state);
+        const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
         return {
-          event: external_after(event),
+          event: me.view(event, target.actor),
           state,
           version: event.version,
           patches,
