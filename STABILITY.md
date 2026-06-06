@@ -12,10 +12,11 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.build`
 - `slice(...)` — including `.actions`, `.given`, `.build`
 - `projection(...)` — including `.from`, `.on`, `.build`
 - `act(...)` — including `.with`, `.build`
+- `sensitive(zodType)` (sensitive-data epic #566 — schema-level marker for PII fields; the orchestrator splits sensitive keys off `data` into `pii` on commit and gates reads by `.discloses`)
 
 Adding new optional builder methods or new optional fields to existing return types is **not** a breaking change. Removing or renaming a method, changing a required parameter, or narrowing an output type **is**.
 
@@ -26,6 +27,7 @@ The runtime surface returned from `act(...).build()`:
 - `do`, `load`, `query`, `query_array`
 - `drain`, `settle`, `correlate`
 - `reset`, `unblock`, `blocked_streams`, `close`
+- `forget` (sensitive-data epic #566 — wipe a stream's PII via `Store.forget_pii`, invalidate the cache, emit the `forgotten` lifecycle event; throws on adapters without `pii_isolation`)
 - `audit`
 
 The signatures, return shapes, and behavioral contracts of these methods are stable. Additive new methods on `IAct` are not breaking. Changing the meaning of an existing call (e.g., what `settle()` guarantees) is.
@@ -54,6 +56,7 @@ The events emitted by the orchestrator on the public event bus (`ActLifecycleEve
 - `settled` — a drain cycle settled (`Drain`)
 - `closed` — a close-the-books cycle completed (`CloseResult`)
 - `notified` — a different process committed to the same backing store (`StoreNotification`); fires only when `Store.notify` is implemented and at least one reaction is registered
+- `forgotten` — a stream's sensitive-data payload was wiped via `app.forget(stream)` (`{stream, at, eventCount}`); fires once per successful call, never on idempotent re-forget
 
 Their names and payload shapes are stable. Adding new optional fields to a payload is not breaking; renaming or removing fields is. Adding new lifecycle event names is not breaking.
 

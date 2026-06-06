@@ -888,4 +888,23 @@ export interface IAct<
   }>;
 
   query_array(query: Query): Promise<Committed<TEvents, keyof TEvents>[]>;
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — the
+   * application-level half of the sensitive-data epic (#566). Delegates to
+   * the Store's `forget_pii(stream)`, invalidates the cache entry for the
+   * stream, then emits the `forgotten` lifecycle event.
+   *
+   * Throws at build time if the configured Store does not implement
+   * `forget_pii` (its adapter declares `pii_isolation: false` or omits the
+   * method) — operators get a clear "your adapter can't comply with GDPR
+   * erasure" signal before the production callsite is exercised.
+   *
+   * Idempotent: a second call on an already-wiped stream returns
+   * `eventCount: 0` and does NOT re-emit `forgotten`.
+   *
+   * @param stream - Target stream to wipe.
+   * @returns Count of events whose PII column was set to NULL.
+   */
+  forget(stream: string): Promise<{ eventCount: number }>;
 }

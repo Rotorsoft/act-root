@@ -47,10 +47,11 @@ export type ReactionDeps<
   TActor extends Actor = Actor,
 > = {
   readonly logger: Logger;
-  readonly boundDo: IAct<TEvents, TActions, TActor>["do"];
-  readonly boundLoad: IAct<TEvents, TActions, TActor>["load"];
-  readonly boundQuery: IAct<TEvents, TActions, TActor>["query"];
-  readonly boundQueryArray: IAct<TEvents, TActions, TActor>["query_array"];
+  readonly bound_do: IAct<TEvents, TActions, TActor>["do"];
+  readonly bound_load: IAct<TEvents, TActions, TActor>["load"];
+  readonly bound_query: IAct<TEvents, TActions, TActor>["query"];
+  readonly bound_query_array: IAct<TEvents, TActions, TActor>["query_array"];
+  readonly bound_forget: IAct<TEvents, TActions, TActor>["forget"];
   /**
    * Registry-backed lookup of sensitive field names per event. Reaction and
    * batch handlers receive the event with these keys stripped from
@@ -125,10 +126,11 @@ export function buildHandle<
 >(deps: ReactionDeps<TEvents, TActions, TActor>): Handle<TEvents> {
   const {
     logger,
-    boundDo,
-    boundLoad,
-    boundQuery,
-    boundQueryArray,
+    bound_do,
+    bound_load,
+    bound_query,
+    bound_query_array,
+    bound_forget,
     pii_fields,
   } = deps;
   return async (lease, payloads) => {
@@ -142,10 +144,11 @@ export function buildHandle<
       logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
     const scopedApp: IAct<TEvents, TActions, TActor> = {
-      do: boundDo,
-      load: boundLoad,
-      query: boundQuery,
-      query_array: boundQueryArray,
+      do: bound_do,
+      load: bound_load,
+      query: bound_query,
+      query_array: bound_query_array,
+      forget: bound_forget,
     };
 
     for (const payload of payloads) {
@@ -165,7 +168,7 @@ export function buildHandle<
         reactingTo?: Committed<Schemas, string>,
         skipValidation?: boolean
       ) =>
-        boundDo(
+        bound_do(
           action,
           target,
           actionPayload,

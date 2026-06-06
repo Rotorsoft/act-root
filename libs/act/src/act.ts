@@ -21,7 +21,7 @@ import {
   SettleLoop,
   scan,
 } from "./internal/index.js";
-import { dispose, log, type Scoped, scoped, store } from "./ports.js";
+import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -129,6 +129,18 @@ export type ActLifecycleEvents<
    * cross-process semantic.
    */
   notified: StoreNotification;
+  /**
+   * A stream's sensitive-data payload was wiped via {@link Act.forget}.
+   * Fires exactly once per successful `forget(stream)` call — idempotent
+   * second calls (no PII left on the stream) return `eventCount: 0` and
+   * do NOT re-emit. Apps that never call `forget()` never see this event.
+   *
+   * Listeners use it for the compliance side of GDPR / CCPA: audit log,
+   * downstream cache busts, projection-side wipes that the framework
+   * doesn't reach (e.g., search indexes, ETL caches). The framework's own
+   * cache is invalidated by `forget()` itself before the event fires.
+   */
+  forgotten: { stream: string; at: Date; eventCount: number };
 };
 
 /**
@@ -319,6 +331,7 @@ export class Act<
   private readonly _bound_load = this.load.bind(this);
   private readonly _bound_query = this.query.bind(this);
   private readonly _bound_query_array = this.query_array.bind(this);
+  private readonly _bound_forget = this.forget.bind(this);
   /** Reaction dispatchers built once and handed to runDrainCycle each cycle. */
   private readonly _handle: Handle<TEvents>;
   private readonly _handle_batch: HandleBatch<TEvents>;
@@ -380,10 +393,11 @@ export class Act<
     this._cd = buildDrain<TEvents>(this._logger);
     this._handle = buildHandle<TEvents, TActions, TActor>({
       logger: this._logger,
-      boundDo: this._bound_do,
-      boundLoad: this._bound_load,
-      boundQuery: this._bound_query,
-      boundQueryArray: this._bound_query_array,
+      bound_do: this._bound_do,
+      bound_load: this._bound_load,
+      bound_query: this._bound_query,
+      bound_query_array: this._bound_query_array,
+      bound_forget: this._bound_forget,
       pii_fields: this.registry.sensitive_fields,
     });
     this._handle_batch = buildHandleBatch<TEvents>(
@@ -870,6 +884,36 @@ export class Act<
       const events: Committed<TEvents, keyof TEvents>[] = [];
       await store().query<TEvents>((e) => events.push(e), query);
       return events;
+    });
+  }
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — see
+   * {@link IAct.forget}. Application-level half of #566.
+   *
+   * Throws on adapters without `Store.forget_pii`, invalidates the cache
+   * entry for the stream, emits the `forgotten` lifecycle event with the
+   * row count. Idempotent: a second call returns `{eventCount: 0}` and
+   * does NOT re-emit.
+   *
+   * @param stream - Target stream.
+   * @returns `{eventCount}` — number of events whose PII column was wiped.
+   */
+  async forget(stream: string): Promise<{ eventCount: number }> {
+    return this._scoped(async () => {
+      const s = store();
+      if (!s.forget_pii) {
+        throw new Error(
+          `Store does not implement forget_pii — adapter cannot comply with sensitive-data erasure. ` +
+            `Use an adapter that declares pii_isolation: true (e.g. @rotorsoft/act on the in-memory store).`
+        );
+      }
+      const eventCount = await s.forget_pii(stream);
+      await cache().invalidate(stream);
+      if (eventCount > 0) {
+        this.emit("forgotten", { stream, at: new Date(), eventCount });
+      }
+      return { eventCount };
     });
   }
 
