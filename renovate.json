@@ -6,6 +6,8 @@
     ":maintainLockFilesWeekly",
     ":enableVulnerabilityAlerts"
   ],
+  "gitAuthor": "Rotorsoft Renovate <41707007+Rotorsoft@users.noreply.github.com>",
+  "rebaseWhen": "conflicted",
   "dependencyDashboard": true,
   "enabledManagers": ["npm", "github-actions"],
   "minimumReleaseAge": "3 days",
