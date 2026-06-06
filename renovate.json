@@ -1,5 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Run by the hosted Mend Renovate App (github.com/apps/renovate). No self-hosted workflow — see issue #877 for the migration rationale.",
   "extends": [
     "config:recommended",
     ":automergePatch",
