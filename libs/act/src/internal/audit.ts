@@ -318,7 +318,7 @@ const make_deprecated_load_pass: PassFactory = (deps, options) => {
           name,
           current_version,
           total: count,
-          top_streams: top_streams,
+          top_streams,
         });
       }
       return findings;

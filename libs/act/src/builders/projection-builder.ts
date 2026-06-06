@@ -193,7 +193,7 @@ function _projection<
           ) => Promise<void>
         ) => {
           const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
-            handler: handler,
+            handler,
             resolver: default_resolver ?? _this_,
             options: {
               blockOnError: true,

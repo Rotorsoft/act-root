@@ -470,7 +470,7 @@ export class Act<
     this._audit_deps = {
       store,
       logger: this._logger,
-      event_to_state: event_to_state,
+      event_to_state,
       states: this._states,
       known_events: new Set(event_to_state.keys()),
       declared_lanes: new Set(this._drain_controllers.keys()),

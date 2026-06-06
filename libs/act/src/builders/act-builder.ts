@@ -496,7 +496,7 @@ export function act<
           options?: Partial<ReactionOptions>
         ) => {
           const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler: handler,
+            handler,
             resolver: _this_,
             options: {
               blockOnError: options?.blockOnError ?? true,
