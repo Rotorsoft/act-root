@@ -528,6 +528,20 @@ export type State<
    * `ConcurrencyError` surfaces on first conflict.
    */
   options?: { [TKey in keyof TActions]?: ActionOptions };
+  /**
+   * Disclosure predicate set by `.discloses(predicate)`. Gates external
+   * reads of `sensitive(...)`-marked fields — returning `true` allows the
+   * actor to see plaintext, `false` redacts. When absent, the framework
+   * default-denies on every external read (sensitive fields are always
+   * substituted with `"[REDACTED]"`). See #855 / epic #566.
+   */
+  // The stored predicate is erased — `any` for the event makes the field
+  // signature bivariant so a narrow `State<{count: number}, {Counted: ...},
+  // ...>` is assignable to `State<any, any, any>` without TypeScript blocking
+  // on contravariant function params. The public `.discloses()` method on the
+  // builder keeps the narrow signature so users still get type-checked predicates.
+  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
+  disclose?: (event: any, actor: Actor) => boolean;
 };
 
 /**

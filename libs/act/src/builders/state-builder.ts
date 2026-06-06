@@ -8,6 +8,8 @@ import type { ZodType } from "zod";
 import type {
   ActionHandler,
   ActionOptions,
+  Actor,
+  Committed,
   GivenHandlers,
   Invariant,
   PassthroughPatchHandler,
@@ -370,6 +372,41 @@ export type ActionBuilder<
     snap: (snapshot: Snapshot<TState, TEvents>) => boolean
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
+   * Declares the disclosure predicate for `sensitive(...)`-marked event
+   * fields. Gates external reads: returning `true` allows the actor to see
+   * plaintext on the event; returning `false` substitutes `"[REDACTED]"`.
+   * When absent, the framework default-denies on every external read —
+   * fail-safe.
+   *
+   * One predicate per state. A second `.discloses(...)` call replaces the
+   * first (same shape as snapshots being state-level, not per-event).
+   *
+   * The predicate receives the full event including merged PII so it can
+   * branch on the payload itself (e.g.
+   * `event.data.ownerId === actor.id`). Reducers, projections, and
+   * reactions are unaffected — they follow separate visibility rules
+   * documented in #855.
+   *
+   * @param disclose - Predicate `(event, actor) => boolean`. `true` =
+   *   plaintext, `false` = `"[REDACTED]"` substitution.
+   * @returns The ActionBuilder for chaining.
+   *
+   * @example Owner-or-admin disclosure
+   * ```typescript
+   * state({ User: userSchema })
+   *   .init(() => ({ ... }))
+   *   .emits({ UserRegistered: z.object({ email: sensitive(z.string()) }) })
+   *   .discloses((event, actor) =>
+   *     actor.id === event.stream || actor.roles?.includes("admin"))
+   * ```
+   */
+  discloses: (
+    disclose: (
+      event: Committed<TEvents, keyof TEvents & string>,
+      actor: Actor
+    ) => boolean
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  /**
    * Finalizes and builds the state definition.
    *
    * Call this method after defining all actions, invariants, and patches to create
@@ -636,6 +673,18 @@ function action_builder<
 
     snap(snap: (snapshot: Snapshot<TState, TEvents>) => boolean) {
       internal.snap = snap;
+      return builder;
+    },
+
+    discloses(
+      disclose: (
+        event: Committed<TEvents, keyof TEvents & string>,
+        actor: Actor
+      ) => boolean
+    ) {
+      // Replace on every call — matches snap's state-level semantics. Operators
+      // who need per-event differences branch inside the predicate.
+      internal.disclose = disclose;
       return builder;
     },
 

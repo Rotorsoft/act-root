@@ -1,5 +1,12 @@
 import type { ZodType, z } from "zod";
-import type { CommittedMeta, Schema, Schemas, State } from "./action.js";
+import type {
+  Actor,
+  Committed,
+  CommittedMeta,
+  Schema,
+  Schemas,
+  State,
+} from "./action.js";
 import type { Reaction } from "./reaction.js";
 
 /**
@@ -52,6 +59,12 @@ export type SchemaRegister<TSchemaReg> = {
  * @template TActions - Action schemas.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
+ * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
+ *   event name. Derived once at build time. Returns the empty array for
+ *   unknown events.
+ * @property disclosure_predicate - Lookup of the `.discloses(predicate)`
+ *   declaration per state name. Returns `null` when no predicate was set
+ *   (framework default-deny).
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -62,6 +75,15 @@ export type Registry<
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
+  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly disclosure_predicate: (
+    stateName: string
+  ) =>
+    | ((
+        event: Committed<TEvents, keyof TEvents & string>,
+        actor: Actor
+      ) => boolean)
+    | null;
 };
 
 /**
