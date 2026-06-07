@@ -4,7 +4,7 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { state } from "../src/builders/state-builder.js";
 import * as drain from "../src/internal/drain.js";
 import * as es from "../src/internal/event-sourcing.js";
-import { buildDrain, buildEs, traceCycle } from "../src/internal/tracing.js";
+import { build_drain, build_es, trace_cycle } from "../src/internal/tracing.js";
 import { cache, log, store } from "../src/ports.js";
 import type { Logger } from "../src/types/index.js";
 import { ZodEmpty } from "../src/types/schemas.js";
@@ -51,30 +51,30 @@ describe("tracing", () => {
     vi.restoreAllMocks();
   });
 
-  describe("buildEs", () => {
+  describe("build_es", () => {
     it("returns bare ops for non-trace levels (action still wrapped to bind correlator)", () => {
-      const ops = buildEs(withLevel("info"));
+      const ops = build_es(withLevel("info"));
       expect(ops.snap).toBe(es.snap);
       // ACT-404: action always carries a bound correlator, so it's a
       // closure regardless of trace level. After the #855 decorator
       // refactor moved the PII machinery off the action/load signatures
-      // onto per-state closures, load no longer needs a buildEs binding
+      // onto per-state closures, load no longer needs a build_es binding
       // and is bare at non-trace levels.
       expect(ops.load).toBe(es.load);
       expect(ops.action).not.toBe(es.action);
     });
 
     it("returns wrapped ops for trace level", () => {
-      const ops = buildEs(withLevel("trace"));
+      const ops = build_es(withLevel("trace"));
       expect(ops.snap).not.toBe(es.snap);
       expect(ops.load).not.toBe(es.load);
       expect(ops.action).not.toBe(es.action);
     });
   });
 
-  describe("buildDrain", () => {
+  describe("build_drain", () => {
     it("returns bare ops for non-trace levels", () => {
-      const ops = buildDrain(withLevel("info"));
+      const ops = build_drain(withLevel("info"));
       expect(ops.claim).toBe(drain.claim);
       expect(ops.fetch).toBe(drain.fetch);
       expect(ops.ack).toBe(drain.ack);
@@ -85,9 +85,9 @@ describe("tracing", () => {
     it("at trace level only subscribe is decorated; cycle ops stay bare (ACT-1103)", () => {
       // Per-op claim/fetch/ack/block decorators were folded into a
       // single cycle trace emitted from `DrainController.drain()` via
-      // `traceCycle`. Subscribe stays decorated because it's driven
+      // `trace_cycle`. Subscribe stays decorated because it's driven
       // from correlate-cycle, outside the cycle shape.
-      const ops = buildDrain(withLevel("trace"));
+      const ops = build_drain(withLevel("trace"));
       expect(ops.claim).toBe(drain.claim);
       expect(ops.fetch).toBe(drain.fetch);
       expect(ops.ack).toBe(drain.ack);
@@ -103,7 +103,7 @@ describe("tracing", () => {
     });
 
     it("logs load exit with cache + v + replayed + snaps + patches inline in the body", async () => {
-      const { load } = buildEs(withLevel("trace"));
+      const { load } = build_es(withLevel("trace"));
       await load(Counter, "s1");
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
@@ -113,7 +113,7 @@ describe("tracing", () => {
     });
 
     it("logs as-of details including the active filter fields", async () => {
-      const { load } = buildEs(withLevel("trace"));
+      const { load } = build_es(withLevel("trace"));
       await load(Counter, "s1", undefined, { before: 9999, limit: 50 });
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
@@ -123,7 +123,7 @@ describe("tracing", () => {
     });
 
     it("logs as-of created_before/created_after when those filters are set", async () => {
-      const { load } = buildEs(withLevel("trace"));
+      const { load } = build_es(withLevel("trace"));
       const before = new Date("2026-05-01T00:00:00.000Z");
       const after = new Date("2026-04-01T00:00:00.000Z");
       await load(Counter, "s1", undefined, {
@@ -138,7 +138,7 @@ describe("tracing", () => {
     });
 
     it("renders bare '(as-of)' marker when an empty asOf object is passed", async () => {
-      const { load } = buildEs(withLevel("trace"));
+      const { load } = build_es(withLevel("trace"));
       // asOf={} doesn't actually time-travel (load checks
       // Object.values(asOf).some(...)), but the marker still fires because
       // the trace decorator only checks `asOf` truthiness.
@@ -149,7 +149,7 @@ describe("tracing", () => {
     });
 
     it("reports cache hit on the second load of the same stream", async () => {
-      const { load } = buildEs(withLevel("trace"));
+      const { load } = build_es(withLevel("trace"));
       // Prime the cache via an action so a checkpoint exists.
       await es.action(Counter, "increment", target("s-warm"), { by: 1 });
       traceSpy.mockClear();
@@ -160,7 +160,7 @@ describe("tracing", () => {
     });
 
     it("withActionTrace logs entry and commit when events emitted", async () => {
-      const { action } = buildEs(withLevel("trace"));
+      const { action } = build_es(withLevel("trace"));
       const snapshots = await action(Counter, "increment", target("s1"), {
         by: 5,
       });
@@ -177,7 +177,7 @@ describe("tracing", () => {
     });
 
     it("withActionTrace skips commit log when nothing emitted", async () => {
-      const { action } = buildEs(withLevel("trace"));
+      const { action } = build_es(withLevel("trace"));
       await action(Counter, "noop", target("s2"), {});
       expect(traceSpy).toHaveBeenCalledWith(
         {},
@@ -197,7 +197,7 @@ describe("tracing", () => {
       const [snapshot] = await es.action(Counter, "increment", target("s3"), {
         by: 1,
       });
-      const { snap } = buildEs(withLevel("trace"));
+      const { snap } = build_es(withLevel("trace"));
       await snap(snapshot);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringContaining(
@@ -207,7 +207,7 @@ describe("tracing", () => {
     });
 
     it("withTombstoneTrace logs stream and version on success", async () => {
-      const { tombstone } = buildEs(withLevel("trace"));
+      const { tombstone } = build_es(withLevel("trace"));
       const committed = await tombstone("ts-trace", -1, "corr-trace");
       expect(committed).toBeDefined();
       expect(traceSpy).toHaveBeenCalledWith(
@@ -216,7 +216,7 @@ describe("tracing", () => {
     });
 
     it("withTombstoneTrace skips log on ConcurrencyError (committed undef)", async () => {
-      const { tombstone } = buildEs(withLevel("trace"));
+      const { tombstone } = build_es(withLevel("trace"));
       await tombstone("ts-trace-race", -1, "corr-trace-1");
       traceSpy.mockClear();
       // Second tombstone at same version → ConcurrencyError → returns undefined
@@ -245,18 +245,18 @@ describe("tracing", () => {
       lagging: false,
     });
 
-    it("traceCycle is a no-op when logger is below trace level", () => {
-      traceCycle(withLevel("info"), [lease("x")], [], [], [], []);
+    it("trace_cycle is a no-op when logger is below trace level", () => {
+      trace_cycle(withLevel("info"), [lease("x")], [], [], [], []);
       expect(traceSpy).not.toHaveBeenCalled();
     });
 
-    it("traceCycle is a no-op when no leases were taken this cycle", () => {
-      traceCycle(withLevel("trace"), [], [], [], [], []);
+    it("trace_cycle is a no-op when no leases were taken this cycle", () => {
+      trace_cycle(withLevel("trace"), [], [], [], [], []);
       expect(traceSpy).not.toHaveBeenCalled();
     });
 
-    it("traceCycle marks acked streams with ✓ + post-at and blocked with ✗ + failed-at/retry + error", () => {
-      traceCycle(
+    it("trace_cycle marks acked streams with ✓ + post-at and blocked with ✗ + failed-at/retry + error", () => {
+      trace_cycle(
         withLevel("trace"),
         [lease("ok-stream"), lease("bad-stream", 1, 2)],
         [
@@ -287,8 +287,8 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle marks ⊘ deferred and ⚠ with the handler error message", () => {
-      traceCycle(
+    it("trace_cycle marks ⊘ deferred and ⚠ with the handler error message", () => {
+      trace_cycle(
         withLevel("trace"),
         [lease("deferred-stream"), lease("erroring-stream", 5, 1)],
         // No fetch entry for deferred-stream → ⊘. erroring-stream
@@ -317,12 +317,12 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle renders dual outcome (✓ + ✗) when a partial batch acks then blocks", () => {
+    it("trace_cycle renders dual outcome (✓ + ✗) when a partial batch acks then blocks", () => {
       // First 15 events of a 16-event batch succeed; #16 throws a
       // non-retryable error. drain-cycle puts the stream in BOTH the
       // `acked` (at=15) and `blocked` arrays — trace lands one line
       // with both segments so the operator sees "progress, then dead."
-      traceCycle(
+      trace_cycle(
         withLevel("trace"),
         [lease("partial-blocked", 0, 0)],
         [
@@ -352,11 +352,11 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle renders dual outcome (✓ + ⚠) when a partial batch acks then retries", () => {
+    it("trace_cycle renders dual outcome (✓ + ⚠) when a partial batch acks then retries", () => {
       // Same shape as above but the failure is retryable — the stream
       // is acked at 15 (progress) and the result carries an error but
       // no block. Next claim will resume at 16 with retry=1.
-      traceCycle(
+      trace_cycle(
         withLevel("trace"),
         [lease("partial-retrying", 0, 0)],
         [
@@ -383,11 +383,11 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle falls back to lease.at when failed_at is absent (batch path)", () => {
+    it("trace_cycle falls back to lease.at when failed_at is absent (batch path)", () => {
       // Batch handlers are all-or-nothing — no single event id is "the
       // one that failed", so finalize doesn't set failed_at. Trace
       // falls back to lease.at (the post-fetch watermark).
-      traceCycle(
+      trace_cycle(
         withLevel("trace"),
         [lease("batch-failed", 42, 3)],
         [
@@ -411,8 +411,8 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle prefixes the caption with lane when non-default", () => {
-      traceCycle(
+    it("trace_cycle prefixes the caption with lane when non-default", () => {
+      trace_cycle(
         withLevel("trace"),
         [lease("lane-stream", 0, 0, "slow")],
         [{ stream: "lane-stream", events: [{ id: 1, name: "Tick" }] }],
@@ -425,8 +425,8 @@ describe("tracing", () => {
       );
     });
 
-    it("traceCycle renders source-prefixed streams as `stream<-source`", () => {
-      traceCycle(
+    it("trace_cycle renders source-prefixed streams as `stream<-source`", () => {
+      trace_cycle(
         withLevel("trace"),
         [lease("sub")],
         [
@@ -450,7 +450,7 @@ describe("tracing", () => {
     it("withSubscribeTrace skips log when nothing newly subscribed", async () => {
       // Pre-subscribe so the next subscribe is a no-op
       await store().subscribe([{ stream: "already-there" }]);
-      const { subscribe } = buildDrain(withLevel("trace"));
+      const { subscribe } = build_drain(withLevel("trace"));
       const result = await subscribe([{ stream: "already-there" }]);
       expect(result.subscribed).toBe(0);
       const corrCalls = traceSpy.mock.calls.filter(
@@ -461,7 +461,7 @@ describe("tracing", () => {
     });
 
     it("withSubscribeTrace logs when subscribed > 0", async () => {
-      const { subscribe } = buildDrain(withLevel("trace"));
+      const { subscribe } = build_drain(withLevel("trace"));
       const result = await subscribe([{ stream: "fresh-stream" }]);
       expect(result.subscribed).toBeGreaterThan(0);
       // pretty mode wraps the >> correlated caption in ANSI codes; the
@@ -475,7 +475,7 @@ describe("tracing", () => {
       // Uniform-lane batches: lane in the caption, streams bare. Mirrors
       // the `>> drained` cycle caption convention so the operator sees
       // the lane once per line.
-      const { subscribe } = buildDrain(withLevel("trace"));
+      const { subscribe } = build_drain(withLevel("trace"));
       await subscribe([{ stream: "lane-sub-stream", lane: "slow" }]);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(/>> correlated.*slow.*lane-sub-stream/)
@@ -487,7 +487,7 @@ describe("tracing", () => {
     });
 
     it("subscribe trace falls back to per-stream `[lane]` when the batch is mixed", async () => {
-      const { subscribe } = buildDrain(withLevel("trace"));
+      const { subscribe } = build_drain(withLevel("trace"));
       await subscribe([
         { stream: "mix-fast", lane: "fast" },
         { stream: "mix-slow", lane: "slow" },

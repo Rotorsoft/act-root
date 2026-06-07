@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { describe, expect, it } from "vitest";
 import { checkWebhook } from "../../src/receiver/check.js";
-import { signRequest } from "../../src/webhook/sign.js";
+import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
 const BODY = '{"orderId":"o-1"}';
@@ -12,7 +12,7 @@ function freshStore() {
 }
 
 function signedHeaders(at: number = NOW, body: string = BODY) {
-  const { signature, timestamp } = signRequest(body, SECRET, at);
+  const { signature, timestamp } = sign_request(body, SECRET, at);
   return {
     "x-webhook-signature": signature,
     "x-webhook-timestamp": timestamp,
@@ -142,12 +142,12 @@ describe("checkWebhook", () => {
 
     it("rejects on missing key after verification passes (does not claim)", async () => {
       const store = freshStore();
-      const headers = signRequest(BODY, SECRET, NOW);
-      const headersBag = {
+      const headers = sign_request(BODY, SECRET, NOW);
+      const headers_bag = {
         "x-webhook-signature": headers.signature,
         "x-webhook-timestamp": headers.timestamp,
       };
-      const result = await checkWebhook(headersBag, BODY, {
+      const result = await checkWebhook(headers_bag, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },

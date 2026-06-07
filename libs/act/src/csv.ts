@@ -75,7 +75,7 @@ export class CsvFile implements EventSource, EventSink {
     let header: readonly string[] | null = null;
     for await (const line of lines) {
       if (!line.trim()) continue;
-      const fields = parseCsvLine(line);
+      const fields = parse_csv_line(line);
       if (!header) {
         header = fields;
         const expected = CSV_COLUMNS.join(",");
@@ -117,21 +117,21 @@ export class CsvFile implements EventSource, EventSink {
       flags: "w",
       encoding: "utf8",
     });
-    let nextId = 1;
+    let next_id = 1;
     try {
-      await writeLine(writer, CSV_COLUMNS.join(","));
+      await write_line(writer, CSV_COLUMNS.join(","));
       await driver(async (event) => {
-        const id = nextId++;
+        const id = next_id++;
         const row = [
           String(id),
-          csvEscape(event.name as string),
-          csvEscape(JSON.stringify(event.data)),
-          csvEscape(event.stream),
+          csv_escape(event.name as string),
+          csv_escape(JSON.stringify(event.data)),
+          csv_escape(event.stream),
           String(event.version),
           event.created.toISOString(),
-          csvEscape(JSON.stringify(event.meta)),
+          csv_escape(JSON.stringify(event.meta)),
         ].join(",");
-        await writeLine(writer, row);
+        await write_line(writer, row);
         return id;
       });
     } finally {
@@ -172,7 +172,7 @@ async function* linesFromBlob(blob: string): AsyncIterable<string> {
   }
 }
 
-function parseCsvLine(line: string): string[] {
+function parse_csv_line(line: string): string[] {
   const fields: string[] = [];
   let i = 0;
   while (i < line.length) {
@@ -206,12 +206,12 @@ function parseCsvLine(line: string): string[] {
   return fields;
 }
 
-function csvEscape(value: string): string {
+function csv_escape(value: string): string {
   if (/[",\n\r]/.test(value)) return `"${value.replace(/"/g, '""')}"`;
   return value;
 }
 
-function writeLine(writer: WriteStream, line: string): Promise<void> {
+function write_line(writer: WriteStream, line: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     writer.write(`${line}\n`, (err) => {
       if (err) reject(err);

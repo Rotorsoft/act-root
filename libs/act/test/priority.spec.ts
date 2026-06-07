@@ -13,7 +13,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 import { act, state, ZodEmpty } from "../src/index.js";
-import { classifyRegistry } from "../src/internal/build-classify.js";
+import { classify_registry } from "../src/internal/build-classify.js";
 import { dispose, store } from "../src/ports.js";
 
 describe("ACT-102 priority lanes — framework", () => {
@@ -86,10 +86,10 @@ describe("ACT-102 priority lanes — framework", () => {
 
       const seen: any[] = [];
       await store().query_streams((p) => seen.push(p));
-      const byStream = Object.fromEntries(
+      const by_stream = Object.fromEntries(
         seen.map((p) => [p.stream, p.priority])
       );
-      expect(byStream).toEqual({ a: 0, b: 7, c: 0 });
+      expect(by_stream).toEqual({ a: 0, b: 7, c: 0 });
     });
 
     it("matches by stream regex by default (InMemory uses anchored regex)", async () => {
@@ -165,7 +165,7 @@ describe("ACT-102 priority lanes — framework", () => {
     });
   });
 
-  describe("classifyRegistry — static priority collection", () => {
+  describe("classify_registry — static priority collection", () => {
     it("collects priority from static resolvers and keeps the max", async () => {
       const Counter = state({ Counter: z.object({ count: z.number() }) })
         .init(() => ({ count: 0 }))
@@ -188,13 +188,13 @@ describe("ACT-102 priority lanes — framework", () => {
         _states: any;
       };
 
-      const c = classifyRegistry(app.registry, app._states);
-      expect(c.staticTargets).toEqual([
+      const c = classify_registry(app.registry, app._states);
+      expect(c.static_targets).toEqual([
         { stream: "shared", source: undefined, priority: 7 },
       ]);
     });
 
-    it("hasDynamicResolvers true when any resolver is a function", () => {
+    it("has_dynamic_resolvers true when any resolver is a function", () => {
       const Counter = state({ Counter: z.object({ count: z.number() }) })
         .init(() => ({ count: 0 }))
         .emits({ Inc: ZodEmpty })
@@ -209,9 +209,9 @@ describe("ACT-102 priority lanes — framework", () => {
         .to((e) => ({ target: `tgt-${e.stream}`, priority: 5 }))
         .build() as unknown as { registry: any; _states: any };
 
-      const c = classifyRegistry(app.registry, app._states);
-      expect(c.hasDynamicResolvers).toBe(true);
-      expect(c.staticTargets).toEqual([]);
+      const c = classify_registry(app.registry, app._states);
+      expect(c.has_dynamic_resolvers).toBe(true);
+      expect(c.static_targets).toEqual([]);
     });
   });
 
@@ -316,11 +316,11 @@ describe("ACT-102 priority lanes — framework", () => {
 
       const seen: any[] = [];
       await store().query_streams((p) => seen.push(p));
-      const byStream = Object.fromEntries(
+      const by_stream = Object.fromEntries(
         seen.map((p) => [p.stream, p.priority])
       );
-      expect(byStream["tgt-urgent"]).toBe(10);
-      expect(byStream["tgt-bulk"]).toBe(0);
+      expect(by_stream["tgt-urgent"]).toBe(10);
+      expect(by_stream["tgt-bulk"]).toBe(0);
     });
   });
 });

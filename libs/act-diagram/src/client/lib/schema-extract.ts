@@ -9,18 +9,18 @@
  * intent is fidelity to author intent rather than canonical form.
  */
 
-type Entry = { key: string; valueStart: number; valueEnd: number };
+type Entry = { key: string; value_start: number; value_end: number };
 
-const isWS = (c: string | undefined) =>
+const is_w_s = (c: string | undefined) =>
   c === " " || c === "\t" || c === "\n" || c === "\r";
-const isIdent = (c: string | undefined) => !!c && /[\w$]/.test(c);
+const is_ident = (c: string | undefined) => !!c && /[\w$]/.test(c);
 
 /** Skip whitespace and comments starting at `from`. Returns new index. */
-function skipTrivia(src: string, from: number): number {
+function skip_trivia(src: string, from: number): number {
   let i = from;
   while (i < src.length) {
     const c = src[i];
-    if (isWS(c)) {
+    if (is_w_s(c)) {
       i++;
       continue;
     }
@@ -44,7 +44,7 @@ function skipTrivia(src: string, from: number): number {
  * `,` or the closing `}` of the enclosing emits object. Returns the index
  * of that stop character.
  */
-function readValue(src: string, start: number): number {
+function read_value(src: string, start: number): number {
   let i = start;
   let depth = 0;
   while (i < src.length) {
@@ -121,29 +121,29 @@ function readValue(src: string, start: number): number {
 }
 
 /**
- * Parse the object literal whose opening `{` is at `startBrace`.
+ * Parse the object literal whose opening `{` is at `start_brace`.
  * Returns the top-level entries and the index of the matching `}`,
  * or null if the literal was malformed.
  */
-function parseObjectLiteral(
+function parse_object_literal(
   src: string,
-  startBrace: number
-): { entries: Entry[]; endBrace: number } | null {
+  start_brace: number
+): { entries: Entry[]; end_brace: number } | null {
   const entries: Entry[] = [];
-  let i = startBrace + 1;
+  let i = start_brace + 1;
 
   while (i < src.length) {
-    i = skipTrivia(src, i);
-    if (src[i] === "}") return { entries, endBrace: i };
+    i = skip_trivia(src, i);
+    if (src[i] === "}") return { entries, end_brace: i };
 
     // Key — identifier or quoted string
     let key = "";
-    let keyStart = i;
-    let keyEnd = i;
-    let keyWasIdentifier = false;
+    let key_start = i;
+    let key_end = i;
+    let key_was_identifier = false;
     if (src[i] === '"' || src[i] === "'") {
       const q = src[i];
-      keyStart = ++i;
+      key_start = ++i;
       while (i < src.length && src[i] !== q) {
         if (src[i] === "\\") {
           i += 2;
@@ -151,39 +151,39 @@ function parseObjectLiteral(
         }
         i++;
       }
-      key = src.slice(keyStart, i);
-      keyEnd = i;
+      key = src.slice(key_start, i);
+      key_end = i;
       i++;
-    } else if (isIdent(src[i])) {
-      keyStart = i;
-      while (isIdent(src[i])) i++;
-      key = src.slice(keyStart, i);
-      keyEnd = i;
-      keyWasIdentifier = true;
+    } else if (is_ident(src[i])) {
+      key_start = i;
+      while (is_ident(src[i])) i++;
+      key = src.slice(key_start, i);
+      key_end = i;
+      key_was_identifier = true;
     } else {
       // Unknown token — bail to keep extraction robust
       return null;
     }
 
-    i = skipTrivia(src, i);
+    i = skip_trivia(src, i);
     if (src[i] !== ":") {
       // Shorthand (`{ Foo, Bar }`) — value is the identifier itself.
       // This is the common case for `.emits({ TicketOpened })` patterns
       // where the schema is imported under the same name as the event.
-      if (keyWasIdentifier) {
-        entries.push({ key, valueStart: keyStart, valueEnd: keyEnd });
+      if (key_was_identifier) {
+        entries.push({ key, value_start: key_start, value_end: key_end });
       }
       while (i < src.length && src[i] !== "," && src[i] !== "}") i++;
       if (src[i] === ",") i++;
       continue;
     }
     i++; // ":"
-    i = skipTrivia(src, i);
+    i = skip_trivia(src, i);
 
-    const valueStart = i;
-    const valueEnd = readValue(src, i);
-    entries.push({ key, valueStart, valueEnd });
-    i = valueEnd;
+    const value_start = i;
+    const value_end = read_value(src, i);
+    entries.push({ key, value_start, value_end });
+    i = value_end;
     if (src[i] === ",") i++;
   }
   return null;
@@ -191,11 +191,11 @@ function parseObjectLiteral(
 
 /**
  * Consume one top-level expression starting at `start`. Stops at `;`
- * at depth 0, or end-of-file. Mirrors `readValue` but operates outside
+ * at depth 0, or end-of-file. Mirrors `read_value` but operates outside
  * an object literal — used to extract the right-hand side of
  * `const IDENT = <expr>;`.
  */
-function readTopLevelExpression(src: string, start: number): number {
+function read_top_level_expression(src: string, start: number): number {
   let i = start;
   let depth = 0;
   while (i < src.length) {
@@ -266,13 +266,15 @@ function readTopLevelExpression(src: string, start: number): number {
  * Build a map of every top-level identifier assignment in `src`.
  *
  *   const Foo = z.object({...});            → Foo  → "z.object({...})"
- *   export const Bar: T = someExpr;         → Bar  → "someExpr"
+ *   export const Bar: T = some_expr;         → Bar  → "some_expr"
  *   let Baz = "literal";                    → Baz  → "\"literal\""
  *
  * Used so cross-file shorthand `.emits({ TicketOpened })` can resolve
  * to the actual Zod expression defined in another module.
  */
-export function extractIdentifierAssignments(src: string): Map<string, string> {
+export function extract_identifier_assignments(
+  src: string
+): Map<string, string> {
   const out = new Map<string, string>();
   // The type-annotation arm is line-bounded (`[^=\n;]`) and explicitly
   // capped at 256 chars so the inner `+` can't drive O(N²) backtracking
@@ -291,7 +293,7 @@ export function extractIdentifierAssignments(src: string): Map<string, string> {
       continue;
     }
     const start = m.index + m[0].length;
-    const end = readTopLevelExpression(src, start);
+    const end = read_top_level_expression(src, start);
     const text = src.slice(start, end).trim();
     if (text) out.set(ident, text);
     re.lastIndex = end;
@@ -309,10 +311,10 @@ export function extractIdentifierAssignments(src: string): Map<string, string> {
  * Returns the index of the opening `{`, or -1 if the identifier can't
  * be resolved to an inline object literal.
  */
-function findIdentifierObjectLiteral(src: string, ident: string): number {
+function find_identifier_object_literal(src: string, ident: string): number {
   // Match `const/let/var IDENT [: T] =` followed by optional whitespace.
   // The capture stops just before whatever the value is. See
-  // `extractIdentifierAssignments` for why the type-annotation arm
+  // `extract_identifier_assignments` for why the type-annotation arm
   // uses `[^=\n;]+` (greedy, no inner `\s*`) — same ReDoS hazard.
   const re = new RegExp(
     `(?:^|[^\\w$])(?:const|let|var)\\s+${ident}\\b\\s*(?::[^=\\n;]+)?=\\s*`,
@@ -321,7 +323,7 @@ function findIdentifierObjectLiteral(src: string, ident: string): number {
   const m = re.exec(src);
   if (!m) return -1;
   const after = m.index + m[0].length;
-  const skipped = skipTrivia(src, after);
+  const skipped = skip_trivia(src, after);
   return src[skipped] === "{" ? skipped : -1;
 }
 
@@ -330,7 +332,7 @@ const BARE_IDENT_RE = /^[A-Za-z_$][\w$]*$/;
 
 /**
  * Find every `.emits( ... )` call in `src` and extract the Zod source
- * text for any event name in `eventNames`. Resolves three indirection
+ * text for any event name in `event_names`. Resolves three indirection
  * patterns:
  *
  *   .emits({ Foo: z.object(...) })   → direct value capture
@@ -342,42 +344,42 @@ const BARE_IDENT_RE = /^[A-Za-z_$][\w$]*$/;
  *
  * Returns a map keyed by event name; missing events stay absent.
  */
-export function extractSchemasFromSource(
+export function extract_schemas_from_source(
   src: string,
-  eventNames: Set<string>,
+  event_names: Set<string>,
   external?: Map<string, string>
 ): Map<string, string> {
   const out = new Map<string, string>();
-  if (!src || eventNames.size === 0) return out;
+  if (!src || event_names.size === 0) return out;
   // Same-file identifier map, scanned once for the shorthand case.
-  const localIdents = extractIdentifierAssignments(src);
+  const local_idents = extract_identifier_assignments(src);
   const deref = (text: string): string =>
     BARE_IDENT_RE.test(text)
-      ? (localIdents.get(text) ?? external?.get(text) ?? text)
+      ? (local_idents.get(text) ?? external?.get(text) ?? text)
       : text;
-  const emitsRe = /\.emits\s*\(/g;
+  const emits_re = /\.emits\s*\(/g;
   let m: RegExpExecArray | null;
-  while ((m = emitsRe.exec(src)) !== null) {
-    let i = skipTrivia(src, emitsRe.lastIndex);
+  while ((m = emits_re.exec(src)) !== null) {
+    let i = skip_trivia(src, emits_re.lastIndex);
     // `.emits(IDENT)` — chase the identifier to its object literal.
-    if (isIdent(src[i])) {
+    if (is_ident(src[i])) {
       const start = i;
-      while (isIdent(src[i])) i++;
+      while (is_ident(src[i])) i++;
       const ident = src.slice(start, i);
-      const objStart = findIdentifierObjectLiteral(src, ident);
-      if (objStart < 0) continue;
-      i = objStart;
+      const obj_start = find_identifier_object_literal(src, ident);
+      if (obj_start < 0) continue;
+      i = obj_start;
     }
     if (src[i] !== "{") continue;
-    const parsed = parseObjectLiteral(src, i);
+    const parsed = parse_object_literal(src, i);
     if (!parsed) continue;
     for (const e of parsed.entries) {
-      if (!eventNames.has(e.key)) continue;
-      const raw = src.slice(e.valueStart, e.valueEnd).trim();
+      if (!event_names.has(e.key)) continue;
+      const raw = src.slice(e.value_start, e.value_end).trim();
       const text = deref(raw);
       if (text) out.set(e.key, text);
     }
-    emitsRe.lastIndex = Math.max(emitsRe.lastIndex, parsed.endBrace + 1);
+    emits_re.lastIndex = Math.max(emits_re.lastIndex, parsed.end_brace + 1);
   }
   return out;
 }

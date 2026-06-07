@@ -14,7 +14,7 @@ import {
   emerald,
   fuchsia,
   green,
-  kindColor,
+  kind_color,
   orange,
   pink,
   red,
@@ -22,7 +22,7 @@ import {
 } from "./colors.js";
 import {
   type ContractIndex,
-  eventStatus,
+  event_status,
   type IndexEntry,
 } from "./contract-index.js";
 
@@ -31,18 +31,18 @@ const loc = (file?: string, line?: number): string => {
   return line ? `${file}:${line}` : file;
 };
 
-const fileNote = (file?: string, line?: number): string => {
+const file_note = (file?: string, line?: number): string => {
   const l = loc(file, line);
   return l ? `  ${dim(l)}` : "";
 };
 
-const kindLabel = (kind: string): string => {
-  const k = kindColor[kind as keyof typeof kindColor];
+const kind_label = (kind: string): string => {
+  const k = kind_color[kind as keyof typeof kind_color];
   return (k ?? dim)(kind.padEnd(10));
 };
 
 /** Format a "matches" list view (multiple search results). */
-export function formatMatches(query: string, matches: IndexEntry[]): string {
+export function format_matches(query: string, matches: IndexEntry[]): string {
   if (matches.length === 0) return dim(`no matches for "${query}"`);
   const head = dim(`matches (${matches.length}) — type a number to pick:`);
   const width = String(matches.length).length;
@@ -51,14 +51,14 @@ export function formatMatches(query: string, matches: IndexEntry[]): string {
     const where = loc(m.file, m.line);
     const q = m.qualifier ? dim(` (${m.qualifier})`) : "";
     const w = where ? `  ${dim(where)}` : "";
-    return `  ${idx} ${kindLabel(m.kind)} ${m.name}${q}${w}`;
+    return `  ${idx} ${kind_label(m.kind)} ${m.name}${q}${w}`;
   });
   return [head, ...lines].join("\n");
 }
 
-const findActionsEmitting = (
+const find_actions_emitting = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{
   state: string;
   action: string;
@@ -73,7 +73,7 @@ const findActionsEmitting = (
   }> = [];
   for (const st of model.states) {
     for (const act of st.actions) {
-      if (act.emits.includes(eventName)) {
+      if (act.emits.includes(event_name)) {
         out.push({
           state: st.name,
           action: act.name,
@@ -86,9 +86,9 @@ const findActionsEmitting = (
   return out;
 };
 
-const findReactionsFor = (
+const find_reactions_for = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{
   slice?: string;
   handler: string;
@@ -105,7 +105,7 @@ const findReactionsFor = (
   }> = [];
   for (const sl of model.slices) {
     for (const r of sl.reactions) {
-      if (r.event === eventName) {
+      if (r.event === event_name) {
         out.push({
           slice: sl.name,
           handler: r.handlerName,
@@ -117,7 +117,7 @@ const findReactionsFor = (
     }
   }
   for (const r of model.reactions) {
-    if (r.event === eventName) {
+    if (r.event === event_name) {
       out.push({
         handler: r.handlerName,
         dispatches: r.dispatches,
@@ -129,58 +129,58 @@ const findReactionsFor = (
   return out;
 };
 
-const findProjectionsFor = (
+const find_projections_for = (
   model: DomainModel,
-  eventName: string
+  event_name: string
 ): Array<{ name: string; file?: string }> =>
   model.projections
-    .filter((p) => p.handles.includes(eventName))
+    .filter((p) => p.handles.includes(event_name))
     .map((p) => ({ name: p.name, file: p.file }));
 
 /** Detailed event view: schema, producers, consumers, deprecation. */
-export function formatEvent(idx: ContractIndex, entry: IndexEntry): string {
+export function format_event(idx: ContractIndex, entry: IndexEntry): string {
   const model = idx.model;
   let schema: string | undefined;
-  let owningState: { name: string; file?: string } | undefined;
+  let owning_state: { name: string; file?: string } | undefined;
   for (const st of model.states) {
     const ev = st.events.find((e) => e.name === entry.name);
     if (ev) {
       schema = ev.schema;
-      owningState = { name: st.name, file: st.file };
+      owning_state = { name: st.name, file: st.file };
       break;
     }
   }
-  const file = entry.file ?? owningState?.file;
+  const file = entry.file ?? owning_state?.file;
 
-  const status = eventStatus(entry.name, idx.allEventNames);
-  const statusLine =
+  const status = event_status(entry.name, idx.all_event_names);
+  const status_line =
     status.status === "active"
       ? green("active")
-      : // `supersededBy` is always set on deprecated entries — see eventStatus.
-        `${red("deprecated")} (superseded by ${orange(status.supersededBy as string)})`;
+      : // `superseded_by` is always set on deprecated entries — see event_status.
+        `${red("deprecated")} (superseded by ${orange(status.superseded_by as string)})`;
 
   const lines: string[] = [];
   lines.push(bold(orange(entry.name)));
   if (file) lines.push(`  in:      ${dim(loc(file, entry.line))}`);
-  if (owningState && owningState.name !== entry.name)
-    lines.push(`  on:      ${amber(owningState.name)}`);
+  if (owning_state && owning_state.name !== entry.name)
+    lines.push(`  on:      ${amber(owning_state.name)}`);
   lines.push(`  schema:  ${schema ?? dim("(not captured)")}`);
-  lines.push(`  status:  ${statusLine}`);
+  lines.push(`  status:  ${status_line}`);
 
-  const producers = findActionsEmitting(model, entry.name);
+  const producers = find_actions_emitting(model, entry.name);
   if (producers.length > 0) {
     lines.push("  producers:");
     for (const p of producers) {
       lines.push(
-        `    - ${pink(p.action)}  ${dim(`(on ${p.state})`)}${fileNote(p.file, p.line)}`
+        `    - ${pink(p.action)}  ${dim(`(on ${p.state})`)}${file_note(p.file, p.line)}`
       );
     }
   } else {
     lines.push(`  producers: ${dim("(none)")}`);
   }
 
-  const reactions = findReactionsFor(model, entry.name);
-  const projections = findProjectionsFor(model, entry.name);
+  const reactions = find_reactions_for(model, entry.name);
+  const projections = find_projections_for(model, entry.name);
   if (reactions.length === 0 && projections.length === 0) {
     lines.push(`  consumers: ${dim("(none)")}`);
   } else {
@@ -192,38 +192,40 @@ export function formatEvent(idx: ContractIndex, entry: IndexEntry): string {
           ? ` → ${r.dispatches.map((d) => pink(d)).join(", ")}`
           : "";
       lines.push(
-        `    - ${slice}${fuchsia(r.handler)}${triggers}${fileNote(r.file, r.line)}`
+        `    - ${slice}${fuchsia(r.handler)}${triggers}${file_note(r.file, r.line)}`
       );
     }
     for (const p of projections) {
-      lines.push(`    - ${emerald(p.name)}${fileNote(p.file)}`);
+      lines.push(`    - ${emerald(p.name)}${file_note(p.file)}`);
     }
   }
 
   return lines.join("\n");
 }
 
-export function formatAction(idx: ContractIndex, entry: IndexEntry): string {
+export function format_action(idx: ContractIndex, entry: IndexEntry): string {
   const model = idx.model;
-  const ownerName = entry.qualifier;
+  const owner_name = entry.qualifier;
   let action:
     | { name: string; emits: string[]; invariants: string[]; line?: number }
     | undefined;
-  let stateFile: string | undefined;
+  let state_file: string | undefined;
   for (const st of model.states) {
-    if (ownerName && st.name !== ownerName) continue;
+    if (owner_name && st.name !== owner_name) continue;
     const a = st.actions.find((x) => x.name === entry.name);
     if (a) {
       action = a;
-      stateFile = st.file;
+      state_file = st.file;
       break;
     }
   }
   const lines: string[] = [];
   lines.push(bold(pink(entry.name)));
-  if (ownerName) lines.push(`  on:      ${amber(ownerName)}`);
-  if (stateFile)
-    lines.push(`  in:      ${dim(loc(stateFile, action?.line ?? entry.line))}`);
+  if (owner_name) lines.push(`  on:      ${amber(owner_name)}`);
+  if (state_file)
+    lines.push(
+      `  in:      ${dim(loc(state_file, action?.line ?? entry.line))}`
+    );
   if (action) {
     if (action.invariants.length > 0) {
       lines.push("  invariants:");
@@ -239,7 +241,7 @@ export function formatAction(idx: ContractIndex, entry: IndexEntry): string {
   return lines.join("\n");
 }
 
-export function formatState(idx: ContractIndex, entry: IndexEntry): string {
+export function format_state(idx: ContractIndex, entry: IndexEntry): string {
   const st = idx.model.states.find((s) => s.name === entry.name);
   const lines: string[] = [];
   lines.push(bold(amber(entry.name)));
@@ -262,7 +264,7 @@ export function formatState(idx: ContractIndex, entry: IndexEntry): string {
   return lines.join("\n");
 }
 
-export function formatSlice(idx: ContractIndex, entry: IndexEntry): string {
+export function format_slice(idx: ContractIndex, entry: IndexEntry): string {
   const sl = idx.model.slices.find((s) => s.name === entry.name);
   const lines: string[] = [];
   lines.push(bold(violet(entry.name)));
@@ -285,14 +287,14 @@ export function formatSlice(idx: ContractIndex, entry: IndexEntry): string {
           ? ` → ${r.dispatches.map((d) => pink(d)).join(", ")}`
           : "";
       lines.push(
-        `    - ${orange(r.event)} → ${fuchsia(r.handlerName)}${triggers}${fileNote(r.file, r.line)}`
+        `    - ${orange(r.event)} → ${fuchsia(r.handlerName)}${triggers}${file_note(r.file, r.line)}`
       );
     }
   }
   return lines.join("\n");
 }
 
-export function formatProjection(
+export function format_projection(
   idx: ContractIndex,
   entry: IndexEntry
 ): string {
@@ -308,37 +310,37 @@ export function formatProjection(
   return lines.join("\n");
 }
 
-export function formatReaction(idx: ContractIndex, entry: IndexEntry): string {
-  const [sliceName, eventName] = (entry.qualifier ?? "::").split("::");
+export function format_reaction(idx: ContractIndex, entry: IndexEntry): string {
+  const [slice_name, event_name] = (entry.qualifier ?? "::").split("::");
   const lines: string[] = [];
-  const slice = sliceName && sliceName !== "*" ? violet(sliceName) : "";
+  const slice = slice_name && slice_name !== "*" ? violet(slice_name) : "";
   // Compact header: ReactionName (in SliceName) — the slice prefix gets
   // baked into the title so we don't burn a separate `in: <slice>` line.
   const header = slice
     ? `${bold(fuchsia(entry.name))} ${dim(`(in ${slice})`)}`
     : bold(fuchsia(entry.name));
   lines.push(header);
-  if (eventName) lines.push(`  on:      ${orange(eventName)}`);
+  if (event_name) lines.push(`  on:      ${orange(event_name)}`);
   if (entry.file) lines.push(`  in:      ${dim(loc(entry.file, entry.line))}`);
 
   // Find the reaction in the model to enrich with producer/dispatch info.
-  const sliceReaction = idx.model.slices
-    .find((s) => s.name === sliceName)
+  const slice_reaction = idx.model.slices
+    .find((s) => s.name === slice_name)
     ?.reactions.find(
-      (r) => r.handlerName === entry.name && r.event === eventName
+      (r) => r.handlerName === entry.name && r.event === event_name
     );
-  const orchReaction = idx.model.reactions.find(
-    (r) => r.handlerName === entry.name && r.event === eventName
+  const orch_reaction = idx.model.reactions.find(
+    (r) => r.handlerName === entry.name && r.event === event_name
   );
-  const r = sliceReaction ?? orchReaction;
+  const r = slice_reaction ?? orch_reaction;
 
-  if (eventName) {
-    const producers = findActionsEmitting(idx.model, eventName);
+  if (event_name) {
+    const producers = find_actions_emitting(idx.model, event_name);
     if (producers.length > 0) {
       lines.push("  producers (of triggering event):");
       for (const p of producers) {
         lines.push(
-          `    - action ${pink(p.action)} (state ${p.state})${fileNote(p.file, p.line)}`
+          `    - action ${pink(p.action)} (state ${p.state})${file_note(p.file, p.line)}`
         );
       }
     }
@@ -354,21 +356,21 @@ export const formatters: Record<
   string,
   (idx: ContractIndex, entry: IndexEntry) => string
 > = {
-  event: formatEvent,
-  action: formatAction,
-  state: formatState,
-  slice: formatSlice,
-  projection: formatProjection,
-  reaction: formatReaction,
+  event: format_event,
+  action: format_action,
+  state: format_state,
+  slice: format_slice,
+  projection: format_projection,
+  reaction: format_reaction,
 };
 
-export function formatDetail(idx: ContractIndex, entry: IndexEntry): string {
+export function format_detail(idx: ContractIndex, entry: IndexEntry): string {
   const fmt = formatters[entry.kind];
   return fmt ? fmt(idx, entry) : "";
 }
 
 /** Header summary printed once at CLI startup. */
-export function formatSummary(idx: ContractIndex): string {
+export function format_summary(idx: ContractIndex): string {
   const m = idx.model;
   const parts = [
     `${m.states.length} ${m.states.length === 1 ? "state" : "states"}`,
@@ -376,8 +378,8 @@ export function formatSummary(idx: ContractIndex): string {
     `${m.projections.length} ${
       m.projections.length === 1 ? "projection" : "projections"
     }`,
-    `${idx.allEventNames.size} ${
-      idx.allEventNames.size === 1 ? "event" : "events"
+    `${idx.all_event_names.size} ${
+      idx.all_event_names.size === 1 ? "event" : "events"
     }`,
   ];
   return dim(`loaded ${parts.join(", ")}`);

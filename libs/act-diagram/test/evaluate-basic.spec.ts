@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractModel } from "../src/client/lib/evaluate.js";
+import { extract_model } from "../src/client/lib/evaluate.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
-describe("extractModel", () => {
+describe("extract_model", () => {
   it("extracts a simple state with actions and events", () => {
     const files: FileTab[] = [
       {
@@ -22,7 +22,7 @@ export const Counter = state({ Counter: z.object({ count: z.number() }) })
       },
     ];
 
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
     expect(model.states[0].name).toBe("Counter");
@@ -50,7 +50,7 @@ export const TicketProjection = projection("tickets")
       },
     ];
 
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.projections).toHaveLength(1);
     expect(model.projections[0].name).toBe("tickets");
@@ -58,7 +58,7 @@ export const TicketProjection = projection("tickets")
   });
 
   it("returns empty model for empty files", () => {
-    const { model } = extractModel([]);
+    const { model } = extract_model([]);
     expect(model.states).toHaveLength(0);
     expect(model.slices).toHaveLength(0);
     expect(model.entries).toHaveLength(0);
@@ -70,7 +70,7 @@ export const TicketProjection = projection("tickets")
       { path: "src/types.d.ts", content: `declare const y: number;` },
       { path: "node_modules/foo/index.ts", content: `export const z = 1;` },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(0);
   });
 
@@ -90,7 +90,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
   });
@@ -118,7 +118,7 @@ export const app = act().withState(Shared).build();
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.entries).toHaveLength(1);
   });
@@ -146,7 +146,7 @@ export const app = act().withState(D).build();
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.entries).toHaveLength(1);
   });
@@ -172,12 +172,12 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
   });
 
-  it("resolves bare unknown module to unknownModuleProxy", () => {
+  it("resolves bare unknown module to unknown_module_proxy", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -194,7 +194,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
   });
@@ -220,7 +220,7 @@ bootstrap();
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -241,7 +241,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -260,7 +260,7 @@ export const S = state({ S: z.object({ x: z.number() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.entries).toHaveLength(1);
     expect(model.entries[0].path).toBe("app");
   });
@@ -283,7 +283,7 @@ const app = act().withState(S).build();
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -304,7 +304,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -331,7 +331,7 @@ export const app = act().withState(T).build();
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.entries).toHaveLength(1);
   });
@@ -350,7 +350,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
     expect(model.states[0].events).toHaveLength(0);
     expect(model.states[0].actions).toHaveLength(0);
@@ -371,7 +371,7 @@ export const S = state({ S: z.object({ v: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states[0].events[0].hasCustomPatch).toBe(false);
   });
 
@@ -392,7 +392,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // invariant without description -> empty string
     expect(model.states[0].actions[0].invariants).toContain("");
   });
@@ -409,7 +409,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Just verify it doesn't crash
     expect(model).toBeDefined();
   });
@@ -428,12 +428,12 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
   });
 
-  it("scoped import resolution falls through all patterns to unknownModuleProxy", () => {
+  it("scoped import resolution falls through all patterns to unknown_module_proxy", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -447,7 +447,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -468,7 +468,7 @@ const app = act().withState(S).build();
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -491,7 +491,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
   });
 
@@ -514,7 +514,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
   });
 
@@ -537,7 +537,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
   });
 
@@ -560,7 +560,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
   });
 
@@ -574,7 +574,7 @@ export const app = act().build();
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.entries).toHaveLength(1);
   });
 
@@ -614,7 +614,7 @@ export const Helper = state({ Helper: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Only the non-test state should be extracted
     expect(model.states).toHaveLength(1);
     expect(model.states[0].name).toBe("S");
@@ -641,12 +641,12 @@ const app = act()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.reactions).toHaveLength(1);
     expect(model.reactions[0].handlerName).toBeDefined();
   });
 
-  it("scoped import falls all the way to unknownModuleProxy (line 107 branch #6)", () => {
+  it("scoped import falls all the way to unknown_module_proxy (line 107 branch #6)", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -661,7 +661,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.states).toHaveLength(1);
   });
@@ -685,7 +685,7 @@ export const S = state({ S: z.object({ x: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(1);
   });
 
@@ -704,7 +704,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -723,7 +723,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { error } = extractModel(files);
+    const { error } = extract_model(files);
     expect(error).toBeUndefined();
   });
 
@@ -734,11 +734,11 @@ export const S = state({ S: z.object({}) })
         content: `const p = require.resolve("./something");`,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model).toBeDefined();
   });
 
-  it("stripNonCode filters slice declarations inside template literals", () => {
+  it("strip_non_code filters slice declarations inside template literals", () => {
     const files: FileTab[] = [
       {
         path: "src/samples.ts",
@@ -752,7 +752,7 @@ export const FakeSlice = slice().build();
 ];`,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // FakeSlice is inside a template literal — should not appear
     const fake = model.slices.find((s) => s.name === "FakeSlice");
     expect(fake).toBeUndefined();

@@ -32,11 +32,11 @@ export type ContractIndex = {
   entries: IndexEntry[];
   model: DomainModel;
   /** All event names that appear anywhere in the model. */
-  allEventNames: Set<string>;
+  all_event_names: Set<string>;
 };
 
 /** Strip `_v<digits>` suffix and return logical (base, version). */
-export function decomposeEventName(name: string): {
+export function decompose_event_name(name: string): {
   base: string;
   version: number;
 } {
@@ -47,7 +47,7 @@ export function decomposeEventName(name: string): {
 
 export type EventStatus = {
   status: "active" | "deprecated";
-  supersededBy?: string;
+  superseded_by?: string;
 };
 
 /**
@@ -55,29 +55,29 @@ export type EventStatus = {
  * known event names. `Foo` is deprecated if any `Foo_v<n>` with a
  * higher version exists; the latest version wins.
  */
-export function eventStatus(
+export function event_status(
   name: string,
-  allNames: Iterable<string>
+  all_names: Iterable<string>
 ): EventStatus {
-  const me = decomposeEventName(name);
-  let bestVersion = me.version;
-  let bestName: string | undefined;
-  for (const other of allNames) {
+  const me = decompose_event_name(name);
+  let best_version = me.version;
+  let best_name: string | undefined;
+  for (const other of all_names) {
     if (other === name) continue;
-    const dec = decomposeEventName(other);
-    if (dec.base === me.base && dec.version > bestVersion) {
-      bestVersion = dec.version;
-      bestName = other;
+    const dec = decompose_event_name(other);
+    if (dec.base === me.base && dec.version > best_version) {
+      best_version = dec.version;
+      best_name = other;
     }
   }
-  return bestName
-    ? { status: "deprecated", supersededBy: bestName }
+  return best_name
+    ? { status: "deprecated", superseded_by: best_name }
     : { status: "active" };
 }
 
-export function buildContractIndex(model: DomainModel): ContractIndex {
+export function build_contract_index(model: DomainModel): ContractIndex {
   const entries: IndexEntry[] = [];
-  const allEventNames = new Set<string>();
+  const all_event_names = new Set<string>();
 
   for (const st of model.states) {
     entries.push({
@@ -87,7 +87,7 @@ export function buildContractIndex(model: DomainModel): ContractIndex {
       line: st.line,
     });
     for (const ev of st.events) {
-      allEventNames.add(ev.name);
+      all_event_names.add(ev.name);
       entries.push({
         kind: "event",
         name: ev.name,
@@ -114,7 +114,7 @@ export function buildContractIndex(model: DomainModel): ContractIndex {
       line: sl.line,
     });
     for (const r of sl.reactions) {
-      allEventNames.add(r.event);
+      all_event_names.add(r.event);
       entries.push({
         kind: "reaction",
         name: r.handlerName,
@@ -131,10 +131,10 @@ export function buildContractIndex(model: DomainModel): ContractIndex {
       file: pr.file,
       line: pr.line,
     });
-    for (const ev of pr.handles) allEventNames.add(ev);
+    for (const ev of pr.handles) all_event_names.add(ev);
   }
   for (const r of model.reactions) {
-    allEventNames.add(r.event);
+    all_event_names.add(r.event);
     entries.push({
       kind: "reaction",
       name: r.handlerName,
@@ -144,7 +144,7 @@ export function buildContractIndex(model: DomainModel): ContractIndex {
     });
   }
 
-  return { entries, model, allEventNames };
+  return { entries, model, all_event_names };
 }
 
 /**
@@ -167,7 +167,7 @@ export const CATEGORY_KEYWORDS: Record<string, Kind> = {
 };
 
 /** Return every entry of a given kind, sorted by name. */
-export function listByKind(idx: ContractIndex, kind: Kind): IndexEntry[] {
+export function list_by_kind(idx: ContractIndex, kind: Kind): IndexEntry[] {
   return idx.entries
     .filter((e) => e.kind === kind)
     .sort((a, b) => a.name.localeCompare(b.name));

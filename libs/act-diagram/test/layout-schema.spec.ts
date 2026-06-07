@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { computeLayout } from "../src/client/lib/layout.js";
+import { compute_layout } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 
 /**
- * Coverage for the eventSchemas plumbing added in ACT-402: layout must
+ * Coverage for the event_schemas plumbing added in ACT-402: layout must
  * forward each event node's captured Zod text so the diagram tooltip
  * surface can render it.
  */
-describe("computeLayout — schema propagation", () => {
+describe("compute_layout — schema propagation", () => {
   it("attaches captured schemas to event nodes", () => {
     const model: DomainModel = {
       entries: [],
@@ -37,7 +37,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const placed = layout.ns.find(
       (n) => n.type === "event" && n.label === "OrderPlaced"
     );
@@ -63,7 +63,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const a = layout.ns.find((n) => n.type === "action" && n.label === "act1");
     expect(a?.emits).toEqual(["E"]);
   });
@@ -97,7 +97,7 @@ describe("computeLayout — schema propagation", () => {
       ],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const p = layout.ns.find(
       (n) => n.type === "projection" && n.label === "OrdersByCustomer"
     );
@@ -125,7 +125,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const nodes = layout.ns.filter(
       (n) => n.type === "event" && n.label === "Shared"
     );

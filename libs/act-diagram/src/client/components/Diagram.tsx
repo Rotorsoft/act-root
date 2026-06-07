@@ -15,7 +15,7 @@ import type {
 } from "../types/index.js";
 
 import {
-  computeLayout,
+  compute_layout,
   H,
   SLICE_PAD,
   STATE_H,
@@ -59,10 +59,10 @@ function splitLabel(label: string, maxChars = 16): string[] {
 function formatModelTree(model: DomainModel): string {
   const lines: string[] = [];
   for (const entry of model.entries) {
-    const sortedSlices = [...entry.slices].sort((a, b) =>
+    const sorted_slices = [...entry.slices].sort((a, b) =>
       a.name.localeCompare(b.name)
     );
-    for (const sl of sortedSlices) {
+    for (const sl of sorted_slices) {
       lines.push(`Slice: ${sl.name}`);
       for (const stKey of sl.stateVars) {
         const st = entry.states.find((s) => s.varName === stKey);
@@ -84,9 +84,9 @@ function formatModelTree(model: DomainModel): string {
     for (const p of entry.projections) {
       lines.push(`Projection: ${p.name} [${p.handles.join(", ")}]`);
     }
-    const sliceStateKeys = new Set(entry.slices.flatMap((sl) => sl.stateVars));
+    const slice_state_keys = new Set(entry.slices.flatMap((sl) => sl.stateVars));
     for (const st of entry.states.filter(
-      (s) => !sliceStateKeys.has(s.varName)
+      (s) => !slice_state_keys.has(s.varName)
     )) {
       lines.push(`State: ${st.name}`);
       for (const a of st.actions) {
@@ -160,7 +160,7 @@ export function Diagram({
 
   // Use the selected entry point's data, or fall back to flat model
   const entry: EntryPoint | undefined = model.entries[activeTab];
-  const viewModel: DomainModel = entry
+  const view_model: DomainModel = entry
     ? {
         ...model,
         entries: [entry],
@@ -249,7 +249,7 @@ export function Diagram({
     useMemo(() => {
       try {
         return {
-          ...computeLayout(viewModel),
+          ...compute_layout(view_model),
           layoutError: undefined as string | undefined,
         };
       } catch (e) {
@@ -265,7 +265,7 @@ export function Diagram({
           layoutError: msg,
         };
       }
-    }, [viewModel]);
+    }, [view_model]);
 
   /** Compute the zoom + pan that fits the diagram in the container */
   const fitTransform = useCallback(() => {
@@ -289,7 +289,7 @@ export function Diagram({
     setPan({ x: px, y: py });
   }, [fitTransform]);
 
-  // Auto-fit when viewModel changes (new tab, new model)
+  // Auto-fit when view_model changes (new tab, new model)
   useEffect(() => {
     // Delay one frame so container has been laid out
     const id = requestAnimationFrame(() => reset());
@@ -304,7 +304,7 @@ export function Diagram({
     );
   }
 
-  if (viewModel.states.length === 0 && viewModel.projections.length === 0) {
+  if (view_model.states.length === 0 && view_model.projections.length === 0) {
     return (
       <div className="flex h-full items-center justify-center text-xs text-zinc-600">
         Nothing to diagram here
@@ -405,7 +405,7 @@ export function Diagram({
             </button>
           </div>
           <pre className="flex-1 overflow-auto whitespace-pre px-3 py-2 font-mono text-[10px] leading-relaxed text-zinc-400 select-all">
-            {formatModelTree(viewModel)}
+            {formatModelTree(view_model)}
           </pre>
         </div>
       )}

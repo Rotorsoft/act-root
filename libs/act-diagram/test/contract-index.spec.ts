@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildContractIndex,
+  build_contract_index,
   CATEGORY_KEYWORDS,
-  decomposeEventName,
-  eventStatus,
-  listByKind,
+  decompose_event_name,
+  event_status,
+  list_by_kind,
   search,
 } from "../src/cli/contract-index.js";
 import type { DomainModel } from "../src/client/types/index.js";
@@ -77,43 +77,43 @@ const model: DomainModel = {
   ],
 };
 
-describe("decomposeEventName", () => {
+describe("decompose_event_name", () => {
   it("treats bare names as version 1", () => {
-    expect(decomposeEventName("Foo")).toEqual({ base: "Foo", version: 1 });
+    expect(decompose_event_name("Foo")).toEqual({ base: "Foo", version: 1 });
   });
   it("decomposes _v<digits> suffix", () => {
-    expect(decomposeEventName("Foo_v3")).toEqual({ base: "Foo", version: 3 });
+    expect(decompose_event_name("Foo_v3")).toEqual({ base: "Foo", version: 3 });
   });
   it("ignores _v without digits", () => {
-    expect(decomposeEventName("Foo_vNext")).toEqual({
+    expect(decompose_event_name("Foo_vNext")).toEqual({
       base: "Foo_vNext",
       version: 1,
     });
   });
 });
 
-describe("eventStatus", () => {
+describe("event_status", () => {
   const all = new Set(["Foo", "Foo_v2", "Foo_v3", "Bar"]);
   it("marks the latest version active", () => {
-    expect(eventStatus("Foo_v3", all)).toEqual({ status: "active" });
+    expect(event_status("Foo_v3", all)).toEqual({ status: "active" });
   });
   it("marks earlier versions deprecated and points to the latest", () => {
-    expect(eventStatus("Foo", all)).toEqual({
+    expect(event_status("Foo", all)).toEqual({
       status: "deprecated",
-      supersededBy: "Foo_v3",
+      superseded_by: "Foo_v3",
     });
-    expect(eventStatus("Foo_v2", all)).toEqual({
+    expect(event_status("Foo_v2", all)).toEqual({
       status: "deprecated",
-      supersededBy: "Foo_v3",
+      superseded_by: "Foo_v3",
     });
   });
   it("marks an isolated bare name active", () => {
-    expect(eventStatus("Bar", all)).toEqual({ status: "active" });
+    expect(event_status("Bar", all)).toEqual({ status: "active" });
   });
 });
 
-describe("buildContractIndex", () => {
-  const idx = buildContractIndex(model);
+describe("build_contract_index", () => {
+  const idx = build_contract_index(model);
 
   it("collects entries for every kind", () => {
     const kinds = new Set(idx.entries.map((e) => e.kind));
@@ -122,8 +122,8 @@ describe("buildContractIndex", () => {
     );
   });
 
-  it("collects every event name into allEventNames", () => {
-    expect(idx.allEventNames).toEqual(
+  it("collects every event name into all_event_names", () => {
+    expect(idx.all_event_names).toEqual(
       new Set(["OrderPlaced", "OrderPlaced_v2", "OrderShipped"])
     );
   });
@@ -136,7 +136,7 @@ describe("buildContractIndex", () => {
   });
 
   it("handles empty models without crashing", () => {
-    const empty = buildContractIndex({
+    const empty = build_contract_index({
       entries: [],
       states: [],
       slices: [],
@@ -144,12 +144,12 @@ describe("buildContractIndex", () => {
       reactions: [],
     });
     expect(empty.entries).toHaveLength(0);
-    expect(empty.allEventNames.size).toBe(0);
+    expect(empty.all_event_names.size).toBe(0);
   });
 });
 
 describe("search", () => {
-  const idx = buildContractIndex(model);
+  const idx = build_contract_index(model);
 
   it("returns empty for empty query", () => {
     expect(search(idx, "")).toEqual([]);
@@ -180,30 +180,30 @@ describe("search", () => {
   });
 });
 
-describe("listByKind", () => {
-  const idx = buildContractIndex(model);
+describe("list_by_kind", () => {
+  const idx = build_contract_index(model);
 
   it("returns entries of the requested kind, sorted by name", () => {
-    const events = listByKind(idx, "event");
+    const events = list_by_kind(idx, "event");
     expect(events.map((e) => e.name)).toEqual([
       "OrderPlaced",
       "OrderPlaced_v2",
       "OrderShipped",
     ]);
-    expect(listByKind(idx, "slice").map((e) => e.name)).toEqual([
+    expect(list_by_kind(idx, "slice").map((e) => e.name)).toEqual([
       "Fulfillment",
     ]);
   });
 
   it("returns an empty array for kinds with no entries", () => {
-    const empty = buildContractIndex({
+    const empty = build_contract_index({
       entries: [],
       states: [],
       slices: [],
       projections: [],
       reactions: [],
     });
-    expect(listByKind(empty, "projection")).toEqual([]);
+    expect(list_by_kind(empty, "projection")).toEqual([]);
   });
 });
 

@@ -26,20 +26,15 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
-import { classifyHttpResponse } from "./classify.js";
-import { signRequest } from "./sign.js";
+import { classify_http_response } from "./classify.js";
+import { sign_request } from "./sign.js";
 import {
   NonRetryableWebhookError,
   type WebhookConfig,
   WebhookError,
 } from "./types.js";
 
-export {
-  classifyHttpResponse,
-  type HttpDisposition,
-  type TryOkOptions,
-  tryOk,
-} from "./classify.js";
+export type { HttpDisposition } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
   WebhookBody,
@@ -65,7 +60,7 @@ function resolve<TEvents extends Schemas, T>(
 }
 
 /** Case-insensitive lookup; returns true if a header is already set. */
-function hasHeader(headers: Record<string, string>, name: string): boolean {
+function has_header(headers: Record<string, string>, name: string): boolean {
   const lower = name.toLowerCase();
   for (const k of Object.keys(headers)) {
     if (k.toLowerCase() === lower) return true;
@@ -92,24 +87,24 @@ export function webhook<TEvents extends Schemas = Schemas>(
 ): ReactionHandler<TEvents, keyof TEvents> {
   const timeoutMs = config.timeoutMs ?? 5_000;
   const method = config.method ?? "POST";
-  const fetchImpl = config.fetch ?? globalThis.fetch;
+  const fetch_impl = config.fetch ?? globalThis.fetch;
 
   // Named function: slice/act builders require non-anonymous reaction
   // handlers so lifecycle telemetry can attribute work.
-  return async function webhookDeliver(event) {
+  return async function webhook_deliver(event) {
     const url = resolve(config.url, event, "");
 
-    const customHeaders = resolve(
+    const custom_headers = resolve(
       config.headers,
       event,
       {} as Record<string, string>
     );
-    const headers: Record<string, string> = { ...customHeaders };
+    const headers: Record<string, string> = { ...custom_headers };
 
-    if (!hasHeader(headers, "content-type")) {
+    if (!has_header(headers, "content-type")) {
       headers["Content-Type"] = "application/json";
     }
-    if (!hasHeader(headers, "idempotency-key")) {
+    if (!has_header(headers, "idempotency-key")) {
       const key = config.idempotencyKey
         ? config.idempotencyKey(event)
         : String(event.id);
@@ -120,10 +115,10 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const body =
       typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
 
-    if (config.secret && !hasHeader(headers, "x-webhook-signature")) {
-      const { signature, timestamp } = signRequest(body, config.secret);
+    if (config.secret && !has_header(headers, "x-webhook-signature")) {
+      const { signature, timestamp } = sign_request(body, config.secret);
       headers["X-Webhook-Signature"] = signature;
-      if (!hasHeader(headers, "x-webhook-timestamp")) {
+      if (!has_header(headers, "x-webhook-timestamp")) {
         headers["X-Webhook-Timestamp"] = timestamp;
       }
     }
@@ -133,7 +128,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
 
     let response: Response;
     try {
-      response = await fetchImpl(url, {
+      response = await fetch_impl(url, {
         method,
         headers,
         body,
@@ -151,7 +146,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    const disposition = classifyHttpResponse(response);
+    const disposition = classify_http_response(response);
     if (disposition === "ok") return;
 
     let responseBody: string | undefined;

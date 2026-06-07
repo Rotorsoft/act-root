@@ -7,16 +7,16 @@
 import { Act, type ActOptions } from "../act.js";
 import {
   _this_,
-  currentVersionOf,
-  deprecatedEventNames,
-  mergeEventRegister,
-  mergeProjection,
+  current_version_of,
+  deprecated_event_names,
+  merge_event_register,
+  merge_projection,
   pii_fields,
   pii_gate,
   pii_merge,
   pii_split,
   pii_strip,
-  registerState,
+  register_state,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
@@ -45,16 +45,16 @@ import type { Slice } from "./slice-builder.js";
  * projections silently overwriting each other's batch handlers used to be a
  * latent footgun.
  */
-function registerBatchHandler(
+function register_batch_handler(
   proj: Projection<any>,
-  batchHandlers: Map<string, BatchHandler<any>>
+  batch_handlers: Map<string, BatchHandler<any>>
 ): void {
   if (!proj.batchHandler || !proj.target) return;
-  const existing = batchHandlers.get(proj.target);
+  const existing = batch_handlers.get(proj.target);
   if (existing && existing !== proj.batchHandler) {
     throw new Error(`Duplicate batch handler for target "${proj.target}"`);
   }
-  batchHandlers.set(proj.target, proj.batchHandler);
+  batch_handlers.set(proj.target, proj.batchHandler);
 }
 
 /**
@@ -63,12 +63,12 @@ function registerBatchHandler(
  * Inline reactions are caught at compile time; this only fires for
  * slices built against older type definitions.
  */
-function validateLaneReferences(
+function validate_lane_references(
   registry: Registry<any, any, any>,
   lanes: ReadonlyArray<LaneConfig>
 ): void {
   const declared = new Set<string>([DEFAULT_LANE, ...lanes.map((l) => l.name)]);
-  for (const [eventName, def] of Object.entries(registry.events)) {
+  for (const [event_name, def] of Object.entries(registry.events)) {
     const entry = def as { reactions: Map<string, Reaction<any, any>> };
     for (const [handlerName, reaction] of entry.reactions) {
       const resolver = reaction.resolver;
@@ -76,7 +76,7 @@ function validateLaneReferences(
       const lane = (resolver as { lane?: string }).lane;
       if (lane && !declared.has(lane)) {
         throw new Error(
-          `Reaction "${handlerName}" on "${eventName}" targets undeclared lane "${lane}". ` +
+          `Reaction "${handlerName}" on "${event_name}" targets undeclared lane "${lane}". ` +
             `Declared lanes: ${[...declared].map((l) => `"${l}"`).join(", ")}. ` +
             `Add \`.withLane({ name: "${lane}", ... })\` to act() or correct the .to() declaration.`
         );
@@ -359,11 +359,11 @@ export function act<
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
-    sensitive_fields: (eventName) => _sf.get(eventName) ?? [],
-    disclosure_predicate: (stateName) => _dp.get(stateName) ?? null,
+    sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
+    disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
   };
-  const pendingProjections: Projection<any>[] = [];
-  const batchHandlers = new Map<string, BatchHandler<any>>();
+  const pending_projections: Projection<any>[] = [];
+  const batch_handlers = new Map<string, BatchHandler<any>>();
   const lanes: LaneConfig[] = [];
 
   // Set on the first `.build()` call. Lets the same builder produce
@@ -380,51 +380,51 @@ export function act<
   // of a deprecated event is on the reduce path. Finally, surfaces a
   // one-line startup advisory so operators can see "your app has
   // legacy events kept for the read path, here's where they live."
-  const finalizeDeprecations = () => {
-    const deprecationSummary: Array<{
-      stateName: string;
+  const finalize_deprecations = () => {
+    const deprecation_summary: Array<{
+      state_name: string;
       deprecated: string;
       current: string;
     }> = [];
     for (const state of states.values()) {
-      const eventNames = Object.keys(state.events);
-      const deprecated = deprecatedEventNames(eventNames);
+      const event_names = Object.keys(state.events);
+      const deprecated = deprecated_event_names(event_names);
       if (deprecated.size === 0) continue;
       (state as { _deprecated?: Set<string> })._deprecated = deprecated;
       for (const name of deprecated) {
-        // `currentVersionOf` is guaranteed non-undefined here — `name`
+        // `current_version_of` is guaranteed non-undefined here — `name`
         // is in `deprecated`, which by construction means a higher-
         // versioned sibling exists in the same group.
-        const current = currentVersionOf(name, eventNames) as string;
-        deprecationSummary.push({
-          stateName: state.name,
+        const current = current_version_of(name, event_names) as string;
+        deprecation_summary.push({
+          state_name: state.name,
           deprecated: name,
           current,
         });
       }
-      for (const [actionName, handler] of Object.entries(state.on)) {
-        const staticTarget = (handler as { _staticEmit?: string } | undefined)
-          ?._staticEmit;
-        if (staticTarget && deprecated.has(staticTarget)) {
-          const current = currentVersionOf(staticTarget, eventNames);
+      for (const [action_name, handler] of Object.entries(state.on)) {
+        const static_target = (handler as { _static_emit?: string } | undefined)
+          ?._static_emit;
+        if (static_target && deprecated.has(static_target)) {
+          const current = current_version_of(static_target, event_names);
           throw new Error(
-            `Action "${actionName}" in state "${state.name}" emits deprecated event "${staticTarget}". ` +
+            `Action "${action_name}" in state "${state.name}" emits deprecated event "${static_target}". ` +
               `A newer version exists: "${current}". Update the .emit() call ` +
               `to target the current version. The reducer (.patch) for ` +
-              `"${staticTarget}" stays as-is — historical events still need it.`
+              `"${static_target}" stays as-is — historical events still need it.`
           );
         }
       }
     }
-    if (deprecationSummary.length > 0) {
-      const list = deprecationSummary
+    if (deprecation_summary.length > 0) {
+      const list = deprecation_summary
         .map(
           (d) =>
-            `"${d.deprecated}" (current: "${d.current}", state: "${d.stateName}")`
+            `"${d.deprecated}" (current: "${d.current}", state: "${d.state_name}")`
         )
         .join(", ");
       log().info(
-        `Act registered ${deprecationSummary.length} deprecated event(s): ${list}. ` +
+        `Act registered ${deprecation_summary.length} deprecated event(s): ${list}. ` +
           `These are legacy versions kept for the read path. Consider truncating ` +
           `closed streams via app.close() when feasible to reduce historical event load. ` +
           `See docs/docs/architecture/event-schema-evolution.md.`
@@ -438,36 +438,36 @@ export function act<
   const builder: ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor> =
     {
       withState: (state) => {
-        registerState(state, states, registry.actions, registry.events);
+        register_state(state, states, registry.actions, registry.events);
         return builder as never;
       },
       withSlice: (input) => {
         for (const s of input.states.values()) {
-          registerState(s, states, registry.actions, registry.events);
+          register_state(s, states, registry.actions, registry.events);
         }
-        mergeEventRegister(registry.events, input.events);
-        pendingProjections.push(...input.projections);
-        for (const sliceLane of input.lanes) {
-          const existing = lanes.find((l) => l.name === sliceLane.name);
+        merge_event_register(registry.events, input.events);
+        pending_projections.push(...input.projections);
+        for (const slice_lane of input.lanes) {
+          const existing = lanes.find((l) => l.name === slice_lane.name);
           if (!existing) {
-            lanes.push(sliceLane);
+            lanes.push(slice_lane);
             continue;
           }
           if (
-            existing.leaseMillis !== sliceLane.leaseMillis ||
-            existing.streamLimit !== sliceLane.streamLimit ||
-            existing.cycleMs !== sliceLane.cycleMs
+            existing.leaseMillis !== slice_lane.leaseMillis ||
+            existing.streamLimit !== slice_lane.streamLimit ||
+            existing.cycleMs !== slice_lane.cycleMs
           ) {
             throw new Error(
-              `Lane "${sliceLane.name}" was already declared with a different config`
+              `Lane "${slice_lane.name}" was already declared with a different config`
             );
           }
         }
         return builder as never;
       },
       withProjection: (proj) => {
-        mergeProjection(proj as Projection<any>, registry.events);
-        registerBatchHandler(proj as Projection<any>, batchHandlers);
+        merge_projection(proj as Projection<any>, registry.events);
+        register_batch_handler(proj as Projection<any>, batch_handlers);
         return builder;
       },
       withActor: <TNewActor extends Actor>() =>
@@ -496,7 +496,7 @@ export function act<
           options?: Partial<ReactionOptions>
         ) => {
           const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler: handler,
+            handler,
             resolver: _this_,
             options: {
               blockOnError: options?.blockOnError ?? true,
@@ -526,17 +526,17 @@ export function act<
         // deprecation scan + advisory log exactly once. Calling
         // `.build({scoped: ...})` repeatedly (e.g., per tenant) is
         // supported — see extension-points.md § Scoped ports. Without
-        // this guard, `mergeProjection` would re-add reactions to the
+        // this guard, `merge_projection` would re-add reactions to the
         // shared registry on every call (accumulating `_p`/`_p_p`
         // dedupe suffixes), and the deprecation advisory would log on
         // every tenant.
         if (!_built) {
-          for (const proj of pendingProjections) {
-            mergeProjection(proj, registry.events as Record<string, any>);
-            registerBatchHandler(proj, batchHandlers);
+          for (const proj of pending_projections) {
+            merge_projection(proj, registry.events as Record<string, any>);
+            register_batch_handler(proj, batch_handlers);
           }
-          finalizeDeprecations();
-          validateLaneReferences(registry, lanes);
+          finalize_deprecations();
+          validate_lane_references(registry, lanes);
           // Precompute the sensitive-field lookup. Iterates each registered
           // event's Zod schema exactly once at build; later commit/load paths
           // hit the cache in O(1). Events with no sensitive fields don't get
@@ -544,19 +544,19 @@ export function act<
           //
           // - events pass: precompute the sensitive-field lookup `_sf` from
           //   each event's Zod schema; while we're already walking events,
-          //   wrap their registered reaction handlers so `buildHandle`
+          //   wrap their registered reaction handlers so `build_handle`
           //   stays PII-unaware.
           // - states pass: snapshot the disclosure predicates into `_dp`,
           //   reject `.snap()` on sensitive-bearing states, and build the
           //   per-state step delegates the orchestrator calls (`me.view`,
           //   `me.message`, wrapped `me.patch[name]`).
-          // - batchHandlers pass: wrap each batch handler so the batch
+          // - batch_handlers pass: wrap each batch handler so the batch
           //   dispatcher stays PII-unaware.
           //
           // The orchestrator calls three step delegates per event:
           //   - `me.message(validated)` — produces the commit-bound shape
           //     (`{name, data, pii?}`) from a validated emit.
-          //   - `me.patch[eventName](event, state)` — the reducer that
+          //   - `me.patch[event_name](event, state)` — the reducer that
           //     derives the next state from the committed event.
           //   - `me.view(event, actor)` — produces the caller-visible form
           //     (snapshot.event).
@@ -567,7 +567,7 @@ export function act<
           // to the pre-#855 code at runtime. For PII-aware states (≥1
           // `sensitive(...)` event), each delegate is rebound to fold the
           // gate / split / merge into the step itself.
-          for (const [eventName, reg] of Object.entries(
+          for (const [event_name, reg] of Object.entries(
             registry.events as Record<
               string,
               {
@@ -578,13 +578,13 @@ export function act<
           )) {
             const fields = pii_fields(reg.schema);
             if (fields.length === 0) continue;
-            _sf.set(eventName, fields);
+            _sf.set(event_name, fields);
             // Strip PII from the event payload before reactions see it.
             for (const [name, reaction] of reg.reactions) {
               const inner = reaction.handler;
               const wrapped = (event: any, stream: string, app: any) =>
                 inner(pii_strip(event, fields), stream, app);
-              // Preserve handler.name — buildHandle asserts on named functions.
+              // Preserve handler.name — build_handle asserts on named functions.
               Object.defineProperty(wrapped, "name", { value: inner.name });
               reaction.handler = wrapped;
               reg.reactions.set(name, reaction as never);
@@ -593,9 +593,9 @@ export function act<
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
             const fields_by_event = new Map<string, readonly string[]>();
-            for (const eventName of Object.keys(state.events)) {
-              const fields = _sf.get(eventName);
-              if (fields) fields_by_event.set(eventName, fields);
+            for (const event_name of Object.keys(state.events)) {
+              const fields = _sf.get(event_name);
+              if (fields) fields_by_event.set(event_name, fields);
             }
             if (fields_by_event.size === 0) continue; // pure — keep state-builder defaults
             // Snapshots write derived state into `__snapshot__.data`, which
@@ -622,13 +622,13 @@ export function act<
             // `state-builder` guarantees a passthrough reducer per declared
             // event, so the lookup is never undefined here. Plain reducers
             // (for this state's non-sensitive events) stay unwrapped.
-            for (const [eventName, fields] of fields_by_event) {
-              const original = state.patch[eventName];
-              state.patch[eventName] = (event, s) =>
+            for (const [event_name, fields] of fields_by_event) {
+              const original = state.patch[event_name];
+              state.patch[event_name] = (event, s) =>
                 original(pii_merge(event, fields), s);
             }
           }
-          for (const [target, original] of batchHandlers) {
+          for (const [target, original] of batch_handlers) {
             const wrapped = async (events: any[], stream: string) => {
               const stripped = events.map((e) => {
                 const f = _sf.get(e.name as string);
@@ -636,7 +636,7 @@ export function act<
               });
               return original(stripped as never, stream);
             };
-            batchHandlers.set(target, wrapped as never);
+            batch_handlers.set(target, wrapped as never);
           }
           _built = true;
         }
@@ -644,7 +644,7 @@ export function act<
         return new Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>(
           registry,
           states,
-          batchHandlers,
+          batch_handlers,
           options,
           lanes
         );

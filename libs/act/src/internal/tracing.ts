@@ -18,7 +18,7 @@
  * - **Plain mode** (production / log aggregators) — every log gets a textual
  *   prefix; event-sourcing uses `caption: body`, drain uses `caption body`.
  *
- * The two factories — {@link buildEs} and {@link buildDrain} — let the
+ * The two factories — {@link build_es} and {@link build_drain} — let the
  * orchestrator choose bare or traced variants once at `.build()` time based
  * on the configured log level. Outside this module, no other source file
  * imports tracing primitives.
@@ -28,7 +28,7 @@
 
 import { config } from "../config.js";
 import type { AsOf, Correlator, Logger, Schemas } from "../types/index.js";
-import { defaultCorrelator } from "./correlator.js";
+import { default_correlator } from "./correlator.js";
 import type { DrainOps } from "./drain.js";
 import * as drain from "./drain.js";
 import type { EsOps } from "./event-sourcing.js";
@@ -81,12 +81,12 @@ const hue = (color: string, text: string): string =>
   PRETTY ? `${color}${text}${C_RESET}` : text;
 
 const drain_caption = (caption: string, lane?: string): string => {
-  const showLane = lane && lane !== "default";
+  const show_lane = lane && lane !== "default";
   if (PRETTY) {
     const tag = `${C_DRAIN}>> ${caption}${C_RESET}`;
-    return showLane ? `${tag} ${C_LANE}${lane}${C_RESET}` : tag;
+    return show_lane ? `${tag} ${C_LANE}${lane}${C_RESET}` : tag;
   }
-  return showLane ? `>> ${caption} ${lane}` : `>> ${caption}`;
+  return show_lane ? `>> ${caption} ${lane}` : `>> ${caption}`;
 };
 
 /**
@@ -166,16 +166,16 @@ const traced = <F extends AsyncFn>(
  *
  * @internal
  */
-export function buildEs(
+export function build_es(
   logger: Logger,
-  correlator: Correlator = defaultCorrelator
+  correlator: Correlator = default_correlator
 ): EsOps {
   // `es.action` takes `correlator` as its last positional arg; bind it once
   // here so the orchestrator's `EsOps.action` keeps the original 6-arg
   // signature.
   const bound_action: EsOps["action"] = (
     me,
-    actionName,
+    action_name,
     target,
     payload,
     reactingTo,
@@ -183,7 +183,7 @@ export function buildEs(
   ) =>
     es.action(
       me,
-      actionName,
+      action_name,
       target,
       payload,
       reactingTo,
@@ -260,14 +260,14 @@ export function buildEs(
  *
  * @internal
  */
-export function buildDrain<TEvents extends Schemas>(
+export function build_drain<TEvents extends Schemas>(
   logger: Logger
 ): DrainOps<TEvents> {
   // Cycle-level tracing happens in `DrainController.drain()` via
-  // {@link traceCycle} — claim/fetch/ack/block all flow into one log
+  // {@link trace_cycle} — claim/fetch/ack/block all flow into one log
   // line per cycle to give the operator a single atomic narrative.
   // `subscribe` stays decorated because it's driven from correlate-
-  // cycle (not from runDrainCycle) and doesn't fit the cycle shape.
+  // cycle (not from run_drain_cycle) and doesn't fit the cycle shape.
   return {
     claim: drain.claim,
     fetch: drain.fetch,
@@ -284,22 +284,25 @@ export function buildDrain<TEvents extends Schemas>(
             // to different lanes in one scan) fall back to per-stream
             // `[lane]` tags, default-lane streams stay bare either way.
             const lanes = new Set(streams.map((s) => s.lane ?? "default"));
-            const uniformLane = lanes.size === 1 ? streams[0]?.lane : undefined;
+            const uniform_lane =
+              lanes.size === 1 ? streams[0]?.lane : undefined;
             const data = streams
               .map(({ stream, lane }) =>
-                uniformLane || !lane || lane === "default"
+                uniform_lane || !lane || lane === "default"
                   ? hue(C_STREAM, stream)
                   : `${hue(C_STREAM, stream)}${dim(`[${lane}]`)}`
               )
               .join(" ");
-            logger.trace(`${drain_caption("correlated", uniformLane)} ${data}`);
+            logger.trace(
+              `${drain_caption("correlated", uniform_lane)} ${data}`
+            );
           }),
   };
 }
 
 /**
  * Emit one cycle-level drain trace summarizing what happened in a
- * single `runDrainCycle` pass. Per-stream rendering shape — outcome +
+ * single `run_drain_cycle` pass. Per-stream rendering shape — outcome +
  * post-state anchored on the right:
  *
  *   stream<-source [events] ✓ @<acked-at>                        — full success
@@ -322,7 +325,7 @@ export function buildDrain<TEvents extends Schemas>(
  *
  * @internal
  */
-export function traceCycle<TEvents extends Schemas>(
+export function trace_cycle<TEvents extends Schemas>(
   logger: Logger,
   leased: ReadonlyArray<{
     readonly stream: string;
@@ -349,18 +352,18 @@ export function traceCycle<TEvents extends Schemas>(
 ): void {
   if (logger.level !== "trace" || !leased.length) return;
   const lane = leased[0]?.lane;
-  const fetchByStream = new Map(fetched.map((f) => [f.stream, f]));
-  const ackedByStream = new Map(acked.map((a) => [a.stream, a.at]));
-  const blockedByStream = new Map(blocked.map((b) => [b.stream, b.error]));
+  const fetch_by_stream = new Map(fetched.map((f) => [f.stream, f]));
+  const acked_by_stream = new Map(acked.map((a) => [a.stream, a.at]));
+  const blocked_by_stream = new Map(blocked.map((b) => [b.stream, b.error]));
   // Handled-with-error stays a single index now: `block` discriminates
   // the marker (✗ vs ⚠); the failure exists independently of whether
   // ack happened.
-  const failedByStream = new Map(
+  const failed_by_stream = new Map(
     handled.filter((h) => h.error).map((h) => [h.lease.stream, h] as const)
   );
   const detail = leased
     .map(({ stream, at, retry }) => {
-      const f = fetchByStream.get(stream);
+      const f = fetch_by_stream.get(stream);
       // Target stream in yellow so the operator's eye lands on "which
       // stream did this happen on?" first; source (the events' origin)
       // stays dim — secondary info.
@@ -375,29 +378,29 @@ export function traceCycle<TEvents extends Schemas>(
           : "";
       // Build ack + fail segments independently — both can fire for
       // the same stream in the partial-success-then-failure case.
-      const ackedAt = ackedByStream.get(stream);
-      const ackPart =
-        ackedAt !== undefined
-          ? hue(C_HIT, `✓ @${ackedAt}`) // ✓ + new at in lime
+      const acked_at = acked_by_stream.get(stream);
+      const ack_part =
+        acked_at !== undefined
+          ? hue(C_HIT, `✓ @${acked_at}`) // ✓ + new at in lime
           : "";
-      const failure = failedByStream.get(stream);
-      let failPart = "";
+      const failure = failed_by_stream.get(stream);
+      let fail_part = "";
       if (failure) {
         // Failed event id when known (per-event path), else falls back
         // to lease.at — the post-fetch watermark — for batch-mode
         // total failures where no single event is "the one."
-        const failedAt = failure.failed_at ?? at;
-        const blockedError = blockedByStream.get(stream);
-        if (blockedError !== undefined) {
-          failPart = `${hue(C_ERR, `✗ @${failedAt}/${retry}`)} ${dim(`(${blockedError})`)}`;
+        const failed_at = failure.failed_at ?? at;
+        const blocked_error = blocked_by_stream.get(stream);
+        if (blocked_error !== undefined) {
+          fail_part = `${hue(C_ERR, `✗ @${failed_at}/${retry}`)} ${dim(`(${blocked_error})`)}`;
         } else {
-          failPart = `${hue(C_MISS, `⚠ @${failedAt}/${retry}`)} ${dim(`(${failure.error})`)}`;
+          fail_part = `${hue(C_MISS, `⚠ @${failed_at}/${retry}`)} ${dim(`(${failure.error})`)}`;
         }
       }
       let tail: string;
-      if (ackPart && failPart) tail = ` ${ackPart} ${failPart}`;
-      else if (ackPart) tail = ` ${ackPart}`;
-      else if (failPart) tail = ` ${failPart}`;
+      if (ack_part && fail_part) tail = ` ${ack_part} ${fail_part}`;
+      else if (ack_part) tail = ` ${ack_part}`;
+      else if (fail_part) tail = ` ${fail_part}`;
       else tail = ` ${dim(`⊘ @${at}/${retry}`)}`; // nothing happened
       return `${key}${events}${tail}`;
     })

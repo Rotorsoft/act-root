@@ -41,7 +41,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
   .build();
 
 describe("orchestrator — non-sensitive workload (master vs PR baseline)", () => {
-  let stream_id = 0;
+  let streamId = 0;
   // biome-ignore lint/suspicious/noExplicitAny: bench-only, narrow generic preserved at runtime
   let app: any;
 
@@ -50,7 +50,7 @@ describe("orchestrator — non-sensitive workload (master vs PR baseline)", () =
     async () => {
       await app.do(
         "increment",
-        { stream: `c-${stream_id++}`, actor },
+        { stream: `c-${streamId++}`, actor },
         { by: 1 }
       );
     },
@@ -58,7 +58,7 @@ describe("orchestrator — non-sensitive workload (master vs PR baseline)", () =
       setup: async () => {
         await dispose()();
         app = act().withState(Counter).build();
-        stream_id = 0;
+        streamId = 0;
       },
     }
   );
@@ -82,7 +82,7 @@ describe("orchestrator — non-sensitive workload (master vs PR baseline)", () =
   bench(
     "app.do() then app.load() — round-trip per call",
     async () => {
-      const stream = `rt-${stream_id++}`;
+      const stream = `rt-${streamId++}`;
       await app.do("increment", { stream, actor }, { by: 1 });
       await app.load(Counter as any, stream);
     },
@@ -90,7 +90,7 @@ describe("orchestrator — non-sensitive workload (master vs PR baseline)", () =
       setup: async () => {
         await dispose()();
         app = act().withState(Counter).build();
-        stream_id = 0;
+        streamId = 0;
       },
     }
   );

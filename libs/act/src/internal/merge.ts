@@ -17,7 +17,7 @@ import type { Schema, State } from "../types/index.js";
  * Unwraps wrapper types (ZodOptional, ZodNullable, ZodDefault, ZodReadonly)
  * to find the base type name, e.g. `z.string().optional()` -> `"ZodString"`.
  */
-function baseTypeName(zodType: ZodType): string {
+function base_type_name(zodType: ZodType): string {
   let t: any = zodType;
   while (typeof t.unwrap === "function") {
     t = t.unwrap();
@@ -31,26 +31,26 @@ function baseTypeName(zodType: ZodType): string {
  * error), then merges via `.extend()`. Falls back to keeping existing
  * schema if either is not a ZodObject.
  */
-function mergeSchemas(
+function merge_schemas(
   existing: ZodType,
   incoming: ZodType,
-  stateName: string
+  state_name: string
 ): ZodType {
   if (existing instanceof ZodObject && incoming instanceof ZodObject) {
-    const existingShape = existing.shape as Record<string, ZodType>;
-    const incomingShape = incoming.shape as Record<string, ZodType>;
-    for (const key of Object.keys(incomingShape)) {
-      if (key in existingShape) {
-        const existingBase = baseTypeName(existingShape[key]);
-        const incomingBase = baseTypeName(incomingShape[key]);
-        if (existingBase !== incomingBase) {
+    const existing_shape = existing.shape as Record<string, ZodType>;
+    const incoming_shape = incoming.shape as Record<string, ZodType>;
+    for (const key of Object.keys(incoming_shape)) {
+      if (key in existing_shape) {
+        const existing_base = base_type_name(existing_shape[key]);
+        const incoming_base = base_type_name(incoming_shape[key]);
+        if (existing_base !== incoming_base) {
           throw new Error(
-            `Schema conflict in "${stateName}": key "${key}" has type "${existingBase}" but incoming partial declares "${incomingBase}"`
+            `Schema conflict in "${state_name}": key "${key}" has type "${existing_base}" but incoming partial declares "${incoming_base}"`
           );
         }
       }
     }
-    return existing.extend(incomingShape);
+    return existing.extend(incoming_shape);
   }
   return existing;
 }
@@ -59,7 +59,7 @@ function mergeSchemas(
  * Merges two init functions by spreading both results together.
  * Each partial only provides its own defaults.
  */
-function mergeInits<TState extends Schema>(
+function merge_inits<TState extends Schema>(
   existing: () => Readonly<TState>,
   incoming: () => Readonly<TState>
 ): () => Readonly<TState> {
@@ -70,7 +70,7 @@ function mergeInits<TState extends Schema>(
  * Registers a state into a states map and action/event registries,
  * merging with existing same-name states (partial state support).
  */
-export function registerState(
+export function register_state(
   state: State<any, any, any>,
   states: Map<string, State<any, any, any>>,
   actions: Record<string, any>,
@@ -78,9 +78,9 @@ export function registerState(
 ): void {
   const existing = states.get(state.name);
   if (existing) {
-    mergeIntoExisting(state, existing, states, actions, events);
+    merge_into_existing(state, existing, states, actions, events);
   } else {
-    registerNewState(state, states, actions, events);
+    register_new_state(state, states, actions, events);
   }
 }
 
@@ -88,7 +88,7 @@ export function registerState(
  * Registers a state for the first time. All action/event names must be unique
  * across the registry; collisions throw.
  */
-function registerNewState(
+function register_new_state(
   state: State<any, any, any>,
   states: Map<string, State<any, any, any>>,
   actions: Record<string, any>,
@@ -113,7 +113,7 @@ function registerNewState(
  *   3. build the merged state and replace it in the states map
  *   4. update action→state pointers and register new events
  */
-function mergeIntoExisting(
+function merge_into_existing(
   state: State<any, any, any>,
   existing: State<any, any, any>,
   states: Map<string, State<any, any, any>>,
@@ -147,16 +147,16 @@ function mergeIntoExisting(
   }
 
   // 2. Merge patches with custom-vs-passthrough resolution
-  const mergedPatch = mergePatches(existing.patch, state.patch, state.name);
+  const merged_patch = merge_patches(existing.patch, state.patch, state.name);
 
   // 3. Build merged state
   const merged = {
     ...existing,
-    state: mergeSchemas(existing.state, state.state, state.name),
-    init: mergeInits(existing.init, state.init),
+    state: merge_schemas(existing.state, state.state, state.name),
+    init: merge_inits(existing.init, state.init),
     events: { ...existing.events, ...state.events },
     actions: { ...existing.actions, ...state.actions },
-    patch: mergedPatch,
+    patch: merged_patch,
     on: { ...existing.on, ...state.on },
     given: { ...existing.given, ...state.given },
     snap:
@@ -185,29 +185,33 @@ function mergeIntoExisting(
  * allowed; passthroughs always yield to custom reducers, and re-registering
  * the same custom patch (same reference, e.g. across slices) is a no-op.
  */
-function mergePatches(
+function merge_patches(
   existing: Record<string, any>,
   incoming: Record<string, any>,
-  stateName: string
+  state_name: string
 ): Record<string, any> {
   const merged = { ...existing };
   for (const name of Object.keys(incoming)) {
-    const existingP = existing[name];
-    const incomingP = incoming[name];
-    if (!existingP) {
-      merged[name] = incomingP;
+    const existing_p = existing[name];
+    const incoming_p = incoming[name];
+    if (!existing_p) {
+      merged[name] = incoming_p;
       continue;
     }
-    const existingIsDefault = existingP._passthrough;
-    const incomingIsDefault = incomingP._passthrough;
-    if (!existingIsDefault && !incomingIsDefault && existingP !== incomingP) {
+    const existing_is_default = existing_p._passthrough;
+    const incoming_is_default = incoming_p._passthrough;
+    if (
+      !existing_is_default &&
+      !incoming_is_default &&
+      existing_p !== incoming_p
+    ) {
       throw new Error(
-        `Duplicate custom patch for event "${name}" in state "${stateName}"`
+        `Duplicate custom patch for event "${name}" in state "${state_name}"`
       );
     }
     // Keep whichever is custom; if both passthrough or existing custom, keep existing
-    if (existingIsDefault && !incomingIsDefault) {
-      merged[name] = incomingP;
+    if (existing_is_default && !incoming_is_default) {
+      merged[name] = incoming_p;
     }
   }
   return merged;
@@ -220,15 +224,15 @@ function mergePatches(
  * which seeds the target events). Reaction names collide by `set()`
  * semantics — last write wins.
  */
-export function mergeEventRegister(
+export function merge_event_register(
   target: Record<string, { reactions: Map<string, unknown> }>,
   source: Record<string, { reactions: Map<string, unknown> }>
 ): void {
-  for (const [eventName, sourceReg] of Object.entries(source)) {
-    const targetReg = target[eventName];
-    if (!targetReg) continue;
-    for (const [name, reaction] of sourceReg.reactions) {
-      targetReg.reactions.set(name, reaction);
+  for (const [event_name, source_reg] of Object.entries(source)) {
+    const target_reg = target[event_name];
+    if (!target_reg) continue;
+    for (const [name, reaction] of source_reg.reactions) {
+      target_reg.reactions.set(name, reaction);
     }
   }
 }
@@ -237,20 +241,20 @@ export function mergeEventRegister(
  * Merges a projection's event schemas and reactions into an event registry,
  * deduplicating reaction names by appending "_p" on collision.
  */
-export function mergeProjection(
+export function merge_projection(
   proj: Projection<any>,
   events: Record<string, any>
 ): void {
-  for (const eventName of Object.keys(proj.events)) {
-    const projRegister = proj.events[eventName];
-    const existing = events[eventName];
+  for (const event_name of Object.keys(proj.events)) {
+    const proj_register = proj.events[event_name];
+    const existing = events[event_name];
     if (!existing) {
-      events[eventName] = {
-        schema: projRegister.schema,
-        reactions: new Map(projRegister.reactions),
+      events[event_name] = {
+        schema: proj_register.schema,
+        reactions: new Map(proj_register.reactions),
       };
     } else {
-      for (const [name, reaction] of projRegister.reactions) {
+      for (const [name, reaction] of proj_register.reactions) {
         let key = name;
         while (existing.reactions.has(key)) key = `${key}_p`;
         existing.reactions.set(key, reaction);

@@ -25,19 +25,19 @@ export type HttpDisposition = "ok" | "retry" | "block";
  * SDK-based reactions, etc.) can apply the same retry semantics
  * without inventing a parallel rule.
  */
-export function classifyHttpResponse(response: Response): HttpDisposition {
+export function classify_http_response(response: Response): HttpDisposition {
   if (response.ok) return "ok";
   if (response.status >= 500) return "retry";
   return "block";
 }
 
-/** Options for {@link tryOk}. */
+/** Options for {@link try_ok}. */
 export type TryOkOptions = {
   /** The endpoint that received the request. Surfaced on the thrown error and in its message. */
   url: string;
   /**
    * Label prefixed onto the error message — typically the
-   * integration's identity (`"webhook"`, `"mySdk"`, `"grpc"`).
+   * integration's identity (`"webhook"`, `"my_sdk"`, `"grpc"`).
    * Default: `"request"`.
    */
   label?: string;
@@ -52,8 +52,8 @@ export type TryOkOptions = {
  *
  * ```ts
  * .on("OrderConfirmed").do(async (event) => {
- *   const response = await mySdk.deliver(event);
- *   await tryOk(response, { url: mySdk.url, label: "mySdk" });
+ *   const response = await my_sdk.deliver(event);
+ *   await try_ok(response, { url: my_sdk.url, label: "my_sdk" });
  *   // ...response was 2xx; continue with downstream work...
  * });
  * ```
@@ -64,11 +64,11 @@ export type TryOkOptions = {
  * here, so `instanceof RetryableHttpError` matches both webhook and
  * custom-integration errors uniformly.
  */
-export async function tryOk(
+export async function try_ok(
   response: Response,
   options: TryOkOptions
 ): Promise<void> {
-  const disposition = classifyHttpResponse(response);
+  const disposition = classify_http_response(response);
   if (disposition === "ok") return;
 
   let responseBody: string | undefined;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   GAP,
   H,
   type Layout,
@@ -126,10 +126,10 @@ const MULTI_ACTION_MODEL: DomainModel = emptyModel({
 
 // -- Tests --------------------------------------------------------------------
 
-describe("computeLayout", () => {
+describe("compute_layout", () => {
   describe("empty model", () => {
     it("produces no nodes, edges, or boxes", () => {
-      const layout = computeLayout(emptyModel());
+      const layout = compute_layout(emptyModel());
       expect(layout.ns).toHaveLength(0);
       expect(layout.es).toHaveLength(0);
       expect(layout.boxes).toHaveLength(0);
@@ -138,7 +138,7 @@ describe("computeLayout", () => {
 
   describe("column ordering: actions -> state -> events", () => {
     it("places action left of state, state left of event (standalone)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const action = find(layout, "action", "increment")!;
       const state = find(layout, "state", "Counter")!;
       const event = find(layout, "event", "Incremented")!;
@@ -155,18 +155,18 @@ describe("computeLayout", () => {
   });
 
   describe("gap enforcement", () => {
-    it("standalone state placed at stateColX (same as slice layout)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+    it("standalone state placed at state_col_x (same as slice layout)", () => {
+      const layout = compute_layout(SIMPLE_MODEL);
       const action = find(layout, "action", "increment")!;
       const state = find(layout, "state", "Counter")!;
 
       // State column starts at action.x + W + GAP
-      const stateColX = action.pos.x + W + GAP;
-      expect(state.pos.x).toBe(stateColX);
+      const state_col_x = action.pos.x + W + GAP;
+      expect(state.pos.x).toBe(state_col_x);
     });
 
     it("maintains GAP/2 vertical spacing between stacked actions", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const actions = layout.ns.filter((n) => n.type === "action");
       actions.sort((a, b) => a.pos.y - b.pos.y);
 
@@ -177,7 +177,7 @@ describe("computeLayout", () => {
     });
 
     it("maintains GAP/2 vertical spacing between stacked events", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const events = layout.ns.filter((n) => n.type === "event");
       events.sort((a, b) => a.pos.y - b.pos.y);
 
@@ -190,7 +190,7 @@ describe("computeLayout", () => {
 
   describe("vertical centering", () => {
     it("centers state vertically relative to its action/event block (standalone, many actions)", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const actions = layout.ns.filter((n) => n.type === "action");
       const events = layout.ns.filter((n) => n.type === "event");
@@ -211,7 +211,7 @@ describe("computeLayout", () => {
     });
 
     it("centers state vertically when 1 action -> 1 event (standalone)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const state = find(layout, "state", "Counter")!;
       const action = find(layout, "action", "increment")!;
       const event = find(layout, "event", "Incremented")!;
@@ -227,17 +227,17 @@ describe("computeLayout", () => {
 
   describe("no overlapping nodes", () => {
     it("has no overlapping nodes in a simple model", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       assertNoOverlaps(layout);
     });
 
     it("has no overlapping nodes in a multi-action model", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       assertNoOverlaps(layout);
     });
 
     it("has no overlapping nodes with two standalone states", () => {
-      const layout = computeLayout(TWO_STATES_MODEL);
+      const layout = compute_layout(TWO_STATES_MODEL);
       const actions = layout.ns.filter((n) => n.type === "action");
       for (let i = 0; i < actions.length; i++) {
         for (let j = i + 1; j < actions.length; j++) {
@@ -297,14 +297,14 @@ describe("computeLayout", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       assertNoOverlaps(layout);
     });
   });
 
   describe("canvas dimensions", () => {
     it("width and height encompass all nodes with MARGIN padding", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       for (const n of layout.ns) {
         const bb = nodeBBox(n);
         expect(bb.left).toBeGreaterThanOrEqual(layout.minX + MARGIN);
@@ -319,7 +319,7 @@ describe("computeLayout", () => {
     });
 
     it("minX/minY account for nodes at negative coordinates", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const state = find(layout, "state", "Counter")!;
       if (state.pos.y < 0) {
         expect(layout.minY).toBeLessThanOrEqual(state.pos.y - MARGIN);
@@ -327,7 +327,7 @@ describe("computeLayout", () => {
     });
 
     it("returns positive dimensions even for empty model", () => {
-      const layout = computeLayout(emptyModel());
+      const layout = compute_layout(emptyModel());
       expect(layout.width).toBe(MARGIN * 2);
       expect(layout.height).toBe(MARGIN * 2);
     });
@@ -335,7 +335,7 @@ describe("computeLayout", () => {
 
   describe("edges", () => {
     it("creates an edge from each action to its emitted events (standalone)", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       expect(layout.es.length).toBeGreaterThanOrEqual(1);
       const edge = layout.es[0];
       // Edge goes left-to-right (from.x < to.x)
@@ -345,7 +345,7 @@ describe("computeLayout", () => {
     });
 
     it("action->event edges start at action right edge and end at event left edge", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const action = find(layout, "action", "increment")!;
       const event = find(layout, "event", "Incremented")!;
       const edge = layout.es.find((e) => !e.dash)!;
@@ -359,7 +359,7 @@ describe("computeLayout", () => {
 
   describe("node dimensions", () => {
     it("uses W x H for action and event nodes", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const action = find(layout, "action", "increment")!;
       const event = find(layout, "event", "Incremented")!;
 
@@ -373,7 +373,7 @@ describe("computeLayout", () => {
     });
 
     it("uses STATE_W x STATE_H for state nodes with few actions", () => {
-      const layout = computeLayout(SIMPLE_MODEL);
+      const layout = compute_layout(SIMPLE_MODEL);
       const state = find(layout, "state", "Counter")!;
 
       const bb = nodeBBox(state);
@@ -382,7 +382,7 @@ describe("computeLayout", () => {
     });
 
     it("state stays square (STATE_W x STATE_H) even with many actions", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const state = find(layout, "state", "Ticket")!;
 
       const bb = nodeBBox(state);
@@ -393,14 +393,14 @@ describe("computeLayout", () => {
 
   describe("guards / invariants metadata", () => {
     it("annotates guarded actions with sub='guarded' and guards array", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const close = find(layout, "action", "CloseTicket")!;
       expect(close.sub).toBe("guarded");
       expect(close.guards).toEqual(["must be open"]);
     });
 
     it("non-guarded actions have no sub or guards", () => {
-      const layout = computeLayout(MULTI_ACTION_MODEL);
+      const layout = compute_layout(MULTI_ACTION_MODEL);
       const open = find(layout, "action", "OpenTicket")!;
       expect(open.sub).toBeUndefined();
       expect(open.guards).toBeUndefined();

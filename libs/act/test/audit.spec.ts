@@ -956,7 +956,7 @@ describe("audit", () => {
     it("reaction-health yields nothing for healthy subscribed streams", async () => {
       // Subscribed stream, no lease, no retries, not blocked → audit
       // visits the row via query_streams and yields no finding.
-      // Exercises the "all checks fail" path through onStream.
+      // Exercises the "all checks fail" path through on_stream.
       const app = act().withState(widget).build();
       const meta = { correlation: "test-corr", causation: {} };
       await store().commit(

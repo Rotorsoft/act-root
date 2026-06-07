@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractModel } from "../src/client/lib/evaluate.js";
+import { extract_model } from "../src/client/lib/evaluate.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
-describe("extractModel — error handling, broken files, regex fallback", () => {
+describe("extract_model — error handling, broken files, regex fallback", () => {
   it("handles files with syntax errors gracefully", () => {
     const files: FileTab[] = [
       {
@@ -20,7 +20,7 @@ export const Widget = state({ Widget: z.object({ value: z.string() }) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Broken file produces no states (no regex fallback), but doesn't crash
     expect(model.states).toHaveLength(0);
   });
@@ -42,7 +42,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(0);
   });
 
@@ -63,7 +63,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     const st = model.states.find((s) => s.name === "S");
     if (st) {
       const action = st.actions.find((a) => a.name === "doIt");
@@ -90,7 +90,7 @@ const MySlice = slice()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.slices).toHaveLength(1);
     expect(model.slices[0].error).toBeDefined();
   });
@@ -113,7 +113,7 @@ export const S = state({ S: z.object({}) })
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     const st = model.states.find((s) => s.name === "S");
     if (st) {
       const action = st.actions.find((a) => a.name === "doIt");
@@ -136,7 +136,7 @@ const P = projection("myProj")
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.projections).toHaveLength(0);
   });
 
@@ -148,7 +148,7 @@ const P = projection("myProj")
           'import { state } from "@rotorsoft/act";\nimport { z } from "zod";\nconst x = ({{ broken }});\nexport const S = state({ S: z.object({}) })\n  .init(() => ({}))\n  .emits({ MyEvt: z.object({}) })\n  .on({ doIt: z.object({}) })\n    .emit((a) => [`MyEvt`, {}])\n  .build();\n',
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(0);
   });
 
@@ -166,7 +166,7 @@ const MySlice = slice()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.slices).toHaveLength(1);
     expect(model.slices[0].error).toBeDefined();
   });
@@ -185,7 +185,7 @@ const MySlice = slice()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // The regex won't capture anonymous arrow, so no reactions extracted
     expect(model).toBeDefined();
   });
@@ -209,7 +209,7 @@ export const MySlice = slice()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.states).toHaveLength(0);
     expect(model.slices).toHaveLength(1);
     expect(model.slices[0].error).toBeDefined();
@@ -230,7 +230,7 @@ export const P = projection("uncaptured")
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.projections).toHaveLength(0);
   });
 
@@ -249,7 +249,7 @@ export const P = projection("uncaptured")
         ].join("\n"),
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // File error should be recorded
     expect(model).toBeDefined();
   });
@@ -260,7 +260,7 @@ export const P = projection("uncaptured")
     poisoned.filter = () => {
       throw new Error("string error in setup");
     };
-    const { error } = extractModel(poisoned as FileTab[]);
+    const { error } = extract_model(poisoned as FileTab[]);
     expect(error).toBe("string error in setup");
   });
 
@@ -270,7 +270,7 @@ export const P = projection("uncaptured")
     poisoned.filter = () => {
       throw new Error("setup failure");
     };
-    const { error } = extractModel(poisoned as FileTab[]);
+    const { error } = extract_model(poisoned as FileTab[]);
     expect(error).toBeDefined();
   });
 
@@ -280,7 +280,7 @@ export const P = projection("uncaptured")
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw { toString: () => "non-error setup failure" };
     };
-    const { error } = extractModel(poisoned as FileTab[]);
+    const { error } = extract_model(poisoned as FileTab[]);
     expect(error).toBeDefined();
   });
 
@@ -298,7 +298,7 @@ export const P = projection("uncaptured")
         ].join("\n"),
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model).toBeDefined();
   });
 });

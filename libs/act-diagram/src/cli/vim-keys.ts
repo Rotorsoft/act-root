@@ -44,26 +44,26 @@ export type VimKeysHandle = {
   /** Resume translating bytes after a `pause()`. */
   resume: () => void;
   /** Register a callback fired when `/` is pressed. Returns an unsubscribe fn. */
-  onSlash: (cb: () => void) => () => void;
+  on_slash: (cb: () => void) => () => void;
 };
 
 export function enableVimKeys(stdin: StreamLike): VimKeysHandle {
-  const origEmit = stdin.emit.bind(stdin);
+  const orig_emit = stdin.emit.bind(stdin);
   let active = true;
-  const slashListeners: Array<() => void> = [];
+  const slash_listeners: Array<() => void> = [];
 
   const patched: StreamLike["emit"] = (event, ...args) => {
     if (active && event === "data" && args[0] instanceof Buffer) {
       const direction = classify(args[0] as Buffer);
-      if (direction === "down") return origEmit("data", DOWN);
-      if (direction === "up") return origEmit("data", UP);
-      if (direction === "cancel") return origEmit("data", ESC);
+      if (direction === "down") return orig_emit("data", DOWN);
+      if (direction === "up") return orig_emit("data", UP);
+      if (direction === "cancel") return orig_emit("data", ESC);
       if (direction === "slash") {
-        for (const cb of slashListeners) cb();
-        return origEmit("data", ESC);
+        for (const cb of slash_listeners) cb();
+        return orig_emit("data", ESC);
       }
     }
-    return origEmit(event, ...args);
+    return orig_emit(event, ...args);
   };
   stdin.emit = patched;
 
@@ -72,7 +72,7 @@ export function enableVimKeys(stdin: StreamLike): VimKeysHandle {
     restore: () => {
       if (restored) return;
       restored = true;
-      if (stdin.emit === patched) stdin.emit = origEmit;
+      if (stdin.emit === patched) stdin.emit = orig_emit;
     },
     pause: () => {
       active = false;
@@ -80,11 +80,11 @@ export function enableVimKeys(stdin: StreamLike): VimKeysHandle {
     resume: () => {
       active = true;
     },
-    onSlash: (cb) => {
-      slashListeners.push(cb);
+    on_slash: (cb) => {
+      slash_listeners.push(cb);
       return () => {
-        const i = slashListeners.indexOf(cb);
-        if (i >= 0) slashListeners.splice(i, 1);
+        const i = slash_listeners.indexOf(cb);
+        if (i >= 0) slash_listeners.splice(i, 1);
       };
     },
   };

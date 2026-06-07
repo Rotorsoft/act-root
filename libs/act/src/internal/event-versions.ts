@@ -47,7 +47,7 @@ function parse(name: string): { base: string; version: number } {
  *
  * @internal
  */
-export function deprecatedEventNames(names: Iterable<string>): Set<string> {
+export function deprecated_event_names(names: Iterable<string>): Set<string> {
   const groups = new Map<string, Versioned[]>();
   for (const name of names) {
     const { base, version } = parse(name);
@@ -75,13 +75,13 @@ export function deprecatedEventNames(names: Iterable<string>): Set<string> {
  *
  * @internal
  */
-export function currentVersionOf(
-  deprecatedName: string,
-  allNames: Iterable<string>
+export function current_version_of(
+  deprecated_name: string,
+  all_names: Iterable<string>
 ): string | undefined {
-  const target = parse(deprecatedName);
+  const target = parse(deprecated_name);
   let highest: Versioned | undefined;
-  for (const name of allNames) {
+  for (const name of all_names) {
     const { base, version } = parse(name);
     if (base !== target.base) continue;
     if (!highest || version > highest.version) highest = { version, name };

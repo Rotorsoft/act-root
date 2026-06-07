@@ -48,9 +48,9 @@ export type RetryProfile = {
  *
  * The envelope is:
  *
- *     ttl = (backoffSum + (maxRetries + 1) * timeoutMs) * safetyFactor
+ *     ttl = (backoff_sum + (maxRetries + 1) * timeoutMs) * safetyFactor
  *
- * where `backoffSum` is the sum of per-retry delays from the chosen
+ * where `backoff_sum` is the sum of per-retry delays from the chosen
  * `strategy`, multiplied by 1.5 if `jitter` is enabled (the
  * worst-case multiplier in `[0.5, 1.5)`). `safetyFactor` defaults
  * to 4 because operators almost always want headroom over the bare
@@ -59,24 +59,24 @@ export type RetryProfile = {
  */
 export function minSafeTtl(profile: RetryProfile): number {
   const safetyFactor = profile.safetyFactor ?? 4;
-  const backoffSum = sumBackoff(profile.maxRetries, profile.backoff);
-  const timeoutSum = (profile.maxRetries + 1) * profile.timeoutMs;
-  return (backoffSum + timeoutSum) * safetyFactor;
+  const backoff_sum = sum_backoff(profile.maxRetries, profile.backoff);
+  const timeout_sum = (profile.maxRetries + 1) * profile.timeoutMs;
+  return (backoff_sum + timeout_sum) * safetyFactor;
 }
 
-function sumBackoff(
+function sum_backoff(
   maxRetries: number,
   backoff: RetryProfile["backoff"]
 ): number {
   if (!backoff) return 0;
   let sum = 0;
   for (let retry = 0; retry < maxRetries; retry++) {
-    sum += delayFor(retry, backoff);
+    sum += delay_for(retry, backoff);
   }
   return backoff.jitter ? sum * 1.5 : sum;
 }
 
-function delayFor(
+function delay_for(
   retry: number,
   backoff: NonNullable<RetryProfile["backoff"]>
 ): number {

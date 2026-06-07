@@ -1,22 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildContractIndex,
+  build_contract_index,
   type IndexEntry,
 } from "../src/cli/contract-index.js";
 import {
-  formatAction,
-  formatDetail,
-  formatEvent,
-  formatMatches,
-  formatProjection,
-  formatReaction,
-  formatSlice,
-  formatState,
-  formatSummary,
+  format_action,
+  format_detail,
+  format_event,
+  format_matches,
+  format_projection,
+  format_reaction,
+  format_slice,
+  format_state,
+  format_summary,
 } from "../src/cli/format.js";
 import type { DomainModel } from "../src/client/types/index.js";
 
-function buildModel(): DomainModel {
+function build_model(): DomainModel {
   return {
     entries: [],
     states: [
@@ -99,7 +99,7 @@ function buildModel(): DomainModel {
   };
 }
 
-const idx = buildContractIndex(buildModel());
+const idx = build_contract_index(build_model());
 
 const findEntry = (kind: IndexEntry["kind"], name: string): IndexEntry => {
   const e = idx.entries.find((x) => x.kind === kind && x.name === name);
@@ -107,9 +107,9 @@ const findEntry = (kind: IndexEntry["kind"], name: string): IndexEntry => {
   return e;
 };
 
-describe("formatMatches", () => {
+describe("format_matches", () => {
   it("shows match list with kinds and locations", () => {
-    const out = formatMatches("order", [
+    const out = format_matches("order", [
       findEntry("event", "OrderPlaced"),
       findEntry("action", "placeOrder"),
     ]);
@@ -121,12 +121,12 @@ describe("formatMatches", () => {
   });
 
   it("falls back to a no-match message", () => {
-    const out = formatMatches("nope", []);
+    const out = format_matches("nope", []);
     expect(out).toContain('no matches for "nope"');
   });
 
   it("renders entries without qualifier or location, and unknown kinds", () => {
-    const out = formatMatches("x", [
+    const out = format_matches("x", [
       { kind: "bogus" as never, name: "noFrills" },
     ]);
     expect(out).toContain("noFrills");
@@ -135,9 +135,9 @@ describe("formatMatches", () => {
   });
 });
 
-describe("formatEvent", () => {
+describe("format_event", () => {
   it("renders schema, producers, consumers, and deprecation", () => {
-    const out = formatEvent(idx, findEntry("event", "OrderPlaced"));
+    const out = format_event(idx, findEntry("event", "OrderPlaced"));
     expect(out).toContain("OrderPlaced");
     expect(out).toContain("z.object({ id: z.string() })");
     expect(out).toContain("status:  deprecated (superseded by OrderPlaced_v2)");
@@ -147,7 +147,7 @@ describe("formatEvent", () => {
   });
 
   it("renders the active status for the latest version", () => {
-    const out = formatEvent(idx, findEntry("event", "OrderPlaced_v2"));
+    const out = format_event(idx, findEntry("event", "OrderPlaced_v2"));
     expect(out).toContain("status:  active");
     expect(out).toContain("Fulfillment::reserveStock");
     expect(out).toContain("→ reserve");
@@ -170,9 +170,9 @@ describe("formatEvent", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "event")!;
-    const out = formatEvent(i, entry);
+    const out = format_event(i, entry);
     expect(out).not.toContain("on state: Same");
   });
 
@@ -192,9 +192,9 @@ describe("formatEvent", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "event" && e.name === "E")!;
-    const out = formatEvent(i, entry);
+    const out = format_event(i, entry);
     expect(out).toContain("src/s.ts:7");
   });
 
@@ -213,10 +213,10 @@ describe("formatEvent", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "event")!;
-    // Wipe entry.file so the `entry.file ?? owningState?.file` chain falls through.
-    const out = formatEvent(i, { ...entry, file: undefined });
+    // Wipe entry.file so the `entry.file ?? owning_state?.file` chain falls through.
+    const out = format_event(i, { ...entry, file: undefined });
     expect(out).not.toContain("defined:");
   });
 
@@ -235,15 +235,15 @@ describe("formatEvent", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "event")!;
-    const out = formatEvent(i, entry);
+    const out = format_event(i, entry);
     // Producer line uses `(on State)` and has no trailing file location.
     expect(out).toMatch(/- a\s+\(on S\)\s*$/m);
   });
 
   it("renders an event entry that doesn't match any state in the model", () => {
-    const out = formatEvent(idx, {
+    const out = format_event(idx, {
       kind: "event",
       name: "PhantomEvent",
     });
@@ -272,18 +272,18 @@ describe("formatEvent", () => {
       projections: [],
       reactions: [],
     };
-    const lonelyIdx = buildContractIndex(lonely);
+    const lonelyIdx = build_contract_index(lonely);
     const entry = lonelyIdx.entries.find((e) => e.name === "Lone")!;
-    const out = formatEvent(lonelyIdx, entry);
+    const out = format_event(lonelyIdx, entry);
     expect(out).toContain("(not captured)");
     expect(out).toContain("producers: (none)");
     expect(out).toContain("consumers: (none)");
   });
 });
 
-describe("formatAction", () => {
+describe("format_action", () => {
   it("shows owning state, invariants, and emits", () => {
-    const out = formatAction(idx, findEntry("action", "placeOrder"));
+    const out = format_action(idx, findEntry("action", "placeOrder"));
     expect(out).toContain("placeOrder");
     expect(out).toContain("on:      Order");
     expect(out).toContain("- fresh-cart");
@@ -292,7 +292,7 @@ describe("formatAction", () => {
   });
 
   it("formats an action even when its qualifier doesn't match any state", () => {
-    const out = formatAction(idx, {
+    const out = format_action(idx, {
       kind: "action",
       name: "placeOrder",
       qualifier: "Nonexistent",
@@ -304,7 +304,7 @@ describe("formatAction", () => {
   });
 
   it("renders bare action header when state lookup misses", () => {
-    const out = formatAction(idx, { kind: "action", name: "ghost" });
+    const out = format_action(idx, { kind: "action", name: "ghost" });
     expect(out).toBe("ghost");
   });
 
@@ -331,13 +331,13 @@ describe("formatAction", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     // Strip qualifier so the formatter falls through the every-state loop.
     const entry = {
       ...i.entries.find((e) => e.kind === "action")!,
       qualifier: undefined,
     };
-    const out = formatAction(i, entry);
+    const out = format_action(i, entry);
     expect(out).toContain("act1");
     expect(out).toContain("b.ts");
     expect(out).not.toContain("on state:");
@@ -359,9 +359,9 @@ describe("formatAction", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = { ...i.entries.find((e) => e.kind === "action")!, line: 42 };
-    const out = formatAction(i, entry);
+    const out = format_action(i, entry);
     expect(out).toContain("src/s.ts:42");
   });
 
@@ -381,29 +381,29 @@ describe("formatAction", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(noEmit);
+    const i = build_contract_index(noEmit);
     const entry = i.entries.find((e) => e.name === "noop")!;
-    const out = formatAction(i, entry);
+    const out = format_action(i, entry);
     expect(out).toContain("emits:   (none)");
   });
 });
 
-describe("formatState", () => {
+describe("format_state", () => {
   it("lists actions and events with schemas", () => {
-    const out = formatState(idx, findEntry("state", "Order"));
+    const out = format_state(idx, findEntry("state", "Order"));
     expect(out).toContain("Order");
     expect(out).toContain("placeOrder → OrderPlaced, OrderPlaced_v2");
     expect(out).toContain("z.object({ id: z.string(), total: z.number() })");
   });
 
   it("handles a state with no actions or events", () => {
-    const out = formatState(idx, findEntry("state", "Empty"));
+    const out = format_state(idx, findEntry("state", "Empty"));
     expect(out).toContain("Empty");
     expect(out).not.toContain("actions:");
   });
 
   it("renders only the header when state lookup misses", () => {
-    const out = formatState(idx, { kind: "state", name: "Phantom" });
+    const out = format_state(idx, { kind: "state", name: "Phantom" });
     expect(out).toBe("Phantom");
   });
 
@@ -424,18 +424,18 @@ describe("formatState", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "state")!;
-    const out = formatState(i, entry);
+    const out = format_state(i, entry);
     expect(out).toContain("- act1");
     expect(out).not.toContain("act1 →");
     expect(out).toContain("- EvA");
   });
 });
 
-describe("formatSlice", () => {
+describe("format_slice", () => {
   it("shows states, projections, and reactions", () => {
-    const out = formatSlice(idx, findEntry("slice", "Fulfillment"));
+    const out = format_slice(idx, findEntry("slice", "Fulfillment"));
     expect(out).toContain("Fulfillment");
     expect(out).toContain("- Order:0");
     expect(out).toContain("- OrdersByCustomer");
@@ -443,12 +443,12 @@ describe("formatSlice", () => {
   });
 
   it("surfaces slice errors", () => {
-    const out = formatSlice(idx, findEntry("slice", "Broken"));
+    const out = format_slice(idx, findEntry("slice", "Broken"));
     expect(out).toContain("error: could not parse");
   });
 
   it("renders only the header when the slice lookup misses", () => {
-    const out = formatSlice(idx, { kind: "slice", name: "ghost" });
+    const out = format_slice(idx, { kind: "slice", name: "ghost" });
     expect(out).toBe("ghost");
   });
 
@@ -468,9 +468,9 @@ describe("formatSlice", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "slice")!;
-    const out = formatSlice(i, entry);
+    const out = format_slice(i, entry);
     // The event → handler arrow is always present in slice reactions;
     // only the dispatch arrow (` → ${actions.join}`) goes away.
     expect(out).toContain("- E → h");
@@ -480,9 +480,9 @@ describe("formatSlice", () => {
   });
 });
 
-describe("formatProjection", () => {
+describe("format_projection", () => {
   it("lists handled events", () => {
-    const out = formatProjection(
+    const out = format_projection(
       idx,
       findEntry("projection", "OrdersByCustomer")
     );
@@ -491,7 +491,7 @@ describe("formatProjection", () => {
   });
 
   it("renders just the header when the projection lookup misses", () => {
-    const out = formatProjection(idx, {
+    const out = format_projection(idx, {
       kind: "projection",
       name: "Unknown",
     });
@@ -506,17 +506,17 @@ describe("formatProjection", () => {
       projections: [{ name: "P", varName: "P", handles: [] }],
       reactions: [],
     };
-    const i = buildContractIndex(empty);
+    const i = build_contract_index(empty);
     const entry = i.entries.find((e) => e.kind === "projection")!;
-    const out = formatProjection(i, entry);
+    const out = format_projection(i, entry);
     expect(out.trim()).toBe("P");
   });
 });
 
-describe("formatReaction", () => {
+describe("format_reaction", () => {
   it("links the reaction to its slice and triggers", () => {
     const reaction = idx.entries.find((e) => e.kind === "reaction")!;
-    const out = formatReaction(idx, reaction);
+    const out = format_reaction(idx, reaction);
     expect(out).toContain("reserveStock");
     expect(out).toContain("(in Fulfillment)");
     expect(out).toContain("on:      OrderPlaced_v2");
@@ -524,7 +524,7 @@ describe("formatReaction", () => {
   });
 
   it("renders bare reaction details when slice and qualifier are missing", () => {
-    const out = formatReaction(idx, {
+    const out = format_reaction(idx, {
       kind: "reaction",
       name: "orphan",
     });
@@ -534,7 +534,7 @@ describe("formatReaction", () => {
   });
 
   it("renders defined: line when entry.file is present", () => {
-    const out = formatReaction(idx, {
+    const out = format_reaction(idx, {
       kind: "reaction",
       name: "alone",
       qualifier: "Slice::Event",
@@ -566,9 +566,9 @@ describe("formatReaction", () => {
         },
       ],
     };
-    const i = buildContractIndex(m);
+    const i = build_contract_index(m);
     const entry = i.entries.find((e) => e.kind === "reaction")!;
-    const out = formatReaction(i, entry);
+    const out = format_reaction(i, entry);
     expect(out).toContain("orchHandler");
     expect(out).toContain("on:      E");
     expect(out).toContain("producers (of triggering event)");
@@ -592,33 +592,33 @@ describe("formatReaction", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(noDispatch);
+    const i = build_contract_index(noDispatch);
     const entry = i.entries.find((e) => e.kind === "reaction")!;
-    const out = formatReaction(i, entry);
+    const out = format_reaction(i, entry);
     expect(out).not.toContain("triggers:");
   });
 });
 
-describe("formatDetail dispatch", () => {
+describe("format_detail dispatch", () => {
   it("routes to the right formatter per kind", () => {
     const e = findEntry("event", "OrderPlaced");
     const a = findEntry("action", "placeOrder");
-    expect(formatDetail(idx, e)).toContain("OrderPlaced");
-    expect(formatDetail(idx, a)).toContain("placeOrder");
+    expect(format_detail(idx, e)).toContain("OrderPlaced");
+    expect(format_detail(idx, a)).toContain("placeOrder");
   });
 
   it("returns empty for unknown kinds", () => {
     expect(
-      formatDetail(idx, { kind: "bogus" as never, name: "x" } as IndexEntry)
+      format_detail(idx, { kind: "bogus" as never, name: "x" } as IndexEntry)
     ).toBe("");
   });
 });
 
-describe("formatSummary", () => {
+describe("format_summary", () => {
   it("summarizes counts", () => {
-    expect(formatSummary(idx)).toContain("2 states");
-    expect(formatSummary(idx)).toContain("2 slices");
-    expect(formatSummary(idx)).toContain("2 events");
+    expect(format_summary(idx)).toContain("2 states");
+    expect(format_summary(idx)).toContain("2 slices");
+    expect(format_summary(idx)).toContain("2 events");
   });
 
   it("uses plural forms for zero or many", () => {
@@ -635,8 +635,8 @@ describe("formatSummary", () => {
       ],
       reactions: [],
     };
-    const i = buildContractIndex(many);
-    expect(formatSummary(i)).toContain("2 projections");
+    const i = build_contract_index(many);
+    expect(format_summary(i)).toContain("2 projections");
   });
 
   it("singularizes counts of 1", () => {
@@ -662,8 +662,8 @@ describe("formatSummary", () => {
       projections: [{ name: "P", varName: "P", handles: [] }],
       reactions: [],
     };
-    const i = buildContractIndex(tiny);
-    const out = formatSummary(i);
+    const i = build_contract_index(tiny);
+    const out = format_summary(i);
     expect(out).toContain("1 state,");
     expect(out).toContain("1 slice,");
     expect(out).toContain("1 projection,");

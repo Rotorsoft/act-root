@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   GAP,
   H,
   type Layout,
@@ -143,10 +143,10 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
 
 // -- Tests --------------------------------------------------------------------
 
-describe("computeLayout — slices", () => {
+describe("compute_layout — slices", () => {
   describe("column ordering in slices", () => {
     it("places action left of state, state left of event (in slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
       const state = find(layout, "state", "Ticket")!;
       const event = find(layout, "event", "TicketOpened")!;
@@ -156,7 +156,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("places reactions to the right of events", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const event = find(layout, "event", "TicketOpened")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
 
@@ -166,7 +166,7 @@ describe("computeLayout — slices", () => {
 
   describe("gap enforcement in slices", () => {
     it("maintains GAP between action column and state column (slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
       const state = find(layout, "state", "Ticket")!;
 
@@ -175,7 +175,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("maintains GAP between state column and event column (slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const event = find(layout, "event", "TicketOpened")!;
 
@@ -186,10 +186,10 @@ describe("computeLayout — slices", () => {
 
   describe("vertical centering in slices", () => {
     it("centers primary block vertically when reaction chain extends below", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
-      const dispatchedAction = layout.ns.find(
+      const dispatched_action = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
 
@@ -205,7 +205,7 @@ describe("computeLayout — slices", () => {
       const trigEvent = find(layout, "event", "TicketOpened")!;
       expect(reaction.pos.y).toBeGreaterThanOrEqual(trigEvent.pos.y);
 
-      expect(dispatchedAction.pos.x).toBeGreaterThan(reaction.pos.x + W);
+      expect(dispatched_action.pos.x).toBeGreaterThan(reaction.pos.x + W);
     });
 
     it("centers state vertically relative to actions/events in a slice (no reactions)", () => {
@@ -234,7 +234,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const state = find(layout, "state", "T")!;
       const actions = layout.ns.filter((n) => n.type === "action");
       const events = layout.ns.filter((n) => n.type === "event");
@@ -255,7 +255,7 @@ describe("computeLayout — slices", () => {
 
   describe("no overlapping nodes in slices", () => {
     it("has no overlapping nodes in a slice model with reactions", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       assertNoOverlaps(layout);
     });
 
@@ -300,25 +300,25 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       assertNoOverlaps(layout);
     });
 
     it("has no overlapping nodes across two slices", () => {
-      const layout = computeLayout(TWO_SLICES_MODEL);
+      const layout = compute_layout(TWO_SLICES_MODEL);
       assertNoOverlaps(layout);
     });
   });
 
   describe("slice bounding boxes", () => {
     it("creates a bounding box for each slice", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       expect(layout.boxes).toHaveLength(1);
       expect(layout.boxes[0].label).toBe("TicketSlice");
     });
 
     it("slice box fully contains all its nodes with SLICE_INNER padding", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
@@ -334,7 +334,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice box has SLICE_INNER padding above topmost and below bottommost node", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
@@ -353,7 +353,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("two slice boxes don't overlap and have SLICE_GAP between them", () => {
-      const layout = computeLayout(TWO_SLICES_MODEL);
+      const layout = compute_layout(TWO_SLICES_MODEL);
       expect(layout.boxes).toHaveLength(2);
 
       const box1 = layout.boxes[0];
@@ -407,7 +407,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       expect(layout.boxes).toHaveLength(2);
 
       const box1 = layout.boxes[0];
@@ -426,7 +426,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice box includes SLICE_PAD offset for the vertical label strip", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       expect(box.x).toBe(PAD - GAP / 2);
     });
@@ -434,7 +434,7 @@ describe("computeLayout — slices", () => {
 
   describe("dashed edges for reactions", () => {
     it("creates dashed edges for reaction arrows", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const dashedEdges = layout.es.filter((e) => e.dash);
       expect(dashedEdges.length).toBeGreaterThanOrEqual(1);
       for (const e of dashedEdges) {
@@ -445,7 +445,7 @@ describe("computeLayout — slices", () => {
 
   describe("dispatched reaction chains", () => {
     it("places dispatched action to the right of the reaction", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const reaction = find(layout, "reaction", "autoAssign")!;
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
@@ -456,7 +456,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("places dispatched state and events further right in the chain", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
@@ -476,7 +476,7 @@ describe("computeLayout — slices", () => {
 
   describe("reaction chain layout rules", () => {
     it("events stack tightly at uniform H + GAP/2 regardless of chains", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const primaryEvents = layout.ns.filter(
         (n) =>
           n.type === "event" &&
@@ -492,15 +492,15 @@ describe("computeLayout — slices", () => {
     });
 
     it("reaction aligns vertically with triggering event when no prior chain", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const trigEvent = find(layout, "event", "TicketOpened")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
 
       expect(reaction.pos.y).toBe(trigEvent.pos.y);
     });
 
-    it("dispatched row is internally centered (action, state, events share rowCenterY)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+    it("dispatched row is internally centered (action, state, events share row_center_y)", () => {
+      const layout = compute_layout(SLICE_MODEL);
       const dAction = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
@@ -520,16 +520,16 @@ describe("computeLayout — slices", () => {
     });
 
     it("dispatched block is centered on reaction center", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const reaction = find(layout, "reaction", "autoAssign")!;
       const dState = layout.ns.find(
         (n) => n.type === "state" && n.key.includes("dispatched")
       )!;
 
-      const reactionCenter = reaction.pos.y + H / 2;
+      const reaction_center = reaction.pos.y + H / 2;
       const stateCenter = dState.pos.y + STATE_H / 2;
 
-      expect(Math.abs(reactionCenter - stateCenter)).toBeLessThan(1);
+      expect(Math.abs(reaction_center - stateCenter)).toBeLessThan(1);
     });
 
     it("watermark pushes second reaction down when chains would overlap", () => {
@@ -573,7 +573,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const r1 = find(layout, "reaction", "r1")!;
       const r2 = find(layout, "reaction", "r2")!;
       const e1 = find(layout, "event", "E1")!;
@@ -598,7 +598,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("states are always square (STATE_W x STATE_H)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const states = layout.ns.filter((n) => n.type === "state");
       for (const s of states) {
         const bb = nodeBBox(s);
@@ -608,7 +608,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice bounding box extends to contain all chain nodes", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       for (const n of layout.ns) {
         if (!n.key.includes("TicketSlice") && !n.key.includes("dispatched"))
@@ -660,7 +660,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       const r1 = find(layout, "reaction", "r1");
       const r2 = find(layout, "reaction", "r2");
@@ -710,22 +710,22 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       const stateNodes = layout.ns.filter(
         (n) => n.type === "state" && n.label === "Ticket"
       );
       expect(stateNodes).toHaveLength(1);
 
-      const actionNodes = layout.ns.filter((n) => n.type === "action");
-      const actionNames = actionNodes.map((n) => n.label);
-      expect(actionNames).toContain("OpenTicket");
-      expect(actionNames).toContain("AssignTicket");
+      const action_nodes = layout.ns.filter((n) => n.type === "action");
+      const action_names = action_nodes.map((n) => n.label);
+      expect(action_names).toContain("OpenTicket");
+      expect(action_names).toContain("AssignTicket");
 
-      const eventNodes = layout.ns.filter((n) => n.type === "event");
-      const eventNames = eventNodes.map((n) => n.label);
-      expect(eventNames).toContain("TicketOpened");
-      expect(eventNames).toContain("TicketAssigned");
+      const event_nodes = layout.ns.filter((n) => n.type === "event");
+      const event_names = event_nodes.map((n) => n.label);
+      expect(event_names).toContain("TicketOpened");
+      expect(event_names).toContain("TicketAssigned");
     });
 
     it("does not duplicate actions when same action appears in both partials", () => {
@@ -754,9 +754,9 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
-      const actionNodes = layout.ns.filter((n) => n.type === "action");
-      expect(actionNodes).toHaveLength(1);
+      const layout = compute_layout(model);
+      const action_nodes = layout.ns.filter((n) => n.type === "action");
+      expect(action_nodes).toHaveLength(1);
     });
   });
 
@@ -774,7 +774,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       expect(layout.boxes).toHaveLength(1);
       expect(layout.boxes[0].w).toBeGreaterThan(0);
       expect(layout.boxes[0].h).toBeGreaterThan(0);
@@ -819,7 +819,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const notify = find(layout, "reaction", "notify");
       expect(notify).toBeDefined();
       const nonReactionNodes = layout.ns.filter(
@@ -859,7 +859,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "orphanHandler");
       expect(reaction).toBeDefined();
     });
@@ -892,7 +892,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "noDispatch");
       expect(reaction).toBeDefined();
       const dispatched = layout.ns.filter((n) => n.key.includes("dispatched"));
@@ -935,7 +935,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const dispatched = layout.ns.filter(
         (n) => n.type === "action" && n.key.includes("dispatched")
       );
@@ -980,7 +980,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       );
@@ -1017,7 +1017,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "r1");
       expect(reaction).toBeDefined();
       const dispatched = layout.ns.find(
@@ -1053,7 +1053,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const evt = find(layout, "event", "Opened");
       expect(evt).toBeDefined();
       expect(evt!.file).toBe("src/ticket.ts");
@@ -1083,7 +1083,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const state = find(layout, "state", "Empty");
       expect(state).toBeDefined();
     });
@@ -1113,7 +1113,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const emittedEvt = find(layout, "event", "EmittedEvt");
       const orphanEvt = find(layout, "event", "OrphanEvt");
       expect(emittedEvt).toBeDefined();
@@ -1155,7 +1155,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const first = find(layout, "reaction", "firstHandler");
       const second = find(layout, "reaction", "secondHandler");
       expect(first).toBeDefined();
@@ -1174,7 +1174,7 @@ describe("computeLayout — slices", () => {
 
     it("places remaining reaction without edge when event is not in any state", () => {
       // Reaction triggers on "UnknownEvt" which is not declared in any state.
-      // No event node exists, so trigNode is null and no edge is created.
+      // No event node exists, so trig_node is null and no edge is created.
       const model = emptyModel({
         states: [
           {
@@ -1200,7 +1200,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "orphanHandler");
       expect(reaction).toBeDefined();
       // No event node for UnknownEvt, so no dashed edge to reaction
@@ -1261,7 +1261,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       // All three reactions should be placed
       const r1 = find(layout, "reaction", "autoReview");
@@ -1321,7 +1321,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       // Reaction should appear exactly once even though Evt is in two action rows
       const reactions = layout.ns.filter(
         (n) => n.type === "reaction" && n.label === "handler"
@@ -1396,7 +1396,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       // Projection should be placed
       const projNode = layout.ns.find(
@@ -1466,7 +1466,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const projNodes = layout.ns.filter((n) => n.type === "projection");
       expect(projNodes).toHaveLength(1);
       expect(projNodes[0].label).toBe("shared");

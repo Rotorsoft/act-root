@@ -4,13 +4,13 @@
  *
  * Two layers of the drain pipeline:
  *
- * - {@link runDrainCycle} — pure function for one round-trip of
+ * - {@link run_drain_cycle} — pure function for one round-trip of
  *   claim → fetch → group → dispatch → ack/block. No orchestrator state.
  *   Reusable for property tests and standalone benchmarks.
  *
  * - {@link DrainController} — stateful driver that owns the armed flag,
  *   the concurrency lock, and the adaptive lag/lead ratio. Wraps
- *   `runDrainCycle` with the lifecycle decisions Act used to make inline.
+ *   `run_drain_cycle` with the lifecycle decisions Act used to make inline.
  *
  * @internal
  */
@@ -30,12 +30,12 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { DrainOps } from "./drain.js";
-import { computeLagLeadRatio } from "./drain-ratio.js";
-import { traceCycle } from "./tracing.js";
+import { compute_lag_lead_ratio } from "./drain-ratio.js";
+import { trace_cycle } from "./tracing.js";
 
 /**
  * Outcome of processing a single leased stream — produced by Act's `handle`
- * / `handleBatch` dispatchers, consumed by `runDrainCycle` to drive ack/block.
+ * / `handle_batch` dispatchers, consumed by `run_drain_cycle` to drive ack/block.
  *
  * @internal
  */
@@ -58,7 +58,7 @@ export type HandleResult = Readonly<{
    * where the reaction defined `options.backoff`. Undefined means "no
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
-  nextAttemptAt?: number;
+  next_attempt_at?: number;
   /**
    * Event id that threw, when a handler error occurred. Distinct from
    * {@link acked_at}: `failed_at = acked_at + 1` in dense streams, but
@@ -79,7 +79,7 @@ export type Handle<TEvents extends Schemas> = (
 ) => Promise<HandleResult>;
 
 /**
- * Bulk reaction dispatcher signature (matches `Act.handleBatch`).
+ * Bulk reaction dispatcher signature (matches `Act.handle_batch`).
  * @internal
  */
 export type HandleBatch<TEvents extends Schemas> = (
@@ -89,7 +89,7 @@ export type HandleBatch<TEvents extends Schemas> = (
 ) => Promise<HandleResult>;
 
 /**
- * One drain cycle's results. Returned by {@link runDrainCycle}; consumed by
+ * One drain cycle's results. Returned by {@link run_drain_cycle}; consumed by
  * `Act.drain()` to update lifecycle state, the lag/lead ratio, and emit the
  * `acked` / `blocked` lifecycle events.
  *
@@ -110,7 +110,7 @@ export type DrainCycle<TEvents extends Schemas> = {
  * Returns `undefined` when nothing was claimed — caller can short-circuit
  * the rest of the drain pass.
  *
- * **Deferred streams.** When `isDeferred(stream)` returns `true`, the
+ * **Deferred streams.** When `is_deferred(stream)` returns `true`, the
  * cycle skips dispatch for that lease — no handle, no ack, no block. The
  * lease holds for `leaseMillis` via the existing claim mechanism, which
  * blocks competing workers from re-attempting during the backoff window
@@ -120,21 +120,21 @@ export type DrainCycle<TEvents extends Schemas> = {
  *
  * @internal
  */
-export async function runDrainCycle<
+export async function run_drain_cycle<
   TEvents extends Schemas,
   TActions extends Schemas,
   TSchemaReg extends SchemaRegister<TActions>,
 >(
   ops: DrainOps<TEvents>,
   registry: Registry<TSchemaReg, TEvents, TActions>,
-  batchHandlers: Map<string, BatchHandler<TEvents>>,
+  batch_handlers: Map<string, BatchHandler<TEvents>>,
   handle: Handle<TEvents>,
-  handleBatch: HandleBatch<TEvents>,
+  handle_batch: HandleBatch<TEvents>,
   lagging: number,
   leading: number,
   eventLimit: number,
   leaseMillis: number,
-  isDeferred?: (stream: string) => boolean,
+  is_deferred?: (stream: string) => boolean,
   lane?: string
 ): Promise<DrainCycle<TEvents> | undefined> {
   // Atomically discover and lease streams (competing consumer pattern)
@@ -150,8 +150,8 @@ export async function runDrainCycle<
   // Partition out streams whose handler is in a backoff window. We hold
   // their leases (no ack/block) so competing workers can't re-attempt
   // during the configured delay.
-  const active = isDeferred
-    ? leased.filter((l) => !isDeferred(l.stream))
+  const active = is_deferred
+    ? leased.filter((l) => !is_deferred(l.stream))
     : leased;
   if (!active.length) {
     return {
@@ -167,9 +167,9 @@ export async function runDrainCycle<
   const fetched = await ops.fetch(active, eventLimit);
 
   // Build a single index keyed by stream — collapses two passes
-  // (payloadsMap build + per-lease fetched.find) into one Map lookup.
+  // (payloads_map build + per-lease fetched.find) into one Map lookup.
   type FetchEntry = (typeof fetched)[number];
-  const fetchMap = new Map<
+  const fetch_map = new Map<
     string,
     { fetch: FetchEntry; payloads: ReactionPayload<TEvents>[] }
   >();
@@ -195,20 +195,20 @@ export async function runDrainCycle<
         })
         .map((reaction) => ({ ...reaction, event }));
     });
-    fetchMap.set(stream, { fetch: f, payloads });
+    fetch_map.set(stream, { fetch: f, payloads });
   }
 
   const handled = await Promise.all(
     active.map((lease) => {
-      // fetch() returns one entry per leased stream — fetchMap.get is
+      // fetch() returns one entry per leased stream — fetch_map.get is
       // always defined here (asserted with `!`).
-      const entry = fetchMap.get(lease.stream)!;
+      const entry = fetch_map.get(lease.stream)!;
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
-      const batchHandler = batchHandlers.get(lease.stream);
+      const batchHandler = batch_handlers.get(lease.stream);
       if (batchHandler && payloads.length > 0) {
-        return handleBatch({ ...lease, at }, payloads, batchHandler);
+        return handle_batch({ ...lease, at }, payloads, batchHandler);
       }
       return handle({ ...lease, at }, payloads);
     })
@@ -251,7 +251,7 @@ const EMPTY_DRAIN: Drain<Schemas> = {
 
 /**
  * Dependencies the {@link DrainController} needs from the orchestrator.
- * The lifecycle event sinks (`onAcked` / `onBlocked`) are callbacks so
+ * The lifecycle event sinks (`on_acked` / `on_blocked`) are callbacks so
  * this module doesn't reach back into Act's emitter.
  *
  * @internal
@@ -264,11 +264,11 @@ export type DrainControllerDeps<
   readonly logger: Logger;
   readonly ops: DrainOps<TEvents>;
   readonly registry: Registry<TSchemaReg, TEvents, TActions>;
-  readonly batchHandlers: Map<string, BatchHandler<TEvents>>;
+  readonly batch_handlers: Map<string, BatchHandler<TEvents>>;
   readonly handle: Handle<TEvents>;
-  readonly handleBatch: HandleBatch<TEvents>;
-  readonly onAcked: (acked: Lease[]) => void;
-  readonly onBlocked: (blocked: BlockedLease[]) => void;
+  readonly handle_batch: HandleBatch<TEvents>;
+  readonly on_acked: (acked: Lease[]) => void;
+  readonly on_blocked: (blocked: BlockedLease[]) => void;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
@@ -280,7 +280,7 @@ export type DrainControllerDeps<
 };
 
 /**
- * Stateful driver around {@link runDrainCycle}. Owns:
+ * Stateful driver around {@link run_drain_cycle}. Owns:
  *
  * - `_armed`  — has any commit / reset / cold-start signaled work to do?
  * - `_locked` — concurrent-call guard (overlapping `drain()` calls return
@@ -301,14 +301,14 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Per-stream backoff: `stream → nextAttemptAt` (ms since epoch). Set by
-   * `_finalize` via `HandleResult.nextAttemptAt`; cleared on successful
+   * Per-stream backoff: `stream → next_attempt_at` (ms since epoch). Set by
+   * `_finalize` via `HandleResult.next_attempt_at`; cleared on successful
    * ack or terminal block. Lives in process memory — per-worker pacing
    * by design (see {@link BackoffOptions} for the multi-worker trade-off).
    */
   private _backoff = new Map<string, number>();
-  /** Timer re-arming drain at the earliest pending `nextAttemptAt`. */
-  private _backoffTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Timer re-arming drain at the earliest pending `next_attempt_at`. */
+  private _backoff_timer: ReturnType<typeof setTimeout> | undefined;
   /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
@@ -334,7 +334,7 @@ export class DrainController<
   }
 
   /** Returns true when `stream` is currently within a backoff window. */
-  private isDeferred = (stream: string): boolean => {
+  private is_deferred = (stream: string): boolean => {
     const next = this._backoff.get(stream);
     return next !== undefined && next > Date.now();
   };
@@ -345,13 +345,13 @@ export class DrainController<
    * Idempotent — collapses many simultaneously deferred streams into a
    * single timer.
    */
-  private scheduleBackoffWake(): void {
-    if (this._backoffTimer) clearTimeout(this._backoffTimer);
+  private schedule_backoff_wake(): void {
+    if (this._backoff_timer) clearTimeout(this._backoff_timer);
     let earliest = Number.POSITIVE_INFINITY;
     for (const t of this._backoff.values()) if (t < earliest) earliest = t;
     const delay = Math.max(0, earliest - Date.now());
-    this._backoffTimer = setTimeout(() => {
-      this._backoffTimer = undefined;
+    this._backoff_timer = setTimeout(() => {
+      this._backoff_timer = undefined;
       // Garbage-collect expired entries so the next cycle sees ready
       // streams as active. Drain will be re-triggered by whoever owns the
       // settle loop (or by the next commit). Re-arm here so a debounced
@@ -366,7 +366,7 @@ export class DrainController<
     // a process exit during retry pacing is the right default. Safe to call
     // unconditionally: Node's `setTimeout` always returns a Timeout with
     // `unref()`.
-    this._backoffTimer.unref();
+    this._backoff_timer.unref();
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -430,17 +430,17 @@ export class DrainController<
       const lagging = Math.ceil(streamLimit * this._ratio);
       const leading = streamLimit - lagging;
 
-      const cycle = await runDrainCycle(
+      const cycle = await run_drain_cycle(
         this._deps.ops,
         this._deps.registry,
-        this._deps.batchHandlers,
+        this._deps.batch_handlers,
         this._deps.handle,
-        this._deps.handleBatch,
+        this._deps.handle_batch,
         lagging,
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.isDeferred : undefined,
+        this._backoff.size > 0 ? this.is_deferred : undefined,
         this._deps.lane
       );
 
@@ -456,30 +456,30 @@ export class DrainController<
       // claim + fetch + outcomes folded together so the operator sees
       // a single atomic narrative for each cycle. No-op when the
       // logger isn't at trace level.
-      traceCycle(this._deps.logger, leased, fetched, handled, acked, blocked);
+      trace_cycle(this._deps.logger, leased, fetched, handled, acked, blocked);
 
       // Adapt next cycle's frontier split to where the pressure is.
-      this._ratio = computeLagLeadRatio(handled, lagging, leading);
+      this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
       // Refresh per-stream backoff state from this cycle's outcomes.
       // Successful acks and terminal blocks both clear the window;
-      // retry-not-block results carry a `nextAttemptAt` set by `_finalize`.
+      // retry-not-block results carry a `next_attempt_at` set by `_finalize`.
       for (const lease of acked) this._backoff.delete(lease.stream);
       for (const lease of blocked) this._backoff.delete(lease.stream);
       for (const h of handled) {
-        if (h.nextAttemptAt !== undefined && !h.block) {
-          this._backoff.set(h.lease.stream, h.nextAttemptAt);
+        if (h.next_attempt_at !== undefined && !h.block) {
+          this._backoff.set(h.lease.stream, h.next_attempt_at);
         }
       }
-      if (this._backoff.size > 0) this.scheduleBackoffWake();
+      if (this._backoff.size > 0) this.schedule_backoff_wake();
 
-      if (acked.length) this._deps.onAcked(acked);
-      if (blocked.length) this._deps.onBlocked(blocked);
+      if (acked.length) this._deps.on_acked(acked);
+      if (blocked.length) this._deps.on_blocked(blocked);
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
-      const hasErrors = handled.some(({ error }) => error);
-      if (!acked.length && !blocked.length && !hasErrors) this._armed = false;
+      const has_errors = handled.some(({ error }) => error);
+      if (!acked.length && !blocked.length && !has_errors) this._armed = false;
 
       return { fetched, leased, acked, blocked };
     } catch (error) {

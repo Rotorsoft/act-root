@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { buildContractIndex } from "../src/cli/contract-index.js";
-import { formatJsonSchema, toJsonSchemaSafe } from "../src/cli/json-schema.js";
+import { build_contract_index } from "../src/cli/contract-index.js";
+import {
+  format_json_schema,
+  toJsonSchemaSafe,
+} from "../src/cli/json-schema.js";
 import type { DomainModel } from "../src/client/types/index.js";
 
 const OrderPlacedSchema = z.object({
@@ -99,15 +102,15 @@ describe("toJsonSchemaSafe", () => {
   });
 });
 
-describe("formatJsonSchema", () => {
-  const idx = buildContractIndex(modelWithRealSchemas());
-  const text = formatJsonSchema(idx);
+describe("format_json_schema", () => {
+  const idx = build_contract_index(modelWithRealSchemas());
+  const text = format_json_schema(idx);
   const parsed = JSON.parse(text);
 
   it("emits valid JSON with metadata header", () => {
     expect(parsed.$schema).toBe("https://json-schema.org/draft/2020-12/schema");
     expect(parsed.generator).toBe("act-diagram/act-contracts");
-    expect(typeof parsed.generatedAt).toBe("string");
+    expect(typeof parsed.generated_at).toBe("string");
     expect(parsed.counts).toEqual({
       states: 1,
       slices: 1,
@@ -129,9 +132,9 @@ describe("formatJsonSchema", () => {
     );
   });
 
-  it("includes deprecation status with supersededBy", () => {
+  it("includes deprecation status with superseded_by", () => {
     expect(parsed.events.OrderPlaced.status).toBe("deprecated");
-    expect(parsed.events.OrderPlaced.supersededBy).toBe("OrderPlaced_v2");
+    expect(parsed.events.OrderPlaced.superseded_by).toBe("OrderPlaced_v2");
     expect(parsed.events.OrderPlaced_v2.status).toBe("active");
   });
 
@@ -164,7 +167,7 @@ describe("formatJsonSchema", () => {
     );
   });
 
-  it("falls back to schemaError when conversion fails", () => {
+  it("falls back to schema_error when conversion fails", () => {
     const model: DomainModel = {
       entries: [],
       states: [
@@ -185,9 +188,9 @@ describe("formatJsonSchema", () => {
       projections: [],
       reactions: [],
     };
-    const idx2 = buildContractIndex(model);
-    const out = JSON.parse(formatJsonSchema(idx2));
-    expect(out.events.Broken.schemaError).toBeDefined();
+    const idx2 = build_contract_index(model);
+    const out = JSON.parse(format_json_schema(idx2));
+    expect(out.events.Broken.schema_error).toBeDefined();
     expect(out.events.Broken.schema).toBeUndefined();
   });
 });

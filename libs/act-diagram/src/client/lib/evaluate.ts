@@ -4,14 +4,14 @@
  */
 import { transform } from "sucrase";
 import type { DomainModel, FileTab } from "../types/index.js";
-import { buildModel, type ExecuteResult } from "./build-model.js";
-import { MODULES, unknownModuleProxy } from "./mock-builders.js";
-import { topoSort } from "./sort.js";
+import { build_model, type ExecuteResult } from "./build-model.js";
+import { MODULES, unknown_module_proxy } from "./mock-builders.js";
+import { topo_sort } from "./sort.js";
 
 /** Replace non-executable content with same-length whitespace (preserving offsets).
  *  `level: "full"` strips comments + strings + template literals (for scanning).
  *  `level: "nav"` strips comments + template literals only (for navigation). */
-export const stripNonCode = (src: string, level: "full" | "nav" = "full") => {
+export const strip_non_code = (src: string, level: "full" | "nav" = "full") => {
   const blank = (m: string) => m.replace(/[^\n]/g, " ");
   let result = src
     .replace(/\/\/[^\n]*/g, blank) // line comments
@@ -26,7 +26,7 @@ export const stripNonCode = (src: string, level: "full" | "nav" = "full") => {
 };
 
 /** Source file filter — excludes tests, declarations, and non-TS files */
-const isSourceFile = (f: FileTab) =>
+const is_source_file = (f: FileTab) =>
   f.path.endsWith(".ts") &&
   !f.path.endsWith(".d.ts") &&
   !f.path.endsWith(".tsx") &&
@@ -59,15 +59,15 @@ function transpile(code: string): string {
 
 function execute(
   files: FileTab[]
-): ExecuteResult & { expectedSlices: Map<string, string> } {
+): ExecuteResult & { expected_slices: Map<string, string> } {
   const result = {
     states: [] as any[],
     slices: [] as any[],
     projections: [] as any[],
     acts: [] as any[],
     error: undefined as string | undefined,
-    fileErrors: new Map<string, string>(),
-    expectedSlices: new Map<string, string>(),
+    file_errors: new Map<string, string>(),
+    expected_slices: new Map<string, string>(),
   };
 
   try {
@@ -84,38 +84,38 @@ function execute(
       __built__[type + "s"].push(info);
     };
 
-    const actModule = { ...MODULES["@rotorsoft/act"] };
-    actModule.state = (entry: any) =>
+    const act_module = { ...MODULES["@rotorsoft/act"] };
+    act_module.state = (entry: any) =>
       (MODULES["@rotorsoft/act"].state as any)(entry, capture("state"));
-    actModule.slice = () =>
+    act_module.slice = () =>
       (MODULES["@rotorsoft/act"].slice as any)(capture("slice"));
-    actModule.projection = (target: any) =>
+    act_module.projection = (target: any) =>
       (MODULES["@rotorsoft/act"].projection as any)(
         target,
         capture("projection")
       );
-    actModule.act = () =>
+    act_module.act = () =>
       (MODULES["@rotorsoft/act"].act as any)(capture("act"));
 
-    const pkgModules: Record<string, any> = {
+    const pkg_modules: Record<string, any> = {
       ...MODULES,
-      "@rotorsoft/act": actModule,
+      "@rotorsoft/act": act_module,
     };
 
     // Per-file exports: each file gets its own exports object
-    const fileExports = new Map<string, Record<string, any>>();
+    const file_exports = new Map<string, Record<string, any>>();
 
     const strip = (p: string) => p.replace(/\.tsx?$/, "");
 
-    const resolveModule = (
+    const resolve_module = (
       mod: string,
-      fromPath: string
+      from_path: string
     ): Record<string, any> => {
-      if (pkgModules[mod]) return pkgModules[mod];
+      if (pkg_modules[mod]) return pkg_modules[mod];
 
       if (mod.startsWith(".")) {
-        const dir = fromPath.includes("/")
-          ? fromPath.slice(0, fromPath.lastIndexOf("/"))
+        const dir = from_path.includes("/")
+          ? from_path.slice(0, from_path.lastIndexOf("/"))
           : "";
         const parts = (dir ? dir + "/" + mod : mod).split("/");
         const resolved: string[] = [];
@@ -125,66 +125,67 @@ function execute(
           else resolved.push(p);
         }
         const rp = resolved.join("/").replace(/\.js$/, "").replace(/\.ts$/, "");
-        return fileExports.get(rp) ?? fileExports.get(rp + "/index") ?? {};
+        return file_exports.get(rp) ?? file_exports.get(rp + "/index") ?? {};
       }
 
       if (mod.startsWith("@") && !mod.startsWith("@rotorsoft/")) {
-        const pkgName = mod.split("/")[1];
-        const subPath = mod.split("/").slice(2).join("/");
-        if (pkgName) {
-          const suffix = subPath
-            ? `/${subPath.replace(/\.js$/, "")}`
+        const pkg_name = mod.split("/")[1];
+        const sub_path = mod.split("/").slice(2).join("/");
+        if (pkg_name) {
+          const suffix = sub_path
+            ? `/${sub_path.replace(/\.js$/, "")}`
             : "/src/index";
           return (
-            fileExports.get(`packages/${pkgName}${suffix}`) ??
-            fileExports.get(`${pkgName}${suffix}`) ??
-            fileExports.get(`packages/${pkgName}/src/index`) ??
-            fileExports.get(`${pkgName}/src/index`) ??
-            fileExports.get(`${pkgName}/index`) ??
-            fileExports.get(pkgName) ??
-            unknownModuleProxy()
+            file_exports.get(`packages/${pkg_name}${suffix}`) ??
+            file_exports.get(`${pkg_name}${suffix}`) ??
+            file_exports.get(`packages/${pkg_name}/src/index`) ??
+            file_exports.get(`${pkg_name}/src/index`) ??
+            file_exports.get(`${pkg_name}/index`) ??
+            file_exports.get(pkg_name) ??
+            unknown_module_proxy()
           );
         }
       }
 
-      return unknownModuleProxy();
+      return unknown_module_proxy();
     };
 
     // Evaluate each file in topo order, each in its own scope
-    const sorted = topoSort(files.filter(isSourceFile));
+    const sorted = topo_sort(files.filter(is_source_file));
 
     for (const file of sorted) {
       _currentFile = file.path;
       const js = transpile(file.content);
       const key = strip(file.path);
       const fileExp: Record<string, any> = {};
-      fileExports.set(key, fileExp);
+      file_exports.set(key, fileExp);
 
       // Pre-scan: capture slice variable names before eval
-      const sliceNamesInAct: string[] = [];
-      const wsRe = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
+      const slice_names_in_act: string[] = [];
+      const ws_re = /\.withSlice\(\s*(?:\w+\.)*(\w+)\s*\)/g;
       let wsm: RegExpExecArray | null;
-      const codeOnly = stripNonCode(js);
-      while ((wsm = wsRe.exec(codeOnly)) !== null) {
-        if (!sliceNamesInAct.includes(wsm[1])) sliceNamesInAct.push(wsm[1]);
+      const code_only = strip_non_code(js);
+      while ((wsm = ws_re.exec(code_only)) !== null) {
+        if (!slice_names_in_act.includes(wsm[1]))
+          slice_names_in_act.push(wsm[1]);
       }
 
       // Inventory: detect slice declarations in executable code
       // sucrase may emit slice() or slice.call(void 0, )
-      for (const m of codeOnly.matchAll(
+      for (const m of code_only.matchAll(
         /(?:exports\.)?(\w+)\s*=\s*(?:\w+\.)?slice(?:\s*\(\s*\)|\.call\(void 0,\s*\))/g
       )) {
-        result.expectedSlices.set(m[1], file.path);
+        result.expected_slices.set(m[1], file.path);
       }
 
-      const fileRequire = Object.assign(
-        (mod: string) => resolveModule(mod, key),
+      const file_require = Object.assign(
+        (mod: string) => resolve_module(mod, key),
         { resolve: (mod: string) => mod, cache: {}, main: undefined }
       );
 
       try {
         // Strip __dirname/__filename declarations that would conflict with our injected vars
-        const cleanJs = js
+        const clean_js = js
           .replace(/\bconst\s+__dirname\b/g, "var __dirname")
           .replace(/\bconst\s+__filename\b/g, "var __filename");
         // Security: new Function() is intentional — this executes the user's own
@@ -204,29 +205,29 @@ function execute(
           var process = { env: {}, cwd: function() { return "/"; }, exit: function() {}, on: function() {}, off: function() {} };
           var Buffer = { from: function() { return ""; } };
           var console = { log: function() {}, error: function() {}, warn: function() {}, info: function() {}, debug: function() {} };
-          ${cleanJs}
+          ${clean_js}
         `
         );
-        fn(fileRequire, fileExp, { exports: fileExp });
+        fn(file_require, fileExp, { exports: fileExp });
       } catch (evalErr: unknown) {
         // Just record the error — Step 3 creates placeholders for missing slices
         const errMsg =
           evalErr instanceof Error ? evalErr.message : String(evalErr);
-        result.fileErrors.set(file.path, errMsg);
+        result.file_errors.set(file.path, errMsg);
       }
 
       // Tag slices with names from .withSlice(VAR) — only for acts built in THIS file
-      if (sliceNamesInAct.length > 0) {
-        for (const actObj of __built__.acts) {
-          if ((actObj._sourceFile as string) !== file.path) continue;
-          const actSlices = actObj.slices as any[];
+      if (slice_names_in_act.length > 0) {
+        for (const act_obj of __built__.acts) {
+          if ((act_obj._sourceFile as string) !== file.path) continue;
+          const act_slices = act_obj.slices as any[];
           for (
             let ai = 0;
-            ai < Math.min(sliceNamesInAct.length, actSlices.length);
+            ai < Math.min(slice_names_in_act.length, act_slices.length);
             ai++
           ) {
-            if (actSlices[ai]) {
-              actSlices[ai]._varName = sliceNamesInAct[ai];
+            if (act_slices[ai]) {
+              act_slices[ai]._varName = slice_names_in_act[ai];
             }
           }
         }
@@ -246,10 +247,10 @@ function execute(
 
 // ─── Model extraction ───────────────────────────────────────────────
 
-export function extractModel(files: FileTab[]): {
+export function extract_model(files: FileTab[]): {
   model: DomainModel;
   error?: string;
 } {
   const result = execute(files);
-  return buildModel(result, files, result.expectedSlices);
+  return build_model(result, files, result.expected_slices);
 }

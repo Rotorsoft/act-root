@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { extractModel } from "../src/client/lib/evaluate.js";
+import { extract_model } from "../src/client/lib/evaluate.js";
 
 describe("wolfdesk broken import", () => {
   const wolfdesk = join(__dirname, "../../../packages/wolfdesk/src");
@@ -40,7 +40,7 @@ describe("wolfdesk broken import", () => {
       { path: "src/ticket-operations.ts", content: broken },
     ];
 
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
 
     const ops = model.slices.find((s) => s.name === "TicketOpsSlice");
     const creation = model.slices.find((s) => s.name === "TicketCreationSlice");
@@ -74,7 +74,7 @@ describe("wolfdesk broken import", () => {
       { path: "src/ticket-operations.ts", content: broken },
     ];
 
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
 
     const ops = model.slices.find((s) => s.name === "TicketOpsSlice");
     const creation = model.slices.find((s) => s.name === "TicketCreationSlice");

@@ -1,7 +1,7 @@
 /**
  * Filesystem walker for the act-contracts CLI.
  * Recursively reads TypeScript source files from a project root and
- * returns a FileTab[] in the same shape `extractModel` already consumes.
+ * returns a FileTab[] in the same shape `extract_model` already consumes.
  */
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -36,7 +36,7 @@ const SKIP_FILE_RE = /\.(?:d\.ts|tsx|test\.ts|spec\.ts|bench\.ts|perf\.ts)$/;
 
 export type LoadOptions = {
   /** Maximum number of files to read. Default 5000 — protects against runaway scans. */
-  maxFiles?: number;
+  max_files?: number;
 };
 
 export type LoadResult = {
@@ -45,21 +45,21 @@ export type LoadResult = {
 };
 
 /**
- * Walk `rootDir` and return every `.ts` file that survives the skip rules.
+ * Walk `root_dir` and return every `.ts` file that survives the skip rules.
  * Returned `FileTab.path` values are project-relative (POSIX separators).
  */
-export async function loadProject(
-  rootDir: string,
+export async function load_project(
+  root_dir: string,
   opts: LoadOptions = {}
 ): Promise<LoadResult> {
-  const max = opts.maxFiles ?? 5000;
+  const max = opts.max_files ?? 5000;
   const files: FileTab[] = [];
   let truncated = false;
 
-  const visit = async (absDir: string, relDir: string): Promise<void> => {
+  const visit = async (abs_dir: string, rel_dir: string): Promise<void> => {
     let entries: Dirent[];
     try {
-      entries = (await readdir(absDir, { withFileTypes: true })) as Dirent[];
+      entries = (await readdir(abs_dir, { withFileTypes: true })) as Dirent[];
       /* c8 ignore start — defensive against perms/removed-dir races. */
     } catch {
       return;
@@ -72,11 +72,11 @@ export async function loadProject(
       }
       const name = entry.name;
       if (name.startsWith(".") && name !== ".") continue;
-      const absPath = posix.join(absDir.replace(/\\/g, "/"), name);
-      const relPath = relDir ? posix.join(relDir, name) : name;
+      const abs_path = posix.join(abs_dir.replace(/\\/g, "/"), name);
+      const rel_path = rel_dir ? posix.join(rel_dir, name) : name;
       if (entry.isDirectory()) {
         if (SKIP_DIRS.has(name)) continue;
-        await visit(absPath, relPath);
+        await visit(abs_path, rel_path);
         continue;
       }
       // Defensive against symlinks / FIFOs / devices.
@@ -86,18 +86,18 @@ export async function loadProject(
       if (!name.endsWith(".ts")) continue;
       if (SKIP_FILE_RE.test(name)) continue;
       try {
-        const content = await readFile(absPath, "utf8");
-        files.push({ path: relPath, content });
+        const content = await readFile(abs_path, "utf8");
+        files.push({ path: rel_path, content });
       } catch {
         // unreadable file — skip
       }
     }
   };
 
-  const rootStat = await stat(rootDir).catch(() => null);
-  if (!rootStat || !rootStat.isDirectory()) {
+  const root_stat = await stat(root_dir).catch(() => null);
+  if (!root_stat || !root_stat.isDirectory()) {
     return { files, truncated };
   }
-  await visit(rootDir.replace(/\\/g, "/"), "");
+  await visit(root_dir.replace(/\\/g, "/"), "");
   return { files, truncated };
 }

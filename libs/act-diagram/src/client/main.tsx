@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { ActDiagram } from "./components/ActDiagram.js";
 import type { AiOptions } from "./components/AiBar.js";
 import { CodePreview } from "./components/CodePreview.js";
-import { parseMultiFileResponse } from "./lib/strip-fences.js";
+import { parse_multi_file_response } from "./lib/strip-fences.js";
 import "./styles.css";
 import type { FileTab } from "./types/file-tab.js";
 
@@ -173,7 +173,7 @@ function DevApp() {
           }
         }
 
-        const newFiles = parseMultiFileResponse(fullText);
+        const newFiles = parse_multi_file_response(fullText);
         if (newFiles.length > 0) {
           setFiles(newFiles);
           setPreview(null);
@@ -324,7 +324,7 @@ function DevApp() {
             return (
               <div className="h-full w-[40%] max-w-[600px] min-w-[280px]">
                 <CodePreview
-                  filePath={preview.file}
+                  file_path={preview.file}
                   content={fileContent}
                   targetLine={preview.line}
                   elementType={preview.type}

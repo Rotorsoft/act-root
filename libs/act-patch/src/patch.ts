@@ -28,24 +28,24 @@ export const patch = <S extends Schema>(
 ): Readonly<S> => {
   if (!patches) return original;
 
-  const patchKeys = Object.keys(patches);
-  if (patchKeys.length === 0) return original;
+  const patch_keys = Object.keys(patches);
+  if (patch_keys.length === 0) return original;
 
   // Spread is faster for small objects; two-pass avoids spread overhead on large ones
-  const origKeys = Object.keys(original);
+  const orig_keys = Object.keys(original);
   const copy: Record<string, any> =
-    origKeys.length <= 16 ? { ...original } : Object.create(null);
+    orig_keys.length <= 16 ? { ...original } : Object.create(null);
 
-  if (origKeys.length > 16) {
-    for (let i = 0; i < origKeys.length; i++) {
-      const key = origKeys[i];
+  if (orig_keys.length > 16) {
+    for (let i = 0; i < orig_keys.length; i++) {
+      const key = orig_keys[i];
       if (key in patches) continue;
       copy[key] = original[key as keyof S];
     }
   }
 
-  for (let i = 0; i < patchKeys.length; i++) {
-    const key = patchKeys[i];
+  for (let i = 0; i < patch_keys.length; i++) {
+    const key = patch_keys[i];
     const patched_value = patches[key as keyof typeof patches];
     if (patched_value === undefined || patched_value === null) {
       delete copy[key];

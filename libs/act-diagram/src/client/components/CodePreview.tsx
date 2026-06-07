@@ -11,7 +11,7 @@ const HIGHLIGHT_COLORS: Record<string, { border: string; bg: string }> = {
 const DEFAULT_HIGHLIGHT = { border: "#fbbf24", bg: "rgba(245,158,11,0.15)" };
 
 type Props = {
-  filePath: string;
+  file_path: string;
   content: string;
   targetLine: number; // 1-based
   elementType?: string;
@@ -19,7 +19,7 @@ type Props = {
 };
 
 export function CodePreview({
-  filePath,
+  file_path,
   content,
   targetLine,
   elementType,
@@ -37,7 +37,7 @@ export function CodePreview({
         el.scrollIntoView({ block: "center", behavior: "smooth" })
       );
     }
-  }, [targetLine, filePath]);
+  }, [targetLine, file_path]);
 
   // Escape to close
   useEffect(() => {
@@ -60,7 +60,7 @@ export function CodePreview({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 bg-zinc-900 px-3 py-1">
         <span className="truncate font-mono text-[10px] text-zinc-400">
-          {filePath}
+          {file_path}
           <span className="ml-2 text-zinc-600">:{targetLine}</span>
         </span>
         <button

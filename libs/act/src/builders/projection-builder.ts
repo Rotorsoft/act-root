@@ -162,7 +162,7 @@ function _projection<
   TTarget extends string | undefined,
 >(target: TTarget): ProjectionBuilder<TEvents, TTarget> {
   const events = {} as EventRegister<TEvents>;
-  const defaultResolver: { target: string } | undefined =
+  const default_resolver: { target: string } | undefined =
     typeof target === "string" ? { target } : undefined;
 
   // Mutable runtime bag — typed loosely; the public projection() return
@@ -193,8 +193,8 @@ function _projection<
           ) => Promise<void>
         ) => {
           const reaction: Reaction<TEvents & { [P in TKey]: TData }, TKey> = {
-            handler: handler,
-            resolver: defaultResolver ?? _this_,
+            handler,
+            resolver: default_resolver ?? _this_,
             options: {
               blockOnError: true,
               maxRetries: 3,

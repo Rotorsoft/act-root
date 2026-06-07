@@ -64,7 +64,7 @@ export class PinoLogger implements Logger {
             target: "pino-pretty",
             options: {
               ignore: "pid,hostname",
-              singleLine: cfg.logSingleLine,
+              single_line: cfg.logSingleLine,
               colorize: true,
             },
           }

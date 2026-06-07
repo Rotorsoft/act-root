@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildModel } from "../src/client/lib/build-model.js";
+import { build_model } from "../src/client/lib/build-model.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
-describe("buildModel direct tests", () => {
-  it("fixupReactions joins all files when no sourceFile provided (line 66)", () => {
+describe("build_model direct tests", () => {
+  it("fixup_reactions joins all files when no source_file provided (line 66)", () => {
     const files: FileTab[] = [
       {
         path: "src/slices.ts",
@@ -30,16 +30,16 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, files, new Map());
+    const { model } = build_model(result, files, new Map());
     const sl = model.slices.find((s) => s.name === "MySlice");
     expect(sl).toBeDefined();
     // The "on Created" handler name should be fixed up to "onCreated"
     expect(sl!.reactions[0].handlerName).toBe("onCreated");
   });
 
-  it("act builder states not already in stateByRef (lines 134-136)", () => {
+  it("act builder states not already in state_by_ref (lines 134-136)", () => {
     const actOnlyState = {
       _tag: "State",
       name: "ActOnlyState",
@@ -49,7 +49,7 @@ describe("buildModel direct tests", () => {
       patches: new Map(),
     };
     const result = {
-      states: [], // state NOT in rawStates
+      states: [], // state NOT in raw_states
       slices: [],
       projections: [],
       acts: [
@@ -62,9 +62,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const st = model.states.find((s) => s.name === "ActOnlyState");
     expect(st).toBeDefined();
     expect(st!.events).toHaveLength(1);
@@ -86,15 +86,15 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "BrokenSlice");
     expect(sl).toBeDefined();
     expect(sl!.error).toContain("broken import");
   });
 
-  it("slice state not in stateByRef, tries addState in-place success (lines 173-180)", () => {
+  it("slice state not in state_by_ref, tries addState in-place success (lines 173-180)", () => {
     const inlineState = {
       _tag: "State",
       name: "InlineSliceState",
@@ -117,9 +117,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "TestSlice");
     expect(sl).toBeDefined();
     expect(sl!.states.length).toBe(1);
@@ -128,7 +128,7 @@ describe("buildModel direct tests", () => {
     expect(st).toBeDefined();
   });
 
-  it("slice state not in stateByRef, addState fails (lines 181-182)", () => {
+  it("slice state not in state_by_ref, addState fails (lines 181-182)", () => {
     const corruptState = {
       name: "CorruptState",
       get events(): any {
@@ -150,9 +150,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "SliceWithCorrupt");
     expect(sl).toBeDefined();
     expect(sl!.error).toContain("corrupt");
@@ -175,9 +175,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "ThrowSlice");
     expect(sl).toBeDefined();
     expect(sl!.error).toContain("boom in states getter");
@@ -191,15 +191,15 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: "Global extraction failed",
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model, error } = buildModel(result, [], new Map());
+    const { model, error } = build_model(result, [], new Map());
     expect(error).toBe("Global extraction failed");
     expect(model.states).toHaveLength(0);
     expect(model.slices).toHaveLength(0);
   });
 
-  it("buildState returns error when event has undefined schema (line 31)", () => {
+  it("build_state returns error when event has undefined schema (line 31)", () => {
     const stateWithUndefinedEvent = {
       _tag: "State",
       name: "BadState",
@@ -214,14 +214,14 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     // State with undefined event schema should not appear in model.states
     expect(model.states.find((s) => s.name === "BadState")).toBeUndefined();
   });
 
-  it("buildState returns error when action has undefined schema (line 37)", () => {
+  it("build_state returns error when action has undefined schema (line 37)", () => {
     const stateWithUndefinedAction = {
       _tag: "State",
       name: "BadActionState",
@@ -236,9 +236,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(
       model.states.find((s) => s.name === "BadActionState")
     ).toBeUndefined();
@@ -259,9 +259,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     // Should not crash -- corrupt state is skipped
     expect(model).toBeDefined();
   });
@@ -289,9 +289,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model).toBeDefined();
   });
 
@@ -299,18 +299,18 @@ describe("buildModel direct tests", () => {
     const badState = {
       _tag: "State",
       name: "BadState",
-      events: { Evt1: undefined }, // undefined schema -> buildState returns error
+      events: { Evt1: undefined }, // undefined schema -> build_state returns error
       actions: {},
       given: {},
       patches: new Map(),
     };
     const result = {
-      states: [badState], // step 1 builds this and stores {error} in stateByRef
+      states: [badState], // step 1 builds this and stores {error} in state_by_ref
       slices: [
         {
           _tag: "Slice",
           _varName: "SliceRefBadState",
-          states: [badState], // same object reference -- found in stateByRef with error
+          states: [badState], // same object reference -- found in state_by_ref with error
           projections: [],
           reactions: [],
         },
@@ -318,16 +318,16 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "SliceRefBadState");
     expect(sl).toBeDefined();
     expect(sl!.error).toContain("undefined schema");
     expect(sl!.states).toHaveLength(0);
   });
 
-  it("slice state buildState returns error (line 190)", () => {
+  it("slice state build_state returns error (line 190)", () => {
     const stateWithBadEvent = {
       _tag: "State",
       name: "SliceBadEvtState",
@@ -350,15 +350,15 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "SliceWithBadState");
     expect(sl).toBeDefined();
     expect(sl!.error).toContain("undefined schema");
   });
 
-  it("duplicate state in rawStates triggers stateByRef.has continue (line 140)", () => {
+  it("duplicate state in raw_states triggers state_by_ref.has continue (line 140)", () => {
     const stateObj = {
       _tag: "State",
       name: "DupState",
@@ -373,14 +373,14 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     // Should only produce one state
     expect(model.states.filter((s) => s.name === "DupState")).toHaveLength(1);
   });
 
-  it("fixupReactions returns early when sourceFile not in files (line 84)", () => {
+  it("fixup_reactions returns early when source_file not in files (line 84)", () => {
     const result = {
       states: [],
       slices: [],
@@ -402,15 +402,15 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    // Pass no matching files -- fixupReactions should return early
-    const { model } = buildModel(result, [], new Map());
+    // Pass no matching files -- fixup_reactions should return early
+    const { model } = build_model(result, [], new Map());
     // Handler name stays unfixed since source file wasn't found
     expect(model.reactions[0].handlerName).toBe("on Created");
   });
 
-  it("act builder skips duplicate state via stateByRef.has (step 1 + act states)", () => {
+  it("act builder skips duplicate state via state_by_ref.has (step 1 + act states)", () => {
     const stateObj = {
       _tag: "State",
       name: "SharedState",
@@ -426,22 +426,22 @@ describe("buildModel direct tests", () => {
       acts: [
         {
           _tag: "Act",
-          states: [stateObj], // same reference -- already in stateByRef
+          states: [stateObj], // same reference -- already in state_by_ref
           slices: [],
           projections: [],
           reactions: [],
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model.states.filter((s) => s.name === "SharedState")).toHaveLength(
       1
     );
   });
 
-  it("buildState with null events and actions (lines 28, 33 ?? fallback)", () => {
+  it("build_state with null events and actions (lines 28, 33 ?? fallback)", () => {
     const stateObj = {
       _tag: "State",
       name: "NullState",
@@ -456,16 +456,16 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const st = model.states.find((s) => s.name === "NullState");
     expect(st).toBeDefined();
     expect(st!.events).toHaveLength(0);
     expect(st!.actions).toHaveLength(0);
   });
 
-  it("buildState with events but null patches (line 47 ?? false fallback)", () => {
+  it("build_state with events but null patches (line 47 ?? false fallback)", () => {
     const stateObj = {
       _tag: "State",
       name: "NoPatchState",
@@ -480,15 +480,15 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const st = model.states.find((s) => s.name === "NoPatchState");
     expect(st).toBeDefined();
     expect(st!.events[0].hasCustomPatch).toBe(false);
   });
 
-  it("fixupReactions: handler name in source but no matching fallback (line 95 false)", () => {
+  it("fixup_reactions: handler name in source but no matching fallback (line 95 false)", () => {
     const result = {
       states: [],
       slices: [
@@ -509,7 +509,7 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
     const files: FileTab[] = [
       {
@@ -518,7 +518,7 @@ describe("buildModel direct tests", () => {
         content: `.on("Created").do(onCreated).to("items")`,
       },
     ];
-    const { model } = buildModel(result, files, new Map());
+    const { model } = build_model(result, files, new Map());
     // Handler name stays as "on SomeOtherEvent" since no match for "Created"
     expect(model.slices[0].reactions[0].handlerName).toBe("on SomeOtherEvent");
   });
@@ -539,9 +539,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model).toBeDefined();
   });
 
@@ -560,9 +560,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model).toBeDefined();
   });
 
@@ -590,9 +590,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model).toBeDefined();
   });
 
@@ -611,9 +611,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model.slices[0].name).toBe("slice");
   });
 
@@ -632,19 +632,19 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map([["src/broken.ts", "Import failed"]]),
+      file_errors: new Map([["src/broken.ts", "Import failed"]]),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "BrokenSlice");
     expect(sl!.error).toContain("Import failed");
   });
 
-  it("slice state buildState throws non-Error (line 205 false branch)", () => {
+  it("slice state build_state throws non-Error (line 205 false branch)", () => {
     const corruptState = {
       _tag: "State", // must have _tag so it passes typeof check
       get name(): string {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw { toString: () => "string thrown in buildState" };
+        throw { toString: () => "string thrown in build_state" };
       },
       events: {},
       actions: {},
@@ -663,11 +663,11 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "SliceWithCorruptState");
-    expect(sl!.error).toContain("string thrown in buildState");
+    expect(sl!.error).toContain("string thrown in build_state");
   });
 
   it("slice with undefined states array (line 180 ?? fallback)", () => {
@@ -685,9 +685,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "NullStatesSlice");
     expect(sl).toBeDefined();
     expect(sl!.states).toHaveLength(0);
@@ -710,9 +710,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "ThrowSlice2");
     expect(sl!.error).toBe("string thrown");
   });
@@ -732,9 +732,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "NoProjSlice");
     expect(sl!.projections).toHaveLength(0);
   });
@@ -754,9 +754,9 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "Sl");
     expect(sl!.projections).toHaveLength(0);
   });
@@ -776,14 +776,14 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const sl = model.slices.find((s) => s.name === "Sl");
     expect(sl!.reactions).toEqual([]);
   });
 
-  it("slice catch with non-Error from fixupReactions (line 227)", () => {
+  it("slice catch with non-Error from fixup_reactions (line 227)", () => {
     const result = {
       states: [],
       slices: [
@@ -799,26 +799,26 @@ describe("buildModel direct tests", () => {
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model.slices[0].file).toBeUndefined();
   });
 
-  it("expectedSlices produces error from result.error or fallback (lines 250-252)", () => {
+  it("expected_slices produces error from result.error or fallback (lines 250-252)", () => {
     const result = {
       states: [],
       slices: [],
       projections: [],
       acts: [],
       error: "Global error",
-      fileErrors: new Map([["src/sl.ts", "file-specific error"]]),
+      file_errors: new Map([["src/sl.ts", "file-specific error"]]),
     };
-    const expectedSlices = new Map([
+    const expected_slices = new Map([
       ["MissingSlice", "src/sl.ts"],
       ["AnotherMissing", "src/other.ts"],
     ]);
-    const { model } = buildModel(result, [], expectedSlices);
+    const { model } = build_model(result, [], expected_slices);
     const sl1 = model.slices.find((s) => s.name === "MissingSlice");
     expect(sl1!.error).toBe("file-specific error");
     const sl2 = model.slices.find((s) => s.name === "AnotherMissing");
@@ -826,17 +826,17 @@ describe("buildModel direct tests", () => {
     expect(sl2!.error).toBe("Global error");
   });
 
-  it("expectedSlices fallback to 'Failed to build slice' (line 252)", () => {
+  it("expected_slices fallback to 'Failed to build slice' (line 252)", () => {
     const result = {
       states: [],
       slices: [],
       projections: [],
       acts: [],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const expectedSlices = new Map([["Missing", "src/m.ts"]]);
-    const { model } = buildModel(result, [], expectedSlices);
+    const expected_slices = new Map([["Missing", "src/m.ts"]]);
+    const { model } = build_model(result, [], expected_slices);
     const sl = model.slices.find((s) => s.name === "Missing");
     expect(sl!.error).toBe("Failed to build slice");
   });
@@ -857,9 +857,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model.reactions).toHaveLength(0);
   });
 
@@ -878,9 +878,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model.entries).toHaveLength(1);
     expect(model.entries[0].reactions).toEqual([]);
   });
@@ -909,10 +909,10 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
     const files = [{ path: "src/app.ts", content: "withSlice(BrokenSlice)" }];
-    const { model } = buildModel(result, files, new Map());
+    const { model } = build_model(result, files, new Map());
     const entry = model.entries[0];
     expect(entry.slices).toHaveLength(1);
     expect(entry.slices[0].name).toBe("BrokenSlice");
@@ -945,9 +945,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const entry = model.entries[0];
     expect(entry.states).toHaveLength(1);
     expect(entry.projections).toHaveLength(1);
@@ -978,11 +978,11 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
     // Source does NOT reference UnrelatedSlice
     const files = [{ path: "src/app.ts", content: "act().build()" }];
-    const { model } = buildModel(result, files, new Map());
+    const { model } = build_model(result, files, new Map());
     const entry = model.entries[0];
     expect(entry.slices).toHaveLength(0);
   });
@@ -1011,11 +1011,11 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
     // No file matches src/missing.ts — triggers ?? "" fallback
     const files = [{ path: "src/other.ts", content: "something" }];
-    const { model } = buildModel(result, files, new Map());
+    const { model } = build_model(result, files, new Map());
     const entry = model.entries[0];
     expect(entry.slices).toHaveLength(0);
   });
@@ -1045,9 +1045,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const entry = model.entries[0];
     // Only "Real" state passes the _tag === "State" check
     expect(entry.states).toHaveLength(1);
@@ -1070,9 +1070,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const entry = model.entries[0];
     expect(entry.slices).toHaveLength(0);
   });
@@ -1093,9 +1093,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     const entry = model.entries[0];
     expect(entry.projections).toHaveLength(0);
   });
@@ -1116,9 +1116,9 @@ describe("buildModel direct tests", () => {
         },
       ],
       error: undefined,
-      fileErrors: new Map<string, string>(),
+      file_errors: new Map<string, string>(),
     };
-    const { model } = buildModel(result, [], new Map());
+    const { model } = build_model(result, [], new Map());
     expect(model).toBeDefined();
   });
 });

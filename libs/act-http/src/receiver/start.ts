@@ -28,7 +28,7 @@ import { webhookMiddleware } from "./hono/index.js";
  *   }), async (event, ctx) => {
  *     // event.orderId and event.total are typed
  *     // ctx.key is the deduplicated Idempotency-Key
- *     await processOrder(event.orderId, event.total);
+ *     await process_order(event.orderId, event.total);
  *   })
  *   .build();
  *

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   type Layout,
   type N,
   W,
@@ -38,7 +38,7 @@ describe("state with no actions (edge case)", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const state = find(layout, "state", "Empty");
     expect(state).toBeDefined();
   });
@@ -63,7 +63,7 @@ describe("standalone reaction edges", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const reaction = find(layout, "reaction", "onEvt");
     expect(reaction).toBeDefined();
     const dashedEdges = layout.es.filter((e) => e.dash);
@@ -100,7 +100,7 @@ describe("standalone reactions", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(find(layout, "reaction", "reactionA")).toBeDefined();
     expect(find(layout, "reaction", "reactionB")).toBeDefined();
   });
@@ -117,20 +117,20 @@ describe("standalone action->event edge when ey not found", () => {
           actions: [
             {
               name: "a",
-              emits: ["Known", "Unknown"], // Unknown not in events -> not in eventYMap
+              emits: ["Known", "Unknown"], // Unknown not in events -> not in event_y_map
               invariants: [],
             },
           ],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const action = find(layout, "action", "a");
     expect(action).toBeDefined();
   });
 });
 
-describe("standalone reaction without trigNode", () => {
+describe("standalone reaction without trig_node", () => {
   it("places standalone reaction when trigger event not found", () => {
     const model = emptyModel({
       states: [
@@ -149,7 +149,7 @@ describe("standalone reaction without trigNode", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const reaction = find(layout, "reaction", "orphanReaction");
     expect(reaction).toBeDefined();
   });
@@ -179,7 +179,7 @@ describe("standalone reactions with multiple events stacking", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const r1 = find(layout, "reaction", "r1")!;
     const r2 = find(layout, "reaction", "r2")!;
     expect(r1).toBeDefined();
@@ -206,7 +206,7 @@ describe("guarded standalone action", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const action = find(layout, "action", "guardedAction");
     expect(action).toBeDefined();
     expect(action!.sub).toBe("guarded");
@@ -229,7 +229,7 @@ describe("orphan events in standalone states", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const actionEvt = find(layout, "event", "ActionEvt");
     const orphanEvt = find(layout, "event", "OrphanEvt");
     expect(actionEvt).toBeDefined();

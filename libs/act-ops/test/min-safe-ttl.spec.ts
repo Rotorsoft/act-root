@@ -12,8 +12,8 @@ import {
 describe("minSafeTtl", () => {
   describe("worked example from external-integration.md", () => {
     // maxRetries=5, exponential { baseMs: 200, maxMs: 30_000 }, timeoutMs=2_000
-    //   backoffSum  = 200 + 400 + 800 + 1600 + 3200 = 6_200ms
-    //   timeoutSum  = 6 * 2_000                     = 12_000ms
+    //   backoff_sum  = 200 + 400 + 800 + 1600 + 3200 = 6_200ms
+    //   timeout_sum  = 6 * 2_000                     = 12_000ms
     //   ttl(sf=4)   = (6200 + 12000) * 4            = 72_800ms
     it("matches the documented envelope at default safetyFactor", () => {
       const ttl = minSafeTtl({
@@ -38,8 +38,8 @@ describe("minSafeTtl", () => {
   describe("strategy: fixed", () => {
     it("sums baseMs across every retry plus all timeouts", () => {
       // maxRetries=3, fixed baseMs=100, timeoutMs=500
-      //   backoffSum = 3 * 100 = 300
-      //   timeoutSum = 4 * 500 = 2_000
+      //   backoff_sum = 3 * 100 = 300
+      //   timeout_sum = 4 * 500 = 2_000
       //   ttl(sf=4)  = (300 + 2000) * 4 = 9_200
       const ttl = minSafeTtl({
         maxRetries: 3,
@@ -53,8 +53,8 @@ describe("minSafeTtl", () => {
   describe("strategy: linear", () => {
     it("sums baseMs * (retry + 1) across every retry plus all timeouts", () => {
       // maxRetries=4, linear baseMs=100, timeoutMs=500
-      //   backoffSum = 100 + 200 + 300 + 400 = 1_000
-      //   timeoutSum = 5 * 500              = 2_500
+      //   backoff_sum = 100 + 200 + 300 + 400 = 1_000
+      //   timeout_sum = 5 * 500              = 2_500
       //   ttl(sf=4)  = (1000 + 2500) * 4    = 14_000
       const ttl = minSafeTtl({
         maxRetries: 4,
@@ -68,8 +68,8 @@ describe("minSafeTtl", () => {
   describe("strategy: exponential", () => {
     it("doubles baseMs each retry when maxMs is omitted", () => {
       // maxRetries=4, exponential baseMs=100 (no cap), timeoutMs=200
-      //   backoffSum = 100 + 200 + 400 + 800 = 1_500
-      //   timeoutSum = 5 * 200              = 1_000
+      //   backoff_sum = 100 + 200 + 400 + 800 = 1_500
+      //   timeout_sum = 5 * 200              = 1_000
       //   ttl(sf=4)  = (1500 + 1000) * 4    = 10_000
       const ttl = minSafeTtl({
         maxRetries: 4,
@@ -83,8 +83,8 @@ describe("minSafeTtl", () => {
       // maxRetries=6, exponential baseMs=1_000 maxMs=5_000, timeoutMs=0
       //   raw delays: 1000, 2000, 4000, 8000, 16000, 32000
       //   capped:     1000, 2000, 4000, 5000, 5000,  5000
-      //   backoffSum                                = 22_000
-      //   timeoutSum = 7 * 0                        = 0
+      //   backoff_sum                                = 22_000
+      //   timeout_sum = 7 * 0                        = 0
       //   ttl(sf=4)                                 = 88_000
       const ttl = minSafeTtl({
         maxRetries: 6,
@@ -98,8 +98,8 @@ describe("minSafeTtl", () => {
   describe("missing backoff", () => {
     it("treats retries as back-to-back, only timeouts contribute", () => {
       // maxRetries=3, no backoff, timeoutMs=1_000
-      //   backoffSum = 0
-      //   timeoutSum = 4 * 1_000 = 4_000
+      //   backoff_sum = 0
+      //   timeout_sum = 4 * 1_000 = 4_000
       //   ttl(sf=4)  = 4_000 * 4 = 16_000
       const ttl = minSafeTtl({
         maxRetries: 3,
@@ -112,9 +112,9 @@ describe("minSafeTtl", () => {
   describe("jitter", () => {
     it("multiplies the backoff sum by 1.5 (worst-case multiplier)", () => {
       // Same shape as the linear case above; jitter inflates only backoff.
-      //   backoffSum (no jitter) = 1_000
-      //   backoffSum (jitter)    = 1_500
-      //   timeoutSum             = 2_500
+      //   backoff_sum (no jitter) = 1_000
+      //   backoff_sum (jitter)    = 1_500
+      //   timeout_sum             = 2_500
       //   ttl(sf=4)              = (1500 + 2500) * 4 = 16_000
       const profile: RetryProfile = {
         maxRetries: 4,
@@ -165,8 +165,8 @@ describe("minSafeTtl", () => {
 
   describe("edge cases", () => {
     it("maxRetries=0 collapses to a single attempt × safetyFactor", () => {
-      // backoffSum = 0 (no retries to delay before)
-      // timeoutSum = 1 * 500 = 500
+      // backoff_sum = 0 (no retries to delay before)
+      // timeout_sum = 1 * 500 = 500
       // ttl(sf=4)  = 500 * 4 = 2_000
       const ttl = minSafeTtl({
         maxRetries: 0,

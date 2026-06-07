@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { act, projection, slice, state, ZodEmpty } from "../src/index.js";
-import { classifyRegistry } from "../src/internal/build-classify.js";
+import { classify_registry } from "../src/internal/build-classify.js";
 
-describe("classifyRegistry", () => {
+describe("classify_registry", () => {
   const Counter = state({ Counter: z.object({ count: z.number() }) })
     .init(() => ({ count: 0 }))
     .emits({ Incremented: ZodEmpty, Decremented: ZodEmpty })
@@ -24,19 +24,19 @@ describe("classifyRegistry", () => {
 
   it("returns an empty classification when no reactions are registered", () => {
     const app = instance() as unknown as {
-      registry: Parameters<typeof classifyRegistry>[0];
-      _states: Parameters<typeof classifyRegistry>[1];
+      registry: Parameters<typeof classify_registry>[0];
+      _states: Parameters<typeof classify_registry>[1];
     };
-    const c = classifyRegistry(app.registry, app._states);
+    const c = classify_registry(app.registry, app._states);
 
-    expect(c.staticTargets).toEqual([]);
-    expect(c.hasDynamicResolvers).toBe(false);
-    expect(c.reactiveEvents.size).toBe(0);
-    expect(c.eventToState.get("Incremented")?.name).toBe("Counter");
-    expect(c.eventToState.get("Decremented")?.name).toBe("Counter");
+    expect(c.static_targets).toEqual([]);
+    expect(c.has_dynamic_resolvers).toBe(false);
+    expect(c.reactive_events.size).toBe(0);
+    expect(c.event_to_state.get("Incremented")?.name).toBe("Counter");
+    expect(c.event_to_state.get("Decremented")?.name).toBe("Counter");
   });
 
-  it("flags hasDynamicResolvers and skips dynamic targets in staticTargets", () => {
+  it("flags has_dynamic_resolvers and skips dynamic targets in static_targets", () => {
     const app = act()
       .withState(Counter)
       .on("Incremented")
@@ -45,15 +45,15 @@ describe("classifyRegistry", () => {
       })
       .to((event) => ({ target: `dyn-${event.stream}` }))
       .build() as unknown as {
-      registry: Parameters<typeof classifyRegistry>[0];
-      _states: Parameters<typeof classifyRegistry>[1];
+      registry: Parameters<typeof classify_registry>[0];
+      _states: Parameters<typeof classify_registry>[1];
     };
-    const c = classifyRegistry(app.registry, app._states);
+    const c = classify_registry(app.registry, app._states);
 
-    expect(c.hasDynamicResolvers).toBe(true);
-    expect(c.staticTargets).toEqual([]);
-    expect(c.reactiveEvents.has("Incremented")).toBe(true);
-    expect(c.reactiveEvents.has("Decremented")).toBe(false);
+    expect(c.has_dynamic_resolvers).toBe(true);
+    expect(c.static_targets).toEqual([]);
+    expect(c.reactive_events.has("Incremented")).toBe(true);
+    expect(c.reactive_events.has("Decremented")).toBe(false);
   });
 
   it("dedupes static targets by (target, source)", () => {
@@ -71,16 +71,16 @@ describe("classifyRegistry", () => {
       .build();
     const TheSlice = slice().withState(Counter).withProjection(Proj).build();
     const app = act().withSlice(TheSlice).build() as unknown as {
-      registry: Parameters<typeof classifyRegistry>[0];
-      _states: Parameters<typeof classifyRegistry>[1];
+      registry: Parameters<typeof classify_registry>[0];
+      _states: Parameters<typeof classify_registry>[1];
     };
-    const c = classifyRegistry(app.registry, app._states);
+    const c = classify_registry(app.registry, app._states);
 
-    expect(c.staticTargets).toEqual([
+    expect(c.static_targets).toEqual([
       { stream: "dest", source: undefined, priority: 0 },
     ]);
-    expect(c.hasDynamicResolvers).toBe(false);
-    expect(c.reactiveEvents.has("Incremented")).toBe(true);
-    expect(c.reactiveEvents.has("Decremented")).toBe(true);
+    expect(c.has_dynamic_resolvers).toBe(false);
+    expect(c.reactive_events.has("Incremented")).toBe(true);
+    expect(c.reactive_events.has("Decremented")).toBe(true);
   });
 });

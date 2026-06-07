@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   H,
   type Layout,
   type N,
@@ -40,7 +40,7 @@ describe("error slice box", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(layout.boxes).toHaveLength(1);
     expect(layout.boxes[0].label).toBe("BrokenSlice");
     expect(layout.boxes[0].error).toBe(
@@ -79,7 +79,7 @@ describe("error slice box", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(layout.boxes).toHaveLength(2);
     expect(layout.boxes[0].error).toBe("broken");
     expect(layout.boxes[1].y).toBeGreaterThan(layout.boxes[0].y);
@@ -128,14 +128,14 @@ describe("projection nodes below events", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const projNode = layout.ns.find((n) => n.type === "projection");
     expect(projNode).toBeDefined();
     expect(projNode!.label).toBe("tickets");
 
-    const eventNodes = layout.ns.filter((n) => n.type === "event");
-    expect(eventNodes.length).toBeGreaterThan(0);
-    const maxEventBottom = Math.max(...eventNodes.map((n) => n.pos.y + H));
+    const event_nodes = layout.ns.filter((n) => n.type === "event");
+    expect(event_nodes.length).toBeGreaterThan(0);
+    const maxEventBottom = Math.max(...event_nodes.map((n) => n.pos.y + H));
     expect(projNode!.pos.y).toBeGreaterThanOrEqual(maxEventBottom);
   });
 
@@ -169,7 +169,7 @@ describe("projection nodes below events", () => {
         { name: "projB", varName: "projB", handles: ["E2"] },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const projNodes = layout.ns.filter((n) => n.type === "projection");
     expect(projNodes).toHaveLength(2);
     expect(projNodes.map((n) => n.label).sort()).toEqual(["projA", "projB"]);
@@ -189,7 +189,7 @@ describe("projection and reaction metadata on event nodes", () => {
       ],
       projections: [{ name: "myProj", varName: "myProj", handles: ["Evt"] }],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const evt = find(layout, "event", "Evt")!;
     expect(evt.projections).toEqual(["myProj"]);
   });
@@ -212,7 +212,7 @@ describe("projection and reaction metadata on event nodes", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const evt = find(layout, "event", "Evt")!;
     expect(evt.reactions).toEqual(["onEvt"]);
   });

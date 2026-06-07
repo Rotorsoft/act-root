@@ -1,4 +1,4 @@
-import { patch as applyPatch } from "@rotorsoft/act-patch";
+import { patch as apply_patch } from "@rotorsoft/act-patch";
 import { StateCache } from "./state-cache.js";
 import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
 
@@ -27,7 +27,7 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  * });
  *
  * // Initial state for reconnects:
- * const cached = broadcast.getState(streamId);
+ * const cached = broadcast.get_state(streamId);
  * ```
  *
  * ## Version Contract
@@ -38,10 +38,10 @@ import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
  */
 export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   private channels = new Map<string, Set<Subscriber<S>>>();
-  private stateCache: StateCache<S>;
+  private state_cache: StateCache<S>;
 
-  constructor(options?: { cacheSize?: number }) {
-    this.stateCache = new StateCache<S>(options?.cacheSize ?? 50);
+  constructor(options?: { cache_size?: number }) {
+    this.state_cache = new StateCache<S>(options?.cache_size ?? 50);
   }
 
   /**
@@ -57,7 +57,7 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
     state: S,
     patches: Partial<S>[] = []
   ): PatchMessage<S> {
-    this.stateCache.set(streamId, state);
+    this.state_cache.set(streamId, state);
 
     const baseV = state._v - patches.length;
     const msg: PatchMessage<S> = {};
@@ -77,17 +77,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
    * (e.g. presence overlay, computed field refresh).
    * Uses the same version as the cached state, single entry.
    */
-  publishOverlay(
+  publish_overlay(
     streamId: string,
-    overlayPatch: Partial<S>
+    overlay_patch: Partial<S>
   ): PatchMessage<S> | undefined {
-    const prev = this.stateCache.get(streamId);
+    const prev = this.state_cache.get(streamId);
     if (!prev) return undefined;
 
-    const state = applyPatch(prev, overlayPatch) as S;
-    this.stateCache.set(streamId, state);
+    const state = apply_patch(prev, overlay_patch) as S;
+    this.state_cache.set(streamId, state);
 
-    const msg: PatchMessage<S> = { [state._v]: overlayPatch };
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
     const subs = this.channels.get(streamId);
     if (subs?.size) {
       for (const cb of subs) cb(msg);
@@ -111,17 +111,17 @@ export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
   }
 
   /** Get the number of subscribers for a stream. */
-  getSubscriberCount(streamId: string): number {
+  get_subscriber_count(streamId: string): number {
     return this.channels.get(streamId)?.size ?? 0;
   }
 
   /** Get the cached state for a stream (for reconnects / initial SSE yield). */
-  getState(streamId: string): S | undefined {
-    return this.stateCache.get(streamId);
+  get_state(streamId: string): S | undefined {
+    return this.state_cache.get(streamId);
   }
 
   /** Direct access to the state cache (for app-specific reads like presence). */
   get cache(): StateCache<S> {
-    return this.stateCache;
+    return this.state_cache;
   }
 }

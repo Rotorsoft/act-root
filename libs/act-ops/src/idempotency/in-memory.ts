@@ -85,8 +85,8 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
   }
 
   private _gc(now: number): void {
-    for (const [key, expiresAt] of this._seen) {
-      if (expiresAt > now) break;
+    for (const [key, expires_at] of this._seen) {
+      if (expires_at > now) break;
       this._seen.delete(key);
     }
   }

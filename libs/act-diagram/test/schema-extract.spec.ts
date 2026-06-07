@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  extractIdentifierAssignments,
-  extractSchemasFromSource,
+  extract_identifier_assignments,
+  extract_schemas_from_source,
 } from "../src/client/lib/schema-extract.js";
 
-describe("extractSchemasFromSource", () => {
+describe("extract_schemas_from_source", () => {
   it("captures plain identifier and z.object values", () => {
     const src = `
       state({Foo: FooSchema}).init(()=>({})).emits({
         OrderPlaced: z.object({ orderId: z.string(), total: z.number() }),
         OrderShipped: OrderShippedSchema,
       })`;
-    const out = extractSchemasFromSource(
+    const out = extract_schemas_from_source(
       src,
       new Set(["OrderPlaced", "OrderShipped"])
     );
@@ -23,14 +23,17 @@ describe("extractSchemasFromSource", () => {
 
   it("ignores events not requested in the name set", () => {
     const src = `.emits({ A: z.string(), B: z.number() })`;
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.get("A")).toBe("z.string()");
     expect(out.has("B")).toBe(false);
   });
 
   it("handles quoted keys and trailing commas", () => {
     const src = `.emits({ "Some-Event": z.object({}), 'Other': z.never(), })`;
-    const out = extractSchemasFromSource(src, new Set(["Some-Event", "Other"]));
+    const out = extract_schemas_from_source(
+      src,
+      new Set(["Some-Event", "Other"])
+    );
     expect(out.get("Some-Event")).toBe("z.object({})");
     expect(out.get("Other")).toBe("z.never()");
   });
@@ -41,7 +44,7 @@ describe("extractSchemasFromSource", () => {
       '  A: z.string().describe("with, commas, and }}}"),\n' +
       "  B: z.string().describe(`tmpl ${nested.call()} done, fine`),\n" +
       "})";
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.get("A")).toBe('z.string().describe("with, commas, and }}}")');
     expect(out.get("B")).toBe(
       "z.string().describe(`tmpl ${nested.call()} done, fine`)"
@@ -51,7 +54,7 @@ describe("extractSchemasFromSource", () => {
   it("handles escaped chars inside strings and templates", () => {
     const src =
       ".emits({ A: z.string().describe('it\\'s safe, ok'), B: `a\\` ${x.y}`,})";
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.get("A")).toBe("z.string().describe('it\\'s safe, ok')");
     expect(out.get("B")).toBe("`a\\` ${x.y}`");
   });
@@ -63,7 +66,7 @@ describe("extractSchemasFromSource", () => {
       const x = 1;
       .emits({ B: z.number() })
     `;
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.get("A")).toBe("z.string()");
     expect(out.get("B")).toBe("z.number()");
   });
@@ -75,9 +78,9 @@ describe("extractSchemasFromSource", () => {
       B: /* hop */ z.number(),
       C: z./* inline */string(),
     })`;
-    const out = extractSchemasFromSource(src, new Set(["A", "B", "C"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B", "C"]));
     expect(out.get("A")).toBe("z.string()");
-    // Leading comment before the value is consumed by skipTrivia.
+    // Leading comment before the value is consumed by skip_trivia.
     expect(out.get("B")).toBe("z.number()");
     // A comment mid-expression is part of the captured slice.
     expect(out.get("C")?.replace(/\s+/g, " ").trim()).toBe(
@@ -86,44 +89,47 @@ describe("extractSchemasFromSource", () => {
   });
 
   it("returns empty for empty input or empty name set", () => {
-    expect(extractSchemasFromSource("", new Set(["A"])).size).toBe(0);
+    expect(extract_schemas_from_source("", new Set(["A"])).size).toBe(0);
     expect(
-      extractSchemasFromSource(".emits({A:z.string()})", new Set()).size
+      extract_schemas_from_source(".emits({A:z.string()})", new Set()).size
     ).toBe(0);
   });
 
   it("skips when no { follows .emits(", () => {
     const src = ".emits(schema).whatever()";
-    expect(extractSchemasFromSource(src, new Set(["A"])).size).toBe(0);
+    expect(extract_schemas_from_source(src, new Set(["A"])).size).toBe(0);
   });
 
   it("returns nothing for malformed (unclosed) blocks", () => {
     const src = ".emits({ A: z.string(";
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.size).toBe(0);
   });
 
   it("returns nothing for malformed key tokens", () => {
     const src = ".emits({ @@@: z.string() })";
-    expect(extractSchemasFromSource(src, new Set(["A"])).size).toBe(0);
+    expect(extract_schemas_from_source(src, new Set(["A"])).size).toBe(0);
   });
 
   it("captures shorthand keys as references to the matching identifier", () => {
     const src = ".emits({ TicketOpened, B: z.number() })";
-    const out = extractSchemasFromSource(src, new Set(["TicketOpened", "B"]));
+    const out = extract_schemas_from_source(
+      src,
+      new Set(["TicketOpened", "B"])
+    );
     expect(out.get("TicketOpened")).toBe("TicketOpened");
     expect(out.get("B")).toBe("z.number()");
   });
 
   it("does not capture shorthand for quoted keys (no implicit binding)", () => {
     const src = `.emits({ "A" })`;
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.has("A")).toBe(false);
   });
 
   it("ignores empty values (key with nothing after the colon)", () => {
     const src = ".emits({ A:, B: z.number() })";
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.has("A")).toBe(false);
     expect(out.get("B")).toBe("z.number()");
   });
@@ -134,7 +140,7 @@ describe("extractSchemasFromSource", () => {
         nested: z.array(z.union([z.string(), z.number()])),
       }).describe("multi-line"),
     })`;
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.get("A")).toContain("z.array(z.union(");
     expect(out.get("A")).toContain('describe("multi-line")');
   });
@@ -145,7 +151,7 @@ describe("extractSchemasFromSource", () => {
         .optional(),
       B: z.number(),
     })`;
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.get("A")?.replace(/\s+/g, " ")).toBe(
       "z.string() // trailing note .optional()"
     );
@@ -154,21 +160,21 @@ describe("extractSchemasFromSource", () => {
 
   it("handles escaped characters inside quoted keys", () => {
     const src = `.emits({ "Some\\"Event": z.string() })`;
-    const out = extractSchemasFromSource(src, new Set([`Some\\"Event`]));
+    const out = extract_schemas_from_source(src, new Set([`Some\\"Event`]));
     expect(out.get(`Some\\"Event`)).toBe("z.string()");
   });
 
   it("walks nested braces inside template-literal interpolations", () => {
     const src =
       ".emits({ A: z.string().describe(`outer ${ ({ a: 1 }).a } end`), })";
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.get("A")).toContain("describe(");
     expect(out.get("A")).toContain("`outer ${");
   });
 
   it("captures trailing shorthand without comma", () => {
     const src = ".emits({ A })";
-    const out = extractSchemasFromSource(src, new Set(["A"]));
+    const out = extract_schemas_from_source(src, new Set(["A"]));
     expect(out.get("A")).toBe("A");
   });
 
@@ -177,7 +183,7 @@ describe("extractSchemasFromSource", () => {
     // `:`, `,`, or `}`, so the shorthand-recovery while-loop walks past
     // `B` until it finds the closing brace.
     const src = ".emits({ A B, C: z.string() })";
-    const out = extractSchemasFromSource(src, new Set(["A", "B", "C"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B", "C"]));
     // A still captured as shorthand; the stray `B` is consumed.
     expect(out.get("A")).toBe("A");
     expect(out.get("C")).toBe("z.string()");
@@ -185,7 +191,7 @@ describe("extractSchemasFromSource", () => {
 
   it("captures common regex-literal Zod patterns", () => {
     const src = `.emits({ A: z.string().regex(/abc/), B: z.string().regex(/\\w+/g), })`;
-    const out = extractSchemasFromSource(src, new Set(["A", "B"]));
+    const out = extract_schemas_from_source(src, new Set(["A", "B"]));
     expect(out.get("A")).toBe("z.string().regex(/abc/)");
     expect(out.get("B")).toBe("z.string().regex(/\\w+/g)");
   });
@@ -198,20 +204,20 @@ describe("extractSchemasFromSource", () => {
       };
       const state = something().emits(Events).build();
     `;
-    const out = extractSchemasFromSource(src, new Set(["Foo", "Bar"]));
+    const out = extract_schemas_from_source(src, new Set(["Foo", "Bar"]));
     expect(out.get("Foo")).toBe("z.object({ id: z.string() })");
     expect(out.get("Bar")).toBe("z.number()");
   });
 
   it("resolves identifiers declared with let or var", () => {
     expect(
-      extractSchemasFromSource(
+      extract_schemas_from_source(
         `let Events = { A: z.string() };\n.emits(Events)`,
         new Set(["A"])
       ).get("A")
     ).toBe("z.string()");
     expect(
-      extractSchemasFromSource(
+      extract_schemas_from_source(
         `var Events = { B: z.boolean() };\n.emits(Events)`,
         new Set(["B"])
       ).get("B")
@@ -225,7 +231,7 @@ describe("extractSchemasFromSource", () => {
       };
       .emits(Events)
     `;
-    expect(extractSchemasFromSource(src, new Set(["A"])).get("A")).toBe(
+    expect(extract_schemas_from_source(src, new Set(["A"])).get("A")).toBe(
       "z.string()"
     );
   });
@@ -239,7 +245,7 @@ describe("extractSchemasFromSource", () => {
       };
       .emits(Events)
     `;
-    const out = extractSchemasFromSource(src, new Set(["Foo"]));
+    const out = extract_schemas_from_source(src, new Set(["Foo"]));
     expect(out.get("Foo")?.replace(/\s+/g, " ")).toBe(
       'z .object({ id: z.string() }) .describe("with a doc")'
     );
@@ -247,7 +253,7 @@ describe("extractSchemasFromSource", () => {
 
   it("skips `.emits(IDENT)` when the identifier can't be resolved", () => {
     const src = `.emits(MissingIdentifier)`;
-    const out = extractSchemasFromSource(src, new Set(["X"]));
+    const out = extract_schemas_from_source(src, new Set(["X"]));
     expect(out.size).toBe(0);
   });
 
@@ -256,14 +262,16 @@ describe("extractSchemasFromSource", () => {
       const NotAnObject = somethingElse;
       .emits(NotAnObject)
     `;
-    const out = extractSchemasFromSource(src, new Set(["X"]));
+    const out = extract_schemas_from_source(src, new Set(["X"]));
     expect(out.size).toBe(0);
   });
 
   it("skips `.emits()` with no argument or a non-object literal", () => {
-    expect(extractSchemasFromSource(".emits()", new Set(["X"])).size).toBe(0);
+    expect(extract_schemas_from_source(".emits()", new Set(["X"])).size).toBe(
+      0
+    );
     expect(
-      extractSchemasFromSource('.emits("nope")', new Set(["X"])).size
+      extract_schemas_from_source('.emits("nope")', new Set(["X"])).size
     ).toBe(0);
   });
 
@@ -272,7 +280,7 @@ describe("extractSchemasFromSource", () => {
       const TicketOpened = z.object({ id: z.string() }).describe("opened");
       const state = something().emits({ TicketOpened }).build();
     `;
-    const out = extractSchemasFromSource(src, new Set(["TicketOpened"]));
+    const out = extract_schemas_from_source(src, new Set(["TicketOpened"]));
     expect(out.get("TicketOpened")?.replace(/\s+/g, " ")).toBe(
       'z.object({ id: z.string() }).describe("opened")'
     );
@@ -284,7 +292,7 @@ describe("extractSchemasFromSource", () => {
       ["Foo", "z.object({ a: z.string() })"],
       ["Bar", "z.number()"],
     ]);
-    const out = extractSchemasFromSource(
+    const out = extract_schemas_from_source(
       stateSrc,
       new Set(["Foo", "Bar"]),
       external
@@ -299,13 +307,13 @@ describe("extractSchemasFromSource", () => {
       .emits({ Foo })
     `;
     const external = new Map<string, string>([["Foo", "z.never()"]]);
-    const out = extractSchemasFromSource(src, new Set(["Foo"]), external);
+    const out = extract_schemas_from_source(src, new Set(["Foo"]), external);
     expect(out.get("Foo")).toBe("z.string()");
   });
 
   it("keeps the identifier text when no resolution succeeds", () => {
     // Neither same-file nor external knows about `Unknown`.
-    const out = extractSchemasFromSource(
+    const out = extract_schemas_from_source(
       `.emits({ Unknown })`,
       new Set(["Unknown"])
     );
@@ -313,28 +321,28 @@ describe("extractSchemasFromSource", () => {
   });
 });
 
-describe("extractIdentifierAssignments", () => {
+describe("extract_identifier_assignments", () => {
   it("extracts top-level const/let/var assignments", () => {
     const src = `
       const Foo = z.object({ a: z.string() });
       let Bar = "hello";
       var Baz = 42;
     `;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("z.object({ a: z.string() })");
     expect(out.get("Bar")).toBe('"hello"');
     expect(out.get("Baz")).toBe("42");
   });
 
   it("strips TypeScript type annotations", () => {
-    const out = extractIdentifierAssignments(
+    const out = extract_identifier_assignments(
       `const Foo: z.ZodType = z.string();`
     );
     expect(out.get("Foo")).toBe("z.string()");
   });
 
   it("handles `export const IDENT = …`", () => {
-    const out = extractIdentifierAssignments(
+    const out = extract_identifier_assignments(
       `export const Foo = z.object({ id: z.string() });`
     );
     expect(out.get("Foo")).toBe("z.object({ id: z.string() })");
@@ -346,7 +354,7 @@ describe("extractIdentifierAssignments", () => {
         .object({ id: z.string() })
         .describe("test");
     `;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")?.replace(/\s+/g, " ")).toBe(
       'z .object({ id: z.string() }) .describe("test")'
     );
@@ -357,43 +365,43 @@ describe("extractIdentifierAssignments", () => {
       const Foo = z.string();
       const Foo = z.number();
     `;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("z.string()");
   });
 
   it("skips empty assignments", () => {
     const src = `const Foo =;`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.has("Foo")).toBe(false);
   });
 
   it("stops at EOF when no `;` is present", () => {
     const src = `const Foo = z.string()`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("z.string()");
   });
 
   it("walks string literals containing semicolons without stopping", () => {
     const src = `const Foo = "has ; inside" + "more;";`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe('"has ; inside" + "more;"');
   });
 
   it("walks escaped chars inside string literals", () => {
     const src = `const Foo = "with \\" escaped quote";`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe('"with \\" escaped quote"');
   });
 
   it("walks template literals with interpolation and escaped backticks", () => {
     const src = "const Foo = `hello ${name}\\` ${x.y}` ;";
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("`hello ${name}\\` ${x.y}`");
   });
 
   it("walks template interpolation with nested braces", () => {
     const src = "const Foo = `outer ${ ({ a: 1 }).a } end`;";
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("`outer ${ ({ a: 1 }).a } end`");
   });
 
@@ -401,7 +409,7 @@ describe("extractIdentifierAssignments", () => {
     const src = `const Foo = z.string()
         // trailing comment with ;
         .optional() /* and ; here */;`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")?.replace(/\s+/g, " ")).toBe(
       "z.string() // trailing comment with ; .optional() /* and ; here */"
     );
@@ -409,7 +417,7 @@ describe("extractIdentifierAssignments", () => {
 
   it("walks balanced brackets so `;` inside nested calls doesn't terminate", () => {
     const src = `const Foo = fn(a, b, c) + arr[0];`;
-    const out = extractIdentifierAssignments(src);
+    const out = extract_identifier_assignments(src);
     expect(out.get("Foo")).toBe("fn(a, b, c) + arr[0]");
   });
 
@@ -419,7 +427,7 @@ describe("extractIdentifierAssignments", () => {
     // sure the call completes well under the previously-quadratic limit.
     const pathological = `#let $:${" ".repeat(50_000)}`;
     const start = Date.now();
-    const out = extractIdentifierAssignments(pathological);
+    const out = extract_identifier_assignments(pathological);
     const elapsed = Date.now() - start;
     expect(out.size).toBe(0);
     expect(elapsed).toBeLessThan(100);
@@ -433,7 +441,7 @@ describe("extractIdentifierAssignments", () => {
     // constant, so 50K repetitions stay well under 100ms.
     const pathological = "#let $:".repeat(50_000);
     const start = Date.now();
-    const out = extractIdentifierAssignments(pathological);
+    const out = extract_identifier_assignments(pathological);
     const elapsed = Date.now() - start;
     expect(out.size).toBe(0);
     expect(elapsed).toBeLessThan(100);

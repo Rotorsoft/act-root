@@ -51,7 +51,9 @@ export const ERROR_MAP = {
   NonRetryableError: { status: 400, code: "NON_RETRYABLE" },
 } as const satisfies Record<string, ErrorMapEntry>;
 
-const lookupKnown = (err: unknown): { name: keyof typeof ERROR_MAP } | null => {
+const lookup_known = (
+  err: unknown
+): { name: keyof typeof ERROR_MAP } | null => {
   if (err instanceof ValidationError) return { name: "ValidationError" };
   if (err instanceof InvariantError) return { name: "InvariantError" };
   if (err instanceof ConcurrencyError) return { name: "ConcurrencyError" };
@@ -72,7 +74,7 @@ const lookupKnown = (err: unknown): { name: keyof typeof ERROR_MAP } | null => {
  * payload to the client).
  */
 export function toApiError(err: unknown): { status: number; body: ApiError } {
-  const known = lookupKnown(err);
+  const known = lookup_known(err);
   if (known) {
     const entry = ERROR_MAP[known.name];
     return {

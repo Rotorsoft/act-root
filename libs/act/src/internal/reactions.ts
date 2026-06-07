@@ -2,13 +2,13 @@
  * @module reactions
  * @category Internal
  *
- * Reaction dispatch — what runs inside the drain pipeline once `runDrainCycle`
+ * Reaction dispatch — what runs inside the drain pipeline once `run_drain_cycle`
  * has fetched events for a leased stream. Two shapes:
  *
  * - per-event `handle`: walks payloads sequentially, builds a scoped `IAct`
  *   that auto-injects `reactingTo` so handlers don't have to thread it
  *   through manually
- * - bulk `handleBatch`: hands every event for a static-target projection to
+ * - bulk `handle_batch`: hands every event for a static-target projection to
  *   a single batch callback, enabling one-transaction replays
  *
  * Both share `_finalize`, which collapses the retry-vs-block decision and
@@ -30,7 +30,7 @@ import {
   type Schemas,
   type Target,
 } from "../types/index.js";
-import { computeBackoffDelay } from "./backoff.js";
+import { compute_backoff_delay } from "./backoff.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -75,21 +75,22 @@ function finalize(
   // budget — block on first attempt when the operator has opted in via
   // `blockOnError`. When `blockOnError` is false, the operator has
   // explicitly chosen "retry forever," so we don't override that.
-  const nonRetryable = error instanceof NonRetryableError;
+  const non_retryable = error instanceof NonRetryableError;
   const block =
-    options.blockOnError && (nonRetryable || lease.retry >= options.maxRetries);
+    options.blockOnError &&
+    (non_retryable || lease.retry >= options.maxRetries);
   if (block)
     logger.error(
-      nonRetryable
+      non_retryable
         ? `Blocking ${lease.stream} on non-retryable error.`
         : `Blocking ${lease.stream} after ${lease.retry} retries.`
     );
   // Backoff applies only on retry paths — successful handles and terminal
   // blocks never defer. `lease.retry` here is the just-failed attempt's
   // counter, so the delay paces the *next* attempt.
-  const nextAttemptAt =
+  const next_attempt_at =
     !block && options.backoff
-      ? Date.now() + computeBackoffDelay(lease.retry, options.backoff)
+      ? Date.now() + compute_backoff_delay(lease.retry, options.backoff)
       : undefined;
   return {
     lease,
@@ -97,13 +98,13 @@ function finalize(
     acked_at: at,
     error: error.message,
     block,
-    nextAttemptAt,
+    next_attempt_at,
     failed_at,
   };
 }
 
 /**
- * Builds the per-event reaction dispatcher passed to `runDrainCycle`.
+ * Builds the per-event reaction dispatcher passed to `run_drain_cycle`.
  *
  * The scoped `IAct` proxy auto-injects the triggering event as `reactingTo`
  * when handlers call `do()` without it (#587), keeping the correlation
@@ -112,7 +113,7 @@ function finalize(
  *
  * @internal
  */
-export function buildHandle<
+export function build_handle<
   TEvents extends Schemas,
   TActions extends Schemas,
   TActor extends Actor = Actor,
@@ -135,7 +136,7 @@ export function buildHandle<
     if (lease.retry > 0)
       logger.warn(`Retrying ${stream}@${at} (${lease.retry}).`);
 
-    const scopedApp: IAct<TEvents, TActions, TActor> = {
+    const scoped_app: IAct<TEvents, TActions, TActor> = {
       do: bound_do,
       load: bound_load,
       query: bound_query,
@@ -145,22 +146,22 @@ export function buildHandle<
 
     for (const payload of payloads) {
       const { event, handler } = payload;
-      scopedApp.do = <TKey extends keyof TActions & string>(
+      scoped_app.do = <TKey extends keyof TActions & string>(
         action: TKey,
         target: Target<TActor>,
-        actionPayload: Readonly<TActions[TKey]>,
+        action_payload: Readonly<TActions[TKey]>,
         reactingTo?: Committed<Schemas, string>,
         skipValidation?: boolean
       ) =>
         bound_do(
           action,
           target,
-          actionPayload,
+          action_payload,
           (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
           skipValidation
         );
       try {
-        await handler(event, stream, scopedApp);
+        await handler(event, stream, scoped_app);
         at = event.id;
         handled++;
       } catch (error) {
@@ -180,13 +181,13 @@ export function buildHandle<
 }
 
 /**
- * Builds the bulk reaction dispatcher passed to `runDrainCycle`. All events
+ * Builds the bulk reaction dispatcher passed to `run_drain_cycle`. All events
  * for a static-target projection are handed to a single callback so the
  * projection can do one transaction per drain (catch-up replays especially).
  *
  * @internal
  */
-export function buildHandleBatch<TEvents extends Schemas>(
+export function build_handle_batch<TEvents extends Schemas>(
   logger: Logger
 ): HandleBatch<TEvents> {
   return async (

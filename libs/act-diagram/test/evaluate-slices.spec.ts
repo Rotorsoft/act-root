@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { extractModel } from "../src/client/lib/evaluate.js";
+import { extract_model } from "../src/client/lib/evaluate.js";
 import type { FileTab } from "../src/client/types/file-tab.js";
 
-describe("extractModel — slices, reactions, projections", () => {
+describe("extract_model — slices, reactions, projections", () => {
   it("extracts slices with reactions and projections", () => {
     const files: FileTab[] = [
       {
@@ -72,7 +72,7 @@ export const app = act()
       },
     ];
 
-    const { model, error } = extractModel(files);
+    const { model, error } = extract_model(files);
     expect(error).toBeUndefined();
     expect(model.slices).toHaveLength(2);
     const ticketSlice = model.slices.find((s) => s.name === "TicketSlice")!;
@@ -119,7 +119,7 @@ export const app = act().withSlice(MySlice).build();
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.slices).toHaveLength(1);
     expect(model.slices[0].name).toBe("MySlice");
   });
@@ -151,10 +151,10 @@ export const app = act()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model.reactions).toHaveLength(1);
     // handler.name on proxy isn't a string -> falls back to "on Created"
-    // fixupReactions recovers "onCreated" from source
+    // fixup_reactions recovers "onCreated" from source
     expect(model.reactions[0].handlerName).toBe("onCreated");
   });
 
@@ -171,7 +171,7 @@ export const P = projection("items")
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Mock eval captures it, fallback scan should not duplicate
     expect(model.projections).toHaveLength(1);
   });
@@ -214,7 +214,7 @@ export const app = act()
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Broken projection file produces no projections
     expect(model.entries).toHaveLength(1);
     expect(model.entries[0].projections).toHaveLength(0);
@@ -259,7 +259,7 @@ export const app2 = act().withSlice(MySlice).build();
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     // Both acts should have built
     expect(model.entries.length).toBeGreaterThanOrEqual(1);
   });
@@ -293,7 +293,7 @@ export const app = act().withSlice(MySlice).withSlice(MySlice).build();
 `,
       },
     ];
-    const { model } = extractModel(files);
+    const { model } = extract_model(files);
     expect(model).toBeDefined();
   });
 });

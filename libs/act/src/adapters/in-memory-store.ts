@@ -74,7 +74,7 @@ class InMemoryStream {
    * Bump the priority via {@link subscribe}: keeps the maximum across
    * reactions so the highest-priority registrant wins.
    */
-  bumpPriority(priority: number) {
+  bump_priority(priority: number) {
     if (priority > this._priority) this._priority = priority;
   }
 
@@ -82,7 +82,7 @@ class InMemoryStream {
    * Set the priority outright via {@link prioritize}: operator
    * runtime override that ignores the build-time `max()` invariant.
    */
-  setPriority(priority: number) {
+  set_priority(priority: number) {
     this._priority = priority;
   }
 
@@ -290,12 +290,12 @@ export class InMemoryStore implements Store {
   // stored stream positions and other metadata
   private _streams: Map<string, InMemoryStream> = new Map();
   // last committed version per stream — O(1) replacement for filter-on-commit
-  private _streamVersions: Map<string, number> = new Map();
+  private _stream_versions: Map<string, number> = new Map();
   // max non-snapshot event id per stream — drives the source-pattern probe in claim()
   // without scanning the full event log.
-  private _maxEventIdByStream: Map<string, number> = new Map();
+  private _max_event_id_by_stream: Map<string, number> = new Map();
   // global max non-snapshot event id — fast pre-check for source-less streams in claim()
-  private _maxNonSnapEventId = -1;
+  private _max_non_snap_event_id = -1;
   // stream → (event_id → cloned sensitive payload). Two-level so `forget_pii`
   // is O(1) — drop the inner Map for the stream and the wipe is done — mirroring
   // the `DELETE WHERE stream = ?` scope that durable adapters get from their
@@ -303,17 +303,17 @@ export class InMemoryStore implements Store {
   // `pii` field; absence means "no PII" (returned as `null` on load).
   private _pii: Map<string, Map<number, Record<string, unknown>>> = new Map();
 
-  private _resetIndexes() {
+  private _reset_indexes() {
     this._events.length = 0;
-    this._streamVersions.clear();
-    this._maxEventIdByStream.clear();
-    this._maxNonSnapEventId = -1;
+    this._stream_versions.clear();
+    this._max_event_id_by_stream.clear();
+    this._max_non_snap_event_id = -1;
     this._pii.clear();
   }
 
   // Attach the isolated PII payload (or null) to an event before handing it to
   // a caller. Allocation-free for events without PII — by far the common case.
-  private _withPii<E extends Schemas>(
+  private _with_pii<E extends Schemas>(
     e: Committed<E, keyof E>
   ): Committed<E, keyof E> {
     const pii = this._pii.get(e.stream)?.get(e.id);
@@ -326,7 +326,7 @@ export class InMemoryStore implements Store {
    */
   async dispose() {
     await sleep();
-    this._resetIndexes();
+    this._reset_indexes();
   }
 
   /**
@@ -343,7 +343,7 @@ export class InMemoryStore implements Store {
    */
   async drop() {
     await sleep();
-    this._resetIndexes();
+    this._reset_indexes();
     this._streams = new Map();
   }
 
@@ -382,7 +382,7 @@ export class InMemoryStore implements Store {
         if (query.after && e.id <= query.after) break;
         if (query.created_after && e.created <= query.created_after) break;
         await Promise.resolve(
-          callback(this._withPii(e as Committed<E, keyof E>))
+          callback(this._with_pii(e as Committed<E, keyof E>))
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -396,7 +396,7 @@ export class InMemoryStore implements Store {
         if (query?.before && e.id >= query.before) break;
         if (query?.created_before && e.created >= query.created_before) break;
         await Promise.resolve(
-          callback(this._withPii(e as Committed<E, keyof E>))
+          callback(this._with_pii(e as Committed<E, keyof E>))
         );
         count++;
         if (query?.limit && count >= query.limit) break;
@@ -421,21 +421,21 @@ export class InMemoryStore implements Store {
     expectedVersion?: number
   ) {
     await sleep();
-    const currentVersion = this._streamVersions.get(stream) ?? -1;
+    const current_version = this._stream_versions.get(stream) ?? -1;
     if (
       typeof expectedVersion === "number" &&
-      currentVersion !== expectedVersion
+      current_version !== expectedVersion
     ) {
       throw new ConcurrencyError(
         stream,
-        currentVersion,
+        current_version,
         msgs as Message<Schemas, keyof Schemas>[],
         expectedVersion
       );
     }
 
-    let version = currentVersion + 1;
-    let lastNonSnapId = -1;
+    let version = current_version + 1;
+    let last_non_snap_id = -1;
     const committed = msgs.map(({ name, data, pii }) => {
       const c: Committed<E, keyof E> = {
         id: this._events.length,
@@ -451,23 +451,23 @@ export class InMemoryStore implements Store {
       // clone on the pii payload defends against caller-side mutation.
       this._events.push(c as Committed<Schemas, keyof Schemas>);
       if (pii != null) {
-        let perStream = this._pii.get(stream);
-        if (!perStream) {
-          perStream = new Map();
-          this._pii.set(stream, perStream);
+        let per_stream = this._pii.get(stream);
+        if (!per_stream) {
+          per_stream = new Map();
+          this._pii.set(stream, per_stream);
         }
-        perStream.set(c.id, structuredClone(pii) as Record<string, unknown>);
+        per_stream.set(c.id, structuredClone(pii) as Record<string, unknown>);
       }
-      if (name !== SNAP_EVENT) lastNonSnapId = c.id;
+      if (name !== SNAP_EVENT) last_non_snap_id = c.id;
       version++;
-      return this._withPii(c);
+      return this._with_pii(c);
     });
-    this._streamVersions.set(stream, version - 1);
-    if (lastNonSnapId >= 0) {
-      this._maxEventIdByStream.set(stream, lastNonSnapId);
+    this._stream_versions.set(stream, version - 1);
+    if (last_non_snap_id >= 0) {
+      this._max_event_id_by_stream.set(stream, last_non_snap_id);
       // commit always assigns a fresh id from this._events.length, so any
       // non-snap commit strictly raises the global max.
-      this._maxNonSnapEventId = lastNonSnapId;
+      this._max_non_snap_event_id = last_non_snap_id;
     }
     return committed;
   }
@@ -491,27 +491,27 @@ export class InMemoryStore implements Store {
     await sleep();
     // Cache compiled regexes — multiple subscribed streams typically share the
     // same source pattern, and the inner loop can run thousands of times per claim.
-    const sourceRegex = new Map<string, RegExp>();
-    const getRegex = (source: string) => {
-      let re = sourceRegex.get(source);
+    const source_regex = new Map<string, RegExp>();
+    const get_regex = (source: string) => {
+      let re = source_regex.get(source);
       if (!re) {
         re = new RegExp(source);
-        sourceRegex.set(source, re);
+        source_regex.set(source, re);
       }
       return re;
     };
-    const hasWork = (s: InMemoryStream): boolean => {
+    const has_work = (s: InMemoryStream): boolean => {
       if (s.at < 0) return true;
-      if (!s.source) return s.at < this._maxNonSnapEventId;
-      const re = getRegex(s.source);
-      for (const [streamName, maxId] of this._maxEventIdByStream) {
-        if (maxId > s.at && re.test(streamName)) return true;
+      if (!s.source) return s.at < this._max_non_snap_event_id;
+      const re = get_regex(s.source);
+      for (const [stream_name, maxId] of this._max_event_id_by_stream) {
+        if (maxId > s.at && re.test(stream_name)) return true;
       }
       return false;
     };
     const available = [...this._streams.values()].filter(
       (s) =>
-        s.is_available && hasWork(s) && (lane === undefined || s.lane === lane)
+        s.is_available && has_work(s) && (lane === undefined || s.lane === lane)
     );
     // Lagging frontier orders by priority DESC (higher first), then by
     // watermark ASC (most-behind first). Mirrors the PG `claim()` SQL
@@ -577,7 +577,7 @@ export class InMemoryStore implements Store {
     } of streams) {
       const existing = this._streams.get(stream);
       if (existing) {
-        existing.bumpPriority(priority);
+        existing.bump_priority(priority);
         existing.lane = lane;
       } else {
         this._streams.set(
@@ -622,14 +622,14 @@ export class InMemoryStore implements Store {
    * cached in the closure so callers can apply it across the streams
    * map without re-compiling per iteration.
    */
-  private _filterPredicate(
+  private _filter_predicate(
     filter: StreamFilter
   ): (s: InMemoryStream) => boolean {
-    const streamRe =
+    const stream_re =
       filter.stream && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
-    const sourceRe =
+    const source_re =
       filter.source && !filter.source_exact
         ? new RegExp(filter.source)
         : undefined;
@@ -638,7 +638,7 @@ export class InMemoryStore implements Store {
         if (
           filter.stream_exact
             ? s.stream !== filter.stream
-            : !streamRe!.test(s.stream)
+            : !stream_re!.test(s.stream)
         )
           return false;
       }
@@ -647,7 +647,7 @@ export class InMemoryStore implements Store {
         if (
           filter.source_exact
             ? s.source !== filter.source
-            : !sourceRe!.test(s.source)
+            : !source_re!.test(s.source)
         )
           return false;
       }
@@ -678,7 +678,7 @@ export class InMemoryStore implements Store {
         }
       }
     } else {
-      const matches = this._filterPredicate(input);
+      const matches = this._filter_predicate(input);
       for (const s of this._streams.values()) {
         if (matches(s)) {
           s.reset();
@@ -728,7 +728,7 @@ export class InMemoryStore implements Store {
       // Filter form: always restrict to blocked streams. An explicit
       // `blocked: false` in the filter is silently overridden — there
       // is no use case for "unblock unblocked streams."
-      const matches = this._filterPredicate({ ...input, blocked: true });
+      const matches = this._filter_predicate({ ...input, blocked: true });
       for (const s of this._streams.values()) {
         if (matches(s) && s.unblock()) count++;
       }
@@ -747,12 +747,12 @@ export class InMemoryStore implements Store {
    */
   async prioritize(filter: StreamFilter, priority: number) {
     await sleep();
-    const matches = this._filterPredicate(filter);
+    const matches = this._filter_predicate(filter);
     let count = 0;
     for (const s of this._streams.values()) {
       if (!matches(s)) continue;
       if (s.priority !== priority) {
-        s.setPriority(priority);
+        s.set_priority(priority);
         count++;
       }
     }
@@ -772,11 +772,11 @@ export class InMemoryStore implements Store {
     const limit = query?.limit ?? 100;
     const after = query?.after;
     const blocked = query?.blocked;
-    const streamRe =
+    const stream_re =
       query?.stream && !query.stream_exact
         ? new RegExp(query.stream)
         : undefined;
-    const sourceRe =
+    const source_re =
       query?.source && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
@@ -792,7 +792,7 @@ export class InMemoryStore implements Store {
         if (
           query.stream_exact
             ? s.stream !== query.stream
-            : !streamRe!.test(s.stream)
+            : !stream_re!.test(s.stream)
         )
           continue;
       }
@@ -801,7 +801,7 @@ export class InMemoryStore implements Store {
         if (
           query.source_exact
             ? s.source !== query.source
-            : !sourceRe!.test(s.source)
+            : !source_re!.test(s.source)
         )
           continue;
       }
@@ -847,34 +847,34 @@ export class InMemoryStore implements Store {
   ): Promise<Map<string, StreamStats<E>>> {
     await sleep();
     const exclude = new Set<string>(options?.exclude ?? []);
-    const wantTail = options?.tail ?? false;
-    const wantCount = options?.count ?? false;
-    const wantNames = options?.names ?? false;
+    const want_tail = options?.tail ?? false;
+    const want_count = options?.count ?? false;
+    const want_names = options?.names ?? false;
     const before = options?.before;
 
     // Pre-compile per-stream scope predicate, cached as we go so each
     // distinct stream evaluates the regex once.
-    const arrayTargets = Array.isArray(input) ? new Set(input) : null;
+    const array_targets = Array.isArray(input) ? new Set(input) : null;
     const filter = Array.isArray(input) ? null : input;
-    const streamRe =
+    const stream_re =
       filter?.stream && !filter.stream_exact
         ? new RegExp(filter.stream)
         : undefined;
 
-    const scopeCache = new Map<string, boolean>();
-    const inScope = (stream: string): boolean => {
-      const cached = scopeCache.get(stream);
+    const scope_cache = new Map<string, boolean>();
+    const in_scope = (stream: string): boolean => {
+      const cached = scope_cache.get(stream);
       if (cached !== undefined) return cached;
       let ok = true;
-      if (arrayTargets) {
-        ok = arrayTargets.has(stream);
+      if (array_targets) {
+        ok = array_targets.has(stream);
       } else if (filter?.stream !== undefined) {
         ok = filter.stream_exact
           ? stream === filter.stream
-          : // biome-ignore lint/style/noNonNullAssertion: streamRe set when stream is regex
-            streamRe!.test(stream);
+          : // biome-ignore lint/style/noNonNullAssertion: stream_re set when stream is regex
+            stream_re!.test(stream);
       }
-      scopeCache.set(stream, ok);
+      scope_cache.set(stream, ok);
       return ok;
     };
 
@@ -887,20 +887,20 @@ export class InMemoryStore implements Store {
     const acc = new Map<string, Acc>();
     for (const e of this._events) {
       if (before !== undefined && e.id >= before) continue;
-      if (!inScope(e.stream)) continue;
+      if (!in_scope(e.stream)) continue;
       if (exclude.has(e.name as string)) continue;
       let a = acc.get(e.stream);
       if (!a) {
         a = { head: e, count: 0 };
-        if (wantTail) a.tail = e;
-        if (wantNames) a.names = {};
+        if (want_tail) a.tail = e;
+        if (want_names) a.names = {};
         acc.set(e.stream, a);
       }
       a.head = e;
       a.count++;
-      if (wantNames) {
+      if (want_names) {
         const n = String(e.name);
-        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when wantNames
+        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when want_names
         a.names![n] = (a.names![n] ?? 0) + 1;
       }
     }
@@ -913,9 +913,9 @@ export class InMemoryStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = { head: a.head };
-      if (wantTail) stats.tail = a.tail;
-      if (wantCount) stats.count = a.count;
-      if (wantNames) stats.names = a.names;
+      if (want_tail) stats.tail = a.tail;
+      if (want_count) stats.count = a.count;
+      if (want_names) stats.names = a.names;
       out.set(stream, stats as StreamStats<E>);
     }
     return out;
@@ -935,18 +935,18 @@ export class InMemoryStore implements Store {
   ) {
     await sleep();
     // Count per-stream deletions
-    const deletedCounts = new Map<string, number>();
-    const streamSet = new Set(targets.map((t) => t.stream));
+    const deleted_counts = new Map<string, number>();
+    const stream_set = new Set(targets.map((t) => t.stream));
     for (const e of this._events) {
-      if (streamSet.has(e.stream)) {
-        deletedCounts.set(e.stream, (deletedCounts.get(e.stream) ?? 0) + 1);
+      if (stream_set.has(e.stream)) {
+        deleted_counts.set(e.stream, (deleted_counts.get(e.stream) ?? 0) + 1);
       }
     }
-    this._events = this._events.filter((e) => !streamSet.has(e.stream));
-    for (const stream of streamSet) {
+    this._events = this._events.filter((e) => !stream_set.has(e.stream));
+    for (const stream of stream_set) {
       this._streams.delete(stream);
-      this._streamVersions.delete(stream);
-      this._maxEventIdByStream.delete(stream);
+      this._stream_versions.delete(stream);
+      this._max_event_id_by_stream.delete(stream);
     }
     const result = new Map<
       string,
@@ -963,20 +963,21 @@ export class InMemoryStore implements Store {
         meta: meta ?? { correlation: "", causation: {} },
       };
       this._events.push(event);
-      this._streamVersions.set(stream, 0);
+      this._stream_versions.set(stream, 0);
       if (event.name !== SNAP_EVENT) {
-        this._maxEventIdByStream.set(stream, event.id);
+        this._max_event_id_by_stream.set(stream, event.id);
       }
       result.set(stream, {
-        deleted: deletedCounts.get(stream) ?? 0,
+        deleted: deleted_counts.get(stream) ?? 0,
         committed: event,
       });
     }
     // Recompute global max from the per-stream index — deletions may have
     // dropped the previous max, while new tombstones may have raised it.
     let max = -1;
-    for (const id of this._maxEventIdByStream.values()) if (id > max) max = id;
-    this._maxNonSnapEventId = max;
+    for (const id of this._max_event_id_by_stream.values())
+      if (id > max) max = id;
+    this._max_non_snap_event_id = max;
     return result;
   }
 
@@ -999,17 +1000,17 @@ export class InMemoryStore implements Store {
   ): Promise<void> {
     await sleep();
     // Snapshot every index so we can roll back on throw.
-    const prevEvents = this._events;
-    const prevStreams = this._streams;
-    const prevStreamVersions = this._streamVersions;
-    const prevMaxEventIdByStream = this._maxEventIdByStream;
-    const prevMaxNonSnapEventId = this._maxNonSnapEventId;
+    const prev_events = this._events;
+    const prev_streams = this._streams;
+    const prev_stream_versions = this._stream_versions;
+    const prev_max_event_id_by_stream = this._max_event_id_by_stream;
+    const prev_max_non_snap_event_id = this._max_non_snap_event_id;
     // Swap in fresh state for the duration of the rebuild.
     this._events = [];
     this._streams = new Map();
-    this._streamVersions = new Map();
-    this._maxEventIdByStream = new Map();
-    this._maxNonSnapEventId = -1;
+    this._stream_versions = new Map();
+    this._max_event_id_by_stream = new Map();
+    this._max_non_snap_event_id = -1;
     try {
       await driver(async (event) => {
         const id = this._events.length;
@@ -1019,21 +1020,21 @@ export class InMemoryStore implements Store {
         // source is expected to be in commit order, so this is also
         // the highest version. Out-of-order sources get last-wins,
         // matching the legacy raw-SQL restore.
-        this._streamVersions.set(event.stream, event.version);
+        this._stream_versions.set(event.stream, event.version);
         if (event.name !== SNAP_EVENT) {
-          this._maxEventIdByStream.set(event.stream, id);
-          this._maxNonSnapEventId = id;
+          this._max_event_id_by_stream.set(event.stream, id);
+          this._max_non_snap_event_id = id;
         }
         return id;
       });
     } catch (err) {
       // Roll back to the captured snapshot — every index restored
       // exactly as it was before the call started.
-      this._events = prevEvents;
-      this._streams = prevStreams;
-      this._streamVersions = prevStreamVersions;
-      this._maxEventIdByStream = prevMaxEventIdByStream;
-      this._maxNonSnapEventId = prevMaxNonSnapEventId;
+      this._events = prev_events;
+      this._streams = prev_streams;
+      this._stream_versions = prev_stream_versions;
+      this._max_event_id_by_stream = prev_max_event_id_by_stream;
+      this._max_non_snap_event_id = prev_max_non_snap_event_id;
       throw err;
     }
   }

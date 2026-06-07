@@ -17,8 +17,8 @@ describe("colors", () => {
     expect(colors.orange("x")).toBe("\x1b[22m\x1b[38;5;208mx\x1b[39m");
     expect(colors.violet("y")).toContain("141m");
     expect(colors.cornflower("y")).toContain("33m");
-    expect(colors.kindColor.event("z")).toContain("208m");
-    expect(colors.kindColor.action("z")).toContain("33m"); // cornflower blue
+    expect(colors.kind_color.event("z")).toContain("208m");
+    expect(colors.kind_color.action("z")).toContain("33m"); // cornflower blue
     // CANCEL_DIM is included so clack's outer dim wrap doesn't wash out
     // inactive option labels.
     expect(colors.orange("x").startsWith("\x1b[22m")).toBe(true);
@@ -47,7 +47,7 @@ describe("colors", () => {
     const colors = await import("../src/cli/colors.js");
     expect(colors.orange("hello")).toBe("hello");
     expect(colors.muted("hello")).toBe("hello");
-    expect(colors.kindColor.slice("S")).toBe("S");
+    expect(colors.kind_color.slice("S")).toBe("S");
     vi.doUnmock("picocolors");
     vi.resetModules();
   });

@@ -71,13 +71,13 @@ export function verifyWebhook(
   const maxAgeSeconds = options?.maxAgeSeconds ?? 300;
   const now = options?.now ?? Math.floor(Date.now() / 1000);
 
-  const signature = pickHeader(headers, "x-webhook-signature");
+  const signature = pick_header(headers, "x-webhook-signature");
   if (!signature) return { ok: false, reason: "missing-signature" };
 
-  const timestampStr = pickHeader(headers, "x-webhook-timestamp");
-  if (!timestampStr) return { ok: false, reason: "missing-timestamp" };
-  const timestamp = Number.parseInt(timestampStr, 10);
-  if (Number.isNaN(timestamp) || String(timestamp) !== timestampStr) {
+  const timestamp_str = pick_header(headers, "x-webhook-timestamp");
+  if (!timestamp_str) return { ok: false, reason: "missing-timestamp" };
+  const timestamp = Number.parseInt(timestamp_str, 10);
+  if (Number.isNaN(timestamp) || String(timestamp) !== timestamp_str) {
     return { ok: false, reason: "missing-timestamp" };
   }
 
@@ -88,17 +88,17 @@ export function verifyWebhook(
   if (!signature.startsWith("sha256=")) {
     return { ok: false, reason: "bad-signature" };
   }
-  const providedHex = signature.slice("sha256=".length);
-  if (!/^[0-9a-fA-F]{64}$/.test(providedHex)) {
+  const provided_hex = signature.slice("sha256=".length);
+  if (!/^[0-9a-fA-F]{64}$/.test(provided_hex)) {
     return { ok: false, reason: "bad-signature" };
   }
 
-  const expectedHex = createHmac("sha256", secret)
-    .update(`${timestampStr}.${body}`)
+  const expected_hex = createHmac("sha256", secret)
+    .update(`${timestamp_str}.${body}`)
     .digest("hex");
 
-  const a = Buffer.from(providedHex, "hex");
-  const b = Buffer.from(expectedHex, "hex");
+  const a = Buffer.from(provided_hex, "hex");
+  const b = Buffer.from(expected_hex, "hex");
   if (!timingSafeEqual(a, b)) {
     return { ok: false, reason: "bad-signature" };
   }
@@ -106,12 +106,12 @@ export function verifyWebhook(
   return { ok: true };
 }
 
-function pickHeader(
+function pick_header(
   headers: Record<string, string | string[] | undefined>,
-  lowerName: string
+  lower_name: string
 ): string | undefined {
   for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() !== lowerName) continue;
+    if (name.toLowerCase() !== lower_name) continue;
     if (Array.isArray(value) || value === undefined || value === "") {
       return undefined;
     }
