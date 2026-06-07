@@ -231,8 +231,34 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **Conventional-commit subject must be lowercase.** `feat(act): add foo` not `feat(act): Add foo`. The commitlint hook will reject otherwise.
 - **Never `--no-verify` or `--no-gpg-sign`.** The pre-commit hook runs lint-staged; the pre-push hook runs tests on master. Bypassing either ships unverified work. If a hook fails, fix the underlying issue.
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
-- **Naming new public API.** Match existing analogs over inventing new patterns. Fields/methods short snake_case (`reset`, `unblock`, `blocked_streams`). Factories camelCase (`act`, `state`, `webhook`). Types PascalCase, with `XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable.
-- **Class field naming.** Private/protected fields are `_snake_case` with an underscore prefix (`_drain_controllers`, `_reactive_events`, `_static_targets`). Public fields are plain snake_case (or a single word) with no prefix (`registry`, `stream`, `payload`). Parameter properties (`constructor(private readonly x: T) {}`) are banned by `erasableSyntaxOnly`; declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
+### Naming conventions
+
+The codebase uses a strict public/internal split. **Internal code follows the convention below; public surfaces keep their existing names** unless a major version bump is explicitly authorized.
+
+**Internal — short snake_case, no exceptions:**
+
+- Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`, `deprecated_event_names`, etc.
+- Local variables: `event_to_state`, `last_event_name`, `stream_info`, `raw_body`, `headers_bag`.
+- Function parameters (anywhere — TS doesn't enforce parameter names as part of the public contract): `event_name`, `state_name`, `skip_validation`, `lower_name`.
+- Private/protected class fields and methods: `_snake_case` with underscore prefix (`_drain_controllers`, `_reactive_events`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`).
+- Internal type fields (types not re-exported through the package's `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
+- Prefix/postfix grouping conventions: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`. Use these when several related identifiers share a structural role.
+
+**Public — match the existing name, even if camelCase:**
+
+- Anything re-exported from any package's `src/index.ts` (or subpath `index.ts` for `act-http`, `act-ops`): `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`.
+- Public type fields (`IAct.forget` return `{eventCount}`, `forgotten` event field `eventCount`, `StateNode.varName`, `WebhookConfig.timeoutMs`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`).
+- ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`.
+- Builder factories: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice` (camelCase per the factory rule below).
+- Top-level factory functions: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`, `broadcast`.
+
+**Types — always PascalCase:**
+
+`XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable. `StateNode`, `EventNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `VerifyOptions`, `WebhookConfig`, `IdempotencyStore`.
+
+**Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
+
+**The public/internal boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck` — it snapshots the source text of every entry point and its transitive relative re-exports. Any unintended rename / removal / signature change shows up as a snapshot diff in the PR. New adapter packages opt in by adding `@rotorsoft/act-tck` as a devDep + project reference and dropping in a `test/stability.spec.ts`.
 
 ## Troubleshooting
 

@@ -41,6 +41,7 @@ That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internall
 - **`runStoreTck(options)`** — every `Store` method, capability-gated where optional.
 - **`runCacheTck(options)`** — every `Cache` method, cross-stream isolation, dispose idempotency.
 - **`runLoggerTck(options)`** — structural smoke test of the `Logger` contract.
+- **`runStabilityTck(options)`** — snapshot-based public-API stability gate. Catches accidental rename / removal / signature drift on a package's public surface before it merges.
 - **`StoreCapabilities`** / **`CacheCapabilities`** / **`LoggerCapabilities`** — flag types for opting into optional surface (e.g., `Store.notify`).
 - Fixture helpers re-exported from `@rotorsoft/act-tck/fixtures` for adapter-specific tests that want the same Counter domain.
 
@@ -69,6 +70,26 @@ Every method on the `Cache` interface: `get` on unset stream returns `undefined`
 ### `runLoggerTck`
 
 Structural smoke test of the `Logger` interface: `level` is a non-empty string; every level method callable with both overload signatures; `null` and cyclic payloads don't throw; `child(bindings)` returns a Logger satisfying the same contract; `dispose` is idempotent and awaitable.
+
+### `runStabilityTck`
+
+Walks the source of every declared entry point, follows relative re-exports recursively, and snapshots the concatenated text via Vitest. Any rename, removed export, or signature change to the public surface shows up as a snapshot diff in the PR — reviewers either accept the change (re-run with `-u`) or push back. Stops at non-relative imports (other packages, `node:*`); each package owns its own snapshot.
+
+```ts
+// libs/act-mysql/test/stability.spec.ts
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { runStabilityTck } from "@rotorsoft/act-tck";
+
+const src = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
+
+runStabilityTck({
+  name: "@rotorsoft/act-mysql",
+  entryPoints: { "": path.join(src, "index.ts") },
+});
+```
+
+The TCK reads source (`.ts`) rather than built `.d.ts` — no prior `pnpm build` required, and the snapshot text matches what reviewers actually read.
 
 ## Common patterns
 
