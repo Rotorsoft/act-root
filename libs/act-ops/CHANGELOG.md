@@ -1,3 +1,5 @@
+# [@rotorsoft/act-ops-v0.2.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.2.0...@rotorsoft/act-ops-v0.2.1) (2026-06-07)
+
 # [@rotorsoft/act-ops-v0.2.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-ops-v0.1.0...@rotorsoft/act-ops-v0.2.0) (2026-05-31)
 
 
