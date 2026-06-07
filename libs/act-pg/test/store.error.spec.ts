@@ -318,6 +318,17 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("forget_pii", () => {
+    it("returns 0 when rowCount is undefined (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.forget_pii("never-existed");
+      expect(result).toBe(0);
+    });
+  });
+
   describe("restore", () => {
     it("swallows ROLLBACK error after a failed restore", async () => {
       // BEGIN succeeds, first TRUNCATE throws, then ROLLBACK ITSELF

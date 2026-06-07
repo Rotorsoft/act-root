@@ -32317,8 +32317,15 @@ export class PostgresStore implements Store {
           stream varchar(100) COLLATE pg_catalog."default" NOT NULL,
           version int NOT NULL,
           created timestamptz NOT NULL DEFAULT now(),
-          meta jsonb
+          meta jsonb,
+          pii jsonb
         ) TABLESPACE pg_default;\`
+      );
+      // Migration for tables created before pii_isolation (#870).
+      // Variable-length encoding skips NULL columns entirely, so events
+      // without sensitive declarations pay zero extra bytes on disk.
+      await client.query(
+        \`ALTER TABLE \${this._fqt} ADD COLUMN IF NOT EXISTS pii jsonb;\`
       );
 
       // Indexes on events
@@ -32546,12 +32553,12 @@ export class PostgresStore implements Store {
         );
 
       const committed: Committed<E, keyof E>[] = [];
-      for (const { name, data } of msgs) {
+      for (const { name, data, pii } of msgs) {
         version++;
         const sql = \`
-          INSERT INTO \${this._fqt}(name, data, stream, version, meta)
-          VALUES($1, $2, $3, $4, $5) RETURNING *\`;
-        const vals = [name, data, stream, version, meta];
+          INSERT INTO \${this._fqt}(name, data, pii, stream, version, meta)
+          VALUES($1, $2, $3, $4, $5, $6) RETURNING *\`;
+        const vals = [name, data, pii ?? null, stream, version, meta];
         try {
           const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
           committed.push(rows.at(0)!);
@@ -33563,11 +33570,12 @@ export class PostgresStore implements Store {
       await client.query(\`TRUNCATE TABLE \${this._fqs}\`);
       await driver(async (event) => {
         const { rows } = await client.query<{ id: number }>(
-          \`INSERT INTO \${this._fqt}(name, data, stream, version, created, meta)
-           VALUES($1, $2, $3, $4, $5, $6) RETURNING id\`,
+          \`INSERT INTO \${this._fqt}(name, data, pii, stream, version, created, meta)
+           VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING id\`,
           [
             event.name,
             event.data,
+            event.pii ?? null,
             event.stream,
             event.version,
             event.created,
@@ -33583,6 +33591,30 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — the
+   * physical-erasure side of the sensitive-data epic (#566). Sets
+   * \`events.pii\` to \`NULL\` for the stream's events; \`events.data\` and
+   * the rest of the row are never touched.
+   *
+   * Row-level locks (no table lock), bounded by events-per-stream.
+   * Idempotent — a second call on an already-wiped stream returns \`0\`.
+   *
+   * Disk reclamation is autovacuum-driven; for strict-deletion
+   * jurisdictions the production checklist documents \`VACUUM FULL\` as
+   * the operator step.
+   *
+   * @param stream Target stream
+   * @returns Count of events whose \`pii\` was set to \`NULL\`
+   */
+  async forget_pii(stream: string): Promise<number> {
+    const r = await this._pool.query(
+      \`UPDATE \${this._fqt} SET pii = NULL WHERE stream = $1 AND pii IS NOT NULL\`,
+      [stream]
+    );
+    return r.rowCount ?? 0;
   }
 }
 
