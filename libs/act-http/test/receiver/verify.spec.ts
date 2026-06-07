@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { verifyWebhook } from "../../src/receiver/index.js";
-import { signRequest } from "../../src/webhook/sign.js";
+import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
 const BODY = '{"orderId":"o-1"}';
@@ -12,7 +12,7 @@ function signedHeaders(
   body: string = BODY,
   secret: string = SECRET
 ) {
-  const { signature, timestamp } = signRequest(body, secret, signedAt);
+  const { signature, timestamp } = sign_request(body, secret, signedAt);
   return {
     "x-webhook-signature": signature,
     "x-webhook-timestamp": timestamp,
@@ -28,7 +28,7 @@ describe("verifyWebhook", () => {
     });
 
     it("accepts case-insensitive header names", () => {
-      const { signature, timestamp } = signRequest(BODY, SECRET, NOW);
+      const { signature, timestamp } = sign_request(BODY, SECRET, NOW);
       const result = verifyWebhook(
         {
           "X-Webhook-Signature": signature,
@@ -44,7 +44,7 @@ describe("verifyWebhook", () => {
 
   describe("missing-signature", () => {
     it("rejects when the signature header is absent", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook({ "x-webhook-timestamp": timestamp }, BODY, SECRET, {
           now: NOW,
@@ -53,7 +53,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects when the signature header is array-valued", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -68,7 +68,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects when the signature header is empty", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           { "x-webhook-signature": "", "x-webhook-timestamp": timestamp },
@@ -80,7 +80,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects when the signature header is undefined", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -97,7 +97,7 @@ describe("verifyWebhook", () => {
 
   describe("missing-timestamp", () => {
     it("rejects when the timestamp header is absent", () => {
-      const { signature } = signRequest(BODY, SECRET, NOW);
+      const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook({ "x-webhook-signature": signature }, BODY, SECRET, {
           now: NOW,
@@ -106,7 +106,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects when the timestamp isn't a parseable integer", () => {
-      const { signature } = signRequest(BODY, SECRET, NOW);
+      const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -121,7 +121,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects timestamps with trailing garbage (round-trip mismatch)", () => {
-      const { signature } = signRequest(BODY, SECRET, NOW);
+      const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -177,7 +177,7 @@ describe("verifyWebhook", () => {
 
   describe("bad-signature", () => {
     it("rejects signatures without the sha256= prefix", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -192,7 +192,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects signatures whose hex isn't 64 chars", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {
@@ -207,7 +207,7 @@ describe("verifyWebhook", () => {
     });
 
     it("rejects signatures with non-hex characters", () => {
-      const { timestamp } = signRequest(BODY, SECRET, NOW);
+      const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
         verifyWebhook(
           {

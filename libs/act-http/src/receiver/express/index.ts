@@ -41,7 +41,7 @@
  * to a UTF-8 string for hashing. Skip when unsigned.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type CheckWebhookOptions, check_webhook } from "../check.js";
 
 /**
  * Build an Express middleware that verifies the request signature
@@ -57,7 +57,7 @@ export function webhookMiddleware(
     next: NextFunction
   ): Promise<void> {
     const rawBody = buffer_or_string(req.body);
-    const result = await checkWebhook(
+    const result = await check_webhook(
       req.headers as Record<string, string | string[] | undefined>,
       rawBody,
       options

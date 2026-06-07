@@ -36,7 +36,7 @@
  * needed.
  */
 import type { MiddlewareHandler } from "hono";
-import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type CheckWebhookOptions, check_webhook } from "../check.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
@@ -59,7 +59,7 @@ export function webhookMiddleware(
   return async function check(c, next) {
     const headers = headers_bag(c.req.raw.headers);
     const rawBody = await c.req.text();
-    const result = await checkWebhook(headers, rawBody, options);
+    const result = await check_webhook(headers, rawBody, options);
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }

@@ -2,7 +2,7 @@ import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { receiver } from "../../src/receiver/start.js";
-import { signRequest } from "../../src/webhook/sign.js";
+import { sign_request } from "../../src/webhook/sign.js";
 
 const OrderSchema = z.object({
   orderId: z.string(),
@@ -145,7 +145,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
   it("accepts signed requests when secret is configured", async () => {
     const SECRET = "shared";
     const body = JSON.stringify({ orderId: "o-7", total: 42 });
-    const { signature, timestamp } = signRequest(body, SECRET);
+    const { signature, timestamp } = sign_request(body, SECRET);
 
     let called = false;
     const r = receiver({

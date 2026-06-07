@@ -44,7 +44,7 @@
  * middleware reads `request.rawBody` for hashing. Skip when unsigned.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type CheckWebhookOptions, check_webhook } from "../check.js";
 
 type WebhookRequest = FastifyRequest & {
   rawBody?: string;
@@ -66,7 +66,7 @@ export function webhookMiddleware(
   ): Promise<void> {
     const req = request as WebhookRequest;
     const rawBody = req.rawBody ?? "";
-    const result = await checkWebhook(
+    const result = await check_webhook(
       req.headers as Record<string, string | string[] | undefined>,
       rawBody,
       options

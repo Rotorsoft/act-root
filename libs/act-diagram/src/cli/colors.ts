@@ -64,7 +64,7 @@ export const fuchsia = (s: string): string => ext(207, s);
 export const lilac = cornflower;
 export const pink = cornflower;
 
-export const kindColor: Record<
+export const kind_color: Record<
   "event" | "action" | "state" | "slice" | "projection" | "reaction",
   (s: string) => string
 > = {

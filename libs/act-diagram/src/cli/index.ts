@@ -12,34 +12,34 @@
  */
 import { resolve } from "node:path";
 import { extract_model } from "../client/lib/evaluate.js";
-import { buildContractIndex, search } from "./contract-index.js";
-import { formatDetail, formatMatches } from "./format.js";
-import { formatJsonSchema } from "./json-schema.js";
-import { loadProject } from "./load-project.js";
-import { formatMarkdown } from "./markdown.js";
-import { runInteractive } from "./repl.js";
+import { build_contract_index, search } from "./contract-index.js";
+import { format_detail, format_matches } from "./format.js";
+import { format_json_schema } from "./json-schema.js";
+import { load_project } from "./load-project.js";
+import { format_markdown } from "./markdown.js";
+import { run_interactive } from "./repl.js";
 
 export type CliArgs = {
   cwd?: string;
   help: boolean;
   version: boolean;
-  maxFiles?: number;
+  max_files?: number;
   /** Non-interactive: print detail for the named entity and exit. */
   query?: string;
   /** Non-interactive: print the full registry as Markdown and exit. */
   markdown?: boolean;
   /** Non-interactive: print the full registry as JSON Schema and exit. */
-  jsonSchema?: boolean;
+  json_schema?: boolean;
 };
 
-export function parseArgs(argv: readonly string[]): CliArgs {
+export function parse_args(argv: readonly string[]): CliArgs {
   let cwd: string | undefined;
   let help = false;
   let version = false;
-  let maxFiles: number | undefined;
+  let max_files: number | undefined;
   let query: string | undefined;
   let markdown = false;
-  let jsonSchema = false;
+  let json_schema = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "-h" || a === "--help") help = true;
@@ -48,13 +48,13 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     else if (a === "-q" || a === "--query") query = argv[++i] ?? query;
     else if (a === "-m" || a === "--markdown" || a === "--md") markdown = true;
     else if (a === "-j" || a === "--json-schema" || a === "--json")
-      jsonSchema = true;
+      json_schema = true;
     else if (a === "--max-files") {
       const n = Number.parseInt(argv[++i] ?? "", 10);
-      if (Number.isFinite(n) && n > 0) maxFiles = n;
+      if (Number.isFinite(n) && n > 0) max_files = n;
     } else if (!a.startsWith("-")) cwd = a;
   }
-  return { cwd, help, version, maxFiles, query, markdown, jsonSchema };
+  return { cwd, help, version, max_files, query, markdown, json_schema };
 }
 
 const USAGE = [
@@ -79,45 +79,45 @@ const USAGE = [
 export type RunDeps = {
   input: NodeJS.ReadableStream;
   output: NodeJS.WritableStream;
-  errorOutput: NodeJS.WritableStream;
+  error_output: NodeJS.WritableStream;
   isTTY: boolean;
   argv: readonly string[];
-  versionString: string;
-  defaultDir?: string;
+  version_string: string;
+  default_dir?: string;
   /**
-   * Override for the interactive flow. Defaults to `runInteractive`.
+   * Override for the interactive flow. Defaults to `run_interactive`.
    * Exposed so tests can drive the non-`-q` code path without hanging
    * on real clack prompts.
    */
-  runInteractive?: (
-    idx: ReturnType<typeof buildContractIndex>,
-    rootDir: string
+  run_interactive?: (
+    idx: ReturnType<typeof build_contract_index>,
+    root_dir: string
   ) => Promise<void>;
 };
 
 export async function main(deps: RunDeps): Promise<number> {
-  const args = parseArgs(deps.argv);
+  const args = parse_args(deps.argv);
   if (args.help) {
     deps.output.write(USAGE + "\n");
     return 0;
   }
   if (args.version) {
-    deps.output.write(deps.versionString + "\n");
+    deps.output.write(deps.version_string + "\n");
     return 0;
   }
 
-  const rootDir = resolve(args.cwd ?? deps.defaultDir ?? ".");
-  const { files, truncated } = await loadProject(rootDir, {
-    maxFiles: args.maxFiles,
+  const root_dir = resolve(args.cwd ?? deps.default_dir ?? ".");
+  const { files, truncated } = await load_project(root_dir, {
+    max_files: args.max_files,
   });
   if (files.length === 0) {
-    deps.errorOutput.write(
-      `act: no TypeScript source files found under ${rootDir}\n`
+    deps.error_output.write(
+      `act: no TypeScript source files found under ${root_dir}\n`
     );
     return 1;
   }
   if (truncated) {
-    deps.errorOutput.write(
+    deps.error_output.write(
       "act: scan was truncated (file cap reached); some sources may be missing.\n"
     );
   }
@@ -125,24 +125,24 @@ export async function main(deps: RunDeps): Promise<number> {
   /* c8 ignore start — extract_model only sets `error` when every file
      fails to evaluate; hard to synthesize in unit tests. */
   if (error) {
-    deps.errorOutput.write(`act: parse error — ${error}\n`);
+    deps.error_output.write(`act: parse error — ${error}\n`);
   }
   /* c8 ignore stop */
 
-  const idx = buildContractIndex(model);
+  const idx = build_contract_index(model);
 
   // Non-interactive Markdown registry: dump the full model and exit.
   // Pipe-friendly for `pnpm act -m > docs/EVENTS.md` and PR comments.
   if (args.markdown) {
-    deps.output.write(`${formatMarkdown(idx)}\n`);
+    deps.output.write(`${format_markdown(idx)}\n`);
     return 0;
   }
 
   // Non-interactive JSON Schema export: machine-readable per-event
   // schemas plus the producer/consumer graph. Cross-service consumers
   // can `Ajv.compile()` the event schemas to validate payloads.
-  if (args.jsonSchema) {
-    deps.output.write(`${formatJsonSchema(idx)}\n`);
+  if (args.json_schema) {
+    deps.output.write(`${format_json_schema(idx)}\n`);
     return 0;
   }
 
@@ -151,7 +151,7 @@ export async function main(deps: RunDeps): Promise<number> {
   if (args.query) {
     const matches = search(idx, args.query);
     if (matches.length === 0) {
-      deps.errorOutput.write(`act: no matches for "${args.query}"\n`);
+      deps.error_output.write(`act: no matches for "${args.query}"\n`);
       return 1;
     }
     const exact = matches.filter(
@@ -161,29 +161,29 @@ export async function main(deps: RunDeps): Promise<number> {
     // same logical entity declared in different files (e.g. a `Counter`
     // state defined in two demo entrypoints). Collapse them so `-q`
     // surfaces a detail view instead of an ambiguity menu.
-    const equivKey = (m: (typeof matches)[number]) =>
+    const equiv_key = (m: (typeof matches)[number]) =>
       `${m.kind}\x00${m.name}\x00${m.qualifier ?? ""}`;
-    const uniqExact = Array.from(
-      new Map(exact.map((m) => [equivKey(m), m])).values()
+    const uniq_exact = Array.from(
+      new Map(exact.map((m) => [equiv_key(m), m])).values()
     );
-    if (uniqExact.length === 1) {
-      deps.output.write(formatDetail(idx, uniqExact[0]) + "\n");
+    if (uniq_exact.length === 1) {
+      deps.output.write(format_detail(idx, uniq_exact[0]) + "\n");
       return 0;
     }
-    const uniqMatches = Array.from(
-      new Map(matches.map((m) => [equivKey(m), m])).values()
+    const uniq_matches = Array.from(
+      new Map(matches.map((m) => [equiv_key(m), m])).values()
     );
-    if (uniqMatches.length === 1) {
-      deps.output.write(formatDetail(idx, uniqMatches[0]) + "\n");
+    if (uniq_matches.length === 1) {
+      deps.output.write(format_detail(idx, uniq_matches[0]) + "\n");
       return 0;
     }
-    deps.output.write(formatMatches(args.query, uniqMatches) + "\n");
+    deps.output.write(format_matches(args.query, uniq_matches) + "\n");
     return 0;
   }
 
   // Default interactive flow ships in `repl.ts`; tests inject a stub
   // so the non-`-q` branch is exercised without the clack prompts.
-  await (deps.runInteractive ?? runInteractive)(idx, rootDir);
+  await (deps.run_interactive ?? run_interactive)(idx, root_dir);
   return 0;
 }
 
@@ -207,11 +207,11 @@ if (isMain) {
   main({
     input: process.stdin,
     output: process.stdout,
-    errorOutput: process.stderr,
+    error_output: process.stderr,
     isTTY: !!process.stdout.isTTY,
     argv: process.argv.slice(2),
-    versionString: "act (act-diagram)",
-    defaultDir: process.env.INIT_CWD ?? process.cwd(),
+    version_string: "act (act-diagram)",
+    default_dir: process.env.INIT_CWD ?? process.cwd(),
   }).then(
     (code) => process.exit(code),
     (err) => {

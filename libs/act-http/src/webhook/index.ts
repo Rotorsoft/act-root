@@ -27,7 +27,7 @@
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
 import { classifyHttpResponse } from "./classify.js";
-import { signRequest } from "./sign.js";
+import { sign_request } from "./sign.js";
 import {
   NonRetryableWebhookError,
   type WebhookConfig,
@@ -121,7 +121,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
 
     if (config.secret && !has_header(headers, "x-webhook-signature")) {
-      const { signature, timestamp } = signRequest(body, config.secret);
+      const { signature, timestamp } = sign_request(body, config.secret);
       headers["X-Webhook-Signature"] = signature;
       if (!has_header(headers, "x-webhook-timestamp")) {
         headers["X-Webhook-Timestamp"] = timestamp;

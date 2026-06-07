@@ -15,17 +15,17 @@
  */
 import { z } from "zod";
 import type { DomainModel } from "../client/types/index.js";
-import { type ContractIndex, eventStatus } from "./contract-index.js";
+import { type ContractIndex, event_status } from "./contract-index.js";
 
 type EventReport = {
   name: string;
   file?: string;
   line?: number;
   status: "active" | "deprecated";
-  supersededBy?: string;
-  schemaText?: string;
+  superseded_by?: string;
+  schema_text?: string;
   schema?: unknown;
-  schemaError?: string;
+  schema_error?: string;
   producers: Array<{
     action: string;
     state: string;
@@ -48,7 +48,7 @@ type EventReport = {
 type Report = {
   $schema: string;
   generator: string;
-  generatedAt: string;
+  generated_at: string;
   counts: {
     states: number;
     slices: number;
@@ -58,7 +58,7 @@ type Report = {
   events: Record<string, EventReport>;
 };
 
-const findProducers = (model: DomainModel, event_name: string) => {
+const find_producers = (model: DomainModel, event_name: string) => {
   const out: EventReport["producers"] = [];
   for (const st of model.states) {
     for (const act of st.actions) {
@@ -75,7 +75,7 @@ const findProducers = (model: DomainModel, event_name: string) => {
   return out;
 };
 
-const findConsumers = (
+const find_consumers = (
   model: DomainModel,
   event_name: string
 ): EventReport["consumers"] => {
@@ -135,26 +135,26 @@ export function toJsonSchemaSafe(
   }
 }
 
-export function formatJsonSchema(idx: ContractIndex): string {
+export function format_json_schema(idx: ContractIndex): string {
   const m = idx.model;
   const events: Record<string, EventReport> = {};
 
   for (const st of m.states) {
     for (const ev of st.events) {
-      const status = eventStatus(ev.name, idx.allEventNames);
+      const status = event_status(ev.name, idx.all_event_names);
       const conv = toJsonSchemaSafe(ev.zod);
       const report: EventReport = {
         name: ev.name,
         file: st.file,
         line: ev.line,
         status: status.status,
-        supersededBy: status.supersededBy,
-        schemaText: ev.schema,
-        producers: findProducers(m, ev.name),
-        consumers: findConsumers(m, ev.name),
+        superseded_by: status.superseded_by,
+        schema_text: ev.schema,
+        producers: find_producers(m, ev.name),
+        consumers: find_consumers(m, ev.name),
       };
       if ("schema" in conv) report.schema = conv.schema;
-      else report.schemaError = conv.error;
+      else report.schema_error = conv.error;
       events[ev.name] = report;
     }
   }
@@ -162,12 +162,12 @@ export function formatJsonSchema(idx: ContractIndex): string {
   const out: Report = {
     $schema: "https://json-schema.org/draft/2020-12/schema",
     generator: "act-diagram/act-contracts",
-    generatedAt: new Date().toISOString(),
+    generated_at: new Date().toISOString(),
     counts: {
       states: m.states.length,
       slices: m.slices.length,
       projections: m.projections.length,
-      events: idx.allEventNames.size,
+      events: idx.all_event_names.size,
     },
     events,
   };

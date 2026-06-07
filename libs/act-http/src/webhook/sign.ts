@@ -20,7 +20,7 @@ import { createHmac } from "node:crypto";
  *   from the package's `./webhook` entry — the webhook helper calls
  *   it internally, and operators don't need it directly.
  */
-export function signRequest(
+export function sign_request(
   body: string,
   secret: string,
   now: number = Math.floor(Date.now() / 1000)

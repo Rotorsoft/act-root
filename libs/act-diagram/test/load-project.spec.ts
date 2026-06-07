@@ -2,9 +2,9 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { loadProject } from "../src/cli/load-project.js";
+import { load_project } from "../src/cli/load-project.js";
 
-describe("loadProject", () => {
+describe("load_project", () => {
   let root: string;
 
   beforeAll(async () => {
@@ -47,26 +47,26 @@ describe("loadProject", () => {
   });
 
   it("includes only .ts source files outside skip patterns", async () => {
-    const { files, truncated } = await loadProject(root);
+    const { files, truncated } = await load_project(root);
     const paths = files.map((f) => f.path).sort();
     expect(paths).toEqual(["src/feature/fulfillment.ts", "src/order.ts"]);
     expect(truncated).toBe(false);
   });
 
-  it("returns truncated=true when maxFiles is exceeded", async () => {
-    const { files, truncated } = await loadProject(root, { maxFiles: 1 });
+  it("returns truncated=true when max_files is exceeded", async () => {
+    const { files, truncated } = await load_project(root, { max_files: 1 });
     expect(files).toHaveLength(1);
     expect(truncated).toBe(true);
   });
 
   it("returns an empty result for a non-existent root", async () => {
-    const { files, truncated } = await loadProject(join(root, "missing"));
+    const { files, truncated } = await load_project(join(root, "missing"));
     expect(files).toEqual([]);
     expect(truncated).toBe(false);
   });
 
   it("returns an empty result when root is a file", async () => {
-    const { files, truncated } = await loadProject(
+    const { files, truncated } = await load_project(
       join(root, "src", "order.ts")
     );
     expect(files).toEqual([]);

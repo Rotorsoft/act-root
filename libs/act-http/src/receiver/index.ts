@@ -37,7 +37,7 @@ export {
   type CheckFailureReason,
   type CheckResult,
   type CheckWebhookOptions,
-  checkWebhook,
+  check_webhook,
 } from "./check.js";
 export { extractIdempotencyKey } from "./extract.js";
 export { receiver } from "./start.js";

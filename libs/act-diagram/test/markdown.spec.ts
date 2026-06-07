@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildContractIndex } from "../src/cli/contract-index.js";
-import { formatMarkdown } from "../src/cli/markdown.js";
+import { build_contract_index } from "../src/cli/contract-index.js";
+import { format_markdown } from "../src/cli/markdown.js";
 import type { DomainModel } from "../src/client/types/index.js";
 
 function richModel(): DomainModel {
@@ -84,9 +84,9 @@ function richModel(): DomainModel {
   };
 }
 
-describe("formatMarkdown", () => {
-  const idx = buildContractIndex(richModel());
-  const md = formatMarkdown(idx);
+describe("format_markdown", () => {
+  const idx = build_contract_index(richModel());
+  const md = format_markdown(idx);
 
   it("opens with a generated-by header and counts", () => {
     expect(md).toMatch(/^# Act Contracts Registry/);
@@ -178,8 +178,8 @@ describe("formatMarkdown", () => {
       projections: [],
       reactions: [],
     };
-    const i = buildContractIndex(model);
-    const out = formatMarkdown(i);
+    const i = build_contract_index(model);
+    const out = format_markdown(i);
     expect(out).toMatch(/```ts\n[\s\S]*z\n[\s\S]*```/);
     // Body lines get indented so they stay inside the bullet's scope.
     expect(out).toContain("  .object({ id: z.string() })");
@@ -191,7 +191,7 @@ describe("formatMarkdown", () => {
   });
 });
 
-describe("formatMarkdown — event with no producer and no consumer", () => {
+describe("format_markdown — event with no producer and no consumer", () => {
   it("emits the (none) placeholders", () => {
     const model: DomainModel = {
       entries: [],
@@ -209,24 +209,24 @@ describe("formatMarkdown — event with no producer and no consumer", () => {
       projections: [],
       reactions: [],
     };
-    const idx = buildContractIndex(model);
-    const md = formatMarkdown(idx);
+    const idx = build_contract_index(model);
+    const md = format_markdown(idx);
     expect(md).toContain("### `Lonesome`");
     expect(md).toContain("**producers:** _(none)_");
     expect(md).toContain("**consumers:** _(none)_");
   });
 });
 
-describe("formatMarkdown — empty model", () => {
+describe("format_markdown — empty model", () => {
   it("emits placeholder sections when the project is empty", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [],
       slices: [],
       projections: [],
       reactions: [],
     });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("## Events");
     expect(md).toContain("## Actions");
     expect(md).toContain("## States");
@@ -237,9 +237,9 @@ describe("formatMarkdown — empty model", () => {
   });
 });
 
-describe("formatMarkdown — defensive paths", () => {
+describe("format_markdown — defensive paths", () => {
   it("handles slice/projection entries whose names don't match any model item", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [],
       slices: [],
@@ -250,14 +250,14 @@ describe("formatMarkdown — defensive paths", () => {
     idx.entries.push({ kind: "slice", name: "Ghost" });
     idx.entries.push({ kind: "projection", name: "Phantom" });
     idx.entries.push({ kind: "state", name: "Lost" });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("### `Ghost`");
     expect(md).toContain("### `Phantom`");
     expect(md).toContain("### `Lost`");
   });
 
   it("handles a reaction entry without a qualifier or file", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [],
       slices: [],
@@ -265,14 +265,14 @@ describe("formatMarkdown — defensive paths", () => {
       reactions: [],
     });
     idx.entries.push({ kind: "reaction", name: "Bare" });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("### `Bare`");
     expect(md).not.toContain("**in slice:** `Bare`");
     expect(md).not.toContain("**on event:**");
   });
 
   it("handles an action entry whose qualifier doesn't match any state", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [
         {
@@ -293,12 +293,12 @@ describe("formatMarkdown — defensive paths", () => {
       name: "doThing",
       qualifier: "Wrong",
     });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toMatch(/### `doThing`/);
   });
 
   it("handles an action whose qualifier matches but the state lacks that action", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [
         {
@@ -316,7 +316,7 @@ describe("formatMarkdown — defensive paths", () => {
     // Qualifier matches "Match" so we enter find(), but find returns
     // undefined → exercises the `if (found)` falsy arm.
     idx.entries.push({ kind: "action", name: "phantom", qualifier: "Match" });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("### `phantom`");
     expect(md).toContain("**on state:** `Match`");
     // Action lookup missed, so no `defined in:` or `emits:` lines.
@@ -324,7 +324,7 @@ describe("formatMarkdown — defensive paths", () => {
   });
 
   it("handles an action entry with no matching state at all (action stays undefined)", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [],
       slices: [],
@@ -332,17 +332,17 @@ describe("formatMarkdown — defensive paths", () => {
       reactions: [],
     });
     // Force an action entry into an empty index — no state with the
-    // matching action name exists, so `action`/`stateFile` stay
+    // matching action name exists, so `action`/`state_file` stay
     // undefined and the `if (action)` block is skipped.
     idx.entries.push({ kind: "action", name: "lonely" });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("### `lonely`");
     expect(md).not.toContain("**emits:**");
     expect(md).not.toContain("**defined in:**");
   });
 
   it("handles an event entry whose name doesn't match any state's events", () => {
-    const idx = buildContractIndex({
+    const idx = build_contract_index({
       entries: [],
       states: [
         {
@@ -359,7 +359,7 @@ describe("formatMarkdown — defensive paths", () => {
     // Push an event entry that doesn't exist in any state — the
     // `if (ev)` lookup misses for every iteration.
     idx.entries.push({ kind: "event", name: "Ghost" });
-    const md = formatMarkdown(idx);
+    const md = format_markdown(idx);
     expect(md).toContain("### `Ghost`");
     // No "defined in" line — entry has no file and lookup missed.
     expect(md).not.toMatch(/### `Ghost`[\s\S]*\*\*defined in:\*\*/);

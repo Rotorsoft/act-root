@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { main, parseArgs } from "../src/cli/index.js";
+import { main, parse_args } from "../src/cli/index.js";
 
 const CALCULATOR_SOURCE = `
 import { state, slice, projection, act } from "@rotorsoft/act";
@@ -45,79 +45,79 @@ function collect(stream: PassThrough): { read: () => string } {
   return { read: () => chunks.join("") };
 }
 
-describe("parseArgs", () => {
+describe("parse_args", () => {
   it("leaves cwd unset when no positional or --cwd given (main fills the default)", () => {
-    expect(parseArgs([])).toEqual({
+    expect(parse_args([])).toEqual({
       cwd: undefined,
       help: false,
       version: false,
-      maxFiles: undefined,
+      max_files: undefined,
       query: undefined,
       markdown: false,
-      jsonSchema: false,
+      json_schema: false,
     });
   });
 
   it("reads -h / --help", () => {
-    expect(parseArgs(["-h"]).help).toBe(true);
-    expect(parseArgs(["--help"]).help).toBe(true);
+    expect(parse_args(["-h"]).help).toBe(true);
+    expect(parse_args(["--help"]).help).toBe(true);
   });
 
   it("reads -v / --version", () => {
-    expect(parseArgs(["-v"]).version).toBe(true);
-    expect(parseArgs(["--version"]).version).toBe(true);
+    expect(parse_args(["-v"]).version).toBe(true);
+    expect(parse_args(["--version"]).version).toBe(true);
   });
 
   it("reads --cwd <dir>", () => {
-    expect(parseArgs(["--cwd", "/tmp/x"]).cwd).toBe("/tmp/x");
+    expect(parse_args(["--cwd", "/tmp/x"]).cwd).toBe("/tmp/x");
   });
 
   it("takes a positional dir argument", () => {
-    expect(parseArgs(["some/dir"]).cwd).toBe("some/dir");
+    expect(parse_args(["some/dir"]).cwd).toBe("some/dir");
   });
 
   it("--cwd without a value leaves cwd unset (main fills the default)", () => {
-    expect(parseArgs(["--cwd"]).cwd).toBeUndefined();
+    expect(parse_args(["--cwd"]).cwd).toBeUndefined();
   });
 
   it("reads --max-files <n>", () => {
-    expect(parseArgs(["--max-files", "10"]).maxFiles).toBe(10);
+    expect(parse_args(["--max-files", "10"]).max_files).toBe(10);
   });
 
   it("ignores invalid --max-files values", () => {
-    expect(parseArgs(["--max-files", "nope"]).maxFiles).toBeUndefined();
-    expect(parseArgs(["--max-files", "-3"]).maxFiles).toBeUndefined();
+    expect(parse_args(["--max-files", "nope"]).max_files).toBeUndefined();
+    expect(parse_args(["--max-files", "-3"]).max_files).toBeUndefined();
   });
 
   it("ignores --max-files with no value", () => {
-    expect(parseArgs(["--max-files"]).maxFiles).toBeUndefined();
+    expect(parse_args(["--max-files"]).max_files).toBeUndefined();
   });
 
   it("ignores unknown flags", () => {
-    expect(parseArgs(["--unknown-flag"]).cwd).toBeUndefined();
+    expect(parse_args(["--unknown-flag"]).cwd).toBeUndefined();
   });
 
   it("reads -q / --query <name>", () => {
-    expect(parseArgs(["-q", "Foo"]).query).toBe("Foo");
-    expect(parseArgs(["--query", "Bar"]).query).toBe("Bar");
+    expect(parse_args(["-q", "Foo"]).query).toBe("Foo");
+    expect(parse_args(["--query", "Bar"]).query).toBe("Bar");
   });
 
   it("leaves query unset when -q has no value", () => {
-    expect(parseArgs(["-q"]).query).toBeUndefined();
+    expect(parse_args(["-q"]).query).toBeUndefined();
   });
 
   it("reads -m / --markdown / --md", () => {
-    expect(parseArgs(["-m"]).markdown).toBe(true);
-    expect(parseArgs(["--markdown"]).markdown).toBe(true);
-    expect(parseArgs(["--md"]).markdown).toBe(true);
-    expect(parseArgs([]).markdown).toBe(false);
+    expect(parse_args(["-m"]).markdown).toBe(true);
+    expect(parse_args(["--markdown"]).markdown).toBe(true);
+    expect(parse_args(["--md"]).markdown).toBe(true);
+    expect(parse_args([]).markdown).toBe(false);
   });
 
   it("reads -j / --json-schema / --json", () => {
-    expect(parseArgs(["-j"]).jsonSchema).toBe(true);
-    expect(parseArgs(["--json-schema"]).jsonSchema).toBe(true);
-    expect(parseArgs(["--json"]).jsonSchema).toBe(true);
-    expect(parseArgs([]).jsonSchema).toBe(false);
+    expect(parse_args(["-j"]).json_schema).toBe(true);
+    expect(parse_args(["--json-schema"]).json_schema).toBe(true);
+    expect(parse_args(["--json"]).json_schema).toBe(true);
+    expect(parse_args([]).json_schema).toBe(false);
   });
 });
 
@@ -141,10 +141,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: err,
+      error_output: err,
       isTTY: false,
       argv: ["--help"],
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(0);
     expect(reader.read()).toContain("Usage:");
@@ -156,10 +156,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: ["--version"],
-      versionString: "act-contracts test-1.2.3",
+      version_string: "act-contracts test-1.2.3",
     });
     expect(code).toBe(0);
     expect(reader.read()).toContain("act-contracts test-1.2.3");
@@ -173,10 +173,10 @@ describe("main", () => {
       const code = await main({
         input: new PassThrough(),
         output: new PassThrough(),
-        errorOutput: err,
+        error_output: err,
         isTTY: false,
         argv: [empty],
-        versionString: "test",
+        version_string: "test",
       });
       expect(code).toBe(1);
       expect(reader.read()).toContain("no TypeScript source files");
@@ -198,10 +198,10 @@ describe("main", () => {
       const code = await main({
         input: new PassThrough(),
         output: new PassThrough(),
-        errorOutput: err,
+        error_output: err,
         isTTY: false,
         argv: [big, "--max-files", "1", "-q", "anything"],
-        versionString: "test",
+        version_string: "test",
       });
       // Truncated scan still emits the warning even if the query has no hits.
       expect([0, 1]).toContain(code);
@@ -211,23 +211,23 @@ describe("main", () => {
     }
   });
 
-  it("falls back to defaultDir when no positional arg or --cwd is given", async () => {
+  it("falls back to default_dir when no positional arg or --cwd is given", async () => {
     const out = new PassThrough();
     const outReader = collect(out);
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: ["-q", "Incremented"],
-      versionString: "test",
-      defaultDir: root,
+      version_string: "test",
+      default_dir: root,
     });
     expect(code).toBe(0);
     expect(outReader.read()).toContain("Incremented");
   });
 
-  it("uses '.' when neither --cwd nor defaultDir is provided", async () => {
+  it("uses '.' when neither --cwd nor default_dir is provided", async () => {
     const empty = await mkdtemp(join(tmpdir(), "act-cli-defaultdir-"));
     const prevCwd = process.cwd();
     try {
@@ -235,10 +235,10 @@ describe("main", () => {
       const code = await main({
         input: new PassThrough(),
         output: new PassThrough(),
-        errorOutput: new PassThrough(),
+        error_output: new PassThrough(),
         isTTY: false,
         argv: [],
-        versionString: "test",
+        version_string: "test",
       });
       expect(code).toBe(1);
     } finally {
@@ -253,10 +253,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root, "-q", "Incremented"],
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(0);
     const text = outReader.read();
@@ -282,10 +282,10 @@ describe("main", () => {
       const code = await main({
         input: new PassThrough(),
         output: out,
-        errorOutput: new PassThrough(),
+        error_output: new PassThrough(),
         isTTY: false,
         argv: [ambiguous, "-q", "Inc"],
-        versionString: "test",
+        version_string: "test",
       });
       expect(code).toBe(0);
       expect(outReader.read()).toContain("matches");
@@ -300,10 +300,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root, "-q", "Tot"], // partial — only matches projection Totals
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(0);
     expect(outReader.read()).toContain("totals");
@@ -314,11 +314,11 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: new PassThrough(),
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root],
-      versionString: "test",
-      runInteractive: async () => {
+      version_string: "test",
+      run_interactive: async () => {
         called++;
       },
     });
@@ -326,14 +326,14 @@ describe("main", () => {
     expect(called).toBe(1);
   });
 
-  it("falls through to the default runInteractive when no override is given", async () => {
-    // Mock the repl module so the *real* `runInteractive` import inside
-    // index.ts becomes a no-op. This exercises the `?? runInteractive`
+  it("falls through to the default run_interactive when no override is given", async () => {
+    // Mock the repl module so the *real* `run_interactive` import inside
+    // index.ts becomes a no-op. This exercises the `?? run_interactive`
     // arm without hanging on the clack prompts.
     vi.resetModules();
     let invoked = 0;
     vi.doMock("../src/cli/repl.js", () => ({
-      runInteractive: async () => {
+      run_interactive: async () => {
         invoked++;
       },
     }));
@@ -341,10 +341,10 @@ describe("main", () => {
     const code = await mainFresh({
       input: new PassThrough(),
       output: new PassThrough(),
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root],
-      versionString: "test",
+      version_string: "test",
     });
     vi.doUnmock("../src/cli/repl.js");
     vi.resetModules();
@@ -358,10 +358,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root, "--markdown"],
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(0);
     const text = reader.read();
@@ -376,10 +376,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: out,
-      errorOutput: new PassThrough(),
+      error_output: new PassThrough(),
       isTTY: false,
       argv: [root, "--json-schema"],
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(0);
     const parsed = JSON.parse(reader.read());
@@ -397,10 +397,10 @@ describe("main", () => {
     const code = await main({
       input: new PassThrough(),
       output: new PassThrough(),
-      errorOutput: err,
+      error_output: err,
       isTTY: false,
       argv: [root, "-q", "no-such-event"],
-      versionString: "test",
+      version_string: "test",
     });
     expect(code).toBe(1);
     expect(errReader.read()).toContain("no matches");

@@ -3,7 +3,7 @@ import { extractIdempotencyKey } from "./extract.js";
 import { type VerifyOptions, verifyWebhook } from "./verify.js";
 
 /**
- * Failure reasons returned by {@link checkWebhook}. The shape splits
+ * Failure reasons returned by {@link check_webhook}. The shape splits
  * `missing-key` (a client error, mapped to HTTP 400) from the five
  * verification failures (authentication errors, HTTP 401) so each
  * maps to its own telemetry bucket.
@@ -17,7 +17,7 @@ export type CheckFailureReason =
   | "bad-signature";
 
 /**
- * Outcome of {@link checkWebhook}. Either the request passed every
+ * Outcome of {@link check_webhook}. Either the request passed every
  * configured check and carries a usable idempotency key, or it
  * failed one of them and the framework adapter should reply with the
  * corresponding HTTP status.
@@ -26,7 +26,7 @@ export type CheckResult =
   | { ok: false; status: 400 | 401; reason: CheckFailureReason }
   | { ok: true; key: string; deduped: boolean };
 
-/** Options for {@link checkWebhook}. */
+/** Options for {@link check_webhook}. */
 export type CheckWebhookOptions = {
   /** Idempotency store the framework-agnostic core claims the key on. */
   store: IdempotencyStore;
@@ -67,7 +67,7 @@ export type CheckWebhookOptions = {
  * (durable adapters like a future `PostgresIdempotencyStore`); the
  * core awaits unconditionally so both shapes compose cleanly.
  */
-export async function checkWebhook(
+export async function check_webhook(
   headers: Record<string, string | string[] | undefined>,
   body: string,
   options: CheckWebhookOptions

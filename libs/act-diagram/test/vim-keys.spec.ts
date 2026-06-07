@@ -74,7 +74,7 @@ describe("enableVimKeys", () => {
       stdin as unknown as Parameters<typeof enableVimKeys>[0]
     );
     let fired = 0;
-    handle.onSlash(() => {
+    handle.on_slash(() => {
       fired++;
     });
     stdin.emit("data", Buffer.from("/"));
@@ -83,13 +83,13 @@ describe("enableVimKeys", () => {
     expect(fired).toBe(1);
   });
 
-  it("onSlash unsubscribe stops further callbacks", () => {
+  it("on_slash unsubscribe stops further callbacks", () => {
     const { stdin } = sink();
     const handle = enableVimKeys(
       stdin as unknown as Parameters<typeof enableVimKeys>[0]
     );
     let fired = 0;
-    const unsub = handle.onSlash(() => {
+    const unsub = handle.on_slash(() => {
       fired++;
     });
     stdin.emit("data", Buffer.from("/"));

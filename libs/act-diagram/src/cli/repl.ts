@@ -7,25 +7,25 @@
 import { writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { intro, isCancel, log, outro, select, text } from "@clack/prompts";
-import { dim, kindColor } from "./colors.js";
+import { dim, kind_color } from "./colors.js";
 import {
   CATEGORY_KEYWORDS,
   type ContractIndex,
   type IndexEntry,
   type Kind,
-  listByKind,
+  list_by_kind,
   search,
 } from "./contract-index.js";
-import { formatDetail, formatSummary } from "./format.js";
-import { formatJsonSchema } from "./json-schema.js";
-import { formatMarkdown } from "./markdown.js";
-import { openInEditor, pickEditor } from "./open-editor.js";
+import { format_detail, format_summary } from "./format.js";
+import { format_json_schema } from "./json-schema.js";
+import { format_markdown } from "./markdown.js";
+import { open_in_editor, pick_editor } from "./open-editor.js";
 import { enableVimKeys, type VimKeysHandle } from "./vim-keys.js";
 
-/** Module-level handle so searchByName can pause/resume around text input. */
-let vimKeys: VimKeysHandle | null = null;
+/** Module-level handle so search_by_name can pause/resume around text input. */
+let vim_keys: VimKeysHandle | null = null;
 /** Set when `/` is pressed in a select; the surrounding loop catches it. */
-let searchRequested = false;
+let search_requested = false;
 
 type CategoryChoice = Kind | "export";
 
@@ -50,24 +50,24 @@ const KIND_ORDER: Kind[] = [
   "reaction",
 ];
 
-const countByKind = (idx: ContractIndex, kind: Kind): number => {
-  if (kind === "event") return idx.allEventNames.size;
+const count_by_kind = (idx: ContractIndex, kind: Kind): number => {
+  if (kind === "event") return idx.all_event_names.size;
   return idx.entries.filter((e) => e.kind === kind).length;
 };
 
-const labelEntry = (e: IndexEntry): string => {
+const label_entry = (e: IndexEntry): string => {
   const loc = e.file ? `${e.file}${e.line ? `:${e.line}` : ""}` : "";
   const where = loc ? `  ${dim(loc)}` : "";
   const qual = e.qualifier ? dim(` (${e.qualifier})`) : "";
-  // `e.kind` is a Kind union and `kindColor` has every Kind as a key,
+  // `e.kind` is a Kind union and `kind_color` has every Kind as a key,
   // so the lookup is total.
-  const colored = kindColor[e.kind](e.name);
+  const colored = kind_color[e.kind](e.name);
   return `${colored}${qual}${where}`;
 };
 
-async function pickFromList(
+async function pick_from_list(
   idx: ContractIndex,
-  rootDir: string,
+  root_dir: string,
   message: string,
   entries: IndexEntry[]
 ): Promise<void> {
@@ -79,27 +79,27 @@ async function pickFromList(
     message: `${message}  ${NAV_LEGEND}`,
     options: entries.map((e) => ({
       value: e,
-      label: labelEntry(e),
+      label: label_entry(e),
       hint: e.kind,
     })),
     maxItems: 12,
   });
   if (isCancel(pick)) return;
-  await showDetail(idx, rootDir, pick);
+  await show_detail(idx, root_dir, pick);
 }
 
-async function showDetail(
+async function show_detail(
   idx: ContractIndex,
-  rootDir: string,
+  root_dir: string,
   entry: IndexEntry
 ): Promise<void> {
   // log.message keeps our ANSI colors intact; `note()` would wrap each
   // line in a dim attribute that washes the kind colors out. The first
-  // line of formatDetail is already the colored bold name, so no extra
+  // line of format_detail is already the colored bold name, so no extra
   // title prefix.
-  log.message(formatDetail(idx, entry));
+  log.message(format_detail(idx, entry));
   if (!entry.file) return;
-  const editor = pickEditor(process.env);
+  const editor = pick_editor(process.env);
   const action = await select<"open">({
     message: `now what?  ${NAV_LEGEND}`,
     options: [
@@ -111,7 +111,7 @@ async function showDetail(
     ],
   });
   if (isCancel(action)) return;
-  const result = await openInEditor(entry.file, entry.line, { rootDir });
+  const result = await open_in_editor(entry.file, entry.line, { root_dir });
   if (!result.ok) log.warn(`editor exited: ${result.reason ?? "unknown"}`);
 }
 
@@ -122,9 +122,9 @@ const DEFAULT_PATHS: Record<ExportFormat, string> = {
   "json-schema": "act-contracts.schema.json",
 };
 
-async function exportRegistry(
+async function export_registry(
   idx: ContractIndex,
-  rootDir: string
+  root_dir: string
 ): Promise<void> {
   const format = await select<ExportFormat>({
     message: `Export as  ${NAV_LEGEND}`,
@@ -143,18 +143,18 @@ async function exportRegistry(
   });
   if (isCancel(format)) return;
 
-  vimKeys?.pause();
+  vim_keys?.pause();
   const path = await text({
-    message: `Save to (relative to ${dim(rootDir)})  ${dim("(esc to cancel)")}`,
+    message: `Save to (relative to ${dim(root_dir)})  ${dim("(esc to cancel)")}`,
     placeholder: DEFAULT_PATHS[format],
     initialValue: DEFAULT_PATHS[format],
   });
-  vimKeys?.resume();
+  vim_keys?.resume();
   if (isCancel(path) || !path || !path.trim()) return;
 
   const content =
-    format === "markdown" ? formatMarkdown(idx) : formatJsonSchema(idx);
-  const abs = resolve(rootDir, path.trim());
+    format === "markdown" ? format_markdown(idx) : format_json_schema(idx);
+  const abs = resolve(root_dir, path.trim());
   try {
     await writeFile(abs, `${content}\n`, "utf8");
     log.success(`wrote ${abs}`);
@@ -167,28 +167,28 @@ async function exportRegistry(
   }
 }
 
-async function searchByName(
+async function search_by_name(
   idx: ContractIndex,
-  rootDir: string
+  root_dir: string
 ): Promise<void> {
   // Pause the vim-keys patch so j/k are typed as letters in the input
   // box. esc/q still cancel via clack's built-in handling (esc) or as
   // literal "q" if the user wants to search for that.
-  vimKeys?.pause();
+  vim_keys?.pause();
   const q = await text({
     message: `Partial name to search  ${dim("(esc to cancel)")}`,
     placeholder: "e.g. order, ticket, place",
   });
-  vimKeys?.resume();
+  vim_keys?.resume();
   if (isCancel(q) || !q || !q.trim()) return;
   const lower = q.trim().toLowerCase();
   const kind = CATEGORY_KEYWORDS[lower];
   if (kind) {
-    await pickFromList(
+    await pick_from_list(
       idx,
-      rootDir,
+      root_dir,
       `${KIND_LABELS[kind]}`,
-      listByKind(idx, kind)
+      list_by_kind(idx, kind)
     );
     return;
   }
@@ -197,43 +197,43 @@ async function searchByName(
     log.warn(`no matches for "${q}"`);
     return;
   }
-  await pickFromList(idx, rootDir, `matches for "${q}"`, matches);
+  await pick_from_list(idx, root_dir, `matches for "${q}"`, matches);
 }
 
-export async function runInteractive(
+export async function run_interactive(
   idx: ContractIndex,
-  rootDir: string
+  root_dir: string
 ): Promise<void> {
   // j/k → arrows, q → esc, / → request-search. Loops below catch the
-  // searchRequested flag when clack cancels and jump to search.
-  vimKeys = enableVimKeys(process.stdin);
-  const unsub = vimKeys.onSlash(() => {
-    searchRequested = true;
+  // search_requested flag when clack cancels and jump to search.
+  vim_keys = enableVimKeys(process.stdin);
+  const unsub = vim_keys.on_slash(() => {
+    search_requested = true;
   });
   try {
-    await driveInteractive(idx, rootDir);
+    await drive_interactive(idx, root_dir);
   } finally {
     unsub();
-    vimKeys.restore();
-    vimKeys = null;
-    searchRequested = false;
+    vim_keys.restore();
+    vim_keys = null;
+    search_requested = false;
   }
 }
 
-async function driveInteractive(
+async function drive_interactive(
   idx: ContractIndex,
-  rootDir: string
+  root_dir: string
 ): Promise<void> {
   intro("act — contracts explorer");
-  log.message(formatSummary(idx));
+  log.message(format_summary(idx));
 
   while (true) {
     // `/` anywhere in the flow cancels the active prompt and sets this
     // flag; checking at the top of the loop is enough for every screen
     // because each sub-flow returns control here.
-    if (searchRequested) {
-      searchRequested = false;
-      await searchByName(idx, rootDir);
+    if (search_requested) {
+      search_requested = false;
+      await search_by_name(idx, root_dir);
       continue;
     }
     const choice = await select<CategoryChoice>({
@@ -241,8 +241,8 @@ async function driveInteractive(
       options: [
         ...KIND_ORDER.map((k) => ({
           value: k as CategoryChoice,
-          label: kindColor[k](KIND_LABELS[k]),
-          hint: `${countByKind(idx, k)}`,
+          label: kind_color[k](KIND_LABELS[k]),
+          hint: `${count_by_kind(idx, k)}`,
         })),
         {
           value: "export" as const,
@@ -253,19 +253,19 @@ async function driveInteractive(
       maxItems: 10,
     });
     if (isCancel(choice)) {
-      if (searchRequested) continue; // `/` was pressed — loop will pick it up
+      if (search_requested) continue; // `/` was pressed — loop will pick it up
       outro("bye.");
       return;
     }
     if (choice === "export") {
-      await exportRegistry(idx, rootDir);
+      await export_registry(idx, root_dir);
       continue;
     }
-    await pickFromList(
+    await pick_from_list(
       idx,
-      rootDir,
+      root_dir,
       `${KIND_LABELS[choice]}`,
-      listByKind(idx, choice)
+      list_by_kind(idx, choice)
     );
   }
 }

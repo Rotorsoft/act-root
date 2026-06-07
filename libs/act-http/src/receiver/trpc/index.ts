@@ -39,7 +39,7 @@
  * that mode.
  */
 import { TRPCError } from "@trpc/server";
-import { type CheckWebhookOptions, checkWebhook } from "../check.js";
+import { type CheckWebhookOptions, check_webhook } from "../check.js";
 
 /**
  * Build a tRPC middleware that verifies the request signature (when
@@ -64,7 +64,7 @@ export function webhookMiddleware(options: CheckWebhookOptions): any {
     // biome-ignore lint/suspicious/noExplicitAny: see above
     next: (next: { ctx: any }) => Promise<any>;
   }) {
-    const result = await checkWebhook(
+    const result = await check_webhook(
       opts.ctx.headers,
       opts.ctx.rawBody,
       options
