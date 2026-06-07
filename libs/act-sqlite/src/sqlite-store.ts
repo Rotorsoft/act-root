@@ -30,6 +30,21 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/** Parse the JSON-stringified `pii` text column back to the in-memory
+ *  shape. Returns `null` when the column was NULL (the common case —
+ *  events without sensitive declarations). Consolidated so every read
+ *  path (`query`, both `query_stats` overloads) uses one branch instead
+ *  of repeating the ternary inline. */
+const parse_pii = (raw: unknown): Record<string, unknown> | null =>
+  raw == null ? null : JSON.parse(raw as string);
+
+/** Stringify the in-memory `pii` shape for the TEXT column. Returns
+ *  `null` when `pii` is absent so SQLite's row format can skip the
+ *  column entirely (zero extra bytes). Used by commit + restore. */
+const stringify_pii = (
+  pii: Readonly<Record<string, unknown>> | null | undefined
+): string | null => (pii == null ? null : JSON.stringify(pii));
+
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQL LIKE pattern. Honors `^` / `$` anchors and converts `.*` → `%`,
  *  `.` → `_`. Unanchored input gets `%` wildcards on both sides.
@@ -103,9 +118,20 @@ export class SqliteStore implements Store {
         data TEXT NOT NULL,
         meta TEXT NOT NULL,
         created TEXT NOT NULL,
+        pii TEXT,
         UNIQUE(stream, version)
       )
     `);
+    // Migration for tables created before pii_isolation (#871).
+    // libSQL surfaces "duplicate column" as an error, hence the
+    // try/swallow — mirrors PG's `ADD COLUMN IF NOT EXISTS`. SQLite's
+    // row format skips NULL columns, so events without sensitive
+    // declarations pay zero extra bytes.
+    try {
+      await this.client.execute("ALTER TABLE events ADD COLUMN pii TEXT");
+    } catch {
+      // already present
+    }
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_stream ON events(stream)"
     );
@@ -195,9 +221,9 @@ export class SqliteStore implements Store {
       const committed: Committed<E, keyof E>[] = [];
       let version = current_version + 1;
 
-      for (const { name, data } of msgs) {
+      for (const { name, data, pii } of msgs) {
         const result = await tx.execute({
-          sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
+          sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
             stream,
             version,
@@ -205,6 +231,7 @@ export class SqliteStore implements Store {
             JSON.stringify(data),
             JSON.stringify(meta),
             now,
+            stringify_pii(pii),
           ],
         });
         committed.push({
@@ -215,6 +242,7 @@ export class SqliteStore implements Store {
           name,
           data,
           meta,
+          ...(pii == null ? {} : { pii }),
         });
         version++;
       }
@@ -292,6 +320,7 @@ export class SqliteStore implements Store {
           name: row.name as string,
           data: JSON.parse(row.data as string),
           meta: JSON.parse(row.meta as string),
+          pii: parse_pii(row.pii),
         })
       );
       count++;
@@ -778,7 +807,7 @@ export class SqliteStore implements Store {
     args: unknown[],
     want_tail: boolean
   ): Promise<Map<string, StreamStats<E>>> {
-    const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
+    const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii`;
     const head_sql = `SELECT * FROM (
       SELECT ${cols}, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version DESC) AS rn
       FROM ${from_clause}
@@ -810,6 +839,7 @@ export class SqliteStore implements Store {
         data: JSON.parse(row.data as string),
         meta: JSON.parse(row.meta as string),
         created: new Date(row.created as string),
+        pii: parse_pii(row.pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
@@ -858,12 +888,12 @@ export class SqliteStore implements Store {
       : "";
     const tail_cols = want_tail
       ? `, t.id AS t_id, t.stream AS t_stream, t.version AS t_version,
-           t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta`
+           t.name AS t_name, t.data AS t_data, t.created AS t_created, t.meta AS t_meta, t.pii AS t_pii`
       : "";
 
     const sql = `
       WITH ef AS (
-        SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta
+        SELECT e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii
         FROM ${from_clause}
         ${where_clause}
       ),
@@ -885,7 +915,7 @@ export class SqliteStore implements Store {
       )
       ${tail_cte}
       SELECT
-        h.id, h.stream, h.version, h.name, h.data, h.created, h.meta,
+        h.id, h.stream, h.version, h.name, h.data, h.created, h.meta, h.pii,
         a.cnt AS agg_count,
         a.names AS agg_names
         ${tail_cols}
@@ -903,7 +933,8 @@ export class SqliteStore implements Store {
       name: unknown,
       data: unknown,
       meta: unknown,
-      created: unknown
+      created: unknown,
+      pii: unknown
     ): Committed<E, keyof E> =>
       ({
         id: Number(id),
@@ -913,6 +944,7 @@ export class SqliteStore implements Store {
         data: JSON.parse(data as string),
         meta: JSON.parse(meta as string),
         created: new Date(created as string),
+        pii: parse_pii(pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
@@ -931,7 +963,8 @@ export class SqliteStore implements Store {
           r.name,
           r.data,
           r.meta,
-          r.created
+          r.created,
+          r.pii
         ),
       };
       if (want_tail && r.t_id !== null && r.t_id !== undefined) {
@@ -942,7 +975,8 @@ export class SqliteStore implements Store {
           r.t_name,
           r.t_data,
           r.t_meta,
-          r.t_created
+          r.t_created,
+          r.t_pii
         );
       }
       if (want_count) stats.count = Number(r.agg_count);
@@ -1064,7 +1098,7 @@ export class SqliteStore implements Store {
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
       await driver(async (event) => {
         const ins = await tx.execute({
-          sql: "INSERT INTO events (stream, version, name, data, meta, created) VALUES (?, ?, ?, ?, ?, ?)",
+          sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
             event.stream,
             event.version,
@@ -1072,6 +1106,7 @@ export class SqliteStore implements Store {
             JSON.stringify(event.data),
             JSON.stringify(event.meta),
             event.created.toISOString(),
+            stringify_pii(event.pii),
           ],
         });
         return Number(ins.lastInsertRowid);
@@ -1081,5 +1116,30 @@ export class SqliteStore implements Store {
       await tx.rollback();
       throw error;
     }
+  }
+
+  /**
+   * Wipe the sensitive-data payload for every event on the stream — the
+   * physical-erasure side of the sensitive-data epic (#566). Sets
+   * `events.pii` to `NULL` for the stream's events; `events.data` and
+   * the rest of the row are never touched.
+   *
+   * Single `UPDATE` under SQLite's writer lock, bounded by events-per-
+   * stream. Idempotent — the `pii IS NOT NULL` predicate filters out
+   * already-wiped rows so a second call returns `0`.
+   *
+   * SQLite doesn't auto-reclaim space; freed pages stay in the file
+   * until an operator-scheduled `PRAGMA incremental_vacuum` or a full
+   * `VACUUM`. The production checklist documents the cadence.
+   *
+   * @param stream Target stream
+   * @returns Count of events whose `pii` was set to `NULL`
+   */
+  async forget_pii(stream: string): Promise<number> {
+    const r = await this.client.execute({
+      sql: "UPDATE events SET pii = NULL WHERE stream = ? AND pii IS NOT NULL",
+      args: [stream],
+    });
+    return r.rowsAffected ?? 0;
   }
 }
