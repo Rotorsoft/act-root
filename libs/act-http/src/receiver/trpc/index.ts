@@ -33,7 +33,7 @@
  *
  * **Raw body requirement**: when `secret` is configured, the middleware
  * needs the raw request bytes for HMAC verification. Capture them in
- * `create_context` — most tRPC HTTP adapters expose the raw stream;
+ * `createContext` — most tRPC HTTP adapters expose the raw stream;
  * read it into a string and stash it on `ctx.rawBody`. Skip when
  * unsigned (no `secret`) — the middleware never reads `rawBody` in
  * that mode.

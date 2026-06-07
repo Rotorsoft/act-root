@@ -95,5 +95,7 @@ export {
 } from "./fixtures/helpers.js";
 export type { LoggerTckOptions } from "./logger-tck.js";
 export { runLoggerTck } from "./logger-tck.js";
+export type { StabilityTckOptions } from "./stability-tck.js";
+export { runStabilityTck } from "./stability-tck.js";
 export type { StoreCapabilities, StoreTckOptions } from "./store-tck.js";
 export { runStoreTck } from "./store-tck.js";

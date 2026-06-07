@@ -14,11 +14,11 @@
  *   app.do() → snapshots (each carries its domain patch)
  *       │
  *       ▼
- *   derive_state(snap)          ← app-specific (overlay presence, deadlines, etc.)
+ *   deriveState(snap)          ← app-specific (overlay presence, deadlines, etc.)
  *   state._v = snap.event.version
  *       │
  *       ▼
- *   broadcast.publish(stream_id, state, patches)
+ *   broadcast.publish(streamId, state, patches)
  *       │
  *       ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2 }
  *       └── push to all SSE subscribers

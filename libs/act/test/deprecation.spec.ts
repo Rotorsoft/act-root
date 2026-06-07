@@ -24,8 +24,8 @@ describe("deprecation (ACT-403)", () => {
   });
 
   const actor = { id: "a", name: "a" };
-  let stream_id = 0;
-  const nextStream = () => `dep-${++stream_id}`;
+  let streamId = 0;
+  const nextStream = () => `dep-${++streamId}`;
 
   describe("deprecated_event_names", () => {
     it("flags nothing when every event is a single version", () => {

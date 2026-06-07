@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
 import { webhookMiddleware } from "../../../src/receiver/hono/index.js";
 
-const BODY = '{"order_id":"o-1"}';
+const BODY = '{"orderId":"o-1"}';
 
 function freshStore() {
   return new InMemoryIdempotencyStore();

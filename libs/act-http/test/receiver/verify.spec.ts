@@ -3,7 +3,7 @@ import { verifyWebhook } from "../../src/receiver/index.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
-const BODY = '{"order_id":"o-1"}';
+const BODY = '{"orderId":"o-1"}';
 const NOW = 1_700_000_000;
 
 /** Build a headers bag for a request signed at `signedAt` with the test secret. */
@@ -232,7 +232,7 @@ describe("verifyWebhook", () => {
     it("rejects when the body was tampered with after signing", () => {
       const headers = signedHeaders(NOW, BODY);
       expect(
-        verifyWebhook(headers, '{"order_id":"o-2"}', SECRET, { now: NOW })
+        verifyWebhook(headers, '{"orderId":"o-2"}', SECRET, { now: NOW })
       ).toEqual({ ok: false, reason: "bad-signature" });
     });
 

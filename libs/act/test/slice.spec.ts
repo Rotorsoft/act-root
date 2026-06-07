@@ -30,8 +30,8 @@ describe("slice", () => {
 
   const actor = { id: "a", name: "a" };
 
-  let stream_id = 0;
-  const nextStream = () => `slice-test-${++stream_id}`;
+  let streamId = 0;
+  const nextStream = () => `slice-test-${++streamId}`;
 
   it("should build a slice with states and empty reactions", () => {
     const s = slice().withState(PartA).build();

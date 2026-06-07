@@ -32,7 +32,7 @@ import type {
  *
  * @example System actor
  * ```typescript
- * const system_actor: Actor = {
+ * const systemActor: Actor = {
  *   id: "system",
  *   name: "Background Job"
  * };
@@ -171,7 +171,7 @@ export type CorrelatorContext = {
  *
  * // Propagate an inbound trace id when present
  * const tracePropagating: Correlator = (ctx) =>
- *   currentTraceId() ?? default_correlator(ctx);
+ *   currentTraceId() ?? defaultCorrelator(ctx);
  * ```
  *
  * Other shapes:
@@ -554,7 +554,7 @@ export type State<
    * - `message(validated)` — produces the `{name, data, pii?}` shape that
    *   goes to `Store.commit` (peels sensitive fields off `data` into
    *   `pii` on PII-aware states; identity otherwise).
-   * - `patch[event_name]` — already on State as the per-event reducer.
+   * - `patch[eventName]` — already on State as the per-event reducer.
    *   Wrapped at build time to merge PII into `data` first when the
    *   event carries sensitive fields; left bare for plain reducers.
    *

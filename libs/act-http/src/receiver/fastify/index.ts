@@ -39,7 +39,7 @@
  * **Raw body requirement**: when `secret` is configured, register a
  * content-type parser that preserves the raw body string. Fastify's
  * default JSON parser eats the bytes — register a custom parser via
- * `app.addContentTypeParser("application/json", { parse_as: "string" }, …)`
+ * `app.addContentTypeParser("application/json", { parseAs: "string" }, …)`
  * and stash the string on `request.rawBody` (Fastify pattern). The
  * middleware reads `request.rawBody` for hashing. Skip when unsigned.
  */

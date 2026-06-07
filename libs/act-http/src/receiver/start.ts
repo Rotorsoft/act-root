@@ -23,12 +23,12 @@ import { webhookMiddleware } from "./hono/index.js";
  *   secret: process.env.WEBHOOK_SECRET,
  * })
  *   .on("OrderConfirmed", z.object({
- *     order_id: z.string(),
+ *     orderId: z.string(),
  *     total: z.number(),
  *   }), async (event, ctx) => {
- *     // event.order_id and event.total are typed
+ *     // event.orderId and event.total are typed
  *     // ctx.key is the deduplicated Idempotency-Key
- *     await process_order(event.order_id, event.total);
+ *     await process_order(event.orderId, event.total);
  *   })
  *   .build();
  *

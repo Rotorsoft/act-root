@@ -24,7 +24,7 @@
  *   store: new InMemoryIdempotencyStore(),
  *   secret: process.env.WEBHOOK_SECRET,
  * })
- *   .on("OrderConfirmed", z.object({ order_id: z.string() }), async (event, ctx) => {
+ *   .on("OrderConfirmed", z.object({ orderId: z.string() }), async (event, ctx) => {
  *     // event is typed; ctx.key is the dedup key
  *   })
  *   .build();

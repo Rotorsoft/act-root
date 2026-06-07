@@ -5,7 +5,7 @@ import { receiver } from "../../src/receiver/start.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const OrderSchema = z.object({
-  order_id: z.string(),
+  orderId: z.string(),
   total: z.number(),
 });
 
@@ -20,7 +20,7 @@ afterEach(async () => {
 
 describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
   it("routes POST /<event_name> to the registered handler with a typed event", async () => {
-    let called: { order_id: string; total: number; key: string } | undefined;
+    let called: { orderId: string; total: number; key: string } | undefined;
 
     const r = receiver({
       port: 0, // not used in fetch mode
@@ -38,12 +38,12 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
           "content-type": "application/json",
           "idempotency-key": "req-1",
         },
-        body: JSON.stringify({ order_id: "o-1", total: 99.5 }),
+        body: JSON.stringify({ orderId: "o-1", total: 99.5 }),
       })
     );
 
     expect(response.status).toBe(204);
-    expect(called).toEqual({ order_id: "o-1", total: 99.5, key: "req-1" });
+    expect(called).toEqual({ orderId: "o-1", total: 99.5, key: "req-1" });
   });
 
   it("returns 204 without calling the handler on a deduplicated re-send", async () => {
@@ -65,7 +65,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
             "content-type": "application/json",
             "idempotency-key": "req-dup",
           },
-          body: JSON.stringify({ order_id: "o-1", total: 1 }),
+          body: JSON.stringify({ orderId: "o-1", total: 1 }),
         })
       );
 
@@ -86,7 +86,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
       new Request("http://localhost/OrderConfirmed", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ order_id: "o-1", total: 1 }),
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
       })
     );
 
@@ -109,7 +109,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
           "content-type": "application/json",
           "idempotency-key": "req-bad",
         },
-        body: JSON.stringify({ order_id: "o-1" }), // missing `total`
+        body: JSON.stringify({ orderId: "o-1" }), // missing `total`
       })
     );
 
@@ -134,7 +134,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
           "content-type": "application/json",
           "idempotency-key": "req-1",
         },
-        body: JSON.stringify({ order_id: "o-1", total: 1 }),
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
       })
     );
 
@@ -144,7 +144,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
 
   it("accepts signed requests when secret is configured", async () => {
     const SECRET = "shared";
-    const body = JSON.stringify({ order_id: "o-7", total: 42 });
+    const body = JSON.stringify({ orderId: "o-7", total: 42 });
     const { signature, timestamp } = sign_request(body, SECRET);
 
     let called = false;
@@ -154,7 +154,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
       secret: SECRET,
     })
       .on("OrderConfirmed", OrderSchema, async (event) => {
-        expect(event.order_id).toBe("o-7");
+        expect(event.orderId).toBe("o-7");
         called = true;
       })
       .build();
@@ -193,7 +193,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
           "content-type": "application/json",
           "idempotency-key": "req-fail",
         },
-        body: JSON.stringify({ order_id: "o-1", total: 1 }),
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
       })
     );
 
@@ -208,7 +208,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
 
   it("supports chaining multiple .on() calls with independent handler types", async () => {
     const ShipmentSchema = z.object({ trackingId: z.string() });
-    let order: { order_id: string } | undefined;
+    let order: { orderId: string } | undefined;
     let shipment: { trackingId: string } | undefined;
 
     const r = receiver({
@@ -216,7 +216,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
       store: new InMemoryIdempotencyStore(),
     })
       .on("OrderConfirmed", OrderSchema, async (event) => {
-        order = { order_id: event.order_id };
+        order = { orderId: event.orderId };
       })
       .on("OrderShipped", ShipmentSchema, async (event) => {
         shipment = { trackingId: event.trackingId };
@@ -230,7 +230,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
           "content-type": "application/json",
           "idempotency-key": "k1",
         },
-        body: JSON.stringify({ order_id: "o-1", total: 1 }),
+        body: JSON.stringify({ orderId: "o-1", total: 1 }),
       })
     );
 
@@ -245,7 +245,7 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
       })
     );
 
-    expect(order).toEqual({ order_id: "o-1" });
+    expect(order).toEqual({ orderId: "o-1" });
     expect(shipment).toEqual({ trackingId: "trk-1" });
   });
 });
@@ -270,7 +270,7 @@ describe("receiver — listen mode (long-running Node server)", () => {
         "content-type": "application/json",
         "idempotency-key": "live-1",
       },
-      body: JSON.stringify({ order_id: "o-live", total: 1 }),
+      body: JSON.stringify({ orderId: "o-live", total: 1 }),
     });
     expect(response.status).toBe(204);
     expect(called).toBe(true);

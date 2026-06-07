@@ -7,7 +7,7 @@ import {
 } from "../../src/webhook/index.js";
 
 type Events = {
-  OrderConfirmed: { order_id: string; total: number };
+  OrderConfirmed: { orderId: string; total: number };
 };
 
 function makeEvent(
@@ -19,7 +19,7 @@ function makeEvent(
     stream: "order-7",
     version: 0,
     created: new Date("2026-05-16T10:00:00Z"),
-    data: { order_id: "order-7", total: 99.5 },
+    data: { orderId: "order-7", total: 99.5 },
     meta: { correlation: "test-corr", causation: {} },
     ...overrides,
   };
@@ -261,7 +261,7 @@ describe("webhook", () => {
         url: "https://example.com/hook",
         body: (e: Committed<Events, keyof Events>) => ({
           kind: e.name,
-          order: e.data.order_id,
+          order: e.data.orderId,
           total: e.data.total,
         }),
         fetch,
@@ -295,7 +295,7 @@ describe("webhook", () => {
       await handler(event, "stream-1", {} as never);
       const parsed = JSON.parse(calls[0].init.body as string);
       expect(parsed.name).toBe("OrderConfirmed");
-      expect(parsed.data.order_id).toBe("order-7");
+      expect(parsed.data.orderId).toBe("order-7");
     });
 
     it("invokes url function with the event", async () => {
@@ -354,14 +354,14 @@ describe("webhook", () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://x.example/webhook",
-        body: (e) => ({ order_id: e.stream, total: e.data.total }),
+        body: (e) => ({ orderId: e.stream, total: e.data.total }),
         secret: "shared-secret",
         fetch,
       });
       await handler(makeEvent(), "stream-1", {} as never);
       const init = calls[0]?.init;
       expect(init?.body).toBe(
-        JSON.stringify({ order_id: "order-7", total: 99.5 })
+        JSON.stringify({ orderId: "order-7", total: 99.5 })
       );
       const headers = init?.headers as Record<string, string>;
       expect(headers["X-Webhook-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);

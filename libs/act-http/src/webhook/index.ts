@@ -16,7 +16,7 @@
  *     webhook({
  *       url: "https://api.example.com/webhooks/orders",
  *       headers: (e) => ({ Authorization: "Bearer ..." }),
- *       body: (e) => ({ order_id: e.stream, total: e.data.total }),
+ *       body: (e) => ({ orderId: e.stream, total: e.data.total }),
  *       timeoutMs: 5_000,
  *     }),
  *     { maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 } }

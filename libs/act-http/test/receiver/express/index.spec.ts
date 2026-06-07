@@ -3,7 +3,7 @@ import type { NextFunction, Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { webhookMiddleware } from "../../../src/receiver/express/index.js";
 
-const BODY = '{"order_id":"o-1"}';
+const BODY = '{"orderId":"o-1"}';
 
 function freshStore() {
   return new InMemoryIdempotencyStore();

@@ -24,30 +24,30 @@ export class PresenceTracker {
   private streams = new Map<string, Map<string, number>>();
 
   /** Increment ref count for an identity on a stream. */
-  add(stream_id: string, identity_id: string): void {
-    if (!this.streams.has(stream_id)) this.streams.set(stream_id, new Map());
-    const counts = this.streams.get(stream_id)!;
+  add(streamId: string, identity_id: string): void {
+    if (!this.streams.has(streamId)) this.streams.set(streamId, new Map());
+    const counts = this.streams.get(streamId)!;
     counts.set(identity_id, (counts.get(identity_id) ?? 0) + 1);
   }
 
   /** Decrement ref count. Removes the identity when count reaches 0. */
-  remove(stream_id: string, identity_id: string): void {
-    const counts = this.streams.get(stream_id);
+  remove(streamId: string, identity_id: string): void {
+    const counts = this.streams.get(streamId);
     if (!counts) return;
     const n = (counts.get(identity_id) ?? 1) - 1;
     if (n <= 0) counts.delete(identity_id);
     else counts.set(identity_id, n);
-    if (counts.size === 0) this.streams.delete(stream_id);
+    if (counts.size === 0) this.streams.delete(streamId);
   }
 
   /** Get the set of online identity IDs for a stream. */
-  get_online(stream_id: string): Set<string> {
-    const counts = this.streams.get(stream_id);
+  get_online(streamId: string): Set<string> {
+    const counts = this.streams.get(streamId);
     return counts ? new Set(counts.keys()) : new Set();
   }
 
   /** Check if a specific identity is online for a stream. */
-  is_online(stream_id: string, identity_id: string): boolean {
-    return (this.streams.get(stream_id)?.get(identity_id) ?? 0) > 0;
+  is_online(streamId: string, identity_id: string): boolean {
+    return (this.streams.get(streamId)?.get(identity_id) ?? 0) > 0;
   }
 }

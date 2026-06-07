@@ -4,8 +4,8 @@ import { sandbox } from "../src/test/index.js";
 
 describe("projection", () => {
   const actor = { id: "a", name: "a" };
-  let stream_id = 0;
-  const nextStream = () => `proj-test-${++stream_id}`;
+  let streamId = 0;
+  const nextStream = () => `proj-test-${++streamId}`;
 
   const Incremented = z.object({ by: z.number() });
   const Labeled = z.object({ label: z.string() });

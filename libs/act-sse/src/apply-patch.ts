@@ -21,12 +21,12 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  *
  * ```typescript
  * onData: (msg) => {
- *   const cached = utils.get_state.get_data({ stream_id });
+ *   const cached = utils.get_state.get_data({ streamId });
  *   const result = applyPatchMessage(msg, cached);
  *   if (result.ok) {
- *     utils.get_state.setData({ stream_id }, result.state);
+ *     utils.get_state.setData({ streamId }, result.state);
  *   } else if (result.reason === "behind") {
- *     utils.get_state.invalidate({ stream_id }); // trigger full refetch
+ *     utils.get_state.invalidate({ streamId }); // trigger full refetch
  *   }
  *   // "stale" → no-op, client already has newer state
  * }
