@@ -34,6 +34,7 @@ import type {
   CloseTarget,
   Committed,
   Correlator,
+  DoOptions,
   Drain,
   DrainOptions,
   EventSink,
@@ -41,6 +42,7 @@ import type {
   IAct,
   LaneConfig,
   Lease,
+  LoadTarget,
   Logger,
   Query,
   Registry,
@@ -602,7 +604,9 @@ export class Act<
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
    * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation (use carefully, for performance)
+   * @param skipValidation - Skip schema validation of the action's
+   *   *emitted events* (use carefully, for performance). Action
+   *   payloads are always validated — they cross a trust boundary.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -657,7 +661,7 @@ export class Act<
    *         { amount: event.data.items.length }
    *       );
    *       // To use a different correlation, pass reactingTo explicitly:
-   *       // await app.do("reduceStock", target, payload, customEvent);
+   *       // await app.do("reduceStock", target, payload, { reactingTo: customEvent });
    *     })
    *     .to("inventory-1")
    *   .build();
@@ -671,8 +675,7 @@ export class Act<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<TEvents, string & keyof TEvents>,
-    skipValidation = false
+    options?: DoOptions<TEvents>
   ) {
     return this._scoped(async () => {
       const snapshots = await this._es.action(
@@ -680,8 +683,7 @@ export class Act<
         action,
         target,
         payload,
-        reactingTo,
-        skipValidation
+        options
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions
@@ -741,6 +743,7 @@ export class Act<
    *
    * @see {@link Snapshot} for snapshot structure
    */
+  // Anonymous load (bare stream) — sensitive fields come back as REDACTED.
   async load<
     TNewState extends Schema,
     TNewEvents extends Schemas,
@@ -749,22 +752,34 @@ export class Act<
     state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
     callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<TNewState, TNewEvents>>;
   async load<TKey extends keyof TStateMap & string>(
     name: TKey,
     stream: string,
     callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
+  ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
+  // Auth-aware load — runs `.discloses(predicate)` against the supplied actor.
+  async load<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    state: State<TNewState, TNewEvents, TNewActions>,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void
+  ): Promise<Snapshot<TNewState, TNewEvents>>;
+  async load<TKey extends keyof TStateMap & string>(
+    name: TKey,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void
   ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
   async load<TNewState extends Schema>(
     stateOrName: State<TNewState, any, any> | string,
-    stream: string,
+    streamOrTarget: string | LoadTarget<TActor>,
     callback?: (snapshot: Snapshot<any, any>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<any, any>> {
     return this._scoped(async () => {
       let merged: State<any, any, any>;
@@ -775,9 +790,18 @@ export class Act<
       } else {
         merged = this._states.get(stateOrName.name) || stateOrName;
       }
-      // When `actor` is omitted the read default-denies — sensitive fields
-      // come back as [REDACTED] regardless of any `.discloses` predicate.
-      return await this._es.load(merged, stream, callback, asOf, actor);
+      // Normalize the two surfaces: bare-stream (default-deny — actor
+      // undefined → REDACTED on the discloses check) vs LoadTarget
+      // (auth-aware — actor flows into `.discloses(predicate)`).
+      const target: LoadTarget<Actor> =
+        typeof streamOrTarget === "string"
+          ? {
+              stream: streamOrTarget,
+              actor: undefined as unknown as Actor,
+              asOf,
+            }
+          : streamOrTarget;
+      return await this._es.load(merged, target, callback);
     });
   }
 

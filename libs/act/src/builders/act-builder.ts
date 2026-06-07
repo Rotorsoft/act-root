@@ -13,7 +13,6 @@ import {
   merge_projection,
   pii_fields,
   pii_gate,
-  pii_merge,
   pii_split,
   pii_strip,
   register_state,
@@ -611,22 +610,22 @@ export function act<
               );
             }
             const disclose = state.disclose ?? null;
-            state.view = (event, actor) => {
-              const fields = fields_by_event.get(event.name as string);
-              return fields ? pii_gate(event, fields, disclose, actor) : event;
-            };
+            state.pii_aware = true;
+            // A pii-aware state can still declare events with no
+            // sensitive markers — `fields_by_event` only contains the
+            // sensitive ones. The non-sensitive lookup hits `?? []`,
+            // and `pii_gate` short-circuits on empty fields.
+            state.view = (event, actor) =>
+              pii_gate(
+                event,
+                fields_by_event.get(event.name as string) ?? [],
+                disclose,
+                actor
+              );
             state.message = (validated) => {
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
             };
-            // `state-builder` guarantees a passthrough reducer per declared
-            // event, so the lookup is never undefined here. Plain reducers
-            // (for this state's non-sensitive events) stay unwrapped.
-            for (const [event_name, fields] of fields_by_event) {
-              const original = state.patch[event_name];
-              state.patch[event_name] = (event, s) =>
-                original(pii_merge(event, fields), s);
-            }
           }
           for (const [target, original] of batch_handlers) {
             const wrapped = async (events: any[], stream: string) => {

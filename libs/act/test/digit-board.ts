@@ -64,7 +64,7 @@ export const app = act()
       "CountDigit",
       { stream: "Board", actor },
       { digit: event.data.digit },
-      event
+      { reactingTo: event }
     );
   })
   .to({ source: `^(${streams.join("|")})$`, target: "Board" })
@@ -78,7 +78,7 @@ export const app = act()
       "ProjectResult",
       { stream: "Calculator" + stream, actor },
       { result: calc.state.result },
-      event
+      { reactingTo: event }
     );
   })
   .to((e) => ({

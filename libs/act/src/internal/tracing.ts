@@ -170,26 +170,17 @@ export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator
 ): EsOps {
-  // `es.action` takes `correlator` as its last positional arg; bind it once
-  // here so the orchestrator's `EsOps.action` keeps the original 6-arg
-  // signature.
+  // Bake the orchestrator-level `correlator` into every `action()` call
+  // so EsOps callers don't need to thread it. A per-call
+  // `options.correlator` still wins — the orchestrator default fills in
+  // only when the caller didn't supply one.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
-    reactingTo,
-    skipValidation = false
-  ) =>
-    es.action(
-      me,
-      action_name,
-      target,
-      payload,
-      reactingTo,
-      skipValidation,
-      correlator
-    );
+    options
+  ) => es.action(me, action_name, target, payload, { correlator, ...options });
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -208,7 +199,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
+    load: traced(es.load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -219,7 +210,7 @@ export function build_es(
         es_caption(
           "load",
           C_GREEN,
-          `${stream}${as_of_marker(asOf)} ${cache_marker(result.cache_hit)} ${stats}`
+          `${target.stream}${as_of_marker(target.asOf)} ${cache_marker(result.cache_hit)} ${stats}`
         )
       );
     }),

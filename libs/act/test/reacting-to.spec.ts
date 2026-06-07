@@ -105,7 +105,7 @@ describe("auto-inject reactingTo (#587)", () => {
             "receive2",
             { stream: "sink2-1", actor: { id: "sys", name: "system" } },
             { val: event.data.val },
-            fakeEvent
+            { reactingTo: fakeEvent }
           );
         })
         .to((event) => ({ target: `sink2-${event.stream}` }))

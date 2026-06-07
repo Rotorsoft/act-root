@@ -31,21 +31,39 @@ describe("cache integration", () => {
 
   it("cache miss populates cache on load", async () => {
     // Commit an event directly
-    await action(Counter, "increment", target, { count: 5 }, undefined, true);
+    await action(
+      Counter,
+      "increment",
+      target,
+      { count: 5 },
+      { skipValidation: true }
+    );
 
     // Load should populate cache
-    const snap = await load(Counter, "c1");
+    const snap = await load(Counter, { stream: "c1" });
     expect(snap.state.count).toBe(5);
 
     // Second load should use cache (partial replay with 0 new events)
-    const snap2 = await load(Counter, "c1");
+    const snap2 = await load(Counter, { stream: "c1" });
     expect(snap2.state.count).toBe(5);
     expect(snap2.patches).toBe(1);
   });
 
   it("action updates cache", async () => {
-    await action(Counter, "increment", target, { count: 3 }, undefined, true);
-    await action(Counter, "increment", target, { count: 7 }, undefined, true);
+    await action(
+      Counter,
+      "increment",
+      target,
+      { count: 3 },
+      { skipValidation: true }
+    );
+    await action(
+      Counter,
+      "increment",
+      target,
+      { count: 7 },
+      { skipValidation: true }
+    );
 
     // Cache should have latest state from the action
     const c = cache() as InMemoryCache;
@@ -56,15 +74,27 @@ describe("cache integration", () => {
 
   it("cached load returns correct state after multiple actions", async () => {
     for (let i = 1; i <= 10; i++) {
-      await action(Counter, "increment", target, { count: 1 }, undefined, true);
+      await action(
+        Counter,
+        "increment",
+        target,
+        { count: 1 },
+        { skipValidation: true }
+      );
     }
-    const snap = await load(Counter, "c1");
+    const snap = await load(Counter, { stream: "c1" });
     expect(snap.state.count).toBe(10);
     expect(snap.patches).toBe(10);
   });
 
   it("cache invalidated on ConcurrencyError", async () => {
-    await action(Counter, "increment", target, { count: 1 }, undefined, true);
+    await action(
+      Counter,
+      "increment",
+      target,
+      { count: 1 },
+      { skipValidation: true }
+    );
 
     // Force a concurrency error by using wrong expectedVersion
     try {
@@ -73,8 +103,7 @@ describe("cache integration", () => {
         "increment",
         { ...target, expectedVersion: 999 },
         { count: 1 },
-        undefined,
-        true
+        { skipValidation: true }
       );
     } catch {
       // expected
@@ -110,8 +139,7 @@ describe("cache integration", () => {
       "increment",
       target,
       { count: 5 },
-      undefined,
-      true
+      { skipValidation: true }
     );
     expect(snaps[0].state.count).toBe(5);
 

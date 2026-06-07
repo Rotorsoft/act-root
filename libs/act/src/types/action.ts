@@ -75,6 +75,29 @@ export type Target<TActor extends Actor = Actor> = {
 };
 
 /**
+ * Auth-aware target for `IAct.load`. Symmetric with {@link Target} (used by
+ * `IAct.do`) but without `expectedVersion` — load is a read, not a write —
+ * and with optional `asOf` for time-travel.
+ *
+ * Passing a `LoadTarget` (rather than a bare `stream` string) is the
+ * framework's explicit "I'm reading on behalf of this actor" signal. The
+ * read-path runs the state's `.discloses(predicate)` against this actor;
+ * sensitive fields come back as plaintext when authorized, `[REDACTED]`
+ * otherwise. The bare-string load form always default-denies (everything
+ * comes back `[REDACTED]`), so callers who need plaintext access must
+ * explicitly construct a `LoadTarget`. `actor` is optional — anonymous
+ * background calls (close-cycle replay, internal restart seeding) pass
+ * just the stream and get the default-deny path.
+ *
+ * @template TActor - The actor type bound at `act().withActor<TActor>()`.
+ */
+export type LoadTarget<TActor extends Actor = Actor> = {
+  readonly stream: string;
+  readonly actor?: TActor;
+  readonly asOf?: AsOf;
+};
+
+/**
  * Metadata describing the causation of an event.
  */
 export type CausationEvent = z.infer<typeof CausationEventSchema>;
@@ -503,6 +526,36 @@ export type ActionOptions = {
 };
 
 /**
+ * Per-call dispatch options for {@link IAct.do} — grouped to keep the
+ * public signature stable as new optional knobs are added.
+ *
+ * @property reactingTo - The committed event that triggered this action.
+ *   Threads the correlation chain (`correlation` + `causation.event`)
+ *   through the new commit. Inside reaction handlers, the framework
+ *   auto-injects the triggering event; pass an explicit value here only
+ *   to override.
+ * @property skipValidation - Skip schema validation of the action's
+ *   *emitted events* (the events the action produces). Action payloads
+ *   are always validated since they cross a trust boundary. Default
+ *   `false`.
+ * @property correlator - Per-call correlator override. When omitted,
+ *   falls back to the orchestrator-level {@link ActOptions.correlator}
+ *   (or the framework default). Useful when a single dispatch needs to
+ *   thread an externally-supplied trace id without globally swapping
+ *   the strategy.
+ */
+export type DoOptions<_TEvents extends Schemas = Schemas> = {
+  /**
+   * Wide type — `reactingTo` is typically a foreign event from another
+   * state's emission, threading correlation through a reaction. It is
+   * NOT constrained to the receiving state's event union.
+   */
+  readonly reactingTo?: Committed<Schemas, keyof Schemas>;
+  readonly skipValidation?: boolean;
+  readonly correlator?: Correlator;
+};
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -535,13 +588,13 @@ export type State<
    * default-denies on every external read (sensitive fields are always
    * substituted with `"[REDACTED]"`). See #855 / epic #566.
    */
-  // The stored predicate is erased — `any` for the event makes the field
-  // signature bivariant so a narrow `State<{count: number}, {Counted: ...},
-  // ...>` is assignable to `State<any, any, any>` without TypeScript blocking
-  // on contravariant function params. The public `.discloses()` method on the
-  // builder keeps the narrow signature so users still get type-checked predicates.
-  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
-  disclose?: (event: any, actor: Actor) => boolean;
+  // Method-shorthand syntax — bivariant on parameters under
+  // `strictFunctionTypes`, so a narrow `State<{count: number},
+  // {Counted: ...}, ...>` stays assignable to `State<any, any, any>`.
+  // The public `.discloses()` builder method keeps the narrow
+  // signature so users still get a type-checked predicate at the
+  // call site.
+  disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
   /**
    * Build-time step delegates wired by `act().build()`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -550,26 +603,36 @@ export type State<
    *
    * - `view(event, actor)` — produces the caller-visible form of a
    *   committed event (gates `sensitive(...)` fields via `.discloses` on
-   *   PII-aware states; identity otherwise).
+   *   PII-aware states; identity otherwise). The reducer chain runs
+   *   against this gated view, so derived state reflects what the
+   *   calling actor is allowed to see.
    * - `message(validated)` — produces the `{name, data, pii?}` shape that
    *   goes to `Store.commit` (peels sensitive fields off `data` into
    *   `pii` on PII-aware states; identity otherwise).
-   * - `patch[eventName]` — already on State as the per-event reducer.
-   *   Wrapped at build time to merge PII into `data` first when the
-   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * `pii_aware` is `true` when any of the state's events declare
+   * `sensitive(...)` fields. Drives the cache-write gate in `load()` /
+   * `action()` (#861): pii-aware states never populate the snapshot
+   * cache because state evolves from the actor-gated event view, so
+   * the cached state would vary by caller. Pure states cache normally.
    *
    * Internal, always set after build, never assigned by user code.
    *
    * @internal
    */
-  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
-  view: (event: any, actor: Actor | undefined) => any;
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  message: (validated: { name: any; data: any }) => {
-    name: any;
-    data: any;
-    pii?: Record<string, unknown>;
-  };
+  pii_aware: boolean;
+  // Method-shorthand syntax — bivariant on parameters, so
+  // `State<specific>` stays assignable to `State<any, any, any>`. No
+  // `any` escapes needed: `view` operates on the event union; `message`
+  // on the message union (a `Message<TEvents, TKey>` with optional
+  // `pii` after split).
+  view(
+    event: Committed<TEvents, keyof TEvents>,
+    actor: Actor | undefined
+  ): Committed<TEvents, keyof TEvents>;
+  message(
+    validated: Message<TEvents, keyof TEvents>
+  ): Message<TEvents, keyof TEvents>;
 };
 
 /**
@@ -667,7 +730,7 @@ export type CloseResult = {
  * >;
  *
  * async function myReaction(event: ..., stream: string, app: App) {
- *   await app.do("someAction", target, payload, event);
+ *   await app.do("someAction", target, payload, { reactingTo: event });
  *   const snapshot = await app.load(MyState, "stream-1");
  *   const events = await app.query_array({ stream: "stream-1" });
  * }
@@ -895,15 +958,35 @@ export interface IAct<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<Schemas, string>,
-    skipValidation?: boolean
+    options?: DoOptions<TEvents>
   ): Promise<Snapshot<any, any>[]>;
 
+  /**
+   * Load a state snapshot for a stream. Two shapes:
+   *
+   * **Anonymous (bare stream)** — `load(state, stream, callback?, asOf?)`.
+   * The framework default-denies on every PII gate: sensitive event fields
+   * come back as `[REDACTED]`, state fields whose names match sensitive
+   * event fields are also `[REDACTED]`. Use this when the caller has no
+   * authorization context (background workers, observability probes, etc.).
+   *
+   * **Auth-aware (LoadTarget)** — `load(state, {stream, actor, asOf?},
+   * callback?)`. Symmetric with `IAct.do(state, target, payload)`. The
+   * read runs the state's `.discloses(predicate)` against the supplied
+   * actor; sensitive fields come back as plaintext when the predicate
+   * returns `true`, `[REDACTED]` otherwise. Forgotten events return
+   * `[SHREDDED]` regardless of actor (data is gone, no auth question).
+   */
   load(
     state: State<any, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void,
     asOf?: AsOf
+  ): Promise<Snapshot<any, any>>;
+  load(
+    state: State<any, any, any> | string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>>;
 
   query(

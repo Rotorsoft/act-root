@@ -44,8 +44,7 @@ describe("event-sourcing", () => {
       "increment",
       { stream: "s", actor: { id: "a", name: "a" }, expectedVersion: -1 },
       { count: 1 },
-      undefined,
-      true
+      { skipValidation: true }
     );
     expect(snapshot.event?.name).toBe("INCREMENT");
   });
@@ -107,7 +106,7 @@ describe("event-sourcing", () => {
       causation: {},
     });
 
-    const snapshot = await load(me, "s");
+    const snapshot = await load(me, { stream: "s" });
     expect(snapshot.state.count).toBe(101);
     expect(snapshot.snaps).toBe(1);
     expect(snapshot.patches).toBe(1);
@@ -158,7 +157,7 @@ describe("event-sourcing", () => {
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
       { count: 1 },
-      reactingTo
+      { reactingTo }
     );
 
     const events: any[] = [];
@@ -233,28 +232,43 @@ describe("event-sourcing", () => {
     expect(snapshot.event?.name).toBe("INCREMENT");
   });
 
-  it("should skip validation when flag is true", async () => {
-    const validateSpy = vi.spyOn(me.actions.increment, "parse");
+  it("skipValidation skips event-payload checks but always validates the action payload", async () => {
+    // Action-side validator MUST still run — actions cross a trust
+    // boundary. Event-side validator MUST be skipped when the flag is on.
+    const actionSpy = vi.spyOn(me.actions.increment, "parse");
+    const eventSpy = vi.spyOn(me.events.INCREMENT, "parse");
     await action(
       { ...me, given: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
-      { count: "invalid" } as unknown as { count: number }, // invalid payload
-      undefined,
-      true // skipValidation = true
+      { count: 1 },
+      { skipValidation: true }
     );
-    expect(validateSpy).not.toHaveBeenCalled();
+    expect(actionSpy).toHaveBeenCalledTimes(1);
+    expect(eventSpy).not.toHaveBeenCalled();
+  });
+
+  it("skipValidation does NOT bypass action-payload validation — invalid payloads still throw", async () => {
+    await expect(
+      action(
+        { ...me, given: undefined },
+        "increment",
+        { stream: "s", actor: { id: "a", name: "a" } },
+        { count: "invalid" } as unknown as { count: number },
+        { skipValidation: true }
+      )
+    ).rejects.toThrow(/Invalid increment payload/);
   });
 
   it("should handle loading a state with no init function", async () => {
     const meWithoutInit = { ...me, init: undefined };
     // @ts-expect-error - testing missing init
-    const snapshot = await load(meWithoutInit, "s");
+    const snapshot = await load(meWithoutInit, { stream: "s" });
     expect(snapshot.state).toEqual({});
   });
 
   it("should handle loading a stream with no events", async () => {
-    const snapshot = await load(me, "s-empty");
+    const snapshot = await load(me, { stream: "s-empty" });
     expect(snapshot.state.count).toBe(0);
     expect(snapshot.patches).toBe(0);
   });
@@ -271,7 +285,7 @@ describe("event-sourcing", () => {
     });
 
     const callback = vi.fn();
-    await load(me, "s", callback);
+    await load(me, { stream: "s" }, callback);
 
     expect(callback).toHaveBeenCalledTimes(2);
     expect(callback.mock.calls[0][0].state.count).toBe(1);
@@ -402,9 +416,7 @@ describe("event-sourcing", () => {
       { ...me, given: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" } },
-      { count: 1 },
-      undefined, // reactingTo is undefined
-      false
+      { count: 1 }
     );
 
     // The expectedVersion passed to commit should be the version from the snapshot.event
@@ -428,6 +440,7 @@ describe("event-sourcing", () => {
       on: {},
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     await store().commit(
       "stream-with-unknown",
@@ -441,7 +454,7 @@ describe("event-sourcing", () => {
     const { log } = await import("../src/ports.js");
     const warnSpy = vi.spyOn(log(), "warn");
 
-    await load(fakeState, "stream-with-unknown");
+    await load(fakeState, { stream: "stream-with-unknown" });
 
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining(
@@ -462,13 +475,14 @@ describe("event-sourcing", () => {
       on: {},
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     await store().commit("stream", [{ name: "E", data: {} }], {
       correlation: "c",
       causation: {},
     });
 
-    await load(state, "stream", vi.fn());
+    await load(state, { stream: "stream" }, vi.fn());
   });
 
   it("should throw on missing stream in action", async () => {
@@ -482,6 +496,7 @@ describe("event-sourcing", () => {
       on: { foo: vi.fn() },
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     await expect(
       action(state, "foo", { stream: "", actor: { id: "a", name: "a" } }, {})

@@ -104,7 +104,7 @@ describe("tracing", () => {
 
     it("logs load exit with cache + v + replayed + snaps + patches inline in the body", async () => {
       const { load } = build_es(withLevel("trace"));
-      await load(Counter, "s1");
+      await load(Counter, { stream: "s1" } as never);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
           /s1\s.*miss.*v=-?\d+.*replayed=\d+.*snaps=\d+.*patches=\d+/
@@ -114,7 +114,10 @@ describe("tracing", () => {
 
     it("logs as-of details including the active filter fields", async () => {
       const { load } = build_es(withLevel("trace"));
-      await load(Counter, "s1", undefined, { before: 9999, limit: 50 });
+      await load(Counter, {
+        stream: "s1",
+        asOf: { before: 9999, limit: 50 },
+      } as never);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
           /s1 \(as-of before=9999 limit=50\).*miss.*v=-?\d+.*replayed=\d+/
@@ -126,10 +129,10 @@ describe("tracing", () => {
       const { load } = build_es(withLevel("trace"));
       const before = new Date("2026-05-01T00:00:00.000Z");
       const after = new Date("2026-04-01T00:00:00.000Z");
-      await load(Counter, "s1", undefined, {
-        created_before: before,
-        created_after: after,
-      });
+      await load(Counter, {
+        stream: "s1",
+        asOf: { created_before: before, created_after: after },
+      } as never);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(
           /created_before=2026-05-01T00:00:00\.000Z.*created_after=2026-04-01T00:00:00\.000Z/
@@ -142,7 +145,7 @@ describe("tracing", () => {
       // asOf={} doesn't actually time-travel (load checks
       // Object.values(asOf).some(...)), but the marker still fires because
       // the trace decorator only checks `asOf` truthiness.
-      await load(Counter, "s1", undefined, {});
+      await load(Counter, { stream: "s1", asOf: {} } as never);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(/s1 \(as-of\)/)
       );
@@ -153,7 +156,7 @@ describe("tracing", () => {
       // Prime the cache via an action so a checkpoint exists.
       await es.action(Counter, "increment", target("s-warm"), { by: 1 });
       traceSpy.mockClear();
-      await load(Counter, "s-warm");
+      await load(Counter, { stream: "s-warm" } as never);
       expect(traceSpy).toHaveBeenCalledWith(
         expect.stringMatching(/s-warm\s.*hit/)
       );

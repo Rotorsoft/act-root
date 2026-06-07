@@ -76,6 +76,7 @@ describe("Builder", () => {
       on: { a: () => ["e", {}] as [string, object] },
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     const state2 = {
       name: "foo2",
@@ -87,6 +88,7 @@ describe("Builder", () => {
       on: { a: () => ["e", {}] as [string, object] },
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     builder.withState(state1);
     expect(() => builder.withState(state2)).toThrow("Duplicate action");
@@ -214,6 +216,7 @@ describe("Builder", () => {
       on: { nonA: () => ["nonE1", {}] as [string, object] },
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     const s2 = {
       name: "NonObj",
@@ -225,6 +228,7 @@ describe("Builder", () => {
       on: { nonB: () => ["nonE2", {}] as [string, object] },
       view: (e: any) => e,
       message: (v: any) => v,
+      pii_aware: false,
     };
     const builder = act();
     builder.withState(s1);

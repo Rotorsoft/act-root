@@ -46,7 +46,6 @@ export {
   _registry,
   pii_fields,
   pii_gate,
-  pii_merge,
   pii_split,
   pii_strip,
   REDACTED,

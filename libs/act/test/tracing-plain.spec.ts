@@ -54,7 +54,7 @@ describe("tracing — plain (production) mode", () => {
     // Event-sourcing trace: `caption: body` (plain mode). Load fires once
     // on exit with cache marker + version/replayed/snaps/patches inline.
     const { action, load } = build_es(traceLogger);
-    await load(Counter, "s-plain");
+    await load(Counter, { stream: "s-plain" });
     expect(traceSpy).toHaveBeenCalledWith(
       "load: s-plain miss v=-1 replayed=0 snaps=0 patches=0"
     );

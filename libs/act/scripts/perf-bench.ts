@@ -138,10 +138,10 @@ const scenarios: Scenario[] = [
       await resetPorts();
       // Seed one commit + warm the cache.
       await action(Counter, "inc", target("warm"), {});
-      await load(Counter, "warm");
+      await load(Counter, { stream: "warm" });
     },
     async run() {
-      await load(Counter, "warm");
+      await load(Counter, { stream: "warm" });
     },
   },
   {
@@ -157,7 +157,7 @@ const scenarios: Scenario[] = [
       await cache().clear();
     },
     async run() {
-      await load(Counter, "cold");
+      await load(Counter, { stream: "cold" });
     },
   },
   {
@@ -167,7 +167,7 @@ const scenarios: Scenario[] = [
     },
     async run() {
       await action(Counter, "inc", target("rt"), {});
-      await load(Counter, "rt");
+      await load(Counter, { stream: "rt" });
     },
   },
   {

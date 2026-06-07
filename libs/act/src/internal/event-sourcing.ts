@@ -17,19 +17,19 @@
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
   InvariantError,
   StreamClosedError,
 } from "../types/errors.js";
 import type {
-  AsOf,
   Committed,
   Correlator,
+  DoOptions,
   Emitted,
   EventMeta,
   EventSource,
+  LoadTarget,
   ScanOptions,
   ScanResult,
   Schema,
@@ -66,8 +66,7 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation?: boolean
+  options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -381,11 +380,10 @@ export async function load<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  stream: string,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  asOf?: AsOf,
-  actor?: Actor
+  target: LoadTarget,
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void
 ): Promise<Snapshot<TState, TEvents>> {
+  const { stream, actor, asOf } = target;
   const time_travel =
     !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = time_travel ? undefined : await cache().get<TState>(stream);
@@ -393,42 +391,37 @@ export async function load<
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
-  // version always reflects stream head: starts from the cached version
-  // (or -1 for a fresh stream / cache miss), advances per event seen.
-  let version = cached?.version ?? -1;
   // replayed counts events processed by THIS load only (snap or patch);
   // distinct from `patches` (the snap-distance accumulator carried over
   // from the cache).
   let replayed = 0;
-  let event: Committed<TEvents, string> | undefined;
+  let event: Committed<TEvents, keyof TEvents> | undefined;
 
-  await store().query(
-    (e) => {
-      version = e.version;
-      const typed = e as Committed<TEvents, string>;
-      event = me.view(typed, actor);
-      if (e.name === SNAP_EVENT) {
-        state = e.data as TState;
+  await store().query<TEvents>(
+    (raw) => {
+      event = me.view(raw, actor);
+      if (event.name === SNAP_EVENT) {
+        state = event.data as TState;
         snaps++;
         patches = 0;
         replayed++;
-      } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](typed, state));
+      } else if (me.patch[event.name]) {
+        state = patch(state, me.patch[event.name](event, state));
         patches++;
         replayed++;
-      } else if (e.name !== TOMBSTONE_EVENT) {
+      } else if (event.name !== TOMBSTONE_EVENT) {
         // Unknown event — not in this state's reducer map. Causes:
         // deleted/renamed event in a versioned schema, load() called with
         // the wrong state, or stream contamination. Skipping silently
         // would corrupt replay; warn so the operator can investigate.
         log().warn(
-          `Skipping unknown event "${String(e.name)}" on stream "${stream}" (id=${e.id}) — no reducer in state "${me.name}"`
+          `Skipping unknown event "${String(event.name)}" on stream "${stream}" (id=${event.id}) — no reducer in state "${me.name}"`
         );
       }
       callback?.({
         event,
         state,
-        version,
+        version: event.version,
         patches,
         snaps,
         cache_hit,
@@ -450,17 +443,25 @@ export async function load<
   // event_id, picks up missed events, and replays — so an "older" cache
   // write from a concurrent slower load is self-correcting on next access.
   // Time-travel loads bypass cache entirely and skip this too.
-  if (replayed > 0 && !time_travel && event) {
+  if (replayed > 0 && !time_travel && event && !me.pii_aware) {
     await cache().set(stream, {
       state,
-      version,
+      version: event.version,
       event_id: event.id,
       patches,
       snaps,
     });
   }
 
-  return { event, state, version, patches, snaps, cache_hit, replayed };
+  return {
+    event,
+    state,
+    version: event?.version ?? cached?.version ?? -1,
+    patches,
+    snaps,
+    cache_hit,
+    replayed,
+  };
 }
 
 /**
@@ -486,8 +487,10 @@ export async function load<
  * @param action The action to execute
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
- * @param reactingTo (Optional) The event that the action is reacting to
- * @param skipValidation (Optional) Whether to skip validation (not recommended)
+ * @param options Per-call dispatch options ({@link DoOptions}) —
+ *   `reactingTo` to thread correlation, `skipValidation` to skip
+ *   event-schema checks, `correlator` to override the framework or
+ *   orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -503,29 +506,26 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation = false,
-  correlator: Correlator = default_correlator
+  options?: DoOptions<TEvents>
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
+  const reactingTo = options?.reactingTo;
+  const skipValidation = options?.skipValidation ?? false;
+  const correlator = options?.correlator ?? default_correlator;
 
-  const validated = skipValidation
-    ? payload
-    : validate(action as string, payload, me.actions[action]);
+  // Action payloads are always validated — they come from external
+  // callers (HTTP, RPC, queue consumers) and must be schema-checked at
+  // the boundary. `skipValidation` only skips event-schema checks for
+  // events the action itself synthesizes from already-trusted input.
+  const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
   const max_retries = opts?.maxRetries ?? 0;
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(
-        me,
-        stream,
-        undefined,
-        undefined,
-        target.actor
-      );
+      const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       const expected = expectedVersion ?? snapshot.event?.version;
@@ -579,12 +579,13 @@ export async function action<
         }
       }
 
-      const emitted = tuples.map(([name, data]) => {
-        const validated = skipValidation
+      const events = tuples.map(([name, data]) => ({
+        name,
+        data: skipValidation
           ? data
-          : validate(name as string, data, me.events[name]);
-        return me.message({ name, data: validated });
-      });
+          : validate(name as string, data, me.events[name]),
+      }));
+      const emitted = events.map((v) => me.message(v));
 
       const meta: EventMeta = {
         correlation:
@@ -605,7 +606,7 @@ export async function action<
           event: reactingTo
             ? {
                 id: reactingTo.id,
-                name: reactingTo.name,
+                name: reactingTo.name as string,
                 stream: reactingTo.stream,
               }
             : undefined,
@@ -633,12 +634,18 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      const snapshots = committed.map((event) => {
+      const snapshots = committed.map((row, i) => {
+        // Actions originate from the caller — they already hold the
+        // plaintext payload they sent. No view/gate round-trip is
+        // useful; the reducer and the returned snapshot see the
+        // pre-split event directly. pii_split (in `me.message`) above
+        // is the only PII operation on the action path.
+        const event = { ...row, data: events[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
         return {
-          event: me.view(event, target.actor),
+          event,
           state,
           version: event.version,
           patches,
@@ -653,18 +660,25 @@ export async function action<
       const last = snapshots.at(-1)!;
       const snapped = me.snap?.(last);
 
+      // #861: `has_open_pii` was set above during `emitted.map` — when
+      // any commit carries open PII the derived state may hold plaintext
+      // (reducers that copy sensitive fields into state against the soft
+      // rule), so we refuse to populate the cache. Post-forget commits
+      // never have pii; cache populates normally on the next access.
       // Update cache with post-commit state (reset patches if snapped).
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).
-      cache()
-        .set<TState>(stream, {
-          state: last.state,
-          version: last.event.version,
-          event_id: last.event.id,
-          patches: snapped ? 0 : last.patches,
-          snaps: snapped ? last.snaps + 1 : last.snaps,
-        })
-        .catch((err) => log().error(err));
+      if (!me.pii_aware) {
+        cache()
+          .set<TState>(stream, {
+            state: last.state,
+            version: last.event.version,
+            event_id: last.event.id,
+            patches: snapped ? 0 : last.patches,
+            snaps: snapped ? last.snaps + 1 : last.snaps,
+          })
+          .catch((err) => log().error(err));
+      }
 
       // Persist snap to store for cold-start durability. Fire-and-forget:
       // snap() has its own try/catch that logs failures, so the rejection

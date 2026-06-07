@@ -85,8 +85,9 @@ async function seedNoSnap(n: number) {
       "increment",
       noSnapTarget,
       { count: 1 },
-      undefined,
-      true
+      {
+        skipValidation: true,
+      }
     );
   }
 }
@@ -97,7 +98,13 @@ async function seedSnap(n: number, cfg: SnapConfig) {
   await store().seed();
   const t = { stream: cfg.stream, actor: { id: "a", name: "a" } };
   for (let i = 0; i < n; i++) {
-    await action(cfg.me, "increment", t, { count: 1 }, undefined, true);
+    await action(
+      cfg.me,
+      "increment",
+      t,
+      { count: 1 },
+      { skipValidation: true }
+    );
     // Wait for fire-and-forget snapshot commits
     if ((i + 1) % cfg.interval === 0)
       await new Promise((r) => setTimeout(r, 200));
@@ -111,7 +118,7 @@ describe("PG: load() 50 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, noSnapStream);
+      await load(Counter, { stream: noSnapStream });
     },
     {
       async setup() {
@@ -125,7 +132,7 @@ describe("PG: load() 50 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, cfg.stream);
+        await load(cfg.me, { stream: cfg.stream });
       },
       {
         async setup() {
@@ -141,7 +148,7 @@ describe("PG: load() 500 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, noSnapStream);
+      await load(Counter, { stream: noSnapStream });
     },
     {
       async setup() {
@@ -155,7 +162,7 @@ describe("PG: load() 500 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, cfg.stream);
+        await load(cfg.me, { stream: cfg.stream });
       },
       {
         async setup() {
@@ -171,7 +178,7 @@ describe("PG: load() 2000 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, noSnapStream);
+      await load(Counter, { stream: noSnapStream });
     },
     {
       async setup() {
@@ -185,7 +192,7 @@ describe("PG: load() 2000 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, cfg.stream);
+        await load(cfg.me, { stream: cfg.stream });
       },
       {
         async setup() {
