@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
-import { webhook_middleware } from "../../../src/receiver/fastify/index.js";
+import { webhookMiddleware } from "../../../src/receiver/fastify/index.js";
 
 const BODY = '{"order_id":"o-1"}';
 
@@ -20,19 +20,19 @@ function mockReply() {
   return { reply, send };
 }
 
-function mockRequest(headers: Record<string, unknown>, raw_body?: string) {
+function mockRequest(headers: Record<string, unknown>, rawBody?: string) {
   return {
     headers,
-    raw_body,
+    rawBody,
   } as unknown as FastifyRequest;
 }
 
-describe("webhook_middleware (Fastify)", () => {
+describe("webhookMiddleware (Fastify)", () => {
   it("attaches request.idempotency on the happy path", async () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
     const { reply } = mockReply();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(
       (req as FastifyRequest & { idempotency: unknown }).idempotency
@@ -43,7 +43,7 @@ describe("webhook_middleware (Fastify)", () => {
     const store = freshStore();
     const req = mockRequest({}, BODY);
     const { reply, send } = mockReply();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(reply.status).toHaveBeenCalledWith(400);
     expect(send).toHaveBeenCalledWith({ error: "missing-key" });
@@ -53,17 +53,17 @@ describe("webhook_middleware (Fastify)", () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
     const { reply, send } = mockReply();
-    const middleware = webhook_middleware({ store, secret: "test-secret" });
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
     await middleware(req, reply);
     expect(reply.status).toHaveBeenCalledWith(401);
     expect(send).toHaveBeenCalledWith({ error: "missing-signature" });
   });
 
-  it("handles a missing raw_body (unsigned mode)", async () => {
+  it("handles a missing rawBody (unsigned mode)", async () => {
     const store = freshStore();
     const req = mockRequest({ "idempotency-key": "req-1" });
     const { reply } = mockReply();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     await middleware(req, reply);
     expect(
       (req as FastifyRequest & { idempotency: unknown }).idempotency
@@ -72,7 +72,7 @@ describe("webhook_middleware (Fastify)", () => {
 
   it("returns deduped: true on a re-claim", async () => {
     const store = freshStore();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     {
       const req = mockRequest({ "idempotency-key": "req-1" }, BODY);
       const { reply } = mockReply();

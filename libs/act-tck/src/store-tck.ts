@@ -62,7 +62,7 @@ export type StoreCapabilities = {
 };
 
 /**
- * Options for {@link run_store_tck}.
+ * Options for {@link runStoreTck}.
  */
 export type StoreTckOptions = {
   /**
@@ -111,16 +111,16 @@ export type StoreTckOptions = {
  *
  * @example
  * ```ts
- * import { run_store_tck } from "@rotorsoft/act-tck";
+ * import { runStoreTck } from "@rotorsoft/act-tck";
  * import { InMemoryStore } from "@rotorsoft/act";
  *
- * run_store_tck({
+ * runStoreTck({
  *   name: "InMemoryStore",
  *   factory: () => new InMemoryStore(),
  * });
  * ```
  */
-export const run_store_tck = (options: StoreTckOptions): void => {
+export const runStoreTck = (options: StoreTckOptions): void => {
   describe(`TCK / Store / ${options.name}`, () => {
     let store: Store;
     // Spread (rather than `?? {}`) so the default-empty path doesn't

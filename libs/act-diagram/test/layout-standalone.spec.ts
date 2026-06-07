@@ -32,7 +32,7 @@ describe("state with no actions (edge case)", () => {
       states: [
         {
           name: "Empty",
-          var_name: "Empty",
+          varName: "Empty",
           events: [],
           actions: [],
         },
@@ -50,15 +50,15 @@ describe("standalone reaction edges", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handler_name: "onEvt",
+          handlerName: "onEvt",
           dispatches: [],
         },
       ],
@@ -82,20 +82,20 @@ describe("standalone reactions", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handler_name: "reactionA",
+          handlerName: "reactionA",
           dispatches: [],
         },
         {
           event: "Evt",
-          handler_name: "reactionB",
+          handlerName: "reactionB",
           dispatches: [],
         },
       ],
@@ -112,8 +112,8 @@ describe("standalone action->event edge when ey not found", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Known", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Known", hasCustomPatch: false }],
           actions: [
             {
               name: "a",
@@ -136,15 +136,15 @@ describe("standalone reaction without trig_node", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "NoSuchEvent", // event not in any state
-          handler_name: "orphanReaction",
+          handlerName: "orphanReaction",
           dispatches: [],
         },
       ],
@@ -161,20 +161,20 @@ describe("standalone reactions with multiple events stacking", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handler_name: "r1",
+          handlerName: "r1",
           dispatches: [],
         },
         {
           event: "Evt",
-          handler_name: "r2",
+          handlerName: "r2",
           dispatches: [],
         },
       ],
@@ -194,8 +194,8 @@ describe("guarded standalone action", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [
             {
               name: "guardedAction",
@@ -220,10 +220,10 @@ describe("orphan events in standalone states", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
+          varName: "S",
           events: [
-            { name: "ActionEvt", has_custom_patch: false },
-            { name: "OrphanEvt", has_custom_patch: false },
+            { name: "ActionEvt", hasCustomPatch: false },
+            { name: "OrphanEvt", hasCustomPatch: false },
           ],
           actions: [{ name: "doIt", emits: ["ActionEvt"], invariants: [] }],
         },

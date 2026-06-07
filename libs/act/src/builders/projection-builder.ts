@@ -30,7 +30,7 @@ export type Projection<TEvents extends Schemas> = {
   readonly _tag: "Projection";
   readonly events: EventRegister<TEvents>;
   readonly target?: string;
-  readonly batch_handler?: BatchHandler<TEvents>;
+  readonly batchHandler?: BatchHandler<TEvents>;
 };
 
 /** Helper: a single-key record mapping an event name to its Zod schema. */
@@ -243,7 +243,7 @@ function _projection<
           _tag: "Projection" as const,
           events,
           target,
-          batch_handler: handler,
+          batchHandler: handler,
         }),
       }),
     }) as ProjectionBuilder<TEvents, TTarget>;

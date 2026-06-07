@@ -21,7 +21,7 @@ describe("build_model direct tests", () => {
           reactions: [
             {
               event: "Created",
-              handler_name: "on Created",
+              handlerName: "on Created",
               dispatches: [],
             },
           ],
@@ -36,7 +36,7 @@ describe("build_model direct tests", () => {
     const sl = model.slices.find((s) => s.name === "MySlice");
     expect(sl).toBeDefined();
     // The "on Created" handler name should be fixed up to "onCreated"
-    expect(sl!.reactions[0].handler_name).toBe("onCreated");
+    expect(sl!.reactions[0].handlerName).toBe("onCreated");
   });
 
   it("act builder states not already in state_by_ref (lines 134-136)", () => {
@@ -395,7 +395,7 @@ describe("build_model direct tests", () => {
           reactions: [
             {
               event: "Created",
-              handler_name: "on Created",
+              handlerName: "on Created",
               dispatches: [],
             },
           ],
@@ -407,7 +407,7 @@ describe("build_model direct tests", () => {
     // Pass no matching files -- fixup_reactions should return early
     const { model } = build_model(result, [], new Map());
     // Handler name stays unfixed since source file wasn't found
-    expect(model.reactions[0].handler_name).toBe("on Created");
+    expect(model.reactions[0].handlerName).toBe("on Created");
   });
 
   it("act builder skips duplicate state via state_by_ref.has (step 1 + act states)", () => {
@@ -485,7 +485,7 @@ describe("build_model direct tests", () => {
     const { model } = build_model(result, [], new Map());
     const st = model.states.find((s) => s.name === "NoPatchState");
     expect(st).toBeDefined();
-    expect(st!.events[0].has_custom_patch).toBe(false);
+    expect(st!.events[0].hasCustomPatch).toBe(false);
   });
 
   it("fixup_reactions: handler name in source but no matching fallback (line 95 false)", () => {
@@ -500,7 +500,7 @@ describe("build_model direct tests", () => {
           reactions: [
             {
               event: "SomeOtherEvent",
-              handler_name: "on SomeOtherEvent",
+              handlerName: "on SomeOtherEvent",
               dispatches: [],
             },
           ],
@@ -520,7 +520,7 @@ describe("build_model direct tests", () => {
     ];
     const { model } = build_model(result, files, new Map());
     // Handler name stays as "on SomeOtherEvent" since no match for "Created"
-    expect(model.slices[0].reactions[0].handler_name).toBe("on SomeOtherEvent");
+    expect(model.slices[0].reactions[0].handlerName).toBe("on SomeOtherEvent");
   });
 
   it("step 1 catch with non-Error thrown (line 145 false branch)", () => {

@@ -1,7 +1,7 @@
-import { run_logger_tck } from "@rotorsoft/act-tck";
+import { runLoggerTck } from "@rotorsoft/act-tck";
 import { PinoLogger } from "../src/pino-logger.js";
 
-run_logger_tck({
+runLoggerTck({
   name: "PinoLogger",
   factory: () => new PinoLogger({ level: "trace", pretty: false }),
 });

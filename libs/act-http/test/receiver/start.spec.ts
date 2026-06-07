@@ -198,12 +198,12 @@ describe("receiver — fetch mode (Lambda / edge / serverless)", () => {
     );
 
     expect(response.status).toBe(500);
-    const response_body = (await response.json()) as {
+    const responseBody = (await response.json()) as {
       error: string;
       detail: string;
     };
-    expect(response_body.error).toBe("handler-failed");
-    expect(response_body.detail).toContain("downstream service unreachable");
+    expect(responseBody.error).toBe("handler-failed");
+    expect(responseBody.detail).toContain("downstream service unreachable");
   });
 
   it("supports chaining multiple .on() calls with independent handler types", async () => {

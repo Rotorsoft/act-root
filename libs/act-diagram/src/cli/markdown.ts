@@ -66,7 +66,7 @@ const find_reactions_for = (
       if (r.event === event_name) {
         out.push({
           slice: sl.name,
-          handler: r.handler_name,
+          handler: r.handlerName,
           dispatches: r.dispatches,
           file: r.file ?? sl.file,
           line: r.line,
@@ -77,7 +77,7 @@ const find_reactions_for = (
   for (const r of model.reactions) {
     if (r.event === event_name) {
       out.push({
-        handler: r.handler_name,
+        handler: r.handlerName,
         dispatches: r.dispatches,
         file: r.file,
         line: r.line,
@@ -273,7 +273,7 @@ export function format_markdown(idx: ContractIndex): string {
               ? ` → ${r.dispatches.map((d) => `\`${d}\``).join(", ")}`
               : "";
           lines.push(
-            `  - \`${r.event}\` → \`${r.handler_name}\`${triggers}${file_suffix(r.file, r.line)}`
+            `  - \`${r.event}\` → \`${r.handlerName}\`${triggers}${file_suffix(r.file, r.line)}`
           );
         }
       }
@@ -312,10 +312,10 @@ export function format_markdown(idx: ContractIndex): string {
     const slice_reaction = m.slices
       .find((x) => x.name === slice_name)
       ?.reactions.find(
-        (rr) => rr.handler_name === r.name && rr.event === event_name
+        (rr) => rr.handlerName === r.name && rr.event === event_name
       );
     const orch_reaction = m.reactions.find(
-      (rr) => rr.handler_name === r.name && rr.event === event_name
+      (rr) => rr.handlerName === r.name && rr.event === event_name
     );
     const inner = slice_reaction ?? orch_reaction;
     if (inner && inner.dispatches.length > 0) {

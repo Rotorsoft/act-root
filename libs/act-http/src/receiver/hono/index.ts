@@ -8,7 +8,7 @@
  *
  * ```ts
  * import { Hono } from "hono";
- * import { webhook_middleware } from "@rotorsoft/act-http/receiver/hono";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = new Hono();
@@ -16,7 +16,7 @@
  *
  * app.post(
  *   "/webhooks/orders",
- *   webhook_middleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
+ *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
  *   async (c) => {
  *     const idem = c.get("idempotency") as { key: string; deduped: boolean };
  *     if (idem.deduped) return c.json({ status: "dedup-skipped", key: idem.key });
@@ -36,12 +36,12 @@
  * needed.
  */
 import type { MiddlewareHandler } from "hono";
-import { type CheckWebhookOptions, check_webhook } from "../check.js";
+import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 
 /**
  * Variables this middleware contributes to the Hono context. The
  * generic on the returned {@link MiddlewareHandler} threads it
- * through so route handlers downstream of `app.post(..., webhook_middleware(...), handler)`
+ * through so route handlers downstream of `app.post(..., webhookMiddleware(...), handler)`
  * see `c.get("idempotency")` typed without a manual cast.
  */
 export type WebhookVariables = {
@@ -53,13 +53,13 @@ export type WebhookVariables = {
  * `secret` is set), enforces `Idempotency-Key`, and claims the key
  * on the configured store. See the module-level docs for usage.
  */
-export function webhook_middleware(
+export function webhookMiddleware(
   options: CheckWebhookOptions
 ): MiddlewareHandler<{ Variables: WebhookVariables }> {
   return async function check(c, next) {
     const headers = headers_bag(c.req.raw.headers);
-    const raw_body = await c.req.text();
-    const result = await check_webhook(headers, raw_body, options);
+    const rawBody = await c.req.text();
+    const result = await checkWebhook(headers, rawBody, options);
     if (!result.ok) {
       return c.json({ error: result.reason }, result.status);
     }

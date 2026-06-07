@@ -35,7 +35,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
 
   it("happy path — wipes pii, returns the row count, emits forgotten once", async () => {
     const app = act().withState(User).build();
-    const seen: { stream: string; at: Date; event_count: number }[] = [];
+    const seen: { stream: string; at: Date; eventCount: number }[] = [];
     app.on("forgotten", (payload) => {
       seen.push(payload);
     });
@@ -45,10 +45,10 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
       { email: "u@example.com", name: "Ursula", plan: "free" }
     );
     const result = await app.forget("user-1");
-    expect(result.event_count).toBe(1);
+    expect(result.eventCount).toBe(1);
     expect(seen).toHaveLength(1);
     expect(seen[0].stream).toBe("user-1");
-    expect(seen[0].event_count).toBe(1);
+    expect(seen[0].eventCount).toBe(1);
     expect(seen[0].at).toBeInstanceOf(Date);
     // Reading the stream back returns SHREDDED for sensitive fields.
     const snap = await app.load(User, "user-1", undefined, undefined, actor);
@@ -59,9 +59,9 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     });
   });
 
-  it("idempotent — second call returns {event_count: 0} and does NOT re-emit forgotten", async () => {
+  it("idempotent — second call returns {eventCount: 0} and does NOT re-emit forgotten", async () => {
     const app = act().withState(User).build();
-    const seen: { stream: string; at: Date; event_count: number }[] = [];
+    const seen: { stream: string; at: Date; eventCount: number }[] = [];
     app.on("forgotten", (payload) => {
       seen.push(payload);
     });
@@ -72,7 +72,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     );
     await app.forget("user-1");
     const second = await app.forget("user-1");
-    expect(second.event_count).toBe(0);
+    expect(second.eventCount).toBe(0);
     expect(seen).toHaveLength(1); // not 2
   });
 
@@ -109,14 +109,14 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     }
   });
 
-  it("zero events on a stream that never had any — event_count 0, no emit", async () => {
+  it("zero events on a stream that never had any — eventCount 0, no emit", async () => {
     const app = act().withState(User).build();
     const seen: unknown[] = [];
     app.on("forgotten", (p) => {
       seen.push(p);
     });
     const result = await app.forget("never-existed");
-    expect(result.event_count).toBe(0);
+    expect(result.eventCount).toBe(0);
     expect(seen).toHaveLength(0);
   });
 });

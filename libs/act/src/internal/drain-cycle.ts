@@ -85,7 +85,7 @@ export type Handle<TEvents extends Schemas> = (
 export type HandleBatch<TEvents extends Schemas> = (
   lease: Lease,
   payloads: ReactionPayload<TEvents>[],
-  batch_handler: BatchHandler<TEvents>
+  batchHandler: BatchHandler<TEvents>
 ) => Promise<HandleResult>;
 
 /**
@@ -206,9 +206,9 @@ export async function run_drain_cycle<
       // fast-forward watermark using fetched events or window max
       const at = entry.fetch.events.at(-1)?.id || fetch_window_at;
       const { payloads } = entry;
-      const batch_handler = batch_handlers.get(lease.stream);
-      if (batch_handler && payloads.length > 0) {
-        return handle_batch({ ...lease, at }, payloads, batch_handler);
+      const batchHandler = batch_handlers.get(lease.stream);
+      if (batchHandler && payloads.length > 0) {
+        return handle_batch({ ...lease, at }, payloads, batchHandler);
       }
       return handle({ ...lease, at }, payloads);
     })

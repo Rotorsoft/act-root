@@ -45,7 +45,7 @@ export const TicketOperations = state({ Ticket: TicketOperationsState })
       "TicketEscalationRequested",
       {
         requestedById: actor.id,
-        request_id: randomUUID(),
+        requestId: randomUUID(),
       },
     ];
   })

@@ -47,7 +47,7 @@ const AssignmentFields = z.object({
 });
 
 const EscalationFields = z.object({
-  request_id: z.uuid(),
+  requestId: z.uuid(),
   requestedById: z.uuid(),
 });
 
@@ -148,7 +148,7 @@ export const TicketMessagingState = TicketBase;
 
 export const TicketOperationsState = TicketBase.extend({
   agentId: z.uuid().optional(),
-  request_id: z.uuid().optional(),
+  requestId: z.uuid().optional(),
   requestedById: z.uuid().optional(),
   escalationId: z.uuid().optional(),
   reassignAfter: z.date().optional(),

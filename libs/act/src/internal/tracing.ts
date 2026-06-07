@@ -179,7 +179,7 @@ export function build_es(
     target,
     payload,
     reactingTo,
-    skip_validation = false
+    skipValidation = false
   ) =>
     es.action(
       me,
@@ -187,7 +187,7 @@ export function build_es(
       target,
       payload,
       reactingTo,
-      skip_validation,
+      skipValidation,
       correlator
     );
   if (logger.level !== "trace") {

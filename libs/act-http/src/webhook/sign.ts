@@ -11,7 +11,7 @@ import { createHmac } from "node:crypto";
  * Returns `{ signature, timestamp }` so the webhook helper can attach
  * both as headers — `X-Webhook-Signature: sha256=<hex>` and
  * `X-Webhook-Timestamp: <unix-seconds>` — for the receiver to verify
- * via `verify_webhook` from `@rotorsoft/act-http/receiver`.
+ * via `verifyWebhook` from `@rotorsoft/act-http/receiver`.
  *
  * `now` is exposed for tests; production callers should leave it
  * undefined so wall-clock is used.

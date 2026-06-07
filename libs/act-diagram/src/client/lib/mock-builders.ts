@@ -206,7 +206,7 @@ export function mock_slice(on_build?: (info: any) => void) {
           const dispatches = capture_dispatches(handler);
           const reaction: ReactionNode = {
             event: event_name,
-            handler_name:
+            handlerName:
               (typeof handler?.name === "string" && handler.name) ||
               `on ${event_name}`,
             dispatches,
@@ -294,7 +294,7 @@ export function mock_act(on_build?: (info: any) => void) {
           const dispatches = capture_dispatches(handler);
           const reaction: ReactionNode = {
             event: event_name,
-            handler_name:
+            handlerName:
               (typeof handler?.name === "string" && handler.name) ||
               `on ${event_name}`,
             dispatches,

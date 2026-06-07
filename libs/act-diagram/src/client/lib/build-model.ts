@@ -48,7 +48,7 @@ function build_state(
   for (const event_name of Object.keys(events)) {
     event_nodes.push({
       name: event_name,
-      has_custom_patch: st.patches?.has(event_name) ?? false,
+      hasCustomPatch: st.patches?.has(event_name) ?? false,
       // Stash the runtime Zod schema so the JSON Schema exporter can
       // call `z.toJSONSchema(zod)` later without re-running the parser.
       zod: events[event_name],
@@ -68,7 +68,7 @@ function build_state(
 
   const node: StateNode = {
     name: domain_name,
-    var_name: unique_key,
+    varName: unique_key,
     events: event_nodes,
     actions: action_nodes,
     file: st._sourceFile as string | undefined,
@@ -83,7 +83,7 @@ function fixup_reactions(
   files: FileTab[],
   source_file?: string
 ) {
-  const fallbacks = reactions.filter((r) => r.handler_name.startsWith("on "));
+  const fallbacks = reactions.filter((r) => r.handlerName.startsWith("on "));
   if (fallbacks.length === 0) return;
   const src = source_file
     ? files.find((f) => f.path === source_file)?.content
@@ -94,12 +94,12 @@ function fixup_reactions(
   let dm: RegExpExecArray | null;
   while ((dm = do_re.exec(src)) !== null) {
     const event_name = dm[1];
-    const handler_name = dm[2] || dm[3];
-    if (!handler_name) continue;
+    const handlerName = dm[2] || dm[3];
+    if (!handlerName) continue;
     const r = fallbacks.find(
-      (r) => r.event === event_name && r.handler_name === `on ${event_name}`
+      (r) => r.event === event_name && r.handlerName === `on ${event_name}`
     );
-    if (r) r.handler_name = handler_name;
+    if (r) r.handlerName = handlerName;
   }
 }
 
@@ -225,7 +225,7 @@ export function build_model(
       model.slices.push({
         name: slice_name,
         states: slice_state_keys,
-        state_vars: slice_state_keys,
+        stateVars: slice_state_keys,
         projections: proj_names,
         reactions: ((s.reactions as ReactionNode[]) ?? []).map((r) => ({
           ...r,
@@ -239,7 +239,7 @@ export function build_model(
       model.slices.push({
         name: slice_name,
         states: [],
-        state_vars: [],
+        stateVars: [],
         projections: [],
         reactions: [],
         error: msg,
@@ -254,7 +254,7 @@ export function build_model(
       model.slices.push({
         name,
         states: [],
-        state_vars: [],
+        stateVars: [],
         projections: [],
         reactions: [],
         error:
@@ -305,7 +305,7 @@ export function build_model(
   for (const p of raw_projections) {
     model.projections.push({
       name: p.target,
-      var_name: p.target,
+      varName: p.target,
       handles: p.handles,
       file: p._sourceFile as string | undefined,
     });
@@ -314,8 +314,8 @@ export function build_model(
   // ── Step 4: Compose act ───────────────────────────────────────────
   const states_in_slices = new Set(model.slices.flatMap((s) => s.states));
   const global_state_keys = model.states
-    .filter((s) => !states_in_slices.has(s.var_name))
-    .map((s) => s.var_name);
+    .filter((s) => !states_in_slices.has(s.varName))
+    .map((s) => s.varName);
 
   for (const a of raw_acts) {
     try {
@@ -388,7 +388,7 @@ export function build_model(
 
     model.entries.push({
       path: entry_path,
-      states: model.states.filter((s) => all_state_keys.has(s.var_name)),
+      states: model.states.filter((s) => all_state_keys.has(s.varName)),
       slices: entry_slices,
       projections: model.projections.filter((p) => act_proj_names.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) ?? [],
@@ -400,7 +400,7 @@ export function build_model(
     model.slices.push({
       name: "global",
       states: global_state_keys,
-      state_vars: global_state_keys,
+      stateVars: global_state_keys,
       projections: model.projections.map((p) => p.name),
       reactions: model.reactions,
     });

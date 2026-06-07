@@ -85,11 +85,11 @@ export const app = act()
     expect(model.entries[0].path).toBe("src/app.ts");
     expect(model.entries[0].projections).toHaveLength(1);
     expect(model.reactions).toHaveLength(1);
-    expect(model.reactions[0].handler_name).toBe("logOpen");
+    expect(model.reactions[0].handlerName).toBe("logOpen");
     expect(model.orchestrator).toBeDefined();
   });
 
-  it("slice var_name tagging skips acts from other files", () => {
+  it("slice varName tagging skips acts from other files", () => {
     const files: FileTab[] = [
       {
         path: "src/states.ts",
@@ -155,7 +155,7 @@ export const app = act()
     expect(model.reactions).toHaveLength(1);
     // handler.name on proxy isn't a string -> falls back to "on Created"
     // fixup_reactions recovers "onCreated" from source
-    expect(model.reactions[0].handler_name).toBe("onCreated");
+    expect(model.reactions[0].handlerName).toBe("onCreated");
   });
 
   it("projection fallback scan skips already-captured projections", () => {
@@ -220,7 +220,7 @@ export const app = act()
     expect(model.entries[0].projections).toHaveLength(0);
   });
 
-  it("act._sourceFile skip in slice var_name tagging (line 189)", () => {
+  it("act._sourceFile skip in slice varName tagging (line 189)", () => {
     const files: FileTab[] = [
       {
         path: "src/states.ts",

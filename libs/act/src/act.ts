@@ -132,7 +132,7 @@ export type ActLifecycleEvents<
   /**
    * A stream's sensitive-data payload was wiped via {@link Act.forget}.
    * Fires exactly once per successful `forget(stream)` call — idempotent
-   * second calls (no PII left on the stream) return `event_count: 0` and
+   * second calls (no PII left on the stream) return `eventCount: 0` and
    * do NOT re-emit. Apps that never call `forget()` never see this event.
    *
    * Listeners use it for the compliance side of GDPR / CCPA: audit log,
@@ -140,7 +140,7 @@ export type ActLifecycleEvents<
    * doesn't reach (e.g., search indexes, ETL caches). The framework's own
    * cache is invalidated by `forget()` itself before the event fires.
    */
-  forgotten: { stream: string; at: Date; event_count: number };
+  forgotten: { stream: string; at: Date; eventCount: number };
 };
 
 /**
@@ -602,7 +602,7 @@ export class Act<
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
    * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skip_validation - Skip schema validation (use carefully, for performance)
+   * @param skipValidation - Skip schema validation (use carefully, for performance)
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -672,7 +672,7 @@ export class Act<
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     reactingTo?: Committed<TEvents, string & keyof TEvents>,
-    skip_validation = false
+    skipValidation = false
   ) {
     return this._scoped(async () => {
       const snapshots = await this._es.action(
@@ -681,7 +681,7 @@ export class Act<
         target,
         payload,
         reactingTo,
-        skip_validation
+        skipValidation
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions
@@ -889,13 +889,13 @@ export class Act<
    *
    * Throws on adapters without `Store.forget_pii`, invalidates the cache
    * entry for the stream, emits the `forgotten` lifecycle event with the
-   * row count. Idempotent: a second call returns `{event_count: 0}` and
+   * row count. Idempotent: a second call returns `{eventCount: 0}` and
    * does NOT re-emit.
    *
    * @param stream - Target stream.
-   * @returns `{event_count}` — number of events whose PII column was wiped.
+   * @returns `{eventCount}` — number of events whose PII column was wiped.
    */
-  async forget(stream: string): Promise<{ event_count: number }> {
+  async forget(stream: string): Promise<{ eventCount: number }> {
     return this._scoped(async () => {
       const s = store();
       if (!s.forget_pii) {
@@ -904,12 +904,12 @@ export class Act<
             `Use an adapter that declares pii_isolation: true (e.g. @rotorsoft/act on the in-memory store).`
         );
       }
-      const event_count = await s.forget_pii(stream);
+      const eventCount = await s.forget_pii(stream);
       await cache().invalidate(stream);
-      if (event_count > 0) {
-        this.emit("forgotten", { stream, at: new Date(), event_count });
+      if (eventCount > 0) {
+        this.emit("forgotten", { stream, at: new Date(), eventCount });
       }
-      return { event_count };
+      return { eventCount };
     });
   }
 

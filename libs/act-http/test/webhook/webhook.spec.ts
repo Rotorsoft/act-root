@@ -82,7 +82,7 @@ describe("webhook", () => {
         expect(err).not.toBeInstanceOf(NonRetryableError);
         const e = err as WebhookError;
         expect(e.status).toBe(500);
-        expect(e.response_body).toBe("boom");
+        expect(e.responseBody).toBe("boom");
       }
     });
 
@@ -111,7 +111,7 @@ describe("webhook", () => {
         expect(err).toBeInstanceOf(NonRetryableError);
         const e = err as NonRetryableWebhookError;
         expect(e.status).toBe(400);
-        expect(e.response_body).toBe("bad input");
+        expect(e.responseBody).toBe("bad input");
       }
     });
 
@@ -159,7 +159,7 @@ describe("webhook", () => {
       ) as unknown as typeof globalThis.fetch;
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        timeout_ms: 10,
+        timeoutMs: 10,
         fetch,
       });
       try {
@@ -188,11 +188,11 @@ describe("webhook", () => {
       ).toBe("1234");
     });
 
-    it("uses idempotency_key override when provided", async () => {
+    it("uses idempotencyKey override when provided", async () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        idempotency_key: (e) => `${e.stream}-${e.id}`,
+        idempotencyKey: (e) => `${e.stream}-${e.id}`,
         fetch,
       });
       await handler(makeEvent({ id: 42 }), "stream-1", {} as never);
@@ -205,7 +205,7 @@ describe("webhook", () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        idempotency_key: () => null,
+        idempotencyKey: () => null,
         fetch,
       });
       await handler(makeEvent(), "stream-1", {} as never);
@@ -416,12 +416,12 @@ describe("webhook", () => {
       const err = new NonRetryableWebhookError("client error", {
         status: 422,
         url: "https://y.example",
-        response_body: "validation failed",
+        responseBody: "validation failed",
       });
       expect(err.name).toBe("NonRetryableWebhookError");
       expect(err.status).toBe(422);
       expect(err.url).toBe("https://y.example");
-      expect(err.response_body).toBe("validation failed");
+      expect(err.responseBody).toBe("validation failed");
       expect(err).toBeInstanceOf(NonRetryableError);
       expect(err).toBeInstanceOf(Error);
     });

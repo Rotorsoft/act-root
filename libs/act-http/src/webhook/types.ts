@@ -55,13 +55,13 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
    * Per-request timeout in milliseconds. Defaults to 5000.
    * The handler throws after the timeout via `AbortController`.
    */
-  readonly timeout_ms?: number;
+  readonly timeoutMs?: number;
   /**
    * Override for the auto-generated `Idempotency-Key`. By default, the
    * helper sends `event.id` (the immutable, monotonic event identifier).
    * Return a string to override; return `null` to skip the header entirely.
    */
-  readonly idempotency_key?: (
+  readonly idempotencyKey?: (
     event: Committed<TEvents, keyof TEvents>
   ) => string | null;
   /**
@@ -76,7 +76,7 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
    *   `${timestamp}.${body}` (`body` is the final serialized payload)
    * - `X-Webhook-Timestamp: <unix-seconds>`
    *
-   * Pair with `verify_webhook` from `@rotorsoft/act-http/receiver` on
+   * Pair with `verifyWebhook` from `@rotorsoft/act-http/receiver` on
    * the receiving side. When undefined, no signature headers are
    * added — back-compat with consumers that don't need signing.
    *
@@ -94,7 +94,7 @@ export type WebhookConfig<TEvents extends Schemas = Schemas> = {
 export type HttpDeliveryErrorInit = {
   status: number;
   url: string;
-  response_body?: string;
+  responseBody?: string;
 };
 
 /**
@@ -114,14 +114,14 @@ export type HttpDeliveryErrorInit = {
 export class RetryableHttpError extends Error {
   readonly status: number;
   readonly url: string;
-  readonly response_body?: string;
+  readonly responseBody?: string;
 
   constructor(message: string, init: HttpDeliveryErrorInit) {
     super(message);
     this.name = "RetryableHttpError";
     this.status = init.status;
     this.url = init.url;
-    this.response_body = init.response_body;
+    this.responseBody = init.responseBody;
   }
 }
 
@@ -139,14 +139,14 @@ export class RetryableHttpError extends Error {
 export class NonRetryableHttpError extends NonRetryableError {
   readonly status: number;
   readonly url: string;
-  readonly response_body?: string;
+  readonly responseBody?: string;
 
   constructor(message: string, init: HttpDeliveryErrorInit) {
     super(message);
     this.name = "NonRetryableHttpError";
     this.status = init.status;
     this.url = init.url;
-    this.response_body = init.response_body;
+    this.responseBody = init.responseBody;
   }
 }
 

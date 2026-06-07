@@ -6,7 +6,7 @@ import type {
   Validator,
 } from "@rotorsoft/act-ops/receiver";
 import { Hono } from "hono";
-import { webhook_middleware } from "./hono/index.js";
+import { webhookMiddleware } from "./hono/index.js";
 
 /**
  * Recommended factory for "I want to receive webhooks." Returns a
@@ -46,7 +46,7 @@ import { webhook_middleware } from "./hono/index.js";
  * Cloudflare Workers, Vercel Edge, Bun, and Deno. For operators
  * with an existing tRPC / Express / Fastify / Hono app who need to
  * compose the receiver with their own middleware stack, the
- * lower-level `webhook_middleware` from
+ * lower-level `webhookMiddleware` from
  * `@rotorsoft/act-http/receiver/<framework>` is the escape hatch.
  *
  * `@hono/node-server` is imported lazily inside `.listen()` so
@@ -58,7 +58,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
     Variables: { idempotency: { key: string; deduped: boolean } };
   }>();
 
-  const middleware = webhook_middleware({
+  const middleware = webhookMiddleware({
     store: options.store,
     secret: options.secret,
   });

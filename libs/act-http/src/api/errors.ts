@@ -73,7 +73,7 @@ const lookup_known = (
  * otherwise (a thrown string or object doesn't get to leak its
  * payload to the client).
  */
-export function to_api_error(err: unknown): { status: number; body: ApiError } {
+export function toApiError(err: unknown): { status: number; body: ApiError } {
   const known = lookup_known(err);
   if (known) {
     const entry = ERROR_MAP[known.name];

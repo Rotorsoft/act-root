@@ -2,7 +2,7 @@ import type { Logger } from "@rotorsoft/act/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Options for {@link run_logger_tck}.
+ * Options for {@link runLoggerTck}.
  */
 export type LoggerTckOptions = {
   /**
@@ -39,16 +39,16 @@ const LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
  *
  * @example
  * ```ts
- * import { run_logger_tck } from "@rotorsoft/act-tck";
+ * import { runLoggerTck } from "@rotorsoft/act-tck";
  * import { ConsoleLogger } from "@rotorsoft/act";
  *
- * run_logger_tck({
+ * runLoggerTck({
  *   name: "ConsoleLogger",
  *   factory: () => new ConsoleLogger({ level: "trace" }),
  * });
  * ```
  */
-export const run_logger_tck = (options: LoggerTckOptions): void => {
+export const runLoggerTck = (options: LoggerTckOptions): void => {
   describe(`TCK / Logger / ${options.name}`, () => {
     let logger: Logger;
     let original_stdout: typeof process.stdout.write;

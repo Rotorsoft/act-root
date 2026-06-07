@@ -67,7 +67,7 @@ export type BoundAction = <
   target: Target,
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
-  skip_validation?: boolean
+  skipValidation?: boolean
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -487,7 +487,7 @@ export async function load<
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
  * @param reactingTo (Optional) The event that the action is reacting to
- * @param skip_validation (Optional) Whether to skip validation (not recommended)
+ * @param skipValidation (Optional) Whether to skip validation (not recommended)
  * @returns The snapshot of the committed event
  *
  * @example
@@ -504,13 +504,13 @@ export async function action<
   target: Target,
   payload: Readonly<TActions[TKey]>,
   reactingTo?: Committed<Schemas, keyof Schemas>,
-  skip_validation = false,
+  skipValidation = false,
   correlator: Correlator = default_correlator
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
 
-  const validated = skip_validation
+  const validated = skipValidation
     ? payload
     : validate(action as string, payload, me.actions[action]);
 
@@ -580,7 +580,7 @@ export async function action<
       }
 
       const emitted = tuples.map(([name, data]) => {
-        const validated = skip_validation
+        const validated = skipValidation
           ? data
           : validate(name as string, data, me.events[name]);
         return me.message({ name, data: validated });

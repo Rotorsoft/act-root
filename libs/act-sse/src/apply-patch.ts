@@ -22,7 +22,7 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  * ```typescript
  * onData: (msg) => {
  *   const cached = utils.get_state.get_data({ stream_id });
- *   const result = apply_patch_message(msg, cached);
+ *   const result = applyPatchMessage(msg, cached);
  *   if (result.ok) {
  *     utils.get_state.setData({ stream_id }, result.state);
  *   } else if (result.reason === "behind") {
@@ -32,7 +32,7 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  * }
  * ```
  */
-export function apply_patch_message<S extends BroadcastState>(
+export function applyPatchMessage<S extends BroadcastState>(
   msg: PatchMessage<S>,
   cached: S | null | undefined
 ): ApplyResult<S> {

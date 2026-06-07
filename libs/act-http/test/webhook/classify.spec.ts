@@ -89,7 +89,7 @@ describe("try_ok", () => {
         throw new Error("expected throw");
       } catch (err) {
         const e = err as RetryableHttpError;
-        expect(e.response_body).toBe("service unavailable");
+        expect(e.responseBody).toBe("service unavailable");
       }
     });
   });
@@ -106,7 +106,7 @@ describe("try_ok", () => {
         expect(err).toBeInstanceOf(NonRetryableError);
         const e = err as NonRetryableHttpError;
         expect(e.status).toBe(400);
-        expect(e.response_body).toBe("bad request");
+        expect(e.responseBody).toBe("bad request");
       }
     });
 
@@ -150,7 +150,7 @@ describe("try_ok", () => {
   });
 
   describe("body capture", () => {
-    it("silently omits response_body when the body read throws", async () => {
+    it("silently omits responseBody when the body read throws", async () => {
       // A Response whose text() rejects — simulate via a mock.
       const flaky = {
         ok: false,
@@ -161,7 +161,7 @@ describe("try_ok", () => {
         await try_ok(flaky, { url: "https://x.example" });
         throw new Error("expected throw");
       } catch (err) {
-        expect((err as RetryableHttpError).response_body).toBeUndefined();
+        expect((err as RetryableHttpError).responseBody).toBeUndefined();
       }
     });
   });
@@ -195,11 +195,11 @@ describe("error class inheritance", () => {
     const err = new RetryableHttpError("boom", {
       status: 502,
       url: "https://x.example",
-      response_body: "bad gateway",
+      responseBody: "bad gateway",
     });
     expect(err.status).toBe(502);
     expect(err.url).toBe("https://x.example");
-    expect(err.response_body).toBe("bad gateway");
+    expect(err.responseBody).toBe("bad gateway");
     expect(err.name).toBe("RetryableHttpError");
   });
 
@@ -207,11 +207,11 @@ describe("error class inheritance", () => {
     const err = new NonRetryableHttpError("bad", {
       status: 422,
       url: "https://y.example",
-      response_body: "validation failed",
+      responseBody: "validation failed",
     });
     expect(err.status).toBe(422);
     expect(err.url).toBe("https://y.example");
-    expect(err.response_body).toBe("validation failed");
+    expect(err.responseBody).toBe("validation failed");
     expect(err.name).toBe("NonRetryableHttpError");
   });
 });

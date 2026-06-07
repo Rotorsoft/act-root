@@ -28,7 +28,7 @@ export const Counter = state({ Counter: z.object({ count: z.number() }) })
     expect(model.states[0].name).toBe("Counter");
     expect(model.states[0].events).toHaveLength(1);
     expect(model.states[0].events[0].name).toBe("Incremented");
-    expect(model.states[0].events[0].has_custom_patch).toBe(true);
+    expect(model.states[0].events[0].hasCustomPatch).toBe(true);
     expect(model.states[0].actions).toHaveLength(1);
     expect(model.states[0].actions[0].name).toBe("increment");
     expect(model.states[0].actions[0].emits).toContain("Incremented");
@@ -356,7 +356,7 @@ export const S = state({ S: z.object({}) })
     expect(model.states[0].actions).toHaveLength(0);
   });
 
-  it("handles state with event that has no custom patch (has_custom_patch false)", () => {
+  it("handles state with event that has no custom patch (hasCustomPatch false)", () => {
     const files: FileTab[] = [
       {
         path: "src/app.ts",
@@ -372,7 +372,7 @@ export const S = state({ S: z.object({ v: z.string() }) })
       },
     ];
     const { model } = extract_model(files);
-    expect(model.states[0].events[0].has_custom_patch).toBe(false);
+    expect(model.states[0].events[0].hasCustomPatch).toBe(false);
   });
 
   it("handles action with invariants that have no description", () => {
@@ -643,7 +643,7 @@ const app = act()
     ];
     const { model } = extract_model(files);
     expect(model.reactions).toHaveLength(1);
-    expect(model.reactions[0].handler_name).toBeDefined();
+    expect(model.reactions[0].handlerName).toBeDefined();
   });
 
   it("scoped import falls all the way to unknown_module_proxy (line 107 branch #6)", () => {

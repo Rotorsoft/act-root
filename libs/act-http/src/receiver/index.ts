@@ -7,10 +7,10 @@
  *
  * The subpath hosts two primitives today:
  *
- * - {@link extract_idempotency_key} — case-insensitive
+ * - {@link extractIdempotencyKey} — case-insensitive
  *   `Idempotency-Key` parser; pair with `IdempotencyStore.claim`
  *   from `@rotorsoft/act-ops/idempotency` for dedup.
- * - {@link verify_webhook} — HMAC-SHA256 signature + timestamp
+ * - {@link verifyWebhook} — HMAC-SHA256 signature + timestamp
  *   verifier; pair with `webhook({ secret })` from
  *   `@rotorsoft/act-http/webhook` for authenticated, replay-resistant
  *   delivery.
@@ -37,12 +37,12 @@ export {
   type CheckFailureReason,
   type CheckResult,
   type CheckWebhookOptions,
-  check_webhook,
+  checkWebhook,
 } from "./check.js";
-export { extract_idempotency_key } from "./extract.js";
+export { extractIdempotencyKey } from "./extract.js";
 export { receiver } from "./start.js";
 export {
   type VerifyOptions,
   type VerifyResult,
-  verify_webhook,
+  verifyWebhook,
 } from "./verify.js";

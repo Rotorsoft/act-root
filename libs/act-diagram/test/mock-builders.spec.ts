@@ -314,7 +314,7 @@ describe("mock_slice", () => {
       .build();
 
     expect(built[0].reactions).toHaveLength(1);
-    expect(built[0].reactions[0].handler_name).toBe("handler");
+    expect(built[0].reactions[0].handlerName).toBe("handler");
   });
 
   it("captures anonymous reaction handlers", () => {
@@ -325,7 +325,7 @@ describe("mock_slice", () => {
       .to(() => "x")
       .build();
 
-    expect(built[0].reactions[0].handler_name).toBe("on Evt");
+    expect(built[0].reactions[0].handlerName).toBe("on Evt");
   });
 
   it("captures dispatches via regex fallback for conditional handlers", () => {
@@ -561,8 +561,8 @@ describe("mock_act", () => {
       .build();
 
     expect(built[0].reactions).toHaveLength(2);
-    expect(built[0].reactions[0].handler_name).toBe("r1");
-    expect(built[0].reactions[1].handler_name).toBe("r2");
+    expect(built[0].reactions[0].handlerName).toBe("r1");
+    expect(built[0].reactions[1].handlerName).toBe("r2");
   });
 
   it("build returns an act stub with all expected methods", () => {

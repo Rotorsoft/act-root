@@ -17,7 +17,7 @@
  *       url: "https://api.example.com/webhooks/orders",
  *       headers: (e) => ({ Authorization: "Bearer ..." }),
  *       body: (e) => ({ order_id: e.stream, total: e.data.total }),
- *       timeout_ms: 5_000,
+ *       timeoutMs: 5_000,
  *     }),
  *     { maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 } }
  *   )
@@ -34,12 +34,7 @@ import {
   WebhookError,
 } from "./types.js";
 
-export {
-  classify_http_response,
-  type HttpDisposition,
-  type TryOkOptions,
-  try_ok,
-} from "./classify.js";
+export type { HttpDisposition } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
   WebhookBody,
@@ -90,7 +85,7 @@ function has_header(headers: Record<string, string>, name: string): boolean {
 export function webhook<TEvents extends Schemas = Schemas>(
   config: WebhookConfig<TEvents>
 ): ReactionHandler<TEvents, keyof TEvents> {
-  const timeout_ms = config.timeout_ms ?? 5_000;
+  const timeoutMs = config.timeoutMs ?? 5_000;
   const method = config.method ?? "POST";
   const fetch_impl = config.fetch ?? globalThis.fetch;
 
@@ -110,15 +105,15 @@ export function webhook<TEvents extends Schemas = Schemas>(
       headers["Content-Type"] = "application/json";
     }
     if (!has_header(headers, "idempotency-key")) {
-      const key = config.idempotency_key
-        ? config.idempotency_key(event)
+      const key = config.idempotencyKey
+        ? config.idempotencyKey(event)
         : String(event.id);
       if (key !== null) headers["Idempotency-Key"] = key;
     }
 
-    const raw_body = resolve(config.body, event, event as unknown);
+    const rawBody = resolve(config.body, event, event as unknown);
     const body =
-      typeof raw_body === "string" ? raw_body : JSON.stringify(raw_body);
+      typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
 
     if (config.secret && !has_header(headers, "x-webhook-signature")) {
       const { signature, timestamp } = sign_request(body, config.secret);
@@ -129,7 +124,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout_ms);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
 
     let response: Response;
     try {
@@ -143,7 +138,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       const aborted = controller.signal.aborted;
       throw new WebhookError(
         aborted
-          ? `webhook ${method} ${url} timed out after ${timeout_ms}ms`
+          ? `webhook ${method} ${url} timed out after ${timeoutMs}ms`
           : `webhook ${method} ${url} failed: ${(err as Error).message}`,
         { status: 0, url }
       );
@@ -154,9 +149,9 @@ export function webhook<TEvents extends Schemas = Schemas>(
     const disposition = classify_http_response(response);
     if (disposition === "ok") return;
 
-    let response_body: string | undefined;
+    let responseBody: string | undefined;
     try {
-      response_body = await response.text();
+      responseBody = await response.text();
     } catch {
       // best-effort body capture; ignore read errors
     }
@@ -165,7 +160,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       disposition === "retry" ? WebhookError : NonRetryableWebhookError;
     throw new ErrorClass(
       `webhook ${method} ${url} responded ${response.status}`,
-      { status: response.status, url, response_body }
+      { status: response.status, url, responseBody }
     );
   };
 }

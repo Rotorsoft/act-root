@@ -18,10 +18,10 @@
  *
  * @example Store adapter
  * ```ts
- * import { run_store_tck } from "@rotorsoft/act-tck";
+ * import { runStoreTck } from "@rotorsoft/act-tck";
  * import { MyStore } from "../src/MyStore.js";
  *
- * run_store_tck({
+ * runStoreTck({
  *   name: "MyStore",
  *   factory: () => new MyStore({ ... }),
  *   capabilities: { notify: true },
@@ -30,10 +30,10 @@
  *
  * @example Cache adapter
  * ```ts
- * import { run_cache_tck } from "@rotorsoft/act-tck";
+ * import { runCacheTck } from "@rotorsoft/act-tck";
  * import { RedisCache } from "../src/RedisCache.js";
  *
- * run_cache_tck({
+ * runCacheTck({
  *   name: "RedisCache",
  *   factory: () => new RedisCache({ url: process.env.REDIS_URL }),
  * });
@@ -41,10 +41,10 @@
  *
  * @example Logger adapter
  * ```ts
- * import { run_logger_tck } from "@rotorsoft/act-tck";
+ * import { runLoggerTck } from "@rotorsoft/act-tck";
  * import { MyLogger } from "../src/MyLogger.js";
  *
- * run_logger_tck({
+ * runLoggerTck({
  *   name: "MyLogger",
  *   factory: () => new MyLogger({ level: "trace" }),
  * });
@@ -72,7 +72,7 @@ export type {
   StoreNotification,
 } from "@rotorsoft/act/types";
 export type { CacheTckOptions } from "./cache-tck.js";
-export { run_cache_tck } from "./cache-tck.js";
+export { runCacheTck } from "./cache-tck.js";
 export type { CounterEvents } from "./fixtures/events.js";
 export {
   COUNTER_EVENT_NAMES,
@@ -90,12 +90,10 @@ export {
   collect,
   dec,
   inc,
-  make_meta,
   reset,
-  seed_stream,
   uid,
 } from "./fixtures/helpers.js";
 export type { LoggerTckOptions } from "./logger-tck.js";
-export { run_logger_tck } from "./logger-tck.js";
+export { runLoggerTck } from "./logger-tck.js";
 export type { StoreCapabilities, StoreTckOptions } from "./store-tck.js";
-export { run_store_tck } from "./store-tck.js";
+export { runStoreTck } from "./store-tck.js";

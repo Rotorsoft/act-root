@@ -68,7 +68,7 @@ export type Layout = {
 
 type ReactionDef = {
   event: string;
-  handler_name: string;
+  handlerName: string;
   dispatches: string[];
 };
 
@@ -116,8 +116,8 @@ function measure_chain(
       const subR = lookup.get(en);
       let eventH = H;
       let sub_chain: ChainMeasure | undefined;
-      if (subR && !visited.has(subR.handler_name)) {
-        visited.add(subR.handler_name);
+      if (subR && !visited.has(subR.handlerName)) {
+        visited.add(subR.handlerName);
         sub_chain = measure_chain(subR, lookup, visited, all_states);
         eventH = Math.max(H, sub_chain.groupH);
       }
@@ -165,10 +165,10 @@ function place_chain(
   // Reaction node — aligned with triggering event
   const rp = { x: rX, y: reactionY };
   ns.push({
-    key: `r:${rDef.handler_name}:${slice_name}`,
+    key: `r:${rDef.handlerName}:${slice_name}`,
     pos: rp,
     type: "reaction",
-    label: rDef.handler_name,
+    label: rDef.handlerName,
   });
   es.push({
     from: { x: triggered_from_x, y: triggered_from_y },
@@ -191,7 +191,7 @@ function place_chain(
       (a) => a.name === row.an
     );
     ns.push({
-      key: `a:${row.an}:dispatched:${rDef.handler_name}`,
+      key: `a:${row.an}:dispatched:${rDef.handlerName}`,
       pos: dap,
       type: "action",
       label: row.an,
@@ -217,7 +217,7 @@ function place_chain(
     // Dispatched state — centered in row
     if (row.target_state) {
       ns.push({
-        key: `s:${row.target_state.name}:dispatched:${rDef.handler_name}:${row.an}`,
+        key: `s:${row.target_state.name}:dispatched:${rDef.handlerName}:${row.an}`,
         pos: { x: nextX, y: row_center_y - STATE_H / 2 },
         type: "state",
         label: row.target_state.name,
@@ -234,7 +234,7 @@ function place_chain(
     let emitY = row_center_y - events_only_h / 2;
     for (const emit of row.emit_infos) {
       ns.push({
-        key: `e:${emit.name}:dispatched:${rDef.handler_name}:${row.an}`,
+        key: `e:${emit.name}:dispatched:${rDef.handlerName}:${row.an}`,
         pos: { x: evtX, y: emitY },
         type: "event",
         label: emit.name,
@@ -280,7 +280,7 @@ export function compute_layout(view_model: DomainModel): Layout {
   const boxes: Box[] = [];
   const sv = new Map<string, StateNode>();
   for (const s of view_model.states) {
-    sv.set(s.var_name, s);
+    sv.set(s.varName, s);
     sv.set(s.name, s);
   }
 
@@ -305,13 +305,13 @@ export function compute_layout(view_model: DomainModel): Layout {
   for (const slice of view_model.slices) {
     for (const r of slice.reactions) {
       const list = event_reactions.get(r.event) ?? [];
-      list.push(r.handler_name);
+      list.push(r.handlerName);
       event_reactions.set(r.event, list);
     }
   }
   for (const r of view_model.reactions) {
     const list = event_reactions.get(r.event) ?? [];
-    list.push(r.handler_name);
+    list.push(r.handlerName);
     event_reactions.set(r.event, list);
   }
   for (const proj of view_model.projections) {
@@ -362,7 +362,7 @@ export function compute_layout(view_model: DomainModel): Layout {
     // Track which source file each event/action came from
     const event_file_map = new Map<string, string>();
     const action_file_map = new Map<string, string>();
-    const raw_parts = slice.state_vars
+    const raw_parts = slice.stateVars
       .map((v) => sv.get(v))
       .filter(Boolean) as StateNode[];
     const merged_by_name = new Map<string, StateNode>();
@@ -464,8 +464,8 @@ export function compute_layout(view_model: DomainModel): Layout {
         if (!visited_events.has(en)) {
           const rDefs = slice_reactions_by_event.get(en) ?? [];
           for (const rDef of rDefs) {
-            if (visited_reactions.has(rDef.handler_name)) continue;
-            visited_reactions.add(rDef.handler_name);
+            if (visited_reactions.has(rDef.handlerName)) continue;
+            visited_reactions.add(rDef.handlerName);
             const chain = measure_chain(
               rDef,
               slice_reaction_by_event,
@@ -636,15 +636,15 @@ export function compute_layout(view_model: DomainModel): Layout {
     // Remaining reactions not already placed inline (e.g., reactions on
     // events not declared in any state within this slice)
     for (const r of slice.reactions) {
-      if (visited_reactions.has(r.handler_name)) continue;
+      if (visited_reactions.has(r.handlerName)) continue;
 
       const rX = slice_right_x + GAP * 2;
       const rp = { x: rX, y };
       ns.push({
-        key: `r:${r.handler_name}:${slice.name}`,
+        key: `r:${r.handlerName}:${slice.name}`,
         pos: rp,
         type: "reaction",
-        label: r.handler_name,
+        label: r.handlerName,
       });
 
       slice_right_x = Math.max(slice_right_x, rX + W + GAP);
@@ -699,9 +699,9 @@ export function compute_layout(view_model: DomainModel): Layout {
 
   // Standalone states (not in slices) — stacked vertically like a virtual slice
   cx = PAD;
-  const claimed = new Set(sorted_slices.flatMap((sl) => sl.state_vars));
+  const claimed = new Set(sorted_slices.flatMap((sl) => sl.stateVars));
   const standalone_states = [...view_model.states]
-    .filter((s) => !claimed.has(s.var_name))
+    .filter((s) => !claimed.has(s.varName))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   for (const st of standalone_states) {
@@ -818,10 +818,10 @@ export function compute_layout(view_model: DomainModel): Layout {
 
       const rp = { x: rX, y: rY };
       ns.push({
-        key: `r:${r.handler_name}:standalone`,
+        key: `r:${r.handlerName}:standalone`,
         pos: rp,
         type: "reaction",
-        label: r.handler_name,
+        label: r.handlerName,
       });
 
       if (trig_node) {

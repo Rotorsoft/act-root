@@ -117,7 +117,7 @@ export function build_contract_index(model: DomainModel): ContractIndex {
       all_event_names.add(r.event);
       entries.push({
         kind: "reaction",
-        name: r.handler_name,
+        name: r.handlerName,
         qualifier: `${sl.name}::${r.event}`,
         file: r.file ?? sl.file,
         line: r.line,
@@ -137,7 +137,7 @@ export function build_contract_index(model: DomainModel): ContractIndex {
     all_event_names.add(r.event);
     entries.push({
       kind: "reaction",
-      name: r.handler_name,
+      name: r.handlerName,
       qualifier: `*::${r.event}`,
       file: r.file,
       line: r.line,

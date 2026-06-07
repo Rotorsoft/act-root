@@ -26,7 +26,7 @@ Three independent subpath exports:
 |---|---|
 | `@rotorsoft/act-http/webhook` | `webhook()` — reaction handler that POSTs committed events with timeout, auto `Idempotency-Key`, and status-classified errors. |
 | `@rotorsoft/act-http/sse` | `BroadcastChannel`, `PresenceTracker`, `StateCache`, `applyPatchMessage` — server-side broadcast + client-side patch applicator for incremental state sync. |
-| `@rotorsoft/act-http/receiver` | `receiver()` builder (high-level Hono-backed runtime) + `extractIdempotencyKey` + `verifyWebhook` + `check_webhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
+| `@rotorsoft/act-http/receiver` | `receiver()` builder (high-level Hono-backed runtime) + `extractIdempotencyKey` + `verifyWebhook` + `checkWebhook` (framework-agnostic core composing both with `IdempotencyStore.claim`). |
 | `@rotorsoft/act-http/receiver/trpc` | `webhookMiddleware` — tRPC middleware adapter. |
 | `@rotorsoft/act-http/receiver/express` | `webhookMiddleware` — Express middleware adapter. |
 | `@rotorsoft/act-http/receiver/fastify` | `webhookMiddleware` — Fastify `preHandler` adapter. |
@@ -133,7 +133,7 @@ On failure: the adapter responds with the framework's idiomatic 400 (`missing-ke
 
 ### `receiver` primitives — when neither builder nor middleware fits
 
-The framework-agnostic core (`check_webhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the `receiver` builder when you can; fall back to the framework `webhookMiddleware`, then the primitives.
+The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the `receiver` builder when you can; fall back to the framework `webhookMiddleware`, then the primitives.
 
 ### `sse` — live state broadcast
 
@@ -173,7 +173,7 @@ onData: (msg) => {
 
 ### `/receiver` subpath
 
-- **`check_webhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim`. Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
+- **`checkWebhook(headers, body, options)`** — framework-agnostic core. Composes `verifyWebhook` (when `options.secret` is set) + `extractIdempotencyKey` + `options.store.claim`. Returns `{ ok: false; status: 400|401; reason }` on failure or `{ ok: true; key; deduped }` on success. The per-framework adapters wrap this and translate the outcome into the framework's idiomatic response.
 - **`extractIdempotencyKey(headers)`** — case-insensitive `Idempotency-Key` header parser. Returns `undefined` when the header carries no usable key: missing, array-valued (ambiguous), or empty string. Validation beyond "is there a usable key?" (length, format) is intentionally out of scope.
 - **`verifyWebhook(headers, body, secret, opts?)`** — HMAC-SHA256 signature + timestamp window verifier. Returns `{ ok: true }` or `{ ok: false; reason }` where reason is one of `missing-signature` / `missing-timestamp` / `stale` / `future` / `bad-signature`. Default timestamp window is ±300 seconds; override via `opts.maxAgeSeconds`. Uses `crypto.timingSafeEqual` to avoid timing attacks. Pair with `webhook({ secret })` on the sender side.
 - **Types**: `CheckResult`, `CheckWebhookOptions`, `CheckFailureReason`, `VerifyResult`, `VerifyOptions`.

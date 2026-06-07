@@ -49,12 +49,12 @@ function register_batch_handler(
   proj: Projection<any>,
   batch_handlers: Map<string, BatchHandler<any>>
 ): void {
-  if (!proj.batch_handler || !proj.target) return;
+  if (!proj.batchHandler || !proj.target) return;
   const existing = batch_handlers.get(proj.target);
-  if (existing && existing !== proj.batch_handler) {
+  if (existing && existing !== proj.batchHandler) {
     throw new Error(`Duplicate batch handler for target "${proj.target}"`);
   }
-  batch_handlers.set(proj.target, proj.batch_handler);
+  batch_handlers.set(proj.target, proj.batchHandler);
 }
 
 /**

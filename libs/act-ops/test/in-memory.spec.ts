@@ -9,8 +9,8 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.claim("k2")).toBe(true);
   });
 
-  it("expires entries after ttl_ms and re-claims on next call", () => {
-    const store = new InMemoryIdempotencyStore({ ttl_ms: 1_000 });
+  it("expires entries after ttlMs and re-claims on next call", () => {
+    const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const t0 = 1_000_000;
     expect(store.claim("k1", t0)).toBe(true);
     expect(store.claim("k1", t0 + 500)).toBe(false);
@@ -19,7 +19,7 @@ describe("InMemoryIdempotencyStore", () => {
   });
 
   it("size reflects current entries after gc", () => {
-    const store = new InMemoryIdempotencyStore({ ttl_ms: 1_000 });
+    const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const t0 = 1_000_000;
     store.claim("a", t0);
     store.claim("b", t0);
@@ -36,8 +36,8 @@ describe("InMemoryIdempotencyStore", () => {
     expect(store.size()).toBe(1);
   });
 
-  it("evicts the oldest entry when max_entries is exceeded", () => {
-    const store = new InMemoryIdempotencyStore({ max_entries: 2 });
+  it("evicts the oldest entry when maxEntries is exceeded", () => {
+    const store = new InMemoryIdempotencyStore({ maxEntries: 2 });
     store.claim("a");
     store.claim("b");
     store.claim("c"); // "a" evicts (oldest); store now holds [b, c]
@@ -58,7 +58,7 @@ describe("InMemoryIdempotencyStore", () => {
   });
 
   it("gc stops at the first non-expired entry (insertion order)", () => {
-    const store = new InMemoryIdempotencyStore({ ttl_ms: 1_000 });
+    const store = new InMemoryIdempotencyStore({ ttlMs: 1_000 });
     const t0 = 1_000_000;
     store.claim("expired-1", t0);
     store.claim("expired-2", t0 + 100);
@@ -70,14 +70,14 @@ describe("InMemoryIdempotencyStore", () => {
   });
 
   describe("ttl source resolution", () => {
-    it("derives ttl_ms from retry_profile when ttl_ms isn't supplied", () => {
+    it("derives ttlMs from retryProfile when ttlMs isn't supplied", () => {
       // Worked example: backoff (linear, base 100, 4 retries) → 1_000,
       // timeouts → 5 * 500 = 2_500, sf=4 → 14_000ms window.
       const store = new InMemoryIdempotencyStore({
-        retry_profile: {
+        retryProfile: {
           maxRetries: 4,
           backoff: { strategy: "linear", baseMs: 100 },
-          timeout_ms: 500,
+          timeoutMs: 500,
         },
       });
       const t0 = 1_000_000;
@@ -88,20 +88,20 @@ describe("InMemoryIdempotencyStore", () => {
       expect(store.claim("k", t0 + 14_001)).toBe(true);
     });
 
-    it("ttl_ms wins over retry_profile when both are supplied", () => {
-      // retry_profile would derive 14_000ms; explicit ttl_ms is 1_000ms.
+    it("ttlMs wins over retryProfile when both are supplied", () => {
+      // retryProfile would derive 14_000ms; explicit ttlMs is 1_000ms.
       const store = new InMemoryIdempotencyStore({
-        ttl_ms: 1_000,
-        retry_profile: {
+        ttlMs: 1_000,
+        retryProfile: {
           maxRetries: 4,
           backoff: { strategy: "linear", baseMs: 100 },
-          timeout_ms: 500,
+          timeoutMs: 500,
         },
       });
       const t0 = 1_000_000;
       expect(store.claim("k", t0)).toBe(true);
       // Past the explicit 1_000ms window — fresh again, proving
-      // ttl_ms (not retry_profile's 14s) is in effect.
+      // ttlMs (not retryProfile's 14s) is in effect.
       expect(store.claim("k", t0 + 1_001)).toBe(true);
     });
 

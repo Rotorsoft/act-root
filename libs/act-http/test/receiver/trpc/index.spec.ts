@@ -1,7 +1,7 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { TRPCError } from "@trpc/server";
 import { describe, expect, it, vi } from "vitest";
-import { webhook_middleware } from "../../../src/receiver/trpc/index.js";
+import { webhookMiddleware } from "../../../src/receiver/trpc/index.js";
 
 const BODY = '{"order_id":"o-1"}';
 
@@ -9,22 +9,22 @@ function freshStore() {
   return new InMemoryIdempotencyStore();
 }
 
-describe("webhook_middleware (tRPC)", () => {
+describe("webhookMiddleware (tRPC)", () => {
   it("calls next with idempotency injected on the happy path", async () => {
     const store = freshStore();
     const next = vi.fn(async () => ({ status: "processed" }));
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     const result = await middleware({
       ctx: {
         headers: { "idempotency-key": "req-1" },
-        raw_body: BODY,
+        rawBody: BODY,
       },
       next,
     });
     expect(next).toHaveBeenCalledWith({
       ctx: {
         headers: { "idempotency-key": "req-1" },
-        raw_body: BODY,
+        rawBody: BODY,
         idempotency: { key: "req-1", deduped: false },
       },
     });
@@ -34,11 +34,11 @@ describe("webhook_middleware (tRPC)", () => {
   it("injects deduped: true on a re-claim", async () => {
     const store = freshStore();
     const next = vi.fn(async () => ({ status: "ok" }));
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     const headers = { "idempotency-key": "req-1" };
-    await middleware({ ctx: { headers, raw_body: BODY }, next });
+    await middleware({ ctx: { headers, rawBody: BODY }, next });
     next.mockClear();
-    await middleware({ ctx: { headers, raw_body: BODY }, next });
+    await middleware({ ctx: { headers, rawBody: BODY }, next });
     const args = next.mock.calls[0] as unknown as [
       { ctx: { idempotency: { deduped: boolean } } },
     ];
@@ -48,9 +48,9 @@ describe("webhook_middleware (tRPC)", () => {
   it("throws TRPCError BAD_REQUEST on missing-key", async () => {
     const store = freshStore();
     const next = vi.fn();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     await expect(
-      middleware({ ctx: { headers: {}, raw_body: BODY }, next })
+      middleware({ ctx: { headers: {}, rawBody: BODY }, next })
     ).rejects.toMatchObject({
       code: "BAD_REQUEST",
       message: "missing-key",
@@ -61,11 +61,11 @@ describe("webhook_middleware (tRPC)", () => {
   it("throws TRPCError UNAUTHORIZED on verification failure", async () => {
     const store = freshStore();
     const next = vi.fn();
-    const middleware = webhook_middleware({ store, secret: "test-secret" });
+    const middleware = webhookMiddleware({ store, secret: "test-secret" });
     // No signature headers — verification will fail with missing-signature.
     await expect(
       middleware({
-        ctx: { headers: { "idempotency-key": "req-1" }, raw_body: BODY },
+        ctx: { headers: { "idempotency-key": "req-1" }, rawBody: BODY },
         next,
       })
     ).rejects.toMatchObject({
@@ -77,10 +77,10 @@ describe("webhook_middleware (tRPC)", () => {
 
   it("throws TRPCError instances (not plain Error)", async () => {
     const store = freshStore();
-    const middleware = webhook_middleware({ store });
+    const middleware = webhookMiddleware({ store });
     try {
       await middleware({
-        ctx: { headers: {}, raw_body: BODY },
+        ctx: { headers: {}, rawBody: BODY },
         next: vi.fn(),
       });
       throw new Error("expected throw");

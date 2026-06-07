@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { verify_webhook } from "../../src/receiver/index.js";
+import { verifyWebhook } from "../../src/receiver/index.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
@@ -19,17 +19,17 @@ function signedHeaders(
   };
 }
 
-describe("verify_webhook", () => {
+describe("verifyWebhook", () => {
   describe("happy path", () => {
     it("returns { ok: true } when signature and timestamp are valid", () => {
       const headers = signedHeaders(NOW);
-      const result = verify_webhook(headers, BODY, SECRET, { now: NOW });
+      const result = verifyWebhook(headers, BODY, SECRET, { now: NOW });
       expect(result).toEqual({ ok: true });
     });
 
     it("accepts case-insensitive header names", () => {
       const { signature, timestamp } = sign_request(BODY, SECRET, NOW);
-      const result = verify_webhook(
+      const result = verifyWebhook(
         {
           "X-Webhook-Signature": signature,
           "X-Webhook-Timestamp": timestamp,
@@ -46,7 +46,7 @@ describe("verify_webhook", () => {
     it("rejects when the signature header is absent", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook({ "x-webhook-timestamp": timestamp }, BODY, SECRET, {
+        verifyWebhook({ "x-webhook-timestamp": timestamp }, BODY, SECRET, {
           now: NOW,
         })
       ).toEqual({ ok: false, reason: "missing-signature" });
@@ -55,7 +55,7 @@ describe("verify_webhook", () => {
     it("rejects when the signature header is array-valued", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": ["sha256=abc", "sha256=def"],
             "x-webhook-timestamp": timestamp,
@@ -70,7 +70,7 @@ describe("verify_webhook", () => {
     it("rejects when the signature header is empty", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           { "x-webhook-signature": "", "x-webhook-timestamp": timestamp },
           BODY,
           SECRET,
@@ -82,7 +82,7 @@ describe("verify_webhook", () => {
     it("rejects when the signature header is undefined", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": undefined,
             "x-webhook-timestamp": timestamp,
@@ -99,7 +99,7 @@ describe("verify_webhook", () => {
     it("rejects when the timestamp header is absent", () => {
       const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook({ "x-webhook-signature": signature }, BODY, SECRET, {
+        verifyWebhook({ "x-webhook-signature": signature }, BODY, SECRET, {
           now: NOW,
         })
       ).toEqual({ ok: false, reason: "missing-timestamp" });
@@ -108,7 +108,7 @@ describe("verify_webhook", () => {
     it("rejects when the timestamp isn't a parseable integer", () => {
       const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": signature,
             "x-webhook-timestamp": "not-a-number",
@@ -123,7 +123,7 @@ describe("verify_webhook", () => {
     it("rejects timestamps with trailing garbage (round-trip mismatch)", () => {
       const { signature } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": signature,
             "x-webhook-timestamp": "1700000000abc",
@@ -137,22 +137,22 @@ describe("verify_webhook", () => {
   });
 
   describe("stale / future", () => {
-    it("rejects timestamps older than max_age_seconds", () => {
+    it("rejects timestamps older than maxAgeSeconds", () => {
       const headers = signedHeaders(NOW - 600);
       expect(
-        verify_webhook(headers, BODY, SECRET, {
+        verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          max_age_seconds: 300,
+          maxAgeSeconds: 300,
         })
       ).toEqual({ ok: false, reason: "stale" });
     });
 
-    it("rejects timestamps further in the future than max_age_seconds", () => {
+    it("rejects timestamps further in the future than maxAgeSeconds", () => {
       const headers = signedHeaders(NOW + 600);
       expect(
-        verify_webhook(headers, BODY, SECRET, {
+        verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          max_age_seconds: 300,
+          maxAgeSeconds: 300,
         })
       ).toEqual({ ok: false, reason: "future" });
     });
@@ -160,17 +160,17 @@ describe("verify_webhook", () => {
     it("accepts timestamps inside the configured window", () => {
       const headers = signedHeaders(NOW - 299);
       expect(
-        verify_webhook(headers, BODY, SECRET, {
+        verifyWebhook(headers, BODY, SECRET, {
           now: NOW,
-          max_age_seconds: 300,
+          maxAgeSeconds: 300,
         })
       ).toEqual({ ok: true });
     });
 
-    it("honors caller-supplied max_age_seconds (tighter window)", () => {
+    it("honors caller-supplied maxAgeSeconds (tighter window)", () => {
       const headers = signedHeaders(NOW - 60);
       expect(
-        verify_webhook(headers, BODY, SECRET, { now: NOW, max_age_seconds: 30 })
+        verifyWebhook(headers, BODY, SECRET, { now: NOW, maxAgeSeconds: 30 })
       ).toEqual({ ok: false, reason: "stale" });
     });
   });
@@ -179,7 +179,7 @@ describe("verify_webhook", () => {
     it("rejects signatures without the sha256= prefix", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": "a".repeat(64),
             "x-webhook-timestamp": timestamp,
@@ -194,7 +194,7 @@ describe("verify_webhook", () => {
     it("rejects signatures whose hex isn't 64 chars", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": "sha256=deadbeef",
             "x-webhook-timestamp": timestamp,
@@ -209,7 +209,7 @@ describe("verify_webhook", () => {
     it("rejects signatures with non-hex characters", () => {
       const { timestamp } = sign_request(BODY, SECRET, NOW);
       expect(
-        verify_webhook(
+        verifyWebhook(
           {
             "x-webhook-signature": `sha256=${"g".repeat(64)}`,
             "x-webhook-timestamp": timestamp,
@@ -223,7 +223,7 @@ describe("verify_webhook", () => {
 
     it("rejects when the recomputed HMAC doesn't match (wrong secret)", () => {
       const headers = signedHeaders(NOW, BODY, "wrong-secret");
-      expect(verify_webhook(headers, BODY, SECRET, { now: NOW })).toEqual({
+      expect(verifyWebhook(headers, BODY, SECRET, { now: NOW })).toEqual({
         ok: false,
         reason: "bad-signature",
       });
@@ -232,7 +232,7 @@ describe("verify_webhook", () => {
     it("rejects when the body was tampered with after signing", () => {
       const headers = signedHeaders(NOW, BODY);
       expect(
-        verify_webhook(headers, '{"order_id":"o-2"}', SECRET, { now: NOW })
+        verifyWebhook(headers, '{"order_id":"o-2"}', SECRET, { now: NOW })
       ).toEqual({ ok: false, reason: "bad-signature" });
     });
 
@@ -241,7 +241,7 @@ describe("verify_webhook", () => {
       // Caller swaps timestamp but keeps the original signature —
       // recomputed HMAC won't match the new timestamp.
       expect(
-        verify_webhook(
+        verifyWebhook(
           { ...headers, "x-webhook-timestamp": String(NOW - 30) },
           BODY,
           SECRET,
@@ -255,13 +255,13 @@ describe("verify_webhook", () => {
     it("uses wall-clock time when `now` is omitted", () => {
       const wallclockNow = Math.floor(Date.now() / 1000);
       const headers = signedHeaders(wallclockNow);
-      expect(verify_webhook(headers, BODY, SECRET)).toEqual({ ok: true });
+      expect(verifyWebhook(headers, BODY, SECRET)).toEqual({ ok: true });
     });
 
-    it("defaults max_age_seconds to 300", () => {
+    it("defaults maxAgeSeconds to 300", () => {
       const headers = signedHeaders(NOW - 299);
-      // No max_age_seconds passed — must still pass at 299s old.
-      expect(verify_webhook(headers, BODY, SECRET, { now: NOW })).toEqual({
+      // No maxAgeSeconds passed — must still pass at 299s old.
+      expect(verifyWebhook(headers, BODY, SECRET, { now: NOW })).toEqual({
         ok: true,
       });
     });

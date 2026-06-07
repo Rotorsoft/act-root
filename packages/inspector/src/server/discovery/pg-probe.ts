@@ -28,14 +28,14 @@ const COMMON_CREDS: ReadonlyArray<{ user: string; password: string }> = [
 function probePort(
   host: string,
   port: number,
-  timeout_ms = 500
+  timeoutMs = 500
 ): Promise<boolean> {
   return new Promise((resolve) => {
     const socket: Socket = createConnection({ host, port });
     const timer = setTimeout(() => {
       socket.destroy();
       resolve(false);
-    }, timeout_ms);
+    }, timeoutMs);
     socket.on("connect", () => {
       clearTimeout(timer);
       socket.destroy();

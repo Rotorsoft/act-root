@@ -41,7 +41,7 @@ describe("InMemoryStore (adapter-specific)", () => {
     expect(claimed.length).toBe(2);
   });
 
-  // ACT-1103 lane contract: every adapter is exercised by `run_store_tck`
+  // ACT-1103 lane contract: every adapter is exercised by `runStoreTck`
   // (see `test/store-tck.spec.ts`). InMemoryStore has no adapter-only
   // lane concern — there's no schema migration to validate.
 });

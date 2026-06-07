@@ -896,7 +896,7 @@ export interface IAct<
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
     reactingTo?: Committed<Schemas, string>,
-    skip_validation?: boolean
+    skipValidation?: boolean
   ): Promise<Snapshot<any, any>[]>;
 
   load(
@@ -929,10 +929,10 @@ export interface IAct<
    * erasure" signal before the production callsite is exercised.
    *
    * Idempotent: a second call on an already-wiped stream returns
-   * `event_count: 0` and does NOT re-emit `forgotten`.
+   * `eventCount: 0` and does NOT re-emit `forgotten`.
    *
    * @param stream - Target stream to wipe.
    * @returns Count of events whose PII column was set to NULL.
    */
-  forget(stream: string): Promise<{ event_count: number }>;
+  forget(stream: string): Promise<{ eventCount: number }>;
 }

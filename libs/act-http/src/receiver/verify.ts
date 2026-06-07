@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Outcome of {@link verify_webhook}. Either the request signature
+ * Outcome of {@link verifyWebhook}. Either the request signature
  * checks out, or one of five distinct failure reasons applies. Each
  * reason maps to an operator-meaningful telemetry bucket — separated
  * deliberately so dashboards can distinguish "client lost its secret"
@@ -19,7 +19,7 @@ export type VerifyResult =
         | "bad-signature";
     };
 
-/** Options for {@link verify_webhook}. */
+/** Options for {@link verifyWebhook}. */
 export type VerifyOptions = {
   /**
    * Maximum acceptable timestamp drift in either direction, in
@@ -27,7 +27,7 @@ export type VerifyOptions = {
    * Slack conventions. Tightening narrows the replay window;
    * loosening accommodates clients with worse clock sync.
    */
-  max_age_seconds?: number;
+  maxAgeSeconds?: number;
   /**
    * Current Unix-seconds time. Exposed for tests; production
    * callers should leave it undefined so wall-clock is used.
@@ -47,8 +47,8 @@ export type VerifyOptions = {
  *   was an array, or value was empty.
  * - `missing-timestamp` — no `X-Webhook-Timestamp` header, value
  *   was empty, or value isn't a parseable integer.
- * - `stale` — timestamp older than `max_age_seconds` from `now`.
- * - `future` — timestamp more than `max_age_seconds` ahead of `now`.
+ * - `stale` — timestamp older than `maxAgeSeconds` from `now`.
+ * - `future` — timestamp more than `maxAgeSeconds` ahead of `now`.
  * - `bad-signature` — signature header didn't start with `sha256=`,
  *   wasn't 64 hex chars, or the recomputed HMAC didn't match
  *   (constant-time compare).
@@ -62,13 +62,13 @@ export type VerifyOptions = {
  * Uses Node's `crypto.timingSafeEqual` for the final comparison to
  * avoid signature-equality timing attacks.
  */
-export function verify_webhook(
+export function verifyWebhook(
   headers: Record<string, string | string[] | undefined>,
   body: string,
   secret: string,
   options?: VerifyOptions
 ): VerifyResult {
-  const max_age_seconds = options?.max_age_seconds ?? 300;
+  const maxAgeSeconds = options?.maxAgeSeconds ?? 300;
   const now = options?.now ?? Math.floor(Date.now() / 1000);
 
   const signature = pick_header(headers, "x-webhook-signature");
@@ -82,8 +82,8 @@ export function verify_webhook(
   }
 
   const delta = now - timestamp;
-  if (delta > max_age_seconds) return { ok: false, reason: "stale" };
-  if (delta < -max_age_seconds) return { ok: false, reason: "future" };
+  if (delta > maxAgeSeconds) return { ok: false, reason: "stale" };
+  if (delta < -maxAgeSeconds) return { ok: false, reason: "future" };
 
   if (!signature.startsWith("sha256=")) {
     return { ok: false, reason: "bad-signature" };

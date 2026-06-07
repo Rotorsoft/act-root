@@ -68,7 +68,7 @@ export const TicketProjection = projection("tickets")
   .do(async function escalated({ stream, data }) {
     await db
       .update(tickets)
-      .set({ escalationId: data.request_id })
+      .set({ escalationId: data.requestId })
       .where(eq(tickets.id, stream))
       .then(() => log().info(`${stream} => escalated`));
   })

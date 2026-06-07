@@ -1,6 +1,6 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { describe, expect, it } from "vitest";
-import { check_webhook } from "../../src/receiver/check.js";
+import { checkWebhook } from "../../src/receiver/check.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
@@ -20,20 +20,20 @@ function signedHeaders(at: number = NOW, body: string = BODY) {
   };
 }
 
-describe("check_webhook", () => {
+describe("checkWebhook", () => {
   describe("happy path", () => {
     it("returns { ok: true, key, deduped: false } on first claim with no secret", async () => {
       const store = freshStore();
       const headers = { "idempotency-key": "req-1" };
-      const result = await check_webhook(headers, BODY, { store });
+      const result = await checkWebhook(headers, BODY, { store });
       expect(result).toEqual({ ok: true, key: "req-1", deduped: false });
     });
 
     it("returns { ok: true, ..., deduped: true } on second claim with same key", async () => {
       const store = freshStore();
       const headers = { "idempotency-key": "req-1" };
-      const first = await check_webhook(headers, BODY, { store });
-      const second = await check_webhook(headers, BODY, { store });
+      const first = await checkWebhook(headers, BODY, { store });
+      const second = await checkWebhook(headers, BODY, { store });
       expect(first).toEqual({ ok: true, key: "req-1", deduped: false });
       expect(second).toEqual({ ok: true, key: "req-1", deduped: true });
     });
@@ -41,7 +41,7 @@ describe("check_webhook", () => {
     it("verifies signature when secret is set", async () => {
       const store = freshStore();
       const headers = signedHeaders(NOW);
-      const result = await check_webhook(headers, BODY, {
+      const result = await checkWebhook(headers, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },
@@ -53,7 +53,7 @@ describe("check_webhook", () => {
   describe("missing-key (400)", () => {
     it("rejects with status 400 when Idempotency-Key is absent", async () => {
       const store = freshStore();
-      const result = await check_webhook({}, BODY, { store });
+      const result = await checkWebhook({}, BODY, { store });
       expect(result).toEqual({
         ok: false,
         status: 400,
@@ -64,7 +64,7 @@ describe("check_webhook", () => {
     it("rejects when Idempotency-Key is empty", async () => {
       const store = freshStore();
       const headers = { "idempotency-key": "" };
-      const result = await check_webhook(headers, BODY, { store });
+      const result = await checkWebhook(headers, BODY, { store });
       expect(result).toEqual({
         ok: false,
         status: 400,
@@ -77,7 +77,7 @@ describe("check_webhook", () => {
     it("forwards missing-signature", async () => {
       const store = freshStore();
       const headers = { "idempotency-key": "req-1" };
-      const result = await check_webhook(headers, BODY, {
+      const result = await checkWebhook(headers, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },
@@ -92,10 +92,10 @@ describe("check_webhook", () => {
     it("forwards stale", async () => {
       const store = freshStore();
       const headers = signedHeaders(NOW - 600);
-      const result = await check_webhook(headers, BODY, {
+      const result = await checkWebhook(headers, BODY, {
         store,
         secret: SECRET,
-        verify: { now: NOW, max_age_seconds: 300 },
+        verify: { now: NOW, maxAgeSeconds: 300 },
       });
       expect(result).toEqual({ ok: false, status: 401, reason: "stale" });
     });
@@ -103,7 +103,7 @@ describe("check_webhook", () => {
     it("forwards bad-signature", async () => {
       const store = freshStore();
       const headers = signedHeaders(NOW);
-      const result = await check_webhook(headers, "tampered-body", {
+      const result = await checkWebhook(headers, "tampered-body", {
         store,
         secret: SECRET,
         verify: { now: NOW },
@@ -123,12 +123,12 @@ describe("check_webhook", () => {
       // Same key, tampered body — verification fails. The key must
       // not be claimed; a follow-up with a valid signature and the
       // same key should still succeed as `deduped: false`.
-      await check_webhook(headers, "tampered-body", {
+      await checkWebhook(headers, "tampered-body", {
         store,
         secret: SECRET,
         verify: { now: NOW },
       });
-      const validResult = await check_webhook(headers, BODY, {
+      const validResult = await checkWebhook(headers, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },
@@ -147,7 +147,7 @@ describe("check_webhook", () => {
         "x-webhook-signature": headers.signature,
         "x-webhook-timestamp": headers.timestamp,
       };
-      const result = await check_webhook(headers_bag, BODY, {
+      const result = await checkWebhook(headers_bag, BODY, {
         store,
         secret: SECRET,
         verify: { now: NOW },

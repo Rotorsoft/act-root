@@ -151,14 +151,14 @@ export function build_handle<
         target: Target<TActor>,
         action_payload: Readonly<TActions[TKey]>,
         reactingTo?: Committed<Schemas, string>,
-        skip_validation?: boolean
+        skipValidation?: boolean
       ) =>
         bound_do(
           action,
           target,
           action_payload,
           (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skip_validation
+          skipValidation
         );
       try {
         await handler(event, stream, scoped_app);
@@ -193,7 +193,7 @@ export function build_handle_batch<TEvents extends Schemas>(
   return async (
     lease: Lease,
     payloads: ReactionPayload<TEvents>[],
-    batch_handler: BatchHandler<TEvents>
+    batchHandler: BatchHandler<TEvents>
   ) => {
     const stream = lease.stream;
     const events = payloads.map(
@@ -205,7 +205,7 @@ export function build_handle_batch<TEvents extends Schemas>(
       logger.warn(`Retrying batch ${stream}@${events[0].id} (${lease.retry}).`);
 
     try {
-      await batch_handler(events, stream);
+      await batchHandler(events, stream);
       return finalize(
         lease,
         events.length,

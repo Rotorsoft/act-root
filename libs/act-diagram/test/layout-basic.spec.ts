@@ -75,8 +75,8 @@ const SIMPLE_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Counter",
-      var_name: "Counter",
-      events: [{ name: "Incremented", has_custom_patch: true }],
+      varName: "Counter",
+      events: [{ name: "Incremented", hasCustomPatch: true }],
       actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
     },
   ],
@@ -87,14 +87,14 @@ const TWO_STATES_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Counter",
-      var_name: "Counter",
-      events: [{ name: "Incremented", has_custom_patch: false }],
+      varName: "Counter",
+      events: [{ name: "Incremented", hasCustomPatch: false }],
       actions: [{ name: "increment", emits: ["Incremented"], invariants: [] }],
     },
     {
       name: "Timer",
-      var_name: "Timer",
-      events: [{ name: "Started", has_custom_patch: false }],
+      varName: "Timer",
+      events: [{ name: "Started", hasCustomPatch: false }],
       actions: [{ name: "start", emits: ["Started"], invariants: [] }],
     },
   ],
@@ -105,11 +105,11 @@ const MULTI_ACTION_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Ticket",
-      var_name: "Ticket",
+      varName: "Ticket",
       events: [
-        { name: "TicketOpened", has_custom_patch: false },
-        { name: "TicketClosed", has_custom_patch: false },
-        { name: "TicketAssigned", has_custom_patch: false },
+        { name: "TicketOpened", hasCustomPatch: false },
+        { name: "TicketClosed", hasCustomPatch: false },
+        { name: "TicketAssigned", hasCustomPatch: false },
       ],
       actions: [
         { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
@@ -253,13 +253,13 @@ describe("compute_layout", () => {
         states: [
           {
             name: "Calculator",
-            var_name: "Calculator",
+            varName: "Calculator",
             events: [
-              { name: "DigitPressed", has_custom_patch: false },
-              { name: "OperatorPressed", has_custom_patch: false },
-              { name: "DotPressed", has_custom_patch: false },
-              { name: "EqualsPressed", has_custom_patch: false },
-              { name: "Cleared", has_custom_patch: false },
+              { name: "DigitPressed", hasCustomPatch: false },
+              { name: "OperatorPressed", hasCustomPatch: false },
+              { name: "DotPressed", hasCustomPatch: false },
+              { name: "EqualsPressed", hasCustomPatch: false },
+              { name: "Cleared", hasCustomPatch: false },
             ],
             actions: [
               {
@@ -277,16 +277,16 @@ describe("compute_layout", () => {
           },
           {
             name: "DigitBoard",
-            var_name: "DigitBoard",
-            events: [{ name: "DigitCounted", has_custom_patch: false }],
+            varName: "DigitBoard",
+            events: [{ name: "DigitCounted", hasCustomPatch: false }],
             actions: [
               { name: "CountDigit", emits: ["DigitCounted"], invariants: [] },
             ],
           },
           {
             name: "CalculatorResult",
-            var_name: "CalculatorResult",
-            events: [{ name: "ResultProjected", has_custom_patch: false }],
+            varName: "CalculatorResult",
+            events: [{ name: "ResultProjected", hasCustomPatch: false }],
             actions: [
               {
                 name: "ProjectResult",

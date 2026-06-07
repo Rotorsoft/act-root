@@ -1,6 +1,6 @@
 import { unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { run_store_tck } from "@rotorsoft/act-tck";
+import { runStoreTck } from "@rotorsoft/act-tck";
 import { afterAll } from "vitest";
 import { SqliteStore } from "../src/index.js";
 
@@ -8,7 +8,7 @@ import { SqliteStore } from "../src/index.js";
 // the WAL/SHM sidecars don't leak into the repo root.
 const DB_PATH = join(import.meta.dirname, "tck-store.db");
 
-run_store_tck({
+runStoreTck({
   name: "SqliteStore",
   factory: () => new SqliteStore({ url: `file:${DB_PATH}` }),
   capabilities: { restore: true },

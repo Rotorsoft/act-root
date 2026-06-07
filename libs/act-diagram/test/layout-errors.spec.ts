@@ -33,7 +33,7 @@ describe("error slice box", () => {
         {
           name: "BrokenSlice",
           states: [],
-          state_vars: [],
+          stateVars: [],
           projections: [],
           reactions: [],
           error: "Failed to build this slice due to syntax error",
@@ -56,8 +56,8 @@ describe("error slice box", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
@@ -65,7 +65,7 @@ describe("error slice box", () => {
         {
           name: "ErrorFirst",
           states: [],
-          state_vars: [],
+          stateVars: [],
           projections: [],
           reactions: [],
           error: "broken",
@@ -73,7 +73,7 @@ describe("error slice box", () => {
         {
           name: "GoodSlice",
           states: ["S"],
-          state_vars: ["S"],
+          stateVars: ["S"],
           projections: [],
           reactions: [],
         },
@@ -92,10 +92,10 @@ describe("projection nodes below events", () => {
       states: [
         {
           name: "Ticket",
-          var_name: "Ticket",
+          varName: "Ticket",
           events: [
-            { name: "TicketOpened", has_custom_patch: false },
-            { name: "TicketClosed", has_custom_patch: false },
+            { name: "TicketOpened", hasCustomPatch: false },
+            { name: "TicketClosed", hasCustomPatch: false },
           ],
           actions: [
             {
@@ -115,7 +115,7 @@ describe("projection nodes below events", () => {
         {
           name: "TicketSlice",
           states: ["Ticket"],
-          state_vars: ["Ticket"],
+          stateVars: ["Ticket"],
           projections: ["tickets"],
           reactions: [],
         },
@@ -123,7 +123,7 @@ describe("projection nodes below events", () => {
       projections: [
         {
           name: "tickets",
-          var_name: "tickets",
+          varName: "tickets",
           handles: ["TicketOpened"],
         },
       ],
@@ -144,10 +144,10 @@ describe("projection nodes below events", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
+          varName: "S",
           events: [
-            { name: "E1", has_custom_patch: false },
-            { name: "E2", has_custom_patch: false },
+            { name: "E1", hasCustomPatch: false },
+            { name: "E2", hasCustomPatch: false },
           ],
           actions: [
             { name: "a1", emits: ["E1"], invariants: [] },
@@ -159,14 +159,14 @@ describe("projection nodes below events", () => {
         {
           name: "Sl",
           states: ["S"],
-          state_vars: ["S"],
+          stateVars: ["S"],
           projections: ["projA", "projB"],
           reactions: [],
         },
       ],
       projections: [
-        { name: "projA", var_name: "projA", handles: ["E1"] },
-        { name: "projB", var_name: "projB", handles: ["E2"] },
+        { name: "projA", varName: "projA", handles: ["E1"] },
+        { name: "projB", varName: "projB", handles: ["E2"] },
       ],
     });
     const layout = compute_layout(model);
@@ -182,12 +182,12 @@ describe("projection and reaction metadata on event nodes", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
         },
       ],
-      projections: [{ name: "myProj", var_name: "myProj", handles: ["Evt"] }],
+      projections: [{ name: "myProj", varName: "myProj", handles: ["Evt"] }],
     });
     const layout = compute_layout(model);
     const evt = find(layout, "event", "Evt")!;
@@ -199,15 +199,15 @@ describe("projection and reaction metadata on event nodes", () => {
       states: [
         {
           name: "S",
-          var_name: "S",
-          events: [{ name: "Evt", has_custom_patch: false }],
+          varName: "S",
+          events: [{ name: "Evt", hasCustomPatch: false }],
           actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handler_name: "onEvt",
+          handlerName: "onEvt",
           dispatches: [],
         },
       ],

@@ -71,9 +71,9 @@ export async function try_ok(
   const disposition = classify_http_response(response);
   if (disposition === "ok") return;
 
-  let response_body: string | undefined;
+  let responseBody: string | undefined;
   try {
-    response_body = await response.text();
+    responseBody = await response.text();
   } catch {
     // best-effort body capture; ignore read errors
   }
@@ -84,6 +84,6 @@ export async function try_ok(
   throw new ErrorClass(`${label} ${options.url} responded ${response.status}`, {
     status: response.status,
     url: options.url,
-    response_body,
+    responseBody,
   });
 }

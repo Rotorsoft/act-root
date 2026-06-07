@@ -8,7 +8,7 @@
  *
  * ```ts
  * import express from "express";
- * import { webhook_middleware } from "@rotorsoft/act-http/receiver/express";
+ * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/express";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = express();
@@ -19,7 +19,7 @@
  *
  * app.post(
  *   "/webhooks/orders",
- *   webhook_middleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
+ *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET }),
  *   (req, res) => {
  *     const { key, deduped } = (req as any).idempotency;
  *     if (deduped) return res.json({ status: "dedup-skipped", key });
@@ -41,14 +41,14 @@
  * to a UTF-8 string for hashing. Skip when unsigned.
  */
 import type { NextFunction, Request, RequestHandler, Response } from "express";
-import { type CheckWebhookOptions, check_webhook } from "../check.js";
+import { type CheckWebhookOptions, checkWebhook } from "../check.js";
 
 /**
  * Build an Express middleware that verifies the request signature
  * (when `secret` is set), enforces `Idempotency-Key`, and claims the
  * key on the configured store. See the module-level docs for usage.
  */
-export function webhook_middleware(
+export function webhookMiddleware(
   options: CheckWebhookOptions
 ): RequestHandler {
   return async function check(
@@ -56,10 +56,10 @@ export function webhook_middleware(
     res: Response,
     next: NextFunction
   ): Promise<void> {
-    const raw_body = buffer_or_string(req.body);
-    const result = await check_webhook(
+    const rawBody = buffer_or_string(req.body);
+    const result = await checkWebhook(
       req.headers as Record<string, string | string[] | undefined>,
-      raw_body,
+      rawBody,
       options
     );
     if (!result.ok) {

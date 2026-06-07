@@ -16,8 +16,8 @@ const EscalationPayload = z.object({
 const escalations = receiver({
   port: PORT,
   store: new InMemoryIdempotencyStore({
-    ttl_ms: 24 * 60 * 60 * 1000,
-    max_entries: 50_000,
+    ttlMs: 24 * 60 * 60 * 1000,
+    maxEntries: 50_000,
   }),
 })
   .on("escalations", EscalationPayload, async () => {

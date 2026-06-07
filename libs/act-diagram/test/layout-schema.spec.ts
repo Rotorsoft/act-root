@@ -14,15 +14,15 @@ describe("compute_layout — schema propagation", () => {
       states: [
         {
           name: "Order",
-          var_name: "Order:0",
+          varName: "Order:0",
           file: "src/order.ts",
           events: [
             {
               name: "OrderPlaced",
-              has_custom_patch: false,
+              hasCustomPatch: false,
               schema: "z.object({ id: z.string() })",
             },
-            { name: "OrderShipped", has_custom_patch: false },
+            { name: "OrderShipped", hasCustomPatch: false },
           ],
           actions: [
             {
@@ -54,8 +54,8 @@ describe("compute_layout — schema propagation", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "E", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "E", hasCustomPatch: false }],
           actions: [{ name: "act1", emits: ["E"], invariants: [] }],
         },
       ],
@@ -74,8 +74,8 @@ describe("compute_layout — schema propagation", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "OrderPlaced", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "OrderPlaced", hasCustomPatch: false }],
           actions: [{ name: "place", emits: ["OrderPlaced"], invariants: [] }],
         },
       ],
@@ -83,7 +83,7 @@ describe("compute_layout — schema propagation", () => {
         {
           name: "Fulfillment",
           states: ["S:0"],
-          state_vars: ["S:0"],
+          stateVars: ["S:0"],
           projections: ["OrdersByCustomer"],
           reactions: [],
         },
@@ -91,7 +91,7 @@ describe("compute_layout — schema propagation", () => {
       projections: [
         {
           name: "OrdersByCustomer",
-          var_name: "OrdersByCustomer",
+          varName: "OrdersByCustomer",
           handles: ["OrderPlaced", "OrderShipped"],
         },
       ],
@@ -110,18 +110,14 @@ describe("compute_layout — schema propagation", () => {
       states: [
         {
           name: "A",
-          var_name: "A:0",
-          events: [
-            { name: "Shared", has_custom_patch: false, schema: "first" },
-          ],
+          varName: "A:0",
+          events: [{ name: "Shared", hasCustomPatch: false, schema: "first" }],
           actions: [],
         },
         {
           name: "B",
-          var_name: "B:1",
-          events: [
-            { name: "Shared", has_custom_patch: false, schema: "second" },
-          ],
+          varName: "B:1",
+          events: [{ name: "Shared", hasCustomPatch: false, schema: "second" }],
           actions: [],
         },
       ],

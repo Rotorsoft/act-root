@@ -108,7 +108,7 @@ const find_reactions_for = (
       if (r.event === event_name) {
         out.push({
           slice: sl.name,
-          handler: r.handler_name,
+          handler: r.handlerName,
           dispatches: r.dispatches,
           file: r.file ?? sl.file,
           line: r.line,
@@ -119,7 +119,7 @@ const find_reactions_for = (
   for (const r of model.reactions) {
     if (r.event === event_name) {
       out.push({
-        handler: r.handler_name,
+        handler: r.handlerName,
         dispatches: r.dispatches,
         file: r.file,
         line: r.line,
@@ -287,7 +287,7 @@ export function format_slice(idx: ContractIndex, entry: IndexEntry): string {
           ? ` → ${r.dispatches.map((d) => pink(d)).join(", ")}`
           : "";
       lines.push(
-        `    - ${orange(r.event)} → ${fuchsia(r.handler_name)}${triggers}${file_note(r.file, r.line)}`
+        `    - ${orange(r.event)} → ${fuchsia(r.handlerName)}${triggers}${file_note(r.file, r.line)}`
       );
     }
   }
@@ -327,10 +327,10 @@ export function format_reaction(idx: ContractIndex, entry: IndexEntry): string {
   const slice_reaction = idx.model.slices
     .find((s) => s.name === slice_name)
     ?.reactions.find(
-      (r) => r.handler_name === entry.name && r.event === event_name
+      (r) => r.handlerName === entry.name && r.event === event_name
     );
   const orch_reaction = idx.model.reactions.find(
-    (r) => r.handler_name === entry.name && r.event === event_name
+    (r) => r.handlerName === entry.name && r.event === event_name
   );
   const r = slice_reaction ?? orch_reaction;
 

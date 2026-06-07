@@ -15,11 +15,11 @@
  * `.fetch(request)` (Lambda / edge).
  *
  * ```ts
- * import { webhook_receiver } from "@rotorsoft/act-http/receiver";
+ * import { webhookReceiver } from "@rotorsoft/act-http/receiver";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  * import { z } from "zod";
  *
- * const receiver = webhook_receiver({
+ * const receiver = webhookReceiver({
  *   port: 4001,
  *   store: new InMemoryIdempotencyStore(),
  *   secret: process.env.WEBHOOK_SECRET,
@@ -41,7 +41,7 @@
  *
  * For operators who want fine control — custom path routing, auth
  * middleware composition, non-standard HTTP server lifecycle — the
- * lower-level `webhook_middleware` factory in
+ * lower-level `webhookMiddleware` factory in
  * `@rotorsoft/act-http/receiver/<framework>` stays available as the
  * escape hatch.
  */

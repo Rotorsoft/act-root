@@ -64,8 +64,8 @@ function formatModelTree(model: DomainModel): string {
     );
     for (const sl of sorted_slices) {
       lines.push(`Slice: ${sl.name}`);
-      for (const stKey of sl.state_vars) {
-        const st = entry.states.find((s) => s.var_name === stKey);
+      for (const stKey of sl.stateVars) {
+        const st = entry.states.find((s) => s.varName === stKey);
         if (!st) continue;
         lines.push(`  State: ${st.name}`);
         for (const a of st.actions) {
@@ -77,16 +77,16 @@ function formatModelTree(model: DomainModel): string {
       }
       for (const r of sl.reactions) {
         lines.push(
-          `  ⚡ ${r.handler_name} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
+          `  ⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
         );
       }
     }
     for (const p of entry.projections) {
       lines.push(`Projection: ${p.name} [${p.handles.join(", ")}]`);
     }
-    const slice_state_keys = new Set(entry.slices.flatMap((sl) => sl.state_vars));
+    const slice_state_keys = new Set(entry.slices.flatMap((sl) => sl.stateVars));
     for (const st of entry.states.filter(
-      (s) => !slice_state_keys.has(s.var_name)
+      (s) => !slice_state_keys.has(s.varName)
     )) {
       lines.push(`State: ${st.name}`);
       for (const a of st.actions) {
@@ -95,7 +95,7 @@ function formatModelTree(model: DomainModel): string {
     }
     for (const r of entry.reactions) {
       lines.push(
-        `⚡ ${r.handler_name} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
+        `⚡ ${r.handlerName} on ${r.event} → [${r.dispatches.join(", ") || "—"}]`
       );
     }
     // Errors section

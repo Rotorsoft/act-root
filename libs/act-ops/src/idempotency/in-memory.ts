@@ -1,4 +1,4 @@
-import { min_safe_ttl, type RetryProfile } from "./min-safe-ttl.js";
+import { minSafeTtl, type RetryProfile } from "./min-safe-ttl.js";
 import type { IdempotencyStore } from "./port.js";
 
 /**
@@ -9,26 +9,26 @@ import type { IdempotencyStore } from "./port.js";
  *
  * The dedup window is set in one of two ways:
  *
- * - {@link ttl_ms} — pass a number directly when you've already
+ * - {@link ttlMs} — pass a number directly when you've already
  *   computed the window, or just want the 24-hour default that
  *   covers any reasonable sender retry envelope.
- * - {@link retry_profile} — pass the sender's retry profile and the
+ * - {@link retryProfile} — pass the sender's retry profile and the
  *   store derives the minimum safe window for you. The math
  *   (per-retry backoff sums, per-attempt timeouts, jitter
  *   worst-case 1.5×, default 4× safety factor) is hidden inside the
  *   store — see [external integration](https://rotorsoft.github.io/act-root/docs/guides/external-integration#ttl-sizing)
  *   for the math explained.
  *
- * When both are supplied, {@link ttl_ms} wins — an explicit number
+ * When both are supplied, {@link ttlMs} wins — an explicit number
  * overrides a derived one.
  */
 export type InMemoryIdempotencyStoreOptions = {
   /** Direct dedup window. Default: 24 hours. */
-  ttl_ms?: number;
-  /** Sender's retry profile — used to derive `ttl_ms` when not supplied. */
-  retry_profile?: RetryProfile;
+  ttlMs?: number;
+  /** Sender's retry profile — used to derive `ttlMs` when not supplied. */
+  retryProfile?: RetryProfile;
   /** Memory bound — oldest entries are evicted past this size. Default: 100,000. */
-  max_entries?: number;
+  maxEntries?: number;
 };
 
 /**
@@ -53,11 +53,11 @@ export class InMemoryIdempotencyStore implements IdempotencyStore {
 
   constructor(options?: InMemoryIdempotencyStoreOptions) {
     this._ttl_ms =
-      options?.ttl_ms ??
-      (options?.retry_profile !== undefined
-        ? min_safe_ttl(options.retry_profile)
+      options?.ttlMs ??
+      (options?.retryProfile !== undefined
+        ? minSafeTtl(options.retryProfile)
         : 24 * 60 * 60 * 1000);
-    this._max_entries = options?.max_entries ?? 100_000;
+    this._max_entries = options?.maxEntries ?? 100_000;
   }
 
   claim(key: string, now: number = Date.now()): boolean {

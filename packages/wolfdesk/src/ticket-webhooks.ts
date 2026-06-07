@@ -50,7 +50,7 @@ export const TicketWebhooksSlice = slice()
         ticket: event.stream,
         escalationId: (event.data as { escalationId: string }).escalationId,
       }),
-      timeout_ms: 2_000,
+      timeoutMs: 2_000,
       secret: WEBHOOK_SECRET,
     }),
     {

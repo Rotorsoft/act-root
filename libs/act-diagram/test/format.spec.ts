@@ -22,19 +22,19 @@ function build_model(): DomainModel {
     states: [
       {
         name: "Order",
-        var_name: "Order:0",
+        varName: "Order:0",
         file: "src/order.ts",
         line: 1,
         events: [
           {
             name: "OrderPlaced",
-            has_custom_patch: true,
+            hasCustomPatch: true,
             line: 12,
             schema: "z.object({ id: z.string() })",
           },
           {
             name: "OrderPlaced_v2",
-            has_custom_patch: false,
+            hasCustomPatch: false,
             line: 14,
             schema: "z.object({ id: z.string(), total: z.number() })",
           },
@@ -50,7 +50,7 @@ function build_model(): DomainModel {
       },
       {
         name: "Empty",
-        var_name: "Empty:1",
+        varName: "Empty:1",
         file: "src/empty.ts",
         events: [],
         actions: [],
@@ -60,14 +60,14 @@ function build_model(): DomainModel {
       {
         name: "Fulfillment",
         states: ["Order:0"],
-        state_vars: ["Order:0"],
+        stateVars: ["Order:0"],
         projections: ["OrdersByCustomer"],
         file: "src/fulfillment.ts",
         line: 5,
         reactions: [
           {
             event: "OrderPlaced_v2",
-            handler_name: "reserveStock",
+            handlerName: "reserveStock",
             dispatches: ["reserve"],
             line: 18,
           },
@@ -76,7 +76,7 @@ function build_model(): DomainModel {
       {
         name: "Broken",
         states: [],
-        state_vars: [],
+        stateVars: [],
         projections: [],
         reactions: [],
         error: "could not parse",
@@ -85,14 +85,14 @@ function build_model(): DomainModel {
     projections: [
       {
         name: "OrdersByCustomer",
-        var_name: "OrdersByCustomer",
+        varName: "OrdersByCustomer",
         handles: ["OrderPlaced_v2"],
       },
     ],
     reactions: [
       {
         event: "OrderPlaced",
-        handler_name: "auditOldEvent",
+        handlerName: "auditOldEvent",
         dispatches: [],
       },
     ],
@@ -160,9 +160,9 @@ describe("format_event", () => {
       states: [
         {
           name: "Same",
-          var_name: "Same:0",
+          varName: "Same:0",
           file: "s.ts",
-          events: [{ name: "Same", has_custom_patch: false }],
+          events: [{ name: "Same", hasCustomPatch: false }],
           actions: [],
         },
       ],
@@ -182,9 +182,9 @@ describe("format_event", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
+          varName: "S:0",
           file: "src/s.ts",
-          events: [{ name: "E", has_custom_patch: false }],
+          events: [{ name: "E", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["E"], invariants: [], line: 7 }],
         },
       ],
@@ -204,8 +204,8 @@ describe("format_event", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "Bare", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "Bare", hasCustomPatch: false }],
           actions: [],
         },
       ],
@@ -226,8 +226,8 @@ describe("format_event", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "E", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "E", hasCustomPatch: false }],
           actions: [{ name: "a", emits: ["E"], invariants: [] }],
         },
       ],
@@ -262,9 +262,9 @@ describe("format_event", () => {
       states: [
         {
           name: "Lonely",
-          var_name: "Lonely:0",
+          varName: "Lonely:0",
           file: "src/l.ts",
-          events: [{ name: "Lone", has_custom_patch: false }],
+          events: [{ name: "Lone", hasCustomPatch: false }],
           actions: [],
         },
       ],
@@ -314,14 +314,14 @@ describe("format_action", () => {
       states: [
         {
           name: "First",
-          var_name: "First:0",
+          varName: "First:0",
           file: "a.ts",
           events: [],
           actions: [],
         },
         {
           name: "Second",
-          var_name: "Second:1",
+          varName: "Second:1",
           file: "b.ts",
           events: [],
           actions: [{ name: "act1", emits: [], invariants: [] }],
@@ -349,7 +349,7 @@ describe("format_action", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
+          varName: "S:0",
           file: "src/s.ts",
           events: [],
           actions: [{ name: "actNoLine", emits: [], invariants: [] }],
@@ -371,7 +371,7 @@ describe("format_action", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
+          varName: "S:0",
           file: "s.ts",
           events: [],
           actions: [{ name: "noop", emits: [], invariants: [] }],
@@ -413,10 +413,10 @@ describe("format_state", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
+          varName: "S:0",
           file: "src/s.ts",
           line: 1,
-          events: [{ name: "EvA", has_custom_patch: false }],
+          events: [{ name: "EvA", hasCustomPatch: false }],
           actions: [{ name: "act1", emits: [], invariants: [] }],
         },
       ],
@@ -460,9 +460,9 @@ describe("format_slice", () => {
         {
           name: "S",
           states: [],
-          state_vars: [],
+          stateVars: [],
           projections: [],
-          reactions: [{ event: "E", handler_name: "h", dispatches: [] }],
+          reactions: [{ event: "E", handlerName: "h", dispatches: [] }],
         },
       ],
       projections: [],
@@ -503,7 +503,7 @@ describe("format_projection", () => {
       entries: [],
       states: [],
       slices: [],
-      projections: [{ name: "P", var_name: "P", handles: [] }],
+      projections: [{ name: "P", varName: "P", handles: [] }],
       reactions: [],
     };
     const i = build_contract_index(empty);
@@ -550,8 +550,8 @@ describe("format_reaction", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "E", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "E", hasCustomPatch: false }],
           actions: [{ name: "act1", emits: ["E"], invariants: [] }],
         },
       ],
@@ -560,7 +560,7 @@ describe("format_reaction", () => {
       reactions: [
         {
           event: "E",
-          handler_name: "orchHandler",
+          handlerName: "orchHandler",
           dispatches: ["act1"],
           file: "src/orch.ts",
         },
@@ -584,9 +584,9 @@ describe("format_reaction", () => {
         {
           name: "S",
           states: [],
-          state_vars: [],
+          stateVars: [],
           projections: [],
-          reactions: [{ event: "E", handler_name: "h", dispatches: [] }],
+          reactions: [{ event: "E", handlerName: "h", dispatches: [] }],
         },
       ],
       projections: [],
@@ -630,8 +630,8 @@ describe("format_summary", () => {
       states: [],
       slices: [],
       projections: [
-        { name: "A", var_name: "A", handles: [] },
-        { name: "B", var_name: "B", handles: [] },
+        { name: "A", varName: "A", handles: [] },
+        { name: "B", varName: "B", handles: [] },
       ],
       reactions: [],
     };
@@ -645,8 +645,8 @@ describe("format_summary", () => {
       states: [
         {
           name: "S",
-          var_name: "S:0",
-          events: [{ name: "E", has_custom_patch: false }],
+          varName: "S:0",
+          events: [{ name: "E", hasCustomPatch: false }],
           actions: [],
         },
       ],
@@ -654,12 +654,12 @@ describe("format_summary", () => {
         {
           name: "OnlySlice",
           states: [],
-          state_vars: [],
+          stateVars: [],
           projections: [],
           reactions: [],
         },
       ],
-      projections: [{ name: "P", var_name: "P", handles: [] }],
+      projections: [{ name: "P", varName: "P", handles: [] }],
       reactions: [],
     };
     const i = build_contract_index(tiny);

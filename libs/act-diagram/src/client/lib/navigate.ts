@@ -30,7 +30,7 @@ function build_patterns(esc: string, type?: string): RegExp[] {
     new RegExp(`(${esc})\\s*:\\s*z\\.object\\(`),
   ];
   const reaction_patterns = [
-    // .do(handler_name) or .do(module.handler_name) — handler declaration in builder
+    // .do(handlerName) or .do(module.handlerName) — handler declaration in builder
     new RegExp(`\\.do\\(\\s*(?:\\w+\\.)?(${esc})\\b`),
     // inline function in .do()
     new RegExp(

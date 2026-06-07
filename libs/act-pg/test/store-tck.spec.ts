@@ -1,7 +1,7 @@
-import { run_store_tck } from "@rotorsoft/act-tck";
+import { runStoreTck } from "@rotorsoft/act-tck";
 import { PostgresStore } from "../src/index.js";
 
-run_store_tck({
+runStoreTck({
   name: "PostgresStore",
   factory: () =>
     new PostgresStore({

@@ -75,10 +75,10 @@ const SLICE_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Ticket",
-      var_name: "Ticket",
+      varName: "Ticket",
       events: [
-        { name: "TicketOpened", has_custom_patch: false },
-        { name: "TicketAssigned", has_custom_patch: false },
+        { name: "TicketOpened", hasCustomPatch: false },
+        { name: "TicketAssigned", hasCustomPatch: false },
       ],
       actions: [
         { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
@@ -90,12 +90,12 @@ const SLICE_MODEL: DomainModel = emptyModel({
     {
       name: "TicketSlice",
       states: ["Ticket"],
-      state_vars: ["Ticket"],
+      stateVars: ["Ticket"],
       projections: [],
       reactions: [
         {
           event: "TicketOpened",
-          handler_name: "autoAssign",
+          handlerName: "autoAssign",
           dispatches: ["AssignTicket"],
         },
       ],
@@ -108,16 +108,16 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Ticket",
-      var_name: "Ticket",
-      events: [{ name: "TicketOpened", has_custom_patch: false }],
+      varName: "Ticket",
+      events: [{ name: "TicketOpened", hasCustomPatch: false }],
       actions: [
         { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
       ],
     },
     {
       name: "Invoice",
-      var_name: "Invoice",
-      events: [{ name: "InvoiceCreated", has_custom_patch: false }],
+      varName: "Invoice",
+      events: [{ name: "InvoiceCreated", hasCustomPatch: false }],
       actions: [
         { name: "CreateInvoice", emits: ["InvoiceCreated"], invariants: [] },
       ],
@@ -127,14 +127,14 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
     {
       name: "TicketSlice",
       states: ["Ticket"],
-      state_vars: ["Ticket"],
+      stateVars: ["Ticket"],
       projections: [],
       reactions: [],
     },
     {
       name: "InvoiceSlice",
       states: ["Invoice"],
-      state_vars: ["Invoice"],
+      stateVars: ["Invoice"],
       projections: [],
       reactions: [],
     },
@@ -213,10 +213,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "T",
-            var_name: "T",
+            varName: "T",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -228,7 +228,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            state_vars: ["T"],
+            stateVars: ["T"],
             projections: [],
             reactions: [],
           },
@@ -264,12 +264,12 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "T",
-            var_name: "T",
+            varName: "T",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
-              { name: "E3", has_custom_patch: false },
-              { name: "E4", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+              { name: "E3", hasCustomPatch: false },
+              { name: "E4", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -283,17 +283,17 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            state_vars: ["T"],
+            stateVars: ["T"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["A3"],
               },
               {
                 event: "E2",
-                handler_name: "r2",
+                handlerName: "r2",
                 dispatches: ["A4"],
               },
             ],
@@ -367,10 +367,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "A",
-            var_name: "A",
+            varName: "A",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
             ],
             actions: [
               { name: "Do1", emits: ["E1"], invariants: [] },
@@ -379,8 +379,8 @@ describe("compute_layout — slices", () => {
           },
           {
             name: "B",
-            var_name: "B",
-            events: [{ name: "E3", has_custom_patch: false }],
+            varName: "B",
+            events: [{ name: "E3", hasCustomPatch: false }],
             actions: [{ name: "Do3", emits: ["E3"], invariants: [] }],
           },
         ],
@@ -388,12 +388,12 @@ describe("compute_layout — slices", () => {
           {
             name: "S1",
             states: ["A"],
-            state_vars: ["A"],
+            stateVars: ["A"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["Do2"],
               },
             ],
@@ -401,7 +401,7 @@ describe("compute_layout — slices", () => {
           {
             name: "S2",
             states: ["B"],
-            state_vars: ["B"],
+            stateVars: ["B"],
             projections: [],
             reactions: [],
           },
@@ -537,12 +537,12 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "T",
-            var_name: "T",
+            varName: "T",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
-              { name: "E3", has_custom_patch: false },
-              { name: "E4", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+              { name: "E3", hasCustomPatch: false },
+              { name: "E4", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -556,17 +556,17 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            state_vars: ["T"],
+            stateVars: ["T"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["A3"],
               },
               {
                 event: "E2",
-                handler_name: "r2",
+                handlerName: "r2",
                 dispatches: ["A4"],
               },
             ],
@@ -626,11 +626,11 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
-              { name: "E3", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+              { name: "E3", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -643,17 +643,17 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["A2"],
               },
               {
                 event: "E2",
-                handler_name: "r2",
+                handlerName: "r2",
                 dispatches: ["A3"],
               },
             ],
@@ -681,16 +681,16 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "Ticket",
-            var_name: "TicketCreation",
-            events: [{ name: "TicketOpened", has_custom_patch: false }],
+            varName: "TicketCreation",
+            events: [{ name: "TicketOpened", hasCustomPatch: false }],
             actions: [
               { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
             ],
           },
           {
             name: "Ticket",
-            var_name: "TicketOps",
-            events: [{ name: "TicketAssigned", has_custom_patch: false }],
+            varName: "TicketOps",
+            events: [{ name: "TicketAssigned", hasCustomPatch: false }],
             actions: [
               {
                 name: "AssignTicket",
@@ -704,7 +704,7 @@ describe("compute_layout — slices", () => {
           {
             name: "TicketSlice",
             states: ["Ticket"],
-            state_vars: ["TicketCreation", "TicketOps"],
+            stateVars: ["TicketCreation", "TicketOps"],
             projections: [],
             reactions: [],
           },
@@ -733,14 +733,14 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S1",
-            events: [{ name: "E", has_custom_patch: false }],
+            varName: "S1",
+            events: [{ name: "E", hasCustomPatch: false }],
             actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
           },
           {
             name: "S",
-            var_name: "S2",
-            events: [{ name: "E", has_custom_patch: false }],
+            varName: "S2",
+            events: [{ name: "E", hasCustomPatch: false }],
             actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
           },
         ],
@@ -748,7 +748,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S1", "S2"],
+            stateVars: ["S1", "S2"],
             projections: [],
             reactions: [],
           },
@@ -768,7 +768,7 @@ describe("compute_layout — slices", () => {
           {
             name: "EmptySlice",
             states: [],
-            state_vars: ["Missing"],
+            stateVars: ["Missing"],
             projections: [],
             reactions: [],
           },
@@ -787,14 +787,14 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "A",
-            var_name: "A",
-            events: [{ name: "EvtA", has_custom_patch: false }],
+            varName: "A",
+            events: [{ name: "EvtA", hasCustomPatch: false }],
             actions: [{ name: "doA", emits: ["EvtA"], invariants: [] }],
           },
           {
             name: "B",
-            var_name: "B",
-            events: [{ name: "EvtB", has_custom_patch: false }],
+            varName: "B",
+            events: [{ name: "EvtB", hasCustomPatch: false }],
             actions: [{ name: "doB", emits: ["EvtB"], invariants: [] }],
           },
         ],
@@ -802,17 +802,17 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["A", "B"],
-            state_vars: ["A", "B"],
+            stateVars: ["A", "B"],
             projections: [],
             reactions: [
               {
                 event: "EvtA",
-                handler_name: "autoDoB",
+                handlerName: "autoDoB",
                 dispatches: ["doB"],
               },
               {
                 event: "EvtB",
-                handler_name: "notify",
+                handlerName: "notify",
                 dispatches: [],
               },
             ],
@@ -838,8 +838,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "Evt", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -847,12 +847,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "UnknownEvent",
-                handler_name: "orphanHandler",
+                handlerName: "orphanHandler",
                 dispatches: [],
               },
             ],
@@ -871,8 +871,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "Evt", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -880,12 +880,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handler_name: "noDispatch",
+                handlerName: "noDispatch",
                 dispatches: [],
               },
             ],
@@ -906,11 +906,11 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
-              { name: "E3", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
+              { name: "E3", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -923,12 +923,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "multiDispatch",
+                handlerName: "multiDispatch",
                 dispatches: ["A2", "A3"],
               },
             ],
@@ -949,10 +949,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -968,12 +968,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["A2"],
               },
             ],
@@ -996,8 +996,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "E1", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "E1", hasCustomPatch: false }],
             actions: [{ name: "A1", emits: ["E1"], invariants: [] }],
           },
         ],
@@ -1005,12 +1005,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handler_name: "r1",
+                handlerName: "r1",
                 dispatches: ["UnknownAction"],
               },
             ],
@@ -1037,9 +1037,9 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "T",
-            var_name: "T",
+            varName: "T",
             file: "src/ticket.ts",
-            events: [{ name: "Opened", has_custom_patch: false }],
+            events: [{ name: "Opened", hasCustomPatch: false }],
             actions: [{ name: "Open", emits: ["Opened"], invariants: [] }],
           },
         ],
@@ -1047,7 +1047,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            state_vars: ["T"],
+            stateVars: ["T"],
             projections: [],
             reactions: [],
           },
@@ -1068,7 +1068,7 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "Empty",
-            var_name: "Empty",
+            varName: "Empty",
             events: [],
             actions: [],
           },
@@ -1077,7 +1077,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["Empty"],
-            state_vars: ["Empty"],
+            stateVars: ["Empty"],
             projections: [],
             reactions: [],
           },
@@ -1095,10 +1095,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "EmittedEvt", has_custom_patch: false },
-              { name: "OrphanEvt", has_custom_patch: false },
+              { name: "EmittedEvt", hasCustomPatch: false },
+              { name: "OrphanEvt", hasCustomPatch: false },
             ],
             actions: [{ name: "doIt", emits: ["EmittedEvt"], invariants: [] }],
           },
@@ -1107,7 +1107,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [],
           },
@@ -1129,8 +1129,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "Evt", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -1138,17 +1138,17 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handler_name: "firstHandler",
+                handlerName: "firstHandler",
                 dispatches: [],
               },
               {
                 event: "Evt",
-                handler_name: "secondHandler",
+                handlerName: "secondHandler",
                 dispatches: [],
               },
             ],
@@ -1179,8 +1179,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "Evt", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -1188,12 +1188,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "UnknownEvt",
-                handler_name: "orphanHandler",
+                handlerName: "orphanHandler",
                 dispatches: [],
               },
             ],
@@ -1220,12 +1220,12 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "Archived", has_custom_patch: false },
-              { name: "Reviewed", has_custom_patch: false },
-              { name: "Notified", has_custom_patch: false },
-              { name: "Logged", has_custom_patch: false },
+              { name: "Archived", hasCustomPatch: false },
+              { name: "Reviewed", hasCustomPatch: false },
+              { name: "Notified", hasCustomPatch: false },
+              { name: "Logged", hasCustomPatch: false },
             ],
             actions: [
               { name: "Archive", emits: ["Archived"], invariants: [] },
@@ -1239,22 +1239,22 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Archived",
-                handler_name: "autoReview",
+                handlerName: "autoReview",
                 dispatches: ["Review"],
               },
               {
                 event: "Archived",
-                handler_name: "notifyOnArchive",
+                handlerName: "notifyOnArchive",
                 dispatches: ["Notify"],
               },
               {
                 event: "Archived",
-                handler_name: "logOnArchive",
+                handlerName: "logOnArchive",
                 dispatches: ["Log"],
               },
             ],
@@ -1297,8 +1297,8 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
-            events: [{ name: "Evt", has_custom_patch: false }],
+            varName: "S",
+            events: [{ name: "Evt", hasCustomPatch: false }],
             actions: [
               { name: "a1", emits: ["Evt"], invariants: [] },
               { name: "a2", emits: ["Evt"], invariants: [] },
@@ -1309,12 +1309,12 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handler_name: "handler",
+                handlerName: "handler",
                 dispatches: [],
               },
             ],
@@ -1337,10 +1337,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "Cart",
-            var_name: "Cart",
+            varName: "Cart",
             events: [
-              { name: "CartSubmitted", has_custom_patch: false },
-              { name: "CartPublished", has_custom_patch: false },
+              { name: "CartSubmitted", hasCustomPatch: false },
+              { name: "CartPublished", hasCustomPatch: false },
             ],
             actions: [
               { name: "PlaceOrder", emits: ["CartSubmitted"], invariants: [] },
@@ -1349,11 +1349,11 @@ describe("compute_layout — slices", () => {
           },
           {
             name: "Inventory",
-            var_name: "Inventory",
+            varName: "Inventory",
             events: [
-              { name: "InventoryImported", has_custom_patch: false },
-              { name: "InventoryAdjusted", has_custom_patch: false },
-              { name: "InventoryDecommissioned", has_custom_patch: false },
+              { name: "InventoryImported", hasCustomPatch: false },
+              { name: "InventoryAdjusted", hasCustomPatch: false },
+              { name: "InventoryDecommissioned", hasCustomPatch: false },
             ],
             actions: [
               {
@@ -1378,7 +1378,7 @@ describe("compute_layout — slices", () => {
           {
             name: "InventorySlice",
             states: ["Cart", "Inventory"],
-            state_vars: ["Cart", "Inventory"],
+            stateVars: ["Cart", "Inventory"],
             projections: ["inventory"],
             reactions: [],
           },
@@ -1386,7 +1386,7 @@ describe("compute_layout — slices", () => {
         projections: [
           {
             name: "inventory",
-            var_name: "InventoryProjection",
+            varName: "InventoryProjection",
             handles: [
               "InventoryImported",
               "InventoryAdjusted",
@@ -1438,10 +1438,10 @@ describe("compute_layout — slices", () => {
         states: [
           {
             name: "S",
-            var_name: "S",
+            varName: "S",
             events: [
-              { name: "E1", has_custom_patch: false },
-              { name: "E2", has_custom_patch: false },
+              { name: "E1", hasCustomPatch: false },
+              { name: "E2", hasCustomPatch: false },
             ],
             actions: [
               { name: "a1", emits: ["E1"], invariants: [] },
@@ -1453,7 +1453,7 @@ describe("compute_layout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            state_vars: ["S"],
+            stateVars: ["S"],
             projections: ["shared"],
             reactions: [],
           },
@@ -1461,7 +1461,7 @@ describe("compute_layout — slices", () => {
         projections: [
           {
             name: "shared",
-            var_name: "shared",
+            varName: "shared",
             handles: ["E1", "E2"],
           },
         ],

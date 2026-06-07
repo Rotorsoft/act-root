@@ -20,7 +20,7 @@
  * picking a policy can layer it on top — or, when #744 ships, opt
  * into the middleware's opinionated defaults.
  */
-export function extract_idempotency_key(
+export function extractIdempotencyKey(
   headers: Record<string, string | string[] | undefined>
 ): string | undefined {
   for (const [name, value] of Object.entries(headers)) {
