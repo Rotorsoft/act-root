@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   GAP,
   H,
   type Layout,
@@ -75,10 +75,10 @@ const SLICE_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Ticket",
-      varName: "Ticket",
+      var_name: "Ticket",
       events: [
-        { name: "TicketOpened", hasCustomPatch: false },
-        { name: "TicketAssigned", hasCustomPatch: false },
+        { name: "TicketOpened", has_custom_patch: false },
+        { name: "TicketAssigned", has_custom_patch: false },
       ],
       actions: [
         { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
@@ -90,12 +90,12 @@ const SLICE_MODEL: DomainModel = emptyModel({
     {
       name: "TicketSlice",
       states: ["Ticket"],
-      stateVars: ["Ticket"],
+      state_vars: ["Ticket"],
       projections: [],
       reactions: [
         {
           event: "TicketOpened",
-          handlerName: "autoAssign",
+          handler_name: "autoAssign",
           dispatches: ["AssignTicket"],
         },
       ],
@@ -108,16 +108,16 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
   states: [
     {
       name: "Ticket",
-      varName: "Ticket",
-      events: [{ name: "TicketOpened", hasCustomPatch: false }],
+      var_name: "Ticket",
+      events: [{ name: "TicketOpened", has_custom_patch: false }],
       actions: [
         { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
       ],
     },
     {
       name: "Invoice",
-      varName: "Invoice",
-      events: [{ name: "InvoiceCreated", hasCustomPatch: false }],
+      var_name: "Invoice",
+      events: [{ name: "InvoiceCreated", has_custom_patch: false }],
       actions: [
         { name: "CreateInvoice", emits: ["InvoiceCreated"], invariants: [] },
       ],
@@ -127,14 +127,14 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
     {
       name: "TicketSlice",
       states: ["Ticket"],
-      stateVars: ["Ticket"],
+      state_vars: ["Ticket"],
       projections: [],
       reactions: [],
     },
     {
       name: "InvoiceSlice",
       states: ["Invoice"],
-      stateVars: ["Invoice"],
+      state_vars: ["Invoice"],
       projections: [],
       reactions: [],
     },
@@ -143,10 +143,10 @@ const TWO_SLICES_MODEL: DomainModel = emptyModel({
 
 // -- Tests --------------------------------------------------------------------
 
-describe("computeLayout — slices", () => {
+describe("compute_layout — slices", () => {
   describe("column ordering in slices", () => {
     it("places action left of state, state left of event (in slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
       const state = find(layout, "state", "Ticket")!;
       const event = find(layout, "event", "TicketOpened")!;
@@ -156,7 +156,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("places reactions to the right of events", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const event = find(layout, "event", "TicketOpened")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
 
@@ -166,7 +166,7 @@ describe("computeLayout — slices", () => {
 
   describe("gap enforcement in slices", () => {
     it("maintains GAP between action column and state column (slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const action = find(layout, "action", "OpenTicket")!;
       const state = find(layout, "state", "Ticket")!;
 
@@ -175,7 +175,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("maintains GAP between state column and event column (slice)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const event = find(layout, "event", "TicketOpened")!;
 
@@ -186,10 +186,10 @@ describe("computeLayout — slices", () => {
 
   describe("vertical centering in slices", () => {
     it("centers primary block vertically when reaction chain extends below", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const state = find(layout, "state", "Ticket")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
-      const dispatchedAction = layout.ns.find(
+      const dispatched_action = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
 
@@ -205,7 +205,7 @@ describe("computeLayout — slices", () => {
       const trigEvent = find(layout, "event", "TicketOpened")!;
       expect(reaction.pos.y).toBeGreaterThanOrEqual(trigEvent.pos.y);
 
-      expect(dispatchedAction.pos.x).toBeGreaterThan(reaction.pos.x + W);
+      expect(dispatched_action.pos.x).toBeGreaterThan(reaction.pos.x + W);
     });
 
     it("centers state vertically relative to actions/events in a slice (no reactions)", () => {
@@ -213,10 +213,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "T",
-            varName: "T",
+            var_name: "T",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -228,13 +228,13 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            stateVars: ["T"],
+            state_vars: ["T"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const state = find(layout, "state", "T")!;
       const actions = layout.ns.filter((n) => n.type === "action");
       const events = layout.ns.filter((n) => n.type === "event");
@@ -255,7 +255,7 @@ describe("computeLayout — slices", () => {
 
   describe("no overlapping nodes in slices", () => {
     it("has no overlapping nodes in a slice model with reactions", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       assertNoOverlaps(layout);
     });
 
@@ -264,12 +264,12 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "T",
-            varName: "T",
+            var_name: "T",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
-              { name: "E3", hasCustomPatch: false },
-              { name: "E4", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
+              { name: "E3", has_custom_patch: false },
+              { name: "E4", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -283,42 +283,42 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            stateVars: ["T"],
+            state_vars: ["T"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["A3"],
               },
               {
                 event: "E2",
-                handlerName: "r2",
+                handler_name: "r2",
                 dispatches: ["A4"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       assertNoOverlaps(layout);
     });
 
     it("has no overlapping nodes across two slices", () => {
-      const layout = computeLayout(TWO_SLICES_MODEL);
+      const layout = compute_layout(TWO_SLICES_MODEL);
       assertNoOverlaps(layout);
     });
   });
 
   describe("slice bounding boxes", () => {
     it("creates a bounding box for each slice", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       expect(layout.boxes).toHaveLength(1);
       expect(layout.boxes[0].label).toBe("TicketSlice");
     });
 
     it("slice box fully contains all its nodes with SLICE_INNER padding", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
@@ -334,7 +334,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice box has SLICE_INNER padding above topmost and below bottommost node", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       const sliceNodes = layout.ns.filter(
         (n) => n.key.includes("TicketSlice") || n.key.includes("dispatched")
@@ -353,7 +353,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("two slice boxes don't overlap and have SLICE_GAP between them", () => {
-      const layout = computeLayout(TWO_SLICES_MODEL);
+      const layout = compute_layout(TWO_SLICES_MODEL);
       expect(layout.boxes).toHaveLength(2);
 
       const box1 = layout.boxes[0];
@@ -367,10 +367,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "A",
-            varName: "A",
+            var_name: "A",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
             ],
             actions: [
               { name: "Do1", emits: ["E1"], invariants: [] },
@@ -379,8 +379,8 @@ describe("computeLayout — slices", () => {
           },
           {
             name: "B",
-            varName: "B",
-            events: [{ name: "E3", hasCustomPatch: false }],
+            var_name: "B",
+            events: [{ name: "E3", has_custom_patch: false }],
             actions: [{ name: "Do3", emits: ["E3"], invariants: [] }],
           },
         ],
@@ -388,12 +388,12 @@ describe("computeLayout — slices", () => {
           {
             name: "S1",
             states: ["A"],
-            stateVars: ["A"],
+            state_vars: ["A"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["Do2"],
               },
             ],
@@ -401,13 +401,13 @@ describe("computeLayout — slices", () => {
           {
             name: "S2",
             states: ["B"],
-            stateVars: ["B"],
+            state_vars: ["B"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       expect(layout.boxes).toHaveLength(2);
 
       const box1 = layout.boxes[0];
@@ -426,7 +426,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice box includes SLICE_PAD offset for the vertical label strip", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       expect(box.x).toBe(PAD - GAP / 2);
     });
@@ -434,7 +434,7 @@ describe("computeLayout — slices", () => {
 
   describe("dashed edges for reactions", () => {
     it("creates dashed edges for reaction arrows", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const dashedEdges = layout.es.filter((e) => e.dash);
       expect(dashedEdges.length).toBeGreaterThanOrEqual(1);
       for (const e of dashedEdges) {
@@ -445,7 +445,7 @@ describe("computeLayout — slices", () => {
 
   describe("dispatched reaction chains", () => {
     it("places dispatched action to the right of the reaction", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const reaction = find(layout, "reaction", "autoAssign")!;
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
@@ -456,7 +456,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("places dispatched state and events further right in the chain", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
@@ -476,7 +476,7 @@ describe("computeLayout — slices", () => {
 
   describe("reaction chain layout rules", () => {
     it("events stack tightly at uniform H + GAP/2 regardless of chains", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const primaryEvents = layout.ns.filter(
         (n) =>
           n.type === "event" &&
@@ -492,15 +492,15 @@ describe("computeLayout — slices", () => {
     });
 
     it("reaction aligns vertically with triggering event when no prior chain", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const trigEvent = find(layout, "event", "TicketOpened")!;
       const reaction = find(layout, "reaction", "autoAssign")!;
 
       expect(reaction.pos.y).toBe(trigEvent.pos.y);
     });
 
-    it("dispatched row is internally centered (action, state, events share rowCenterY)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+    it("dispatched row is internally centered (action, state, events share row_center_y)", () => {
+      const layout = compute_layout(SLICE_MODEL);
       const dAction = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       )!;
@@ -520,16 +520,16 @@ describe("computeLayout — slices", () => {
     });
 
     it("dispatched block is centered on reaction center", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const reaction = find(layout, "reaction", "autoAssign")!;
       const dState = layout.ns.find(
         (n) => n.type === "state" && n.key.includes("dispatched")
       )!;
 
-      const reactionCenter = reaction.pos.y + H / 2;
+      const reaction_center = reaction.pos.y + H / 2;
       const stateCenter = dState.pos.y + STATE_H / 2;
 
-      expect(Math.abs(reactionCenter - stateCenter)).toBeLessThan(1);
+      expect(Math.abs(reaction_center - stateCenter)).toBeLessThan(1);
     });
 
     it("watermark pushes second reaction down when chains would overlap", () => {
@@ -537,12 +537,12 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "T",
-            varName: "T",
+            var_name: "T",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
-              { name: "E3", hasCustomPatch: false },
-              { name: "E4", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
+              { name: "E3", has_custom_patch: false },
+              { name: "E4", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -556,24 +556,24 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            stateVars: ["T"],
+            state_vars: ["T"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["A3"],
               },
               {
                 event: "E2",
-                handlerName: "r2",
+                handler_name: "r2",
                 dispatches: ["A4"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const r1 = find(layout, "reaction", "r1")!;
       const r2 = find(layout, "reaction", "r2")!;
       const e1 = find(layout, "event", "E1")!;
@@ -598,7 +598,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("states are always square (STATE_W x STATE_H)", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const states = layout.ns.filter((n) => n.type === "state");
       for (const s of states) {
         const bb = nodeBBox(s);
@@ -608,7 +608,7 @@ describe("computeLayout — slices", () => {
     });
 
     it("slice bounding box extends to contain all chain nodes", () => {
-      const layout = computeLayout(SLICE_MODEL);
+      const layout = compute_layout(SLICE_MODEL);
       const box = layout.boxes[0];
       for (const n of layout.ns) {
         if (!n.key.includes("TicketSlice") && !n.key.includes("dispatched"))
@@ -626,11 +626,11 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
-              { name: "E3", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
+              { name: "E3", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -643,24 +643,24 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["A2"],
               },
               {
                 event: "E2",
-                handlerName: "r2",
+                handler_name: "r2",
                 dispatches: ["A3"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       const r1 = find(layout, "reaction", "r1");
       const r2 = find(layout, "reaction", "r2");
@@ -681,16 +681,16 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "Ticket",
-            varName: "TicketCreation",
-            events: [{ name: "TicketOpened", hasCustomPatch: false }],
+            var_name: "TicketCreation",
+            events: [{ name: "TicketOpened", has_custom_patch: false }],
             actions: [
               { name: "OpenTicket", emits: ["TicketOpened"], invariants: [] },
             ],
           },
           {
             name: "Ticket",
-            varName: "TicketOps",
-            events: [{ name: "TicketAssigned", hasCustomPatch: false }],
+            var_name: "TicketOps",
+            events: [{ name: "TicketAssigned", has_custom_patch: false }],
             actions: [
               {
                 name: "AssignTicket",
@@ -704,13 +704,13 @@ describe("computeLayout — slices", () => {
           {
             name: "TicketSlice",
             states: ["Ticket"],
-            stateVars: ["TicketCreation", "TicketOps"],
+            state_vars: ["TicketCreation", "TicketOps"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       const stateNodes = layout.ns.filter(
         (n) => n.type === "state" && n.label === "Ticket"
@@ -718,14 +718,14 @@ describe("computeLayout — slices", () => {
       expect(stateNodes).toHaveLength(1);
 
       const action_nodes = layout.ns.filter((n) => n.type === "action");
-      const actionNames = action_nodes.map((n) => n.label);
-      expect(actionNames).toContain("OpenTicket");
-      expect(actionNames).toContain("AssignTicket");
+      const action_names = action_nodes.map((n) => n.label);
+      expect(action_names).toContain("OpenTicket");
+      expect(action_names).toContain("AssignTicket");
 
-      const eventNodes = layout.ns.filter((n) => n.type === "event");
-      const eventNames = eventNodes.map((n) => n.label);
-      expect(eventNames).toContain("TicketOpened");
-      expect(eventNames).toContain("TicketAssigned");
+      const event_nodes = layout.ns.filter((n) => n.type === "event");
+      const event_names = event_nodes.map((n) => n.label);
+      expect(event_names).toContain("TicketOpened");
+      expect(event_names).toContain("TicketAssigned");
     });
 
     it("does not duplicate actions when same action appears in both partials", () => {
@@ -733,14 +733,14 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S1",
-            events: [{ name: "E", hasCustomPatch: false }],
+            var_name: "S1",
+            events: [{ name: "E", has_custom_patch: false }],
             actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
           },
           {
             name: "S",
-            varName: "S2",
-            events: [{ name: "E", hasCustomPatch: false }],
+            var_name: "S2",
+            events: [{ name: "E", has_custom_patch: false }],
             actions: [{ name: "doIt", emits: ["E"], invariants: [] }],
           },
         ],
@@ -748,13 +748,13 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S1", "S2"],
+            state_vars: ["S1", "S2"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const action_nodes = layout.ns.filter((n) => n.type === "action");
       expect(action_nodes).toHaveLength(1);
     });
@@ -768,13 +768,13 @@ describe("computeLayout — slices", () => {
           {
             name: "EmptySlice",
             states: [],
-            stateVars: ["Missing"],
+            state_vars: ["Missing"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       expect(layout.boxes).toHaveLength(1);
       expect(layout.boxes[0].w).toBeGreaterThan(0);
       expect(layout.boxes[0].h).toBeGreaterThan(0);
@@ -787,14 +787,14 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "A",
-            varName: "A",
-            events: [{ name: "EvtA", hasCustomPatch: false }],
+            var_name: "A",
+            events: [{ name: "EvtA", has_custom_patch: false }],
             actions: [{ name: "doA", emits: ["EvtA"], invariants: [] }],
           },
           {
             name: "B",
-            varName: "B",
-            events: [{ name: "EvtB", hasCustomPatch: false }],
+            var_name: "B",
+            events: [{ name: "EvtB", has_custom_patch: false }],
             actions: [{ name: "doB", emits: ["EvtB"], invariants: [] }],
           },
         ],
@@ -802,24 +802,24 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["A", "B"],
-            stateVars: ["A", "B"],
+            state_vars: ["A", "B"],
             projections: [],
             reactions: [
               {
                 event: "EvtA",
-                handlerName: "autoDoB",
+                handler_name: "autoDoB",
                 dispatches: ["doB"],
               },
               {
                 event: "EvtB",
-                handlerName: "notify",
+                handler_name: "notify",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const notify = find(layout, "reaction", "notify");
       expect(notify).toBeDefined();
       const nonReactionNodes = layout.ns.filter(
@@ -838,8 +838,8 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "Evt", has_custom_patch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -847,19 +847,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "UnknownEvent",
-                handlerName: "orphanHandler",
+                handler_name: "orphanHandler",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "orphanHandler");
       expect(reaction).toBeDefined();
     });
@@ -871,8 +871,8 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "Evt", has_custom_patch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -880,19 +880,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handlerName: "noDispatch",
+                handler_name: "noDispatch",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "noDispatch");
       expect(reaction).toBeDefined();
       const dispatched = layout.ns.filter((n) => n.key.includes("dispatched"));
@@ -906,11 +906,11 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
-              { name: "E3", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
+              { name: "E3", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -923,19 +923,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "multiDispatch",
+                handler_name: "multiDispatch",
                 dispatches: ["A2", "A3"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const dispatched = layout.ns.filter(
         (n) => n.type === "action" && n.key.includes("dispatched")
       );
@@ -949,10 +949,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
             ],
             actions: [
               { name: "A1", emits: ["E1"], invariants: [] },
@@ -968,19 +968,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["A2"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const dispatched = layout.ns.find(
         (n) => n.type === "action" && n.key.includes("dispatched")
       );
@@ -996,8 +996,8 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "E1", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "E1", has_custom_patch: false }],
             actions: [{ name: "A1", emits: ["E1"], invariants: [] }],
           },
         ],
@@ -1005,19 +1005,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "E1",
-                handlerName: "r1",
+                handler_name: "r1",
                 dispatches: ["UnknownAction"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "r1");
       expect(reaction).toBeDefined();
       const dispatched = layout.ns.find(
@@ -1037,9 +1037,9 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "T",
-            varName: "T",
+            var_name: "T",
             file: "src/ticket.ts",
-            events: [{ name: "Opened", hasCustomPatch: false }],
+            events: [{ name: "Opened", has_custom_patch: false }],
             actions: [{ name: "Open", emits: ["Opened"], invariants: [] }],
           },
         ],
@@ -1047,13 +1047,13 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["T"],
-            stateVars: ["T"],
+            state_vars: ["T"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const evt = find(layout, "event", "Opened");
       expect(evt).toBeDefined();
       expect(evt!.file).toBe("src/ticket.ts");
@@ -1068,7 +1068,7 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "Empty",
-            varName: "Empty",
+            var_name: "Empty",
             events: [],
             actions: [],
           },
@@ -1077,13 +1077,13 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["Empty"],
-            stateVars: ["Empty"],
+            state_vars: ["Empty"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const state = find(layout, "state", "Empty");
       expect(state).toBeDefined();
     });
@@ -1095,10 +1095,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "EmittedEvt", hasCustomPatch: false },
-              { name: "OrphanEvt", hasCustomPatch: false },
+              { name: "EmittedEvt", has_custom_patch: false },
+              { name: "OrphanEvt", has_custom_patch: false },
             ],
             actions: [{ name: "doIt", emits: ["EmittedEvt"], invariants: [] }],
           },
@@ -1107,13 +1107,13 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const emittedEvt = find(layout, "event", "EmittedEvt");
       const orphanEvt = find(layout, "event", "OrphanEvt");
       expect(emittedEvt).toBeDefined();
@@ -1129,8 +1129,8 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "Evt", has_custom_patch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -1138,24 +1138,24 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handlerName: "firstHandler",
+                handler_name: "firstHandler",
                 dispatches: [],
               },
               {
                 event: "Evt",
-                handlerName: "secondHandler",
+                handler_name: "secondHandler",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const first = find(layout, "reaction", "firstHandler");
       const second = find(layout, "reaction", "secondHandler");
       expect(first).toBeDefined();
@@ -1174,13 +1174,13 @@ describe("computeLayout — slices", () => {
 
     it("places remaining reaction without edge when event is not in any state", () => {
       // Reaction triggers on "UnknownEvt" which is not declared in any state.
-      // No event node exists, so trigNode is null and no edge is created.
+      // No event node exists, so trig_node is null and no edge is created.
       const model = emptyModel({
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "Evt", has_custom_patch: false }],
             actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
           },
         ],
@@ -1188,19 +1188,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "UnknownEvt",
-                handlerName: "orphanHandler",
+                handler_name: "orphanHandler",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const reaction = find(layout, "reaction", "orphanHandler");
       expect(reaction).toBeDefined();
       // No event node for UnknownEvt, so no dashed edge to reaction
@@ -1220,12 +1220,12 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "Archived", hasCustomPatch: false },
-              { name: "Reviewed", hasCustomPatch: false },
-              { name: "Notified", hasCustomPatch: false },
-              { name: "Logged", hasCustomPatch: false },
+              { name: "Archived", has_custom_patch: false },
+              { name: "Reviewed", has_custom_patch: false },
+              { name: "Notified", has_custom_patch: false },
+              { name: "Logged", has_custom_patch: false },
             ],
             actions: [
               { name: "Archive", emits: ["Archived"], invariants: [] },
@@ -1239,29 +1239,29 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Archived",
-                handlerName: "autoReview",
+                handler_name: "autoReview",
                 dispatches: ["Review"],
               },
               {
                 event: "Archived",
-                handlerName: "notifyOnArchive",
+                handler_name: "notifyOnArchive",
                 dispatches: ["Notify"],
               },
               {
                 event: "Archived",
-                handlerName: "logOnArchive",
+                handler_name: "logOnArchive",
                 dispatches: ["Log"],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       // All three reactions should be placed
       const r1 = find(layout, "reaction", "autoReview");
@@ -1297,8 +1297,8 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
-            events: [{ name: "Evt", hasCustomPatch: false }],
+            var_name: "S",
+            events: [{ name: "Evt", has_custom_patch: false }],
             actions: [
               { name: "a1", emits: ["Evt"], invariants: [] },
               { name: "a2", emits: ["Evt"], invariants: [] },
@@ -1309,19 +1309,19 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: [],
             reactions: [
               {
                 event: "Evt",
-                handlerName: "handler",
+                handler_name: "handler",
                 dispatches: [],
               },
             ],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       // Reaction should appear exactly once even though Evt is in two action rows
       const reactions = layout.ns.filter(
         (n) => n.type === "reaction" && n.label === "handler"
@@ -1337,10 +1337,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "Cart",
-            varName: "Cart",
+            var_name: "Cart",
             events: [
-              { name: "CartSubmitted", hasCustomPatch: false },
-              { name: "CartPublished", hasCustomPatch: false },
+              { name: "CartSubmitted", has_custom_patch: false },
+              { name: "CartPublished", has_custom_patch: false },
             ],
             actions: [
               { name: "PlaceOrder", emits: ["CartSubmitted"], invariants: [] },
@@ -1349,11 +1349,11 @@ describe("computeLayout — slices", () => {
           },
           {
             name: "Inventory",
-            varName: "Inventory",
+            var_name: "Inventory",
             events: [
-              { name: "InventoryImported", hasCustomPatch: false },
-              { name: "InventoryAdjusted", hasCustomPatch: false },
-              { name: "InventoryDecommissioned", hasCustomPatch: false },
+              { name: "InventoryImported", has_custom_patch: false },
+              { name: "InventoryAdjusted", has_custom_patch: false },
+              { name: "InventoryDecommissioned", has_custom_patch: false },
             ],
             actions: [
               {
@@ -1378,7 +1378,7 @@ describe("computeLayout — slices", () => {
           {
             name: "InventorySlice",
             states: ["Cart", "Inventory"],
-            stateVars: ["Cart", "Inventory"],
+            state_vars: ["Cart", "Inventory"],
             projections: ["inventory"],
             reactions: [],
           },
@@ -1386,7 +1386,7 @@ describe("computeLayout — slices", () => {
         projections: [
           {
             name: "inventory",
-            varName: "InventoryProjection",
+            var_name: "InventoryProjection",
             handles: [
               "InventoryImported",
               "InventoryAdjusted",
@@ -1396,7 +1396,7 @@ describe("computeLayout — slices", () => {
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
 
       // Projection should be placed
       const projNode = layout.ns.find(
@@ -1438,10 +1438,10 @@ describe("computeLayout — slices", () => {
         states: [
           {
             name: "S",
-            varName: "S",
+            var_name: "S",
             events: [
-              { name: "E1", hasCustomPatch: false },
-              { name: "E2", hasCustomPatch: false },
+              { name: "E1", has_custom_patch: false },
+              { name: "E2", has_custom_patch: false },
             ],
             actions: [
               { name: "a1", emits: ["E1"], invariants: [] },
@@ -1453,7 +1453,7 @@ describe("computeLayout — slices", () => {
           {
             name: "Sl",
             states: ["S"],
-            stateVars: ["S"],
+            state_vars: ["S"],
             projections: ["shared"],
             reactions: [],
           },
@@ -1461,12 +1461,12 @@ describe("computeLayout — slices", () => {
         projections: [
           {
             name: "shared",
-            varName: "shared",
+            var_name: "shared",
             handles: ["E1", "E2"],
           },
         ],
       });
-      const layout = computeLayout(model);
+      const layout = compute_layout(model);
       const projNodes = layout.ns.filter((n) => n.type === "projection");
       expect(projNodes).toHaveLength(1);
       expect(projNodes[0].label).toBe("shared");

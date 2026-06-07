@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import {
   MODULES,
-  mockAct,
-  mockProjection,
-  mockSlice,
-  mockState,
-  proxyTarget,
-  unknownModuleProxy,
+  mock_act,
+  mock_projection,
+  mock_slice,
+  mock_state,
+  proxy_target,
+  unknown_module_proxy,
 } from "../src/client/lib/mock-builders.js";
 
-describe("mockState", () => {
+describe("mock_state", () => {
   it("captures state name and events", () => {
     const built: any[] = [];
-    const builder = mockState({ Counter: {} }, (info) => built.push(info));
+    const builder = mock_state({ Counter: {} }, (info) => built.push(info));
     builder
       .init(() => ({}))
       .emits({ Incremented: {} })
@@ -30,7 +30,7 @@ describe("mockState", () => {
 
   it("captures patches", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E1: {} })
       .patch({ E1: () => ({}) })
@@ -44,7 +44,7 @@ describe("mockState", () => {
   it("captures given invariants", () => {
     const built: any[] = [];
     const inv = { description: "must be open", valid: () => true };
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Done: {} })
       .on({ doIt: {} })
@@ -57,7 +57,7 @@ describe("mockState", () => {
 
   it("handles snap() in chain", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Done: {} })
       .on({ doIt: {} })
@@ -70,7 +70,7 @@ describe("mockState", () => {
 
   it("handles emits(undefined) gracefully", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits(undefined as unknown as Record<string, any>)
       .build();
@@ -78,8 +78,8 @@ describe("mockState", () => {
     expect(built[0].events).toEqual({});
   });
 
-  it("builds without onBuild callback", () => {
-    const result = mockState({ S: {} })
+  it("builds without on_build callback", () => {
+    const result = mock_state({ S: {} })
       .init()
       .emits({ E: {} })
       .on({ a: {} })
@@ -90,7 +90,7 @@ describe("mockState", () => {
 
   it("handles emit with function handler that references events by string (Strategy 1)", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Created: {}, Updated: {} })
       .on({ create: {} })
@@ -113,18 +113,18 @@ describe("mockState", () => {
     const events: Record<string, any> = {};
     events[event_name] = {};
 
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits(events)
       .on({ action1: {} })
       .emit(function handler(arg: any) {
-        // Access arg properties to trigger dummyArg.get → proxyFn
+        // Access arg properties to trigger dummy_arg.get → proxy_fn
         const val = arg.someProperty;
-        // Call proxyFn to trigger proxyFn.apply → deepProxy
+        // Call proxy_fn to trigger proxy_fn.apply → deep_proxy
         const result = val("test");
-        // Access deepProxy property to trigger deepProxy.get
+        // Access deep_proxy property to trigger deep_proxy.get
         const nested = result.deep;
-        // Check 'in' to trigger deepProxy.has
+        // Check 'in' to trigger deep_proxy.has
         if ("x" in nested) {
           void nested;
         }
@@ -137,20 +137,20 @@ describe("mockState", () => {
     expect(built[0].actions.__emits_action1).toContain("Created");
   });
 
-  it("exercises dummyArg Symbol access returning undefined (line 50-51)", () => {
-    // When the handler accesses a Symbol property on dummyArg,
-    // the get trap returns undefined (not proxyFn)
+  it("exercises dummy_arg Symbol access returning undefined (line 50-51)", () => {
+    // When the handler accesses a Symbol property on dummy_arg,
+    // the get trap returns undefined (not proxy_fn)
     const built: any[] = [];
     const event_name = "Fin" + "ished";
     const events: Record<string, any> = {};
     events[event_name] = {};
 
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits(events)
       .on({ action1: {} })
       .emit(function handler(arg: any) {
-        // Symbol access triggers dummyArg.get with non-string prop → undefined
+        // Symbol access triggers dummy_arg.get with non-string prop → undefined
         const sym = arg[Symbol.iterator];
         void sym; // just access it, don't use
         const name = ["Fin", "ished"].join("");
@@ -161,22 +161,22 @@ describe("mockState", () => {
     expect(built[0].actions.__emits_action1).toContain("Finished");
   });
 
-  it("exercises proxyFn.get trap (line 42-43)", () => {
-    // When handler accesses a property on proxyFn (returned by dummyArg.get),
-    // proxyFn.get returns deepProxy
+  it("exercises proxy_fn.get trap (line 42-43)", () => {
+    // When handler accesses a property on proxy_fn (returned by dummy_arg.get),
+    // proxy_fn.get returns deep_proxy
     const built: any[] = [];
     const event_name = "Up" + "dated";
     const events: Record<string, any> = {};
     events[event_name] = {};
 
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits(events)
       .on({ action1: {} })
       .emit(function handler(arg: any) {
-        // arg.prop returns proxyFn, accessing .something on proxyFn triggers proxyFn.get
+        // arg.prop returns proxy_fn, accessing .something on proxy_fn triggers proxy_fn.get
         const fn = arg.myMethod;
-        const deepResult = fn.nestedProp; // proxyFn.get → deepProxy
+        const deepResult = fn.nestedProp; // proxy_fn.get → deep_proxy
         void deepResult;
         const name = ["Up", "dated"].join("");
         return [name, {}];
@@ -189,8 +189,8 @@ describe("mockState", () => {
   it("handles emit with function that accesses event properties via proxy", () => {
     const built: any[] = [];
     // This handler accesses action properties via proxy args, triggering
-    // deepProxy.get, deepProxy.apply, deepProxy.has, dummyArg.get, proxyFn.get
-    mockState({ S: {} }, (info) => built.push(info))
+    // deep_proxy.get, deep_proxy.apply, deep_proxy.has, dummy_arg.get, proxy_fn.get
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Created: {} })
       .on({ create: {} })
@@ -211,8 +211,8 @@ describe("mockState", () => {
   it("handles emit with function handler via proxy execution (no string match)", () => {
     const built: any[] = [];
     // Handler returns array but event name is NOT in events, so string search fails
-    // Proxy execution path runs: handler(dummyArg, dummyArg, dummyArg)
-    mockState({ S: {} }, (info) => built.push(info))
+    // Proxy execution path runs: handler(dummy_arg, dummy_arg, dummy_arg)
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ Alpha: {} })
       .on({ doIt: {} })
@@ -229,7 +229,7 @@ describe("mockState", () => {
 
   it("handles emit with function that throws during proxy execution", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E1: {} })
       .on({ doIt: {} })
@@ -244,7 +244,7 @@ describe("mockState", () => {
 
   it("handles emit with non-string non-function handler", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E: {} })
       .on({ doIt: {} })
@@ -256,7 +256,7 @@ describe("mockState", () => {
 
   it("handles .given() without arguments", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E: {} })
       .on({ doIt: {} })
@@ -269,7 +269,7 @@ describe("mockState", () => {
 
   it("handles .patch() without arguments", () => {
     const built: any[] = [];
-    mockState({ S: {} }, (info) => built.push(info))
+    mock_state({ S: {} }, (info) => built.push(info))
       .init()
       .emits({ E: {} })
       .patch(undefined as any)
@@ -281,12 +281,12 @@ describe("mockState", () => {
   });
 });
 
-describe("mockSlice", () => {
+describe("mock_slice", () => {
   it("captures states and projections", () => {
     const built: any[] = [];
     const fakeState = { _tag: "State", name: "S" };
     const fakeProj = { _tag: "Projection", target: "p" };
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .withState(fakeState)
       .withProjection(fakeProj)
       .build();
@@ -298,7 +298,7 @@ describe("mockSlice", () => {
 
   it("withProjection(null) does not add to projections (line 192)", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .withProjection(null)
       .build();
 
@@ -307,30 +307,30 @@ describe("mockSlice", () => {
 
   it("captures reactions with .to()", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("SomeEvent")
       .do(async function handler() {})
       .to(() => "target")
       .build();
 
     expect(built[0].reactions).toHaveLength(1);
-    expect(built[0].reactions[0].handlerName).toBe("handler");
+    expect(built[0].reactions[0].handler_name).toBe("handler");
   });
 
   it("captures anonymous reaction handlers", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async () => {})
       .to(() => "x")
       .build();
 
-    expect(built[0].reactions[0].handlerName).toBe("on Evt");
+    expect(built[0].reactions[0].handler_name).toBe("on Evt");
   });
 
   it("captures dispatches via regex fallback for conditional handlers", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(function conditionalHandler(_event: any, _stream: any, app: any) {
         if (Math.random() > 2) {
@@ -345,9 +345,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toContain("DispatchedAction");
   });
 
-  it("captureDispatches returns empty for non-function handler", () => {
+  it("capture_dispatches returns empty for non-function handler", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do("not a function" as any)
       .to(() => "x")
@@ -356,9 +356,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toEqual([]);
   });
 
-  it("captureDispatches deduplicates action names from app.do()", () => {
+  it("capture_dispatches deduplicates action names from app.do()", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async function dupHandler(_event: any, _stream: any, app: any) {
         await app.do("SameAction", "s1", {});
@@ -370,9 +370,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toEqual(["SameAction"]);
   });
 
-  it("captureDispatches deduplicates regex-found action names", () => {
+  it("capture_dispatches deduplicates regex-found action names", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(function multiRef(_event: any, _stream: any, app: any) {
         if (Math.random() > 2) {
@@ -386,9 +386,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toEqual(["RepeatAction"]);
   });
 
-  it("captureDispatches exercises event.data proxy path", () => {
+  it("capture_dispatches exercises event.data proxy path", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async function dataAccessor(event: any, _stream: any, app: any) {
         // Access event.data to trigger the data proxy
@@ -401,9 +401,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toContain("ActionFromData");
   });
 
-  it("captureDispatches swallows rejected promise from async handler (line 155)", () => {
+  it("capture_dispatches swallows rejected promise from async handler (line 155)", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async function rejectHandler(_event: any, _stream: any, app: any) {
         await app.do("CapturedAction", "s", {});
@@ -416,9 +416,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toContain("CapturedAction");
   });
 
-  it("captureDispatches mockEvent returns empty string for unknown props (line 151)", () => {
+  it("capture_dispatches mock_event returns empty string for unknown props (line 151)", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async function propAccessor(event: any, _stream: any, app: any) {
         // Access a property that is neither "stream" nor "data"
@@ -431,9 +431,9 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toContain("ActionFromId");
   });
 
-  it("captureDispatches handles handler that throws", () => {
+  it("capture_dispatches handles handler that throws", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(function thrower() {
         throw new Error("sync throw");
@@ -445,13 +445,13 @@ describe("mockSlice", () => {
     expect(built[0].reactions[0].dispatches).toEqual([]);
   });
 
-  it("captureDispatches supports handlers calling app.load, query, query_array", () => {
+  it("capture_dispatches supports handlers calling app.load, query, query_array", () => {
     const built: any[] = [];
-    mockSlice((info) => built.push(info))
+    mock_slice((info) => built.push(info))
       .on("Evt")
       .do(async function loader(_event: any, _stream: string, app: any) {
         const snap = await app.load("S", "stream-1");
-        // Access state property to exercise safeProxy get handler
+        // Access state property to exercise safe_proxy get handler
         void snap.state.status;
         await app.query({ stream: "stream-1" });
         await app.query_array({ stream: "stream-1" });
@@ -465,10 +465,10 @@ describe("mockSlice", () => {
   });
 });
 
-describe("mockProjection", () => {
+describe("mock_projection", () => {
   it("captures event handles", () => {
     const built: any[] = [];
-    mockProjection("myProj", (info) => built.push(info))
+    mock_projection("myProj", (info) => built.push(info))
       .on({ EventA: {} })
       .do()
       .on({ EventB: {} })
@@ -481,13 +481,13 @@ describe("mockProjection", () => {
 
   it("uses default target when none provided", () => {
     const built: any[] = [];
-    mockProjection(undefined, (info) => built.push(info)).build();
+    mock_projection(undefined, (info) => built.push(info)).build();
     expect(built[0].target).toBe("projection");
   });
 
   it(".to() with string resolver updates target", () => {
     const built: any[] = [];
-    mockProjection("initial", (info) => built.push(info))
+    mock_projection("initial", (info) => built.push(info))
       .on({ Evt: {} })
       .do()
       .to("newTarget")
@@ -498,7 +498,7 @@ describe("mockProjection", () => {
 
   it(".to() with non-string resolver keeps target unchanged", () => {
     const built: any[] = [];
-    mockProjection("initial", (info) => built.push(info))
+    mock_projection("initial", (info) => built.push(info))
       .on({ Evt: {} })
       .do()
       .to(() => "fn")
@@ -509,7 +509,7 @@ describe("mockProjection", () => {
 
   it(".to() chains back to builder", () => {
     const built: any[] = [];
-    mockProjection("p", (info) => built.push(info))
+    mock_projection("p", (info) => built.push(info))
       .on({ E1: {} })
       .do()
       .to("target")
@@ -521,13 +521,13 @@ describe("mockProjection", () => {
   });
 });
 
-describe("mockAct", () => {
+describe("mock_act", () => {
   it("captures states, slices, projections", () => {
     const built: any[] = [];
     const fakeState = { _tag: "State", name: "S" };
     const fakeSlice = { _tag: "Slice", states: [] };
     const fakeProj = { _tag: "Projection", target: "p" };
-    mockAct((info) => built.push(info))
+    mock_act((info) => built.push(info))
       .withState(fakeState)
       .withSlice(fakeSlice)
       .withProjection(fakeProj)
@@ -542,7 +542,7 @@ describe("mockAct", () => {
 
   it("withState(null) pushes null to states (line 273)", () => {
     const built: any[] = [];
-    mockAct((info) => built.push(info))
+    mock_act((info) => built.push(info))
       .withState(null)
       .build();
 
@@ -551,7 +551,7 @@ describe("mockAct", () => {
 
   it("captures reactions with .to()", () => {
     const built: any[] = [];
-    mockAct((info) => built.push(info))
+    mock_act((info) => built.push(info))
       .on("E1")
       .do(async function r1() {})
       .to(() => "t")
@@ -561,12 +561,12 @@ describe("mockAct", () => {
       .build();
 
     expect(built[0].reactions).toHaveLength(2);
-    expect(built[0].reactions[0].handlerName).toBe("r1");
-    expect(built[0].reactions[1].handlerName).toBe("r2");
+    expect(built[0].reactions[0].handler_name).toBe("r1");
+    expect(built[0].reactions[1].handler_name).toBe("r2");
   });
 
   it("build returns an act stub with all expected methods", () => {
-    const result = mockAct().build();
+    const result = mock_act().build();
     expect(typeof result.do).toBe("function");
     expect(typeof result.load).toBe("function");
     expect(typeof result.drain).toBe("function");
@@ -578,12 +578,12 @@ describe("mockAct", () => {
   });
 
   it("act stub .on() returns itself for chaining", () => {
-    const stub = mockAct().build();
+    const stub = mock_act().build();
     expect(stub.on("x")).toBe(stub);
   });
 
   it("act stub methods return expected values", async () => {
-    const stub = mockAct().build();
+    const stub = mock_act().build();
     expect(await stub.do()).toEqual([]);
     expect(await stub.load()).toEqual({});
     expect(await stub.drain()).toBeUndefined();
@@ -595,52 +595,52 @@ describe("mockAct", () => {
   });
 });
 
-describe("proxyTarget", () => {
+describe("proxy_target", () => {
   it("is a callable no-op function used as Proxy target", () => {
-    expect(typeof proxyTarget).toBe("function");
-    expect(proxyTarget()).toBeUndefined();
+    expect(typeof proxy_target).toBe("function");
+    expect(proxy_target()).toBeUndefined();
   });
 });
 
-describe("unknownModuleProxy", () => {
+describe("unknown_module_proxy", () => {
   it("property access returns the proxy", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     expect(typeof (proxy as any).anything).toBe("function");
     expect(typeof (proxy as any).nested.deep).toBe("function");
   });
 
   it("function call returns the proxy", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     const result = (proxy as any).foo();
     expect(typeof result).toBe("function");
   });
 
   it("constructor call on nested export returns the proxy", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     const result = new (proxy as any).SomeClass();
     expect(typeof result).toBe("function");
   });
 
   it("direct constructor call returns the proxy", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     // Calls the top-level construct handler
     const result = new (proxy as any)();
     expect(typeof result).toBe("function");
   });
 
   it("Symbol.toPrimitive returns empty string", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     const prim = (proxy as any)[Symbol.toPrimitive];
     expect(prim()).toBe("");
   });
 
   it("default export returns the proxy", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     expect((proxy as any).default).toBe(proxy);
   });
 
   it("has() returns true for any property", () => {
-    const proxy = unknownModuleProxy();
+    const proxy = unknown_module_proxy();
     expect("anything" in proxy).toBe(true);
   });
 });
@@ -648,10 +648,10 @@ describe("unknownModuleProxy", () => {
 describe("MODULES", () => {
   it("has @rotorsoft/act module with all builders", () => {
     const act = MODULES["@rotorsoft/act"];
-    expect(act.state).toBe(mockState);
-    expect(act.slice).toBe(mockSlice);
-    expect(act.projection).toBe(mockProjection);
-    expect(act.act).toBe(mockAct);
+    expect(act.state).toBe(mock_state);
+    expect(act.slice).toBe(mock_slice);
+    expect(act.projection).toBe(mock_projection);
+    expect(act.act).toBe(mock_act);
     expect(typeof act.store).toBe("function");
     expect(typeof act.dispose).toBe("function");
   });

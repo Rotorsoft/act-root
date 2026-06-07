@@ -1,28 +1,28 @@
 import { describe, expect, it } from "vitest";
-import { computeLayout } from "../src/client/lib/layout.js";
+import { compute_layout } from "../src/client/lib/layout.js";
 import type { DomainModel } from "../src/client/types/domain-model.js";
 
 /**
- * Coverage for the eventSchemas plumbing added in ACT-402: layout must
+ * Coverage for the event_schemas plumbing added in ACT-402: layout must
  * forward each event node's captured Zod text so the diagram tooltip
  * surface can render it.
  */
-describe("computeLayout — schema propagation", () => {
+describe("compute_layout — schema propagation", () => {
   it("attaches captured schemas to event nodes", () => {
     const model: DomainModel = {
       entries: [],
       states: [
         {
           name: "Order",
-          varName: "Order:0",
+          var_name: "Order:0",
           file: "src/order.ts",
           events: [
             {
               name: "OrderPlaced",
-              hasCustomPatch: false,
+              has_custom_patch: false,
               schema: "z.object({ id: z.string() })",
             },
-            { name: "OrderShipped", hasCustomPatch: false },
+            { name: "OrderShipped", has_custom_patch: false },
           ],
           actions: [
             {
@@ -37,7 +37,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const placed = layout.ns.find(
       (n) => n.type === "event" && n.label === "OrderPlaced"
     );
@@ -54,8 +54,8 @@ describe("computeLayout — schema propagation", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "E", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "E", has_custom_patch: false }],
           actions: [{ name: "act1", emits: ["E"], invariants: [] }],
         },
       ],
@@ -63,7 +63,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const a = layout.ns.find((n) => n.type === "action" && n.label === "act1");
     expect(a?.emits).toEqual(["E"]);
   });
@@ -74,8 +74,8 @@ describe("computeLayout — schema propagation", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "OrderPlaced", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "OrderPlaced", has_custom_patch: false }],
           actions: [{ name: "place", emits: ["OrderPlaced"], invariants: [] }],
         },
       ],
@@ -83,7 +83,7 @@ describe("computeLayout — schema propagation", () => {
         {
           name: "Fulfillment",
           states: ["S:0"],
-          stateVars: ["S:0"],
+          state_vars: ["S:0"],
           projections: ["OrdersByCustomer"],
           reactions: [],
         },
@@ -91,13 +91,13 @@ describe("computeLayout — schema propagation", () => {
       projections: [
         {
           name: "OrdersByCustomer",
-          varName: "OrdersByCustomer",
+          var_name: "OrdersByCustomer",
           handles: ["OrderPlaced", "OrderShipped"],
         },
       ],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const p = layout.ns.find(
       (n) => n.type === "projection" && n.label === "OrdersByCustomer"
     );
@@ -110,14 +110,18 @@ describe("computeLayout — schema propagation", () => {
       states: [
         {
           name: "A",
-          varName: "A:0",
-          events: [{ name: "Shared", hasCustomPatch: false, schema: "first" }],
+          var_name: "A:0",
+          events: [
+            { name: "Shared", has_custom_patch: false, schema: "first" },
+          ],
           actions: [],
         },
         {
           name: "B",
-          varName: "B:1",
-          events: [{ name: "Shared", hasCustomPatch: false, schema: "second" }],
+          var_name: "B:1",
+          events: [
+            { name: "Shared", has_custom_patch: false, schema: "second" },
+          ],
           actions: [],
         },
       ],
@@ -125,7 +129,7 @@ describe("computeLayout — schema propagation", () => {
       projections: [],
       reactions: [],
     };
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const nodes = layout.ns.filter(
       (n) => n.type === "event" && n.label === "Shared"
     );

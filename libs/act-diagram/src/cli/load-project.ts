@@ -1,7 +1,7 @@
 /**
  * Filesystem walker for the act-contracts CLI.
  * Recursively reads TypeScript source files from a project root and
- * returns a FileTab[] in the same shape `extractModel` already consumes.
+ * returns a FileTab[] in the same shape `extract_model` already consumes.
  */
 import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";

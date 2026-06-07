@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   type Layout,
   type N,
   W,
@@ -32,13 +32,13 @@ describe("state with no actions (edge case)", () => {
       states: [
         {
           name: "Empty",
-          varName: "Empty",
+          var_name: "Empty",
           events: [],
           actions: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const state = find(layout, "state", "Empty");
     expect(state).toBeDefined();
   });
@@ -50,20 +50,20 @@ describe("standalone reaction edges", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handlerName: "onEvt",
+          handler_name: "onEvt",
           dispatches: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const reaction = find(layout, "reaction", "onEvt");
     expect(reaction).toBeDefined();
     const dashedEdges = layout.es.filter((e) => e.dash);
@@ -82,25 +82,25 @@ describe("standalone reactions", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handlerName: "reactionA",
+          handler_name: "reactionA",
           dispatches: [],
         },
         {
           event: "Evt",
-          handlerName: "reactionB",
+          handler_name: "reactionB",
           dispatches: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(find(layout, "reaction", "reactionA")).toBeDefined();
     expect(find(layout, "reaction", "reactionB")).toBeDefined();
   });
@@ -112,44 +112,44 @@ describe("standalone action->event edge when ey not found", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Known", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Known", has_custom_patch: false }],
           actions: [
             {
               name: "a",
-              emits: ["Known", "Unknown"], // Unknown not in events -> not in eventYMap
+              emits: ["Known", "Unknown"], // Unknown not in events -> not in event_y_map
               invariants: [],
             },
           ],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const action = find(layout, "action", "a");
     expect(action).toBeDefined();
   });
 });
 
-describe("standalone reaction without trigNode", () => {
+describe("standalone reaction without trig_node", () => {
   it("places standalone reaction when trigger event not found", () => {
     const model = emptyModel({
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "NoSuchEvent", // event not in any state
-          handlerName: "orphanReaction",
+          handler_name: "orphanReaction",
           dispatches: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const reaction = find(layout, "reaction", "orphanReaction");
     expect(reaction).toBeDefined();
   });
@@ -161,25 +161,25 @@ describe("standalone reactions with multiple events stacking", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handlerName: "r1",
+          handler_name: "r1",
           dispatches: [],
         },
         {
           event: "Evt",
-          handlerName: "r2",
+          handler_name: "r2",
           dispatches: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const r1 = find(layout, "reaction", "r1")!;
     const r2 = find(layout, "reaction", "r2")!;
     expect(r1).toBeDefined();
@@ -194,8 +194,8 @@ describe("guarded standalone action", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [
             {
               name: "guardedAction",
@@ -206,7 +206,7 @@ describe("guarded standalone action", () => {
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const action = find(layout, "action", "guardedAction");
     expect(action).toBeDefined();
     expect(action!.sub).toBe("guarded");
@@ -220,16 +220,16 @@ describe("orphan events in standalone states", () => {
       states: [
         {
           name: "S",
-          varName: "S",
+          var_name: "S",
           events: [
-            { name: "ActionEvt", hasCustomPatch: false },
-            { name: "OrphanEvt", hasCustomPatch: false },
+            { name: "ActionEvt", has_custom_patch: false },
+            { name: "OrphanEvt", has_custom_patch: false },
           ],
           actions: [{ name: "doIt", emits: ["ActionEvt"], invariants: [] }],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const actionEvt = find(layout, "event", "ActionEvt");
     const orphanEvt = find(layout, "event", "OrphanEvt");
     expect(actionEvt).toBeDefined();

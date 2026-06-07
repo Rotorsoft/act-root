@@ -5,7 +5,7 @@ import type { FileTab } from "../types/index.js";
  * Format: ```typescript:src/states.ts\n...code...\n```
  * Falls back to a single src/app.ts file if no path annotations found.
  */
-export function parseMultiFileResponse(raw: string): FileTab[] {
+export function parse_multi_file_response(raw: string): FileTab[] {
   const files: FileTab[] = [];
   const re = /```(?:typescript|ts):([^\n]+)\n([\s\S]*?)```/g;
   let m: RegExpExecArray | null;
@@ -18,7 +18,7 @@ export function parseMultiFileResponse(raw: string): FileTab[] {
   }
   // Fallback: no path-annotated blocks — treat entire response as single file
   if (files.length === 0) {
-    const code = stripFences(raw);
+    const code = strip_fences(raw);
     if (code.trim()) {
       files.push({ path: "src/app.ts", content: code });
     }
@@ -26,7 +26,7 @@ export function parseMultiFileResponse(raw: string): FileTab[] {
   return files;
 }
 
-export function stripFences(code: string): string {
+export function strip_fences(code: string): string {
   let result = code.replace(/```(?:typescript|ts)?\s*\n/g, "");
   result = result.replace(/\n?```\s*$/g, "");
   // Strip leading natural language before first code line
@@ -36,27 +36,27 @@ export function stripFences(code: string): string {
   );
   // Strip trailing natural language after last code-like line
   const lines = result.split("\n");
-  let lastCodeLine = lines.length - 1;
-  while (lastCodeLine > 0) {
-    const trimmed = lines[lastCodeLine].trim();
+  let last_code_line = lines.length - 1;
+  while (last_code_line > 0) {
+    const trimmed = lines[last_code_line].trim();
     if (trimmed && /[;{})\]:]$|^\s*\/\/|^\s*\*\/|^\s*\*|^$/.test(trimmed))
       break;
-    lastCodeLine--;
+    last_code_line--;
   }
-  if (lastCodeLine < lines.length - 1) {
-    result = lines.slice(0, lastCodeLine + 1).join("\n");
+  if (last_code_line < lines.length - 1) {
+    result = lines.slice(0, last_code_line + 1).join("\n");
   }
   return result.trim();
 }
 
 /** Derive a project name from the prompt or generated code */
-export function deriveProjectName(prompt: string, code?: string): string {
+export function derive_project_name(prompt: string, code?: string): string {
   // Try to extract from code: look for act() variable or first state() name
   if (code) {
-    const actMatch = code.match(/(?:const|let|var)\s+(\w+)\s*=\s*act\s*\(/);
-    if (actMatch) return actMatch[1];
-    const stateMatch = code.match(/state\(\s*\{\s*(\w+)/);
-    if (stateMatch) return stateMatch[1] + " App";
+    const act_match = code.match(/(?:const|let|var)\s+(\w+)\s*=\s*act\s*\(/);
+    if (act_match) return act_match[1];
+    const state_match = code.match(/state\(\s*\{\s*(\w+)/);
+    if (state_match) return state_match[1] + " App";
   }
   // Fall back to prompt: take first 3 meaningful words, title-case
   const words = prompt

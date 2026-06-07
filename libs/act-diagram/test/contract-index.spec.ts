@@ -14,18 +14,18 @@ const model: DomainModel = {
   states: [
     {
       name: "Order",
-      varName: "Order:0",
+      var_name: "Order:0",
       file: "src/order.ts",
       line: 1,
       events: [
         {
           name: "OrderPlaced",
-          hasCustomPatch: true,
+          has_custom_patch: true,
           line: 12,
           schema: "z.object({})",
         },
-        { name: "OrderPlaced_v2", hasCustomPatch: false, line: 14 },
-        { name: "OrderShipped", hasCustomPatch: false, line: 16 },
+        { name: "OrderPlaced_v2", has_custom_patch: false, line: 14 },
+        { name: "OrderShipped", has_custom_patch: false, line: 16 },
       ],
       actions: [
         {
@@ -47,14 +47,14 @@ const model: DomainModel = {
     {
       name: "Fulfillment",
       states: ["Order:0"],
-      stateVars: ["Order:0"],
+      state_vars: ["Order:0"],
       projections: [],
       file: "src/fulfillment.ts",
       line: 5,
       reactions: [
         {
           event: "OrderPlaced_v2",
-          handlerName: "reserveStock",
+          handler_name: "reserveStock",
           dispatches: ["reserve"],
           line: 18,
         },
@@ -64,14 +64,14 @@ const model: DomainModel = {
   projections: [
     {
       name: "OrdersByCustomer",
-      varName: "OrdersByCustomer",
+      var_name: "OrdersByCustomer",
       handles: ["OrderPlaced_v2"],
     },
   ],
   reactions: [
     {
       event: "OrderShipped",
-      handlerName: "notifyShipped",
+      handler_name: "notifyShipped",
       dispatches: [],
     },
   ],

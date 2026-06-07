@@ -89,7 +89,7 @@ vi.mock("../src/cli/vim-keys.js", () => ({
 
 // Import AFTER mocks
 const { runInteractive } = await import("../src/cli/repl.js");
-const { extractModel } = await import("../src/client/lib/evaluate.js");
+const { extract_model } = await import("../src/client/lib/evaluate.js");
 const { buildContractIndex } = await import("../src/cli/contract-index.js");
 
 import type { FileTab } from "../src/client/types/file-tab.js";
@@ -133,7 +133,7 @@ export const calculator = act()
 ];
 
 const buildIdx = () => {
-  const { model } = extractModel(CALCULATOR);
+  const { model } = extract_model(CALCULATOR);
   return buildContractIndex(model);
 };
 

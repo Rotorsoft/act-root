@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { extractModel } from "../lib/evaluate.js";
-import { navigateToCode } from "../lib/navigate.js";
+import { extract_model } from "../lib/evaluate.js";
+import { navigate_to_code } from "../lib/navigate.js";
 import { validate } from "../lib/validate.js";
 import type {
   DomainModel,
@@ -39,7 +39,7 @@ function useExtractModel(files: FileTab[]) {
 
     // Debounce: wait for file changes to settle before extracting
     const timer = setTimeout(() => {
-      const { model, error } = extractModel(files);
+      const { model, error } = extract_model(files);
       const warnings = validate(model);
 
       // Check if the model has errors (slice errors or global error)
@@ -128,7 +128,7 @@ export function ActDiagram({
   const handleClick = useCallback(
     (name: string, type?: string, file?: string) => {
       if (!onNavigate) return;
-      const result = navigateToCode(files, name, type, file);
+      const result = navigate_to_code(files, name, type, file);
       if (result) onNavigate(result.file, result.line, result.col, type);
     },
     [files, onNavigate]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeLayout,
+  compute_layout,
   H,
   type Layout,
   type N,
@@ -33,14 +33,14 @@ describe("error slice box", () => {
         {
           name: "BrokenSlice",
           states: [],
-          stateVars: [],
+          state_vars: [],
           projections: [],
           reactions: [],
           error: "Failed to build this slice due to syntax error",
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(layout.boxes).toHaveLength(1);
     expect(layout.boxes[0].label).toBe("BrokenSlice");
     expect(layout.boxes[0].error).toBe(
@@ -56,8 +56,8 @@ describe("error slice box", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["Evt"], invariants: [] }],
         },
       ],
@@ -65,7 +65,7 @@ describe("error slice box", () => {
         {
           name: "ErrorFirst",
           states: [],
-          stateVars: [],
+          state_vars: [],
           projections: [],
           reactions: [],
           error: "broken",
@@ -73,13 +73,13 @@ describe("error slice box", () => {
         {
           name: "GoodSlice",
           states: ["S"],
-          stateVars: ["S"],
+          state_vars: ["S"],
           projections: [],
           reactions: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     expect(layout.boxes).toHaveLength(2);
     expect(layout.boxes[0].error).toBe("broken");
     expect(layout.boxes[1].y).toBeGreaterThan(layout.boxes[0].y);
@@ -92,10 +92,10 @@ describe("projection nodes below events", () => {
       states: [
         {
           name: "Ticket",
-          varName: "Ticket",
+          var_name: "Ticket",
           events: [
-            { name: "TicketOpened", hasCustomPatch: false },
-            { name: "TicketClosed", hasCustomPatch: false },
+            { name: "TicketOpened", has_custom_patch: false },
+            { name: "TicketClosed", has_custom_patch: false },
           ],
           actions: [
             {
@@ -115,7 +115,7 @@ describe("projection nodes below events", () => {
         {
           name: "TicketSlice",
           states: ["Ticket"],
-          stateVars: ["Ticket"],
+          state_vars: ["Ticket"],
           projections: ["tickets"],
           reactions: [],
         },
@@ -123,19 +123,19 @@ describe("projection nodes below events", () => {
       projections: [
         {
           name: "tickets",
-          varName: "tickets",
+          var_name: "tickets",
           handles: ["TicketOpened"],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const projNode = layout.ns.find((n) => n.type === "projection");
     expect(projNode).toBeDefined();
     expect(projNode!.label).toBe("tickets");
 
-    const eventNodes = layout.ns.filter((n) => n.type === "event");
-    expect(eventNodes.length).toBeGreaterThan(0);
-    const maxEventBottom = Math.max(...eventNodes.map((n) => n.pos.y + H));
+    const event_nodes = layout.ns.filter((n) => n.type === "event");
+    expect(event_nodes.length).toBeGreaterThan(0);
+    const maxEventBottom = Math.max(...event_nodes.map((n) => n.pos.y + H));
     expect(projNode!.pos.y).toBeGreaterThanOrEqual(maxEventBottom);
   });
 
@@ -144,10 +144,10 @@ describe("projection nodes below events", () => {
       states: [
         {
           name: "S",
-          varName: "S",
+          var_name: "S",
           events: [
-            { name: "E1", hasCustomPatch: false },
-            { name: "E2", hasCustomPatch: false },
+            { name: "E1", has_custom_patch: false },
+            { name: "E2", has_custom_patch: false },
           ],
           actions: [
             { name: "a1", emits: ["E1"], invariants: [] },
@@ -159,17 +159,17 @@ describe("projection nodes below events", () => {
         {
           name: "Sl",
           states: ["S"],
-          stateVars: ["S"],
+          state_vars: ["S"],
           projections: ["projA", "projB"],
           reactions: [],
         },
       ],
       projections: [
-        { name: "projA", varName: "projA", handles: ["E1"] },
-        { name: "projB", varName: "projB", handles: ["E2"] },
+        { name: "projA", var_name: "projA", handles: ["E1"] },
+        { name: "projB", var_name: "projB", handles: ["E2"] },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const projNodes = layout.ns.filter((n) => n.type === "projection");
     expect(projNodes).toHaveLength(2);
     expect(projNodes.map((n) => n.label).sort()).toEqual(["projA", "projB"]);
@@ -182,14 +182,14 @@ describe("projection and reaction metadata on event nodes", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
         },
       ],
-      projections: [{ name: "myProj", varName: "myProj", handles: ["Evt"] }],
+      projections: [{ name: "myProj", var_name: "myProj", handles: ["Evt"] }],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const evt = find(layout, "event", "Evt")!;
     expect(evt.projections).toEqual(["myProj"]);
   });
@@ -199,20 +199,20 @@ describe("projection and reaction metadata on event nodes", () => {
       states: [
         {
           name: "S",
-          varName: "S",
-          events: [{ name: "Evt", hasCustomPatch: false }],
+          var_name: "S",
+          events: [{ name: "Evt", has_custom_patch: false }],
           actions: [{ name: "doIt", emits: ["Evt"], invariants: [] }],
         },
       ],
       reactions: [
         {
           event: "Evt",
-          handlerName: "onEvt",
+          handler_name: "onEvt",
           dispatches: [],
         },
       ],
     });
-    const layout = computeLayout(model);
+    const layout = compute_layout(model);
     const evt = find(layout, "event", "Evt")!;
     expect(evt.reactions).toEqual(["onEvt"]);
   });

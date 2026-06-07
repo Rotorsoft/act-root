@@ -9,19 +9,19 @@ function richModel(): DomainModel {
     states: [
       {
         name: "Order",
-        varName: "Order:0",
+        var_name: "Order:0",
         file: "src/order.ts",
         line: 1,
         events: [
           {
             name: "OrderPlaced",
-            hasCustomPatch: true,
+            has_custom_patch: true,
             line: 12,
             schema: "z.object({ id: z.string() })",
           },
           {
             name: "OrderPlaced_v2",
-            hasCustomPatch: false,
+            has_custom_patch: false,
             line: 14,
             schema: "z.object({ id: z.string(), total: z.number() })",
           },
@@ -41,24 +41,24 @@ function richModel(): DomainModel {
       {
         name: "Fulfillment",
         states: ["Order:0"],
-        stateVars: ["Order:0"],
+        state_vars: ["Order:0"],
         projections: ["OrdersByCustomer"],
         file: "src/fulfillment.ts",
         line: 5,
         reactions: [
           {
             event: "OrderPlaced_v2",
-            handlerName: "reserveStock",
+            handler_name: "reserveStock",
             dispatches: ["reserve"],
             line: 18,
           },
-          { event: "OrderShipped", handlerName: "noTriggers", dispatches: [] },
+          { event: "OrderShipped", handler_name: "noTriggers", dispatches: [] },
         ],
       },
       {
         name: "Broken",
         states: [],
-        stateVars: [],
+        state_vars: [],
         projections: [],
         reactions: [],
         error: "could not parse",
@@ -67,16 +67,16 @@ function richModel(): DomainModel {
     projections: [
       {
         name: "OrdersByCustomer",
-        varName: "OrdersByCustomer",
+        var_name: "OrdersByCustomer",
         handles: ["OrderPlaced_v2"],
         file: "src/projections.ts",
       },
-      { name: "Empty", varName: "Empty", handles: [] },
+      { name: "Empty", var_name: "Empty", handles: [] },
     ],
     reactions: [
       {
         event: "OrderPlaced",
-        handlerName: "auditOldEvent",
+        handler_name: "auditOldEvent",
         dispatches: ["audit"],
         file: "src/audit.ts",
       },
@@ -162,12 +162,12 @@ describe("formatMarkdown", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           file: "src/s.ts",
           events: [
             {
               name: "MultiLine",
-              hasCustomPatch: false,
+              has_custom_patch: false,
               schema: 'z\n  .object({ id: z.string() })\n  .describe("hi")',
             },
           ],
@@ -198,9 +198,9 @@ describe("formatMarkdown — event with no producer and no consumer", () => {
       states: [
         {
           name: "Orphan",
-          varName: "Orphan:0",
+          var_name: "Orphan:0",
           file: "src/orphan.ts",
-          events: [{ name: "Lonesome", hasCustomPatch: false }],
+          events: [{ name: "Lonesome", has_custom_patch: false }],
           // No actions → no producers for Lonesome
           actions: [],
         },
@@ -277,7 +277,7 @@ describe("formatMarkdown — defensive paths", () => {
       states: [
         {
           name: "Real",
-          varName: "Real:0",
+          var_name: "Real:0",
           file: "src/r.ts",
           events: [],
           actions: [{ name: "doThing", emits: [], invariants: [] }],
@@ -303,7 +303,7 @@ describe("formatMarkdown — defensive paths", () => {
       states: [
         {
           name: "Match",
-          varName: "Match:0",
+          var_name: "Match:0",
           file: "src/m.ts",
           events: [],
           actions: [], // qualifier matches, but no matching action name
@@ -347,8 +347,8 @@ describe("formatMarkdown — defensive paths", () => {
       states: [
         {
           name: "Other",
-          varName: "Other:0",
-          events: [{ name: "Different", hasCustomPatch: false }],
+          var_name: "Other:0",
+          events: [{ name: "Different", has_custom_patch: false }],
           actions: [],
         },
       ],

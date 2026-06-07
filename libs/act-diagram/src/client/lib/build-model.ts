@@ -15,8 +15,8 @@ import type {
   StateNode,
 } from "../types/index.js";
 import {
-  extractIdentifierAssignments,
-  extractSchemasFromSource,
+  extract_identifier_assignments,
+  extract_schemas_from_source,
 } from "./schema-extract.js";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ import {
 let _stateIdx = 0;
 
 /** Convert a raw mock state to a StateNode. Returns error string on validation failure. */
-function buildState(
+function build_state(
   model: DomainModel,
   st: any
 ): { key: string; node: StateNode } | { error: string } {
@@ -34,21 +34,21 @@ function buildState(
     if (schema === undefined)
       return { error: `Event "${name}" has undefined schema` };
   }
-  const rawActions = (st.actions ?? {}) as Record<string, unknown>;
-  for (const [name, schema] of Object.entries(rawActions)) {
+  const raw_actions = (st.actions ?? {}) as Record<string, unknown>;
+  for (const [name, schema] of Object.entries(raw_actions)) {
     if (name.startsWith("__emits_")) continue;
     if (schema === undefined)
       return { error: `Action "${name}" has undefined schema` };
   }
 
-  const domainName = st.name as string;
-  const uniqueKey = `${domainName}:${_stateIdx++}`;
+  const domain_name = st.name as string;
+  const unique_key = `${domain_name}:${_stateIdx++}`;
 
-  const eventNodes: EventNode[] = [];
+  const event_nodes: EventNode[] = [];
   for (const event_name of Object.keys(events)) {
-    eventNodes.push({
+    event_nodes.push({
       name: event_name,
-      hasCustomPatch: st.patches?.has(event_name) ?? false,
+      has_custom_patch: st.patches?.has(event_name) ?? false,
       // Stash the runtime Zod schema so the JSON Schema exporter can
       // call `z.toJSONSchema(zod)` later without re-running the parser.
       zod: events[event_name],
@@ -56,10 +56,10 @@ function buildState(
   }
 
   const action_nodes: ActionNode[] = [];
-  for (const action_name of Object.keys(rawActions)) {
+  for (const action_name of Object.keys(raw_actions)) {
     if (action_name.startsWith("__emits_")) continue;
     const emits: string[] =
-      (rawActions[`__emits_${action_name}`] as string[]) ?? [];
+      (raw_actions[`__emits_${action_name}`] as string[]) ?? [];
     const invariants = (st.given?.[action_name] ?? []).map(
       (inv: any) => inv.description ?? ""
     );
@@ -67,39 +67,39 @@ function buildState(
   }
 
   const node: StateNode = {
-    name: domainName,
-    varName: uniqueKey,
-    events: eventNodes,
+    name: domain_name,
+    var_name: unique_key,
+    events: event_nodes,
     actions: action_nodes,
     file: st._sourceFile as string | undefined,
   };
   model.states.push(node);
-  st._modelKey = uniqueKey;
-  return { key: uniqueKey, node };
+  st._modelKey = unique_key;
+  return { key: unique_key, node };
 }
 
-function fixupReactions(
+function fixup_reactions(
   reactions: ReactionNode[],
   files: FileTab[],
-  sourceFile?: string
+  source_file?: string
 ) {
-  const fallbacks = reactions.filter((r) => r.handlerName.startsWith("on "));
+  const fallbacks = reactions.filter((r) => r.handler_name.startsWith("on "));
   if (fallbacks.length === 0) return;
-  const src = sourceFile
-    ? files.find((f) => f.path === sourceFile)?.content
+  const src = source_file
+    ? files.find((f) => f.path === source_file)?.content
     : files.map((f) => f.content).join("\n");
   if (!src) return;
-  const doRe =
+  const do_re =
     /\.on\(\s*["'`](\w+)["'`]\s*\)\s*\.do\(\s*(?:async\s+)?(?:function\s+(\w+)|(?:\w+\.)?(\w+))?/g;
   let dm: RegExpExecArray | null;
-  while ((dm = doRe.exec(src)) !== null) {
+  while ((dm = do_re.exec(src)) !== null) {
     const event_name = dm[1];
-    const handlerName = dm[2] || dm[3];
-    if (!handlerName) continue;
+    const handler_name = dm[2] || dm[3];
+    if (!handler_name) continue;
     const r = fallbacks.find(
-      (r) => r.event === event_name && r.handlerName === `on ${event_name}`
+      (r) => r.event === event_name && r.handler_name === `on ${event_name}`
     );
-    if (r) r.handlerName = handlerName;
+    if (r) r.handler_name = handler_name;
   }
 }
 
@@ -111,25 +111,25 @@ export type ExecuteResult = {
   projections: any[];
   acts: any[];
   error?: string;
-  fileErrors: Map<string, string>;
+  file_errors: Map<string, string>;
 };
 
 // ── Bottom-up model builder ─────────────────────────────────────────
 
-export function buildModel(
+export function build_model(
   result: ExecuteResult,
   files: FileTab[],
-  expectedSlices: Map<string, string>
+  expected_slices: Map<string, string>
 ): { model: DomainModel; error?: string } {
-  const rawStates = result.states.filter((s: any) => s && s._tag === "State");
-  const rawSlices = result.slices.filter((s: any) => s && s._tag === "Slice");
-  const rawProjections = result.projections.filter(
+  const raw_states = result.states.filter((s: any) => s && s._tag === "State");
+  const raw_slices = result.slices.filter((s: any) => s && s._tag === "Slice");
+  const raw_projections = result.projections.filter(
     (p: any) => p && p._tag === "Projection"
   );
-  const rawActs = result.acts.filter((a: any) => a && a._tag === "Act");
+  const raw_acts = result.acts.filter((a: any) => a && a._tag === "Act");
 
   // Maps from raw mock ref → built result or error
-  const stateByRef = new Map<
+  const state_by_ref = new Map<
     any,
     { key: string; node: StateNode } | { error: string }
   >();
@@ -143,24 +143,24 @@ export function buildModel(
   };
 
   // ── Step 1: Build each state independently ────────────────────────
-  for (const st of rawStates) {
-    if (stateByRef.has(st)) continue;
+  for (const st of raw_states) {
+    if (state_by_ref.has(st)) continue;
     try {
-      stateByRef.set(st, buildState(model, st));
+      state_by_ref.set(st, build_state(model, st));
     } catch (e) {
-      stateByRef.set(st, {
+      state_by_ref.set(st, {
         error: e instanceof Error ? e.message : String(e),
       });
     }
   }
   // Also states from act builders
-  for (const a of rawActs) {
+  for (const a of raw_acts) {
     for (const st of a.states ?? []) {
-      if (!st || st._tag !== "State" || stateByRef.has(st)) continue;
+      if (!st || st._tag !== "State" || state_by_ref.has(st)) continue;
       try {
-        stateByRef.set(st, buildState(model, st));
+        state_by_ref.set(st, build_state(model, st));
       } catch (e) {
-        stateByRef.set(st, {
+        state_by_ref.set(st, {
           error: e instanceof Error ? e.message : String(e),
         });
       }
@@ -168,78 +168,78 @@ export function buildModel(
   }
 
   // ── Step 2: Build each slice independently ────────────────────────
-  const builtSliceNames = new Set<string>();
+  const built_slice_names = new Set<string>();
 
-  for (const s of rawSlices) {
-    const sliceName = (s._varName ?? "slice") as string;
-    builtSliceNames.add(sliceName);
+  for (const s of raw_slices) {
+    const slice_name = (s._varName ?? "slice") as string;
+    built_slice_names.add(slice_name);
 
     try {
       try {
-        fixupReactions(s.reactions as ReactionNode[], files);
+        fixup_reactions(s.reactions as ReactionNode[], files);
       } catch {
         /* ignore fixup errors */
       }
 
-      const sliceStateKeys: string[] = [];
+      const slice_state_keys: string[] = [];
       const errors: string[] = [];
 
       for (const st of s.states ?? []) {
         if (!st || typeof st !== "object") {
           // Find which file caused this — check all file errors
-          const fileErr = [...result.fileErrors.values()][0];
+          const fileErr = [...result.file_errors.values()][0];
           errors.push(fileErr ?? "Missing state (broken import)");
           continue;
         }
-        const built = stateByRef.get(st);
+        const built = state_by_ref.get(st);
         if (built) {
           if ("error" in built) {
             errors.push(built.error);
           } else {
-            sliceStateKeys.push(built.key);
+            slice_state_keys.push(built.key);
           }
         } else {
           // State not seen before — try building it now
           try {
-            const result = buildState(model, st);
-            stateByRef.set(st, result);
+            const result = build_state(model, st);
+            state_by_ref.set(st, result);
             if ("error" in result) {
               errors.push(result.error);
             } else {
-              sliceStateKeys.push(result.key);
+              slice_state_keys.push(result.key);
             }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
-            stateByRef.set(st, { error: msg });
+            state_by_ref.set(st, { error: msg });
             errors.push(msg);
           }
         }
       }
 
-      const projNames: string[] = [];
+      const proj_names: string[] = [];
       for (const p of s.projections ?? []) {
-        if (p && p._tag === "Projection") projNames.push(p.target as string);
+        if (p && p._tag === "Projection") proj_names.push(p.target as string);
       }
 
-      const sliceFile = s._sourceFile as string | undefined;
+      const slice_file = s._sourceFile as string | undefined;
       model.slices.push({
-        name: sliceName,
-        states: sliceStateKeys,
-        stateVars: sliceStateKeys,
-        projections: projNames,
+        name: slice_name,
+        states: slice_state_keys,
+        state_vars: slice_state_keys,
+        projections: proj_names,
         reactions: ((s.reactions as ReactionNode[]) ?? []).map((r) => ({
           ...r,
-          file: r.file ?? sliceFile,
+          file: r.file ?? slice_file,
         })),
-        file: sliceFile,
+        file: slice_file,
         error: errors.length > 0 ? errors.join("; ") : undefined,
       });
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       model.slices.push({
-        name: sliceName,
+        name: slice_name,
         states: [],
-        stateVars: [],
+        state_vars: [],
         projections: [],
         reactions: [],
         error: msg,
@@ -249,19 +249,19 @@ export function buildModel(
   }
 
   // Always show expected slices that weren't built (from inventory)
-  for (const [name, filePath] of expectedSlices) {
-    if (!builtSliceNames.has(name)) {
+  for (const [name, file_path] of expected_slices) {
+    if (!built_slice_names.has(name)) {
       model.slices.push({
         name,
         states: [],
-        stateVars: [],
+        state_vars: [],
         projections: [],
         reactions: [],
         error:
-          result.fileErrors.get(filePath) ??
+          result.file_errors.get(file_path) ??
           result.error ??
           "Failed to build slice",
-        file: filePath,
+        file: file_path,
       });
     }
   }
@@ -275,26 +275,26 @@ export function buildModel(
   // resolves to the `export const TicketOpened = z.object(...)` that
   // lives in another module. First definition wins on collision — Act
   // codebases don't reassign event-schema identifiers.
-  const sourceByPath = new Map<string, string>();
-  const externalIdents = new Map<string, string>();
+  const source_by_path = new Map<string, string>();
+  const external_idents = new Map<string, string>();
   for (const f of files) {
-    sourceByPath.set(f.path, f.content);
-    for (const [ident, expr] of extractIdentifierAssignments(f.content)) {
-      if (!externalIdents.has(ident)) externalIdents.set(ident, expr);
+    source_by_path.set(f.path, f.content);
+    for (const [ident, expr] of extract_identifier_assignments(f.content)) {
+      if (!external_idents.has(ident)) external_idents.set(ident, expr);
     }
   }
-  for (const stNode of model.states) {
-    if (!stNode.file) continue;
-    // `stNode.file` came from `_sourceFile`, which was set during file
+  for (const st_node of model.states) {
+    if (!st_node.file) continue;
+    // `st_node.file` came from `_sourceFile`, which was set during file
     // evaluation — so it's always present in `files`. The `!` and
     // v8-ignore acknowledge the type-level optionality without paying
     // for an unreachable branch.
     /* v8 ignore next */
-    const src = sourceByPath.get(stNode.file)!;
-    const names = new Set(stNode.events.map((e) => e.name));
+    const src = source_by_path.get(st_node.file)!;
+    const names = new Set(st_node.events.map((e) => e.name));
     if (names.size === 0) continue;
-    const schemas = extractSchemasFromSource(src, names, externalIdents);
-    for (const ev of stNode.events) {
+    const schemas = extract_schemas_from_source(src, names, external_idents);
+    for (const ev of st_node.events) {
       // Set unconditionally — `undefined` is a valid value for the
       // optional schema field and matches the "not captured" state.
       ev.schema = schemas.get(ev.name);
@@ -302,24 +302,24 @@ export function buildModel(
   }
 
   // ── Step 3: Build projections ─────────────────────────────────────
-  for (const p of rawProjections) {
+  for (const p of raw_projections) {
     model.projections.push({
       name: p.target,
-      varName: p.target,
+      var_name: p.target,
       handles: p.handles,
       file: p._sourceFile as string | undefined,
     });
   }
 
   // ── Step 4: Compose act ───────────────────────────────────────────
-  const statesInSlices = new Set(model.slices.flatMap((s) => s.states));
-  const globalStateKeys = model.states
-    .filter((s) => !statesInSlices.has(s.varName))
-    .map((s) => s.varName);
+  const states_in_slices = new Set(model.slices.flatMap((s) => s.states));
+  const global_state_keys = model.states
+    .filter((s) => !states_in_slices.has(s.var_name))
+    .map((s) => s.var_name);
 
-  for (const a of rawActs) {
+  for (const a of raw_acts) {
     try {
-      fixupReactions(
+      fixup_reactions(
         (a.reactions as ReactionNode[]) ?? [],
         files,
         a._sourceFile as string | undefined
@@ -334,15 +334,15 @@ export function buildModel(
       states: model.states.map((s) => s.name),
     } as ActNode;
 
-    const actFile = a._sourceFile as string | undefined;
+    const act_file = a._sourceFile as string | undefined;
     for (const r of (a.reactions as ReactionNode[]) ?? []) {
-      model.reactions.push({ ...r, file: r.file ?? actFile });
+      model.reactions.push({ ...r, file: r.file ?? act_file });
     }
 
-    const entryPath = (a._sourceFile ?? "app.ts") as string;
+    const entry_path = (a._sourceFile ?? "app.ts") as string;
 
     // Filter to items owned by this act builder
-    const actSliceNames = new Set<string>(
+    const act_slice_names = new Set<string>(
       ((a.slices as any[]) ?? [])
         .filter((s: any) => s != null)
         .map((s: any) => s._varName ?? "")
@@ -350,55 +350,57 @@ export function buildModel(
     );
     // Also include error placeholder slices from files referenced by this act
     for (const sl of model.slices) {
-      if (sl.error && !actSliceNames.has(sl.name)) {
+      if (sl.error && !act_slice_names.has(sl.name)) {
         // Check if this act's source file references this slice name
-        const actSrc = files.find((f) => f.path === entryPath)?.content ?? "";
-        if (actSrc.includes(sl.name)) {
-          actSliceNames.add(sl.name);
+        const act_src = files.find((f) => f.path === entry_path)?.content ?? "";
+        if (act_src.includes(sl.name)) {
+          act_slice_names.add(sl.name);
         }
       }
     }
 
-    const entrySlices = model.slices.filter((s) => actSliceNames.has(s.name));
-    const sliceStateKeys = new Set(entrySlices.flatMap((s) => s.states));
+    const entry_slices = model.slices.filter((s) =>
+      act_slice_names.has(s.name)
+    );
+    const slice_state_keys = new Set(entry_slices.flatMap((s) => s.states));
 
-    const actStateKeys = new Set<string>();
+    const act_state_keys = new Set<string>();
     for (const s of (a.states as any[]) ?? []) {
       try {
         if (s && s._tag === "State") {
-          actStateKeys.add((s._modelKey ?? s.name) as string);
+          act_state_keys.add((s._modelKey ?? s.name) as string);
         }
       } catch {
         /* skip corrupt state */
       }
     }
-    const allStateKeys = new Set([...actStateKeys, ...sliceStateKeys]);
+    const all_state_keys = new Set([...act_state_keys, ...slice_state_keys]);
 
-    const actProjNames = new Set<string>(
+    const act_proj_names = new Set<string>(
       ((a.projections as any[]) ?? [])
         .filter((p: any) => p && p._tag === "Projection")
         .map((p: any) => p.target as string)
     );
     // Include projections embedded in slices
-    for (const sl of entrySlices) {
-      for (const pn of sl.projections) actProjNames.add(pn);
+    for (const sl of entry_slices) {
+      for (const pn of sl.projections) act_proj_names.add(pn);
     }
 
     model.entries.push({
-      path: entryPath,
-      states: model.states.filter((s) => allStateKeys.has(s.varName)),
-      slices: entrySlices,
-      projections: model.projections.filter((p) => actProjNames.has(p.name)),
+      path: entry_path,
+      states: model.states.filter((s) => all_state_keys.has(s.var_name)),
+      slices: entry_slices,
+      projections: model.projections.filter((p) => act_proj_names.has(p.name)),
       reactions: (a.reactions as ReactionNode[]) ?? [],
     });
   }
 
   // Global slice for standalone states/reactions
-  if (globalStateKeys.length > 0 || model.reactions.length > 0) {
+  if (global_state_keys.length > 0 || model.reactions.length > 0) {
     model.slices.push({
       name: "global",
-      states: globalStateKeys,
-      stateVars: globalStateKeys,
+      states: global_state_keys,
+      state_vars: global_state_keys,
       projections: model.projections.map((p) => p.name),
       reactions: model.reactions,
     });

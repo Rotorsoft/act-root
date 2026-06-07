@@ -27,7 +27,7 @@ export type DomainModel = {
 
 export type StateNode = {
   name: string;
-  varName: string;
+  var_name: string;
   events: EventNode[];
   actions: ActionNode[];
   file?: string;
@@ -36,7 +36,7 @@ export type StateNode = {
 
 export type EventNode = {
   name: string;
-  hasCustomPatch: boolean;
+  has_custom_patch: boolean;
   line?: number;
   /**
    * Best-effort source text of the Zod schema expression as written in
@@ -63,7 +63,7 @@ export type ActionNode = {
 export type SliceNode = {
   name: string;
   states: string[]; // resolved state domain names
-  stateVars: string[]; // original variable names from .withState()
+  state_vars: string[]; // original variable names from .withState()
   projections: string[];
   reactions: ReactionNode[];
   error?: string; // extraction/compilation error for this slice
@@ -73,7 +73,7 @@ export type SliceNode = {
 
 export type ProjectionNode = {
   name: string;
-  varName: string;
+  var_name: string;
   handles: string[]; // event names
   file?: string;
   line?: number;
@@ -81,7 +81,7 @@ export type ProjectionNode = {
 
 export type ReactionNode = {
   event: string;
-  handlerName: string; // function name or "on EventName"
+  handler_name: string; // function name or "on EventName"
   dispatches: string[]; // action names this reaction calls via app.do()
   file?: string;
   line?: number;

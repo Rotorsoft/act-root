@@ -16,25 +16,25 @@ import {
 } from "../src/cli/format.js";
 import type { DomainModel } from "../src/client/types/index.js";
 
-function buildModel(): DomainModel {
+function build_model(): DomainModel {
   return {
     entries: [],
     states: [
       {
         name: "Order",
-        varName: "Order:0",
+        var_name: "Order:0",
         file: "src/order.ts",
         line: 1,
         events: [
           {
             name: "OrderPlaced",
-            hasCustomPatch: true,
+            has_custom_patch: true,
             line: 12,
             schema: "z.object({ id: z.string() })",
           },
           {
             name: "OrderPlaced_v2",
-            hasCustomPatch: false,
+            has_custom_patch: false,
             line: 14,
             schema: "z.object({ id: z.string(), total: z.number() })",
           },
@@ -50,7 +50,7 @@ function buildModel(): DomainModel {
       },
       {
         name: "Empty",
-        varName: "Empty:1",
+        var_name: "Empty:1",
         file: "src/empty.ts",
         events: [],
         actions: [],
@@ -60,14 +60,14 @@ function buildModel(): DomainModel {
       {
         name: "Fulfillment",
         states: ["Order:0"],
-        stateVars: ["Order:0"],
+        state_vars: ["Order:0"],
         projections: ["OrdersByCustomer"],
         file: "src/fulfillment.ts",
         line: 5,
         reactions: [
           {
             event: "OrderPlaced_v2",
-            handlerName: "reserveStock",
+            handler_name: "reserveStock",
             dispatches: ["reserve"],
             line: 18,
           },
@@ -76,7 +76,7 @@ function buildModel(): DomainModel {
       {
         name: "Broken",
         states: [],
-        stateVars: [],
+        state_vars: [],
         projections: [],
         reactions: [],
         error: "could not parse",
@@ -85,21 +85,21 @@ function buildModel(): DomainModel {
     projections: [
       {
         name: "OrdersByCustomer",
-        varName: "OrdersByCustomer",
+        var_name: "OrdersByCustomer",
         handles: ["OrderPlaced_v2"],
       },
     ],
     reactions: [
       {
         event: "OrderPlaced",
-        handlerName: "auditOldEvent",
+        handler_name: "auditOldEvent",
         dispatches: [],
       },
     ],
   };
 }
 
-const idx = buildContractIndex(buildModel());
+const idx = buildContractIndex(build_model());
 
 const findEntry = (kind: IndexEntry["kind"], name: string): IndexEntry => {
   const e = idx.entries.find((x) => x.kind === kind && x.name === name);
@@ -160,9 +160,9 @@ describe("formatEvent", () => {
       states: [
         {
           name: "Same",
-          varName: "Same:0",
+          var_name: "Same:0",
           file: "s.ts",
-          events: [{ name: "Same", hasCustomPatch: false }],
+          events: [{ name: "Same", has_custom_patch: false }],
           actions: [],
         },
       ],
@@ -182,9 +182,9 @@ describe("formatEvent", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           file: "src/s.ts",
-          events: [{ name: "E", hasCustomPatch: false }],
+          events: [{ name: "E", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["E"], invariants: [], line: 7 }],
         },
       ],
@@ -204,8 +204,8 @@ describe("formatEvent", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "Bare", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "Bare", has_custom_patch: false }],
           actions: [],
         },
       ],
@@ -226,8 +226,8 @@ describe("formatEvent", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "E", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "E", has_custom_patch: false }],
           actions: [{ name: "a", emits: ["E"], invariants: [] }],
         },
       ],
@@ -262,9 +262,9 @@ describe("formatEvent", () => {
       states: [
         {
           name: "Lonely",
-          varName: "Lonely:0",
+          var_name: "Lonely:0",
           file: "src/l.ts",
-          events: [{ name: "Lone", hasCustomPatch: false }],
+          events: [{ name: "Lone", has_custom_patch: false }],
           actions: [],
         },
       ],
@@ -314,14 +314,14 @@ describe("formatAction", () => {
       states: [
         {
           name: "First",
-          varName: "First:0",
+          var_name: "First:0",
           file: "a.ts",
           events: [],
           actions: [],
         },
         {
           name: "Second",
-          varName: "Second:1",
+          var_name: "Second:1",
           file: "b.ts",
           events: [],
           actions: [{ name: "act1", emits: [], invariants: [] }],
@@ -349,7 +349,7 @@ describe("formatAction", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           file: "src/s.ts",
           events: [],
           actions: [{ name: "actNoLine", emits: [], invariants: [] }],
@@ -371,7 +371,7 @@ describe("formatAction", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           file: "s.ts",
           events: [],
           actions: [{ name: "noop", emits: [], invariants: [] }],
@@ -413,10 +413,10 @@ describe("formatState", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           file: "src/s.ts",
           line: 1,
-          events: [{ name: "EvA", hasCustomPatch: false }],
+          events: [{ name: "EvA", has_custom_patch: false }],
           actions: [{ name: "act1", emits: [], invariants: [] }],
         },
       ],
@@ -460,9 +460,9 @@ describe("formatSlice", () => {
         {
           name: "S",
           states: [],
-          stateVars: [],
+          state_vars: [],
           projections: [],
-          reactions: [{ event: "E", handlerName: "h", dispatches: [] }],
+          reactions: [{ event: "E", handler_name: "h", dispatches: [] }],
         },
       ],
       projections: [],
@@ -503,7 +503,7 @@ describe("formatProjection", () => {
       entries: [],
       states: [],
       slices: [],
-      projections: [{ name: "P", varName: "P", handles: [] }],
+      projections: [{ name: "P", var_name: "P", handles: [] }],
       reactions: [],
     };
     const i = buildContractIndex(empty);
@@ -550,8 +550,8 @@ describe("formatReaction", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "E", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "E", has_custom_patch: false }],
           actions: [{ name: "act1", emits: ["E"], invariants: [] }],
         },
       ],
@@ -560,7 +560,7 @@ describe("formatReaction", () => {
       reactions: [
         {
           event: "E",
-          handlerName: "orchHandler",
+          handler_name: "orchHandler",
           dispatches: ["act1"],
           file: "src/orch.ts",
         },
@@ -584,9 +584,9 @@ describe("formatReaction", () => {
         {
           name: "S",
           states: [],
-          stateVars: [],
+          state_vars: [],
           projections: [],
-          reactions: [{ event: "E", handlerName: "h", dispatches: [] }],
+          reactions: [{ event: "E", handler_name: "h", dispatches: [] }],
         },
       ],
       projections: [],
@@ -630,8 +630,8 @@ describe("formatSummary", () => {
       states: [],
       slices: [],
       projections: [
-        { name: "A", varName: "A", handles: [] },
-        { name: "B", varName: "B", handles: [] },
+        { name: "A", var_name: "A", handles: [] },
+        { name: "B", var_name: "B", handles: [] },
       ],
       reactions: [],
     };
@@ -645,8 +645,8 @@ describe("formatSummary", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
-          events: [{ name: "E", hasCustomPatch: false }],
+          var_name: "S:0",
+          events: [{ name: "E", has_custom_patch: false }],
           actions: [],
         },
       ],
@@ -654,12 +654,12 @@ describe("formatSummary", () => {
         {
           name: "OnlySlice",
           states: [],
-          stateVars: [],
+          state_vars: [],
           projections: [],
           reactions: [],
         },
       ],
-      projections: [{ name: "P", varName: "P", handles: [] }],
+      projections: [{ name: "P", var_name: "P", handles: [] }],
       reactions: [],
     };
     const i = buildContractIndex(tiny);

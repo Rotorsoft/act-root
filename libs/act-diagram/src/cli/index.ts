@@ -3,7 +3,7 @@
  * `act` — interactive Act-app contracts explorer.
  *
  * Walks the project for TypeScript sources, feeds them through the
- * same `extractModel` parser the diagram uses, and lets you navigate
+ * same `extract_model` parser the diagram uses, and lets you navigate
  * the domain model: category → entry → formatted detail → optional
  * jump-to-source in $EDITOR.
  *
@@ -11,7 +11,7 @@
  * `pnpm -F @rotorsoft/act-diagram act [dir]` from anywhere.
  */
 import { resolve } from "node:path";
-import { extractModel } from "../client/lib/evaluate.js";
+import { extract_model } from "../client/lib/evaluate.js";
 import { buildContractIndex, search } from "./contract-index.js";
 import { formatDetail, formatMatches } from "./format.js";
 import { formatJsonSchema } from "./json-schema.js";
@@ -121,8 +121,8 @@ export async function main(deps: RunDeps): Promise<number> {
       "act: scan was truncated (file cap reached); some sources may be missing.\n"
     );
   }
-  const { model, error } = extractModel(files);
-  /* c8 ignore start — extractModel only sets `error` when every file
+  const { model, error } = extract_model(files);
+  /* c8 ignore start — extract_model only sets `error` when every file
      fails to evaluate; hard to synthesize in unit tests. */
   if (error) {
     deps.errorOutput.write(`act: parse error — ${error}\n`);

@@ -108,7 +108,7 @@ const findReactionsFor = (
       if (r.event === event_name) {
         out.push({
           slice: sl.name,
-          handler: r.handlerName,
+          handler: r.handler_name,
           dispatches: r.dispatches,
           file: r.file ?? sl.file,
           line: r.line,
@@ -119,7 +119,7 @@ const findReactionsFor = (
   for (const r of model.reactions) {
     if (r.event === event_name) {
       out.push({
-        handler: r.handlerName,
+        handler: r.handler_name,
         dispatches: r.dispatches,
         file: r.file,
         line: r.line,
@@ -285,7 +285,7 @@ export function formatSlice(idx: ContractIndex, entry: IndexEntry): string {
           ? ` → ${r.dispatches.map((d) => pink(d)).join(", ")}`
           : "";
       lines.push(
-        `    - ${orange(r.event)} → ${fuchsia(r.handlerName)}${triggers}${fileNote(r.file, r.line)}`
+        `    - ${orange(r.event)} → ${fuchsia(r.handler_name)}${triggers}${fileNote(r.file, r.line)}`
       );
     }
   }
@@ -309,9 +309,9 @@ export function formatProjection(
 }
 
 export function formatReaction(idx: ContractIndex, entry: IndexEntry): string {
-  const [sliceName, event_name] = (entry.qualifier ?? "::").split("::");
+  const [slice_name, event_name] = (entry.qualifier ?? "::").split("::");
   const lines: string[] = [];
-  const slice = sliceName && sliceName !== "*" ? violet(sliceName) : "";
+  const slice = slice_name && slice_name !== "*" ? violet(slice_name) : "";
   // Compact header: ReactionName (in SliceName) — the slice prefix gets
   // baked into the title so we don't burn a separate `in: <slice>` line.
   const header = slice
@@ -323,12 +323,12 @@ export function formatReaction(idx: ContractIndex, entry: IndexEntry): string {
 
   // Find the reaction in the model to enrich with producer/dispatch info.
   const sliceReaction = idx.model.slices
-    .find((s) => s.name === sliceName)
+    .find((s) => s.name === slice_name)
     ?.reactions.find(
-      (r) => r.handlerName === entry.name && r.event === event_name
+      (r) => r.handler_name === entry.name && r.event === event_name
     );
   const orchReaction = idx.model.reactions.find(
-    (r) => r.handlerName === entry.name && r.event === event_name
+    (r) => r.handler_name === entry.name && r.event === event_name
   );
   const r = sliceReaction ?? orchReaction;
 

@@ -66,7 +66,7 @@ const findReactionsFor = (
       if (r.event === event_name) {
         out.push({
           slice: sl.name,
-          handler: r.handlerName,
+          handler: r.handler_name,
           dispatches: r.dispatches,
           file: r.file ?? sl.file,
           line: r.line,
@@ -77,7 +77,7 @@ const findReactionsFor = (
   for (const r of model.reactions) {
     if (r.event === event_name) {
       out.push({
-        handler: r.handlerName,
+        handler: r.handler_name,
         dispatches: r.dispatches,
         file: r.file,
         line: r.line,
@@ -273,7 +273,7 @@ export function formatMarkdown(idx: ContractIndex): string {
               ? ` → ${r.dispatches.map((d) => `\`${d}\``).join(", ")}`
               : "";
           lines.push(
-            `  - \`${r.event}\` → \`${r.handlerName}\`${triggers}${fileSuffix(r.file, r.line)}`
+            `  - \`${r.event}\` → \`${r.handler_name}\`${triggers}${fileSuffix(r.file, r.line)}`
           );
         }
       }
@@ -303,19 +303,19 @@ export function formatMarkdown(idx: ContractIndex): string {
   const reactions = listByKind(idx, "reaction");
   if (reactions.length === 0) lines.push("_(none)_\n");
   for (const r of reactions) {
-    const [sliceName, event_name] = (r.qualifier ?? "::").split("::");
+    const [slice_name, event_name] = (r.qualifier ?? "::").split("::");
     lines.push(`### \`${r.name}\``);
-    if (sliceName && sliceName !== "*")
-      lines.push(`- **in slice:** \`${sliceName}\``);
+    if (slice_name && slice_name !== "*")
+      lines.push(`- **in slice:** \`${slice_name}\``);
     if (event_name) lines.push(`- **on event:** \`${event_name}\``);
     if (r.file) lines.push(`- **defined in:** \`${loc(r.file, r.line)}\``);
     const sliceReaction = m.slices
-      .find((x) => x.name === sliceName)
+      .find((x) => x.name === slice_name)
       ?.reactions.find(
-        (rr) => rr.handlerName === r.name && rr.event === event_name
+        (rr) => rr.handler_name === r.name && rr.event === event_name
       );
     const orchReaction = m.reactions.find(
-      (rr) => rr.handlerName === r.name && rr.event === event_name
+      (rr) => rr.handler_name === r.name && rr.event === event_name
     );
     const inner = sliceReaction ?? orchReaction;
     if (inner && inner.dispatches.length > 0) {

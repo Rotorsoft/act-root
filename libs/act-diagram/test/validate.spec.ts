@@ -10,8 +10,8 @@ describe("validate", () => {
       states: [
         {
           name: "Foo",
-          varName: "Foo:0",
-          events: [{ name: "Done", hasCustomPatch: false }],
+          var_name: "Foo:0",
+          events: [{ name: "Done", has_custom_patch: false }],
           actions: [{ name: "doSomething", emits: [], invariants: [] }],
         },
       ],
@@ -33,8 +33,8 @@ describe("validate", () => {
       states: [
         {
           name: "Bar",
-          varName: "Bar:0",
-          events: [{ name: "Created", hasCustomPatch: false }],
+          var_name: "Bar:0",
+          events: [{ name: "Created", has_custom_patch: false }],
           actions: [{ name: "create", emits: ["Created"], invariants: [] }],
         },
       ],

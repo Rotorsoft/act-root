@@ -86,7 +86,7 @@ const findConsumers = (
         out.push({
           type: "reaction",
           slice: sl.name,
-          handler: r.handlerName,
+          handler: r.handler_name,
           dispatches: r.dispatches,
           file: r.file ?? sl.file,
           line: r.line,
@@ -98,7 +98,7 @@ const findConsumers = (
     if (r.event === event_name) {
       out.push({
         type: "reaction",
-        handler: r.handlerName,
+        handler: r.handler_name,
         dispatches: r.dispatches,
         file: r.file,
         line: r.line,

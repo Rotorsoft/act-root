@@ -20,18 +20,18 @@ function modelWithRealSchemas(): DomainModel {
     states: [
       {
         name: "Order",
-        varName: "Order:0",
+        var_name: "Order:0",
         file: "src/order.ts",
         events: [
           {
             name: "OrderPlaced",
-            hasCustomPatch: false,
+            has_custom_patch: false,
             schema: "z.object({ orderId: z.string(), total: z.number() })",
             zod: OrderPlacedSchema,
           },
           {
             name: "OrderPlaced_v2",
-            hasCustomPatch: false,
+            has_custom_patch: false,
             schema: "...",
             zod: OrderPlacedV2Schema,
           },
@@ -43,13 +43,13 @@ function modelWithRealSchemas(): DomainModel {
       {
         name: "Fulfillment",
         states: ["Order:0"],
-        stateVars: ["Order:0"],
+        state_vars: ["Order:0"],
         projections: ["OrdersByCustomer"],
         file: "src/f.ts",
         reactions: [
           {
             event: "OrderPlaced_v2",
-            handlerName: "reserveStock",
+            handler_name: "reserveStock",
             dispatches: ["reserve"],
           },
         ],
@@ -58,14 +58,14 @@ function modelWithRealSchemas(): DomainModel {
     projections: [
       {
         name: "OrdersByCustomer",
-        varName: "OrdersByCustomer",
+        var_name: "OrdersByCustomer",
         handles: ["OrderPlaced_v2"],
       },
     ],
     reactions: [
       {
         event: "OrderPlaced",
-        handlerName: "audit",
+        handler_name: "audit",
         dispatches: [],
       },
     ],
@@ -170,11 +170,11 @@ describe("formatJsonSchema", () => {
       states: [
         {
           name: "S",
-          varName: "S:0",
+          var_name: "S:0",
           events: [
             {
               name: "Broken",
-              hasCustomPatch: false,
+              has_custom_patch: false,
               zod: { not: "a real zod schema" } as unknown,
             },
           ],

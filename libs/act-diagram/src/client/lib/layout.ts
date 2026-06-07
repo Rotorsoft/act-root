@@ -68,75 +68,75 @@ export type Layout = {
 
 type ReactionDef = {
   event: string;
-  handlerName: string;
+  handler_name: string;
   dispatches: string[];
 };
 
 type EmitMeasure = {
   name: string;
   h: number; // H if no sub-chain, or sub-chain groupH if it has one
-  subChain?: ChainMeasure;
-  subReaction?: ReactionDef;
+  sub_chain?: ChainMeasure;
+  sub_reaction?: ReactionDef;
 };
 type RowMeasure = {
   an: string;
   rowH: number;
-  emitInfos: EmitMeasure[];
+  emit_infos: EmitMeasure[];
   emitsH: number;
-  targetState: StateNode | undefined;
+  target_state: StateNode | undefined;
 };
 type ChainMeasure = {
   groupH: number;
-  dispatchBlockH: number;
+  dispatch_block_h: number;
   rows: RowMeasure[];
 };
 
 /** Measure a reaction chain recursively (leaves first) */
-function measureChain(
+function measure_chain(
   rDef: ReactionDef,
   lookup: Map<string, ReactionDef>,
   visited: Set<string>,
-  allStates: StateNode[]
+  all_states: StateNode[]
 ): ChainMeasure {
   const rows: RowMeasure[] = [];
-  let dispatchBlockH = 0;
+  let dispatch_block_h = 0;
 
   for (const an of rDef.dispatches) {
-    const targetAction = allStates
+    const target_action = all_states
       .flatMap((s) => s.actions)
       .find((a) => a.name === an);
-    const targetState = allStates.find((s) =>
+    const target_state = all_states.find((s) =>
       s.actions.some((a) => a.name === an)
     );
-    const emitNames = targetAction?.emits ?? [];
+    const emit_names = target_action?.emits ?? [];
 
-    const emitInfos: EmitMeasure[] = [];
+    const emit_infos: EmitMeasure[] = [];
     let emitsH = 0;
-    for (const en of emitNames) {
+    for (const en of emit_names) {
       const subR = lookup.get(en);
       let eventH = H;
-      let subChain: ChainMeasure | undefined;
-      if (subR && !visited.has(subR.handlerName)) {
-        visited.add(subR.handlerName);
-        subChain = measureChain(subR, lookup, visited, allStates);
-        eventH = Math.max(H, subChain.groupH);
+      let sub_chain: ChainMeasure | undefined;
+      if (subR && !visited.has(subR.handler_name)) {
+        visited.add(subR.handler_name);
+        sub_chain = measure_chain(subR, lookup, visited, all_states);
+        eventH = Math.max(H, sub_chain.groupH);
       }
-      emitInfos.push({
+      emit_infos.push({
         name: en,
         h: eventH,
-        subChain,
-        subReaction: subR && subChain ? subR : undefined,
+        sub_chain,
+        sub_reaction: subR && sub_chain ? subR : undefined,
       });
       emitsH += eventH;
     }
 
-    const rowH = Math.max(H, targetState ? STATE_H : 0, emitsH || H);
-    rows.push({ an, rowH, emitInfos, emitsH, targetState });
-    if (dispatchBlockH > 0) dispatchBlockH += GAP / 2;
-    dispatchBlockH += rowH;
+    const rowH = Math.max(H, target_state ? STATE_H : 0, emitsH || H);
+    rows.push({ an, rowH, emit_infos, emitsH, target_state });
+    if (dispatch_block_h > 0) dispatch_block_h += GAP / 2;
+    dispatch_block_h += rowH;
   }
 
-  return { groupH: Math.max(H, dispatchBlockH), dispatchBlockH, rows };
+  return { groupH: Math.max(H, dispatch_block_h), dispatch_block_h, rows };
 }
 
 /**
@@ -144,67 +144,67 @@ function measureChain(
  * The reaction aligns with the triggering event (reactionY).
  * The dispatched block is centered relative to the reaction.
  */
-function placeChain(
+function place_chain(
   measure: ChainMeasure,
   rDef: ReactionDef,
   reactionY: number,
   rX: number,
-  triggeredFromX: number,
-  triggeredFromY: number,
+  triggered_from_x: number,
+  triggered_from_y: number,
   ns: N[],
   es: E[],
-  sliceName: string,
+  slice_name: string,
   lookup: Map<string, ReactionDef>,
-  eventProjections: Map<string, string[]>,
-  eventReactions: Map<string, string[]>,
-  eventSchemas: Map<string, string>,
-  sliceRightXRef: { value: number }
+  event_projections: Map<string, string[]>,
+  event_reactions: Map<string, string[]>,
+  event_schemas: Map<string, string>,
+  slice_right_x_ref: { value: number }
 ): void {
-  const dispatchBaseX = rX + W + GAP;
+  const dispatch_base_x = rX + W + GAP;
 
   // Reaction node — aligned with triggering event
   const rp = { x: rX, y: reactionY };
   ns.push({
-    key: `r:${rDef.handlerName}:${sliceName}`,
+    key: `r:${rDef.handler_name}:${slice_name}`,
     pos: rp,
     type: "reaction",
-    label: rDef.handlerName,
+    label: rDef.handler_name,
   });
   es.push({
-    from: { x: triggeredFromX, y: triggeredFromY },
+    from: { x: triggered_from_x, y: triggered_from_y },
     to: { x: rp.x, y: rp.y + H / 2 },
     color: COLORS.reaction.border,
     dash: true,
   });
 
   // Dispatched rows — centered vertically relative to reaction center
-  const reactionCenterY = reactionY + H / 2;
-  let dispatchY = reactionCenterY - measure.dispatchBlockH / 2;
+  const reaction_center_y = reactionY + H / 2;
+  let dispatchY = reaction_center_y - measure.dispatch_block_h / 2;
 
   for (const row of measure.rows) {
-    const rowCenterY = dispatchY + row.rowH / 2;
-    let nextX = dispatchBaseX;
+    const row_center_y = dispatchY + row.rowH / 2;
+    let nextX = dispatch_base_x;
 
     // Dispatched action — centered in row
-    const dap = { x: nextX, y: rowCenterY - H / 2 };
-    const dispatchedAction = row.targetState?.actions.find(
+    const dap = { x: nextX, y: row_center_y - H / 2 };
+    const dispatched_action = row.target_state?.actions.find(
       (a) => a.name === row.an
     );
     ns.push({
-      key: `a:${row.an}:dispatched:${rDef.handlerName}`,
+      key: `a:${row.an}:dispatched:${rDef.handler_name}`,
       pos: dap,
       type: "action",
       label: row.an,
       sub:
-        dispatchedAction && dispatchedAction.invariants.length > 0
+        dispatched_action && dispatched_action.invariants.length > 0
           ? "guarded"
           : undefined,
       guards:
-        dispatchedAction && dispatchedAction.invariants.length > 0
-          ? dispatchedAction.invariants
+        dispatched_action && dispatched_action.invariants.length > 0
+          ? dispatched_action.invariants
           : undefined,
-      file: row.targetState?.file,
-      emits: dispatchedAction?.emits,
+      file: row.target_state?.file,
+      emits: dispatched_action?.emits,
     });
     es.push({
       from: { x: rp.x + W, y: rp.y + H / 2 },
@@ -215,13 +215,13 @@ function placeChain(
     nextX += W + GAP;
 
     // Dispatched state — centered in row
-    if (row.targetState) {
+    if (row.target_state) {
       ns.push({
-        key: `s:${row.targetState.name}:dispatched:${rDef.handlerName}:${row.an}`,
-        pos: { x: nextX, y: rowCenterY - STATE_H / 2 },
+        key: `s:${row.target_state.name}:dispatched:${rDef.handler_name}:${row.an}`,
+        pos: { x: nextX, y: row_center_y - STATE_H / 2 },
         type: "state",
-        label: row.targetState.name,
-        file: row.targetState.file,
+        label: row.target_state.name,
+        file: row.target_state.file,
       });
       nextX += STATE_W + GAP;
     }
@@ -229,96 +229,96 @@ function placeChain(
     // Dispatched events — vertically centered with the state box,
     // each event node is H tall; sub-chains extend rightward
     const evtX = nextX;
-    const nEvents = row.emitInfos.length;
-    const eventsOnlyH = nEvents * H + (nEvents - 1) * (GAP / 2);
-    let emitY = rowCenterY - eventsOnlyH / 2;
-    for (const emit of row.emitInfos) {
+    const nEvents = row.emit_infos.length;
+    const events_only_h = nEvents * H + (nEvents - 1) * (GAP / 2);
+    let emitY = row_center_y - events_only_h / 2;
+    for (const emit of row.emit_infos) {
       ns.push({
-        key: `e:${emit.name}:dispatched:${rDef.handlerName}:${row.an}`,
+        key: `e:${emit.name}:dispatched:${rDef.handler_name}:${row.an}`,
         pos: { x: evtX, y: emitY },
         type: "event",
         label: emit.name,
-        file: row.targetState?.file,
-        projections: eventProjections.get(emit.name),
-        reactions: eventReactions.get(emit.name),
-        schema: eventSchemas.get(emit.name),
+        file: row.target_state?.file,
+        projections: event_projections.get(emit.name),
+        reactions: event_reactions.get(emit.name),
+        schema: event_schemas.get(emit.name),
       });
 
       // Recurse into sub-chain — reaction aligns with this emit
-      if (emit.subChain && emit.subReaction) {
-        const subRX = evtX + W + GAP * 3;
-        placeChain(
-          emit.subChain,
-          emit.subReaction,
+      if (emit.sub_chain && emit.sub_reaction) {
+        const sub_r_x = evtX + W + GAP * 3;
+        place_chain(
+          emit.sub_chain,
+          emit.sub_reaction,
           emitY, // reaction aligns with emit
-          subRX,
+          sub_r_x,
           evtX + W,
           emitY + H / 2,
           ns,
           es,
-          sliceName,
+          slice_name,
           lookup,
-          eventProjections,
-          eventReactions,
-          eventSchemas,
-          sliceRightXRef
+          event_projections,
+          event_reactions,
+          event_schemas,
+          slice_right_x_ref
         );
       }
 
       emitY += H + GAP / 2;
     }
-    if (row.emitInfos.length > 0) nextX = evtX + W + GAP;
-    sliceRightXRef.value = Math.max(sliceRightXRef.value, nextX);
+    if (row.emit_infos.length > 0) nextX = evtX + W + GAP;
+    slice_right_x_ref.value = Math.max(slice_right_x_ref.value, nextX);
     dispatchY += row.rowH + GAP / 2;
   }
 }
 
 // ── Layout computation ───────────────────────────────────────────────
-export function computeLayout(viewModel: DomainModel): Layout {
+export function compute_layout(view_model: DomainModel): Layout {
   const ns: N[] = [];
   const es: E[] = [];
   const boxes: Box[] = [];
   const sv = new Map<string, StateNode>();
-  for (const s of viewModel.states) {
-    sv.set(s.varName, s);
+  for (const s of view_model.states) {
+    sv.set(s.var_name, s);
     sv.set(s.name, s);
   }
 
   // Build projection lookup: event name → projection names
-  const eventProjections = new Map<string, string[]>();
-  const eventReactions = new Map<string, string[]>();
+  const event_projections = new Map<string, string[]>();
+  const event_reactions = new Map<string, string[]>();
   // Captured Zod schema text per event name (first occurrence wins).
-  const eventSchemas = new Map<string, string>();
-  for (const s of viewModel.states) {
+  const event_schemas = new Map<string, string>();
+  for (const s of view_model.states) {
     for (const e of s.events) {
-      if (e.schema && !eventSchemas.has(e.name)) {
-        eventSchemas.set(e.name, e.schema);
+      if (e.schema && !event_schemas.has(e.name)) {
+        event_schemas.set(e.name, e.schema);
       }
     }
   }
   // Projection name → event names it handles (for projection tooltips).
-  const projectionHandles = new Map<string, string[]>();
-  for (const proj of viewModel.projections) {
-    projectionHandles.set(proj.name, proj.handles);
+  const projection_handles = new Map<string, string[]>();
+  for (const proj of view_model.projections) {
+    projection_handles.set(proj.name, proj.handles);
   }
 
-  for (const slice of viewModel.slices) {
+  for (const slice of view_model.slices) {
     for (const r of slice.reactions) {
-      const list = eventReactions.get(r.event) ?? [];
-      list.push(r.handlerName);
-      eventReactions.set(r.event, list);
+      const list = event_reactions.get(r.event) ?? [];
+      list.push(r.handler_name);
+      event_reactions.set(r.event, list);
     }
   }
-  for (const r of viewModel.reactions) {
-    const list = eventReactions.get(r.event) ?? [];
-    list.push(r.handlerName);
-    eventReactions.set(r.event, list);
+  for (const r of view_model.reactions) {
+    const list = event_reactions.get(r.event) ?? [];
+    list.push(r.handler_name);
+    event_reactions.set(r.event, list);
   }
-  for (const proj of viewModel.projections) {
+  for (const proj of view_model.projections) {
     for (const en of proj.handles) {
-      const list = eventProjections.get(en) ?? [];
+      const list = event_projections.get(en) ?? [];
       list.push(proj.name);
-      eventProjections.set(en, list);
+      event_projections.set(en, list);
     }
   }
 
@@ -332,10 +332,10 @@ export function computeLayout(viewModel: DomainModel): Layout {
    * Reactions extend the flow to the right of events.
    */
   // Sort slices by name for stable layout across re-extractions
-  const sortedSlices = [...viewModel.slices].sort((a, b) =>
+  const sorted_slices = [...view_model.slices].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
-  for (const slice of sortedSlices) {
+  for (const slice of sorted_slices) {
     // Error slices get a minimum-sized box with the error message
     if (slice.error && slice.states.length === 0) {
       const sx = PAD;
@@ -360,84 +360,87 @@ export function computeLayout(viewModel: DomainModel): Layout {
     cx += SLICE_PAD + GAP;
     // Merge partial states with the same domain name within a slice
     // Track which source file each event/action came from
-    const eventFileMap = new Map<string, string>();
-    const actionFileMap = new Map<string, string>();
-    const rawParts = slice.stateVars
+    const event_file_map = new Map<string, string>();
+    const action_file_map = new Map<string, string>();
+    const raw_parts = slice.state_vars
       .map((v) => sv.get(v))
       .filter(Boolean) as StateNode[];
-    const mergedByName = new Map<string, StateNode>();
-    for (const st of rawParts) {
+    const merged_by_name = new Map<string, StateNode>();
+    for (const st of raw_parts) {
       // Record source file for each event and action
       for (const e of st.events) {
-        if (st.file) eventFileMap.set(e.name, st.file);
+        if (st.file) event_file_map.set(e.name, st.file);
       }
       for (const a of st.actions) {
-        if (st.file) actionFileMap.set(a.name, st.file);
+        if (st.file) action_file_map.set(a.name, st.file);
       }
-      const existing = mergedByName.get(st.name);
+      const existing = merged_by_name.get(st.name);
       if (existing) {
         // Merge actions and events, avoiding duplicates
-        const actionNames = new Set(existing.actions.map((a) => a.name));
+        const action_names = new Set(existing.actions.map((a) => a.name));
         for (const a of st.actions) {
-          if (!actionNames.has(a.name)) existing.actions.push(a);
+          if (!action_names.has(a.name)) existing.actions.push(a);
         }
-        const eventNames = new Set(existing.events.map((e) => e.name));
+        const event_names = new Set(existing.events.map((e) => e.name));
         for (const e of st.events) {
-          if (!eventNames.has(e.name)) existing.events.push(e);
+          if (!event_names.has(e.name)) existing.events.push(e);
         }
       } else {
         // Clone so we don't mutate the original
-        mergedByName.set(st.name, {
+        merged_by_name.set(st.name, {
           ...st,
           actions: [...st.actions],
           events: [...st.events],
         });
       }
     }
-    const parts = [...mergedByName.values()];
+    const parts = [...merged_by_name.values()];
 
     let y = SLICE_INNER; // layout relative to y=0
-    let sliceRightX = cx;
-    const sliceNodeStart = ns.length;
-    const sliceEdgeStart = es.length;
+    let slice_right_x = cx;
+    const slice_node_start = ns.length;
+    const slice_edge_start = es.length;
 
     // Build event→reactions lookup within this slice (supports multiple per event)
-    const sliceReactionsByEvent = new Map<string, typeof slice.reactions>();
+    const slice_reactions_by_event = new Map<string, typeof slice.reactions>();
     for (const r of slice.reactions) {
-      const list = sliceReactionsByEvent.get(r.event) ?? [];
+      const list = slice_reactions_by_event.get(r.event) ?? [];
       list.push(r);
-      sliceReactionsByEvent.set(r.event, list);
+      slice_reactions_by_event.set(r.event, list);
     }
     // Single-reaction lookup for chain measurement (uses first reaction)
-    const sliceReactionByEvent = new Map<string, (typeof slice.reactions)[0]>();
-    for (const [event, reactions] of sliceReactionsByEvent) {
-      sliceReactionByEvent.set(event, reactions[0]);
+    const slice_reaction_by_event = new Map<
+      string,
+      (typeof slice.reactions)[0]
+    >();
+    for (const [event, reactions] of slice_reactions_by_event) {
+      slice_reaction_by_event.set(event, reactions[0]);
     }
 
     // Track visited events/reactions to prevent cycles
-    const visitedEvents = new Set<string>();
-    const visitedReactions = new Set<string>();
+    const visited_events = new Set<string>();
+    const visited_reactions = new Set<string>();
 
-    let partIdx = 0;
+    let part_idx = 0;
     for (const st of parts) {
       // Extra vertical separation between states within a slice
-      if (partIdx > 0) y += GAP * 2;
-      const stateColX = cx + W + GAP;
-      const eventColX = stateColX + STATE_W + GAP;
+      if (part_idx > 0) y += GAP * 2;
+      const state_col_x = cx + W + GAP;
+      const event_col_x = state_col_x + STATE_W + GAP;
 
       // ── Pre-calculate sizes ────────────────────────────────────
       const event_rows: { event_name: string; action_name: string }[] = [];
-      const actionEmitted = new Set<string>();
+      const action_emitted = new Set<string>();
       for (const action of st.actions) {
         for (const en of action.emits) {
-          actionEmitted.add(en);
+          action_emitted.add(en);
         }
       }
       // Trigger events first (declared in .emits() but not produced by any
       // action) — these are chain entry points and must be processed before
       // their downstream events so the full serial chain is detected
       for (const ev of st.events) {
-        if (!actionEmitted.has(ev.name)) {
+        if (!action_emitted.has(ev.name)) {
           event_rows.push({ event_name: ev.name, action_name: "" });
         }
       }
@@ -454,24 +457,24 @@ export function computeLayout(viewModel: DomainModel): Layout {
         chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }>;
       };
       const measured_events: EventMeasure[] = [];
-      let evtBlockH = 0;
+      let evt_block_h = 0;
       for (const { event_name: en, action_name } of event_rows) {
         const chains: Array<{ chain: ChainMeasure; reaction: ReactionDef }> =
           [];
-        if (!visitedEvents.has(en)) {
-          const rDefs = sliceReactionsByEvent.get(en) ?? [];
+        if (!visited_events.has(en)) {
+          const rDefs = slice_reactions_by_event.get(en) ?? [];
           for (const rDef of rDefs) {
-            if (visitedReactions.has(rDef.handlerName)) continue;
-            visitedReactions.add(rDef.handlerName);
-            const chain = measureChain(
+            if (visited_reactions.has(rDef.handler_name)) continue;
+            visited_reactions.add(rDef.handler_name);
+            const chain = measure_chain(
               rDef,
-              sliceReactionByEvent,
-              visitedReactions,
-              viewModel.states
+              slice_reaction_by_event,
+              visited_reactions,
+              view_model.states
             );
             chains.push({ chain, reaction: rDef });
           }
-          if (rDefs.length > 0) visitedEvents.add(en);
+          if (rDefs.length > 0) visited_events.add(en);
         }
         measured_events.push({
           event_name: en,
@@ -479,83 +482,83 @@ export function computeLayout(viewModel: DomainModel): Layout {
           h: H,
           chains,
         });
-        if (evtBlockH > 0) evtBlockH += GAP / 2;
+        if (evt_block_h > 0) evt_block_h += GAP / 2;
         // Primary event always claims H in the event column —
         // chain height extends rightward, not downward
-        evtBlockH += H;
+        evt_block_h += H;
       }
-      if (evtBlockH === 0) evtBlockH = H;
+      if (evt_block_h === 0) evt_block_h = H;
 
       const nActs = st.actions.length;
-      const actBlockH = nActs * H + (nActs - 1) * (GAP / 2);
-      const primaryBlockH = Math.max(evtBlockH, actBlockH, STATE_H);
-      const stCenterY = y + primaryBlockH / 2;
+      const act_block_h = nActs * H + (nActs - 1) * (GAP / 2);
+      const primary_block_h = Math.max(evt_block_h, act_block_h, STATE_H);
+      const st_center_y = y + primary_block_h / 2;
 
       // ── State box (fixed square, vertically centered) ─────────
       ns.push({
         key: `s:${st.name}:${slice.name}`,
-        pos: { x: stateColX, y: stCenterY - STATE_H / 2 },
+        pos: { x: state_col_x, y: st_center_y - STATE_H / 2 },
         type: "state",
         label: st.name,
         file: st.file,
       });
 
       // ── Events centered, chains extend right with watermark ────
-      const sliceRightXRef = { value: sliceRightX };
-      let evtY = stCenterY - evtBlockH / 2;
-      let chainWatermark = -Infinity; // tracks lowest Y used by chains
-      const eventYMap = new Map<string, number>();
+      const slice_right_x_ref = { value: slice_right_x };
+      let evtY = st_center_y - evt_block_h / 2;
+      let chain_watermark = -Infinity; // tracks lowest Y used by chains
+      const event_y_map = new Map<string, number>();
 
       for (let ei = 0; ei < measured_events.length; ei++) {
         const { event_name: en, action_name, chains } = measured_events[ei];
         ns.push({
           key: `e:${en}:${slice.name}:${action_name}`,
-          pos: { x: eventColX, y: evtY },
+          pos: { x: event_col_x, y: evtY },
           type: "event",
           label: en,
-          file: eventFileMap.get(en) ?? st.file,
-          projections: eventProjections.get(en),
-          reactions: eventReactions.get(en),
-          schema: eventSchemas.get(en),
+          file: event_file_map.get(en) ?? st.file,
+          projections: event_projections.get(en),
+          reactions: event_reactions.get(en),
+          schema: event_schemas.get(en),
         });
-        eventYMap.set(en, evtY);
+        event_y_map.set(en, evtY);
 
         // Place all reaction chains for this event — each aligns with
         // the event when possible, pushed down by watermark when
         // previous chains need space
-        for (const { chain, reaction: chainReaction } of chains) {
-          const rX = eventColX + W + GAP * 3;
+        for (const { chain, reaction: chain_reaction } of chains) {
+          const rX = event_col_x + W + GAP * 3;
           // Reaction must be placed so its dispatched block doesn't
-          // overlap previous chains. The block extends dispatchBlockH/2
+          // overlap previous chains. The block extends dispatch_block_h/2
           // above the reaction center, so:
-          //   reactionCenter - dispatchBlockH/2 >= chainWatermark
-          //   reactionY + H/2 - dispatchBlockH/2 >= chainWatermark
-          //   reactionY >= chainWatermark - H/2 + dispatchBlockH/2
-          const minReactionY =
-            chainWatermark + chain.dispatchBlockH / 2 - H / 2;
-          const reactionY = Math.max(evtY, minReactionY);
-          const chainStartIdx = ns.length;
-          placeChain(
+          //   reaction_center - dispatch_block_h/2 >= chain_watermark
+          //   reactionY + H/2 - dispatch_block_h/2 >= chain_watermark
+          //   reactionY >= chain_watermark - H/2 + dispatch_block_h/2
+          const min_reaction_y =
+            chain_watermark + chain.dispatch_block_h / 2 - H / 2;
+          const reactionY = Math.max(evtY, min_reaction_y);
+          const chain_start_idx = ns.length;
+          place_chain(
             chain,
-            chainReaction,
+            chain_reaction,
             reactionY,
             rX,
-            eventColX + W,
+            event_col_x + W,
             evtY + H / 2, // arrow always from event center
             ns,
             es,
             slice.name,
-            sliceReactionByEvent,
-            eventProjections,
-            eventReactions,
-            eventSchemas,
-            sliceRightXRef
+            slice_reaction_by_event,
+            event_projections,
+            event_reactions,
+            event_schemas,
+            slice_right_x_ref
           );
           // Advance watermark past all nodes placed by this chain
-          for (let ni = chainStartIdx; ni < ns.length; ni++) {
+          for (let ni = chain_start_idx; ni < ns.length; ni++) {
             const n = ns[ni];
             const nh = n.type === "state" ? STATE_H : H;
-            chainWatermark = Math.max(chainWatermark, n.pos.y + nh + GAP / 2);
+            chain_watermark = Math.max(chain_watermark, n.pos.y + nh + GAP / 2);
           }
         }
 
@@ -563,29 +566,29 @@ export function computeLayout(viewModel: DomainModel): Layout {
       }
 
       // ── Projections below events ──────────────────────────────
-      const seenProj = new Set<string>();
+      const seen_proj = new Set<string>();
       for (const me of measured_events) {
-        const projs = eventProjections.get(me.event_name);
+        const projs = event_projections.get(me.event_name);
         if (!projs) continue;
         for (const pn of projs) {
-          if (seenProj.has(pn)) continue;
-          seenProj.add(pn);
+          if (seen_proj.has(pn)) continue;
+          seen_proj.add(pn);
           ns.push({
             key: `p:${pn}:${slice.name}`,
-            pos: { x: eventColX, y: evtY },
+            pos: { x: event_col_x, y: evtY },
             type: "projection",
             label: pn,
-            handles: projectionHandles.get(pn),
+            handles: projection_handles.get(pn),
           });
           evtY += H + GAP / 2;
         }
       }
 
-      sliceRightX = sliceRightXRef.value;
+      slice_right_x = slice_right_x_ref.value;
 
       // ── Actions centered relative to state ─────────────────────
-      let actY = stCenterY - actBlockH / 2;
-      const actionColors = [
+      let actY = st_center_y - act_block_h / 2;
+      const action_colors = [
         "#60a5fa",
         "#f97316",
         "#a78bfa",
@@ -593,9 +596,9 @@ export function computeLayout(viewModel: DomainModel): Layout {
         "#fb7185",
         "#fbbf24",
       ];
-      let actionIdx = 0;
+      let action_idx = 0;
       for (const action of st.actions) {
-        const color = actionColors[actionIdx % actionColors.length];
+        const color = action_colors[action_idx % action_colors.length];
         ns.push({
           key: `a:${action.name}:${slice.name}`,
           pos: { x: cx, y: actY },
@@ -603,48 +606,48 @@ export function computeLayout(viewModel: DomainModel): Layout {
           label: action.name,
           sub: action.invariants.length > 0 ? "guarded" : undefined,
           guards: action.invariants.length > 0 ? action.invariants : undefined,
-          file: actionFileMap.get(action.name) ?? st.file,
+          file: action_file_map.get(action.name) ?? st.file,
           emits: action.emits,
         });
         for (const en of action.emits) {
-          const ey = eventYMap.get(en)!;
+          const ey = event_y_map.get(en)!;
           es.push({
             from: { x: cx + W, y: actY + H / 2 },
-            to: { x: eventColX, y: ey + H / 2 },
+            to: { x: event_col_x, y: ey + H / 2 },
             color,
             dash: false,
           });
         }
         actY += H + GAP / 2;
-        actionIdx++;
+        action_idx++;
       }
 
       // Advance y past projections and chain watermarks that may extend
       // beyond the primary action/state/event block
-      const contentBottomY = Math.max(
-        y + primaryBlockH,
+      const content_bottom_y = Math.max(
+        y + primary_block_h,
         evtY,
-        chainWatermark > -Infinity ? chainWatermark : 0
+        chain_watermark > -Infinity ? chain_watermark : 0
       );
-      y = contentBottomY + GAP / 2;
-      partIdx++;
+      y = content_bottom_y + GAP / 2;
+      part_idx++;
     }
 
     // Remaining reactions not already placed inline (e.g., reactions on
     // events not declared in any state within this slice)
     for (const r of slice.reactions) {
-      if (visitedReactions.has(r.handlerName)) continue;
+      if (visited_reactions.has(r.handler_name)) continue;
 
-      const rX = sliceRightX + GAP * 2;
+      const rX = slice_right_x + GAP * 2;
       const rp = { x: rX, y };
       ns.push({
-        key: `r:${r.handlerName}:${slice.name}`,
+        key: `r:${r.handler_name}:${slice.name}`,
         pos: rp,
         type: "reaction",
-        label: r.handlerName,
+        label: r.handler_name,
       });
 
-      sliceRightX = Math.max(sliceRightX, rX + W + GAP);
+      slice_right_x = Math.max(slice_right_x, rX + W + GAP);
       y += H + GAP / 2;
     }
 
@@ -655,7 +658,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
       maxX: -Infinity,
       maxY: -Infinity,
     };
-    for (let ni = sliceNodeStart; ni < ns.length; ni++) {
+    for (let ni = slice_node_start; ni < ns.length; ni++) {
       const n = ns[ni];
       const nw = n.type === "state" ? STATE_W : W;
       const nh = n.type === "state" ? STATE_H : H;
@@ -676,10 +679,10 @@ export function computeLayout(viewModel: DomainModel): Layout {
     const boxH = contentH + SLICE_INNER * 2;
     const dy = globalY - bbox.minY + SLICE_INNER;
     // Shift all nodes and edges placed for this slice
-    for (let ni = sliceNodeStart; ni < ns.length; ni++) {
+    for (let ni = slice_node_start; ni < ns.length; ni++) {
       ns[ni].pos.y += dy;
     }
-    for (let ei = sliceEdgeStart; ei < es.length; ei++) {
+    for (let ei = slice_edge_start; ei < es.length; ei++) {
       es[ei].from.y += dy;
       es[ei].to.y += dy;
     }
@@ -696,74 +699,74 @@ export function computeLayout(viewModel: DomainModel): Layout {
 
   // Standalone states (not in slices) — stacked vertically like a virtual slice
   cx = PAD;
-  const claimed = new Set(sortedSlices.flatMap((sl) => sl.stateVars));
-  const standaloneStates = [...viewModel.states]
-    .filter((s) => !claimed.has(s.varName))
+  const claimed = new Set(sorted_slices.flatMap((sl) => sl.state_vars));
+  const standalone_states = [...view_model.states]
+    .filter((s) => !claimed.has(s.var_name))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  for (const st of standaloneStates) {
-    const stateColX = cx + W + GAP;
-    const eventColX = stateColX + STATE_W + GAP;
+  for (const st of standalone_states) {
+    const state_col_x = cx + W + GAP;
+    const event_col_x = state_col_x + STATE_W + GAP;
 
     // Collect all events: from actions + declared in .emits() but not emitted by any action
-    const actionEmittedEvents = new Set(st.actions.flatMap((a) => a.emits));
-    const orphanEvents = st.events
+    const action_emitted_events = new Set(st.actions.flatMap((a) => a.emits));
+    const orphan_events = st.events
       .map((e) => e.name)
-      .filter((en) => !actionEmittedEvents.has(en));
+      .filter((en) => !action_emitted_events.has(en));
 
     // Compute block sizes
-    const nEvents = actionEmittedEvents.size + orphanEvents.length;
-    const evtBlockH =
+    const nEvents = action_emitted_events.size + orphan_events.length;
+    const evt_block_h =
       Math.max(nEvents, 1) * H + (Math.max(nEvents, 1) - 1) * (GAP / 2);
     const nActs = st.actions.length;
-    const actBlockH = nActs * H + (nActs - 1) * (GAP / 2);
-    const blockH = Math.max(evtBlockH, actBlockH, STATE_H);
-    const stCenterY = globalY + blockH / 2;
+    const act_block_h = nActs * H + (nActs - 1) * (GAP / 2);
+    const blockH = Math.max(evt_block_h, act_block_h, STATE_H);
+    const st_center_y = globalY + blockH / 2;
 
     // State (fixed square, vertically centered)
     ns.push({
       key: `s:${st.name}:standalone`,
-      pos: { x: stateColX, y: stCenterY - STATE_H / 2 },
+      pos: { x: state_col_x, y: st_center_y - STATE_H / 2 },
       type: "state",
       label: st.name,
     });
 
     // Events centered relative to state
-    let evtY = stCenterY - evtBlockH / 2;
-    const eventYMap = new Map<string, number>();
+    let evtY = st_center_y - evt_block_h / 2;
+    const event_y_map = new Map<string, number>();
     for (const action of st.actions) {
       for (const en of action.emits) {
         ns.push({
           key: `e:${en}:standalone`,
-          pos: { x: eventColX, y: evtY },
+          pos: { x: event_col_x, y: evtY },
           type: "event",
           label: en,
-          projections: eventProjections.get(en),
-          reactions: eventReactions.get(en),
-          schema: eventSchemas.get(en),
+          projections: event_projections.get(en),
+          reactions: event_reactions.get(en),
+          schema: event_schemas.get(en),
         });
-        eventYMap.set(en, evtY);
+        event_y_map.set(en, evtY);
         evtY += H + GAP / 2;
       }
     }
     // Orphan events — declared in .emits() but not produced by any action
-    for (const en of orphanEvents) {
+    for (const en of orphan_events) {
       ns.push({
         key: `e:${en}:standalone`,
-        pos: { x: eventColX, y: evtY },
+        pos: { x: event_col_x, y: evtY },
         type: "event",
         label: en,
-        projections: eventProjections.get(en),
-        reactions: eventReactions.get(en),
-        schema: eventSchemas.get(en),
+        projections: event_projections.get(en),
+        reactions: event_reactions.get(en),
+        schema: event_schemas.get(en),
       });
-      eventYMap.set(en, evtY);
+      event_y_map.set(en, evtY);
       evtY += H + GAP / 2;
     }
 
     // Actions centered relative to state
-    let actY = stCenterY - actBlockH / 2;
-    const standaloneColors = [
+    let actY = st_center_y - act_block_h / 2;
+    const standalone_colors = [
       "#60a5fa",
       "#f97316",
       "#a78bfa",
@@ -773,7 +776,7 @@ export function computeLayout(viewModel: DomainModel): Layout {
     ];
     let aIdx = 0;
     for (const action of st.actions) {
-      const aColor = standaloneColors[aIdx % standaloneColors.length];
+      const aColor = standalone_colors[aIdx % standalone_colors.length];
       ns.push({
         key: `a:${action.name}:standalone`,
         pos: { x: cx, y: actY },
@@ -784,10 +787,10 @@ export function computeLayout(viewModel: DomainModel): Layout {
         emits: action.emits,
       });
       for (const en of action.emits) {
-        const ey = eventYMap.get(en)!;
+        const ey = event_y_map.get(en)!;
         es.push({
           from: { x: cx + W, y: actY + H / 2 },
-          to: { x: eventColX, y: ey + H / 2 },
+          to: { x: event_col_x, y: ey + H / 2 },
           color: aColor,
           dash: false,
         });
@@ -800,35 +803,37 @@ export function computeLayout(viewModel: DomainModel): Layout {
   }
 
   // Standalone reactions (from act() builder, not in slices) — placed to the right of their events
-  if (viewModel.reactions.length > 0) {
-    const reactionYByEvent = new Map<string, number>();
-    for (const r of viewModel.reactions) {
+  if (view_model.reactions.length > 0) {
+    const reaction_y_by_event = new Map<string, number>();
+    for (const r of view_model.reactions) {
       // Find the event node this reaction listens to
-      const trigNode = ns.find(
+      const trig_node = ns.find(
         (n) => n.type === "event" && n.label === r.event
       );
-      const baseY = trigNode ? trigNode.pos.y : globalY;
-      const rY = reactionYByEvent.get(r.event) ?? baseY;
-      const rX = trigNode ? trigNode.pos.x + W + GAP * 3 : cx + W * 3 + GAP * 4;
+      const baseY = trig_node ? trig_node.pos.y : globalY;
+      const rY = reaction_y_by_event.get(r.event) ?? baseY;
+      const rX = trig_node
+        ? trig_node.pos.x + W + GAP * 3
+        : cx + W * 3 + GAP * 4;
 
       const rp = { x: rX, y: rY };
       ns.push({
-        key: `r:${r.handlerName}:standalone`,
+        key: `r:${r.handler_name}:standalone`,
         pos: rp,
         type: "reaction",
-        label: r.handlerName,
+        label: r.handler_name,
       });
 
-      if (trigNode) {
+      if (trig_node) {
         es.push({
-          from: { x: trigNode.pos.x + W, y: trigNode.pos.y + H / 2 },
+          from: { x: trig_node.pos.x + W, y: trig_node.pos.y + H / 2 },
           to: { x: rp.x, y: rp.y + H / 2 },
           color: COLORS.reaction.border,
           dash: true,
         });
       }
 
-      reactionYByEvent.set(r.event, rY + H + GAP / 2);
+      reaction_y_by_event.set(r.event, rY + H + GAP / 2);
       globalY = Math.max(globalY, rY + H + GAP);
     }
   }
