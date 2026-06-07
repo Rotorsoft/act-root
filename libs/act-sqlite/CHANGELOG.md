@@ -1,3 +1,5 @@
+# [@rotorsoft/act-sqlite-v1.4.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.4.1...@rotorsoft/act-sqlite-v1.4.2) (2026-06-07)
+
 # [@rotorsoft/act-sqlite-v1.4.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.4.0...@rotorsoft/act-sqlite-v1.4.1) (2026-06-07)
 
 # [@rotorsoft/act-sqlite-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.3.0...@rotorsoft/act-sqlite-v1.4.0) (2026-05-30)
