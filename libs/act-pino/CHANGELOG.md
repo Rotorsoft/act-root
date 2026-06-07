@@ -1,3 +1,5 @@
+# [@rotorsoft/act-pino-v1.0.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v1.0.0...@rotorsoft/act-pino-v1.0.1) (2026-06-07)
+
 # [@rotorsoft/act-pino-v1.0.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pino-v0.5.0...@rotorsoft/act-pino-v1.0.0) (2026-05-21)
 
 
