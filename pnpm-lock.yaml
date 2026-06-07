@@ -9,7 +9,7 @@ overrides:
   picomatch: '>=4.0.4'
   yaml: '>=2.9.0'
   undici: '>=8.3.0'
-  rollup: '>=4.61.0'
+  rollup: '>=4.61.1'
   minimatch@<3.1.4: '>=10.2.5'
   serialize-javascript: '>=7.0.5'
   svgo: '>=4.0.1'
