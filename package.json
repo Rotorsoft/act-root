@@ -18,7 +18,7 @@
     "library"
   ],
   "engines": {
-    "node": ">=22.22.3",
+    "node": ">=24.16.0",
     "pnpm": ">=10.34.1"
   },
   "packageManager": "pnpm@11.4.0",
