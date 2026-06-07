@@ -1,7 +1,7 @@
-import { runCacheTck } from "@rotorsoft/act-tck";
+import { run_cache_tck } from "@rotorsoft/act-tck";
 import { InMemoryCache } from "../src/adapters/in-memory-cache.js";
 
-runCacheTck({
+run_cache_tck({
   name: "InMemoryCache",
   factory: () => new InMemoryCache({ maxSize: 1000 }),
 });

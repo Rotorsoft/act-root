@@ -1,4 +1,4 @@
-import { patch as deepMerge } from "@rotorsoft/act-patch";
+import { patch as deep_merge } from "@rotorsoft/act-patch";
 import type { BroadcastState, PatchMessage } from "./types.js";
 
 /**
@@ -21,18 +21,18 @@ export type ApplyResult<S extends BroadcastState = BroadcastState> =
  *
  * ```typescript
  * onData: (msg) => {
- *   const cached = utils.getState.getData({ streamId });
- *   const result = applyPatchMessage(msg, cached);
+ *   const cached = utils.get_state.get_data({ stream_id });
+ *   const result = apply_patch_message(msg, cached);
  *   if (result.ok) {
- *     utils.getState.setData({ streamId }, result.state);
+ *     utils.get_state.setData({ stream_id }, result.state);
  *   } else if (result.reason === "behind") {
- *     utils.getState.invalidate({ streamId }); // trigger full refetch
+ *     utils.get_state.invalidate({ stream_id }); // trigger full refetch
  *   }
  *   // "stale" → no-op, client already has newer state
  * }
  * ```
  */
-export function applyPatchMessage<S extends BroadcastState>(
+export function apply_patch_message<S extends BroadcastState>(
   msg: PatchMessage<S>,
   cached: S | null | undefined
 ): ApplyResult<S> {
@@ -55,7 +55,7 @@ export function applyPatchMessage<S extends BroadcastState>(
   let state = cached;
   for (const v of versions) {
     if (v <= cachedV) continue; // already applied
-    state = { ...deepMerge(state, msg[v]), _v: v } as S;
+    state = { ...deep_merge(state, msg[v]), _v: v } as S;
   }
   return { ok: true, state };
 }

@@ -10,11 +10,11 @@
  *   implementation. Swap for a durable adapter (Postgres unique
  *   index, Redis `SET NX`) in multi-process receivers without
  *   changing the call site.
- * - {@link minSafeTtl} — derives the minimum safe dedup window from
+ * - {@link min_safe_ttl} — derives the minimum safe dedup window from
  *   the sender's retry profile. The math durable adapters and
- *   `InMemoryIdempotencyStore`'s `retryProfile` option both call.
+ *   `InMemoryIdempotencyStore`'s `retry_profile` option both call.
  * - {@link RetryProfile} — the sender's retry shape, used as input
- *   to `minSafeTtl` and as the `retryProfile` option on the store.
+ *   to `min_safe_ttl` and as the `retry_profile` option on the store.
  *
  * Sibling subpaths (e.g. `@rotorsoft/act-ops/poison`,
  * `@rotorsoft/act-ops/retry`) will host future operational primitives
@@ -31,5 +31,5 @@ export {
   InMemoryIdempotencyStore,
   type InMemoryIdempotencyStoreOptions,
 } from "./in-memory.js";
-export { minSafeTtl, type RetryProfile } from "./min-safe-ttl.js";
+export { min_safe_ttl, type RetryProfile } from "./min-safe-ttl.js";
 export type { IdempotencyStore } from "./port.js";

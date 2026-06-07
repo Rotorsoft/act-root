@@ -66,9 +66,9 @@ export const requestTicketEscalation = (target: Target) =>
 
 export const escalateTicket = (
   target: Target,
-  requestId = chance.guid(),
+  request_id = chance.guid(),
   requestedById = chance.guid()
-) => app.do("EscalateTicket", target, { requestId, requestedById });
+) => app.do("EscalateTicket", target, { request_id, requestedById });
 
 export const reassignTicket = (
   target: Target,

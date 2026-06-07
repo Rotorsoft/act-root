@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /**
- * Outcome of {@link verifyWebhook}. Either the request signature
+ * Outcome of {@link verify_webhook}. Either the request signature
  * checks out, or one of five distinct failure reasons applies. Each
  * reason maps to an operator-meaningful telemetry bucket — separated
  * deliberately so dashboards can distinguish "client lost its secret"
@@ -19,7 +19,7 @@ export type VerifyResult =
         | "bad-signature";
     };
 
-/** Options for {@link verifyWebhook}. */
+/** Options for {@link verify_webhook}. */
 export type VerifyOptions = {
   /**
    * Maximum acceptable timestamp drift in either direction, in
@@ -62,7 +62,7 @@ export type VerifyOptions = {
  * Uses Node's `crypto.timingSafeEqual` for the final comparison to
  * avoid signature-equality timing attacks.
  */
-export function verifyWebhook(
+export function verify_webhook(
   headers: Record<string, string | string[] | undefined>,
   body: string,
   secret: string,
@@ -74,10 +74,10 @@ export function verifyWebhook(
   const signature = pick_header(headers, "x-webhook-signature");
   if (!signature) return { ok: false, reason: "missing-signature" };
 
-  const timestampStr = pick_header(headers, "x-webhook-timestamp");
-  if (!timestampStr) return { ok: false, reason: "missing-timestamp" };
-  const timestamp = Number.parseInt(timestampStr, 10);
-  if (Number.isNaN(timestamp) || String(timestamp) !== timestampStr) {
+  const timestamp_str = pick_header(headers, "x-webhook-timestamp");
+  if (!timestamp_str) return { ok: false, reason: "missing-timestamp" };
+  const timestamp = Number.parseInt(timestamp_str, 10);
+  if (Number.isNaN(timestamp) || String(timestamp) !== timestamp_str) {
     return { ok: false, reason: "missing-timestamp" };
   }
 
@@ -88,17 +88,17 @@ export function verifyWebhook(
   if (!signature.startsWith("sha256=")) {
     return { ok: false, reason: "bad-signature" };
   }
-  const providedHex = signature.slice("sha256=".length);
-  if (!/^[0-9a-fA-F]{64}$/.test(providedHex)) {
+  const provided_hex = signature.slice("sha256=".length);
+  if (!/^[0-9a-fA-F]{64}$/.test(provided_hex)) {
     return { ok: false, reason: "bad-signature" };
   }
 
-  const expectedHex = createHmac("sha256", secret)
-    .update(`${timestampStr}.${body}`)
+  const expected_hex = createHmac("sha256", secret)
+    .update(`${timestamp_str}.${body}`)
     .digest("hex");
 
-  const a = Buffer.from(providedHex, "hex");
-  const b = Buffer.from(expectedHex, "hex");
+  const a = Buffer.from(provided_hex, "hex");
+  const b = Buffer.from(expected_hex, "hex");
   if (!timingSafeEqual(a, b)) {
     return { ok: false, reason: "bad-signature" };
   }
@@ -108,10 +108,10 @@ export function verifyWebhook(
 
 function pick_header(
   headers: Record<string, string | string[] | undefined>,
-  lowerName: string
+  lower_name: string
 ): string | undefined {
   for (const [name, value] of Object.entries(headers)) {
-    if (name.toLowerCase() !== lowerName) continue;
+    if (name.toLowerCase() !== lower_name) continue;
     if (Array.isArray(value) || value === undefined || value === "") {
       return undefined;
     }

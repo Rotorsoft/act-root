@@ -12,10 +12,10 @@
  *   an `Actor` from an incoming request. Auth (JWT, session, API
  *   key) stays in the host; the package only asks for this one
  *   function.
- * - {@link ApiError}, {@link ERROR_MAP}, {@link toApiError} — the
+ * - {@link ApiError}, {@link ERROR_MAP}, {@link to_api_error} — the
  *   uniform error envelope and the status/code mapping every
  *   transport uses. Cross-transport consistency by construction.
- * - {@link withIdempotency} — the helper that wraps action handlers
+ * - {@link with_idempotency} — the helper that wraps action handlers
  *   in an `Idempotency-Key` claim. Reuses the
  *   `@rotorsoft/act-ops/idempotency` contract that
  *   `@rotorsoft/act-http/receiver` already speaks, so receivers and
@@ -39,6 +39,6 @@ export {
   type ApiError,
   ERROR_MAP,
   type ErrorMapEntry,
-  toApiError,
+  to_api_error,
 } from "./errors.js";
-export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+export { type IdempotencyResult, with_idempotency } from "./idempotency.js";

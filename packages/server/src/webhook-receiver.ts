@@ -30,8 +30,8 @@ const escalations = receiver({
   store: new InMemoryIdempotencyStore({
     // 24h dedup window — covers any reasonable retry+backoff envelope
     // from a sender using ACT-601 `exponential` backoff up to maxMs=30s.
-    ttlMs: 24 * 60 * 60 * 1000,
-    maxEntries: 50_000,
+    ttl_ms: 24 * 60 * 60 * 1000,
+    max_entries: 50_000,
   }),
   secret: process.env.WEBHOOK_SECRET,
 })

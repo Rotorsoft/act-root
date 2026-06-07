@@ -6,7 +6,7 @@ import type {
   Validator,
 } from "@rotorsoft/act-ops/receiver";
 import { Hono } from "hono";
-import { webhookMiddleware } from "./hono/index.js";
+import { webhook_middleware } from "./hono/index.js";
 
 /**
  * Recommended factory for "I want to receive webhooks." Returns a
@@ -23,12 +23,12 @@ import { webhookMiddleware } from "./hono/index.js";
  *   secret: process.env.WEBHOOK_SECRET,
  * })
  *   .on("OrderConfirmed", z.object({
- *     orderId: z.string(),
+ *     order_id: z.string(),
  *     total: z.number(),
  *   }), async (event, ctx) => {
- *     // event.orderId and event.total are typed
+ *     // event.order_id and event.total are typed
  *     // ctx.key is the deduplicated Idempotency-Key
- *     await processOrder(event.orderId, event.total);
+ *     await process_order(event.order_id, event.total);
  *   })
  *   .build();
  *
@@ -46,7 +46,7 @@ import { webhookMiddleware } from "./hono/index.js";
  * Cloudflare Workers, Vercel Edge, Bun, and Deno. For operators
  * with an existing tRPC / Express / Fastify / Hono app who need to
  * compose the receiver with their own middleware stack, the
- * lower-level `webhookMiddleware` from
+ * lower-level `webhook_middleware` from
  * `@rotorsoft/act-http/receiver/<framework>` is the escape hatch.
  *
  * `@hono/node-server` is imported lazily inside `.listen()` so
@@ -58,7 +58,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
     Variables: { idempotency: { key: string; deduped: boolean } };
   }>();
 
-  const middleware = webhookMiddleware({
+  const middleware = webhook_middleware({
     store: options.store,
     secret: options.secret,
   });

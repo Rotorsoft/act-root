@@ -8,11 +8,11 @@ import {
 import type { DomainModel } from "../src/client/types/index.js";
 
 const OrderPlacedSchema = z.object({
-  orderId: z.string(),
+  order_id: z.string(),
   total: z.number(),
 });
 const OrderPlacedV2Schema = z.object({
-  orderId: z.string(),
+  order_id: z.string(),
   total: z.number(),
   currency: z.string(),
 });
@@ -29,7 +29,7 @@ function modelWithRealSchemas(): DomainModel {
           {
             name: "OrderPlaced",
             has_custom_patch: false,
-            schema: "z.object({ orderId: z.string(), total: z.number() })",
+            schema: "z.object({ order_id: z.string(), total: z.number() })",
             zod: OrderPlacedSchema,
           },
           {
@@ -123,7 +123,7 @@ describe("format_json_schema", () => {
     expect(parsed.events.OrderPlaced.schema).toMatchObject({
       type: "object",
       properties: {
-        orderId: { type: "string" },
+        order_id: { type: "string" },
         total: { type: "number" },
       },
     });

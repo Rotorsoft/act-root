@@ -72,10 +72,10 @@ describe("PinoLogger", () => {
 
   it("creates child logger with bindings", () => {
     const logger = new PinoLogger({ level: "trace", pretty: false });
-    const child = logger.child({ requestId: "abc" });
+    const child = logger.child({ request_id: "abc" });
     child.info("from child");
     const parsed = JSON.parse(output[0]);
-    expect(parsed.requestId).toBe("abc");
+    expect(parsed.request_id).toBe("abc");
     expect(parsed.msg).toBe("from child");
   });
 

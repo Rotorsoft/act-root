@@ -57,10 +57,10 @@ describe("PostgresStore priority lanes", () => {
 
     const seen: any[] = [];
     await store().query_streams((p) => seen.push(p));
-    const byStream = Object.fromEntries(
+    const by_stream = Object.fromEntries(
       seen.map((p) => [p.stream, p.priority])
     );
-    expect(byStream).toEqual({ a: 0, b: 7 });
+    expect(by_stream).toEqual({ a: 0, b: 7 });
   });
 
   it("prioritize matches by regex", async () => {

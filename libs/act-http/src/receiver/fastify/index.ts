@@ -8,7 +8,7 @@
  *
  * ```ts
  * import Fastify from "fastify";
- * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/fastify";
+ * import { webhook_middleware } from "@rotorsoft/act-http/receiver/fastify";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * const app = Fastify();
@@ -17,7 +17,7 @@
  * app.post(
  *   "/webhooks/orders",
  *   {
- *     preHandler: webhookMiddleware({
+ *     preHandler: webhook_middleware({
  *       store: dedup,
  *       secret: process.env.WEBHOOK_SECRET,
  *     }),
@@ -39,15 +39,15 @@
  * **Raw body requirement**: when `secret` is configured, register a
  * content-type parser that preserves the raw body string. Fastify's
  * default JSON parser eats the bytes — register a custom parser via
- * `app.addContentTypeParser("application/json", { parseAs: "string" }, …)`
- * and stash the string on `request.rawBody` (Fastify pattern). The
- * middleware reads `request.rawBody` for hashing. Skip when unsigned.
+ * `app.addContentTypeParser("application/json", { parse_as: "string" }, …)`
+ * and stash the string on `request.raw_body` (Fastify pattern). The
+ * middleware reads `request.raw_body` for hashing. Skip when unsigned.
  */
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { type CheckWebhookOptions, check_webhook } from "../check.js";
 
 type WebhookRequest = FastifyRequest & {
-  rawBody?: string;
+  raw_body?: string;
   idempotency?: { key: string; deduped: boolean };
 };
 
@@ -57,7 +57,7 @@ type WebhookRequest = FastifyRequest & {
  * claims the key on the configured store. See the module-level docs
  * for usage.
  */
-export function webhookMiddleware(
+export function webhook_middleware(
   options: CheckWebhookOptions
 ): (request: FastifyRequest, reply: FastifyReply) => Promise<void> {
   return async function check(
@@ -65,10 +65,10 @@ export function webhookMiddleware(
     reply: FastifyReply
   ): Promise<void> {
     const req = request as WebhookRequest;
-    const rawBody = req.rawBody ?? "";
+    const raw_body = req.raw_body ?? "";
     const result = await check_webhook(
       req.headers as Record<string, string | string[] | undefined>,
-      rawBody,
+      raw_body,
       options
     );
     if (!result.ok) {

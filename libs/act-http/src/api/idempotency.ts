@@ -1,7 +1,7 @@
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 /**
- * Result of a {@link withIdempotency} call.
+ * Result of a {@link with_idempotency} call.
  *
  * - `{ deduped: false, result }` — the claim was fresh; the handler
  *   ran and produced `result`.
@@ -31,7 +31,7 @@ export type IdempotencyResult<T> =
  * `IdempotencyStore` implementation covers both halves of the "Act
  * over the wire" surface — receiver and generated API.
  */
-export async function withIdempotency<T>(
+export async function with_idempotency<T>(
   store: IdempotencyStore,
   key: string,
   handler: () => Promise<T>

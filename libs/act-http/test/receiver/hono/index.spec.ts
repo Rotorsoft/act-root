@@ -1,19 +1,19 @@
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
-import { webhookMiddleware } from "../../../src/receiver/hono/index.js";
+import { webhook_middleware } from "../../../src/receiver/hono/index.js";
 
-const BODY = '{"orderId":"o-1"}';
+const BODY = '{"order_id":"o-1"}';
 
 function freshStore() {
   return new InMemoryIdempotencyStore();
 }
 
-describe("webhookMiddleware (Hono)", () => {
+describe("webhook_middleware (Hono)", () => {
   it("attaches idempotency on the happy path and continues", async () => {
     const store = freshStore();
     const app = new Hono();
-    app.post("/webhook", webhookMiddleware({ store }), (c) => {
+    app.post("/webhook", webhook_middleware({ store }), (c) => {
       const idem = c.get("idempotency");
       return c.json(idem);
     });
@@ -30,7 +30,7 @@ describe("webhookMiddleware (Hono)", () => {
   it("returns 400 missing-key", async () => {
     const store = freshStore();
     const app = new Hono();
-    app.post("/webhook", webhookMiddleware({ store }), (c) => c.text("ok"));
+    app.post("/webhook", webhook_middleware({ store }), (c) => c.text("ok"));
 
     const res = await app.request("/webhook", {
       method: "POST",
@@ -46,7 +46,7 @@ describe("webhookMiddleware (Hono)", () => {
     const app = new Hono();
     app.post(
       "/webhook",
-      webhookMiddleware({ store, secret: "test-secret" }),
+      webhook_middleware({ store, secret: "test-secret" }),
       (c) => c.text("ok")
     );
 
@@ -62,7 +62,7 @@ describe("webhookMiddleware (Hono)", () => {
   it("returns deduped: true on a re-claim", async () => {
     const store = freshStore();
     const app = new Hono();
-    app.post("/webhook", webhookMiddleware({ store }), (c) =>
+    app.post("/webhook", webhook_middleware({ store }), (c) =>
       c.json(c.get("idempotency"))
     );
 

@@ -3,26 +3,26 @@
  * @module act-http/receiver/trpc
  *
  * tRPC adapter for the receiver-side webhook check. Composes
- * `extractIdempotencyKey` + `verifyWebhook` + `IdempotencyStore.claim`
+ * `extract_idempotency_key` + `verify_webhook` + `IdempotencyStore.claim`
  * into a single middleware factory.
  *
  * Usage:
  *
  * ```ts
  * import { initTRPC, TRPCError } from "@trpc/server";
- * import { webhookMiddleware } from "@rotorsoft/act-http/receiver/trpc";
+ * import { webhook_middleware } from "@rotorsoft/act-http/receiver/trpc";
  * import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
  *
  * type Ctx = {
  *   headers: Record<string, string | string[] | undefined>;
- *   rawBody: string;
+ *   raw_body: string;
  * };
  *
  * const t = initTRPC.context<Ctx>().create();
  * const dedup = new InMemoryIdempotencyStore();
  *
  * const idempotent = t.procedure.use(
- *   webhookMiddleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
+ *   webhook_middleware({ store: dedup, secret: process.env.WEBHOOK_SECRET })
  * );
  * ```
  *
@@ -33,9 +33,9 @@
  *
  * **Raw body requirement**: when `secret` is configured, the middleware
  * needs the raw request bytes for HMAC verification. Capture them in
- * `createContext` — most tRPC HTTP adapters expose the raw stream;
- * read it into a string and stash it on `ctx.rawBody`. Skip when
- * unsigned (no `secret`) — the middleware never reads `rawBody` in
+ * `create_context` — most tRPC HTTP adapters expose the raw stream;
+ * read it into a string and stash it on `ctx.raw_body`. Skip when
+ * unsigned (no `secret`) — the middleware never reads `raw_body` in
  * that mode.
  */
 import { TRPCError } from "@trpc/server";
@@ -51,22 +51,22 @@ import { type CheckWebhookOptions, check_webhook } from "../check.js";
  * (internal namespace, not for external import). Type-safety at the
  * call site comes from `t.procedure.use(...)` validating the
  * middleware shape against the procedure's context — the operator's
- * tRPC context must include `headers` and `rawBody`, and downstream
+ * tRPC context must include `headers` and `raw_body`, and downstream
  * handlers see `ctx.idempotency = { key, deduped }`.
  */
 // biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape
-export function webhookMiddleware(options: CheckWebhookOptions): any {
+export function webhook_middleware(options: CheckWebhookOptions): any {
   return async function check(opts: {
     ctx: {
       headers: Record<string, string | string[] | undefined>;
-      rawBody: string;
+      raw_body: string;
     };
     // biome-ignore lint/suspicious/noExplicitAny: see above
     next: (next: { ctx: any }) => Promise<any>;
   }) {
     const result = await check_webhook(
       opts.ctx.headers,
-      opts.ctx.rawBody,
+      opts.ctx.raw_body,
       options
     );
     if (!result.ok) {

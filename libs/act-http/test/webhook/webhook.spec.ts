@@ -7,7 +7,7 @@ import {
 } from "../../src/webhook/index.js";
 
 type Events = {
-  OrderConfirmed: { orderId: string; total: number };
+  OrderConfirmed: { order_id: string; total: number };
 };
 
 function makeEvent(
@@ -19,7 +19,7 @@ function makeEvent(
     stream: "order-7",
     version: 0,
     created: new Date("2026-05-16T10:00:00Z"),
-    data: { orderId: "order-7", total: 99.5 },
+    data: { order_id: "order-7", total: 99.5 },
     meta: { correlation: "test-corr", causation: {} },
     ...overrides,
   };
@@ -82,7 +82,7 @@ describe("webhook", () => {
         expect(err).not.toBeInstanceOf(NonRetryableError);
         const e = err as WebhookError;
         expect(e.status).toBe(500);
-        expect(e.responseBody).toBe("boom");
+        expect(e.response_body).toBe("boom");
       }
     });
 
@@ -111,7 +111,7 @@ describe("webhook", () => {
         expect(err).toBeInstanceOf(NonRetryableError);
         const e = err as NonRetryableWebhookError;
         expect(e.status).toBe(400);
-        expect(e.responseBody).toBe("bad input");
+        expect(e.response_body).toBe("bad input");
       }
     });
 
@@ -159,7 +159,7 @@ describe("webhook", () => {
       ) as unknown as typeof globalThis.fetch;
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        timeoutMs: 10,
+        timeout_ms: 10,
         fetch,
       });
       try {
@@ -188,11 +188,11 @@ describe("webhook", () => {
       ).toBe("1234");
     });
 
-    it("uses idempotencyKey override when provided", async () => {
+    it("uses idempotency_key override when provided", async () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        idempotencyKey: (e) => `${e.stream}-${e.id}`,
+        idempotency_key: (e) => `${e.stream}-${e.id}`,
         fetch,
       });
       await handler(makeEvent({ id: 42 }), "stream-1", {} as never);
@@ -205,7 +205,7 @@ describe("webhook", () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://example.com/hook",
-        idempotencyKey: () => null,
+        idempotency_key: () => null,
         fetch,
       });
       await handler(makeEvent(), "stream-1", {} as never);
@@ -261,7 +261,7 @@ describe("webhook", () => {
         url: "https://example.com/hook",
         body: (e: Committed<Events, keyof Events>) => ({
           kind: e.name,
-          order: e.data.orderId,
+          order: e.data.order_id,
           total: e.data.total,
         }),
         fetch,
@@ -295,7 +295,7 @@ describe("webhook", () => {
       await handler(event, "stream-1", {} as never);
       const parsed = JSON.parse(calls[0].init.body as string);
       expect(parsed.name).toBe("OrderConfirmed");
-      expect(parsed.data.orderId).toBe("order-7");
+      expect(parsed.data.order_id).toBe("order-7");
     });
 
     it("invokes url function with the event", async () => {
@@ -354,14 +354,14 @@ describe("webhook", () => {
       const { fetch, calls } = makeFetch({ status: 200 });
       const handler = webhook<Events>({
         url: "https://x.example/webhook",
-        body: (e) => ({ orderId: e.stream, total: e.data.total }),
+        body: (e) => ({ order_id: e.stream, total: e.data.total }),
         secret: "shared-secret",
         fetch,
       });
       await handler(makeEvent(), "stream-1", {} as never);
       const init = calls[0]?.init;
       expect(init?.body).toBe(
-        JSON.stringify({ orderId: "order-7", total: 99.5 })
+        JSON.stringify({ order_id: "order-7", total: 99.5 })
       );
       const headers = init?.headers as Record<string, string>;
       expect(headers["X-Webhook-Signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
@@ -416,12 +416,12 @@ describe("webhook", () => {
       const err = new NonRetryableWebhookError("client error", {
         status: 422,
         url: "https://y.example",
-        responseBody: "validation failed",
+        response_body: "validation failed",
       });
       expect(err.name).toBe("NonRetryableWebhookError");
       expect(err.status).toBe(422);
       expect(err.url).toBe("https://y.example");
-      expect(err.responseBody).toBe("validation failed");
+      expect(err.response_body).toBe("validation failed");
       expect(err).toBeInstanceOf(NonRetryableError);
       expect(err).toBeInstanceOf(Error);
     });

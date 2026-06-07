@@ -2,7 +2,7 @@ import type { Logger } from "@rotorsoft/act/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Options for {@link runLoggerTck}.
+ * Options for {@link run_logger_tck}.
  */
 export type LoggerTckOptions = {
   /**
@@ -39,19 +39,19 @@ const LEVELS = ["fatal", "error", "warn", "info", "debug", "trace"] as const;
  *
  * @example
  * ```ts
- * import { runLoggerTck } from "@rotorsoft/act-tck";
+ * import { run_logger_tck } from "@rotorsoft/act-tck";
  * import { ConsoleLogger } from "@rotorsoft/act";
  *
- * runLoggerTck({
+ * run_logger_tck({
  *   name: "ConsoleLogger",
  *   factory: () => new ConsoleLogger({ level: "trace" }),
  * });
  * ```
  */
-export const runLoggerTck = (options: LoggerTckOptions): void => {
+export const run_logger_tck = (options: LoggerTckOptions): void => {
   describe(`TCK / Logger / ${options.name}`, () => {
     let logger: Logger;
-    let originalStdout: typeof process.stdout.write;
+    let original_stdout: typeof process.stdout.write;
 
     // Silence stdout during the TCK — we don't assert on output, and
     // chatty implementations would otherwise spam test runs. Loggers
@@ -60,12 +60,12 @@ export const runLoggerTck = (options: LoggerTckOptions): void => {
     // responsibility.
     beforeEach(() => {
       logger = options.factory();
-      originalStdout = process.stdout.write.bind(process.stdout);
+      original_stdout = process.stdout.write.bind(process.stdout);
       process.stdout.write = (() => true) as typeof process.stdout.write;
     });
 
     afterEach(async () => {
-      process.stdout.write = originalStdout;
+      process.stdout.write = original_stdout;
       await logger.dispose();
     });
 
@@ -99,7 +99,7 @@ export const runLoggerTck = (options: LoggerTckOptions): void => {
     });
 
     it("child(bindings) returns a Logger satisfying the same contract", () => {
-      const child = logger.child({ requestId: "abc" });
+      const child = logger.child({ request_id: "abc" });
       expect(typeof child.level).toBe("string");
       for (const level of LEVELS) {
         expect(typeof child[level]).toBe("function");

@@ -23,9 +23,9 @@ import {
   collect,
   dec,
   inc,
-  makeMeta,
-  reset as resetEvent,
-  seedStream,
+  make_meta,
+  reset as reset_event,
+  seed_stream,
   uid,
 } from "./fixtures/helpers.js";
 
@@ -62,7 +62,7 @@ export type StoreCapabilities = {
 };
 
 /**
- * Options for {@link runStoreTck}.
+ * Options for {@link run_store_tck}.
  */
 export type StoreTckOptions = {
   /**
@@ -111,16 +111,16 @@ export type StoreTckOptions = {
  *
  * @example
  * ```ts
- * import { runStoreTck } from "@rotorsoft/act-tck";
+ * import { run_store_tck } from "@rotorsoft/act-tck";
  * import { InMemoryStore } from "@rotorsoft/act";
  *
- * runStoreTck({
+ * run_store_tck({
  *   name: "InMemoryStore",
  *   factory: () => new InMemoryStore(),
  * });
  * ```
  */
-export const runStoreTck = (options: StoreTckOptions): void => {
+export const run_store_tck = (options: StoreTckOptions): void => {
   describe(`TCK / Store / ${options.name}`, () => {
     let store: Store;
     // Spread (rather than `?? {}`) so the default-empty path doesn't
@@ -144,7 +144,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2), dec(3)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         expect(committed).toHaveLength(3);
         expect(committed[0].version).toBe(0);
@@ -163,7 +163,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           s,
           [inc(1)],
-          makeMeta({ stream: s, correlation })
+          make_meta({ stream: s, correlation })
         );
         expect(committed[0].stream).toBe(s);
         expect(committed[0].meta.correlation).toBe(correlation);
@@ -171,15 +171,19 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("throws ConcurrencyError when expectedVersion is wrong", async () => {
         const s = `commit-cc-${uid()}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
         await store.commit<CounterEvents>(
           s,
           [inc(1)],
-          makeMeta({ stream: s }),
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s }),
           0
         );
         await expect(
-          store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }), 0)
+          store.commit<CounterEvents>(s, [inc(1)], make_meta({ stream: s }), 0)
         ).rejects.toBeInstanceOf(ConcurrencyError);
       });
 
@@ -188,10 +192,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         await expect(
-          store.commit<CounterEvents>(s, [inc(3)], makeMeta({ stream: s }), 0)
+          store.commit<CounterEvents>(s, [inc(3)], make_meta({ stream: s }), 0)
         ).rejects.toBeInstanceOf(ConcurrencyError);
         const found = await collect(store, { stream: s, stream_exact: true });
         expect(found).toHaveLength(2);
@@ -206,30 +210,30 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1), dec(1)],
-          makeMeta({ stream: s1, correlation: cor })
+          make_meta({ stream: s1, correlation: cor })
         );
         await store.commit<CounterEvents>(
           s2,
-          [inc(2), dec(2), resetEvent()],
-          makeMeta({ stream: s2, correlation: cor })
+          [inc(2), dec(2), reset_event()],
+          make_meta({ stream: s2, correlation: cor })
         );
 
-        const byStream = await collect(store, {
+        const by_stream = await collect(store, {
           stream: s1,
           stream_exact: true,
         });
-        expect(byStream).toHaveLength(2);
+        expect(by_stream).toHaveLength(2);
 
-        const byName = await collect(store, {
+        const by_name = await collect(store, {
           stream: s2,
           stream_exact: true,
           names: ["Reset"],
         });
-        expect(byName).toHaveLength(1);
-        expect(byName[0].name).toBe("Reset");
+        expect(by_name).toHaveLength(1);
+        expect(by_name[0].name).toBe("Reset");
 
-        const byCorrelation = await collect(store, { correlation: cor });
-        expect(byCorrelation).toHaveLength(5);
+        const by_correlation = await collect(store, { correlation: cor });
+        expect(by_correlation).toHaveLength(5);
 
         const limited = await collect(store, {
           correlation: cor,
@@ -243,7 +247,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2), inc(3)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         const forward = await collect(store, { stream: s, stream_exact: true });
         const backward = await collect(store, {
@@ -273,22 +277,22 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2), inc(3), inc(4)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
-        const afterFirst = await collect(store, {
+        const after_first = await collect(store, {
           stream: s,
           stream_exact: true,
           after: committed[0].id,
         });
-        expect(afterFirst.map((e) => e.id)).toEqual(
+        expect(after_first.map((e) => e.id)).toEqual(
           committed.slice(1).map((c) => c.id)
         );
-        const beforeLast = await collect(store, {
+        const before_last = await collect(store, {
           stream: s,
           stream_exact: true,
           before: committed[committed.length - 1].id,
         });
-        expect(beforeLast.map((e) => e.id)).toEqual(
+        expect(before_last.map((e) => e.id)).toEqual(
           committed.slice(0, -1).map((c) => c.id)
         );
       });
@@ -297,20 +301,24 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `q-ts-${uid()}`;
         const before = new Date(Date.now() - 60_000);
         const future = new Date(Date.now() + 60_000);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
-        const inWindow = await collect(store, {
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        const in_window = await collect(store, {
           stream: s,
           stream_exact: true,
           created_after: before,
           created_before: future,
         });
-        expect(inWindow.length).toBe(1);
-        const outOfWindow = await collect(store, {
+        expect(in_window.length).toBe(1);
+        const out_of_window = await collect(store, {
           stream: s,
           stream_exact: true,
           created_after: future,
         });
-        expect(outOfWindow.length).toBe(0);
+        expect(out_of_window.length).toBe(0);
       });
 
       it("backward traversal short-circuits at `after` id boundary", async () => {
@@ -318,7 +326,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2), inc(3)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         // Backward from the end, but only events newer than committed[0].id.
         const got = await collect(store, {
@@ -335,7 +343,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("backward traversal short-circuits at `created_after` boundary", async () => {
         const s = `q-back-cafter-${uid()}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         // Asking backward with created_after = now+1m should short-circuit
         // immediately because the only event was created before that bound.
         const future = new Date(Date.now() + 60_000);
@@ -350,10 +362,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("backward traversal honors created_before by skipping newer events", async () => {
         const s = `q-back-ts-${uid()}`;
-        // `makeMeta()` with no stream — exercises the meta builder's
+        // `make_meta()` with no stream — exercises the meta builder's
         // no-causation branch alongside the backward + created_before
         // path inside the adapter.
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta());
+        await store.commit<CounterEvents>(s, [inc(1)], make_meta());
         const past = new Date(Date.now() - 60_000);
         const got = await collect(store, {
           stream: s,
@@ -368,8 +380,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const tag = uid();
         const a = `q-exact-${tag}`;
         const b = `q-exact-${tag}-extra`;
-        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
-        await store.commit<CounterEvents>(b, [inc(2)], makeMeta({ stream: b }));
+        await store.commit<CounterEvents>(
+          a,
+          [inc(1)],
+          make_meta({ stream: a })
+        );
+        await store.commit<CounterEvents>(
+          b,
+          [inc(2)],
+          make_meta({ stream: b })
+        );
         const exact = await collect(store, { stream: a, stream_exact: true });
         expect(exact).toHaveLength(1);
         expect(exact[0].data).toEqual({ amount: 1 });
@@ -386,12 +406,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           inner,
           [inc(1)],
-          makeMeta({ stream: inner })
+          make_meta({ stream: inner })
         );
         await store.commit<CounterEvents>(
           longer,
           [inc(2)],
-          makeMeta({ stream: longer })
+          make_meta({ stream: longer })
         );
         const got = await collect(store, { stream: `qr-${tag}-inner` });
         expect(got.map((e) => e.stream).sort()).toEqual([inner, longer].sort());
@@ -404,12 +424,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           inner,
           [inc(1)],
-          makeMeta({ stream: inner })
+          make_meta({ stream: inner })
         );
         await store.commit<CounterEvents>(
           longer,
           [inc(2)],
-          makeMeta({ stream: longer })
+          make_meta({ stream: longer })
         );
         const got = await collect(store, { stream: `^qr-${tag}-anchor$` });
         expect(got).toHaveLength(1);
@@ -421,12 +441,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const a = `qr-${tag}-pfx-a`;
         const b = `qr-${tag}-pfx-b`;
         const other = `zz-${tag}-other`;
-        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
-        await store.commit<CounterEvents>(b, [inc(2)], makeMeta({ stream: b }));
+        await store.commit<CounterEvents>(
+          a,
+          [inc(1)],
+          make_meta({ stream: a })
+        );
+        await store.commit<CounterEvents>(
+          b,
+          [inc(2)],
+          make_meta({ stream: b })
+        );
         await store.commit<CounterEvents>(
           other,
           [inc(3)],
-          makeMeta({ stream: other })
+          make_meta({ stream: other })
         );
         const got = await collect(store, { stream: `^qr-${tag}-pfx-` });
         expect(got.map((e) => e.stream).sort()).toEqual([a, b].sort());
@@ -445,7 +473,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = `claim-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const by = `worker-${uid()}`;
         const leased = await store.claim(100, 0, by, 10_000);
         const mine = leased.find((l) => l.stream === s);
@@ -458,7 +490,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `claim-held-${uid()}`;
         const other = `claim-other-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leasedA = await store.claim(100, 0, `wA-${uid()}`, 100_000);
         const targetA = leasedA.find((l) => l.stream === s);
         expect(targetA).toBeDefined();
@@ -470,7 +506,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           other,
           [inc(2)],
-          makeMeta({ stream: other })
+          make_meta({ stream: other })
         );
         const leasedB = await store.claim(100, 0, `wB-${uid()}`, 100_000);
         expect(leasedB.length).toBeGreaterThan(0);
@@ -484,7 +520,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         const first = await store.claim(100, 0, `w-${uid()}`, 1);
         const mine = first.find((l) => l.stream === s);
@@ -497,7 +533,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("dedupes when both frontiers would return the same stream", async () => {
         const s = `claim-dedup-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         // Asking for both frontiers with overlapping budgets must not
         // return the same stream twice.
         const claimed = await store.claim(100, 100, `w-${uid()}`, 100_000);
@@ -509,22 +549,26 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `ack-wrong-${uid()}`;
         const sibling = `ack-sibling-${uid()}`;
         await store.subscribe([{ stream: s }, { stream: sibling }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         await store.commit<CounterEvents>(
           sibling,
           [inc(2)],
-          makeMeta({ stream: sibling })
+          make_meta({ stream: sibling })
         );
         const leased = await store.claim(100, 0, `right-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
-        const siblingLease = leased.find((l) => l.stream === sibling);
+        const sibling_lease = leased.find((l) => l.stream === sibling);
         expect(mine).toBeDefined();
-        expect(siblingLease).toBeDefined();
+        expect(sibling_lease).toBeDefined();
         // Mix a correctly-held lease with an imposter ack so `acked`
         // ends up with one entry (the sibling) and the predicate runs.
         const acked = await store.ack([
           { ...(mine as Lease), by: "imposter" },
-          siblingLease as Lease,
+          sibling_lease as Lease,
         ]);
         expect(acked.length).toBeGreaterThan(0);
         expect(acked.find((l) => l.stream === s)).toBeUndefined();
@@ -561,7 +605,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("hides blocked streams from claim", async () => {
         const s = `block-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -579,7 +627,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("rejects block calls from a different holder", async () => {
         const s = `block-wrong-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leased = await store.claim(100, 0, `right-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -596,7 +648,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("rewinds a stream watermark to -1", async () => {
         const s = `reset-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         expect(mine).toBeDefined();
@@ -611,7 +667,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("clears blocked status when resetting", async () => {
         const s = `reset-blk-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         const others = leased.filter((l) => l.stream !== s);
@@ -633,8 +693,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `unblock-${uid()}`;
         await store.subscribe([{ stream: s }]);
         // Two events so the watermark advances past 0 before block.
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
-        await store.commit<CounterEvents>(s, [inc(2)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(2)],
+          make_meta({ stream: s })
+        );
 
         // First lease + ack first event → watermark advances.
         const first = await store.claim(100, 0, `w-${uid()}`, 100_000);
@@ -642,10 +710,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.ack([{ ...(m1 as Lease), at: m1!.at }]);
 
         // Capture watermark before block.
-        const beforeBlock = await store.claim(100, 0, `w-${uid()}`, 100_000);
-        const m2 = beforeBlock.find((l) => l.stream === s);
+        const before_block = await store.claim(100, 0, `w-${uid()}`, 100_000);
+        const m2 = before_block.find((l) => l.stream === s);
         expect(m2).toBeDefined();
-        const watermarkBefore = m2!.at;
+        const watermark_before = m2!.at;
         await store.block([{ ...(m2 as Lease), error: "permanent" }]);
 
         // Stream is now blocked — query_streams must report it as such.
@@ -653,28 +721,32 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // same as "s not in the result," which short-circuits a find()
         // callback and leaves it uncovered when no other streams happen
         // to be claimable in the fixture.)
-        let blockedFlag: boolean | undefined;
+        let blocked_flag: boolean | undefined;
         await store.query_streams(
           (p) => {
-            blockedFlag = p.blocked;
+            blocked_flag = p.blocked;
           },
           { stream: s, stream_exact: true, limit: 1 }
         );
-        expect(blockedFlag).toBe(true);
+        expect(blocked_flag).toBe(true);
 
         // Unblock — claim picks it back up at the same watermark.
         expect(await store.unblock([s])).toBe(1);
         const after = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const back = after.find((l) => l.stream === s);
         expect(back).toBeDefined();
-        expect(back!.at).toBe(watermarkBefore);
+        expect(back!.at).toBe(watermark_before);
         expect(back!.retry).toBe(0);
       });
 
       it("returns 0 when the stream is not blocked", async () => {
         const s = `unblock-noop-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         // Stream exists but isn't blocked.
         expect(await store.unblock([s])).toBe(0);
       });
@@ -691,12 +763,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1)],
-          makeMeta({ stream: s1 })
+          make_meta({ stream: s1 })
         );
         await store.commit<CounterEvents>(
           s2,
           [inc(1)],
-          makeMeta({ stream: s2 })
+          make_meta({ stream: s2 })
         );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m1 = leased.find((l) => l.stream === s1);
@@ -716,17 +788,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1)],
-          makeMeta({ stream: s1 })
+          make_meta({ stream: s1 })
         );
         await store.commit<CounterEvents>(
           s2,
           [inc(1)],
-          makeMeta({ stream: s2 })
+          make_meta({ stream: s2 })
         );
         await store.commit<CounterEvents>(
           s3,
           [inc(1)],
-          makeMeta({ stream: s3 })
+          make_meta({ stream: s3 })
         );
         // Block all three.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
@@ -769,12 +841,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1)],
-          makeMeta({ stream: s1 })
+          make_meta({ stream: s1 })
         );
         await store.commit<CounterEvents>(
           s2,
           [inc(1)],
-          makeMeta({ stream: s2 })
+          make_meta({ stream: s2 })
         );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.filter((l) => l.stream === s1 || l.stream === s2);
@@ -795,7 +867,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const tag = uid();
         const s = `unblock-blocked-false-${tag}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         // Stream is registered but not blocked.
         expect(
           await store.unblock({
@@ -820,17 +896,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1)],
-          makeMeta({ stream: s1 })
+          make_meta({ stream: s1 })
         );
         await store.commit<CounterEvents>(
           s2,
           [inc(1)],
-          makeMeta({ stream: s2 })
+          make_meta({ stream: s2 })
         );
         await store.commit<CounterEvents>(
           other,
           [inc(1)],
-          makeMeta({ stream: other })
+          make_meta({ stream: other })
         );
         // Advance watermarks for all three so the reset is observable.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
@@ -846,7 +922,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // Inspect via query_streams (doesn't lease, no regex alternation
         // assumptions on SQLite's LIKE-pattern path) — fetch each name
         // by exact match and check the watermark independently.
-        const positionFor = async (name: string): Promise<number | null> => {
+        const position_for = async (name: string): Promise<number | null> => {
           let at: number | null = null;
           await store.query_streams(
             (p) => {
@@ -856,9 +932,9 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           );
           return at;
         };
-        expect(await positionFor(s1)).toBe(-1);
-        expect(await positionFor(s2)).toBe(-1);
-        expect(await positionFor(other)).toBeGreaterThan(-1);
+        expect(await position_for(s1)).toBe(-1);
+        expect(await position_for(s2)).toBe(-1);
+        expect(await position_for(other)).toBeGreaterThan(-1);
       });
 
       it("filter form: resets only blocked streams when blocked:true", async () => {
@@ -869,12 +945,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s1,
           [inc(1)],
-          makeMeta({ stream: s1 })
+          make_meta({ stream: s1 })
         );
         await store.commit<CounterEvents>(
           s2,
           [inc(1)],
-          makeMeta({ stream: s2 })
+          make_meta({ stream: s2 })
         );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const m1 = leased.find((l) => l.stream === s1);
@@ -964,39 +1040,39 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const tag = uid();
         const src1 = `lane-claim-src1-${tag}`;
         const src2 = `lane-claim-src2-${tag}`;
-        const subDefault = `lane-claim-def-${tag}`;
-        const subSlow = `lane-claim-slow-${tag}`;
+        const sub_default = `lane-claim-def-${tag}`;
+        const sub_slow = `lane-claim-slow-${tag}`;
         await store.commit<CounterEvents>(
           src1,
           [inc(1)],
-          makeMeta({ stream: src1 })
+          make_meta({ stream: src1 })
         );
         await store.commit<CounterEvents>(
           src2,
           [inc(1)],
-          makeMeta({ stream: src2 })
+          make_meta({ stream: src2 })
         );
         await store.subscribe([
-          { stream: subDefault, source: src1 },
-          { stream: subSlow, source: src2, lane: "slow" },
+          { stream: sub_default, source: src1 },
+          { stream: sub_slow, source: src2, lane: "slow" },
         ]);
 
         const slow = await store.claim(50, 0, `w-slow-${tag}`, 1_000, "slow");
-        const slowMine = slow.filter(
-          (l) => l.stream === subDefault || l.stream === subSlow
+        const slow_mine = slow.filter(
+          (l) => l.stream === sub_default || l.stream === sub_slow
         );
-        expect(slowMine.map((l) => l.stream)).toEqual([subSlow]);
-        expect(slowMine[0]?.lane).toBe("slow");
-        await store.ack(slowMine.map((l) => ({ ...l, at: l.at + 1 })));
+        expect(slow_mine.map((l) => l.stream)).toEqual([sub_slow]);
+        expect(slow_mine[0]?.lane).toBe("slow");
+        await store.ack(slow_mine.map((l) => ({ ...l, at: l.at + 1 })));
 
         const all = await store.claim(50, 0, `w-all-${tag}`, 1_000);
-        const allMine = all
-          .filter((l) => l.stream === subDefault || l.stream === subSlow)
+        const all_mine = all
+          .filter((l) => l.stream === sub_default || l.stream === sub_slow)
           .map((l) => ({ stream: l.stream, lane: l.lane }));
-        expect(allMine).toEqual(
+        expect(all_mine).toEqual(
           expect.arrayContaining([
-            { stream: subDefault, lane: "default" },
-            { stream: subSlow, lane: "slow" },
+            { stream: sub_default, lane: "default" },
+            { stream: sub_slow, lane: "slow" },
           ])
         );
       });
@@ -1047,7 +1123,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           src,
           [inc(1)],
-          makeMeta({ stream: src })
+          make_meta({ stream: src })
         );
         await store.subscribe([
           { stream: a, source: src, lane: `rslow-${tag}` },
@@ -1081,7 +1157,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           src,
           [inc(1)],
-          makeMeta({ stream: src })
+          make_meta({ stream: src })
         );
         await store.subscribe([
           { stream: a, source: src, lane: `uslow-${tag}` },
@@ -1111,7 +1187,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         const result = await store.truncate([{ stream: s }]);
         expect(result.get(s)?.deleted).toBe(2);
@@ -1130,7 +1206,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("seeds a snapshot when one is provided", async () => {
         const s = `trunc-snap-${uid()}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const result = await store.truncate([
           { stream: s, snapshot: { count: 7 } },
         ]);
@@ -1178,12 +1258,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         ]);
 
         const all: Array<{ stream: string; source?: string }> = [];
-        const allResult = await store.query_streams(
+        const all_result = await store.query_streams(
           (p) => all.push({ stream: p.stream, source: p.source }),
           { stream: `qs-${tag}-.*` }
         );
-        expect(allResult.count).toBe(4);
-        expect(allResult.maxEventId).toBeGreaterThanOrEqual(-1);
+        expect(all_result.count).toBe(4);
+        expect(all_result.maxEventId).toBeGreaterThanOrEqual(-1);
         expect(all.map((p) => p.stream).sort()).toEqual(
           [proj1, proj2, dyn1, dyn2].sort()
         );
@@ -1201,20 +1281,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         });
         expect(exact).toEqual([dyn1]);
 
-        const bySource: string[] = [];
-        await store.query_streams((p) => bySource.push(p.stream), {
+        const by_source: string[] = [];
+        await store.query_streams((p) => by_source.push(p.stream), {
           stream: `qs-${tag}-.*`,
           source: `qs-${tag}-src-.*`,
         });
-        expect(bySource.sort()).toEqual([dyn1, dyn2].sort());
+        expect(by_source.sort()).toEqual([dyn1, dyn2].sort());
 
-        const exactSource: string[] = [];
-        await store.query_streams((p) => exactSource.push(p.stream), {
+        const exact_source: string[] = [];
+        await store.query_streams((p) => exact_source.push(p.stream), {
           stream: `qs-${tag}-.*`,
           source: src2,
           source_exact: true,
         });
-        expect(exactSource).toEqual([dyn2]);
+        expect(exact_source).toEqual([dyn2]);
       });
 
       it("paginates with limit + after (keyset)", async () => {
@@ -1247,7 +1327,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `qb-${tag}`;
         const sibling = `qb-${tag}-other`;
         await store.subscribe([{ stream: s }, { stream: sibling }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
         const mine = leased.find((l) => l.stream === s);
         const others = leased.filter((l) => l.stream !== s);
@@ -1282,17 +1366,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           sA,
           [inc(1), inc(2)],
-          makeMeta({ stream: sA })
+          make_meta({ stream: sA })
         );
         await store.commit<CounterEvents>(
           sB,
           [dec(5)],
-          makeMeta({ stream: sB })
+          make_meta({ stream: sB })
         );
         await store.commit<CounterEvents>(
           sUnasked,
           [inc(99)],
-          makeMeta({ stream: sUnasked })
+          make_meta({ stream: sUnasked })
         );
 
         const stats = await store.query_stats<CounterEvents>([sA, sB]);
@@ -1315,9 +1399,21 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("tail returns the earliest event per stream", async () => {
         const tag = uid();
         const s = `qst-tail-${tag}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
-        await store.commit<CounterEvents>(s, [inc(2)], makeMeta({ stream: s }));
-        await store.commit<CounterEvents>(s, [inc(3)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(2)],
+          make_meta({ stream: s })
+        );
+        await store.commit<CounterEvents>(
+          s,
+          [inc(3)],
+          make_meta({ stream: s })
+        );
 
         const stats = await store.query_stats<CounterEvents>([s], {
           tail: true,
@@ -1333,12 +1429,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const tag = uid();
         const s = `qst-cn-${tag}`;
         // 1 inc, then truncate (wipes + seeds snap), then 2 more incs + 1 dec
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         await store.truncate([{ stream: s, snapshot: { count: 99 } }]);
         await store.commit<CounterEvents>(
           s,
           [inc(2), inc(3), dec(1)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
 
         const stats = await store.query_stats<CounterEvents>([s], {
@@ -1362,12 +1462,12 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s,
           [inc(1), dec(2), inc(3)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         await store.commit<CounterEvents>(
           sAllOut,
           [inc(7)],
-          makeMeta({ stream: sAllOut })
+          make_meta({ stream: sAllOut })
         );
 
         // Without exclude — head is the latest Incremented.
@@ -1389,10 +1489,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(wipe.has(sAllOut)).toBe(false);
 
         // Framework markers are typed in EventName<E> too — close-cycle pattern.
-        const noTomb = await store.query_stats<CounterEvents>([s], {
+        const no_tomb = await store.query_stats<CounterEvents>([s], {
           exclude: [TOMBSTONE_EVENT],
         });
-        expect(noTomb.get(s)?.head.name).toBe("Incremented");
+        expect(no_tomb.get(s)?.head.name).toBe("Incremented");
       });
 
       it("before — time travel narrows head/tail/count", async () => {
@@ -1401,14 +1501,18 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const c1 = await store.commit<CounterEvents>(
           s,
           [inc(1)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         const c2 = await store.commit<CounterEvents>(
           s,
           [inc(2)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
-        await store.commit<CounterEvents>(s, [inc(3)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(3)],
+          make_meta({ stream: s })
+        );
 
         // Cutoff at id of c2's event — only c1's event is < cutoff
         const before = c2[0].id;
@@ -1437,17 +1541,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           sA,
           [inc(1)],
-          makeMeta({ stream: sA })
+          make_meta({ stream: sA })
         );
         await store.commit<CounterEvents>(
           sB,
           [inc(2)],
-          makeMeta({ stream: sB })
+          make_meta({ stream: sB })
         );
         await store.commit<CounterEvents>(
           sOther,
           [inc(3)],
-          makeMeta({ stream: sOther })
+          make_meta({ stream: sOther })
         );
 
         // Regex match — restrict to this tag's orders.
@@ -1480,8 +1584,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const a = `qsc-${tag}-a`;
         const b = `qsc-${tag}-b`;
         await store.subscribe([{ stream: a }, { stream: b }]);
-        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
-        await store.commit<CounterEvents>(b, [inc(2)], makeMeta({ stream: b }));
+        await store.commit<CounterEvents>(
+          a,
+          [inc(1)],
+          make_meta({ stream: a })
+        );
+        await store.commit<CounterEvents>(
+          b,
+          [inc(2)],
+          make_meta({ stream: b })
+        );
 
         // Block stream `a` via the standard claim → block path.
         const leased = await store.claim(100, 0, `w-${uid()}`, 100_000);
@@ -1492,15 +1604,15 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.block([{ ...(mine as Lease), error: "boom" }]);
 
         // Step 1: subscription-level filter via query_streams.
-        const blockedNames: string[] = [];
-        await store.query_streams((p) => blockedNames.push(p.stream), {
+        const blocked_names: string[] = [];
+        await store.query_streams((p) => blocked_names.push(p.stream), {
           stream: `^qsc-${tag}-`,
           blocked: true,
         });
-        expect(blockedNames).toEqual([a]);
+        expect(blocked_names).toEqual([a]);
 
         // Step 2: event-level stats for those streams.
-        const stats = await store.query_stats<CounterEvents>(blockedNames);
+        const stats = await store.query_stats<CounterEvents>(blocked_names);
         expect(stats.get(a)?.head.name).toBe("Incremented");
         expect(stats.has(b)).toBe(false);
       });
@@ -1509,8 +1621,16 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const tag = uid();
         const a = `qse-${tag}-a`;
         const b = `qse-${tag}-b`;
-        await store.commit<CounterEvents>(a, [inc(1)], makeMeta({ stream: a }));
-        await store.commit<CounterEvents>(b, [dec(2)], makeMeta({ stream: b }));
+        await store.commit<CounterEvents>(
+          a,
+          [inc(1)],
+          make_meta({ stream: a })
+        );
+        await store.commit<CounterEvents>(
+          b,
+          [dec(2)],
+          make_meta({ stream: b })
+        );
 
         // {} matches all event-bearing streams globally — the TCK runs
         // against a shared store, so we only assert that this tag's
@@ -1526,7 +1646,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           s,
           [inc(1), inc(2), dec(3)],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
 
         // count only → no names, no tail in result.
@@ -1632,7 +1752,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       it("maxEventId tracks the highest committed id", async () => {
         const s = `head-${uid()}`;
         await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const positions: string[] = [];
         const { maxEventId } = await store.query_streams(
           (p) => positions.push(p.stream),
@@ -1643,10 +1767,10 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
-    describe("seedStream helper coverage", () => {
+    describe("seed_stream helper coverage", () => {
       it("commits N events with monotonically increasing ids", async () => {
         const s = `seed-${uid()}`;
-        const committed = await seedStream(store, s, 3);
+        const committed = await seed_stream(store, s, 3);
         expect(committed).toHaveLength(3);
         for (let i = 1; i < committed.length; i++) {
           expect(committed[i].id).toBeGreaterThan(committed[i - 1].id);
@@ -1676,7 +1800,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
        * pattern so async-callback backpressure stays exercised
        * even from this synthetic source.
        */
-      const asSource = (
+      const as_source = (
         events: Committed<Schemas, keyof Schemas>[]
       ): EventSource => ({
         async query(callback) {
@@ -1699,20 +1823,20 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       /**
        * Build a {@link Committed} event with stub meta + the given
-       * created date. `originalId` populates `id` — used by the
+       * created date. `original_id` populates `id` — used by the
        * orchestrator's scan to key the causation remap. Tests pass
        * arbitrary values (often a counter) since they're only
        * consumed by the map.
        */
       const event = (
-        originalId: number,
+        original_id: number,
         stream: string,
         version: number,
         name: string,
         created: Date,
         data: Record<string, unknown> = {}
       ): Committed<Schemas, keyof Schemas> => ({
-        id: originalId,
+        id: original_id,
         name,
         data,
         stream,
@@ -1747,7 +1871,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       };
 
       it("returns kept=0 on an empty source", async () => {
-        const result = await restore(asSource([]));
+        const result = await restore(as_source([]));
         expect(result.kept).toBe(0);
         expect(result.duration_ms).toBeGreaterThanOrEqual(0);
         expect(result.dropped).toEqual({
@@ -1769,7 +1893,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           event(2, s, 1, "Incremented", t1, { amount: 2 }),
           event(3, s, 2, "Decremented", t2, { amount: 1 }),
         ];
-        const result = await restore(asSource(events));
+        const result = await restore(as_source(events));
         expect(result.kept).toBe(3);
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
         await store.query<CounterEvents>(
@@ -1822,7 +1946,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           event(3, a, 1, "Decremented", t, { amount: 5 }),
           event(4, b, 1, "Incremented", t, { amount: 30 }),
         ];
-        const result = await restore(asSource(events));
+        const result = await restore(as_source(events));
         expect(result.kept).toBe(4);
         const aBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
         const bBack: Committed<CounterEvents, keyof CounterEvents>[] = [];
@@ -1846,7 +1970,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `restore-isoc-${uid()}`;
         const iso = "2021-07-15T12:34:56.789Z";
         await restore(
-          asSource([
+          as_source([
             {
               id: 1,
               stream: s,
@@ -1874,41 +1998,41 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         await store.commit<CounterEvents>(
           old,
           [inc(1), inc(2)],
-          makeMeta({ stream: old })
+          make_meta({ stream: old })
         );
         const fresh = `restore-fresh-${uid()}`;
         const t = new Date("2020-01-01T00:00:00.000Z");
         await restore(
-          asSource([event(1, fresh, 0, "Incremented", t, { amount: 99 })])
+          as_source([event(1, fresh, 0, "Incremented", t, { amount: 99 })])
         );
         // The old stream is gone.
-        const oldBack = await collect(store, {
+        const old_back = await collect(store, {
           stream: old,
           stream_exact: true,
         });
-        expect(oldBack).toHaveLength(0);
+        expect(old_back).toHaveLength(0);
         // Only the fresh stream remains.
-        const freshBack = await collect(store, {
+        const fresh_back = await collect(store, {
           stream: fresh,
           stream_exact: true,
         });
-        expect(freshBack).toHaveLength(1);
+        expect(fresh_back).toHaveLength(1);
       });
 
       it("clears subscription/stream-position metadata", async () => {
         const sub = `restore-sub-${uid()}`;
         await store.subscribe([{ stream: sub, source: "anything" }]);
-        const collectStreams = async () => {
+        const collect_streams = async () => {
           const out: string[] = [];
           await store.query_streams((p) => {
             out.push(p.stream);
           });
           return out;
         };
-        const before = await collectStreams();
+        const before = await collect_streams();
         expect(before.includes(sub)).toBe(true);
-        await restore(asSource([]));
-        const after = await collectStreams();
+        await restore(as_source([]));
+        const after = await collect_streams();
         expect(after.includes(sub)).toBe(false);
       });
 
@@ -1919,7 +2043,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `restore-snap-${uid()}`;
         const t = new Date("2020-04-01T00:00:00.000Z");
         await restore(
-          asSource([
+          as_source([
             {
               id: 1,
               stream: s,
@@ -1985,7 +2109,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             },
           },
         ];
-        await restore(asSource(events));
+        await restore(as_source(events));
         const back: Committed<CounterEvents, keyof CounterEvents>[] = [];
         await store.query<CounterEvents>(
           (e) => {
@@ -2006,7 +2130,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `restore-orphan-${uid()}`;
         const t = new Date("2020-09-01T00:00:00.000Z");
         await restore(
-          asSource([
+          as_source([
             {
               id: 1,
               stream: s,
@@ -2039,7 +2163,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const committed = await store.commit<CounterEvents>(
           original,
           [inc(1), inc(2), inc(3)],
-          makeMeta({ stream: original })
+          make_meta({ stream: original })
         );
         // EventSource that fires one event then throws — exercises
         // the rollback path on the destination store. Implemented as
@@ -2084,7 +2208,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `restore-drop-snap-${uid()}`;
         const t = new Date("2020-10-01T00:00:00.000Z");
         const result = await restore(
-          asSource([
+          as_source([
             event(1, s, 0, "Incremented", t, { amount: 1 }),
             {
               id: 2,
@@ -2118,7 +2242,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         const s = `restore-progress-${uid()}`;
         const t = new Date("2021-02-01T00:00:00.000Z");
         await restore(
-          asSource([
+          as_source([
             event(1, s, 0, "Incremented", t, { amount: 1 }),
             event(2, s, 1, "Incremented", t, { amount: 2 }),
           ]),
@@ -2145,7 +2269,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               pii: { email: "u@example.com", name: "Ursula" },
             },
           ],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         expect(committed).toHaveLength(1);
         expect(committed[0].pii).toEqual({
@@ -2169,7 +2293,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("passes through events without pii (pii is null or undefined on load)", async () => {
         const s = `pii-none-${uid()}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const seen: Committed<CounterEvents, keyof CounterEvents>[] = [];
         await store.query<CounterEvents>(
           (e) => {
@@ -2200,7 +2328,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               pii: { email: "b@example.com" },
             },
           ],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
 
         const forget = store.forget_pii;
@@ -2234,7 +2362,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               pii: { email: "u@example.com" },
             },
           ],
-          makeMeta({ stream: s })
+          make_meta({ stream: s })
         );
         const forget = store.forget_pii!;
         const first = await forget.call(store, s);
@@ -2255,7 +2383,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               pii: { email: "alice@example.com" },
             },
           ],
-          makeMeta({ stream: sA })
+          make_meta({ stream: sA })
         );
         await store.commit<CounterEvents>(
           sB,
@@ -2266,7 +2394,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
               pii: { email: "bob@example.com" },
             },
           ],
-          makeMeta({ stream: sB })
+          make_meta({ stream: sB })
         );
         await store.forget_pii!.call(store, sA);
 
@@ -2291,7 +2419,11 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("forget_pii on a stream with no pii events returns 0", async () => {
         const s = `pii-forget-empty-${uid()}`;
-        await store.commit<CounterEvents>(s, [inc(1)], makeMeta({ stream: s }));
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
         const wiped = await store.forget_pii!.call(store, s);
         expect(wiped).toBe(0);
       });
@@ -2306,13 +2438,13 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           const notify = store.notify;
           expect(notify).toBeDefined();
           const received: StoreNotification[] = [];
-          let resolveArrived!: () => void;
+          let resolve_arrived!: () => void;
           const arrived = new Promise<void>((res) => {
-            resolveArrived = res;
+            resolve_arrived = res;
           });
           const disposer = await notify!.call(store, (n) => {
             received.push(n);
-            resolveArrived();
+            resolve_arrived();
           });
           const writer = await options.factory();
           try {
@@ -2320,7 +2452,7 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             await writer.commit<CounterEvents>(
               stream,
               [inc(1)],
-              makeMeta({ stream })
+              make_meta({ stream })
             );
             // No explicit timeout — vitest's default test timeout
             // bounds the wait. If notify silently fails to deliver,

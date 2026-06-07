@@ -101,13 +101,13 @@ describe("schemaEvolution", () => {
   it("classifies events as current / deprecated / active", async () => {
     await seedFixture();
     const result = await caller.schemaEvolution();
-    const byName = new Map(result.events.map((e) => [e.name, e]));
+    const by_name = new Map(result.events.map((e) => [e.name, e]));
     // `Opened` is the legacy version of `Opened_v2` — deprecated.
-    expect(byName.get("Opened")!.status).toBe("deprecated");
-    expect(byName.get("Opened")!.currentVersion).toBe("Opened_v2");
-    expect(byName.get("Opened_v2")!.status).toBe("current");
-    expect(byName.get("Closed")!.status).toBe("active");
-    expect(byName.get("Heartbeat")!.status).toBe("active");
+    expect(by_name.get("Opened")!.status).toBe("deprecated");
+    expect(by_name.get("Opened")!.currentVersion).toBe("Opened_v2");
+    expect(by_name.get("Opened_v2")!.status).toBe("current");
+    expect(by_name.get("Closed")!.status).toBe("active");
+    expect(by_name.get("Heartbeat")!.status).toBe("active");
     // Deprecated rows sort first.
     expect(result.events[0]!.status).toBe("deprecated");
     // Summary totals.

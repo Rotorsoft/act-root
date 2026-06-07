@@ -4,7 +4,7 @@ import { check_webhook } from "../../src/receiver/check.js";
 import { sign_request } from "../../src/webhook/sign.js";
 
 const SECRET = "test-secret";
-const BODY = '{"orderId":"o-1"}';
+const BODY = '{"order_id":"o-1"}';
 const NOW = 1_700_000_000;
 
 function freshStore() {

@@ -86,10 +86,10 @@ describe("ACT-102 priority lanes — framework", () => {
 
       const seen: any[] = [];
       await store().query_streams((p) => seen.push(p));
-      const byStream = Object.fromEntries(
+      const by_stream = Object.fromEntries(
         seen.map((p) => [p.stream, p.priority])
       );
-      expect(byStream).toEqual({ a: 0, b: 7, c: 0 });
+      expect(by_stream).toEqual({ a: 0, b: 7, c: 0 });
     });
 
     it("matches by stream regex by default (InMemory uses anchored regex)", async () => {
@@ -316,11 +316,11 @@ describe("ACT-102 priority lanes — framework", () => {
 
       const seen: any[] = [];
       await store().query_streams((p) => seen.push(p));
-      const byStream = Object.fromEntries(
+      const by_stream = Object.fromEntries(
         seen.map((p) => [p.stream, p.priority])
       );
-      expect(byStream["tgt-urgent"]).toBe(10);
-      expect(byStream["tgt-bulk"]).toBe(0);
+      expect(by_stream["tgt-urgent"]).toBe(10);
+      expect(by_stream["tgt-bulk"]).toBe(0);
     });
   });
 });

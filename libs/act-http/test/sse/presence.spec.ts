@@ -4,15 +4,15 @@ import { PresenceTracker } from "../../src/sse/presence.js";
 describe("PresenceTracker", () => {
   it("tracks online identities", () => {
     const p = new PresenceTracker();
-    expect(p.getOnline("g1").size).toBe(0);
-    expect(p.isOnline("g1", "p1")).toBe(false);
+    expect(p.get_online("g1").size).toBe(0);
+    expect(p.is_online("g1", "p1")).toBe(false);
 
     p.add("g1", "p1");
-    expect(p.isOnline("g1", "p1")).toBe(true);
-    expect(p.getOnline("g1")).toEqual(new Set(["p1"]));
+    expect(p.is_online("g1", "p1")).toBe(true);
+    expect(p.get_online("g1")).toEqual(new Set(["p1"]));
 
     p.remove("g1", "p1");
-    expect(p.isOnline("g1", "p1")).toBe(false);
+    expect(p.is_online("g1", "p1")).toBe(false);
   });
 
   it("ref-counts for multi-tab", () => {
@@ -21,10 +21,10 @@ describe("PresenceTracker", () => {
     p.add("g1", "p1");
 
     p.remove("g1", "p1");
-    expect(p.isOnline("g1", "p1")).toBe(true);
+    expect(p.is_online("g1", "p1")).toBe(true);
 
     p.remove("g1", "p1");
-    expect(p.isOnline("g1", "p1")).toBe(false);
+    expect(p.is_online("g1", "p1")).toBe(false);
   });
 
   it("isolates streams", () => {
@@ -32,8 +32,8 @@ describe("PresenceTracker", () => {
     p.add("g1", "p1");
     p.add("g2", "p2");
 
-    expect(p.getOnline("g1")).toEqual(new Set(["p1"]));
-    expect(p.getOnline("g2")).toEqual(new Set(["p2"]));
+    expect(p.get_online("g1")).toEqual(new Set(["p1"]));
+    expect(p.get_online("g2")).toEqual(new Set(["p2"]));
   });
 
   it("handles remove on empty stream gracefully", () => {
@@ -45,7 +45,7 @@ describe("PresenceTracker", () => {
     const p = new PresenceTracker();
     p.add("g1", "p1");
     p.remove("g1", "p2");
-    expect(p.isOnline("g1", "p1")).toBe(true);
-    expect(p.isOnline("g1", "p2")).toBe(false);
+    expect(p.is_online("g1", "p1")).toBe(true);
+    expect(p.is_online("g1", "p2")).toBe(false);
   });
 });

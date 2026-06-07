@@ -68,16 +68,16 @@ describe("streamMeta", () => {
   it("surfaces every subscribed position with lane + priority", async () => {
     await fixture();
     const positions = await caller.streamMeta();
-    const byStream = new Map(positions.map((p) => [p.stream, p]));
-    expect(byStream.get("sub-leased")!.priority).toBe(9);
-    expect(byStream.get("sub-leased")!.lane).toBe("premium");
+    const by_stream = new Map(positions.map((p) => [p.stream, p]));
+    expect(by_stream.get("sub-leased")!.priority).toBe(9);
+    expect(by_stream.get("sub-leased")!.lane).toBe("premium");
     // InMemoryStore stores the default lane as the literal "default"
     // (vs PG/SQLite which use NULL); the router preserves whichever
     // shape the adapter returns.
-    const healthyLane = byStream.get("sub-healthy")!.lane;
+    const healthyLane = by_stream.get("sub-healthy")!.lane;
     expect(healthyLane === null || healthyLane === "default").toBe(true);
-    expect(byStream.get("sub-blocked")!.blocked).toBe(true);
-    expect(byStream.get("sub-blocked")!.error).toBe("boom");
+    expect(by_stream.get("sub-blocked")!.blocked).toBe(true);
+    expect(by_stream.get("sub-blocked")!.error).toBe("boom");
   });
 
   it("returns [] when there are no subscriptions", async () => {

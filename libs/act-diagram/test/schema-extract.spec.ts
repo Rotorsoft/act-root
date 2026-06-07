@@ -8,7 +8,7 @@ describe("extract_schemas_from_source", () => {
   it("captures plain identifier and z.object values", () => {
     const src = `
       state({Foo: FooSchema}).init(()=>({})).emits({
-        OrderPlaced: z.object({ orderId: z.string(), total: z.number() }),
+        OrderPlaced: z.object({ order_id: z.string(), total: z.number() }),
         OrderShipped: OrderShippedSchema,
       })`;
     const out = extract_schemas_from_source(
@@ -16,7 +16,7 @@ describe("extract_schemas_from_source", () => {
       new Set(["OrderPlaced", "OrderShipped"])
     );
     expect(out.get("OrderPlaced")).toBe(
-      "z.object({ orderId: z.string(), total: z.number() })"
+      "z.object({ order_id: z.string(), total: z.number() })"
     );
     expect(out.get("OrderShipped")).toBe("OrderShippedSchema");
   });

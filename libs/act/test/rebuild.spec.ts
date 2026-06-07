@@ -11,8 +11,8 @@ describe("Store.reset", () => {
   });
 
   const actor = { id: "a", name: "a" };
-  let streamId = 0;
-  const nextStream = () => `reset-test-${++streamId}`;
+  let stream_id = 0;
+  const nextStream = () => `reset-test-${++stream_id}`;
 
   const Incremented = z.object({ by: z.number() });
 

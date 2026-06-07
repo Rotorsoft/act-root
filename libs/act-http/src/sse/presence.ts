@@ -11,43 +11,43 @@
  * const presence = new PresenceTracker();
  *
  * // On SSE connect:
- * presence.add(gameId, playerId);
+ * presence.add(game_id, player_id);
  *
  * // On SSE disconnect:
- * presence.remove(gameId, playerId);
+ * presence.remove(game_id, player_id);
  *
  * // Query:
- * presence.getOnline(gameId); // Set<string>
+ * presence.get_online(game_id); // Set<string>
  * ```
  */
 export class PresenceTracker {
   private streams = new Map<string, Map<string, number>>();
 
   /** Increment ref count for an identity on a stream. */
-  add(streamId: string, identityId: string): void {
-    if (!this.streams.has(streamId)) this.streams.set(streamId, new Map());
-    const counts = this.streams.get(streamId)!;
-    counts.set(identityId, (counts.get(identityId) ?? 0) + 1);
+  add(stream_id: string, identity_id: string): void {
+    if (!this.streams.has(stream_id)) this.streams.set(stream_id, new Map());
+    const counts = this.streams.get(stream_id)!;
+    counts.set(identity_id, (counts.get(identity_id) ?? 0) + 1);
   }
 
   /** Decrement ref count. Removes the identity when count reaches 0. */
-  remove(streamId: string, identityId: string): void {
-    const counts = this.streams.get(streamId);
+  remove(stream_id: string, identity_id: string): void {
+    const counts = this.streams.get(stream_id);
     if (!counts) return;
-    const n = (counts.get(identityId) ?? 1) - 1;
-    if (n <= 0) counts.delete(identityId);
-    else counts.set(identityId, n);
-    if (counts.size === 0) this.streams.delete(streamId);
+    const n = (counts.get(identity_id) ?? 1) - 1;
+    if (n <= 0) counts.delete(identity_id);
+    else counts.set(identity_id, n);
+    if (counts.size === 0) this.streams.delete(stream_id);
   }
 
   /** Get the set of online identity IDs for a stream. */
-  getOnline(streamId: string): Set<string> {
-    const counts = this.streams.get(streamId);
+  get_online(stream_id: string): Set<string> {
+    const counts = this.streams.get(stream_id);
     return counts ? new Set(counts.keys()) : new Set();
   }
 
   /** Check if a specific identity is online for a stream. */
-  isOnline(streamId: string, identityId: string): boolean {
-    return (this.streams.get(streamId)?.get(identityId) ?? 0) > 0;
+  is_online(stream_id: string, identity_id: string): boolean {
+    return (this.streams.get(stream_id)?.get(identity_id) ?? 0) > 0;
   }
 }

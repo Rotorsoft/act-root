@@ -54,10 +54,10 @@ describe("BroadcastChannel", () => {
 
   it("caches state for reconnects", () => {
     const bc = new BroadcastChannel<TestState>();
-    expect(bc.getState("s1")).toBeUndefined();
+    expect(bc.get_state("s1")).toBeUndefined();
 
     bc.publish("s1", makeState(3, { name: "cached" }));
-    const cached = bc.getState("s1");
+    const cached = bc.get_state("s1");
     expect(cached?._v).toBe(3);
     expect(cached?.name).toBe("cached");
   });
@@ -77,42 +77,42 @@ describe("BroadcastChannel", () => {
 
   it("tracks subscriber count", () => {
     const bc = new BroadcastChannel<TestState>();
-    expect(bc.getSubscriberCount("s1")).toBe(0);
+    expect(bc.get_subscriber_count("s1")).toBe(0);
 
     const c1 = bc.subscribe("s1", () => {});
     const c2 = bc.subscribe("s1", () => {});
-    expect(bc.getSubscriberCount("s1")).toBe(2);
+    expect(bc.get_subscriber_count("s1")).toBe(2);
 
     c1();
-    expect(bc.getSubscriberCount("s1")).toBe(1);
+    expect(bc.get_subscriber_count("s1")).toBe(1);
 
     c2();
-    expect(bc.getSubscriberCount("s1")).toBe(0);
+    expect(bc.get_subscriber_count("s1")).toBe(0);
   });
 
-  it("publishOverlay sends patch for same-version changes", () => {
+  it("publish_overlay sends patch for same-version changes", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(5, { name: "original" }));
 
     const msgs: PatchMessage<TestState>[] = [];
     bc.subscribe("s1", (m) => msgs.push(m));
-    bc.publishOverlay("s1", { name: "overlayed" });
+    bc.publish_overlay("s1", { name: "overlayed" });
 
     expect(msgs).toHaveLength(1);
     expect(msgs[0][5]).toEqual({ name: "overlayed" });
   });
 
-  it("publishOverlay returns undefined when no cached state", () => {
+  it("publish_overlay returns undefined when no cached state", () => {
     const bc = new BroadcastChannel<TestState>();
-    const result = bc.publishOverlay("missing", { name: "x" });
+    const result = bc.publish_overlay("missing", { name: "x" });
     expect(result).toBeUndefined();
   });
 
-  it("publishOverlay updates cache", () => {
+  it("publish_overlay updates cache", () => {
     const bc = new BroadcastChannel<TestState>();
     bc.publish("s1", makeState(5, { name: "original" }));
-    bc.publishOverlay("s1", { name: "changed" });
-    expect(bc.getState("s1")?.name).toBe("changed");
+    bc.publish_overlay("s1", { name: "changed" });
+    expect(bc.get_state("s1")?.name).toBe("changed");
   });
 
   it("exposes cache accessor", () => {

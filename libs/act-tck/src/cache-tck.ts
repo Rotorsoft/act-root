@@ -2,7 +2,7 @@ import type { Cache, CacheEntry } from "@rotorsoft/act/types";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 /**
- * Options for {@link runCacheTck}.
+ * Options for {@link run_cache_tck}.
  */
 export type CacheTckOptions = {
   /**
@@ -50,16 +50,16 @@ const entry = (
  *
  * @example
  * ```ts
- * import { runCacheTck } from "@rotorsoft/act-tck";
+ * import { run_cache_tck } from "@rotorsoft/act-tck";
  * import { InMemoryCache } from "@rotorsoft/act";
  *
- * runCacheTck({
+ * run_cache_tck({
  *   name: "InMemoryCache",
  *   factory: () => new InMemoryCache({ maxSize: 1000 }),
  * });
  * ```
  */
-export const runCacheTck = (options: CacheTckOptions): void => {
+export const run_cache_tck = (options: CacheTckOptions): void => {
   describe(`TCK / Cache / ${options.name}`, () => {
     let cache: Cache;
 

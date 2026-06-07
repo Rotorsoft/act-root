@@ -7,7 +7,7 @@
  * **Not re-exported from the package root** by design — the math is
  * an implementation detail of {@link InMemoryIdempotencyStore} (and
  * any future durable adapter). Operators configure dedup windows
- * through the store's `retryProfile` option, not by calling this
+ * through the store's `retry_profile` option, not by calling this
  * function directly. Tests import it from this path; external
  * consumers can't reach it.
  */
@@ -25,9 +25,9 @@
  * @property backoff - Optional backoff strategy. When omitted,
  *   retries fire back-to-back with only the per-attempt timeout
  *   between them
- * @property timeoutMs - Per-attempt timeout (the sender's `fetch`
+ * @property timeout_ms - Per-attempt timeout (the sender's `fetch`
  *   timeout, or the equivalent for whatever transport)
- * @property safetyFactor - Multiplier applied to the bare envelope.
+ * @property safety_factor - Multiplier applied to the bare envelope.
  *   Default 4
  */
 export type RetryProfile = {
@@ -38,8 +38,8 @@ export type RetryProfile = {
     readonly maxMs?: number;
     readonly jitter?: boolean;
   };
-  readonly timeoutMs: number;
-  readonly safetyFactor?: number;
+  readonly timeout_ms: number;
+  readonly safety_factor?: number;
 };
 
 /**
@@ -48,20 +48,20 @@ export type RetryProfile = {
  *
  * The envelope is:
  *
- *     ttl = (backoffSum + (maxRetries + 1) * timeoutMs) * safetyFactor
+ *     ttl = (backoff_sum + (maxRetries + 1) * timeout_ms) * safety_factor
  *
- * where `backoffSum` is the sum of per-retry delays from the chosen
+ * where `backoff_sum` is the sum of per-retry delays from the chosen
  * `strategy`, multiplied by 1.5 if `jitter` is enabled (the
- * worst-case multiplier in `[0.5, 1.5)`). `safetyFactor` defaults
+ * worst-case multiplier in `[0.5, 1.5)`). `safety_factor` defaults
  * to 4 because operators almost always want headroom over the bare
  * envelope — slow networks, clock skew, and incident-window retries
  * stretch the real-world maximum past the computed one.
  */
-export function minSafeTtl(profile: RetryProfile): number {
-  const safetyFactor = profile.safetyFactor ?? 4;
-  const backoffSum = sum_backoff(profile.maxRetries, profile.backoff);
-  const timeoutSum = (profile.maxRetries + 1) * profile.timeoutMs;
-  return (backoffSum + timeoutSum) * safetyFactor;
+export function min_safe_ttl(profile: RetryProfile): number {
+  const safety_factor = profile.safety_factor ?? 4;
+  const backoff_sum = sum_backoff(profile.maxRetries, profile.backoff);
+  const timeout_sum = (profile.maxRetries + 1) * profile.timeout_ms;
+  return (backoff_sum + timeout_sum) * safety_factor;
 }
 
 function sum_backoff(

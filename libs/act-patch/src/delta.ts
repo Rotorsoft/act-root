@@ -19,7 +19,7 @@ import type { DeepPartial, Schema } from "./types.js";
  * missing key, but it always *propagates* `null` when the caller put one
  * in `after`**. So nullable-schema actions can express a deletion as
  * `{ field: null }`, and the deletion travels through delta → event →
- * reducer-side `patch(state, eventData)` all the way to the aggregate.
+ * reducer-side `patch(state, event_data)` all the way to the aggregate.
  * Non-nullable schemas (no `.nullable()` fields) never see `null` in the
  * type or at runtime — the konsult case.
  *
@@ -60,10 +60,10 @@ export const delta = <S extends Schema>(
   if (Object.is(before, after)) return {} as DeepPartial<S>;
 
   const out: Record<string, unknown> = {};
-  const afterKeys = Object.keys(after);
+  const after_keys = Object.keys(after);
 
-  for (let i = 0; i < afterKeys.length; i++) {
-    const k = afterKeys[i];
+  for (let i = 0; i < after_keys.length; i++) {
+    const k = after_keys[i];
     const a = (after as any)[k];
     const b = (before as any)[k];
     if (!(k in before)) {

@@ -23,7 +23,7 @@ export const uid = (): string => randomUUID().slice(0, 8);
 export const actor = (name = "tester") => ({ id: randomUUID(), name });
 
 /** Build an EventMeta with a correlation id and optional action causation. */
-export const makeMeta = (
+export const make_meta = (
   opts: { correlation?: string; stream?: string; action?: string } = {}
 ): EventMeta => ({
   correlation: opts.correlation ?? randomUUID(),
@@ -54,7 +54,7 @@ export const reset = (): CounterMessage => ({ name: "Reset", data: {} });
  * Commit `count` Incremented events to `stream` on the given store, each
  * within its own commit transaction (so they receive distinct event ids).
  */
-export const seedStream = async (
+export const seed_stream = async (
   store: Store,
   stream: string,
   count: number,
@@ -65,7 +65,7 @@ export const seedStream = async (
     const committed = await store.commit<CounterEvents>(
       stream,
       [inc(1)],
-      makeMeta({ correlation, stream })
+      make_meta({ correlation, stream })
     );
     out.push(...(committed as CommittedCounterEvent[]));
   }

@@ -14,17 +14,17 @@
  *   app.do() → snapshots (each carries its domain patch)
  *       │
  *       ▼
- *   deriveState(snap)          ← app-specific (overlay presence, deadlines, etc.)
+ *   derive_state(snap)          ← app-specific (overlay presence, deadlines, etc.)
  *   state._v = snap.event.version
  *       │
  *       ▼
- *   broadcast.publish(streamId, state, patches)
+ *   broadcast.publish(stream_id, state, patches)
  *       │
  *       ├── version-key each patch: { [baseV+1]: patch1, [baseV+2]: patch2 }
  *       └── push to all SSE subscribers
  *       │
  *       ▼
- *   Client: applyPatchMessage(msg, cached)
+ *   Client: apply_patch_message(msg, cached)
  *       │
  *       ├── contiguous → deep-merge patches in version order
  *       ├── stale    → skip (client already ahead)
@@ -39,7 +39,7 @@
 
 export { patch } from "@rotorsoft/act-patch";
 export type { ApplyResult } from "./apply-patch.js";
-export { applyPatchMessage } from "./apply-patch.js";
+export { apply_patch_message } from "./apply-patch.js";
 export { BroadcastChannel } from "./broadcast.js";
 export { PresenceTracker } from "./presence.js";
 export { StateCache } from "./state-cache.js";

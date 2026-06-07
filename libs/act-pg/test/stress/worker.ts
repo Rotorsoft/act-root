@@ -210,7 +210,7 @@ async function drainCommitter(workerId: string): Promise<WorkerResult> {
 async function drainConsumer(workerId: string): Promise<WorkerResult> {
   const drainTargetStream = process.env.DRAIN_TARGET_STREAM ?? "drain-target";
   const drainTargetSource = process.env.DRAIN_SOURCE_REGEX ?? "drain-source-.*";
-  const ttlMs = Number(process.env.DRAIN_BUDGET_MS ?? 30_000);
+  const ttl_ms = Number(process.env.DRAIN_BUDGET_MS ?? 30_000);
 
   // Subscribe so the drain pipeline knows about us.
   await store().subscribe([
@@ -222,7 +222,7 @@ async function drainConsumer(workerId: string): Promise<WorkerResult> {
   let totalEvents = 0;
   const seenEventIds = new Set<number>();
 
-  while (Date.now() - t0 < ttlMs) {
+  while (Date.now() - t0 < ttl_ms) {
     const leases = await store().claim(5, 5, workerId, 5_000);
     if (!leases.length) {
       await sleep(100);

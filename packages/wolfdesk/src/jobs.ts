@@ -24,7 +24,7 @@ export function AutoEscalate(batchSize: number) {
             .do(
               "EscalateTicket",
               { stream: ticket.id, actor },
-              { requestId: randomUUID(), requestedById: AUTO_ESCALATION_ID }
+              { request_id: randomUUID(), requestedById: AUTO_ESCALATION_ID }
             )
             .catch(console.error);
         }

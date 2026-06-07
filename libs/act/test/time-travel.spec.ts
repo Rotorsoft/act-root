@@ -3,8 +3,8 @@ import { act, state } from "../src/index.js";
 import { fixture, sandbox } from "../src/test/index.js";
 
 const actor = { id: "a", name: "a" };
-let streamId = 0;
-const nextStream = () => `tt-test-${++streamId}`;
+let stream_id = 0;
+const nextStream = () => `tt-test-${++stream_id}`;
 
 const Incremented = z.object({ by: z.number() });
 const Counter = state({ Counter: z.object({ count: z.number() }) })

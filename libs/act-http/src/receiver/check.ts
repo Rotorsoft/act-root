@@ -1,6 +1,6 @@
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { extractIdempotencyKey } from "./extract.js";
-import { type VerifyOptions, verifyWebhook } from "./verify.js";
+import { extract_idempotency_key } from "./extract.js";
+import { type VerifyOptions, verify_webhook } from "./verify.js";
 
 /**
  * Failure reasons returned by {@link check_webhook}. The shape splits
@@ -38,7 +38,7 @@ export type CheckWebhookOptions = {
    */
   secret?: string;
   /**
-   * Verification options forwarded to {@link verifyWebhook}. Only
+   * Verification options forwarded to {@link verify_webhook}. Only
    * meaningful when `secret` is set. Defaults to a ±300-second
    * timestamp window.
    */
@@ -73,7 +73,7 @@ export async function check_webhook(
   options: CheckWebhookOptions
 ): Promise<CheckResult> {
   if (options.secret !== undefined) {
-    const verification = verifyWebhook(
+    const verification = verify_webhook(
       headers,
       body,
       options.secret,
@@ -84,7 +84,7 @@ export async function check_webhook(
     }
   }
 
-  const key = extractIdempotencyKey(headers);
+  const key = extract_idempotency_key(headers);
   if (!key) return { ok: false, status: 400, reason: "missing-key" };
 
   const claimed = await options.store.claim(key);

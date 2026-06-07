@@ -6,7 +6,7 @@ import {
   ValidationError,
 } from "@rotorsoft/act";
 import { describe, expect, it } from "vitest";
-import { ERROR_MAP, toApiError } from "../../src/api/index.js";
+import { ERROR_MAP, to_api_error } from "../../src/api/index.js";
 
 describe("ERROR_MAP", () => {
   it("declares one entry per recognized framework error", () => {
@@ -43,13 +43,13 @@ describe("ERROR_MAP", () => {
   });
 });
 
-describe("toApiError", () => {
+describe("to_api_error", () => {
   it("maps ValidationError to 422 + VALIDATION", () => {
     const err = new ValidationError("doIt", { foo: "bar" }, {
       issues: [],
       name: "ZodError",
     } as unknown as import("zod").ZodError);
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(422);
     expect(result.body).toMatchObject({
       error: "ValidationError",
@@ -68,7 +68,7 @@ describe("toApiError", () => {
       {} as any,
       "guard tripped"
     );
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(409);
     expect(result.body.error).toBe("InvariantError");
     expect(result.body.code).toBe("INVARIANT");
@@ -77,7 +77,7 @@ describe("toApiError", () => {
 
   it("maps ConcurrencyError to 412 + CONCURRENCY", () => {
     const err = new ConcurrencyError("order-1", 1, [], 2);
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(412);
     expect(result.body).toMatchObject({
       error: "ConcurrencyError",
@@ -88,7 +88,7 @@ describe("toApiError", () => {
 
   it("maps StreamClosedError to 410 + STREAM_CLOSED", () => {
     const err = new StreamClosedError("order-1");
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(410);
     expect(result.body).toMatchObject({
       error: "StreamClosedError",
@@ -99,7 +99,7 @@ describe("toApiError", () => {
 
   it("maps NonRetryableError to 400 + NON_RETRYABLE", () => {
     const err = new NonRetryableError("permanent failure");
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(400);
     expect(result.body).toMatchObject({
       error: "NonRetryableError",
@@ -110,7 +110,7 @@ describe("toApiError", () => {
 
   it("maps an unknown Error to 500 + INTERNAL with detail", () => {
     const err = new Error("oops");
-    const result = toApiError(err);
+    const result = to_api_error(err);
     expect(result.status).toBe(500);
     expect(result.body).toEqual({
       error: "InternalError",
@@ -120,7 +120,7 @@ describe("toApiError", () => {
   });
 
   it("maps a non-Error throw to 500 + INTERNAL without detail", () => {
-    const result = toApiError("a string was thrown");
+    const result = to_api_error("a string was thrown");
     expect(result.status).toBe(500);
     expect(result.body).toEqual({
       error: "InternalError",
@@ -130,9 +130,9 @@ describe("toApiError", () => {
   });
 
   it("handles null / undefined throws as 500 without detail", () => {
-    expect(toApiError(null).status).toBe(500);
-    expect(toApiError(null).body.detail).toBeUndefined();
-    expect(toApiError(undefined).body).toEqual({
+    expect(to_api_error(null).status).toBe(500);
+    expect(to_api_error(null).body.detail).toBeUndefined();
+    expect(to_api_error(undefined).body).toEqual({
       error: "InternalError",
       code: "INTERNAL",
     });

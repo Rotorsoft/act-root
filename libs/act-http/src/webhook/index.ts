@@ -16,8 +16,8 @@
  *     webhook({
  *       url: "https://api.example.com/webhooks/orders",
  *       headers: (e) => ({ Authorization: "Bearer ..." }),
- *       body: (e) => ({ orderId: e.stream, total: e.data.total }),
- *       timeoutMs: 5_000,
+ *       body: (e) => ({ order_id: e.stream, total: e.data.total }),
+ *       timeout_ms: 5_000,
  *     }),
  *     { maxRetries: 5, backoff: { strategy: "exponential", baseMs: 200, maxMs: 30_000 } }
  *   )
@@ -26,7 +26,7 @@
  */
 
 import type { Committed, ReactionHandler, Schemas } from "@rotorsoft/act";
-import { classifyHttpResponse } from "./classify.js";
+import { classify_http_response } from "./classify.js";
 import { sign_request } from "./sign.js";
 import {
   NonRetryableWebhookError,
@@ -35,10 +35,10 @@ import {
 } from "./types.js";
 
 export {
-  classifyHttpResponse,
+  classify_http_response,
   type HttpDisposition,
   type TryOkOptions,
-  tryOk,
+  try_ok,
 } from "./classify.js";
 export type {
   HttpDeliveryErrorInit,
@@ -90,35 +90,35 @@ function has_header(headers: Record<string, string>, name: string): boolean {
 export function webhook<TEvents extends Schemas = Schemas>(
   config: WebhookConfig<TEvents>
 ): ReactionHandler<TEvents, keyof TEvents> {
-  const timeoutMs = config.timeoutMs ?? 5_000;
+  const timeout_ms = config.timeout_ms ?? 5_000;
   const method = config.method ?? "POST";
-  const fetchImpl = config.fetch ?? globalThis.fetch;
+  const fetch_impl = config.fetch ?? globalThis.fetch;
 
   // Named function: slice/act builders require non-anonymous reaction
   // handlers so lifecycle telemetry can attribute work.
-  return async function webhookDeliver(event) {
+  return async function webhook_deliver(event) {
     const url = resolve(config.url, event, "");
 
-    const customHeaders = resolve(
+    const custom_headers = resolve(
       config.headers,
       event,
       {} as Record<string, string>
     );
-    const headers: Record<string, string> = { ...customHeaders };
+    const headers: Record<string, string> = { ...custom_headers };
 
     if (!has_header(headers, "content-type")) {
       headers["Content-Type"] = "application/json";
     }
     if (!has_header(headers, "idempotency-key")) {
-      const key = config.idempotencyKey
-        ? config.idempotencyKey(event)
+      const key = config.idempotency_key
+        ? config.idempotency_key(event)
         : String(event.id);
       if (key !== null) headers["Idempotency-Key"] = key;
     }
 
-    const rawBody = resolve(config.body, event, event as unknown);
+    const raw_body = resolve(config.body, event, event as unknown);
     const body =
-      typeof rawBody === "string" ? rawBody : JSON.stringify(rawBody);
+      typeof raw_body === "string" ? raw_body : JSON.stringify(raw_body);
 
     if (config.secret && !has_header(headers, "x-webhook-signature")) {
       const { signature, timestamp } = sign_request(body, config.secret);
@@ -129,11 +129,11 @@ export function webhook<TEvents extends Schemas = Schemas>(
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const timer = setTimeout(() => controller.abort(), timeout_ms);
 
     let response: Response;
     try {
-      response = await fetchImpl(url, {
+      response = await fetch_impl(url, {
         method,
         headers,
         body,
@@ -143,7 +143,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       const aborted = controller.signal.aborted;
       throw new WebhookError(
         aborted
-          ? `webhook ${method} ${url} timed out after ${timeoutMs}ms`
+          ? `webhook ${method} ${url} timed out after ${timeout_ms}ms`
           : `webhook ${method} ${url} failed: ${(err as Error).message}`,
         { status: 0, url }
       );
@@ -151,12 +151,12 @@ export function webhook<TEvents extends Schemas = Schemas>(
       clearTimeout(timer);
     }
 
-    const disposition = classifyHttpResponse(response);
+    const disposition = classify_http_response(response);
     if (disposition === "ok") return;
 
-    let responseBody: string | undefined;
+    let response_body: string | undefined;
     try {
-      responseBody = await response.text();
+      response_body = await response.text();
     } catch {
       // best-effort body capture; ignore read errors
     }
@@ -165,7 +165,7 @@ export function webhook<TEvents extends Schemas = Schemas>(
       disposition === "retry" ? WebhookError : NonRetryableWebhookError;
     throw new ErrorClass(
       `webhook ${method} ${url} responded ${response.status}`,
-      { status: response.status, url, responseBody }
+      { status: response.status, url, response_body }
     );
   };
 }
