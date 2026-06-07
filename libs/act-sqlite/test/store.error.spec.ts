@@ -229,4 +229,17 @@ describe("SqliteStore error paths", () => {
     );
     expect(client._tx.rollback).toHaveBeenCalled();
   });
+
+  it("forget_pii: returns 0 when rowsAffected is undefined (defensive)", async () => {
+    // libsql types `rowsAffected` as `number`, but tests guard the
+    // adapter's `?? 0` fallback in case a driver returns `undefined`
+    // for a no-op UPDATE.
+    const client = {
+      execute: vi.fn(() => Promise.resolve({ rowsAffected: undefined })),
+      close: vi.fn(),
+    };
+    (db as unknown as { client: unknown }).client = client;
+    const wiped = await db.forget_pii("never-existed");
+    expect(wiped).toBe(0);
+  });
 });

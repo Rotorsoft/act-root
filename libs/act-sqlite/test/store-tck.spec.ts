@@ -11,7 +11,7 @@ const DB_PATH = join(import.meta.dirname, "tck-store.db");
 runStoreTck({
   name: "SqliteStore",
   factory: () => new SqliteStore({ url: `file:${DB_PATH}` }),
-  capabilities: { restore: true },
+  capabilities: { restore: true, pii_isolation: true },
 });
 
 // The TCK's own `afterAll` only calls `store.dispose()`; the file +
