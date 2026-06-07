@@ -1,3 +1,5 @@
+# [@rotorsoft/act-tck-v1.5.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.2...@rotorsoft/act-tck-v1.5.3) (2026-06-07)
+
 # [@rotorsoft/act-tck-v1.5.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.1...@rotorsoft/act-tck-v1.5.2) (2026-06-07)
 
 # [@rotorsoft/act-tck-v1.5.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.0...@rotorsoft/act-tck-v1.5.1) (2026-06-07)
