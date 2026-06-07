@@ -233,32 +233,31 @@ Durable workflow rules the AI assistant follows when working on the framework it
 - **PR auto-close uses GitHub numbers, not project keys.** `Closes #735` (auto-closes on merge), not `Closes ACT-604` (doesn't). Project keys go in the PR title and body for searchability.
 ### Naming conventions
 
-The codebase uses a strict public/internal split. **Internal code follows the convention below; public surfaces keep their existing names** unless a major version bump is explicitly authorized.
+The codebase uses two distinct casings. Which one you pick is determined by **whether the identifier is on the public surface or not** — there is no third "shifting style by context" option.
+
+**Public — camelCase. This is the convention, not a legacy carve-out.**
+
+Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `act-http`/`act-ops`) is camelCase:
+
+- Exported functions: `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`, `extractIdempotencyKey`, `checkWebhook`.
+- Public type fields: `IAct.forget` return `{eventCount}`, `forgotten` event `eventCount`, `StateNode.varName`, `EventNode.hasCustomPatch`, `WebhookConfig.timeoutMs`/`idempotencyKey`, `HttpDeliveryErrorInit.responseBody`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`.
+- ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`, `expectedVersion`, `reactingTo`, `asOf`, `maxSize`.
+- Builder methods: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice`.
+- Top-level factories: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`, `broadcast`.
+- Public class names + types — PascalCase always: `StateNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `WebhookConfig`, `IdempotencyStore`. Suffix with `XxxOptions` / `XxxResult` / `XxxConfig` when applicable.
 
 **Internal — short snake_case, no exceptions:**
 
-- Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`, `deprecated_event_names`, etc.
+- Internal helper functions: `run_close_cycle`, `classify_registry`, `compute_backoff_delay`, `build_handle`, `merge_event_register`, `current_version_of`.
 - Local variables: `event_to_state`, `last_event_name`, `stream_info`, `raw_body`, `headers_bag`.
-- Function parameters (anywhere — TS doesn't enforce parameter names as part of the public contract): `event_name`, `state_name`, `skip_validation`, `lower_name`.
-- Private/protected class fields and methods: `_snake_case` with underscore prefix (`_drain_controllers`, `_reactive_events`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`).
-- Internal type fields (types not re-exported through the package's `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
-- Prefix/postfix grouping conventions: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`. Use these when several related identifiers share a structural role.
-
-**Public — match the existing name, even if camelCase:**
-
-- Anything re-exported from any package's `src/index.ts` (or subpath `index.ts` for `act-http`, `act-ops`): `verifyWebhook`, `applyPatchMessage`, `withIdempotency`, `runStoreTck`, `webhookMiddleware`, `minSafeTtl`.
-- Public type fields (`IAct.forget` return `{eventCount}`, `forgotten` event field `eventCount`, `StateNode.varName`, `WebhookConfig.timeoutMs`, `VerifyOptions.maxAgeSeconds`, `RetryProfile.safetyFactor`, `Projection.batchHandler`, `QueryStreamsResult.maxEventId`, `InMemoryIdempotencyStore` options `ttlMs`/`maxEntries`/`retryProfile`).
-- ActOptions / RetryOptions / ReactionOptions / Backoff / DrainOptions / SettleOptions / LaneConfig fields: `maxRetries`, `blockOnError`, `baseMs`, `maxMs`, `jitter`, `strategy`, `leaseMillis`, `eventLimit`, `streamLimit`, `cycleMs`, `debounceMs`, `maxSubscribedStreams`, `onlyLanes`, `settleDebounceMs`, `maxPasses`.
-- Builder factories: `withState`, `withProjection`, `withReaction`, `withActor`, `withLane`, `withSlice` (camelCase per the factory rule below).
-- Top-level factory functions: short single-word lowercase — `act`, `state`, `slice`, `projection`, `sensitive`, `webhook`, `receiver`, `broadcast`.
-
-**Types — always PascalCase:**
-
-`XxxOptions` / `XxxResult` / `XxxConfig` suffixes when applicable. `StateNode`, `EventNode`, `BroadcastChannel`, `InMemoryStore`, `ConsoleLogger`, `RetryProfile`, `VerifyOptions`, `WebhookConfig`, `IdempotencyStore`.
+- Function parameters: TS doesn't enforce parameter names as part of the public contract (callers pass positional args), so parameters are snake_case even on public method signatures — `event_name`, `state_name`, `skip_validation`.
+- Private/protected class fields and methods: `_snake_case` with underscore prefix — `_drain_controllers`, `_reactive_events`, `_arm_all`, `_wire_notify`, `_max_event_id_by_stream`.
+- Internal type fields (types not re-exported through any `src/index.ts`): `Classification.static_targets`, `HandleResult.next_attempt_at`, `AuditPass.on_event`, `SettleDeps.on_settled`.
+- Grouping prefixes/postfixes when several related identifiers share a structural role: `pii_*`, `make_*`, `is_*`, `compute_*`, `*_by_stream`.
 
 **Parameter properties are banned** by `erasableSyntaxOnly`: declare each field explicitly above the constructor and assign in the body. Constructor parameter names stay camelCase (matches the external call site); rename to `_snake_case` only on the assignment to the field.
 
-**The public/internal boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck` — it snapshots the source text of every entry point and its transitive relative re-exports. Any unintended rename / removal / signature change shows up as a snapshot diff in the PR. New adapter packages opt in by adding `@rotorsoft/act-tck` as a devDep + project reference and dropping in a `test/stability.spec.ts`.
+**The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. Every package has a `test/stability.spec.ts` that snapshots the source text of every declared entry point plus its transitive relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR. New packages opt in by adding `@rotorsoft/act-tck` as a devDep + project reference and dropping in their own `stability.spec.ts`.
 
 ## Troubleshooting
 

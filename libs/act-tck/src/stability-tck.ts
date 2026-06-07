@@ -81,8 +81,10 @@ async function load_surface(entry: string): Promise<string> {
     const content = await fs.readFile(abs, "utf8");
     visited.set(abs, content);
 
-    // Follow `from "./relative.js"` re-exports / imports.
-    const re_export = /\bfrom\s+["'](\.[^"']+)["']/g;
+    // Match top-of-line `import`/`export ... from "./relative.js"` statements
+    // only, so JSDoc strings and example code in comments don't get walked.
+    const re_export =
+      /^\s*(?:import|export)\b[^"';]*\bfrom\s+["'](\.[^"']+)["']/gm;
     for (const m of content.matchAll(re_export)) {
       const rel = m[1].replace(/\.js$/, ".ts");
       const target = path.resolve(path.dirname(abs), rel);
