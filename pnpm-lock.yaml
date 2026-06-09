@@ -365,7 +365,7 @@ importers:
   packages/calculator:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=1.8.0'
+        specifier: '>=1.10.0'
         version: link:../../libs/act
       '@trpc/server':
         specifier: 11.17.0
@@ -583,7 +583,7 @@ importers:
   performance/act-performance:
     dependencies:
       '@rotorsoft/act':
-        specifier: '>=1.8.0'
+        specifier: '>=1.10.0'
         version: link:../../libs/act
       '@rotorsoft/act-pg':
         specifier: '>=1.4.0'
