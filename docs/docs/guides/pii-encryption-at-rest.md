@@ -203,6 +203,25 @@ But "the column is `NULL`" is not the same as "the ciphertext is gone from disk.
 
 Either way, the operator step lives outside the framework. Act guarantees the column is `NULL` after `forget`; the DB and the storage layer determine when the ciphertext disappears.
 
+## A fifth option, in flight
+
+The recipes above all sit at the DB or volume layer: the framework hands the `pii` JSON to the adapter, the adapter writes it as-is, encryption happens lower down. There is a genuine third position between "framework-wide Encryptor port" (rejected — see the [book essay](../../../book/act-566-pii-rejected-designs.md)) and "operator's DB layer" (everything above), and that's **adapter-layer encryption**: a per-adapter constructor option on `act-pg` and `act-sqlite` that wraps the `pii` column on commit and unwraps it on read, with the key provided by a callback the operator controls.
+
+```ts
+// Shape under design — not shipped yet.
+PostgresStore({
+  connectionString: ...,
+  pii_encryption: {
+    key_provider: () => process.env.PII_KEY,    // sync or async; KMS, Vault, env var
+    algorithm: "aes-256-gcm",
+  },
+});
+```
+
+Why it's worth pursuing as a separate ticket ([#921](https://github.com/Rotorsoft/act-root/issues/921)): it covers the deployments the recipes above can't reach — self-hosted Postgres without `pgcrypto`, edge SQLite on devices you don't own, container or serverless workloads where you control the connection but not the volume. It composes with TDE (defense in depth) and fits KMS-shaped key providers cleanly. The `Store` contract doesn't change; `Capabilities.pii_isolation` still gates the column itself; `forget_pii` semantics are identical (a `NULL` is a `NULL` whether the ciphertext or plaintext lived there before).
+
+It didn't ship with the original epic ([#566](https://github.com/Rotorsoft/act-root/issues/566)) because every current adopter is on RDS / Cloud SQL (TDE works) or self-hosted PG with `pgcrypto` available. Key management adds real maintenance surface (rotation, multi-key reads during rollover, audit) that hadn't yet earned its keep. Track [#921](https://github.com/Rotorsoft/act-root/issues/921) for shipping status.
+
 ## What this guide doesn't cover
 
 Application-layer crypto (encrypting fields inside `events.data` before they reach the Store) is the wrong shape — that's what `events.pii` is for. Use `sensitive()` to declare which fields live in the PII column, then encrypt at the DB layer using one of the recipes above.
