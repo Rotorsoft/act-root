@@ -56,6 +56,7 @@ interface Store extends Disposable, EventSource {
   // Optional, capability-gated:
   notify?(handler): NotifyDisposer | Promise<NotifyDisposer>;
   restore?(driver: (callback: (event: Committed) => Promise<number>) => Promise<void>): Promise<void>;
+  forget_pii?(stream: string): Promise<number>;
 }
 ```
 
@@ -66,6 +67,31 @@ interface Store extends Disposable, EventSource {
 `query_stats` is the per-stream-aggregate primitive (added in [ACT-639](https://github.com/Rotorsoft/act-root/issues/639)). Default returns the head event per stream via an indexed path; opt-in `count`/`tail`/`names` trigger a full scan but share it. Input is `string[]` for an enumerated set or `Pick<StreamFilter, "stream" | "stream_exact">` for pattern selection — subscription-level filters (`source`, `blocked`) live on `query_streams`; compose the two for "stats for blocked subscriptions" workflows.
 
 `restore` is the offline wipe-and-rebuild primitive (added in [ACT-1124](https://github.com/Rotorsoft/act-root/issues/783), reshaped into the current HOF driver pattern by [ACT-1125](https://github.com/Rotorsoft/act-root/issues/784)). Capability-gated — adapters that can't atomically wipe and reinsert in one transaction don't have to implement it. The adapter's job is narrow: open a transaction (PG `BEGIN`, SQLite `BEGIN IMMEDIATE`, InMemory snapshot-and-swap), wipe events + streams/subscriptions, hand the orchestrator a per-event insert callback by invoking `driver(callback)`, then commit or roll back. `RESTART IDENTITY` (PG) / `sqlite_sequence` reset (SQLite) reseed dense ids from 1; InMemory uses `0..N-1`. `created` is preserved verbatim from the source — distinct from `commit`, which always stamps `now()`. Reactions re-subscribe via the orchestrator on the next settle cycle.
+
+### `forget_pii` — the sensitive-data erasure primitive
+
+`forget_pii(stream: string): Promise<number>` is the physical-erasure half of the sensitive-data epic. The orchestrator calls it from `app.forget(stream)`; the adapter wipes the PII column for every event on the stream and returns the row count. `events.data` and the rest of the row are never touched, so the append-only invariant the rest of the framework depends on stays intact.
+
+```ts
+const wiped = await store.forget_pii("user-42");
+// wiped === 7 — seven events had their pii column nulled.
+```
+
+The method is idempotent. A second call on an already-wiped stream returns `0` without error; a call on a stream that never carried PII also returns `0`. Adapters implement this by issuing a single `UPDATE events SET pii = NULL WHERE stream = ?` (PG/SQLite) or the in-memory equivalent, with no per-event branching for "did this event have PII to begin with."
+
+Capability-gated through `StoreCapabilities.pii_isolation` in `@rotorsoft/act-tck`. Adapters that can ship the column declare `pii_isolation: true` and implement the method; adapters that can't (Kafka, append-only object-storage logs that don't support row-level UPDATE) declare `pii_isolation: false` and omit it. When `pii_isolation` is `true`, the TCK runs the full PII suite — commit-with-pii round trip, pii-less passthrough, `forget_pii` happy path, idempotency, and isolation across sibling streams. When `false`, the suite is skipped.
+
+`app.forget(stream)` calls into `Store.forget_pii` directly. If the configured store omits the method, the orchestrator throws with a clear "your adapter cannot comply with sensitive-data erasure" message — operators discover the misconfiguration in dev, not during a compliance audit. The framework also invalidates the cache entry for the stream and emits the `forgotten` lifecycle event after a successful wipe. For the user-facing flow, see the [Handling sensitive data](../guides/sensitive-data.md) guide.
+
+Disk reclamation is adapter-dependent and intentionally out of scope: PG autovacuum reclaims lazily; SQLite needs `PRAGMA incremental_vacuum` or `VACUUM` to release pages. The framework's job is isolation and erasure of the column; physical page reclamation is the operator's.
+
+In-tree adapters that declare `pii_isolation`:
+
+| Adapter | Capability | Notes |
+|---|---|---|
+| `InMemoryStore` | `true` | Per-event `pii` field cleared on `forget_pii`; useful for tests of the orchestrator's gate/strip path |
+| `PostgresStore` | `true` | `events.pii JSONB` column, nulled with a single indexed `UPDATE` |
+| `SqliteStore` | `true` | `events.pii TEXT` column, same pattern |
 
 ### `EventSource` / `EventSink` — the transfer surface
 
