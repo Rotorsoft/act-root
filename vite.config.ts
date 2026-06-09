@@ -1,15 +1,29 @@
 /**
  * Root vitest config. `@rotorsoft/*` package paths resolve to source
  * (rather than each package's built `dist/`) via `vite-tsconfig-paths`,
- * which reads `tsconfig.eslint.json`'s `paths` map. New in-tree packages
- * become test-resolvable as soon as they're added to that map — no
- * `pnpm build` bootstrap dance, no manual alias entry per subpath.
+ * sourced from `tsconfig.eslint.json`. New in-tree packages become
+ * test-resolvable as soon as they land in that map — no `pnpm build`
+ * bootstrap dance.
+ *
+ * The plugin's `root` and `projects` are pinned to the workspace root
+ * via `import.meta.dirname` so vitest invocations from a sub-package
+ * (e.g. `pnpm -F @rotorsoft/act-pg exec vitest run ...` in CI's
+ * conformance jobs) still find the tsconfig — the plugin defaults
+ * `root` to the CWD, which is the sub-package in that case.
  */
+import { resolve } from "node:path";
 import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
+const workspace_root = import.meta.dirname;
+
 export default defineConfig({
-  plugins: [tsconfigPaths({ projects: ["tsconfig.eslint.json"] })],
+  plugins: [
+    tsconfigPaths({
+      root: workspace_root,
+      projects: [resolve(workspace_root, "tsconfig.eslint.json")],
+    }),
+  ],
   test: {
     globals: true,
     // picocolors enables color emission when `CI` is set in env, which
