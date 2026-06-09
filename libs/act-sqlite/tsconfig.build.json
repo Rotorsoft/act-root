@@ -9,6 +9,9 @@
   "references": [
     {
       "path": "../act/tsconfig.build.json"
+    },
+    {
+      "path": "../act-crypto/tsconfig.build.json"
     }
   ],
   "include": ["src"],

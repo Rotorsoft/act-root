@@ -28423,6 +28423,192 @@ export function pii_strip<
 "
 `;
 
+exports[`@rotorsoft/act-crypto — public API stability > stable public surface for (root) 1`] = `
+"// === envelope.ts ===
+/**
+ * Authenticated envelope encryption with a versioned wire format.
+ *
+ * Sits between the act framework's port adapters (\`act-pg\`, \`act-sqlite\`,
+ * future adapters) and an operator-controlled key provider. The framework
+ * itself stays unaware of encryption — this package is a leaf-level
+ * helper that adapters call from their commit and query paths when an
+ * operator opts in via the adapter's \`pii_encryption\` constructor option.
+ *
+ * The PII column on \`events\` is the first caller, but nothing here is
+ * PII-specific. Any adapter holding a JSON-serializable column value
+ * that wants column-level encryption with operator-controlled keys can
+ * use the same primitives.
+ *
+ * Wire format (base64-encoded on disk):
+ *
+ *     [version: 1B][iv: 12B][tag: 16B][ciphertext: NB]
+ *
+ * - \`version = 0x01\` — AES-256-GCM. The version byte is the only marker
+ *   \`decrypt\` inspects to decide how to unpack; a future algorithm bumps
+ *   the byte and gains a new switch arm.
+ * - \`iv\` — 12 random bytes per encryption. GCM's IV-uniqueness contract;
+ *   \`randomBytes(12)\` is collision-safe at any reasonable scale.
+ * - \`tag\` — 16-byte GCM auth tag. \`decipher.final()\` throws on mismatch,
+ *   which \`decrypt\` surfaces as \`DecryptionError\`.
+ *
+ * @packageDocumentation
+ */
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+
+/**
+ * Supported algorithm names. Singleton today; widen when a v2 lands.
+ * The literal type keeps misspellings out of operator config at
+ * compile time.
+ */
+export type Algorithm = "aes-256-gcm";
+
+/**
+ * Operator-supplied configuration for envelope encryption. Adapters
+ * accept a value of this shape under whatever option name fits their
+ * surface (e.g. \`pii_encryption\` on \`PostgresStore\`).
+ */
+export type Encryption = {
+  /**
+   * Returns the symmetric key used for both encrypt and decrypt.
+   * \`makeKeyResolver\` calls this once on first use and caches the
+   * result for the resolver's lifetime — operators who need rotation
+   * restart the adapter with a new provider. Must return a 32-byte
+   * Buffer (256 bits) for AES-256-GCM.
+   */
+  readonly keyProvider: () => Buffer | Promise<Buffer>;
+  /** Cipher selection. Locked to \`aes-256-gcm\` for now. */
+  readonly algorithm: Algorithm;
+};
+
+const V1_AES_256_GCM = 0x01;
+const IV_LEN = 12;
+const TAG_LEN = 16;
+const KEY_LEN = 32;
+const HEADER_LEN = 1 + IV_LEN + TAG_LEN; // 29
+
+/**
+ * Thrown when \`decrypt\` can't recover a payload. The message is
+ * intentionally generic — the cause (corrupt framing, wrong key,
+ * tampered ciphertext) is private so adversarial callers can't probe
+ * for which failure mode a given input hit.
+ */
+export class DecryptionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecryptionError";
+  }
+}
+
+/**
+ * Wrap an {@link Encryption} config into a memoized key resolver.
+ *
+ * The returned function calls \`encryption.keyProvider\` on first use,
+ * validates the result is a 32-byte Buffer, and caches it for the
+ * resolver's lifetime. Subsequent calls hit the cache without
+ * re-invoking the provider — important when the provider is a KMS
+ * round-trip.
+ *
+ * Operators who need key rotation construct a new adapter (which makes
+ * a new resolver) rather than mutating the in-flight one. The
+ * resolver's lifecycle matches the adapter's, not the application's.
+ *
+ * @throws Error if \`keyProvider\` returns anything other than a
+ *   32-byte Buffer.
+ */
+export function makeKeyResolver(encryption: Encryption): () => Promise<Buffer> {
+  let cached: Buffer | undefined;
+  return async () => {
+    if (cached) return cached;
+    const key = await encryption.keyProvider();
+    if (!Buffer.isBuffer(key) || key.length !== KEY_LEN)
+      throw new Error(
+        \`act-crypto: keyProvider must return a \${KEY_LEN}-byte Buffer (AES-256 requires a 256-bit key)\`
+      );
+    cached = key;
+    return cached;
+  };
+}
+
+/**
+ * Encrypt a JSON-serializable value into a base64-framed string.
+ *
+ * The payload is \`JSON.stringify\`-ed before encryption — callers
+ * holding raw bytes wrap them in a JSON-safe form (base64 string,
+ * tagged object) before calling.
+ *
+ * @param payload Anything \`JSON.stringify\` can serialize. Callers
+ *   filter \`null\`/\`undefined\` upstream when the storage layer treats
+ *   absence specially.
+ * @param resolve_key Key resolver from {@link makeKeyResolver}.
+ * @returns Base64-encoded framed ciphertext suitable for a text or
+ *   jsonb column.
+ */
+export async function encrypt(
+  payload: unknown,
+  resolve_key: () => Promise<Buffer>
+): Promise<string> {
+  const key = await resolve_key();
+  const iv = randomBytes(IV_LEN);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const plaintext = Buffer.from(JSON.stringify(payload), "utf8");
+  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([Buffer.from([V1_AES_256_GCM]), iv, tag, ct]).toString(
+    "base64"
+  );
+}
+
+/**
+ * Decrypt a base64-framed string back into the original JS value.
+ *
+ * @param encoded Output of a prior {@link encrypt} call.
+ * @param resolve_key Key resolver from {@link makeKeyResolver}.
+ * @returns The original payload after \`JSON.parse\`.
+ * @throws DecryptionError on:
+ *   - input too short to hold the header
+ *   - unknown version byte
+ *   - GCM auth-tag mismatch (wrong key or tampered ciphertext)
+ *   - any decryption-stage failure
+ */
+export async function decrypt(
+  encoded: string,
+  resolve_key: () => Promise<Buffer>
+): Promise<unknown> {
+  const key = await resolve_key();
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length < HEADER_LEN + 1)
+    throw new DecryptionError("ciphertext too short to be valid");
+  const version = bytes[0];
+  if (version !== V1_AES_256_GCM)
+    throw new DecryptionError(
+      \`ciphertext framing version \${version} is not supported\`
+    );
+  const iv = bytes.subarray(1, 1 + IV_LEN);
+  const tag = bytes.subarray(1 + IV_LEN, HEADER_LEN);
+  const ct = bytes.subarray(HEADER_LEN);
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  try {
+    const pt = Buffer.concat([decipher.update(ct), decipher.final()]);
+    return JSON.parse(pt.toString("utf8"));
+  } catch {
+    throw new DecryptionError(
+      "ciphertext failed to decrypt — wrong key, tampered payload, or corrupt framing"
+    );
+  }
+}
+
+// === index.ts ===
+/**
+ * @rotorsoft/act-crypto — authenticated envelope encryption helper for
+ * act adapter packages.
+ *
+ * @packageDocumentation
+ */
+export * from "./envelope.js";
+"
+`;
+
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./api 1`] = `
 "// === actor.ts ===
 import type { Actor } from "@rotorsoft/act";
@@ -32136,6 +32322,12 @@ import {
   SNAP_EVENT,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
+import {
+  decrypt,
+  type Encryption,
+  encrypt,
+  makeKeyResolver,
+} from "@rotorsoft/act-crypto";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
 
@@ -32173,6 +32365,30 @@ type Config = Readonly<{
    * **on every store instance** (writers and listeners both).
    */
   notify?: boolean;
+  /**
+   * Adapter-layer envelope encryption for the \`events.pii\` column.
+   * Optional — when present, every non-null PII payload is encrypted
+   * before INSERT and decrypted on every read; when absent, the
+   * column is stored and read as plaintext (the framework's default
+   * behavior).
+   *
+   * Cipher and wire format come from \`@rotorsoft/act-crypto\`:
+   * AES-256-GCM with a versioned base64-framed envelope. The
+   * jsonb column distinguishes encrypted from plaintext rows by
+   * type — encrypted writes land as JSONB strings, plaintext writes
+   * as JSONB objects — so existing data continues to read through
+   * transparently after enabling encryption on new commits.
+   *
+   * \`forget_pii\` semantics are unchanged: the column is set to
+   * \`NULL\` regardless of whether the prior value was plaintext or
+   * ciphertext.
+   *
+   * Encryption at rest at the **storage** layer (\`pgcrypto\`, RDS
+   * TDE, Cloud SQL TDE) composes orthogonally — defense in depth
+   * without coordination. See \`docs/docs/guides/pii-encryption-at-rest.md\`
+   * for the full decision matrix.
+   */
+  pii_encryption?: Encryption;
 }> &
   pg.PoolConfig;
 
@@ -32362,6 +32578,15 @@ export class PostgresStore implements Store {
   ) => Promise<NotifyDisposer>;
 
   /**
+   * Memoized key resolver for the optional \`pii_encryption\` envelope.
+   * Initialized in the constructor when encryption is configured;
+   * \`undefined\` otherwise. The resolver caches the operator's key on
+   * first use — rotation means restarting the store with a fresh
+   * provider.
+   */
+  private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
+
+  /**
    * Create a new PostgresStore instance.
    * @param config Partial configuration (host, port, user, password, schema, table, etc.)
    */
@@ -32369,7 +32594,12 @@ export class PostgresStore implements Store {
     this.config = { ...DEFAULT_CONFIG, ...config };
     assert_safe_identifier(this.config.schema, "schema");
     assert_safe_identifier(this.config.table, "table");
-    const { schema: _, table: __, ...poolConfig } = this.config;
+    const {
+      schema: _,
+      table: __,
+      pii_encryption: ___,
+      ...poolConfig
+    } = this.config;
     this._pool = new Pool(poolConfig);
     this._fqt = \`"\${this.config.schema}"."\${this.config.table}"\`;
     this._fqs = \`"\${this.config.schema}"."\${this.config.table}_streams"\`;
@@ -32380,6 +32610,9 @@ export class PostgresStore implements Store {
     if (this.config.notify) {
       this.notify = this._subscribe_notifications.bind(this);
     }
+    this._resolve_pii_key = this.config.pii_encryption
+      ? makeKeyResolver(this.config.pii_encryption)
+      : undefined;
   }
 
   /**
@@ -32632,7 +32865,22 @@ export class PostgresStore implements Store {
     }
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
-    for (const row of result.rows) await Promise.resolve(callback(row));
+    for (const row of result.rows) {
+      // Decrypt the pii column when encryption is configured and the
+      // stored value is a string (encrypted writes land as JSONB
+      // strings; plaintext rows land as JSONB objects, including
+      // legacy data committed before encryption was enabled). The
+      // type-based discriminator means mixed-data rollouts read
+      // through transparently. The cast is local — \`Committed.pii\`
+      // is \`readonly\` on the public type, but rows materialized from
+      // the driver are mutable in-flight before they cross back to
+      // the framework.
+      if (this._resolve_pii_key && typeof row.pii === "string") {
+        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+        (row as { pii: unknown }).pii = decrypted;
+      }
+      await Promise.resolve(callback(row));
+    }
 
     return result.rowCount ?? 0;
   }
@@ -32680,10 +32928,31 @@ export class PostgresStore implements Store {
         const sql = \`
           INSERT INTO \${this._fqt}(name, data, pii, stream, version, meta)
           VALUES($1, $2, $3, $4, $5, $6) RETURNING *\`;
-        const vals = [name, data, pii ?? null, stream, version, meta];
+        // Encrypt the pii payload when encryption is configured and
+        // there's anything to encrypt — \`null\` passes through verbatim
+        // so \`forget_pii\` semantics survive intact (a NULL stays NULL).
+        // Encrypted output is \`JSON.stringify\`-ed so the bare base64
+        // string lands in jsonb as a JSON string literal — the pg
+        // driver doesn't auto-wrap raw strings before they hit jsonb,
+        // and a bare token like \`AQAB...\` isn't valid JSON on its own.
+        const pii_for_write =
+          this._resolve_pii_key && pii != null
+            ? JSON.stringify(await encrypt(pii, this._resolve_pii_key))
+            : (pii ?? null);
+        const vals = [name, data, pii_for_write, stream, version, meta];
         try {
           const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
-          committed.push(rows.at(0)!);
+          const row = rows.at(0)!;
+          // Decrypt before handing back to the caller — the committed
+          // event the framework returns must carry the cleartext payload
+          // (the reducer chain runs against \`event.pii\`). The encrypted
+          // value only lives at rest in the column; never in memory past
+          // this point. Same cast rationale as the query path.
+          if (this._resolve_pii_key && typeof row.pii === "string") {
+            const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+            (row as { pii: unknown }).pii = decrypted;
+          }
+          committed.push(row);
         } catch (error) {
           // PG unique-violation on (stream, version) — a concurrent commit
           // beat us between the version SELECT and this INSERT. Surface as
@@ -33691,13 +33960,24 @@ export class PostgresStore implements Store {
       );
       await client.query(\`TRUNCATE TABLE \${this._fqs}\`);
       await driver(async (event) => {
+        // Restore mirrors commit: encrypt the pii payload when
+        // encryption is configured. The source iterator yields
+        // plaintext events (restore is the rebuild path — the driver
+        // already presents data in the framework's native shape),
+        // so this is symmetric with the commit-path call above —
+        // including the JSON.stringify wrapper that turns the bare
+        // base64 string into a jsonb-acceptable JSON string literal.
+        const pii_for_write =
+          this._resolve_pii_key && event.pii != null
+            ? JSON.stringify(await encrypt(event.pii, this._resolve_pii_key))
+            : (event.pii ?? null);
         const { rows } = await client.query<{ id: number }>(
           \`INSERT INTO \${this._fqt}(name, data, pii, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING id\`,
           [
             event.name,
             event.data,
-            event.pii ?? null,
+            pii_for_write,
             event.stream,
             event.version,
             event.created,
@@ -33934,6 +34214,12 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
+import {
+  decrypt,
+  type Encryption,
+  encrypt,
+  makeKeyResolver,
+} from "@rotorsoft/act-crypto";
 
 /**
  * SQLite store configuration
@@ -33943,26 +34229,38 @@ export interface SqliteConfig {
   url: string;
   /** Auth token for libSQL server connections (optional) */
   authToken?: string;
+  /**
+   * Adapter-layer envelope encryption for the \`events.pii\` column.
+   * Optional — when present, every non-null PII payload is encrypted
+   * before INSERT and decrypted on every read; when absent, the
+   * column is stored and read as plaintext (the framework's default
+   * behavior).
+   *
+   * Cipher and wire format come from \`@rotorsoft/act-crypto\`:
+   * AES-256-GCM with a versioned base64-framed envelope. The TEXT
+   * column stores \`JSON.stringify(...)\`-ed values either way, so
+   * encrypted writes land as a JSON-stringified base64 string and
+   * plaintext writes as a JSON-stringified object. The read path
+   * discriminates by \`typeof\` after \`JSON.parse\` — strings get
+   * decrypted, objects pass through — which makes mixed-data
+   * rollouts transparent.
+   *
+   * \`forget_pii\` semantics are unchanged: the column is set to
+   * \`NULL\` regardless of whether the prior value was plaintext or
+   * ciphertext.
+   *
+   * Encryption at rest at the **storage** layer (SQLite SEE, an
+   * encrypted volume, OS-level FDE) composes orthogonally with
+   * adapter-layer encryption. See
+   * \`docs/docs/guides/pii-encryption-at-rest.md\` for the decision
+   * matrix.
+   */
+  pii_encryption?: Encryption;
 }
 
 const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
-
-/** Parse the JSON-stringified \`pii\` text column back to the in-memory
- *  shape. Returns \`null\` when the column was NULL (the common case —
- *  events without sensitive declarations). Consolidated so every read
- *  path (\`query\`, both \`query_stats\` overloads) uses one branch instead
- *  of repeating the ternary inline. */
-const parse_pii = (raw: unknown): Record<string, unknown> | null =>
-  raw == null ? null : JSON.parse(raw as string);
-
-/** Stringify the in-memory \`pii\` shape for the TEXT column. Returns
- *  \`null\` when \`pii\` is absent so SQLite's row format can skip the
- *  column entirely (zero extra bytes). Used by commit + restore. */
-const stringify_pii = (
-  pii: Readonly<Record<string, unknown>> | null | undefined
-): string | null => (pii == null ? null : JSON.stringify(pii));
 
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQL LIKE pattern. Honors \`^\` / \`$\` anchors and converts \`.*\` → \`%\`,
@@ -34017,6 +34315,14 @@ export function streamPatternToLike(input: string): string {
  */
 export class SqliteStore implements Store {
   private client: Client;
+  /**
+   * Memoized key resolver for the optional \`pii_encryption\` envelope.
+   * Initialized in the constructor when encryption is configured;
+   * \`undefined\` otherwise. The resolver caches the operator's key on
+   * first use — rotation means restarting the store with a fresh
+   * provider.
+   */
+  private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: Partial<SqliteConfig> = {}) {
     const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -34024,6 +34330,50 @@ export class SqliteStore implements Store {
       url: cfg.url,
       authToken: cfg.authToken,
     });
+    this._resolve_pii_key = cfg.pii_encryption
+      ? makeKeyResolver(cfg.pii_encryption)
+      : undefined;
+  }
+
+  /**
+   * Write-side pii encoder: encrypts when \`pii_encryption\` is configured,
+   * stringifies for the TEXT column either way. \`null\` passes through so
+   * \`forget_pii\` semantics survive intact (the row format skips the
+   * column entirely on a \`NULL\` write).
+   *
+   * @internal
+   */
+  private async _stringify_pii_for_write(
+    pii: Readonly<Record<string, unknown>> | null | undefined
+  ): Promise<string | null> {
+    if (pii == null) return null;
+    if (this._resolve_pii_key) {
+      return JSON.stringify(await encrypt(pii, this._resolve_pii_key));
+    }
+    return JSON.stringify(pii);
+  }
+
+  /**
+   * Read-side pii decoder: parses the TEXT column, and when
+   * \`pii_encryption\` is configured, transparently decrypts any value
+   * that came back as a JSON string. Plaintext writes deserialize to
+   * objects and pass through — which is what makes mixed-data
+   * rollouts (some pre-encryption rows, some post-) read cleanly.
+   *
+   * @internal
+   */
+  private async _parse_pii_from_read(
+    raw: unknown
+  ): Promise<Record<string, unknown> | null> {
+    if (raw == null) return null;
+    const parsed = JSON.parse(raw as string);
+    if (this._resolve_pii_key && typeof parsed === "string") {
+      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+        string,
+        unknown
+      >;
+    }
+    return parsed;
   }
 
   async seed() {
@@ -34141,6 +34491,7 @@ export class SqliteStore implements Store {
       let version = current_version + 1;
 
       for (const { name, data, pii } of msgs) {
+        const pii_for_write = await this._stringify_pii_for_write(pii);
         const result = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
@@ -34150,7 +34501,7 @@ export class SqliteStore implements Store {
             JSON.stringify(data),
             JSON.stringify(meta),
             now,
-            stringify_pii(pii),
+            pii_for_write,
           ],
         });
         committed.push({
@@ -34230,6 +34581,7 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
+      const pii_value = await this._parse_pii_from_read(row.pii);
       await Promise.resolve(
         callback({
           id: Number(row.id),
@@ -34239,7 +34591,7 @@ export class SqliteStore implements Store {
           name: row.name as string,
           data: JSON.parse(row.data as string),
           meta: JSON.parse(row.meta as string),
-          pii: parse_pii(row.pii),
+          pii: pii_value,
         })
       );
       count++;
@@ -34747,9 +35099,9 @@ export class SqliteStore implements Store {
         : null,
     ]);
 
-    const to_committed = (
+    const to_committed = async (
       row: Record<string, unknown>
-    ): Committed<E, keyof E> =>
+    ): Promise<Committed<E, keyof E>> =>
       ({
         id: Number(row.id),
         stream: row.stream as string,
@@ -34758,13 +35110,13 @@ export class SqliteStore implements Store {
         data: JSON.parse(row.data as string),
         meta: JSON.parse(row.meta as string),
         created: new Date(row.created as string),
-        pii: parse_pii(row.pii),
+        pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
     for (const row of headRes.rows) {
       out.set(row.stream as string, {
-        head: to_committed(row as Record<string, unknown>),
+        head: await to_committed(row as Record<string, unknown>),
       });
     }
     if (tailRes) {
@@ -34776,7 +35128,7 @@ export class SqliteStore implements Store {
             head: Committed<E, keyof E>;
             tail?: Committed<E, keyof E>;
           }
-        ).tail = to_committed(row as Record<string, unknown>);
+        ).tail = await to_committed(row as Record<string, unknown>);
       }
     }
     return out;
@@ -34845,7 +35197,7 @@ export class SqliteStore implements Store {
 
     const res = await this.client.execute({ sql, args: args as any[] });
 
-    const to_committed = (
+    const to_committed = async (
       id: unknown,
       stream: unknown,
       version: unknown,
@@ -34854,7 +35206,7 @@ export class SqliteStore implements Store {
       meta: unknown,
       created: unknown,
       pii: unknown
-    ): Committed<E, keyof E> =>
+    ): Promise<Committed<E, keyof E>> =>
       ({
         id: Number(id),
         stream: stream as string,
@@ -34863,7 +35215,7 @@ export class SqliteStore implements Store {
         data: JSON.parse(data as string),
         meta: JSON.parse(meta as string),
         created: new Date(created as string),
-        pii: parse_pii(pii),
+        pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
@@ -34875,7 +35227,7 @@ export class SqliteStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = {
-        head: to_committed(
+        head: await to_committed(
           r.id,
           r.stream,
           r.version,
@@ -34887,7 +35239,7 @@ export class SqliteStore implements Store {
         ),
       };
       if (want_tail && r.t_id !== null && r.t_id !== undefined) {
-        stats.tail = to_committed(
+        stats.tail = await to_committed(
           r.t_id,
           r.t_stream,
           r.t_version,
@@ -35016,6 +35368,7 @@ export class SqliteStore implements Store {
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
       await driver(async (event) => {
+        const pii_for_write = await this._stringify_pii_for_write(event.pii);
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
@@ -35025,7 +35378,7 @@ export class SqliteStore implements Store {
             JSON.stringify(event.data),
             JSON.stringify(event.meta),
             event.created.toISOString(),
-            stringify_pii(event.pii),
+            pii_for_write,
           ],
         });
         return Number(ins.lastInsertRowid);

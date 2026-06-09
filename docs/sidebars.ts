@@ -94,6 +94,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-crypto",
+          href: "/docs/api/act-crypto/src",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-tck",
           href: "/docs/api/act-tck/src",
         },

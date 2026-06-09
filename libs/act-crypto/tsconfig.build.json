@@ -6,14 +6,6 @@
     "declarationDir": "dist/@types",
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "references": [
-    {
-      "path": "../act/tsconfig.build.json"
-    },
-    {
-      "path": "../act-crypto/tsconfig.build.json"
-    }
-  ],
   "include": ["src"],
   "exclude": ["test", "bench", "dist", "node_modules"]
 }

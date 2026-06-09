@@ -1,24 +1,23 @@
 {
-  "name": "@rotorsoft/act-sqlite",
+  "name": "@rotorsoft/act-crypto",
   "type": "module",
-  "version": "1.4.2",
-  "description": "act sqlite adapters",
+  "version": "0.0.0",
+  "description": "Authenticated envelope encryption helper for act adapters",
   "keywords": [
     "typescript",
-    "event-sourcing",
-    "sqlite",
-    "libsql",
-    "event-store",
-    "embedded"
+    "aes-256-gcm",
+    "envelope-encryption",
+    "rotorsoft",
+    "act"
   ],
   "author": "rotorsoft",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rotorsoft/act-root.git",
-    "directory": "libs/act-sqlite"
+    "directory": "libs/act-crypto"
   },
-  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-sqlite#readme",
+  "homepage": "https://github.com/rotorsoft/act-root/tree/master/libs/act-crypto#readme",
   "bugs": {
     "url": "https://github.com/rotorsoft/act-root/issues"
   },
@@ -47,15 +46,5 @@
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types"
   },
-  "dependencies": {
-    "@libsql/client": "^0.17.3",
-    "@rotorsoft/act-crypto": "workspace:*"
-  },
-  "peerDependencies": {
-    "@rotorsoft/act": "workspace:^",
-    "zod": "^4.4.3"
-  },
-  "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^"
-  }
+  "dependencies": {}
 }

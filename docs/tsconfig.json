@@ -36,11 +36,13 @@
       ],
       "@rotorsoft/act-ops/receiver": ["../libs/act-ops/src/receiver/index.ts"],
       "@rotorsoft/act-sqlite": ["../libs/act-sqlite/src/index.ts"],
-      "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"]
+      "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"],
+      "@rotorsoft/act-crypto": ["../libs/act-crypto/src/index.ts"]
     }
   },
   "include": [
     "../libs/act/src/**/*",
+    "../libs/act-crypto/src/**/*",
     "../libs/act-diagram/src/**/*",
     "../libs/act-http/src/**/*",
     "../libs/act-patch/src/**/*",

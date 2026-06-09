@@ -25,6 +25,12 @@ import {
   SNAP_EVENT,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
+import {
+  decrypt,
+  type Encryption,
+  encrypt,
+  makeKeyResolver,
+} from "@rotorsoft/act-crypto";
 import pg from "pg";
 import { dateReviver } from "./utils.js";
 
@@ -62,6 +68,30 @@ type Config = Readonly<{
    * **on every store instance** (writers and listeners both).
    */
   notify?: boolean;
+  /**
+   * Adapter-layer envelope encryption for the `events.pii` column.
+   * Optional — when present, every non-null PII payload is encrypted
+   * before INSERT and decrypted on every read; when absent, the
+   * column is stored and read as plaintext (the framework's default
+   * behavior).
+   *
+   * Cipher and wire format come from `@rotorsoft/act-crypto`:
+   * AES-256-GCM with a versioned base64-framed envelope. The
+   * jsonb column distinguishes encrypted from plaintext rows by
+   * type — encrypted writes land as JSONB strings, plaintext writes
+   * as JSONB objects — so existing data continues to read through
+   * transparently after enabling encryption on new commits.
+   *
+   * `forget_pii` semantics are unchanged: the column is set to
+   * `NULL` regardless of whether the prior value was plaintext or
+   * ciphertext.
+   *
+   * Encryption at rest at the **storage** layer (`pgcrypto`, RDS
+   * TDE, Cloud SQL TDE) composes orthogonally — defense in depth
+   * without coordination. See `docs/docs/guides/pii-encryption-at-rest.md`
+   * for the full decision matrix.
+   */
+  pii_encryption?: Encryption;
 }> &
   pg.PoolConfig;
 
@@ -251,6 +281,15 @@ export class PostgresStore implements Store {
   ) => Promise<NotifyDisposer>;
 
   /**
+   * Memoized key resolver for the optional `pii_encryption` envelope.
+   * Initialized in the constructor when encryption is configured;
+   * `undefined` otherwise. The resolver caches the operator's key on
+   * first use — rotation means restarting the store with a fresh
+   * provider.
+   */
+  private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
+
+  /**
    * Create a new PostgresStore instance.
    * @param config Partial configuration (host, port, user, password, schema, table, etc.)
    */
@@ -258,7 +297,12 @@ export class PostgresStore implements Store {
     this.config = { ...DEFAULT_CONFIG, ...config };
     assert_safe_identifier(this.config.schema, "schema");
     assert_safe_identifier(this.config.table, "table");
-    const { schema: _, table: __, ...poolConfig } = this.config;
+    const {
+      schema: _,
+      table: __,
+      pii_encryption: ___,
+      ...poolConfig
+    } = this.config;
     this._pool = new Pool(poolConfig);
     this._fqt = `"${this.config.schema}"."${this.config.table}"`;
     this._fqs = `"${this.config.schema}"."${this.config.table}_streams"`;
@@ -269,6 +313,9 @@ export class PostgresStore implements Store {
     if (this.config.notify) {
       this.notify = this._subscribe_notifications.bind(this);
     }
+    this._resolve_pii_key = this.config.pii_encryption
+      ? makeKeyResolver(this.config.pii_encryption)
+      : undefined;
   }
 
   /**
@@ -521,7 +568,22 @@ export class PostgresStore implements Store {
     }
 
     const result = await this._pool.query<Committed<E, keyof E>>(sql, values);
-    for (const row of result.rows) await Promise.resolve(callback(row));
+    for (const row of result.rows) {
+      // Decrypt the pii column when encryption is configured and the
+      // stored value is a string (encrypted writes land as JSONB
+      // strings; plaintext rows land as JSONB objects, including
+      // legacy data committed before encryption was enabled). The
+      // type-based discriminator means mixed-data rollouts read
+      // through transparently. The cast is local — `Committed.pii`
+      // is `readonly` on the public type, but rows materialized from
+      // the driver are mutable in-flight before they cross back to
+      // the framework.
+      if (this._resolve_pii_key && typeof row.pii === "string") {
+        const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+        (row as { pii: unknown }).pii = decrypted;
+      }
+      await Promise.resolve(callback(row));
+    }
 
     return result.rowCount ?? 0;
   }
@@ -569,10 +631,31 @@ export class PostgresStore implements Store {
         const sql = `
           INSERT INTO ${this._fqt}(name, data, pii, stream, version, meta)
           VALUES($1, $2, $3, $4, $5, $6) RETURNING *`;
-        const vals = [name, data, pii ?? null, stream, version, meta];
+        // Encrypt the pii payload when encryption is configured and
+        // there's anything to encrypt — `null` passes through verbatim
+        // so `forget_pii` semantics survive intact (a NULL stays NULL).
+        // Encrypted output is `JSON.stringify`-ed so the bare base64
+        // string lands in jsonb as a JSON string literal — the pg
+        // driver doesn't auto-wrap raw strings before they hit jsonb,
+        // and a bare token like `AQAB...` isn't valid JSON on its own.
+        const pii_for_write =
+          this._resolve_pii_key && pii != null
+            ? JSON.stringify(await encrypt(pii, this._resolve_pii_key))
+            : (pii ?? null);
+        const vals = [name, data, pii_for_write, stream, version, meta];
         try {
           const { rows } = await client.query<Committed<E, keyof E>>(sql, vals);
-          committed.push(rows.at(0)!);
+          const row = rows.at(0)!;
+          // Decrypt before handing back to the caller — the committed
+          // event the framework returns must carry the cleartext payload
+          // (the reducer chain runs against `event.pii`). The encrypted
+          // value only lives at rest in the column; never in memory past
+          // this point. Same cast rationale as the query path.
+          if (this._resolve_pii_key && typeof row.pii === "string") {
+            const decrypted = await decrypt(row.pii, this._resolve_pii_key);
+            (row as { pii: unknown }).pii = decrypted;
+          }
+          committed.push(row);
         } catch (error) {
           // PG unique-violation on (stream, version) — a concurrent commit
           // beat us between the version SELECT and this INSERT. Surface as
@@ -1580,13 +1663,24 @@ export class PostgresStore implements Store {
       );
       await client.query(`TRUNCATE TABLE ${this._fqs}`);
       await driver(async (event) => {
+        // Restore mirrors commit: encrypt the pii payload when
+        // encryption is configured. The source iterator yields
+        // plaintext events (restore is the rebuild path — the driver
+        // already presents data in the framework's native shape),
+        // so this is symmetric with the commit-path call above —
+        // including the JSON.stringify wrapper that turns the bare
+        // base64 string into a jsonb-acceptable JSON string literal.
+        const pii_for_write =
+          this._resolve_pii_key && event.pii != null
+            ? JSON.stringify(await encrypt(event.pii, this._resolve_pii_key))
+            : (event.pii ?? null);
         const { rows } = await client.query<{ id: number }>(
           `INSERT INTO ${this._fqt}(name, data, pii, stream, version, created, meta)
            VALUES($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
           [
             event.name,
             event.data,
-            event.pii ?? null,
+            pii_for_write,
             event.stream,
             event.version,
             event.created,

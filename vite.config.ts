@@ -69,6 +69,10 @@ export default defineConfig({
         __dirname,
         "libs/act-tck/src/index.ts"
       ),
+      "@rotorsoft/act-crypto": path.resolve(
+        __dirname,
+        "libs/act-crypto/src/index.ts"
+      ),
     },
   },
   test: {
