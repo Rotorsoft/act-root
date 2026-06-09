@@ -210,8 +210,8 @@ importers:
         version: 4.4.3
     devDependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.101.0
-        version: 0.101.0(zod@4.4.3)
+        specifier: ^0.102.0
+        version: 0.102.0(zod@4.4.3)
       '@clack/prompts':
         specifier: ^1.5.1
         version: 1.5.1
@@ -715,8 +715,8 @@ packages:
     resolution: {integrity: sha512-qmo1LXrNKLHvJE6mdQbLnsZAoZvj7VyF2ft4xmbSGWI2WWm87fx/CjUX4kEExt4y0a6T6nEts6ofpUfH5TEE1A==}
     engines: {node: '>= 14.0.0'}
 
-  '@anthropic-ai/sdk@0.101.0':
-    resolution: {integrity: sha512-fw/Y7kCZPRZ1IuyDHGj0bCDTYLgsZgvgg01gVdbphHvpGMdOzGSYWGiSyzrRMMBWkbG1ijvuYaAQLKkAlQc3Ww==}
+  '@anthropic-ai/sdk@0.102.0':
+    resolution: {integrity: sha512-cThh3KcPW3lzkFyTz1cjyhJvOVw45NkLMoowO2ZJ/76CBz44ADUon+NsjEc/PypAkARs72Xu8qxTnx6PAOTQUQ==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -9340,7 +9340,7 @@ snapshots:
     dependencies:
       '@algolia/client-common': 5.50.1
 
-  '@anthropic-ai/sdk@0.101.0(zod@4.4.3)':
+  '@anthropic-ai/sdk@0.102.0(zod@4.4.3)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.0.0
@@ -11163,7 +11163,7 @@ snapshots:
 
   '@docusaurus/react-loadable@6.0.0(react@19.2.7)':
     dependencies:
-      '@types/react': 19.2.16
+      '@types/react': 19.2.17
       react: 19.2.7
 
   '@docusaurus/theme-classic@3.10.1(@docusaurus/faster@3.10.1(@docusaurus/types@3.10.1(@swc/core@1.15.24)(esbuild@0.27.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7))(esbuild@0.27.2))(@rspack/core@1.7.11)(@swc/core@1.15.24)(@types/react@19.2.17)(esbuild@0.27.2)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(typescript@6.0.3)':
@@ -13073,7 +13073,7 @@ snapshots:
   '@types/react-router@5.1.20':
     dependencies:
       '@types/history': 4.7.11
-      '@types/react': 19.2.16
+      '@types/react': 19.2.17
 
   '@types/react@19.2.16':
     dependencies:
