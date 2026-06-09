@@ -57,7 +57,7 @@ describe("property: cache/store coherence", () => {
       // Phase 1 — confirm cache is warm after action()s.
       const cached = new Map<string, Awaited<ReturnType<typeof load>>>();
       for (const s of streams) {
-        const snap = await load(Counter, s);
+        const snap = await load(Counter, { stream: s });
         expect(snap.cache_hit).toBe(true);
         cached.set(s, snap);
       }
@@ -66,7 +66,7 @@ describe("property: cache/store coherence", () => {
       // ones state-for-state and version-for-version.
       await cache().clear();
       for (const s of streams) {
-        const fresh = await load(Counter, s);
+        const fresh = await load(Counter, { stream: s });
         expect(fresh.cache_hit).toBe(false);
         expect(fresh.state).toEqual(cached.get(s)!.state);
         expect(fresh.version).toBe(cached.get(s)!.version);
@@ -80,7 +80,7 @@ describe("property: cache/store coherence", () => {
     const { stream, by } = ops[0];
     // Seed the stream + warm the cache.
     await action(Counter, "inc", target(stream), { by });
-    const before = await load(Counter, stream);
+    const before = await load(Counter, { stream: stream });
     expect(before.cache_hit).toBe(true);
 
     // Force a ConcurrencyError by passing a deliberately stale
@@ -95,7 +95,7 @@ describe("property: cache/store coherence", () => {
     ).rejects.toThrow();
 
     // Next load is a cache miss — entry was invalidated.
-    const after = await load(Counter, stream);
+    const after = await load(Counter, { stream: stream });
     expect(after.cache_hit).toBe(false);
     expect(after.state).toEqual(before.state); // store is unchanged
   });
@@ -110,9 +110,9 @@ describe("property: cache/store coherence", () => {
       // Clear cache so the first load is a miss; that miss should warm
       // the cache so the second load is a hit.
       await cache().clear();
-      const first = await load(Counter, stream);
+      const first = await load(Counter, { stream: stream });
       expect(first.cache_hit).toBe(false);
-      const second = await load(Counter, stream);
+      const second = await load(Counter, { stream: stream });
       expect(second.cache_hit).toBe(true);
       expect(second.state).toEqual(first.state);
       expect(second.version).toBe(first.version);
@@ -126,7 +126,7 @@ describe("property: cache/store coherence", () => {
       await action(Counter, "inc", target(stream), { by });
     }
     for (const s of new Set(ops.map((o) => o.stream))) {
-      const snap = await load(Counter, s);
+      const snap = await load(Counter, { stream: s });
       // Read events directly to find the head version.
       const events: any[] = [];
       await store().query((e) => events.push(e), {

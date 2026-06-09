@@ -82,7 +82,7 @@ export const CreationSlice = slice()
   .withProjection(TicketProjection)
   .on("TicketOpened")
     .do(async function autoAssign(event, _stream, app) {
-      await app.do("AssignTicket", event.stream, { assignedTo: "default-agent" }, event);
+      await app.do("AssignTicket", event.stream, { assignedTo: "default-agent" }, { reactingTo: event });
     })
     .to(() => "default")
   .on("TicketEscalated")

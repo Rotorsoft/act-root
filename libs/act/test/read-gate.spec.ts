@@ -14,6 +14,7 @@ import {
 
 const userSchema = z.object({
   email: z.string().optional(),
+  name: z.string().optional(),
   plan: z.enum(["free", "pro"]).optional(),
 });
 
@@ -23,11 +24,15 @@ const userRegisteredSchema = z.object({
   plan: z.enum(["free", "pro"]),
 });
 
-// Owner-or-admin policy — typical real-world shape.
+// Owner-or-admin policy — typical real-world shape. The reducer copies
+// both sensitive event fields into state so the load-path mask (#861)
+// exercises its multi-match path.
 const User = state({ User: userSchema })
   .init(() => ({}))
   .emits({ UserRegistered: userRegisteredSchema })
-  .patch({ UserRegistered: ({ data }) => ({ email: data.email }) })
+  .patch({
+    UserRegistered: ({ data }) => ({ email: data.email, name: data.name }),
+  })
   .on({ register: userRegisteredSchema })
   .emit((p) => ["UserRegistered", p])
   .discloses(
@@ -89,7 +94,12 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
-  it("stranger registering user-1 sees REDACTED in the returned snapshot", async () => {
+  it("do() returns plaintext to the emitter regardless of .discloses — actor IS the source (#861)", async () => {
+    // The action handler runs against payload the caller just sent.
+    // No view gate on the return path — the caller already has the
+    // plaintext they submitted. .discloses governs reads (load/query),
+    // not writes; redacting a freshly-emitted event back to its
+    // originator would be theater.
     const app = act().withState(User).build();
     const [snap] = await app.do(
       "register",
@@ -97,13 +107,13 @@ describe("read-path PII gate (#855 slice 4)", () => {
       { email: "u@example.com", name: "Ursula", plan: "pro" }
     );
     expect(snap.event?.data).toEqual({
-      email: REDACTED,
-      name: REDACTED,
+      email: "u@example.com",
+      name: "Ursula",
       plan: "pro",
     });
   });
 
-  it("state without .discloses default-denies — REDACTED even when the actor 'should' see it", async () => {
+  it("do() on a state without .discloses also returns plaintext — same rationale", async () => {
     const app = act().withState(UserNoPolicy).build();
     const [snap] = await app.do(
       "register",
@@ -111,8 +121,8 @@ describe("read-path PII gate (#855 slice 4)", () => {
       { email: "u@example.com", name: "Ursula", plan: "free" }
     );
     expect(snap.event?.data).toEqual({
-      email: REDACTED,
-      name: REDACTED,
+      email: "u@example.com",
+      name: "Ursula",
       plan: "free",
     });
   });
@@ -127,7 +137,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
       { email: "u@example.com", name: "Ursula", plan: "free" }
     );
     await cache().invalidate("user-1");
-    const snap = await app.load(User, "user-1", undefined, undefined, owner);
+    const snap = await app.load(User, { stream: "user-1", actor: owner });
     expect(snap.event?.data).toEqual({
       email: "u@example.com",
       name: "Ursula",
@@ -143,7 +153,7 @@ describe("read-path PII gate (#855 slice 4)", () => {
       { email: "u@example.com", name: "Ursula", plan: "pro" }
     );
     await cache().invalidate("user-1");
-    const snap = await app.load(User, "user-1", undefined, undefined, stranger);
+    const snap = await app.load(User, { stream: "user-1", actor: stranger });
     expect(snap.event?.data).toEqual({
       email: REDACTED,
       name: REDACTED,
@@ -181,26 +191,14 @@ describe("read-path PII gate (#855 slice 4)", () => {
     // when the underlying pii column is gone.
     await store().forget_pii?.("user-1");
     await cache().invalidate("user-1");
-    const snapOwner = await app.load(
-      User,
-      "user-1",
-      undefined,
-      undefined,
-      owner
-    );
+    const snapOwner = await app.load(User, { stream: "user-1", actor: owner });
     expect(snapOwner.event?.data).toEqual({
       email: SHREDDED,
       name: SHREDDED,
       plan: "pro",
     });
     await cache().invalidate("user-1");
-    const snapAdmin = await app.load(
-      User,
-      "user-1",
-      undefined,
-      undefined,
-      admin
-    );
+    const snapAdmin = await app.load(User, { stream: "user-1", actor: admin });
     expect(snapAdmin.event?.data).toEqual({
       email: SHREDDED,
       name: SHREDDED,
@@ -208,23 +206,77 @@ describe("read-path PII gate (#855 slice 4)", () => {
     });
   });
 
-  // --- Reducer always sees plaintext, even when external gate redacts ---
+  // --- Reducer sees plaintext (deterministic state evolution), but the
+  //     load-path actor mask (#861) substitutes REDACTED for state fields
+  //     whose names match a sensitive event field when the caller isn't
+  //     authorized. Best-effort name-match — see `pii_mask_state`.
 
-  it("reducer sees plaintext — derived state stays correct under external redaction", async () => {
+  it("reducer sees plaintext; load-path mask redacts state for unauthorized actors (#861)", async () => {
     const app = act().withState(User).build();
     await app.do(
       "register",
       { stream: "user-1", actor: owner },
       { email: "real@example.com", name: "Ursula", plan: "free" }
     );
+    // The reducer runs against the actor-gated view, so state mirrors
+    // what the calling actor sees. Owner is authorized → plaintext in
+    // state and event. Stranger is not → REDACTED in both.
     await cache().invalidate("user-1");
-    // Load as a stranger. The external view of the event is REDACTED, but the
-    // reducer-derived state (which the reducer copies from event.data.email)
-    // should still hold the plaintext — verifies the reducer saw the merged
-    // view, not the gated one.
-    const snap = await app.load(User, "user-1", undefined, undefined, stranger);
-    expect(snap.state).toEqual({ email: "real@example.com" });
-    expect(snap.event?.data.email).toBe(REDACTED);
+    const snapOwner = await app.load(User, { stream: "user-1", actor: owner });
+    expect(snapOwner.state).toEqual({
+      email: "real@example.com",
+      name: "Ursula",
+    });
+    expect(snapOwner.event?.data.email).toBe("real@example.com");
+    await cache().invalidate("user-1");
+    const snapStranger = await app.load(User, {
+      stream: "user-1",
+      actor: stranger,
+    });
+    expect(snapStranger.state).toEqual({ email: REDACTED, name: REDACTED });
+    expect(snapStranger.event?.data.email).toBe(REDACTED);
+  });
+
+  // --- Pii-aware state with a non-sensitive event mixed in ---
+  // Exercises the `fields_by_event.get(name) ?? []` fallback in
+  // `state.view` and `pii_gate`'s empty-fields short-circuit.
+
+  it("pii-aware state with a non-sensitive event — load() passes it through unchanged", async () => {
+    const registeredSchema = z.object({
+      email: sensitive(z.string()),
+      name: sensitive(z.string()),
+      plan: z.enum(["free", "pro"]),
+    });
+    const promotedSchema = z.object({ plan: z.enum(["free", "pro"]) });
+    const MixedUser = state({ MixedUser: userSchema })
+      .init(() => ({}))
+      .emits({
+        UserRegistered2: registeredSchema,
+        UserPromoted: promotedSchema,
+      })
+      .patch({
+        UserRegistered2: ({ data }) => ({ email: data.email, name: data.name }),
+        UserPromoted: ({ data }, s) => ({ ...s, plan: data.plan }),
+      })
+      .on({ register: registeredSchema })
+      .emit((action) => ["UserRegistered2", action])
+      .on({ promote: promotedSchema })
+      .emit((action) => ["UserPromoted", action])
+      .discloses(() => true)
+      .build();
+    const app = act().withState(MixedUser).build();
+    await app.do(
+      "register",
+      { stream: "u-mix", actor: owner },
+      { email: "m@example.com", name: "Mira", plan: "free" }
+    );
+    await app.do("promote", { stream: "u-mix", actor: owner }, { plan: "pro" });
+    await cache().invalidate("u-mix");
+    const snap = await app.load(MixedUser, { stream: "u-mix", actor: owner });
+    // The last event is non-sensitive — view's fallback path hits the
+    // empty-fields short-circuit and returns the event unchanged.
+    expect(snap.event?.name).toBe("UserPromoted");
+    expect(snap.event?.data).toEqual({ plan: "pro" });
   });
 
   // --- Non-sensitive events: zero-cost passthrough ---

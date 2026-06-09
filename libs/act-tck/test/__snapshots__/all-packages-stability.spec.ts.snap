@@ -17,7 +17,6 @@ import {
   merge_projection,
   pii_fields,
   pii_gate,
-  pii_merge,
   pii_split,
   pii_strip,
   register_state,
@@ -356,15 +355,18 @@ export function act<
   // same builder cast to the widened generic; type fanout is preserved
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
-  // Caches behind registry.sensitive_fields / registry.disclosure_predicate.
-  // Populated on the first .build() call.
+  // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
+  // registry.deprecated_events. Populated on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
+  const _de = new Map<string, ReadonlySet<string>>();
+  const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
+    deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
   };
   const pending_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
@@ -378,10 +380,11 @@ export function act<
   // ACT-403: auto-deprecation enforcement. Groups each state's events
   // by base name + \`_v<digits>\`; the highest version is current, all
   // lower ones are deprecated. Stashes the deprecation set on the
-  // state so \`event-sourcing.ts\` can warn at runtime for dynamic
-  // emits. Scans static \`.emit("X")\` markers across every state and
-  // throws if any target a deprecated event — the only legitimate use
-  // of a deprecated event is on the reduce path. Finally, surfaces a
+  // registry (\`registry.deprecated_events(state_name)\`) so the
+  // orchestrator can warn post-commit when an action emits one.
+  // Scans static \`.emit("X")\` markers across every state and throws
+  // if any target a deprecated event — the only legitimate use of a
+  // deprecated event is on the reduce path. Finally, surfaces a
   // one-line startup advisory so operators can see "your app has
   // legacy events kept for the read path, here's where they live."
   const finalize_deprecations = () => {
@@ -394,7 +397,7 @@ export function act<
       const event_names = Object.keys(state.events);
       const deprecated = deprecated_event_names(event_names);
       if (deprecated.size === 0) continue;
-      (state as { _deprecated?: Set<string> })._deprecated = deprecated;
+      _de.set(state.name, deprecated);
       for (const name of deprecated) {
         // \`current_version_of\` is guaranteed non-undefined here — \`name\`
         // is in \`deprecated\`, which by construction means a higher-
@@ -615,22 +618,22 @@ export function act<
               );
             }
             const disclose = state.disclose ?? null;
-            state.view = (event, actor) => {
-              const fields = fields_by_event.get(event.name as string);
-              return fields ? pii_gate(event, fields, disclose, actor) : event;
-            };
+            state.pii_aware = true;
+            // A pii-aware state can still declare events with no
+            // sensitive markers — \`fields_by_event\` only contains the
+            // sensitive ones. The non-sensitive lookup hits \`?? []\`,
+            // and \`pii_gate\` short-circuits on empty fields.
+            state.view = (event, actor) =>
+              pii_gate(
+                event,
+                fields_by_event.get(event.name as string) ?? [],
+                disclose,
+                actor
+              );
             state.message = (validated) => {
               const fields = fields_by_event.get(validated.name as string);
               return fields ? pii_split(validated, fields) : validated;
             };
-            // \`state-builder\` guarantees a passthrough reducer per declared
-            // event, so the lookup is never undefined here. Plain reducers
-            // (for this state's non-sensitive events) stay unwrapped.
-            for (const [event_name, fields] of fields_by_event) {
-              const original = state.patch[event_name];
-              state.patch[event_name] = (event, s) =>
-                original(pii_merge(event, fields), s);
-            }
           }
           for (const [target, original] of batch_handlers) {
             const wrapped = async (events: any[], stream: string) => {
@@ -695,6 +698,7 @@ import type {
   CloseTarget,
   Committed,
   Correlator,
+  DoOptions,
   Drain,
   DrainOptions,
   EventSink,
@@ -702,6 +706,7 @@ import type {
   IAct,
   LaneConfig,
   Lease,
+  LoadTarget,
   Logger,
   Query,
   Registry,
@@ -1262,8 +1267,9 @@ export class Act<
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
-   * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation (use carefully, for performance)
+   * @param options - Per-call dispatch options ({@link DoOptions}) —
+   *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+   *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -1318,7 +1324,7 @@ export class Act<
    *         { amount: event.data.items.length }
    *       );
    *       // To use a different correlation, pass reactingTo explicitly:
-   *       // await app.do("reduceStock", target, payload, customEvent);
+   *       // await app.do("reduceStock", target, payload, { reactingTo: customEvent });
    *     })
    *     .to("inventory-1")
    *   .build();
@@ -1332,8 +1338,7 @@ export class Act<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<TEvents, string & keyof TEvents>,
-    skipValidation = false
+    options?: DoOptions<TEvents>
   ) {
     return this._scoped(async () => {
       const snapshots = await this._es.action(
@@ -1341,8 +1346,7 @@ export class Act<
         action,
         target,
         payload,
-        reactingTo,
-        skipValidation
+        options
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions
@@ -1402,6 +1406,7 @@ export class Act<
    *
    * @see {@link Snapshot} for snapshot structure
    */
+  // Anonymous load (bare stream) — sensitive fields come back as REDACTED.
   async load<
     TNewState extends Schema,
     TNewEvents extends Schemas,
@@ -1410,22 +1415,34 @@ export class Act<
     state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
     callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<TNewState, TNewEvents>>;
   async load<TKey extends keyof TStateMap & string>(
     name: TKey,
     stream: string,
     callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
+  ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
+  // Auth-aware load — runs \`.discloses(predicate)\` against the supplied actor.
+  async load<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    state: State<TNewState, TNewEvents, TNewActions>,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void
+  ): Promise<Snapshot<TNewState, TNewEvents>>;
+  async load<TKey extends keyof TStateMap & string>(
+    name: TKey,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void
   ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
   async load<TNewState extends Schema>(
     stateOrName: State<TNewState, any, any> | string,
-    stream: string,
+    streamOrTarget: string | LoadTarget<TActor>,
     callback?: (snapshot: Snapshot<any, any>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<any, any>> {
     return this._scoped(async () => {
       let merged: State<any, any, any>;
@@ -1436,9 +1453,18 @@ export class Act<
       } else {
         merged = this._states.get(stateOrName.name) || stateOrName;
       }
-      // When \`actor\` is omitted the read default-denies — sensitive fields
-      // come back as [REDACTED] regardless of any \`.discloses\` predicate.
-      return await this._es.load(merged, stream, callback, asOf, actor);
+      // Normalize the two surfaces: bare-stream (default-deny — actor
+      // undefined → REDACTED on the discloses check) vs LoadTarget
+      // (auth-aware — actor flows into \`.discloses(predicate)\`).
+      const target: LoadTarget<Actor> =
+        typeof streamOrTarget === "string"
+          ? {
+              stream: streamOrTarget,
+              actor: undefined as unknown as Actor,
+              asOf,
+            }
+          : streamOrTarget;
+      return await this._es.load(merged, target, callback);
     });
   }
 
@@ -2280,6 +2306,29 @@ export type Target<TActor extends Actor = Actor> = {
 };
 
 /**
+ * Auth-aware target for \`IAct.load\`. Symmetric with {@link Target} (used by
+ * \`IAct.do\`) but without \`expectedVersion\` — load is a read, not a write —
+ * and with optional \`asOf\` for time-travel.
+ *
+ * Passing a \`LoadTarget\` (rather than a bare \`stream\` string) is the
+ * framework's explicit "I'm reading on behalf of this actor" signal. The
+ * read-path runs the state's \`.discloses(predicate)\` against this actor;
+ * sensitive fields come back as plaintext when authorized, \`[REDACTED]\`
+ * otherwise. The bare-string load form always default-denies (everything
+ * comes back \`[REDACTED]\`), so callers who need plaintext access must
+ * explicitly construct a \`LoadTarget\`. \`actor\` is optional — anonymous
+ * background calls (close-cycle replay, internal restart seeding) pass
+ * just the stream and get the default-deny path.
+ *
+ * @template TActor - The actor type bound at \`act().withActor<TActor>()\`.
+ */
+export type LoadTarget<TActor extends Actor = Actor> = {
+  readonly stream: string;
+  readonly actor?: TActor;
+  readonly asOf?: AsOf;
+};
+
+/**
  * Metadata describing the causation of an event.
  */
 export type CausationEvent = z.infer<typeof CausationEventSchema>;
@@ -2708,6 +2757,31 @@ export type ActionOptions = {
 };
 
 /**
+ * Per-call dispatch options for {@link IAct.do} — grouped to keep the
+ * public signature stable as new optional knobs are added.
+ *
+ * @property reactingTo - The committed event that triggered this action.
+ *   Threads the correlation chain (\`correlation\` + \`causation.event\`)
+ *   through the new commit. Inside reaction handlers, the framework
+ *   auto-injects the triggering event; pass an explicit value here only
+ *   to override.
+ * @property correlator - Per-call correlator override. When omitted,
+ *   falls back to the orchestrator-level {@link ActOptions.correlator}
+ *   (or the framework default). Useful when a single dispatch needs to
+ *   thread an externally-supplied trace id without globally swapping
+ *   the strategy.
+ */
+export type DoOptions<_TEvents extends Schemas = Schemas> = {
+  /**
+   * Wide type — \`reactingTo\` is typically a foreign event from another
+   * state's emission, threading correlation through a reaction. It is
+   * NOT constrained to the receiving state's event union.
+   */
+  readonly reactingTo?: Committed<Schemas, keyof Schemas>;
+  readonly correlator?: Correlator;
+};
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -2740,13 +2814,13 @@ export type State<
    * default-denies on every external read (sensitive fields are always
    * substituted with \`"[REDACTED]"\`). See #855 / epic #566.
    */
-  // The stored predicate is erased — \`any\` for the event makes the field
-  // signature bivariant so a narrow \`State<{count: number}, {Counted: ...},
-  // ...>\` is assignable to \`State<any, any, any>\` without TypeScript blocking
-  // on contravariant function params. The public \`.discloses()\` method on the
-  // builder keeps the narrow signature so users still get type-checked predicates.
-  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
-  disclose?: (event: any, actor: Actor) => boolean;
+  // Method-shorthand syntax — bivariant on parameters under
+  // \`strictFunctionTypes\`, so a narrow \`State<{count: number},
+  // {Counted: ...}, ...>\` stays assignable to \`State<any, any, any>\`.
+  // The public \`.discloses()\` builder method keeps the narrow
+  // signature so users still get a type-checked predicate at the
+  // call site.
+  disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -2755,26 +2829,36 @@ export type State<
    *
    * - \`view(event, actor)\` — produces the caller-visible form of a
    *   committed event (gates \`sensitive(...)\` fields via \`.discloses\` on
-   *   PII-aware states; identity otherwise).
+   *   PII-aware states; identity otherwise). The reducer chain runs
+   *   against this gated view, so derived state reflects what the
+   *   calling actor is allowed to see.
    * - \`message(validated)\` — produces the \`{name, data, pii?}\` shape that
    *   goes to \`Store.commit\` (peels sensitive fields off \`data\` into
    *   \`pii\` on PII-aware states; identity otherwise).
-   * - \`patch[eventName]\` — already on State as the per-event reducer.
-   *   Wrapped at build time to merge PII into \`data\` first when the
-   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * \`pii_aware\` is \`true\` when any of the state's events declare
+   * \`sensitive(...)\` fields. Drives the cache-write gate in \`load()\` /
+   * \`action()\` (#861): pii-aware states never populate the snapshot
+   * cache because state evolves from the actor-gated event view, so
+   * the cached state would vary by caller. Pure states cache normally.
    *
    * Internal, always set after build, never assigned by user code.
    *
    * @internal
    */
-  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
-  view: (event: any, actor: Actor | undefined) => any;
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  message: (validated: { name: any; data: any }) => {
-    name: any;
-    data: any;
-    pii?: Record<string, unknown>;
-  };
+  pii_aware: boolean;
+  // Method-shorthand syntax — bivariant on parameters, so
+  // \`State<specific>\` stays assignable to \`State<any, any, any>\`. No
+  // \`any\` escapes needed: \`view\` operates on the event union; \`message\`
+  // on the message union (a \`Message<TEvents, TKey>\` with optional
+  // \`pii\` after split).
+  view(
+    event: Committed<TEvents, keyof TEvents>,
+    actor: Actor | undefined
+  ): Committed<TEvents, keyof TEvents>;
+  message(
+    validated: Message<TEvents, keyof TEvents>
+  ): Message<TEvents, keyof TEvents>;
 };
 
 /**
@@ -2872,7 +2956,7 @@ export type CloseResult = {
  * >;
  *
  * async function myReaction(event: ..., stream: string, app: App) {
- *   await app.do("someAction", target, payload, event);
+ *   await app.do("someAction", target, payload, { reactingTo: event });
  *   const snapshot = await app.load(MyState, "stream-1");
  *   const events = await app.query_array({ stream: "stream-1" });
  * }
@@ -3100,15 +3184,35 @@ export interface IAct<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<Schemas, string>,
-    skipValidation?: boolean
+    options?: DoOptions<TEvents>
   ): Promise<Snapshot<any, any>[]>;
 
+  /**
+   * Load a state snapshot for a stream. Two shapes:
+   *
+   * **Anonymous (bare stream)** — \`load(state, stream, callback?, asOf?)\`.
+   * The framework default-denies on every PII gate: sensitive event fields
+   * come back as \`[REDACTED]\`, state fields whose names match sensitive
+   * event fields are also \`[REDACTED]\`. Use this when the caller has no
+   * authorization context (background workers, observability probes, etc.).
+   *
+   * **Auth-aware (LoadTarget)** — \`load(state, {stream, actor, asOf?},
+   * callback?)\`. Symmetric with \`IAct.do(state, target, payload)\`. The
+   * read runs the state's \`.discloses(predicate)\` against the supplied
+   * actor; sensitive fields come back as plaintext when the predicate
+   * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
+   * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
+   */
   load(
     state: State<any, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void,
     asOf?: AsOf
+  ): Promise<Snapshot<any, any>>;
+  load(
+    state: State<any, any, any> | string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>>;
 
   query(
@@ -4388,7 +4492,7 @@ async function load_restart_seeds(
           );
           return;
         }
-        const snap = await load(owner_state, stream);
+        const snap = await load(owner_state, { stream });
         seed_states.set(stream, snap.state as Schema);
       })
   );
@@ -6407,19 +6511,19 @@ export class NonRetryableError extends Error {
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
   InvariantError,
   StreamClosedError,
 } from "../types/errors.js";
 import type {
-  AsOf,
   Committed,
   Correlator,
+  DoOptions,
   Emitted,
   EventMeta,
   EventSource,
+  LoadTarget,
   ScanOptions,
   ScanResult,
   Schema,
@@ -6456,8 +6560,7 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation?: boolean
+  options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -6682,7 +6785,6 @@ export async function scan(
           migrated = {
             ...event,
             name: migration.to as typeof event.name,
-            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
             data: new_data as any,
           };
           migrated_count++;
@@ -6771,11 +6873,10 @@ export async function load<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  stream: string,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  asOf?: AsOf,
-  actor?: Actor
+  target: LoadTarget,
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void
 ): Promise<Snapshot<TState, TEvents>> {
+  const { stream, actor, asOf } = target;
   const time_travel =
     !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = time_travel ? undefined : await cache().get<TState>(stream);
@@ -6783,42 +6884,37 @@ export async function load<
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
-  // version always reflects stream head: starts from the cached version
-  // (or -1 for a fresh stream / cache miss), advances per event seen.
-  let version = cached?.version ?? -1;
   // replayed counts events processed by THIS load only (snap or patch);
   // distinct from \`patches\` (the snap-distance accumulator carried over
   // from the cache).
   let replayed = 0;
-  let event: Committed<TEvents, string> | undefined;
+  let event: Committed<TEvents, keyof TEvents> | undefined;
 
-  await store().query(
-    (e) => {
-      version = e.version;
-      const typed = e as Committed<TEvents, string>;
-      event = me.view(typed, actor);
-      if (e.name === SNAP_EVENT) {
-        state = e.data as TState;
+  await store().query<TEvents>(
+    (raw) => {
+      event = me.view(raw, actor);
+      if (event.name === SNAP_EVENT) {
+        state = event.data as TState;
         snaps++;
         patches = 0;
         replayed++;
-      } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](typed, state));
+      } else if (me.patch[event.name]) {
+        state = patch(state, me.patch[event.name](event, state));
         patches++;
         replayed++;
-      } else if (e.name !== TOMBSTONE_EVENT) {
+      } else if (event.name !== TOMBSTONE_EVENT) {
         // Unknown event — not in this state's reducer map. Causes:
         // deleted/renamed event in a versioned schema, load() called with
         // the wrong state, or stream contamination. Skipping silently
         // would corrupt replay; warn so the operator can investigate.
         log().warn(
-          \`Skipping unknown event "\${String(e.name)}" on stream "\${stream}" (id=\${e.id}) — no reducer in state "\${me.name}"\`
+          \`Skipping unknown event "\${String(event.name)}" on stream "\${stream}" (id=\${event.id}) — no reducer in state "\${me.name}"\`
         );
       }
       callback?.({
         event,
         state,
-        version,
+        version: event.version,
         patches,
         snaps,
         cache_hit,
@@ -6840,17 +6936,25 @@ export async function load<
   // event_id, picks up missed events, and replays — so an "older" cache
   // write from a concurrent slower load is self-correcting on next access.
   // Time-travel loads bypass cache entirely and skip this too.
-  if (replayed > 0 && !time_travel && event) {
+  if (replayed > 0 && !time_travel && event && !me.pii_aware) {
     await cache().set(stream, {
       state,
-      version,
+      version: event.version,
       event_id: event.id,
       patches,
       snaps,
     });
   }
 
-  return { event, state, version, patches, snaps, cache_hit, replayed };
+  return {
+    event,
+    state,
+    version: event?.version ?? cached?.version ?? -1,
+    patches,
+    snaps,
+    cache_hit,
+    replayed,
+  };
 }
 
 /**
@@ -6876,8 +6980,9 @@ export async function load<
  * @param action The action to execute
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
- * @param reactingTo (Optional) The event that the action is reacting to
- * @param skipValidation (Optional) Whether to skip validation (not recommended)
+ * @param options Per-call dispatch options ({@link DoOptions}) —
+ *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+ *   framework or orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -6893,29 +6998,21 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation = false,
-  correlator: Correlator = default_correlator
+  options?: DoOptions<TEvents>
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
+  const reactingTo = options?.reactingTo;
+  const correlator = options?.correlator ?? default_correlator;
 
-  const validated = skipValidation
-    ? payload
-    : validate(action as string, payload, me.actions[action]);
+  const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
   const max_retries = opts?.maxRetries ?? 0;
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(
-        me,
-        stream,
-        undefined,
-        undefined,
-        target.actor
-      );
+      const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       const expected = expectedVersion ?? snapshot.event?.version;
@@ -6946,35 +7043,11 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // ACT-403: warn once per process per event name when a dynamic
-      // \`.emit((a) => ["X", ...])\` produces a deprecated event. Static
-      // \`.emit("X")\` is already caught at build time by act-builder; this
-      // is the runtime safety net for the dynamic form, which the static
-      // checker can't inspect. The \`_warned\` set lives on the state so
-      // multiple Act instances over the same merged state share idempotency.
-      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-      if (deprecated && deprecated.size > 0) {
-        const me_ = me as { _warned?: Set<string> };
-        const warned = me_._warned ?? (me_._warned = new Set<string>());
-        for (const [name] of tuples) {
-          const evt = name as string;
-          if (deprecated.has(evt) && !warned.has(evt)) {
-            warned.add(evt);
-            log().warn(
-              \`Action "\${String(action)}" emitted deprecated event "\${evt}". \` +
-                \`A newer version exists in the registry — update the action's \` +
-                \`.emit() to target the current version. (warned once per process)\`
-            );
-          }
-        }
-      }
-
-      const emitted = tuples.map(([name, data]) => {
-        const validated = skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]);
-        return me.message({ name, data: validated });
-      });
+      const valid = tuples.map(([name, data]) => ({
+        name,
+        data: validate(name as string, data, me.events[name]),
+      }));
+      const emitted = valid.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -6995,7 +7068,7 @@ export async function action<
           event: reactingTo
             ? {
                 id: reactingTo.id,
-                name: reactingTo.name,
+                name: reactingTo.name as string,
                 stream: reactingTo.stream,
               }
             : undefined,
@@ -7023,12 +7096,18 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      const snapshots = committed.map((event) => {
+      const snapshots = committed.map((row, i) => {
+        // Actions originate from the caller — they already hold the
+        // plaintext payload they sent. No view/gate round-trip is
+        // useful; the reducer and the returned snapshot see the
+        // pre-split event directly. pii_split (in \`me.message\`) above
+        // is the only PII operation on the action path.
+        const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
         return {
-          event: me.view(event, target.actor),
+          event,
           state,
           version: event.version,
           patches,
@@ -7043,18 +7122,25 @@ export async function action<
       const last = snapshots.at(-1)!;
       const snapped = me.snap?.(last);
 
+      // #861: \`has_open_pii\` was set above during \`emitted.map\` — when
+      // any commit carries open PII the derived state may hold plaintext
+      // (reducers that copy sensitive fields into state against the soft
+      // rule), so we refuse to populate the cache. Post-forget commits
+      // never have pii; cache populates normally on the next access.
       // Update cache with post-commit state (reset patches if snapped).
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).
-      cache()
-        .set<TState>(stream, {
-          state: last.state,
-          version: last.event.version,
-          event_id: last.event.id,
-          patches: snapped ? 0 : last.patches,
-          snaps: snapped ? last.snaps + 1 : last.snaps,
-        })
-        .catch((err) => log().error(err));
+      if (!me.pii_aware) {
+        cache()
+          .set<TState>(stream, {
+            state: last.state,
+            version: last.event.version,
+            event_id: last.event.id,
+            patches: snapped ? 0 : last.patches,
+            snaps: snapped ? last.snaps + 1 : last.snaps,
+          })
+          .catch((err) => log().error(err));
+      }
 
       // Persist snap to store for cold-start durability. Fire-and-forget:
       // snap() has its own try/catch that logs failures, so the rejection
@@ -8340,7 +8426,6 @@ export {
   _registry,
   pii_fields,
   pii_gate,
-  pii_merge,
   pii_split,
   pii_strip,
   REDACTED,
@@ -10896,6 +10981,7 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
+  type DoOptions,
   type IAct,
   type Lease,
   type Logger,
@@ -11025,16 +11111,13 @@ export function build_handle<
         action: TKey,
         target: Target<TActor>,
         action_payload: Readonly<TActions[TKey]>,
-        reactingTo?: Committed<Schemas, string>,
-        skipValidation?: boolean
+        options?: DoOptions<TEvents>
       ) =>
-        bound_do(
-          action,
-          target,
-          action_payload,
-          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skipValidation
-        );
+        bound_do(action, target, action_payload, {
+          ...options,
+          reactingTo:
+            options?.reactingTo ?? (event as Committed<Schemas, string>),
+        });
       try {
         await handler(event, stream, scoped_app);
         at = event.id;
@@ -11163,6 +11246,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -11182,6 +11276,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**
@@ -11476,61 +11571,19 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  *
  * @internal
  */
-export function pii_split(
-  emitted: { name: unknown; data: unknown },
+export function pii_split<TName, TData extends Record<string, unknown>>(
+  emitted: { name: TName; data: TData },
   fields: readonly string[]
-): { name: unknown; data: unknown; pii: Record<string, unknown> } {
-  const rec = emitted.data as Record<string, unknown>;
-  const clean: Record<string, unknown> = {};
+): { name: TName; data: TData; pii: Record<string, unknown> } {
+  const data = { ...emitted.data };
   const pii: Record<string, unknown> = {};
-  for (const k of Object.keys(rec)) {
-    if (fields.includes(k)) pii[k] = rec[k];
-    else clean[k] = rec[k];
+  for (const f of fields) {
+    if (f in data) {
+      pii[f] = data[f];
+      delete data[f];
+    }
   }
-  return { name: emitted.name, data: clean, pii };
-}
-
-/**
- * Build the **reducer view** of a committed event — sensitive fields merged
- * back into \`data\` so per-state reducers always see plaintext.
- *
- * - Event with no \`pii\` payload AND no schema-declared sensitive fields →
- *   return the event unchanged (zero-cost path).
- * - Event with a \`pii\` payload → merge into \`data\` (plaintext for the reducer).
- * - Event whose schema *declares* sensitive fields but \`pii\` is null/undefined
- *   (post-\`forget_pii\`) → substitute {@link SHREDDED} for each declared field.
- *
- * Used inside \`load()\` before invoking the reducer chain. Reducer-visible PII
- * is by design — the reducer is the source of truth for derived state. The
- * external view returned to callers is separately gated by {@link pii_gate}.
- *
- * @internal
- */
-export function pii_merge<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
-  event: Committed<TEvents, TKey>,
-  fields: readonly string[]
-): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. Callers (the State's \`_pii_merge\`
-  // decorator) filter on \`fields_by_event.get(name)\` before invocation, so the
-  // empty-fields short-circuit lives at the caller, not here.
-  const data = event.data as Record<string, unknown>;
-  const pii = event.pii;
-  if (pii != null) {
-    return {
-      ...event,
-      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
-    };
-  }
-  // Schema declared sensitive fields but the pii payload is gone — shredded.
-  const shredded: Record<string, unknown> = { ...data };
-  for (const f of fields) shredded[f] = SHREDDED;
-  return {
-    ...event,
-    data: shredded as Committed<TEvents, TKey>["data"],
-  };
+  return { name: emitted.name, data, pii };
 }
 
 /**
@@ -11550,17 +11603,13 @@ export function pii_merge<
  *
  * @internal
  */
-export function pii_gate<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
+export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. The State's \`_pii_gate\` decorator
-  // filters on \`fields_by_event.get(name)\` before invocation.
+  if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
     const shredded: Record<string, unknown> = { ...data };
@@ -11956,7 +12005,7 @@ export type SliceBuilder<
  *   .withState(TicketCreation)
  *   .withState(TicketOperations) // handler can dispatch AssignTicket
  *   .on("TicketOpened").do(async (event, _stream, app) => {
- *     await app.do("AssignTicket", target, payload, event);
+ *     await app.do("AssignTicket", target, payload, { reactingTo: event });
  *   })
  *   .build();
  * \`\`\`
@@ -12632,9 +12681,10 @@ export function state<TName extends string, TState extends Schema>(
             init,
             patch: default_patch,
             on: {},
-            // Step delegates initialized as identity. \`act().build()\`
-            // overrides on states with \`sensitive(...)\` events to bake in
-            // the gate / split.
+            // Step delegates initialized as identity, \`pii_aware\` false.
+            // \`act().build()\` flips both on states with \`sensitive(...)\`
+            // events to bake in the gate / split and gate the cache write.
+            pii_aware: false,
             view: (event) => event,
             message: (validated) => validated,
           };
@@ -12931,26 +12981,17 @@ export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator
 ): EsOps {
-  // \`es.action\` takes \`correlator\` as its last positional arg; bind it once
-  // here so the orchestrator's \`EsOps.action\` keeps the original 6-arg
-  // signature.
+  // Bake the orchestrator-level \`correlator\` into every \`action()\` call
+  // so EsOps callers don't need to thread it. A per-call
+  // \`options.correlator\` still wins — the orchestrator default fills in
+  // only when the caller didn't supply one.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
-    reactingTo,
-    skipValidation = false
-  ) =>
-    es.action(
-      me,
-      action_name,
-      target,
-      payload,
-      reactingTo,
-      skipValidation,
-      correlator
-    );
+    options
+  ) => es.action(me, action_name, target, payload, { correlator, ...options });
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -12969,7 +13010,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
+    load: traced(es.load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -12980,7 +13021,7 @@ export function build_es(
         es_caption(
           "load",
           C_GREEN,
-          \`\${stream}\${as_of_marker(asOf)} \${cache_marker(result.cache_hit)} \${stats}\`
+          \`\${target.stream}\${as_of_marker(target.asOf)} \${cache_marker(result.cache_hit)} \${stats}\`
         )
       );
     }),
@@ -13295,6 +13336,7 @@ import type {
   CloseTarget,
   Committed,
   Correlator,
+  DoOptions,
   Drain,
   DrainOptions,
   EventSink,
@@ -13302,6 +13344,7 @@ import type {
   IAct,
   LaneConfig,
   Lease,
+  LoadTarget,
   Logger,
   Query,
   Registry,
@@ -13862,8 +13905,9 @@ export class Act<
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
-   * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation (use carefully, for performance)
+   * @param options - Per-call dispatch options ({@link DoOptions}) —
+   *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+   *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -13918,7 +13962,7 @@ export class Act<
    *         { amount: event.data.items.length }
    *       );
    *       // To use a different correlation, pass reactingTo explicitly:
-   *       // await app.do("reduceStock", target, payload, customEvent);
+   *       // await app.do("reduceStock", target, payload, { reactingTo: customEvent });
    *     })
    *     .to("inventory-1")
    *   .build();
@@ -13932,8 +13976,7 @@ export class Act<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<TEvents, string & keyof TEvents>,
-    skipValidation = false
+    options?: DoOptions<TEvents>
   ) {
     return this._scoped(async () => {
       const snapshots = await this._es.action(
@@ -13941,8 +13984,7 @@ export class Act<
         action,
         target,
         payload,
-        reactingTo,
-        skipValidation
+        options
       );
       // Arm the drain when any committed event has reactions (ACT-1103:
       // arm only the lanes whose reactions match — events whose reactions
@@ -14002,6 +14044,7 @@ export class Act<
    *
    * @see {@link Snapshot} for snapshot structure
    */
+  // Anonymous load (bare stream) — sensitive fields come back as REDACTED.
   async load<
     TNewState extends Schema,
     TNewEvents extends Schemas,
@@ -14010,22 +14053,34 @@ export class Act<
     state: State<TNewState, TNewEvents, TNewActions>,
     stream: string,
     callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<TNewState, TNewEvents>>;
   async load<TKey extends keyof TStateMap & string>(
     name: TKey,
     stream: string,
     callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
+  ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
+  // Auth-aware load — runs \`.discloses(predicate)\` against the supplied actor.
+  async load<
+    TNewState extends Schema,
+    TNewEvents extends Schemas,
+    TNewActions extends Schemas,
+  >(
+    state: State<TNewState, TNewEvents, TNewActions>,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TNewState, TNewEvents>) => void
+  ): Promise<Snapshot<TNewState, TNewEvents>>;
+  async load<TKey extends keyof TStateMap & string>(
+    name: TKey,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<TStateMap[TKey], TEvents>) => void
   ): Promise<Snapshot<TStateMap[TKey], TEvents>>;
   async load<TNewState extends Schema>(
     stateOrName: State<TNewState, any, any> | string,
-    stream: string,
+    streamOrTarget: string | LoadTarget<TActor>,
     callback?: (snapshot: Snapshot<any, any>) => void,
-    asOf?: AsOf,
-    actor?: Actor
+    asOf?: AsOf
   ): Promise<Snapshot<any, any>> {
     return this._scoped(async () => {
       let merged: State<any, any, any>;
@@ -14036,9 +14091,18 @@ export class Act<
       } else {
         merged = this._states.get(stateOrName.name) || stateOrName;
       }
-      // When \`actor\` is omitted the read default-denies — sensitive fields
-      // come back as [REDACTED] regardless of any \`.discloses\` predicate.
-      return await this._es.load(merged, stream, callback, asOf, actor);
+      // Normalize the two surfaces: bare-stream (default-deny — actor
+      // undefined → REDACTED on the discloses check) vs LoadTarget
+      // (auth-aware — actor flows into \`.discloses(predicate)\`).
+      const target: LoadTarget<Actor> =
+        typeof streamOrTarget === "string"
+          ? {
+              stream: streamOrTarget,
+              actor: undefined as unknown as Actor,
+              asOf,
+            }
+          : streamOrTarget;
+      return await this._es.load(merged, target, callback);
     });
   }
 
@@ -14880,6 +14944,29 @@ export type Target<TActor extends Actor = Actor> = {
 };
 
 /**
+ * Auth-aware target for \`IAct.load\`. Symmetric with {@link Target} (used by
+ * \`IAct.do\`) but without \`expectedVersion\` — load is a read, not a write —
+ * and with optional \`asOf\` for time-travel.
+ *
+ * Passing a \`LoadTarget\` (rather than a bare \`stream\` string) is the
+ * framework's explicit "I'm reading on behalf of this actor" signal. The
+ * read-path runs the state's \`.discloses(predicate)\` against this actor;
+ * sensitive fields come back as plaintext when authorized, \`[REDACTED]\`
+ * otherwise. The bare-string load form always default-denies (everything
+ * comes back \`[REDACTED]\`), so callers who need plaintext access must
+ * explicitly construct a \`LoadTarget\`. \`actor\` is optional — anonymous
+ * background calls (close-cycle replay, internal restart seeding) pass
+ * just the stream and get the default-deny path.
+ *
+ * @template TActor - The actor type bound at \`act().withActor<TActor>()\`.
+ */
+export type LoadTarget<TActor extends Actor = Actor> = {
+  readonly stream: string;
+  readonly actor?: TActor;
+  readonly asOf?: AsOf;
+};
+
+/**
  * Metadata describing the causation of an event.
  */
 export type CausationEvent = z.infer<typeof CausationEventSchema>;
@@ -15308,6 +15395,31 @@ export type ActionOptions = {
 };
 
 /**
+ * Per-call dispatch options for {@link IAct.do} — grouped to keep the
+ * public signature stable as new optional knobs are added.
+ *
+ * @property reactingTo - The committed event that triggered this action.
+ *   Threads the correlation chain (\`correlation\` + \`causation.event\`)
+ *   through the new commit. Inside reaction handlers, the framework
+ *   auto-injects the triggering event; pass an explicit value here only
+ *   to override.
+ * @property correlator - Per-call correlator override. When omitted,
+ *   falls back to the orchestrator-level {@link ActOptions.correlator}
+ *   (or the framework default). Useful when a single dispatch needs to
+ *   thread an externally-supplied trace id without globally swapping
+ *   the strategy.
+ */
+export type DoOptions<_TEvents extends Schemas = Schemas> = {
+  /**
+   * Wide type — \`reactingTo\` is typically a foreign event from another
+   * state's emission, threading correlation through a reaction. It is
+   * NOT constrained to the receiving state's event union.
+   */
+  readonly reactingTo?: Committed<Schemas, keyof Schemas>;
+  readonly correlator?: Correlator;
+};
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -15340,13 +15452,13 @@ export type State<
    * default-denies on every external read (sensitive fields are always
    * substituted with \`"[REDACTED]"\`). See #855 / epic #566.
    */
-  // The stored predicate is erased — \`any\` for the event makes the field
-  // signature bivariant so a narrow \`State<{count: number}, {Counted: ...},
-  // ...>\` is assignable to \`State<any, any, any>\` without TypeScript blocking
-  // on contravariant function params. The public \`.discloses()\` method on the
-  // builder keeps the narrow signature so users still get type-checked predicates.
-  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
-  disclose?: (event: any, actor: Actor) => boolean;
+  // Method-shorthand syntax — bivariant on parameters under
+  // \`strictFunctionTypes\`, so a narrow \`State<{count: number},
+  // {Counted: ...}, ...>\` stays assignable to \`State<any, any, any>\`.
+  // The public \`.discloses()\` builder method keeps the narrow
+  // signature so users still get a type-checked predicate at the
+  // call site.
+  disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -15355,26 +15467,36 @@ export type State<
    *
    * - \`view(event, actor)\` — produces the caller-visible form of a
    *   committed event (gates \`sensitive(...)\` fields via \`.discloses\` on
-   *   PII-aware states; identity otherwise).
+   *   PII-aware states; identity otherwise). The reducer chain runs
+   *   against this gated view, so derived state reflects what the
+   *   calling actor is allowed to see.
    * - \`message(validated)\` — produces the \`{name, data, pii?}\` shape that
    *   goes to \`Store.commit\` (peels sensitive fields off \`data\` into
    *   \`pii\` on PII-aware states; identity otherwise).
-   * - \`patch[eventName]\` — already on State as the per-event reducer.
-   *   Wrapped at build time to merge PII into \`data\` first when the
-   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * \`pii_aware\` is \`true\` when any of the state's events declare
+   * \`sensitive(...)\` fields. Drives the cache-write gate in \`load()\` /
+   * \`action()\` (#861): pii-aware states never populate the snapshot
+   * cache because state evolves from the actor-gated event view, so
+   * the cached state would vary by caller. Pure states cache normally.
    *
    * Internal, always set after build, never assigned by user code.
    *
    * @internal
    */
-  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
-  view: (event: any, actor: Actor | undefined) => any;
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  message: (validated: { name: any; data: any }) => {
-    name: any;
-    data: any;
-    pii?: Record<string, unknown>;
-  };
+  pii_aware: boolean;
+  // Method-shorthand syntax — bivariant on parameters, so
+  // \`State<specific>\` stays assignable to \`State<any, any, any>\`. No
+  // \`any\` escapes needed: \`view\` operates on the event union; \`message\`
+  // on the message union (a \`Message<TEvents, TKey>\` with optional
+  // \`pii\` after split).
+  view(
+    event: Committed<TEvents, keyof TEvents>,
+    actor: Actor | undefined
+  ): Committed<TEvents, keyof TEvents>;
+  message(
+    validated: Message<TEvents, keyof TEvents>
+  ): Message<TEvents, keyof TEvents>;
 };
 
 /**
@@ -15472,7 +15594,7 @@ export type CloseResult = {
  * >;
  *
  * async function myReaction(event: ..., stream: string, app: App) {
- *   await app.do("someAction", target, payload, event);
+ *   await app.do("someAction", target, payload, { reactingTo: event });
  *   const snapshot = await app.load(MyState, "stream-1");
  *   const events = await app.query_array({ stream: "stream-1" });
  * }
@@ -15700,15 +15822,35 @@ export interface IAct<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<Schemas, string>,
-    skipValidation?: boolean
+    options?: DoOptions<TEvents>
   ): Promise<Snapshot<any, any>[]>;
 
+  /**
+   * Load a state snapshot for a stream. Two shapes:
+   *
+   * **Anonymous (bare stream)** — \`load(state, stream, callback?, asOf?)\`.
+   * The framework default-denies on every PII gate: sensitive event fields
+   * come back as \`[REDACTED]\`, state fields whose names match sensitive
+   * event fields are also \`[REDACTED]\`. Use this when the caller has no
+   * authorization context (background workers, observability probes, etc.).
+   *
+   * **Auth-aware (LoadTarget)** — \`load(state, {stream, actor, asOf?},
+   * callback?)\`. Symmetric with \`IAct.do(state, target, payload)\`. The
+   * read runs the state's \`.discloses(predicate)\` against the supplied
+   * actor; sensitive fields come back as plaintext when the predicate
+   * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
+   * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
+   */
   load(
     state: State<any, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void,
     asOf?: AsOf
+  ): Promise<Snapshot<any, any>>;
+  load(
+    state: State<any, any, any> | string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>>;
 
   query(
@@ -16988,7 +17130,7 @@ async function load_restart_seeds(
           );
           return;
         }
-        const snap = await load(owner_state, stream);
+        const snap = await load(owner_state, { stream });
         seed_states.set(stream, snap.state as Schema);
       })
   );
@@ -18784,19 +18926,19 @@ export class NonRetryableError extends Error {
 
 import { patch } from "@rotorsoft/act-patch";
 import { cache, log, SNAP_EVENT, store, TOMBSTONE_EVENT } from "../ports.js";
-import type { Actor } from "../types/action.js";
 import {
   ConcurrencyError,
   InvariantError,
   StreamClosedError,
 } from "../types/errors.js";
 import type {
-  AsOf,
   Committed,
   Correlator,
+  DoOptions,
   Emitted,
   EventMeta,
   EventSource,
+  LoadTarget,
   ScanOptions,
   ScanResult,
   Schema,
@@ -18833,8 +18975,7 @@ export type BoundAction = <
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation?: boolean
+  options?: DoOptions<TEvents>
 ) => Promise<Snapshot<TState, TEvents>[]>;
 
 /** @internal */
@@ -19059,7 +19200,6 @@ export async function scan(
           migrated = {
             ...event,
             name: migration.to as typeof event.name,
-            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
             data: new_data as any,
           };
           migrated_count++;
@@ -19148,11 +19288,10 @@ export async function load<
   TActions extends Schemas,
 >(
   me: State<TState, TEvents, TActions>,
-  stream: string,
-  callback?: (snapshot: Snapshot<TState, TEvents>) => void,
-  asOf?: AsOf,
-  actor?: Actor
+  target: LoadTarget,
+  callback?: (snapshot: Snapshot<TState, TEvents>) => void
 ): Promise<Snapshot<TState, TEvents>> {
+  const { stream, actor, asOf } = target;
   const time_travel =
     !!asOf && Object.values(asOf).some((v) => v !== undefined);
   const cached = time_travel ? undefined : await cache().get<TState>(stream);
@@ -19160,42 +19299,37 @@ export async function load<
   let state = cached?.state ?? (me.init ? me.init() : ({} as TState));
   let patches = cached?.patches ?? 0;
   let snaps = cached?.snaps ?? 0;
-  // version always reflects stream head: starts from the cached version
-  // (or -1 for a fresh stream / cache miss), advances per event seen.
-  let version = cached?.version ?? -1;
   // replayed counts events processed by THIS load only (snap or patch);
   // distinct from \`patches\` (the snap-distance accumulator carried over
   // from the cache).
   let replayed = 0;
-  let event: Committed<TEvents, string> | undefined;
+  let event: Committed<TEvents, keyof TEvents> | undefined;
 
-  await store().query(
-    (e) => {
-      version = e.version;
-      const typed = e as Committed<TEvents, string>;
-      event = me.view(typed, actor);
-      if (e.name === SNAP_EVENT) {
-        state = e.data as TState;
+  await store().query<TEvents>(
+    (raw) => {
+      event = me.view(raw, actor);
+      if (event.name === SNAP_EVENT) {
+        state = event.data as TState;
         snaps++;
         patches = 0;
         replayed++;
-      } else if (me.patch[e.name]) {
-        state = patch(state, me.patch[e.name](typed, state));
+      } else if (me.patch[event.name]) {
+        state = patch(state, me.patch[event.name](event, state));
         patches++;
         replayed++;
-      } else if (e.name !== TOMBSTONE_EVENT) {
+      } else if (event.name !== TOMBSTONE_EVENT) {
         // Unknown event — not in this state's reducer map. Causes:
         // deleted/renamed event in a versioned schema, load() called with
         // the wrong state, or stream contamination. Skipping silently
         // would corrupt replay; warn so the operator can investigate.
         log().warn(
-          \`Skipping unknown event "\${String(e.name)}" on stream "\${stream}" (id=\${e.id}) — no reducer in state "\${me.name}"\`
+          \`Skipping unknown event "\${String(event.name)}" on stream "\${stream}" (id=\${event.id}) — no reducer in state "\${me.name}"\`
         );
       }
       callback?.({
         event,
         state,
-        version,
+        version: event.version,
         patches,
         snaps,
         cache_hit,
@@ -19217,17 +19351,25 @@ export async function load<
   // event_id, picks up missed events, and replays — so an "older" cache
   // write from a concurrent slower load is self-correcting on next access.
   // Time-travel loads bypass cache entirely and skip this too.
-  if (replayed > 0 && !time_travel && event) {
+  if (replayed > 0 && !time_travel && event && !me.pii_aware) {
     await cache().set(stream, {
       state,
-      version,
+      version: event.version,
       event_id: event.id,
       patches,
       snaps,
     });
   }
 
-  return { event, state, version, patches, snaps, cache_hit, replayed };
+  return {
+    event,
+    state,
+    version: event?.version ?? cached?.version ?? -1,
+    patches,
+    snaps,
+    cache_hit,
+    replayed,
+  };
 }
 
 /**
@@ -19253,8 +19395,9 @@ export async function load<
  * @param action The action to execute
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
- * @param reactingTo (Optional) The event that the action is reacting to
- * @param skipValidation (Optional) Whether to skip validation (not recommended)
+ * @param options Per-call dispatch options ({@link DoOptions}) —
+ *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+ *   framework or orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -19270,29 +19413,21 @@ export async function action<
   action: TKey,
   target: Target,
   payload: Readonly<TActions[TKey]>,
-  reactingTo?: Committed<Schemas, keyof Schemas>,
-  skipValidation = false,
-  correlator: Correlator = default_correlator
+  options?: DoOptions<TEvents>
 ): Promise<Snapshot<TState, TEvents>[]> {
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
+  const reactingTo = options?.reactingTo;
+  const correlator = options?.correlator ?? default_correlator;
 
-  const validated = skipValidation
-    ? payload
-    : validate(action as string, payload, me.actions[action]);
+  const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
   const max_retries = opts?.maxRetries ?? 0;
 
   for (let attempt = 0; ; attempt++) {
     try {
-      const snapshot = await load(
-        me,
-        stream,
-        undefined,
-        undefined,
-        target.actor
-      );
+      const snapshot = await load(me, { stream, actor: target.actor });
       if (snapshot.event?.name === TOMBSTONE_EVENT)
         throw new StreamClosedError(stream);
       const expected = expectedVersion ?? snapshot.event?.version;
@@ -19323,35 +19458,11 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // ACT-403: warn once per process per event name when a dynamic
-      // \`.emit((a) => ["X", ...])\` produces a deprecated event. Static
-      // \`.emit("X")\` is already caught at build time by act-builder; this
-      // is the runtime safety net for the dynamic form, which the static
-      // checker can't inspect. The \`_warned\` set lives on the state so
-      // multiple Act instances over the same merged state share idempotency.
-      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-      if (deprecated && deprecated.size > 0) {
-        const me_ = me as { _warned?: Set<string> };
-        const warned = me_._warned ?? (me_._warned = new Set<string>());
-        for (const [name] of tuples) {
-          const evt = name as string;
-          if (deprecated.has(evt) && !warned.has(evt)) {
-            warned.add(evt);
-            log().warn(
-              \`Action "\${String(action)}" emitted deprecated event "\${evt}". \` +
-                \`A newer version exists in the registry — update the action's \` +
-                \`.emit() to target the current version. (warned once per process)\`
-            );
-          }
-        }
-      }
-
-      const emitted = tuples.map(([name, data]) => {
-        const validated = skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]);
-        return me.message({ name, data: validated });
-      });
+      const valid = tuples.map(([name, data]) => ({
+        name,
+        data: validate(name as string, data, me.events[name]),
+      }));
+      const emitted = valid.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -19372,7 +19483,7 @@ export async function action<
           event: reactingTo
             ? {
                 id: reactingTo.id,
-                name: reactingTo.name,
+                name: reactingTo.name as string,
                 stream: reactingTo.stream,
               }
             : undefined,
@@ -19400,12 +19511,18 @@ export async function action<
       }
 
       let { state, patches } = snapshot;
-      const snapshots = committed.map((event) => {
+      const snapshots = committed.map((row, i) => {
+        // Actions originate from the caller — they already hold the
+        // plaintext payload they sent. No view/gate round-trip is
+        // useful; the reducer and the returned snapshot see the
+        // pre-split event directly. pii_split (in \`me.message\`) above
+        // is the only PII operation on the action path.
+        const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
         return {
-          event: me.view(event, target.actor),
+          event,
           state,
           version: event.version,
           patches,
@@ -19420,18 +19537,25 @@ export async function action<
       const last = snapshots.at(-1)!;
       const snapped = me.snap?.(last);
 
+      // #861: \`has_open_pii\` was set above during \`emitted.map\` — when
+      // any commit carries open PII the derived state may hold plaintext
+      // (reducers that copy sensitive fields into state against the soft
+      // rule), so we refuse to populate the cache. Post-forget commits
+      // never have pii; cache populates normally on the next access.
       // Update cache with post-commit state (reset patches if snapped).
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).
-      cache()
-        .set<TState>(stream, {
-          state: last.state,
-          version: last.event.version,
-          event_id: last.event.id,
-          patches: snapped ? 0 : last.patches,
-          snaps: snapped ? last.snaps + 1 : last.snaps,
-        })
-        .catch((err) => log().error(err));
+      if (!me.pii_aware) {
+        cache()
+          .set<TState>(stream, {
+            state: last.state,
+            version: last.event.version,
+            event_id: last.event.id,
+            patches: snapped ? 0 : last.patches,
+            snaps: snapped ? last.snaps + 1 : last.snaps,
+          })
+          .catch((err) => log().error(err));
+      }
 
       // Persist snap to store for cold-start durability. Fire-and-forget:
       // snap() has its own try/catch that logs failures, so the rejection
@@ -20703,7 +20827,6 @@ export {
   _registry,
   pii_fields,
   pii_gate,
-  pii_merge,
   pii_split,
   pii_strip,
   REDACTED,
@@ -23240,6 +23363,7 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
+  type DoOptions,
   type IAct,
   type Lease,
   type Logger,
@@ -23369,16 +23493,13 @@ export function build_handle<
         action: TKey,
         target: Target<TActor>,
         action_payload: Readonly<TActions[TKey]>,
-        reactingTo?: Committed<Schemas, string>,
-        skipValidation?: boolean
+        options?: DoOptions<TEvents>
       ) =>
-        bound_do(
-          action,
-          target,
-          action_payload,
-          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skipValidation
-        );
+        bound_do(action, target, action_payload, {
+          ...options,
+          reactingTo:
+            options?.reactingTo ?? (event as Committed<Schemas, string>),
+        });
       try {
         await handler(event, stream, scoped_app);
         at = event.id;
@@ -23507,6 +23628,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -23526,6 +23658,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**
@@ -23989,61 +24122,19 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  *
  * @internal
  */
-export function pii_split(
-  emitted: { name: unknown; data: unknown },
+export function pii_split<TName, TData extends Record<string, unknown>>(
+  emitted: { name: TName; data: TData },
   fields: readonly string[]
-): { name: unknown; data: unknown; pii: Record<string, unknown> } {
-  const rec = emitted.data as Record<string, unknown>;
-  const clean: Record<string, unknown> = {};
+): { name: TName; data: TData; pii: Record<string, unknown> } {
+  const data = { ...emitted.data };
   const pii: Record<string, unknown> = {};
-  for (const k of Object.keys(rec)) {
-    if (fields.includes(k)) pii[k] = rec[k];
-    else clean[k] = rec[k];
+  for (const f of fields) {
+    if (f in data) {
+      pii[f] = data[f];
+      delete data[f];
+    }
   }
-  return { name: emitted.name, data: clean, pii };
-}
-
-/**
- * Build the **reducer view** of a committed event — sensitive fields merged
- * back into \`data\` so per-state reducers always see plaintext.
- *
- * - Event with no \`pii\` payload AND no schema-declared sensitive fields →
- *   return the event unchanged (zero-cost path).
- * - Event with a \`pii\` payload → merge into \`data\` (plaintext for the reducer).
- * - Event whose schema *declares* sensitive fields but \`pii\` is null/undefined
- *   (post-\`forget_pii\`) → substitute {@link SHREDDED} for each declared field.
- *
- * Used inside \`load()\` before invoking the reducer chain. Reducer-visible PII
- * is by design — the reducer is the source of truth for derived state. The
- * external view returned to callers is separately gated by {@link pii_gate}.
- *
- * @internal
- */
-export function pii_merge<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
-  event: Committed<TEvents, TKey>,
-  fields: readonly string[]
-): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. Callers (the State's \`_pii_merge\`
-  // decorator) filter on \`fields_by_event.get(name)\` before invocation, so the
-  // empty-fields short-circuit lives at the caller, not here.
-  const data = event.data as Record<string, unknown>;
-  const pii = event.pii;
-  if (pii != null) {
-    return {
-      ...event,
-      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
-    };
-  }
-  // Schema declared sensitive fields but the pii payload is gone — shredded.
-  const shredded: Record<string, unknown> = { ...data };
-  for (const f of fields) shredded[f] = SHREDDED;
-  return {
-    ...event,
-    data: shredded as Committed<TEvents, TKey>["data"],
-  };
+  return { name: emitted.name, data, pii };
 }
 
 /**
@@ -24063,17 +24154,13 @@ export function pii_merge<
  *
  * @internal
  */
-export function pii_gate<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
+export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. The State's \`_pii_gate\` decorator
-  // filters on \`fields_by_event.get(name)\` before invocation.
+  if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
     const shredded: Record<string, unknown> = { ...data };
@@ -24436,26 +24523,17 @@ export function build_es(
   logger: Logger,
   correlator: Correlator = default_correlator
 ): EsOps {
-  // \`es.action\` takes \`correlator\` as its last positional arg; bind it once
-  // here so the orchestrator's \`EsOps.action\` keeps the original 6-arg
-  // signature.
+  // Bake the orchestrator-level \`correlator\` into every \`action()\` call
+  // so EsOps callers don't need to thread it. A per-call
+  // \`options.correlator\` still wins — the orchestrator default fills in
+  // only when the caller didn't supply one.
   const bound_action: EsOps["action"] = (
     me,
     action_name,
     target,
     payload,
-    reactingTo,
-    skipValidation = false
-  ) =>
-    es.action(
-      me,
-      action_name,
-      target,
-      payload,
-      reactingTo,
-      skipValidation,
-      correlator
-    );
+    options
+  ) => es.action(me, action_name, target, payload, { correlator, ...options });
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -24474,7 +24552,7 @@ export function build_es(
         )
       );
     }),
-    load: traced(es.load, (result, _me, stream, _cb, asOf) => {
+    load: traced(es.load, (result, _me, target) => {
       const stats = stats_marker(
         result.version,
         result.replayed,
@@ -24485,7 +24563,7 @@ export function build_es(
         es_caption(
           "load",
           C_GREEN,
-          \`\${stream}\${as_of_marker(asOf)} \${cache_marker(result.cache_hit)} \${stats}\`
+          \`\${target.stream}\${as_of_marker(target.asOf)} \${cache_marker(result.cache_hit)} \${stats}\`
         )
       );
     }),
@@ -24838,6 +24916,29 @@ export type Target<TActor extends Actor = Actor> = {
   readonly stream: string;
   readonly actor: TActor;
   readonly expectedVersion?: number;
+};
+
+/**
+ * Auth-aware target for \`IAct.load\`. Symmetric with {@link Target} (used by
+ * \`IAct.do\`) but without \`expectedVersion\` — load is a read, not a write —
+ * and with optional \`asOf\` for time-travel.
+ *
+ * Passing a \`LoadTarget\` (rather than a bare \`stream\` string) is the
+ * framework's explicit "I'm reading on behalf of this actor" signal. The
+ * read-path runs the state's \`.discloses(predicate)\` against this actor;
+ * sensitive fields come back as plaintext when authorized, \`[REDACTED]\`
+ * otherwise. The bare-string load form always default-denies (everything
+ * comes back \`[REDACTED]\`), so callers who need plaintext access must
+ * explicitly construct a \`LoadTarget\`. \`actor\` is optional — anonymous
+ * background calls (close-cycle replay, internal restart seeding) pass
+ * just the stream and get the default-deny path.
+ *
+ * @template TActor - The actor type bound at \`act().withActor<TActor>()\`.
+ */
+export type LoadTarget<TActor extends Actor = Actor> = {
+  readonly stream: string;
+  readonly actor?: TActor;
+  readonly asOf?: AsOf;
 };
 
 /**
@@ -25269,6 +25370,31 @@ export type ActionOptions = {
 };
 
 /**
+ * Per-call dispatch options for {@link IAct.do} — grouped to keep the
+ * public signature stable as new optional knobs are added.
+ *
+ * @property reactingTo - The committed event that triggered this action.
+ *   Threads the correlation chain (\`correlation\` + \`causation.event\`)
+ *   through the new commit. Inside reaction handlers, the framework
+ *   auto-injects the triggering event; pass an explicit value here only
+ *   to override.
+ * @property correlator - Per-call correlator override. When omitted,
+ *   falls back to the orchestrator-level {@link ActOptions.correlator}
+ *   (or the framework default). Useful when a single dispatch needs to
+ *   thread an externally-supplied trace id without globally swapping
+ *   the strategy.
+ */
+export type DoOptions<_TEvents extends Schemas = Schemas> = {
+  /**
+   * Wide type — \`reactingTo\` is typically a foreign event from another
+   * state's emission, threading correlation through a reaction. It is
+   * NOT constrained to the receiving state's event union.
+   */
+  readonly reactingTo?: Committed<Schemas, keyof Schemas>;
+  readonly correlator?: Correlator;
+};
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -25301,13 +25427,13 @@ export type State<
    * default-denies on every external read (sensitive fields are always
    * substituted with \`"[REDACTED]"\`). See #855 / epic #566.
    */
-  // The stored predicate is erased — \`any\` for the event makes the field
-  // signature bivariant so a narrow \`State<{count: number}, {Counted: ...},
-  // ...>\` is assignable to \`State<any, any, any>\` without TypeScript blocking
-  // on contravariant function params. The public \`.discloses()\` method on the
-  // builder keeps the narrow signature so users still get type-checked predicates.
-  // biome-ignore lint/suspicious/noExplicitAny: erased for State<any,any,any> compatibility
-  disclose?: (event: any, actor: Actor) => boolean;
+  // Method-shorthand syntax — bivariant on parameters under
+  // \`strictFunctionTypes\`, so a narrow \`State<{count: number},
+  // {Counted: ...}, ...>\` stays assignable to \`State<any, any, any>\`.
+  // The public \`.discloses()\` builder method keeps the narrow
+  // signature so users still get a type-checked predicate at the
+  // call site.
+  disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -25316,26 +25442,36 @@ export type State<
    *
    * - \`view(event, actor)\` — produces the caller-visible form of a
    *   committed event (gates \`sensitive(...)\` fields via \`.discloses\` on
-   *   PII-aware states; identity otherwise).
+   *   PII-aware states; identity otherwise). The reducer chain runs
+   *   against this gated view, so derived state reflects what the
+   *   calling actor is allowed to see.
    * - \`message(validated)\` — produces the \`{name, data, pii?}\` shape that
    *   goes to \`Store.commit\` (peels sensitive fields off \`data\` into
    *   \`pii\` on PII-aware states; identity otherwise).
-   * - \`patch[eventName]\` — already on State as the per-event reducer.
-   *   Wrapped at build time to merge PII into \`data\` first when the
-   *   event carries sensitive fields; left bare for plain reducers.
+   *
+   * \`pii_aware\` is \`true\` when any of the state's events declare
+   * \`sensitive(...)\` fields. Drives the cache-write gate in \`load()\` /
+   * \`action()\` (#861): pii-aware states never populate the snapshot
+   * cache because state evolves from the actor-gated event view, so
+   * the cached state would vary by caller. Pure states cache normally.
    *
    * Internal, always set after build, never assigned by user code.
    *
    * @internal
    */
-  // biome-ignore lint/suspicious/noExplicitAny: internal step, event payload varies per state
-  view: (event: any, actor: Actor | undefined) => any;
-  // biome-ignore lint/suspicious/noExplicitAny: same
-  message: (validated: { name: any; data: any }) => {
-    name: any;
-    data: any;
-    pii?: Record<string, unknown>;
-  };
+  pii_aware: boolean;
+  // Method-shorthand syntax — bivariant on parameters, so
+  // \`State<specific>\` stays assignable to \`State<any, any, any>\`. No
+  // \`any\` escapes needed: \`view\` operates on the event union; \`message\`
+  // on the message union (a \`Message<TEvents, TKey>\` with optional
+  // \`pii\` after split).
+  view(
+    event: Committed<TEvents, keyof TEvents>,
+    actor: Actor | undefined
+  ): Committed<TEvents, keyof TEvents>;
+  message(
+    validated: Message<TEvents, keyof TEvents>
+  ): Message<TEvents, keyof TEvents>;
 };
 
 /**
@@ -25433,7 +25569,7 @@ export type CloseResult = {
  * >;
  *
  * async function myReaction(event: ..., stream: string, app: App) {
- *   await app.do("someAction", target, payload, event);
+ *   await app.do("someAction", target, payload, { reactingTo: event });
  *   const snapshot = await app.load(MyState, "stream-1");
  *   const events = await app.query_array({ stream: "stream-1" });
  * }
@@ -25661,15 +25797,35 @@ export interface IAct<
     action: TKey,
     target: Target<TActor>,
     payload: Readonly<TActions[TKey]>,
-    reactingTo?: Committed<Schemas, string>,
-    skipValidation?: boolean
+    options?: DoOptions<TEvents>
   ): Promise<Snapshot<any, any>[]>;
 
+  /**
+   * Load a state snapshot for a stream. Two shapes:
+   *
+   * **Anonymous (bare stream)** — \`load(state, stream, callback?, asOf?)\`.
+   * The framework default-denies on every PII gate: sensitive event fields
+   * come back as \`[REDACTED]\`, state fields whose names match sensitive
+   * event fields are also \`[REDACTED]\`. Use this when the caller has no
+   * authorization context (background workers, observability probes, etc.).
+   *
+   * **Auth-aware (LoadTarget)** — \`load(state, {stream, actor, asOf?},
+   * callback?)\`. Symmetric with \`IAct.do(state, target, payload)\`. The
+   * read runs the state's \`.discloses(predicate)\` against the supplied
+   * actor; sensitive fields come back as plaintext when the predicate
+   * returns \`true\`, \`[REDACTED]\` otherwise. Forgotten events return
+   * \`[SHREDDED]\` regardless of actor (data is gone, no auth question).
+   */
   load(
     state: State<any, any, any> | string,
     stream: string,
     callback?: (snapshot: Snapshot<any, any>) => void,
     asOf?: AsOf
+  ): Promise<Snapshot<any, any>>;
+  load(
+    state: State<any, any, any> | string,
+    target: LoadTarget<TActor>,
+    callback?: (snapshot: Snapshot<any, any>) => void
   ): Promise<Snapshot<any, any>>;
 
   query(
@@ -27831,6 +27987,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -27850,6 +28017,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**
@@ -28144,61 +28312,19 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  *
  * @internal
  */
-export function pii_split(
-  emitted: { name: unknown; data: unknown },
+export function pii_split<TName, TData extends Record<string, unknown>>(
+  emitted: { name: TName; data: TData },
   fields: readonly string[]
-): { name: unknown; data: unknown; pii: Record<string, unknown> } {
-  const rec = emitted.data as Record<string, unknown>;
-  const clean: Record<string, unknown> = {};
+): { name: TName; data: TData; pii: Record<string, unknown> } {
+  const data = { ...emitted.data };
   const pii: Record<string, unknown> = {};
-  for (const k of Object.keys(rec)) {
-    if (fields.includes(k)) pii[k] = rec[k];
-    else clean[k] = rec[k];
+  for (const f of fields) {
+    if (f in data) {
+      pii[f] = data[f];
+      delete data[f];
+    }
   }
-  return { name: emitted.name, data: clean, pii };
-}
-
-/**
- * Build the **reducer view** of a committed event — sensitive fields merged
- * back into \`data\` so per-state reducers always see plaintext.
- *
- * - Event with no \`pii\` payload AND no schema-declared sensitive fields →
- *   return the event unchanged (zero-cost path).
- * - Event with a \`pii\` payload → merge into \`data\` (plaintext for the reducer).
- * - Event whose schema *declares* sensitive fields but \`pii\` is null/undefined
- *   (post-\`forget_pii\`) → substitute {@link SHREDDED} for each declared field.
- *
- * Used inside \`load()\` before invoking the reducer chain. Reducer-visible PII
- * is by design — the reducer is the source of truth for derived state. The
- * external view returned to callers is separately gated by {@link pii_gate}.
- *
- * @internal
- */
-export function pii_merge<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
-  event: Committed<TEvents, TKey>,
-  fields: readonly string[]
-): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. Callers (the State's \`_pii_merge\`
-  // decorator) filter on \`fields_by_event.get(name)\` before invocation, so the
-  // empty-fields short-circuit lives at the caller, not here.
-  const data = event.data as Record<string, unknown>;
-  const pii = event.pii;
-  if (pii != null) {
-    return {
-      ...event,
-      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
-    };
-  }
-  // Schema declared sensitive fields but the pii payload is gone — shredded.
-  const shredded: Record<string, unknown> = { ...data };
-  for (const f of fields) shredded[f] = SHREDDED;
-  return {
-    ...event,
-    data: shredded as Committed<TEvents, TKey>["data"],
-  };
+  return { name: emitted.name, data, pii };
 }
 
 /**
@@ -28218,17 +28344,13 @@ export function pii_merge<
  *
  * @internal
  */
-export function pii_gate<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
+export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  // Contract: \`fields\` is non-empty. The State's \`_pii_gate\` decorator
-  // filters on \`fields_by_event.get(name)\` before invocation.
+  if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
     const shredded: Record<string, unknown> = { ...data };

@@ -87,7 +87,7 @@ export const TicketMessagingSlice = slice()
           actor: { id: randomUUID(), name: "deliver reaction" },
         },
         { messageId: event.data.messageId },
-        event
+        { reactingTo: event }
       );
     },
     // Exponential backoff with jitter for an external delivery channel —

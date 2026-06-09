@@ -104,7 +104,7 @@ export const TicketOpsSlice = slice()
         actor: { id: randomUUID(), name: "escalate reaction" },
       },
       event.data,
-      event
+      { reactingTo: event }
     );
   })
   .build();

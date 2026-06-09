@@ -184,7 +184,7 @@ Slice handlers receive `(event, stream, app)` where `app` implements `IAct` (`do
 
 ### Auto-injected `reactingTo`
 
-When a slice handler calls `app.do()` without an explicit fourth argument, the framework automatically threads the triggering event in as `reactingTo`, propagating the correlation chain (`correlation` and `causation.event`) through the new commit. Pass an explicit fourth argument only if you want to override that default — e.g., to attribute a side-effect commit to a different upstream event.
+When a slice handler calls `app.do(action, target, payload)` without the fourth `options` argument, the framework automatically threads the triggering event in as `reactingTo`, propagating the correlation chain (`correlation` and `causation.event`) through the new commit. Pass `{ reactingTo: someOtherEvent }` explicitly only if you want to override that default — e.g., to attribute a side-effect commit to a different upstream event.
 
 ## Act Orchestrator
 

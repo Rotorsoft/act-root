@@ -240,7 +240,7 @@ async function load_restart_seeds(
           );
           return;
         }
-        const snap = await load(owner_state, stream);
+        const snap = await load(owner_state, { stream });
         seed_states.set(stream, snap.state as Schema);
       })
   );

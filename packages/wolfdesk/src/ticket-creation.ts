@@ -83,7 +83,7 @@ export const TicketCreationSlice = slice()
         actor: { id: randomUUID(), name: "assign reaction" },
       },
       agent,
-      event
+      { reactingTo: event }
     );
   })
   .build();

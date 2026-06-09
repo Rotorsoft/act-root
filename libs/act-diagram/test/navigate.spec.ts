@@ -38,7 +38,7 @@ export const TicketSlice = slice()
   .withState(Ticket)
   .on("TicketOpened")
     .do(async function autoAssign(event, _stream, app) {
-      await app.do("AssignTicket", event.stream, {}, event);
+      await app.do("AssignTicket", event.stream, {}, { reactingTo: event });
     })
     .to(() => "default")
   .build();`,

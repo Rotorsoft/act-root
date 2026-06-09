@@ -72,7 +72,7 @@ async function seedEvents(n: number, me: AnyState = Counter) {
   store(new InMemoryStore());
   await store().seed();
   for (let i = 0; i < n; i++) {
-    await action(me, "increment", target, { count: 1 }, undefined, true);
+    await action(me, "increment", target, { count: 1 });
   }
 }
 
@@ -82,7 +82,7 @@ describe("load() 50 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, stream);
+      await load(Counter, { stream: stream });
     },
     {
       async setup() {
@@ -96,7 +96,7 @@ describe("load() 50 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, stream);
+        await load(cfg.me, { stream: stream });
       },
       {
         async setup() {
@@ -112,7 +112,7 @@ describe("load() 500 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, stream);
+      await load(Counter, { stream: stream });
     },
     {
       async setup() {
@@ -126,7 +126,7 @@ describe("load() 500 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, stream);
+        await load(cfg.me, { stream: stream });
       },
       {
         async setup() {
@@ -142,7 +142,7 @@ describe("load() 2000 events", () => {
   bench(
     "no snap",
     async () => {
-      await load(Counter, stream);
+      await load(Counter, { stream: stream });
     },
     {
       async setup() {
@@ -156,7 +156,7 @@ describe("load() 2000 events", () => {
     bench(
       `${label}`,
       async () => {
-        await load(cfg.me, stream);
+        await load(cfg.me, { stream: stream });
       },
       {
         async setup() {

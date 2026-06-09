@@ -21,6 +21,7 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
+  type DoOptions,
   type IAct,
   type Lease,
   type Logger,
@@ -150,16 +151,13 @@ export function build_handle<
         action: TKey,
         target: Target<TActor>,
         action_payload: Readonly<TActions[TKey]>,
-        reactingTo?: Committed<Schemas, string>,
-        skipValidation?: boolean
+        options?: DoOptions<TEvents>
       ) =>
-        bound_do(
-          action,
-          target,
-          action_payload,
-          (reactingTo ?? event) as Committed<TEvents, string & keyof TEvents>,
-          skipValidation
-        );
+        bound_do(action, target, action_payload, {
+          ...options,
+          reactingTo:
+            options?.reactingTo ?? (event as Committed<Schemas, string>),
+        });
       try {
         await handler(event, stream, scoped_app);
         at = event.id;

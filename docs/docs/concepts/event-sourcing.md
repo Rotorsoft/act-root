@@ -127,7 +127,7 @@ const app = act()
   .withState(Account)
   .on("Deposited")
     .do(async (event, stream, app) => {
-      await app.do("LogEntry", target, { message: `Deposit: ${event.data.amount}` }, event);
+      await app.do("LogEntry", target, { message: `Deposit: ${event.data.amount}` }, { reactingTo: event });
     })
     .to((event) => ({ target: `audit-${event.stream}` }))
   .build();

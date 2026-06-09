@@ -65,6 +65,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the `.discloses(predicate)`
  *   declaration per state name. Returns `null` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the `_v<digits>` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static `.emit("X")` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -84,6 +95,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**

@@ -577,9 +577,10 @@ export function state<TName extends string, TState extends Schema>(
             init,
             patch: default_patch,
             on: {},
-            // Step delegates initialized as identity. `act().build()`
-            // overrides on states with `sensitive(...)` events to bake in
-            // the gate / split.
+            // Step delegates initialized as identity, `pii_aware` false.
+            // `act().build()` flips both on states with `sensitive(...)`
+            // events to bake in the gate / split and gate the cache write.
+            pii_aware: false,
             view: (event) => event,
             message: (validated) => validated,
           };

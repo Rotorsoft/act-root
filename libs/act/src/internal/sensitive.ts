@@ -115,61 +115,19 @@ export function pii_fields(schema: z.ZodType): readonly string[] {
  *
  * @internal
  */
-export function pii_split(
-  emitted: { name: unknown; data: unknown },
+export function pii_split<TName, TData extends Record<string, unknown>>(
+  emitted: { name: TName; data: TData },
   fields: readonly string[]
-): { name: unknown; data: unknown; pii: Record<string, unknown> } {
-  const rec = emitted.data as Record<string, unknown>;
-  const clean: Record<string, unknown> = {};
+): { name: TName; data: TData; pii: Record<string, unknown> } {
+  const data = { ...emitted.data };
   const pii: Record<string, unknown> = {};
-  for (const k of Object.keys(rec)) {
-    if (fields.includes(k)) pii[k] = rec[k];
-    else clean[k] = rec[k];
+  for (const f of fields) {
+    if (f in data) {
+      pii[f] = data[f];
+      delete data[f];
+    }
   }
-  return { name: emitted.name, data: clean, pii };
-}
-
-/**
- * Build the **reducer view** of a committed event — sensitive fields merged
- * back into `data` so per-state reducers always see plaintext.
- *
- * - Event with no `pii` payload AND no schema-declared sensitive fields →
- *   return the event unchanged (zero-cost path).
- * - Event with a `pii` payload → merge into `data` (plaintext for the reducer).
- * - Event whose schema *declares* sensitive fields but `pii` is null/undefined
- *   (post-`forget_pii`) → substitute {@link SHREDDED} for each declared field.
- *
- * Used inside `load()` before invoking the reducer chain. Reducer-visible PII
- * is by design — the reducer is the source of truth for derived state. The
- * external view returned to callers is separately gated by {@link pii_gate}.
- *
- * @internal
- */
-export function pii_merge<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
-  event: Committed<TEvents, TKey>,
-  fields: readonly string[]
-): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. Callers (the State's `_pii_merge`
-  // decorator) filter on `fields_by_event.get(name)` before invocation, so the
-  // empty-fields short-circuit lives at the caller, not here.
-  const data = event.data as Record<string, unknown>;
-  const pii = event.pii;
-  if (pii != null) {
-    return {
-      ...event,
-      data: { ...data, ...pii } as Committed<TEvents, TKey>["data"],
-    };
-  }
-  // Schema declared sensitive fields but the pii payload is gone — shredded.
-  const shredded: Record<string, unknown> = { ...data };
-  for (const f of fields) shredded[f] = SHREDDED;
-  return {
-    ...event,
-    data: shredded as Committed<TEvents, TKey>["data"],
-  };
+  return { name: emitted.name, data, pii };
 }
 
 /**
@@ -189,17 +147,13 @@ export function pii_merge<
  *
  * @internal
  */
-export function pii_gate<
-  TEvents extends Schemas,
-  TKey extends keyof TEvents & string,
->(
+export function pii_gate<TEvents extends Schemas, TKey extends keyof TEvents>(
   event: Committed<TEvents, TKey>,
   fields: readonly string[],
   predicate: ((event: any, actor: Actor) => boolean) | null,
   actor: Actor | undefined
 ): Committed<TEvents, TKey> {
-  // Contract: `fields` is non-empty. The State's `_pii_gate` decorator
-  // filters on `fields_by_event.get(name)` before invocation.
+  if (fields.length === 0) return event;
   const data = event.data as Record<string, unknown>;
   if (event.pii == null) {
     const shredded: Record<string, unknown> = { ...data };

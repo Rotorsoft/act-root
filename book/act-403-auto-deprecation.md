@@ -7,7 +7,7 @@ For the schema-evolution chapter. Builds on top of the versioned-event-names pat
 **What the framework does with the signal (ACT-403):**
 
 1. **Build-time throw** when a static `.emit("Foo")` targets a deprecated event. The `app.build()` call refuses to construct the orchestrator until the call site is updated to `.emit("Foo_v2")`.
-2. **Runtime warning** (once per process per event name) when a dynamic `.emit((a) => ["Foo", ...])` produces a deprecated event. Static analysis can't see inside arbitrary functions; the runtime check is the safety net.
+2. **Startup advisory** — a single info log at `app.build()` enumerates every deprecated event in scope, with its current version and owning state. The same data is exposed programmatically via `app.registry.deprecated_events(state_name)` for callers that want their own policy (a CI gate, a metrics tag, an opt-in Logger warn). Dynamic `.emit((a) => ["Foo", ...])` callbacks escape the static check but show up in the advisory all the same — *every* deprecated event the registry knows about is named at boot. The orchestrator and `event-sourcing.ts` stay deprecation-unaware: the registry holds the data, the build-time channel surfaces it, no per-action runtime warn.
 3. **Silent on the read path.** `.patch({ Foo: ... })` reducers are required forever (immutable history) — replay of historical events must not warn.
 
 **The chapter's "aha" moment:** the asymmetry between *emit* and *reduce*. Deprecation in event sourcing is fundamentally about not WRITING new instances of a legacy event; the read path keeps reducers alive for the lifetime of the system. The framework encodes that asymmetry directly.
@@ -22,6 +22,6 @@ For the schema-evolution chapter. Builds on top of the versioned-event-names pat
 
 **Connect back to ACT-401:** both checks (cross-slice schema reference identity + auto-deprecation) share the same load-bearing idea — *the framework enforces contracts the type system can't see*. TypeScript can't tell that two `z.object({...})` calls have different refinements, can't tell that `.emit("OrderPaid")` references a version that's been superseded. The framework owns that gap.
 
-**Runtime cost is zero in the common case.** The check is one property read + a falsy branch for any state without deprecation. Benchmark in `libs/act/PERFORMANCE.md` shows the with-deprecation path is statistically indistinguishable from the without — 1.00× with rme ±0.6%. Worth mentioning so readers don't worry about a "policy tax."
+**Runtime cost is exactly zero.** The action path runs no deprecation check at all — `event-sourcing.ts` is unaware the concept exists. All of the work happens at build time (the static-emit scan, the advisory log, populating `registry.deprecated_events`); the hot path is the same code whether or not the registry holds any deprecated names. Worth mentioning so readers don't worry about a "policy tax."
 
 **Wolfdesk in the repo doesn't use this yet** (no schema migrations there). A made-up example for the chapter works fine — `OrderPaid` → `OrderPaid_v2` after a currency field was added.

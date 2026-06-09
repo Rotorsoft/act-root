@@ -79,7 +79,7 @@ async function main() {
         "CountDigit",
         { stream: "Board", actor },
         { digit: event.data.digit },
-        event
+        { reactingTo: event }
       );
     })
     .to({
@@ -96,7 +96,7 @@ async function main() {
         "ProjectResult",
         { stream: "Calculator" + event.stream, actor },
         { result: calc.state.result },
-        event
+        { reactingTo: event }
       );
     })
     .to((e) => ({

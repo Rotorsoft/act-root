@@ -203,7 +203,7 @@ export type SliceBuilder<
  *   .withState(TicketCreation)
  *   .withState(TicketOperations) // handler can dispatch AssignTicket
  *   .on("TicketOpened").do(async (event, _stream, app) => {
- *     await app.do("AssignTicket", target, payload, event);
+ *     await app.do("AssignTicket", target, payload, { reactingTo: event });
  *   })
  *   .build();
  * ```

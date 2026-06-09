@@ -51,7 +51,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     expect(seen[0].eventCount).toBe(1);
     expect(seen[0].at).toBeInstanceOf(Date);
     // Reading the stream back returns SHREDDED for sensitive fields.
-    const snap = await app.load(User, "user-1", undefined, undefined, actor);
+    const snap = await app.load(User, { stream: "user-1", actor: actor });
     expect(snap.event?.data).toEqual({
       email: SHREDDED,
       name: SHREDDED,
@@ -84,7 +84,7 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
       { email: "u@example.com", name: "Ursula", plan: "free" }
     );
     // Warm the cache with a load.
-    await app.load(User, "user-1", undefined, undefined, actor);
+    await app.load(User, { stream: "user-1", actor: actor });
     // Spy on cache().invalidate to confirm forget triggers it.
     const spy = vi.spyOn(cache(), "invalidate");
     await app.forget("user-1");
@@ -118,5 +118,42 @@ describe("app.forget(stream) + forgotten lifecycle (#855 slice 7)", () => {
     const result = await app.forget("never-existed");
     expect(result.eventCount).toBe(0);
     expect(seen).toHaveLength(0);
+  });
+
+  it("pii-aware states never populate the snapshot cache (#861)", async () => {
+    const app = act().withState(User).build();
+    await app.do(
+      "register",
+      { stream: "user-1", actor },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    // The reducer runs against the actor-gated event view, so derived
+    // state varies by caller. Pii-aware states never cache to avoid
+    // serving one actor's view to another. Verified pre-forget and
+    // post-forget — the rule is build-time, not runtime.
+    await app.load(User, { stream: "user-1", actor });
+    expect(await cache().get("user-1")).toBeUndefined();
+    await app.forget("user-1");
+    await app.load(User, { stream: "user-1", actor });
+    expect(await cache().get("user-1")).toBeUndefined();
+  });
+
+  it("cache.invalidate failure short-circuits forget and suppresses `forgotten` (#861)", async () => {
+    const app = act().withState(User).build();
+    const seen: unknown[] = [];
+    app.on("forgotten", (p) => {
+      seen.push(p);
+    });
+    await app.do(
+      "register",
+      { stream: "user-1", actor },
+      { email: "u@example.com", name: "Ursula", plan: "free" }
+    );
+    const spy = vi
+      .spyOn(cache(), "invalidate")
+      .mockRejectedValueOnce(new Error("cache adapter down"));
+    await expect(app.forget("user-1")).rejects.toThrow("cache adapter down");
+    expect(seen).toHaveLength(0);
+    spy.mockRestore();
   });
 });
