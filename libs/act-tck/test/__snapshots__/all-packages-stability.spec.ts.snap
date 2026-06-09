@@ -355,15 +355,18 @@ export function act<
   // same builder cast to the widened generic; type fanout is preserved
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
-  // Caches behind registry.sensitive_fields / registry.disclosure_predicate.
-  // Populated on the first .build() call.
+  // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
+  // registry.deprecated_events. Populated on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
+  const _de = new Map<string, ReadonlySet<string>>();
+  const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
+    deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
   };
   const pending_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
@@ -377,10 +380,11 @@ export function act<
   // ACT-403: auto-deprecation enforcement. Groups each state's events
   // by base name + \`_v<digits>\`; the highest version is current, all
   // lower ones are deprecated. Stashes the deprecation set on the
-  // state so \`event-sourcing.ts\` can warn at runtime for dynamic
-  // emits. Scans static \`.emit("X")\` markers across every state and
-  // throws if any target a deprecated event — the only legitimate use
-  // of a deprecated event is on the reduce path. Finally, surfaces a
+  // registry (\`registry.deprecated_events(state_name)\`) so the
+  // orchestrator can warn post-commit when an action emits one.
+  // Scans static \`.emit("X")\` markers across every state and throws
+  // if any target a deprecated event — the only legitimate use of a
+  // deprecated event is on the reduce path. Finally, surfaces a
   // one-line startup advisory so operators can see "your app has
   // legacy events kept for the read path, here's where they live."
   const finalize_deprecations = () => {
@@ -393,7 +397,7 @@ export function act<
       const event_names = Object.keys(state.events);
       const deprecated = deprecated_event_names(event_names);
       if (deprecated.size === 0) continue;
-      (state as { _deprecated?: Set<string> })._deprecated = deprecated;
+      _de.set(state.name, deprecated);
       for (const name of deprecated) {
         // \`current_version_of\` is guaranteed non-undefined here — \`name\`
         // is in \`deprecated\`, which by construction means a higher-
@@ -1263,10 +1267,9 @@ export class Act<
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
-   * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation of the action's
-   *   *emitted events* (use carefully, for performance). Action
-   *   payloads are always validated — they cross a trust boundary.
+   * @param options - Per-call dispatch options ({@link DoOptions}) —
+   *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+   *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -2762,10 +2765,6 @@ export type ActionOptions = {
  *   through the new commit. Inside reaction handlers, the framework
  *   auto-injects the triggering event; pass an explicit value here only
  *   to override.
- * @property skipValidation - Skip schema validation of the action's
- *   *emitted events* (the events the action produces). Action payloads
- *   are always validated since they cross a trust boundary. Default
- *   \`false\`.
  * @property correlator - Per-call correlator override. When omitted,
  *   falls back to the orchestrator-level {@link ActOptions.correlator}
  *   (or the framework default). Useful when a single dispatch needs to
@@ -2779,7 +2778,6 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
    * NOT constrained to the receiving state's event union.
    */
   readonly reactingTo?: Committed<Schemas, keyof Schemas>;
-  readonly skipValidation?: boolean;
   readonly correlator?: Correlator;
 };
 
@@ -6787,7 +6785,6 @@ export async function scan(
           migrated = {
             ...event,
             name: migration.to as typeof event.name,
-            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
             data: new_data as any,
           };
           migrated_count++;
@@ -6984,9 +6981,8 @@ export async function load<
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
  * @param options Per-call dispatch options ({@link DoOptions}) —
- *   \`reactingTo\` to thread correlation, \`skipValidation\` to skip
- *   event-schema checks, \`correlator\` to override the framework or
- *   orchestrator-level correlator for this call only.
+ *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+ *   framework or orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -7007,13 +7003,8 @@ export async function action<
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
   const reactingTo = options?.reactingTo;
-  const skipValidation = options?.skipValidation ?? false;
   const correlator = options?.correlator ?? default_correlator;
 
-  // Action payloads are always validated — they come from external
-  // callers (HTTP, RPC, queue consumers) and must be schema-checked at
-  // the boundary. \`skipValidation\` only skips event-schema checks for
-  // events the action itself synthesizes from already-trusted input.
   const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
@@ -7052,36 +7043,11 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // ACT-403: warn once per process per event name when a dynamic
-      // \`.emit((a) => ["X", ...])\` produces a deprecated event. Static
-      // \`.emit("X")\` is already caught at build time by act-builder; this
-      // is the runtime safety net for the dynamic form, which the static
-      // checker can't inspect. The \`_warned\` set lives on the state so
-      // multiple Act instances over the same merged state share idempotency.
-      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-      if (deprecated && deprecated.size > 0) {
-        const me_ = me as { _warned?: Set<string> };
-        const warned = me_._warned ?? (me_._warned = new Set<string>());
-        for (const [name] of tuples) {
-          const evt = name as string;
-          if (deprecated.has(evt) && !warned.has(evt)) {
-            warned.add(evt);
-            log().warn(
-              \`Action "\${String(action)}" emitted deprecated event "\${evt}". \` +
-                \`A newer version exists in the registry — update the action's \` +
-                \`.emit() to target the current version. (warned once per process)\`
-            );
-          }
-        }
-      }
-
-      const events = tuples.map(([name, data]) => ({
+      const valid = tuples.map(([name, data]) => ({
         name,
-        data: skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]),
+        data: validate(name as string, data, me.events[name]),
       }));
-      const emitted = events.map((v) => me.message(v));
+      const emitted = valid.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -7136,7 +7102,7 @@ export async function action<
         // useful; the reducer and the returned snapshot see the
         // pre-split event directly. pii_split (in \`me.message\`) above
         // is the only PII operation on the action path.
-        const event = { ...row, data: events[i].data };
+        const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
@@ -11280,6 +11246,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -11299,6 +11276,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**
@@ -13013,8 +12991,7 @@ export function build_es(
     target,
     payload,
     options
-  ) =>
-    es.action(me, action_name, target, payload, { correlator, ...options });
+  ) => es.action(me, action_name, target, payload, { correlator, ...options });
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -13928,10 +13905,9 @@ export class Act<
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
-   * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation of the action's
-   *   *emitted events* (use carefully, for performance). Action
-   *   payloads are always validated — they cross a trust boundary.
+   * @param options - Per-call dispatch options ({@link DoOptions}) —
+   *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+   *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema
@@ -15427,10 +15403,6 @@ export type ActionOptions = {
  *   through the new commit. Inside reaction handlers, the framework
  *   auto-injects the triggering event; pass an explicit value here only
  *   to override.
- * @property skipValidation - Skip schema validation of the action's
- *   *emitted events* (the events the action produces). Action payloads
- *   are always validated since they cross a trust boundary. Default
- *   \`false\`.
  * @property correlator - Per-call correlator override. When omitted,
  *   falls back to the orchestrator-level {@link ActOptions.correlator}
  *   (or the framework default). Useful when a single dispatch needs to
@@ -15444,7 +15416,6 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
    * NOT constrained to the receiving state's event union.
    */
   readonly reactingTo?: Committed<Schemas, keyof Schemas>;
-  readonly skipValidation?: boolean;
   readonly correlator?: Correlator;
 };
 
@@ -19229,7 +19200,6 @@ export async function scan(
           migrated = {
             ...event,
             name: migration.to as typeof event.name,
-            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
             data: new_data as any,
           };
           migrated_count++;
@@ -19426,9 +19396,8 @@ export async function load<
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
  * @param options Per-call dispatch options ({@link DoOptions}) —
- *   \`reactingTo\` to thread correlation, \`skipValidation\` to skip
- *   event-schema checks, \`correlator\` to override the framework or
- *   orchestrator-level correlator for this call only.
+ *   \`reactingTo\` to thread correlation, \`correlator\` to override the
+ *   framework or orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -19449,13 +19418,8 @@ export async function action<
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
   const reactingTo = options?.reactingTo;
-  const skipValidation = options?.skipValidation ?? false;
   const correlator = options?.correlator ?? default_correlator;
 
-  // Action payloads are always validated — they come from external
-  // callers (HTTP, RPC, queue consumers) and must be schema-checked at
-  // the boundary. \`skipValidation\` only skips event-schema checks for
-  // events the action itself synthesizes from already-trusted input.
   const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
@@ -19494,36 +19458,11 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // ACT-403: warn once per process per event name when a dynamic
-      // \`.emit((a) => ["X", ...])\` produces a deprecated event. Static
-      // \`.emit("X")\` is already caught at build time by act-builder; this
-      // is the runtime safety net for the dynamic form, which the static
-      // checker can't inspect. The \`_warned\` set lives on the state so
-      // multiple Act instances over the same merged state share idempotency.
-      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-      if (deprecated && deprecated.size > 0) {
-        const me_ = me as { _warned?: Set<string> };
-        const warned = me_._warned ?? (me_._warned = new Set<string>());
-        for (const [name] of tuples) {
-          const evt = name as string;
-          if (deprecated.has(evt) && !warned.has(evt)) {
-            warned.add(evt);
-            log().warn(
-              \`Action "\${String(action)}" emitted deprecated event "\${evt}". \` +
-                \`A newer version exists in the registry — update the action's \` +
-                \`.emit() to target the current version. (warned once per process)\`
-            );
-          }
-        }
-      }
-
-      const events = tuples.map(([name, data]) => ({
+      const valid = tuples.map(([name, data]) => ({
         name,
-        data: skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]),
+        data: validate(name as string, data, me.events[name]),
       }));
-      const emitted = events.map((v) => me.message(v));
+      const emitted = valid.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -19578,7 +19517,7 @@ export async function action<
         // useful; the reducer and the returned snapshot see the
         // pre-split event directly. pii_split (in \`me.message\`) above
         // is the only PII operation on the action path.
-        const event = { ...row, data: events[i].data };
+        const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;
@@ -23689,6 +23628,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -23708,6 +23658,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**
@@ -24582,8 +24533,7 @@ export function build_es(
     target,
     payload,
     options
-  ) =>
-    es.action(me, action_name, target, payload, { correlator, ...options });
+  ) => es.action(me, action_name, target, payload, { correlator, ...options });
   if (logger.level !== "trace") {
     return {
       snap: es.snap,
@@ -25428,10 +25378,6 @@ export type ActionOptions = {
  *   through the new commit. Inside reaction handlers, the framework
  *   auto-injects the triggering event; pass an explicit value here only
  *   to override.
- * @property skipValidation - Skip schema validation of the action's
- *   *emitted events* (the events the action produces). Action payloads
- *   are always validated since they cross a trust boundary. Default
- *   \`false\`.
  * @property correlator - Per-call correlator override. When omitted,
  *   falls back to the orchestrator-level {@link ActOptions.correlator}
  *   (or the framework default). Useful when a single dispatch needs to
@@ -25445,7 +25391,6 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
    * NOT constrained to the receiving state's event union.
    */
   readonly reactingTo?: Committed<Schemas, keyof Schemas>;
-  readonly skipValidation?: boolean;
   readonly correlator?: Correlator;
 };
 
@@ -28042,6 +27987,17 @@ export type SchemaRegister<TSchemaReg> = {
  * @property disclosure_predicate - Lookup of the \`.discloses(predicate)\`
  *   declaration per state name. Returns \`null\` when no predicate was set
  *   (framework default-deny).
+ * @property deprecated_events - Lookup of deprecated event names per state
+ *   name. Derived from the \`_v<digits>\` versioning convention at build
+ *   time: for each state, every event whose base name has a
+ *   higher-numbered sibling is "deprecated." Returns an empty set for
+ *   states with no deprecation in scope. The framework surfaces
+ *   deprecations once at build time (static \`.emit("X")\` targeting a
+ *   deprecated name throws; a single startup advisory enumerates every
+ *   legacy event in scope) — there is intentionally no runtime warn on
+ *   dynamic emits, so the build-time advisory is the only channel.
+ *   Exposed here for callers that want to layer their own warning
+ *   policy on top.
  */
 export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
@@ -28061,6 +28017,7 @@ export type Registry<
         actor: Actor
       ) => boolean)
     | null;
+  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
 };
 
 /**

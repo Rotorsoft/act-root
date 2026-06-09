@@ -351,15 +351,18 @@ export function act<
   // same builder cast to the widened generic; type fanout is preserved
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
-  // Caches behind registry.sensitive_fields / registry.disclosure_predicate.
-  // Populated on the first .build() call.
+  // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
+  // registry.deprecated_events. Populated on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
+  const _de = new Map<string, ReadonlySet<string>>();
+  const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
     events: {} as Registry<TSchemaReg, TEvents, TActions>["events"],
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
+    deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
   };
   const pending_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
@@ -373,10 +376,11 @@ export function act<
   // ACT-403: auto-deprecation enforcement. Groups each state's events
   // by base name + `_v<digits>`; the highest version is current, all
   // lower ones are deprecated. Stashes the deprecation set on the
-  // state so `event-sourcing.ts` can warn at runtime for dynamic
-  // emits. Scans static `.emit("X")` markers across every state and
-  // throws if any target a deprecated event — the only legitimate use
-  // of a deprecated event is on the reduce path. Finally, surfaces a
+  // registry (`registry.deprecated_events(state_name)`) so the
+  // orchestrator can warn post-commit when an action emits one.
+  // Scans static `.emit("X")` markers across every state and throws
+  // if any target a deprecated event — the only legitimate use of a
+  // deprecated event is on the reduce path. Finally, surfaces a
   // one-line startup advisory so operators can see "your app has
   // legacy events kept for the read path, here's where they live."
   const finalize_deprecations = () => {
@@ -389,7 +393,7 @@ export function act<
       const event_names = Object.keys(state.events);
       const deprecated = deprecated_event_names(event_names);
       if (deprecated.size === 0) continue;
-      (state as { _deprecated?: Set<string> })._deprecated = deprecated;
+      _de.set(state.name, deprecated);
       for (const name of deprecated) {
         // `current_version_of` is guaranteed non-undefined here — `name`
         // is in `deprecated`, which by construction means a higher-

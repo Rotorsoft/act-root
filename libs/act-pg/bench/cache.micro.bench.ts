@@ -80,15 +80,7 @@ async function seedNoSnap(n: number) {
   await store().drop();
   await store().seed();
   for (let i = 0; i < n; i++) {
-    await action(
-      Counter,
-      "increment",
-      noSnapTarget,
-      { count: 1 },
-      {
-        skipValidation: true,
-      }
-    );
+    await action(Counter, "increment", noSnapTarget, { count: 1 });
   }
 }
 
@@ -98,13 +90,7 @@ async function seedSnap(n: number, cfg: SnapConfig) {
   await store().seed();
   const t = { stream: cfg.stream, actor: { id: "a", name: "a" } };
   for (let i = 0; i < n; i++) {
-    await action(
-      cfg.me,
-      "increment",
-      t,
-      { count: 1 },
-      { skipValidation: true }
-    );
+    await action(cfg.me, "increment", t, { count: 1 });
     // Wait for fire-and-forget snapshot commits
     if ((i + 1) % cfg.interval === 0)
       await new Promise((r) => setTimeout(r, 200));

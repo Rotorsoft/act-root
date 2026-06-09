@@ -31,13 +31,7 @@ describe("cache integration", () => {
 
   it("cache miss populates cache on load", async () => {
     // Commit an event directly
-    await action(
-      Counter,
-      "increment",
-      target,
-      { count: 5 },
-      { skipValidation: true }
-    );
+    await action(Counter, "increment", target, { count: 5 });
 
     // Load should populate cache
     const snap = await load(Counter, { stream: "c1" });
@@ -50,20 +44,8 @@ describe("cache integration", () => {
   });
 
   it("action updates cache", async () => {
-    await action(
-      Counter,
-      "increment",
-      target,
-      { count: 3 },
-      { skipValidation: true }
-    );
-    await action(
-      Counter,
-      "increment",
-      target,
-      { count: 7 },
-      { skipValidation: true }
-    );
+    await action(Counter, "increment", target, { count: 3 });
+    await action(Counter, "increment", target, { count: 7 });
 
     // Cache should have latest state from the action
     const c = cache() as InMemoryCache;
@@ -74,13 +56,7 @@ describe("cache integration", () => {
 
   it("cached load returns correct state after multiple actions", async () => {
     for (let i = 1; i <= 10; i++) {
-      await action(
-        Counter,
-        "increment",
-        target,
-        { count: 1 },
-        { skipValidation: true }
-      );
+      await action(Counter, "increment", target, { count: 1 });
     }
     const snap = await load(Counter, { stream: "c1" });
     expect(snap.state.count).toBe(10);
@@ -88,13 +64,7 @@ describe("cache integration", () => {
   });
 
   it("cache invalidated on ConcurrencyError", async () => {
-    await action(
-      Counter,
-      "increment",
-      target,
-      { count: 1 },
-      { skipValidation: true }
-    );
+    await action(Counter, "increment", target, { count: 1 });
 
     // Force a concurrency error by using wrong expectedVersion
     try {
@@ -102,8 +72,7 @@ describe("cache integration", () => {
         Counter,
         "increment",
         { ...target, expectedVersion: 999 },
-        { count: 1 },
-        { skipValidation: true }
+        { count: 1 }
       );
     } catch {
       // expected
@@ -134,13 +103,7 @@ describe("cache integration", () => {
     const errorSpy = vi.spyOn(log(), "error").mockImplementation(() => {});
 
     // Action should succeed despite cache.set rejecting
-    const snaps = await action(
-      Counter,
-      "increment",
-      target,
-      { count: 5 },
-      { skipValidation: true }
-    );
+    const snaps = await action(Counter, "increment", target, { count: 5 });
     expect(snaps[0].state.count).toBe(5);
 
     // Flush the fire-and-forget .catch microtask

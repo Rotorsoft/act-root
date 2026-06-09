@@ -603,10 +603,9 @@ export class Act<
    * @param action - The name of the action to execute
    * @param target - Target specification with stream ID and actor context
    * @param payload - Action payload matching the action's schema
-   * @param reactingTo - Optional event that triggered this action (for correlation)
-   * @param skipValidation - Skip schema validation of the action's
-   *   *emitted events* (use carefully, for performance). Action
-   *   payloads are always validated — they cross a trust boundary.
+   * @param options - Per-call dispatch options ({@link DoOptions}) —
+   *   `reactingTo` to thread correlation, `correlator` to override the
+   *   framework or orchestrator-level correlator for this call only.
    * @returns Array of snapshots for all affected states (usually one)
    *
    * @throws {ValidationError} If payload doesn't match action schema

@@ -534,10 +534,6 @@ export type ActionOptions = {
  *   through the new commit. Inside reaction handlers, the framework
  *   auto-injects the triggering event; pass an explicit value here only
  *   to override.
- * @property skipValidation - Skip schema validation of the action's
- *   *emitted events* (the events the action produces). Action payloads
- *   are always validated since they cross a trust boundary. Default
- *   `false`.
  * @property correlator - Per-call correlator override. When omitted,
  *   falls back to the orchestrator-level {@link ActOptions.correlator}
  *   (or the framework default). Useful when a single dispatch needs to
@@ -551,7 +547,6 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
    * NOT constrained to the receiving state's event union.
    */
   readonly reactingTo?: Committed<Schemas, keyof Schemas>;
-  readonly skipValidation?: boolean;
   readonly correlator?: Correlator;
 };
 

@@ -155,7 +155,9 @@ After a schema migration, `OrderPlaced` and `OrderPlaced_v2` both live in the re
 
   This catches the forgotten `.emit()` call after a migration. The `app.build()` call refuses to construct the orchestrator until the static targets are fixed.
 
-- **Runtime warning** when a dynamic `.emit((a) => ["OrderPlaced", ...])` produces a deprecated event name at commit time. Static analysis can't see inside arbitrary functions, so this is the safety net. The warning is routed through the `Logger` port and idempotent — one warning per event name per process, regardless of how many actions hit the path.
+- **Startup advisory** — a single info log at `app.build()` enumerates every deprecated event in scope with its current version and owning state. One line per Act, regardless of how many call sites emit the legacy name. The same data is exposed programmatically via `app.registry.deprecated_events(state_name)` for callers that want to layer their own policy on top (a CI gate, a metrics tag, a custom Logger warning).
+
+- **No runtime warning on dynamic emits.** Dynamic `.emit((a) => ["OrderPlaced", ...])` callbacks escape the static check, but the startup advisory already names every deprecated event the registry knows about — a per-action runtime warn would only repeat what the operator already saw at boot. The orchestrator (and `event-sourcing.ts`) stays unaware of deprecation by design; the registry holds the data, the build-time channel surfaces it.
 
 - **`.patch()` reducer path stays silent forever.** Replay of historical events must not warn, because the reducer is required for the lifetime of the system. Deprecation is for *emission*, not *reduction*.
 
@@ -180,7 +182,8 @@ Same operator-driven category as `app.close()` / `app.reset()` / `app.unblock()`
 ## Pointers
 
 - `libs/act/src/types/action.ts` — `EventRegister`, `PatchHandlers` — type-level shape that drives this
-- `libs/act/src/internal/event-sourcing.ts` — `load()` — reads `me.patch[e.name]`; missing reducer logs a warning rather than silently corrupting state
+- `libs/act/src/types/registry.ts` — `Registry.deprecated_events(state_name)` — closure-backed lookup populated at build time; the only programmatic surface for deprecated names
+- `libs/act/src/internal/event-sourcing.ts` — `load()` — reads `me.patch[e.name]`; missing reducer logs a warning rather than silently corrupting state. The action path is intentionally deprecation-unaware
 - `libs/act/src/internal/merge.ts` — duplicate-event-name guard at slice composition time (one canonical reducer per event)
-- `libs/act/src/internal/event-versions.ts` — `_v<digits>` parser; `deprecatedEventNames()` + `currentVersionOf()` helpers
-- `libs/act/src/builders/act-builder.ts` — build-time scan of `state.on[action]._staticEmit` markers; throws on emission of a deprecated event
+- `libs/act/src/internal/event-versions.ts` — `_v<digits>` parser; `deprecated_event_names()` + `current_version_of()` helpers
+- `libs/act/src/builders/act-builder.ts` — `finalize_deprecations()` populates `registry.deprecated_events`, throws on static `.emit("OldName")` targeting a deprecated event, and emits the one-line startup advisory

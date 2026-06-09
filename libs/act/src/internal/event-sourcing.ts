@@ -291,7 +291,6 @@ export async function scan(
           migrated = {
             ...event,
             name: migration.to as typeof event.name,
-            // biome-ignore lint/suspicious/noExplicitAny: migration target shape is caller-defined
             data: new_data as any,
           };
           migrated_count++;
@@ -488,9 +487,8 @@ export async function load<
  * @param target The target (stream, actor, etc.)
  * @param payload The payload of the action
  * @param options Per-call dispatch options ({@link DoOptions}) —
- *   `reactingTo` to thread correlation, `skipValidation` to skip
- *   event-schema checks, `correlator` to override the framework or
- *   orchestrator-level correlator for this call only.
+ *   `reactingTo` to thread correlation, `correlator` to override the
+ *   framework or orchestrator-level correlator for this call only.
  * @returns The snapshot of the committed event
  *
  * @example
@@ -511,13 +509,8 @@ export async function action<
   const { stream, expectedVersion, actor } = target;
   if (!stream) throw new Error("Missing target stream");
   const reactingTo = options?.reactingTo;
-  const skipValidation = options?.skipValidation ?? false;
   const correlator = options?.correlator ?? default_correlator;
 
-  // Action payloads are always validated — they come from external
-  // callers (HTTP, RPC, queue consumers) and must be schema-checked at
-  // the boundary. `skipValidation` only skips event-schema checks for
-  // events the action itself synthesizes from already-trusted input.
   const validated = validate(action as string, payload, me.actions[action]);
 
   const opts = me.options?.[action];
@@ -556,36 +549,11 @@ export async function action<
         ? (result as Emitted<TEvents>[]) // array of tuples
         : ([result] as Emitted<TEvents>[]); // single tuple
 
-      // ACT-403: warn once per process per event name when a dynamic
-      // `.emit((a) => ["X", ...])` produces a deprecated event. Static
-      // `.emit("X")` is already caught at build time by act-builder; this
-      // is the runtime safety net for the dynamic form, which the static
-      // checker can't inspect. The `_warned` set lives on the state so
-      // multiple Act instances over the same merged state share idempotency.
-      const deprecated = (me as { _deprecated?: Set<string> })._deprecated;
-      if (deprecated && deprecated.size > 0) {
-        const me_ = me as { _warned?: Set<string> };
-        const warned = me_._warned ?? (me_._warned = new Set<string>());
-        for (const [name] of tuples) {
-          const evt = name as string;
-          if (deprecated.has(evt) && !warned.has(evt)) {
-            warned.add(evt);
-            log().warn(
-              `Action "${String(action)}" emitted deprecated event "${evt}". ` +
-                `A newer version exists in the registry — update the action's ` +
-                `.emit() to target the current version. (warned once per process)`
-            );
-          }
-        }
-      }
-
-      const events = tuples.map(([name, data]) => ({
+      const valid = tuples.map(([name, data]) => ({
         name,
-        data: skipValidation
-          ? data
-          : validate(name as string, data, me.events[name]),
+        data: validate(name as string, data, me.events[name]),
       }));
-      const emitted = events.map((v) => me.message(v));
+      const emitted = valid.map((e) => me.message(e));
 
       const meta: EventMeta = {
         correlation:
@@ -640,7 +608,7 @@ export async function action<
         // useful; the reducer and the returned snapshot see the
         // pre-split event directly. pii_split (in `me.message`) above
         // is the only PII operation on the action path.
-        const event = { ...row, data: events[i].data };
+        const event = { ...row, data: valid[i].data };
         const p = me.patch[event.name](event, state);
         state = patch(state, p);
         patches++;

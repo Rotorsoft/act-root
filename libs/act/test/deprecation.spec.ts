@@ -177,7 +177,14 @@ describe("deprecation (ACT-403)", () => {
   });
 
   describe("runtime warning (dynamic .emit)", () => {
-    it("warns once per process when a dynamic emit produces a deprecated event", async () => {
+    it("does not emit a runtime warning when a dynamic emit produces a deprecated event", async () => {
+      // Build-time advisory (the startup info log + the static-emit
+      // throw) is the deprecation channel. The dynamic-emit case
+      // intentionally has no runtime warn — every deprecated event name
+      // is already named in the startup advisory, and per-action runtime
+      // warnings add log noise without surfacing anything operators
+      // can't see at boot. Exposed via `registry.deprecated_events(...)`
+      // for callers that want to opt into their own warning policy.
       const warnSpy = vi.spyOn(log(), "warn");
 
       const Counter = state({ Counter: z.object({ n: z.number() }) })
@@ -198,8 +205,13 @@ describe("deprecation (ACT-403)", () => {
       const deprecationWarns = warnSpy.mock.calls.filter((c) =>
         String(c[0] ?? "").includes('deprecated event "Tick"')
       );
-      expect(deprecationWarns).toHaveLength(1);
-      expect(String(deprecationWarns[0][0])).toMatch(/warned once per process/);
+      expect(deprecationWarns).toHaveLength(0);
+
+      // Registry exposes the deprecated set for opt-in inspection.
+      expect(app.registry.deprecated_events("Counter").has("Tick")).toBe(true);
+      expect(app.registry.deprecated_events("Counter").has("Tick_v2")).toBe(
+        false
+      );
 
       warnSpy.mockRestore();
     });
@@ -266,12 +278,17 @@ describe("deprecation (ACT-403)", () => {
         .emit(() => ["Tick", {}])
         .build();
 
-      act().withState(Plain).build();
+      const app = act().withState(Plain).build();
 
       const advisory = infoSpy.mock.calls.find((c) =>
         String(c[0] ?? "").includes("deprecated event(s)")
       );
       expect(advisory).toBeUndefined();
+
+      // Registry returns the empty fallback set for states with no
+      // deprecation in scope (exercises the `?? EMPTY_DEPRECATED` branch).
+      expect(app.registry.deprecated_events("Plain").size).toBe(0);
+      expect(app.registry.deprecated_events("Unknown").size).toBe(0);
 
       infoSpy.mockRestore();
     });

@@ -43,8 +43,7 @@ describe("event-sourcing", () => {
       { ...me, given: undefined },
       "increment",
       { stream: "s", actor: { id: "a", name: "a" }, expectedVersion: -1 },
-      { count: 1 },
-      { skipValidation: true }
+      { count: 1 }
     );
     expect(snapshot.event?.name).toBe("INCREMENT");
   });
@@ -230,34 +229,6 @@ describe("event-sourcing", () => {
       { count: 1 }
     );
     expect(snapshot.event?.name).toBe("INCREMENT");
-  });
-
-  it("skipValidation skips event-payload checks but always validates the action payload", async () => {
-    // Action-side validator MUST still run — actions cross a trust
-    // boundary. Event-side validator MUST be skipped when the flag is on.
-    const actionSpy = vi.spyOn(me.actions.increment, "parse");
-    const eventSpy = vi.spyOn(me.events.INCREMENT, "parse");
-    await action(
-      { ...me, given: undefined },
-      "increment",
-      { stream: "s", actor: { id: "a", name: "a" } },
-      { count: 1 },
-      { skipValidation: true }
-    );
-    expect(actionSpy).toHaveBeenCalledTimes(1);
-    expect(eventSpy).not.toHaveBeenCalled();
-  });
-
-  it("skipValidation does NOT bypass action-payload validation — invalid payloads still throw", async () => {
-    await expect(
-      action(
-        { ...me, given: undefined },
-        "increment",
-        { stream: "s", actor: { id: "a", name: "a" } },
-        { count: "invalid" } as unknown as { count: number },
-        { skipValidation: true }
-      )
-    ).rejects.toThrow(/Invalid increment payload/);
   });
 
   it("should handle loading a state with no init function", async () => {

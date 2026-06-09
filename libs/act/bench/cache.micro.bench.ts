@@ -72,13 +72,7 @@ async function seedEvents(n: number, me: AnyState = Counter) {
   store(new InMemoryStore());
   await store().seed();
   for (let i = 0; i < n; i++) {
-    await action(
-      me,
-      "increment",
-      target,
-      { count: 1 },
-      { skipValidation: true }
-    );
+    await action(me, "increment", target, { count: 1 });
   }
 }
 
