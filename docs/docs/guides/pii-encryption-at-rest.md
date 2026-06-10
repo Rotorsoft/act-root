@@ -203,24 +203,79 @@ But "the column is `NULL`" is not the same as "the ciphertext is gone from disk.
 
 Either way, the operator step lives outside the framework. Act guarantees the column is `NULL` after `forget`; the DB and the storage layer determine when the ciphertext disappears.
 
-## A fifth option, in flight
+## Recipe: adapter-layer envelope encryption
 
-The recipes above all sit at the DB or volume layer: the framework hands the `pii` JSON to the adapter, the adapter writes it as-is, encryption happens lower down. There is a genuine third position between "framework-wide Encryptor port" (rejected — see the [book essay](../../../book/act-566-pii-rejected-designs.md)) and "operator's DB layer" (everything above), and that's **adapter-layer encryption**: a per-adapter constructor option on `act-pg` and `act-sqlite` that wraps the `pii` column on commit and unwraps it on read, with the key provided by a callback the operator controls.
+The four recipes above all sit at the DB or volume layer: the framework hands the `pii` JSON to the adapter, the adapter writes it as-is, encryption happens lower down. There is a fifth position — **adapter-layer encryption** ([#921](https://github.com/Rotorsoft/act-root/issues/921)). Both `@rotorsoft/act-pg` and `@rotorsoft/act-sqlite` accept an optional `pii_encryption` constructor option that wraps the `pii` column on commit and unwraps it on read, with an operator-controlled key. The cipher (AES-256-GCM, versioned envelope) lives in `@rotorsoft/act-crypto`; the framework core stays unaware.
+
+When to reach for this instead of TDE or `pgcrypto`:
+
+- **Self-hosted Postgres without `pgcrypto`** — for example, a managed PG service that doesn't expose extensions.
+- **Edge SQLite** on devices you don't fully control, where OS-level FDE isn't guaranteed.
+- **Container or serverless workloads** where the connection is yours but the volume is opaque.
+- **KMS-required deployments** — `keyProvider` is a callback, so AWS KMS / GCP KMS / Vault drop in directly.
+
+It composes with TDE — adapter-layer at the column, TDE at the volume — for defense in depth without coordination.
+
+### Setup (Postgres)
 
 ```ts
-// Shape under design — not shipped yet.
-PostgresStore({
-  connectionString: ...,
+import { PostgresStore } from "@rotorsoft/act-pg";
+
+const store = new PostgresStore({
+  host: "localhost",
+  port: 5432,
+  database: "app",
+  user: "postgres",
+  password: "secret",
   pii_encryption: {
-    key_provider: () => process.env.PII_KEY,    // sync or async; KMS, Vault, env var
+    keyProvider: () =>
+      Buffer.from(process.env.PII_KEY_BASE64 ?? "", "base64"),
     algorithm: "aes-256-gcm",
   },
 });
 ```
 
-Why it's worth pursuing as a separate ticket ([#921](https://github.com/Rotorsoft/act-root/issues/921)): it covers the deployments the recipes above can't reach — self-hosted Postgres without `pgcrypto`, edge SQLite on devices you don't own, container or serverless workloads where you control the connection but not the volume. It composes with TDE (defense in depth) and fits KMS-shaped key providers cleanly. The `Store` contract doesn't change; `Capabilities.pii_isolation` still gates the column itself; `forget_pii` semantics are identical (a `NULL` is a `NULL` whether the ciphertext or plaintext lived there before).
+`keyProvider` is called once on first use and the result is cached for the lifetime of the store instance. Rotation means restarting the store with a new provider. Sync and async providers both work — return `Buffer` or `Promise<Buffer>`. The key must be 32 bytes (256 bits); anything else throws at first use with a clear error.
 
-It didn't ship with the original epic ([#566](https://github.com/Rotorsoft/act-root/issues/566)) because every current adopter is on RDS / Cloud SQL (TDE works) or self-hosted PG with `pgcrypto` available. Key management adds real maintenance surface (rotation, multi-key reads during rollover, audit) that hadn't yet earned its keep. Track [#921](https://github.com/Rotorsoft/act-root/issues/921) for shipping status.
+### Setup (SQLite)
+
+```ts
+import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+const store = new SqliteStore({
+  url: "file:app.db",
+  pii_encryption: {
+    keyProvider: () => readFileSync("/etc/secrets/pii-key.bin"),
+    algorithm: "aes-256-gcm",
+  },
+});
+```
+
+### On-disk shape
+
+The `pii` column stays the same type (`jsonb` on PG, `TEXT` on SQLite). Encrypted writes land as JSON-stringified base64 ciphertext — `"AQAB...=="` rather than `{"email": "..."}`. The wire format carries a one-byte version header so a future algorithm can land without breaking existing rows:
+
+```
+[version: 1 byte = 0x01][iv: 12B][gcm tag: 16B][ciphertext: NB]
+```
+
+The read path discriminates by type after `JSON.parse`: strings get decrypted, objects pass through. This makes mixed-data rollouts transparent — events written before enabling encryption continue to read as plaintext, events written after read as ciphertext.
+
+### What stays unchanged
+
+- `Store.forget_pii(stream)` still issues `UPDATE events SET pii = NULL`. The encryption layer is invisible to that SQL — a `NULL` is a `NULL` whether the prior value was ciphertext or plaintext.
+- `Capabilities.pii_isolation` still gates the *column itself*. Encryption is orthogonal — adapters declare `pii_isolation: true` regardless of whether the operator turned encryption on.
+- The TCK is unchanged. Encryption is an adapter-internal concern; the conformance suite asserts column round-trip through the `Store` contract, not the on-disk bytes.
+
+### Limitations and trade-offs
+
+- **Rotation is restart-driven.** The resolver caches the operator's key for the store's lifetime. Multi-key reads-during-rollover, KMS rotation policies, and operator audit are out of scope. A future ticket may expose a key-versioned `keyProvider`; for now, the deployment cycles the secret and restarts.
+- **Performance.** AES-256-GCM in `node:crypto` is hardware-accelerated on modern CPUs; the per-event cost is small but non-zero. Bench your workload before enabling encryption on a hot path that already runs near its budget.
+- **No application-layer key management.** No master keys, no KEK/DEK split, no rotation tooling. The framework ships the cipher and the envelope; the operator's KMS owns the key.
+
+### Composition with TDE / `pgcrypto`
+
+Adapter-layer encryption stacks cleanly with the recipes above. Postgres with adapter-layer encryption + RDS TDE gives you encryption at two layers — column-level with an app-side key, and volume-level with a KMS-managed AWS key. SQLite with adapter-layer encryption + SEE or OS-level FDE has the same shape. The recipes don't conflict; the question is whether one layer is enough for your compliance regime.
 
 ## What this guide doesn't cover
 

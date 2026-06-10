@@ -15,6 +15,12 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
+import {
+  decrypt,
+  type Encryption,
+  encrypt,
+  makeKeyResolver,
+} from "@rotorsoft/act-crypto";
 
 /**
  * SQLite store configuration
@@ -24,26 +30,38 @@ export interface SqliteConfig {
   url: string;
   /** Auth token for libSQL server connections (optional) */
   authToken?: string;
+  /**
+   * Adapter-layer envelope encryption for the `events.pii` column.
+   * Optional — when present, every non-null PII payload is encrypted
+   * before INSERT and decrypted on every read; when absent, the
+   * column is stored and read as plaintext (the framework's default
+   * behavior).
+   *
+   * Cipher and wire format come from `@rotorsoft/act-crypto`:
+   * AES-256-GCM with a versioned base64-framed envelope. The TEXT
+   * column stores `JSON.stringify(...)`-ed values either way, so
+   * encrypted writes land as a JSON-stringified base64 string and
+   * plaintext writes as a JSON-stringified object. The read path
+   * discriminates by `typeof` after `JSON.parse` — strings get
+   * decrypted, objects pass through — which makes mixed-data
+   * rollouts transparent.
+   *
+   * `forget_pii` semantics are unchanged: the column is set to
+   * `NULL` regardless of whether the prior value was plaintext or
+   * ciphertext.
+   *
+   * Encryption at rest at the **storage** layer (SQLite SEE, an
+   * encrypted volume, OS-level FDE) composes orthogonally with
+   * adapter-layer encryption. See
+   * `docs/docs/guides/pii-encryption-at-rest.md` for the decision
+   * matrix.
+   */
+  pii_encryption?: Encryption;
 }
 
 const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
-
-/** Parse the JSON-stringified `pii` text column back to the in-memory
- *  shape. Returns `null` when the column was NULL (the common case —
- *  events without sensitive declarations). Consolidated so every read
- *  path (`query`, both `query_stats` overloads) uses one branch instead
- *  of repeating the ternary inline. */
-const parse_pii = (raw: unknown): Record<string, unknown> | null =>
-  raw == null ? null : JSON.parse(raw as string);
-
-/** Stringify the in-memory `pii` shape for the TEXT column. Returns
- *  `null` when `pii` is absent so SQLite's row format can skip the
- *  column entirely (zero extra bytes). Used by commit + restore. */
-const stringify_pii = (
-  pii: Readonly<Record<string, unknown>> | null | undefined
-): string | null => (pii == null ? null : JSON.stringify(pii));
 
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQL LIKE pattern. Honors `^` / `$` anchors and converts `.*` → `%`,
@@ -98,6 +116,14 @@ export function streamPatternToLike(input: string): string {
  */
 export class SqliteStore implements Store {
   private client: Client;
+  /**
+   * Memoized key resolver for the optional `pii_encryption` envelope.
+   * Initialized in the constructor when encryption is configured;
+   * `undefined` otherwise. The resolver caches the operator's key on
+   * first use — rotation means restarting the store with a fresh
+   * provider.
+   */
+  private readonly _resolve_pii_key: (() => Promise<Buffer>) | undefined;
 
   constructor(config: Partial<SqliteConfig> = {}) {
     const cfg = { ...DEFAULT_CONFIG, ...config };
@@ -105,6 +131,50 @@ export class SqliteStore implements Store {
       url: cfg.url,
       authToken: cfg.authToken,
     });
+    this._resolve_pii_key = cfg.pii_encryption
+      ? makeKeyResolver(cfg.pii_encryption)
+      : undefined;
+  }
+
+  /**
+   * Write-side pii encoder: encrypts when `pii_encryption` is configured,
+   * stringifies for the TEXT column either way. `null` passes through so
+   * `forget_pii` semantics survive intact (the row format skips the
+   * column entirely on a `NULL` write).
+   *
+   * @internal
+   */
+  private async _stringify_pii_for_write(
+    pii: Readonly<Record<string, unknown>> | null | undefined
+  ): Promise<string | null> {
+    if (pii == null) return null;
+    if (this._resolve_pii_key) {
+      return JSON.stringify(await encrypt(pii, this._resolve_pii_key));
+    }
+    return JSON.stringify(pii);
+  }
+
+  /**
+   * Read-side pii decoder: parses the TEXT column, and when
+   * `pii_encryption` is configured, transparently decrypts any value
+   * that came back as a JSON string. Plaintext writes deserialize to
+   * objects and pass through — which is what makes mixed-data
+   * rollouts (some pre-encryption rows, some post-) read cleanly.
+   *
+   * @internal
+   */
+  private async _parse_pii_from_read(
+    raw: unknown
+  ): Promise<Record<string, unknown> | null> {
+    if (raw == null) return null;
+    const parsed = JSON.parse(raw as string);
+    if (this._resolve_pii_key && typeof parsed === "string") {
+      return (await decrypt(parsed, this._resolve_pii_key)) as Record<
+        string,
+        unknown
+      >;
+    }
+    return parsed;
   }
 
   async seed() {
@@ -222,6 +292,7 @@ export class SqliteStore implements Store {
       let version = current_version + 1;
 
       for (const { name, data, pii } of msgs) {
+        const pii_for_write = await this._stringify_pii_for_write(pii);
         const result = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
@@ -231,7 +302,7 @@ export class SqliteStore implements Store {
             JSON.stringify(data),
             JSON.stringify(meta),
             now,
-            stringify_pii(pii),
+            pii_for_write,
           ],
         });
         committed.push({
@@ -311,6 +382,7 @@ export class SqliteStore implements Store {
     let count = 0;
 
     for (const row of result.rows) {
+      const pii_value = await this._parse_pii_from_read(row.pii);
       await Promise.resolve(
         callback({
           id: Number(row.id),
@@ -320,7 +392,7 @@ export class SqliteStore implements Store {
           name: row.name as string,
           data: JSON.parse(row.data as string),
           meta: JSON.parse(row.meta as string),
-          pii: parse_pii(row.pii),
+          pii: pii_value,
         })
       );
       count++;
@@ -828,9 +900,9 @@ export class SqliteStore implements Store {
         : null,
     ]);
 
-    const to_committed = (
+    const to_committed = async (
       row: Record<string, unknown>
-    ): Committed<E, keyof E> =>
+    ): Promise<Committed<E, keyof E>> =>
       ({
         id: Number(row.id),
         stream: row.stream as string,
@@ -839,13 +911,13 @@ export class SqliteStore implements Store {
         data: JSON.parse(row.data as string),
         meta: JSON.parse(row.meta as string),
         created: new Date(row.created as string),
-        pii: parse_pii(row.pii),
+        pii: await this._parse_pii_from_read(row.pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
     for (const row of headRes.rows) {
       out.set(row.stream as string, {
-        head: to_committed(row as Record<string, unknown>),
+        head: await to_committed(row as Record<string, unknown>),
       });
     }
     if (tailRes) {
@@ -857,7 +929,7 @@ export class SqliteStore implements Store {
             head: Committed<E, keyof E>;
             tail?: Committed<E, keyof E>;
           }
-        ).tail = to_committed(row as Record<string, unknown>);
+        ).tail = await to_committed(row as Record<string, unknown>);
       }
     }
     return out;
@@ -926,7 +998,7 @@ export class SqliteStore implements Store {
 
     const res = await this.client.execute({ sql, args: args as any[] });
 
-    const to_committed = (
+    const to_committed = async (
       id: unknown,
       stream: unknown,
       version: unknown,
@@ -935,7 +1007,7 @@ export class SqliteStore implements Store {
       meta: unknown,
       created: unknown,
       pii: unknown
-    ): Committed<E, keyof E> =>
+    ): Promise<Committed<E, keyof E>> =>
       ({
         id: Number(id),
         stream: stream as string,
@@ -944,7 +1016,7 @@ export class SqliteStore implements Store {
         data: JSON.parse(data as string),
         meta: JSON.parse(meta as string),
         created: new Date(created as string),
-        pii: parse_pii(pii),
+        pii: await this._parse_pii_from_read(pii),
       }) as Committed<E, keyof E>;
 
     const out = new Map<string, StreamStats<E>>();
@@ -956,7 +1028,7 @@ export class SqliteStore implements Store {
         count?: number;
         names?: Record<string, number>;
       } = {
-        head: to_committed(
+        head: await to_committed(
           r.id,
           r.stream,
           r.version,
@@ -968,7 +1040,7 @@ export class SqliteStore implements Store {
         ),
       };
       if (want_tail && r.t_id !== null && r.t_id !== undefined) {
-        stats.tail = to_committed(
+        stats.tail = await to_committed(
           r.t_id,
           r.t_stream,
           r.t_version,
@@ -1097,6 +1169,7 @@ export class SqliteStore implements Store {
       // canonical SQLite reset; safe even if the row doesn't exist.
       await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'events'");
       await driver(async (event) => {
+        const pii_for_write = await this._stringify_pii_for_write(event.pii);
         const ins = await tx.execute({
           sql: "INSERT INTO events (stream, version, name, data, meta, created, pii) VALUES (?, ?, ?, ?, ?, ?, ?)",
           args: [
@@ -1106,7 +1179,7 @@ export class SqliteStore implements Store {
             JSON.stringify(event.data),
             JSON.stringify(event.meta),
             event.created.toISOString(),
-            stringify_pii(event.pii),
+            pii_for_write,
           ],
         });
         return Number(ins.lastInsertRowid);

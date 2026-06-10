@@ -1,76 +1,29 @@
-import * as path from "node:path";
+/**
+ * Root vitest config. `@rotorsoft/*` package paths resolve to source
+ * (rather than each package's built `dist/`) via `vite-tsconfig-paths`,
+ * sourced from `tsconfig.eslint.json`. New in-tree packages become
+ * test-resolvable as soon as they land in that map — no `pnpm build`
+ * bootstrap dance.
+ *
+ * The plugin's `root` and `projects` are pinned to the workspace root
+ * via `import.meta.dirname` so vitest invocations from a sub-package
+ * (e.g. `pnpm -F @rotorsoft/act-pg exec vitest run ...` in CI's
+ * conformance jobs) still find the tsconfig — the plugin defaults
+ * `root` to the CWD, which is the sub-package in that case.
+ */
+import { resolve } from "node:path";
+import tsconfigPaths from "vite-tsconfig-paths";
 import { defineConfig } from "vitest/config";
 
+const workspace_root = import.meta.dirname;
+
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@rotorsoft/act-patch": path.resolve(
-        __dirname,
-        "libs/act-patch/src/index.ts"
-      ),
-      "@rotorsoft/act-sse": path.resolve(
-        __dirname,
-        "libs/act-sse/src/index.ts"
-      ),
-      "@rotorsoft/act-http/webhook": path.resolve(
-        __dirname,
-        "libs/act-http/src/webhook/index.ts"
-      ),
-      "@rotorsoft/act-http/sse": path.resolve(
-        __dirname,
-        "libs/act-http/src/sse/index.ts"
-      ),
-      "@rotorsoft/act-http/receiver/trpc": path.resolve(
-        __dirname,
-        "libs/act-http/src/receiver/trpc/index.ts"
-      ),
-      "@rotorsoft/act-http/receiver/express": path.resolve(
-        __dirname,
-        "libs/act-http/src/receiver/express/index.ts"
-      ),
-      "@rotorsoft/act-http/receiver/fastify": path.resolve(
-        __dirname,
-        "libs/act-http/src/receiver/fastify/index.ts"
-      ),
-      "@rotorsoft/act-http/receiver/hono": path.resolve(
-        __dirname,
-        "libs/act-http/src/receiver/hono/index.ts"
-      ),
-      "@rotorsoft/act-http/receiver": path.resolve(
-        __dirname,
-        "libs/act-http/src/receiver/index.ts"
-      ),
-      "@rotorsoft/act-pino": path.resolve(
-        __dirname,
-        "libs/act-pino/src/index.ts"
-      ),
-      "@rotorsoft/act-ops/idempotency": path.resolve(
-        __dirname,
-        "libs/act-ops/src/idempotency/index.ts"
-      ),
-      "@rotorsoft/act-ops/receiver": path.resolve(
-        __dirname,
-        "libs/act-ops/src/receiver/index.ts"
-      ),
-      "@rotorsoft/act-sqlite": path.resolve(
-        __dirname,
-        "libs/act-sqlite/src/index.ts"
-      ),
-      "@rotorsoft/act/test": path.resolve(
-        __dirname,
-        "libs/act/src/test/index.ts"
-      ),
-      "@rotorsoft/act/types": path.resolve(
-        __dirname,
-        "libs/act/src/types/index.ts"
-      ),
-      "@rotorsoft/act": path.resolve(__dirname, "libs/act/src/index.ts"),
-      "@rotorsoft/act-tck": path.resolve(
-        __dirname,
-        "libs/act-tck/src/index.ts"
-      ),
-    },
-  },
+  plugins: [
+    tsconfigPaths({
+      root: workspace_root,
+      projects: [resolve(workspace_root, "tsconfig.eslint.json")],
+    }),
+  ],
   test: {
     globals: true,
     // picocolors enables color emission when `CI` is set in env, which
