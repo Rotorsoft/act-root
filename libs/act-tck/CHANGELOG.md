@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.6.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.4...@rotorsoft/act-tck-v1.6.0) (2026-06-10)
+
+
+### Features
+
+* **act-pg,act-sqlite:** [#921](https://github.com/rotorsoft/act-root/issues/921) — adapter-layer PII column encryption via @rotorsoft/act-crypto ([e0b1109](https://github.com/rotorsoft/act-root/commit/e0b11099a4fe2f333f3a2b045df1cf6728854e71))
+
 # [@rotorsoft/act-tck-v1.5.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.3...@rotorsoft/act-tck-v1.5.4) (2026-06-09)
 
 # [@rotorsoft/act-tck-v1.5.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.5.2...@rotorsoft/act-tck-v1.5.3) (2026-06-07)
