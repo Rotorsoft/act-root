@@ -46,7 +46,7 @@
  * them never sees two shapes for the same framework error.
  */
 import { zValidator } from "@hono/zod-validator";
-import type { Act, Actor, Schema, Schemas } from "@rotorsoft/act";
+import type { Actor, Target } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
@@ -186,8 +186,30 @@ const default_key_from = (c: Context): string | undefined =>
  * @returns A Hono app covering every registered action under
  *   `<basePath>/actions/<name>`.
  */
-export function hono(
-  app: Act<Schemas, Schemas, Schemas, Record<string, Schema>>,
+/**
+ * Structural shape of the Act surface this generator walks at
+ * runtime — the registry's action-name → owning-state map plus the
+ * `do(...)` dispatch. Letting TApp infer to the caller's concrete
+ * `Act<...>` against this structural bound keeps nested variance
+ * out of the signature and avoids `any` in either direction.
+ *
+ * @internal
+ */
+type ActSurface = {
+  readonly registry: {
+    actions: Record<
+      string,
+      {
+        readonly name: string;
+        readonly actions: Record<string, unknown>;
+      }
+    >;
+  };
+  do(action: string, target: Target, payload: unknown): Promise<unknown>;
+};
+
+export function hono<TApp extends ActSurface = ActSurface>(
+  app: TApp,
   options: HonoOptions
 ): Hono<{ Variables: ActMiddlewareVariables }> {
   const base_path = options.basePath ?? "/api";
@@ -199,7 +221,7 @@ export function hono(
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
-    const schema = state.actions[action_name] as Schema;
+    const schema = state.actions[action_name];
     api.post(
       `/actions/${action_name}`,
       zValidator("json", schema as never),

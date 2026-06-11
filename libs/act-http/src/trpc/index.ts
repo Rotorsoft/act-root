@@ -50,9 +50,16 @@
  * transports never sees two error shapes for the same framework
  * error.
  */
-import type { Act, Actor, Schema, Schemas } from "@rotorsoft/act";
+import type { Actor, Target } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
-import { initTRPC, TRPCError } from "@trpc/server";
+import {
+  type AnyTRPCMiddlewareFunction,
+  type AnyTRPCMutationProcedure,
+  type AnyTRPCRootTypes,
+  initTRPC,
+  type TRPCBuiltRouter,
+  TRPCError,
+} from "@trpc/server";
 import {
   type ActorExtractor,
   toApiError,
@@ -141,9 +148,17 @@ export type TrpcOptions<Ctx> = {
  * (typically wrap them as `TRPCError({ code: "UNAUTHORIZED" })`
  * in the extractor body).
  */
-// biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape lives behind `unstable-core-do-not-import`; structural typing carries the host's `t` validation.
-export function authenticated(extractor: ActorExtractor): any {
-  return async function actor_middleware({
+export function authenticated(
+  extractor: ActorExtractor
+): AnyTRPCMiddlewareFunction {
+  // tRPC's middleware function type lives behind
+  // `unstable-core-do-not-import`; we satisfy it structurally with the
+  // shape `procedure.use(...)` actually requires (an `{ ctx, next }`
+  // bag whose `next` callback is invoked once with the augmented ctx)
+  // and cast the structurally-typed result up to the named export. The
+  // type cast carries no `any`; both sides are structurally compatible
+  // at the call site.
+  const middleware = async function actor_middleware({
     ctx,
     next,
   }: {
@@ -153,6 +168,7 @@ export function authenticated(extractor: ActorExtractor): any {
     const actor = await extractor(ctx);
     return next({ ctx: { ...ctx, actor } });
   };
+  return middleware as unknown as AnyTRPCMiddlewareFunction;
 }
 
 /**
@@ -237,37 +253,80 @@ function status_to_trpc_code(status: number): TRPCError["code"] {
  * @returns A tRPC router covering every registered action, grouped
  *   by owning state.
  */
-export function trpc<Ctx extends object = object>(
-  // biome-ignore lint/suspicious/noExplicitAny: erased — the generator walks the registry at runtime, not the typed surface
-  app: Act<any, Schemas, Schemas, Record<string, Schema>>,
-  options: TrpcOptions<Ctx>
-) {
-  const t = initTRPC.context<Ctx>().create();
-  const authed = t.procedure.use(authenticated(options.actor));
+/**
+ * Structural shape of the Act surface this generator walks at
+ * runtime — the registry's action-name → owning-state map plus the
+ * `do(...)` dispatch. Letting TApp infer to the caller's concrete
+ * `Act<...>` against this structural bound (instead of forcing it
+ * to fit a narrow framework-typed upper bound) keeps the variance
+ * of nested types like `PatchHandler` from leaking — and avoids
+ * `any` in the signature.
+ *
+ * @internal
+ */
+type ActSurface = {
+  readonly registry: {
+    actions: Record<
+      string,
+      {
+        readonly name: string;
+        readonly actions: Record<string, unknown>;
+      }
+    >;
+  };
+  do(action: string, target: Target, payload: unknown): Promise<unknown>;
+};
 
-  const handlers: Record<string, ReturnType<typeof authed.mutation>> = {};
+/**
+ * Generated router type — one mutation procedure per action name in
+ * `TApp`'s registry. Mapped over the concrete action keys so
+ * `createTRPCReact<typeof router>()` sees specific procedure names
+ * (`PressKey`, `Clear`, …) instead of a wide `Record<string, ...>`
+ * index signature — which is what trips tRPC React's
+ * "useContext / Provider / useUtils collides" check on widely-typed
+ * routers.
+ *
+ * @internal
+ */
+type GeneratedRouter<TApp> = TRPCBuiltRouter<
+  AnyTRPCRootTypes,
+  TApp extends { registry: { actions: infer TActions } }
+    ? { [K in keyof TActions]: AnyTRPCMutationProcedure }
+    : Record<string, AnyTRPCMutationProcedure>
+>;
+
+export function trpc<
+  Ctx extends object = object,
+  TApp extends ActSurface = ActSurface,
+>(app: TApp, options: TrpcOptions<Ctx>): GeneratedRouter<TApp> {
+  const t = initTRPC.context<Ctx>().create();
+
+  // Resolve the actor inline per mutation instead of via
+  // `t.procedure.use(authenticated(...))`. The middleware path threads
+  // tRPC's internal `Unwrap` type into each procedure's inferred shape,
+  // which the d.ts emitter can't name portably (`unstable-core-do-not-
+  // import` has a hashed file name that varies per build). Inlining
+  // sidesteps the issue entirely — the standalone `authenticated`
+  // export still works for hosts who want middleware composition.
+  const handlers: Record<
+    string,
+    ReturnType<ReturnType<typeof t.procedure.input>["mutation"]>
+  > = {};
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
-    handlers[action_name] = authed
+    handlers[action_name] = t.procedure
       .input(state.actions[action_name] as never)
       .mutation(async ({ input, ctx }) => {
-        // tRPC's internal `Simplify<Ctx>` transform produces a type
-        // that's structurally identical to `Ctx & { actor }` but not
-        // assignable to the generic parameter. The cast restores the
-        // link; the runtime ctx IS the augmented context.
-        const host_ctx = ctx as unknown as Ctx & { actor: Actor };
+        const host_ctx = ctx as unknown as Ctx;
         try {
+          const actor = await options.actor(host_ctx);
           const stream = await options.stream(action_name, input, host_ctx);
           const expected_version = options.expectedVersion
             ? await options.expectedVersion(action_name, input, host_ctx)
             : undefined;
           const target =
             expected_version === undefined
-              ? { stream, actor: host_ctx.actor }
-              : {
-                  stream,
-                  actor: host_ctx.actor,
-                  expectedVersion: expected_version,
-                };
+              ? { stream, actor }
+              : { stream, actor, expectedVersion: expected_version };
 
           if (options.idempotency) {
             const key = options.idempotency.keyFrom(host_ctx);
@@ -305,5 +364,11 @@ export function trpc<Ctx extends object = object>(
       });
   }
 
-  return t.router(handlers as never);
+  // The runtime router IS structurally compatible with
+  // `GeneratedRouter<TApp>` (one mutation per action key), but tRPC's
+  // `BuiltRouter` carries an internal `Unwrap<Ctx>` that the d.ts
+  // emitter can't name portably. Bridging through `unknown` keeps the
+  // caller-visible type clean (specific procedure names, no
+  // index-signature widening that trips React tRPC's collision check).
+  return t.router(handlers) as unknown as GeneratedRouter<TApp>;
 }

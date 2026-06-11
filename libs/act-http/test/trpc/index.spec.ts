@@ -85,8 +85,23 @@ const make_ctx = (overrides: Partial<Ctx> = {}): Ctx => ({
   ...overrides,
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: the generator returns a widely-typed router; callers cast at use sites for typed input/output. The type-level test below pins the per-procedure input shape separately.
-type AnyCaller = any;
+// Caller shape under test — Record-indexed so we can dispatch any
+// procedure by name without per-test typing. Each procedure returns
+// the framework's `Snapshot[]` shape; the few fields the assertions
+// reach for (`event.name`, `event.stream`) are spelled out
+// structurally rather than via the framework's wider type so the
+// test stays narrow.
+type CallerSnapshot = {
+  event: {
+    name: string;
+    stream: string;
+    meta: {
+      causation: { action?: { actor: { id: string; name: string } } };
+    };
+  };
+  state: { display: string };
+};
+type AnyCaller = Record<string, (input?: unknown) => Promise<CallerSnapshot[]>>;
 
 describe("trpc(app, options) — generated router", () => {
   test("emits one flat mutation per registered action across all states", ({
@@ -107,7 +122,9 @@ describe("trpc(app, options) — generated router", () => {
   }) => {
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
     expect(typeof caller.PressKey).toBe("function");
     expect(typeof caller.Clear).toBe("function");
     expect(typeof caller.OpenTicket).toBe("function");
@@ -119,7 +136,9 @@ describe("trpc(app, options) — generated router", () => {
     const do_spy = vi.spyOn(app, "do");
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
 
     const snapshots = await caller.PressKey({ key: "5" });
     expect(snapshots).toHaveLength(1);
@@ -138,7 +157,9 @@ describe("trpc(app, options) — generated router", () => {
   test("maps ValidationError to a 4xx code", async ({ app }) => {
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
 
     // Empty key violates the action's `.min(1)` Zod constraint. tRPC's
     // own input parser catches it first as BAD_REQUEST.
@@ -157,7 +178,9 @@ describe("trpc(app, options) — generated router", () => {
         expectedVersion: () => 7,
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+      const caller = t.createCallerFactory(router)(
+        make_ctx()
+      ) as unknown as AnyCaller;
 
       await caller.PressKey({ key: "5" });
       expect(do_spy).toHaveBeenCalledWith(
@@ -180,7 +203,9 @@ describe("trpc(app, options) — generated router", () => {
         expectedVersion: () => undefined,
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+      const caller = t.createCallerFactory(router)(
+        make_ctx()
+      ) as unknown as AnyCaller;
 
       await caller.PressKey({ key: "5" });
       expect(do_spy).toHaveBeenCalledWith(
@@ -239,7 +264,9 @@ describe("trpc(app, options) — generated router", () => {
       test(label, async ({ app }) => {
         const router = trpc<Ctx>(app as never, default_options());
         const t = initTRPC.context<Ctx>().create();
-        const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+        const caller = t.createCallerFactory(router)(
+          make_ctx()
+        ) as unknown as AnyCaller;
         vi.spyOn(app, "do").mockRejectedValueOnce(throws());
         await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
           code,
@@ -253,7 +280,9 @@ describe("trpc(app, options) — generated router", () => {
   }) => {
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
 
     vi.spyOn(app, "do").mockRejectedValueOnce(new Error("disk on fire"));
     await expect(caller.PressKey({ key: "5" })).rejects.toMatchObject({
@@ -264,7 +293,9 @@ describe("trpc(app, options) — generated router", () => {
   test("non-Error throws still surface as TRPCError", async ({ app }) => {
     const router = trpc<Ctx>(app as never, default_options());
     const t = initTRPC.context<Ctx>().create();
-    const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+    const caller = t.createCallerFactory(router)(
+      make_ctx()
+    ) as unknown as AnyCaller;
 
     vi.spyOn(app, "do").mockRejectedValueOnce("not-an-error-instance");
     await expect(caller.PressKey({ key: "5" })).rejects.toBeInstanceOf(
@@ -284,9 +315,9 @@ describe("trpc(app, options) — generated router", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller: AnyCaller = t.createCallerFactory(router)(
+      const caller = t.createCallerFactory(router)(
         make_ctx({ idempotencyKey: "fresh-1" })
-      );
+      ) as unknown as AnyCaller;
 
       const snapshots = await caller.PressKey({ key: "7" });
       expect(snapshots[0].event.name).toBe("KeyPressed");
@@ -301,7 +332,9 @@ describe("trpc(app, options) — generated router", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+      const caller = t.createCallerFactory(router)(
+        make_ctx()
+      ) as unknown as AnyCaller;
 
       await expect(caller.PressKey({ key: "8" })).rejects.toMatchObject({
         code: "BAD_REQUEST",
@@ -320,9 +353,9 @@ describe("trpc(app, options) — generated router", () => {
         },
       });
       const t = initTRPC.context<Ctx>().create();
-      const caller: AnyCaller = t.createCallerFactory(router)(
+      const caller = t.createCallerFactory(router)(
         make_ctx({ idempotencyKey: "dup-1" })
-      );
+      ) as unknown as AnyCaller;
 
       await caller.PressKey({ key: "1" });
       await expect(caller.PressKey({ key: "1" })).rejects.toMatchObject({

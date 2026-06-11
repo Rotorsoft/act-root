@@ -83,8 +83,11 @@ const make_headers = (
 
 describe("hono(app, options) — generated REST surface", () => {
   test("emits one POST /actions/<name> per registered action", ({ app }) => {
-    // biome-ignore lint/suspicious/noExplicitAny: Hono's `routes` array carries the registered path+method pairs.
-    const api: any = hono(app as never, default_options());
+    // Cast through `unknown` to reach Hono's `routes` array (the
+    // structural surface the assertion below introspects).
+    const api = hono(app as never, default_options()) as unknown as {
+      routes: Array<{ method: string; path: string }>;
+    };
     // Hono registers each route entry once per `app.post(...)` call;
     // dedupe so the assertion is order/duplicate-insensitive.
     const paths = Array.from(
@@ -402,7 +405,6 @@ describe("hono(app, options) — generated REST surface", () => {
       api.use(
         "*",
         authenticated(() => {
-          // biome-ignore lint/suspicious/useErrorMessage: testing the non-Error branch
           throw "raw-string-throw";
         })
       );
