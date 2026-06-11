@@ -370,9 +370,9 @@ Set `LOG_LEVEL=debug` or `LOG_LEVEL=trace` for verbose framework logging (uses p
 
 ## Real-Time Application Patterns
 
-These patterns apply when building apps that need live state push (SSE/WebSockets) on top of act's event sourcing. Use `@rotorsoft/act-sse` for incremental state broadcast.
+These patterns apply when building apps that need live state push (SSE/WebSockets) on top of act's event sourcing. Use `@rotorsoft/act-http/sse` for incremental state broadcast.
 
-Install: `pnpm -F @my-app/app add @rotorsoft/act-sse`
+Install: `pnpm -F @my-app/app add @rotorsoft/act-http/sse`
 
 ### `app.do()` Returns One Snapshot Per Event — Use the Last One
 
@@ -395,9 +395,9 @@ async function doAction(action: string, target: any, payload: any) {
 }
 ```
 
-### Incremental State Broadcast with `@rotorsoft/act-sse`
+### Incremental State Broadcast with `@rotorsoft/act-http/sse`
 
-Instead of sending the full aggregate state to every client after each action, `act-sse` computes RFC 6902 JSON Patches between consecutive states and sends only the diff — falling back to full state when the patch is too large or the client needs to resync.
+Instead of sending the full aggregate state to every client after each action, `@rotorsoft/act-http/sse` computes RFC 6902 JSON Patches between consecutive states and sends only the diff — falling back to full state when the patch is too large or the client needs to resync.
 
 **Version contract:** `_v` is always set from `snap.event.version` — the event store's monotonic stream version. No separate version counters.
 
@@ -417,7 +417,7 @@ Instead of sending the full aggregate state to every client after each action, `
       └── push to all SSE subscribers
       │
       ▼
-  Client: applyBroadcastMessage(msg, cached)
+  Client: applyPatchMessage(msg, cached)
       │
       ├── full   → accept if _v ≥ cachedV
       ├── patch  → apply if _baseV === cachedV
@@ -428,8 +428,8 @@ Instead of sending the full aggregate state to every client after each action, `
 ### Server-Side Setup
 
 ```typescript
-import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-sse";
-import type { BroadcastState } from "@rotorsoft/act-sse";
+import { BroadcastChannel, PresenceTracker } from "@rotorsoft/act-http/sse";
+import type { BroadcastState } from "@rotorsoft/act-http/sse";
 
 // Extend BroadcastState with your app-specific fields
 type MyAppState = BroadcastState & {
@@ -464,12 +464,12 @@ function broadcastPresenceChange(streamId: string) {
 ### Client-Side Patch Application
 
 ```typescript
-import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
 // In SSE onData handler (React Query):
 onData: (msg) => {
   const cached = utils.getState.getData({ streamId });
-  const result = applyBroadcastMessage(msg, cached);
+  const result = applyPatchMessage(msg, cached);
 
   if (result.ok) {
     utils.getState.setData({ streamId }, result.state);
@@ -483,7 +483,7 @@ onData: (msg) => {
 ### SSE Subscription Pattern (tRPC)
 
 ```typescript
-import type { BroadcastMessage } from "@rotorsoft/act-sse";
+import type { PatchMessage } from "@rotorsoft/act-http/sse";
 
 onStateChange: publicProcedure
   .input(z.object({ streamId: z.string(), identityId: z.string().optional() }))
@@ -491,7 +491,7 @@ onStateChange: publicProcedure
     const { streamId, identityId } = input;
 
     let resolve: (() => void) | null = null;
-    let pending: BroadcastMessage<MyAppState> | null = null;
+    let pending: PatchMessage<MyAppState> | null = null;
 
     const cleanup = broadcast.subscribe(streamId, (msg) => {
       pending = msg;
@@ -689,10 +689,10 @@ The snapshot from `app.do()` has all event patches applied — it is the authori
 
 **Rule: The hot path (API responses, SSE push, in-memory cache) must use aggregate snapshots, never projection state.**
 
-The `BroadcastChannel` from `act-sse` maintains an LRU cache seeded from aggregate snapshots. Projections should maintain their own cache to avoid double-apply bugs.
+The `BroadcastChannel` from `@rotorsoft/act-http/sse` maintains an LRU cache seeded from aggregate snapshots. Projections should maintain their own cache to avoid double-apply bugs.
 
 ```typescript
-// Hot path: broadcast from aggregate snapshot (uses act-sse internally)
+// Hot path: broadcast from aggregate snapshot (uses @rotorsoft/act-http/sse internally)
 const snap = await doAction("Update", target, payload);
 broadcastState(streamId, snap);
 

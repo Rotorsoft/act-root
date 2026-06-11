@@ -193,7 +193,7 @@ export const ItemSlice = slice()
 
 **clear*() helpers**: Export a `clear*()` function to reset projection state in tests.
 
-**Lifecycle-only projections**: When using `act-sse` for real-time broadcast, projections only need to persist data for **lifecycle events** (entity created, member added, completed, deleted, etc.) — not every high-frequency operational event. The broadcast cache is the source of truth for full state; the DB stores lightweight summaries for cold-start recovery and list views. See [server.md](server.md) § Projection Optimization Strategies.
+**Lifecycle-only projections**: When using `@rotorsoft/act-http/sse` for real-time broadcast, projections only need to persist data for **lifecycle events** (entity created, member added, completed, deleted, etc.) — not every high-frequency operational event. The broadcast cache is the source of truth for full state; the DB stores lightweight summaries for cold-start recovery and list views. See [server.md](server.md) § Projection Optimization Strategies.
 
 ## Drizzle Projections (PostgreSQL)
 

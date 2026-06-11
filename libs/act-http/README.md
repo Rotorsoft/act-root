@@ -235,6 +235,38 @@ The same shared `ApiError` envelope underwrites cross-transport consistency: it'
 
 Output is deterministic given the same registry — entries land in `Object.entries(app.registry.actions)` iteration order. CI can snapshot the result to catch unintended API-surface changes; one merge that quietly changes a Zod schema or adds a new action surfaces as a doc diff in the same PR.
 
+### `trpc` + `hono` SSE subscriptions — live state from the generators
+
+Both generators accept an optional `sse` option that walks the registry once and emits a typed subscription per unique state name, all reading from a host-supplied `BroadcastChannel`. Hosts continue to own publication (`channel.publish(streamId, state, patches)` after each `app.do(...)`); the generators own subscription, accounting, cleanup, and the wire format.
+
+```ts
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+import { hono } from "@rotorsoft/act-http/hono";
+
+const broadcast = new BroadcastChannel<MyState>();
+
+// Server-side: after every app.do(...), publish the derived state.
+const snaps = await app.do(action, target, payload);
+broadcast.publish(target.stream, deriveState(snaps), snaps.map((s) => s.patch).filter(Boolean));
+
+// tRPC — emits `router.subscribe.<stateName>.useSubscription({ stream })`.
+const router = trpc(app, {
+  actor,
+  stream,
+  sse: { channel: broadcast, maxConnections: 500, heartbeatMs: 30_000 },
+});
+
+// Hono — emits `GET /api/sse/<stateName>?stream=<id>` per registered state.
+const api = hono(app, {
+  actor,
+  stream,
+  sse: { channel: broadcast },
+});
+```
+
+Defaults are sized for typical business-app dashboards: `maxConnections = 500` (range `[1, 10_000]`), `heartbeatMs = 30_000` (range `[15_000, 300_000]`). The 501st concurrent open returns `503 / SSE_BUSY` with `Retry-After: 1` (Hono) or throws `TOO_MANY_REQUESTS` (tRPC). Streams cleaned up via the consumer's `iter.return()` / disconnect both run the loop's `finally` block: unsubscribe from the channel, release the slot, clear the heartbeat. See [@rotorsoft/act-http/sse](#sse--live-state-broadcast) below for the channel/cache primitives this wires.
+
 ### `sse` — live state broadcast
 
 ```ts
@@ -298,7 +330,11 @@ Shared utilities consumed by every transport in the auto-generated API umbrella 
 - **`ERROR_MAP`** — `as const` table mapping framework error types to `{ status, code }`. `ValidationError → 422 / VALIDATION`, `InvariantError → 409 / INVARIANT`, `ConcurrencyError → 412 / CONCURRENCY`, `StreamClosedError → 410 / STREAM_CLOSED`, `NonRetryableError → 400 / NON_RETRYABLE`.
 - **`toApiError(err) → { status, body }`** — the single mapping helper every transport calls in its error boundary. Known framework errors map per `ERROR_MAP`; everything else surfaces as 500 / `INTERNAL` (with `detail` only when the throw was an `Error` — thrown strings or objects don't leak payloads).
 - **`withIdempotency(store, key, handler)`** — wraps an action handler in an `Idempotency-Key` claim. Reuses `@rotorsoft/act-ops/idempotency` — same contract `@rotorsoft/act-http/receiver` already speaks, so one `IdempotencyStore` covers both halves of the "Act over the wire" surface. Returns `{ deduped: false, result }` on fresh claim, `{ deduped: true }` on duplicate (handler is not called).
-- **Types**: `IdempotencyResult<T>`, `ErrorMapEntry`.
+- **`SseOptions`** — `{ channel: BroadcastChannel<S>, maxConnections?, heartbeatMs? }`. Shared SSE wiring options consumed by both `trpc(app, { sse })` and `hono(app, { sse })`. Defaults: `maxConnections=500` (validated `[1, 10_000]`), `heartbeatMs=30_000` (validated `[15_000, 300_000]`). Out-of-range values throw `RangeError` at transport construction so misconfiguration surfaces at startup, not at first connection.
+- **`SseConnectionCounter`** — per-process slot counter. The 501st concurrent open is refused (`503 / SSE_BUSY` with `Retry-After: 1` on Hono, `TOO_MANY_REQUESTS` on tRPC). Internal — both transports construct one each, shared by every state-name's subscription on a single generator instance.
+- **`runSseSubscription(channel, streamId, accounting?, signal?, on_cap_exceeded?)`** — the shared subscription loop both transports run. Acquires one slot (when an `accounting` is supplied), yields the cached state if present, then forwards every channel publication as a `{ kind: "patch", data }` frame until the consumer breaks or the signal aborts. Used internally; exported for adopters who want to build their own transport surface against the same accounting / cancellation discipline.
+- **`resolveSseConfig(options)`** + **`DEFAULT_SSE_HEARTBEAT_MS`** / **`DEFAULT_SSE_MAX_CONNECTIONS`** — validation helper and exposed defaults.
+- **Types**: `IdempotencyResult<T>`, `ErrorMapEntry`, `SseConfig`, `SseAccounting`, `SseSubscriptionFrame<S>`.
 
 ### `/trpc` subpath
 
@@ -306,7 +342,7 @@ Auto-generated tRPC router for the act-http-api epic (#835).
 
 - **`trpc(app, options) → Router`** — generator function. Walks `app.registry.actions` once and emits a flat top-level mutation per action. Each procedure runs the internal `authenticated(options.actor)` middleware (so `ctx.actor: Actor` is set on the downstream context), resolves the target stream via `options.stream(action, input, ctx)`, and calls `app.do(action, { stream, actor }, input)`. Known framework errors map through `toApiError` to the conventional tRPC codes; unknown throws surface as `INTERNAL_SERVER_ERROR`.
 - **`authenticated(extractor) → middleware`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own procedure chain (logging + tracing + custom auth flavors) use `t.procedure.use(authenticated(extractor))` to inject `ctx.actor` without going through the generator. The middleware is structurally-typed so any host `t` instance accepts it.
-- **`TrpcOptions<Ctx>`** — `{ actor, stream, expectedVersion?, idempotency? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `expectedVersion` is optional — `(action, input, ctx) => number | undefined` — when set, the procedure threads the resolved value through `Target.expectedVersion` so `app.do` enforces optimistic concurrency; hosts typically read it from an `If-Match` header or the client's last-known snapshot, and returning `undefined` skips the check for that call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result).
+- **`TrpcOptions<Ctx>`** — `{ actor, stream, expectedVersion?, idempotency?, sse? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `expectedVersion` is optional — `(action, input, ctx) => number | undefined` — when set, the procedure threads the resolved value through `Target.expectedVersion` so `app.do` enforces optimistic concurrency; hosts typically read it from an `If-Match` header or the client's last-known snapshot, and returning `undefined` skips the check for that call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result). `sse` is optional — when set, the generator emits one subscription per unique registered state name under the nested `router.subscribe.<stateName>` namespace; each yields `{ kind: "state", data }` once (when the channel has a cached state) and then `{ kind: "patch", data }` per channel publication until the consumer breaks. The cap surfaces as `TOO_MANY_REQUESTS`.
 
 ### `/hono` subpath
 
@@ -314,7 +350,7 @@ Auto-generated REST surface for the act-http-api epic (#835).
 
 - **`hono(app, options) → Hono`** — generator function. Walks `app.registry.actions` once and registers a `POST /actions/<actionName>` per action under `basePath` (default `/api`). Body is validated with `@hono/zod-validator` against the action's Zod schema; failures short-circuit with `400`. The internal `authenticated(options.actor)` middleware stashes the resolved `Actor` under `c.get("actor")`. Routes return `200 Snapshot[]` on success, `4xx ApiError` envelope (with the conventional HTTP status) on framework errors, `500 / INTERNAL` on unknown throws.
 - **`authenticated(extractor) → MiddlewareHandler`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own Hono chain wire `api.use("*", authenticated(extractor))` and downstream routes read `c.get("actor"): Actor`. Errors thrown by the extractor surface as `401 / UNAUTHORIZED`.
-- **`HonoOptions`** — `{ actor, stream, expectedVersion?, idempotency?, basePath? }`. `actor` is the `ActorExtractor`. `stream` returns the target stream per call. `expectedVersion` threads `Target.expectedVersion` for optimistic concurrency — returning `undefined` skips the check. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom?: (c) => string | undefined }` — when set, the route honors `Idempotency-Key` via `withIdempotency`; default `keyFrom` reads the `Idempotency-Key` header. Duplicate claims return `409 / CONFLICT`. `basePath` defaults to `/api`.
+- **`HonoOptions`** — `{ actor, stream, expectedVersion?, idempotency?, sse?, basePath? }`. `actor` is the `ActorExtractor`. `stream` returns the target stream per call. `expectedVersion` threads `Target.expectedVersion` for optimistic concurrency — returning `undefined` skips the check. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom?: (c) => string | undefined }` — when set, the route honors `Idempotency-Key` via `withIdempotency`; default `keyFrom` reads the `Idempotency-Key` header. Duplicate claims return `409 / CONFLICT`. `sse` is optional — when set, the generator emits one `GET <basePath>/sse/<stateName>?stream=<id>` route per unique registered state name; each route opens a `text/event-stream`, yields the cached state (`event: state`) when present, then forwards every channel publication as `event: patch`. The connection cap surfaces as `503 / SSE_BUSY` with `Retry-After: 1`. A heartbeat ping every `heartbeatMs` keeps proxies from idling the connection out. `basePath` defaults to `/api`.
 - **`ActMiddlewareVariables`** — `{ actor: Actor }`. Use as the `Variables` generic on a host Hono instance to get `c.get("actor")` typed downstream of `authenticated`.
 
 ### `/openapi` subpath

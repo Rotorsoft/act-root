@@ -60,8 +60,13 @@ import {
   type TRPCBuiltRouter,
   TRPCError,
 } from "@trpc/server";
+import { z } from "zod";
 import {
   type ActorExtractor,
+  resolveSseConfig,
+  runSseSubscription,
+  SseConnectionCounter,
+  type SseOptions,
   toApiError,
   withIdempotency,
 } from "../api/index.js";
@@ -115,6 +120,22 @@ export type TrpcOptions<Ctx> = {
     readonly store: IdempotencyStore;
     readonly keyFrom: (ctx: Ctx) => string | undefined;
   };
+  /**
+   * Optional SSE wiring. When set, the generator emits one
+   * subscription per unique state name in the registry, grouped on
+   * the returned router as
+   * `router.subscribe.<stateName>.useSubscription({ stream })`.
+   * Each subscription yields `{ kind: "state", data }` once with
+   * the cached state (when present) and then `{ kind: "patch",
+   * data }` for every patch the shared
+   * {@link SseOptions.channel} publishes. The per-process
+   * connection cap surfaces as a `TOO_MANY_REQUESTS` `TRPCError`.
+   *
+   * Off by default — most APIs don't expose live state to every
+   * client, and opening one is widening both the auth and cost
+   * surface.
+   */
+  readonly sse?: SseOptions;
 };
 
 /**
@@ -362,6 +383,35 @@ export function trpc<
           throw to_trpc_error(err);
         }
       });
+  }
+
+  if (options.sse) {
+    const sse_config = resolveSseConfig(options.sse);
+    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const state_names = new Set<string>();
+    for (const action of Object.values(app.registry.actions)) {
+      state_names.add(action.name);
+    }
+    const sse_handlers: Record<string, unknown> = {};
+    for (const state_name of state_names) {
+      sse_handlers[state_name] = t.procedure
+        .input(z.object({ stream: z.string().min(1) }))
+        .subscription(({ input, signal }) =>
+          runSseSubscription(
+            sse_config.channel,
+            input.stream,
+            sse_counter,
+            signal,
+            () => {
+              throw new TRPCError({
+                code: "TOO_MANY_REQUESTS",
+                message: "max concurrent SSE subscriptions reached",
+              });
+            }
+          )
+        );
+    }
+    handlers.subscribe = t.router(sse_handlers as never) as never;
   }
 
   // The runtime router IS structurally compatible with

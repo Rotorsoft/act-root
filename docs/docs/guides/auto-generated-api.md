@@ -295,6 +295,80 @@ openapi(app, { info, servers, idempotency: true });
 
 Behavior: fresh claim → handler runs, response normal. Duplicate claim → `409 CONFLICT` with `code: "CONFLICT"` and `detail: "Idempotency-Key already used; original result not cached"`. Same shape on tRPC (the procedure throws `CONFLICT`). See the [External integration guide](./external-integration.md) for the surrounding pattern — this is the same `IdempotencyStore` contract that powers receivers.
 
+## Real-time subscriptions
+
+Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option.
+
+```ts
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import { trpc } from "@rotorsoft/act-http/trpc";
+import { hono } from "@rotorsoft/act-http/hono";
+
+const broadcast = new BroadcastChannel<MyState>();
+
+// Server-side: after every app.do(...), publish the derived state.
+const snaps = await app.do(action, target, payload);
+broadcast.publish(
+  target.stream,
+  deriveState(snaps),
+  snaps.map((s) => s.patch).filter(Boolean)
+);
+
+// tRPC — emits one subscription per registered state under
+// `router.subscribe.<stateName>`.
+const router = trpc(app, {
+  actor,
+  stream,
+  sse: { channel: broadcast },
+});
+// Client:
+//   trpc.subscribe.Ticket.useSubscription({ stream: "ticket-42" })
+
+// Hono — emits one streaming `GET /api/sse/<stateName>?stream=<id>`
+// per registered state.
+const api = hono(app, {
+  actor,
+  stream,
+  sse: { channel: broadcast },
+});
+// Client:
+//   new EventSource("/api/sse/Ticket?stream=ticket-42")
+```
+
+### What the generator owns
+
+For every subscription, on every open:
+
+1. Run the `actor` extractor (`401` / `UNAUTHORIZED` on throw).
+2. Acquire one slot on the per-process counter. Full counter →
+   - Hono: `503 / SSE_BUSY` with `Retry-After: 1` (header set **before** the response body starts so it's a clean reject, not a hung stream).
+   - tRPC: `TRPCError({ code: "TOO_MANY_REQUESTS" })`.
+3. Yield `{ kind: "state", data }` once if `channel.get_state(streamId)` has a cached value (re-connect / cold-start affordance — the client doesn't need a separate `getById` query).
+4. Subscribe to the channel for `streamId` and forward every publication as `{ kind: "patch", data }`.
+5. Run a keep-alive ping every `heartbeatMs` (default 30 s). Below the 60 s idle timeout most reverse proxies impose.
+6. Tear down on `iter.return()` / disconnect / abort: unsubscribe, release the slot, clear the heartbeat. The teardown runs from a `finally` block so a crashed handler doesn't leak count.
+
+The shared loop is exported as `runSseSubscription` from `@rotorsoft/act-http/api` for adopters who want to build a different transport (WebSocket, a custom long-poll bridge) on the same accounting + cancellation discipline.
+
+### Defaults and validation
+
+`SseOptions = { channel, maxConnections?, heartbeatMs? }`. Defaults sized for typical business-app dashboards:
+
+| Knob | Default | Range | Why |
+|---|---|---|---|
+| `maxConnections` | `500` | `[1, 10_000]` | Comfortable for hundreds of human viewers; above 10k the FD ceiling and memory force horizontal scaling regardless of tuning. |
+| `heartbeatMs` | `30_000` | `[15_000, 300_000]` | Sub-15s wastes bandwidth on business workloads; above 5 min risks proxy idle drops. |
+
+Out-of-range knobs throw `RangeError` at transport construction — misconfiguration surfaces at startup, not at first connection.
+
+### Why SSE, not WebSocket
+
+Projection patches are one-way (server → client) and rebuildable from the event log — exactly the workload SSE was designed for. SSE rides plain HTTP, traverses corporate proxies cleanly, auto-reconnects on disconnect, needs no protocol upgrade. WebSocket would buy duplex we don't use; long-polling would burn round-trips. The `BroadcastChannel` primitive at `@rotorsoft/act-http/sse` was already shipping this contract — the new generator wiring just lifts it into the auto-generated transport.
+
+### Horizontal scaling
+
+SSE doesn't multiplex across processes. Each worker enforces its own `maxConnections` cap. For deployments where active viewers exceed the per-process ceiling, operators run multiple processes behind a **sticky** load balancer (one subscriber per process, no failover for an open connection) and let the channel publication run per-worker as well. There is no cross-process channel; the `BroadcastChannel` is in-memory.
+
 ## Deployment recipes
 
 The three generators were designed to run on every fetch-shaped runtime. Pick the recipe that matches your shape.

@@ -50,9 +50,15 @@ import type { Actor, Target } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import {
   type ActorExtractor,
   type ApiError,
+  fireAndForget,
+  resolveSseConfig,
+  runSseSubscription,
+  SseConnectionCounter,
+  type SseOptions,
   toApiError,
   withIdempotency,
 } from "../api/index.js";
@@ -109,6 +115,23 @@ export type HonoOptions = {
     readonly store: IdempotencyStore;
     readonly keyFrom?: (c: Context) => string | undefined;
   };
+  /**
+   * Optional SSE wiring. When set, the generator emits one
+   * `GET <basePath>/sse/<stateName>?stream=<streamId>` per unique
+   * state name in the registry. The endpoint runs the host
+   * {@link actor} extractor, looks up the streamId from
+   * `?stream=...`, opens a `text/event-stream`, yields the cached
+   * state (if any), and forwards every patch published to the
+   * shared {@link SseOptions.channel}. A heartbeat keeps proxies
+   * from idling the connection out; the per-process connection cap
+   * returns `503 Service Unavailable` (with `Retry-After: 1`) when
+   * full so operators never see silent stalls.
+   *
+   * Off by default — most APIs don't expose live state to every
+   * client, and opening one is widening both the auth and cost
+   * surface.
+   */
+  readonly sse?: SseOptions;
   readonly basePath?: string;
 };
 
@@ -219,6 +242,71 @@ export function hono<TApp extends ActSurface = ActSurface>(
   api.use("*", authenticated(options.actor));
 
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
+
+  // Wire SSE subscriptions before the mutation routes so the
+  // `/sse/*` paths sit alongside `/actions/*`. The cap counter is
+  // shared by every state-name's GET route on this generator
+  // instance so a noisy room on one state doesn't get a free pass
+  // on another.
+  if (options.sse) {
+    const sse_config = resolveSseConfig(options.sse);
+    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const state_names = new Set<string>();
+    for (const action of Object.values(app.registry.actions)) {
+      state_names.add(action.name);
+    }
+    for (const state_name of state_names) {
+      api.get(`/sse/${state_name}`, async (c) => {
+        const stream_id = c.req.query("stream");
+        if (!stream_id) {
+          const body: ApiError = {
+            error: "BadRequest",
+            detail: "stream query parameter is required",
+            code: "BAD_REQUEST",
+          };
+          return c.json(body, 400);
+        }
+        if (!sse_counter.acquire()) {
+          c.header("Retry-After", "1");
+          const body: ApiError = {
+            error: "ServiceUnavailable",
+            detail: "max concurrent SSE connections reached",
+            code: "SSE_BUSY",
+          };
+          return c.json(body, 503);
+        }
+        // The route already acquired the slot above so streamSSE
+        // could return `503` before writing headers if the cap was
+        // full. The shared loop runs without accounting; the route
+        // releases the slot in `finally`.
+        const controller = new AbortController();
+        return streamSSE(c, async (sse_stream) => {
+          sse_stream.onAbort(() => controller.abort());
+          const heartbeat = setInterval(() => {
+            fireAndForget(() =>
+              sse_stream.writeSSE({ event: "ping", data: "" })
+            );
+          }, sse_config.heartbeatMs);
+          try {
+            for await (const frame of runSseSubscription(
+              sse_config.channel,
+              stream_id,
+              undefined,
+              controller.signal
+            )) {
+              await sse_stream.writeSSE({
+                event: frame.kind,
+                data: JSON.stringify(frame.data),
+              });
+            }
+          } finally {
+            clearInterval(heartbeat);
+            sse_counter.release();
+          }
+        });
+      });
+    }
+  }
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
     const schema = state.actions[action_name];

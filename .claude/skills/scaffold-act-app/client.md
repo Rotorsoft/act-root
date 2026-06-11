@@ -12,12 +12,12 @@ React + Vite frontend in `packages/app/src/client/`.
 
 **splitLink is required, not optional.** tRPC SSE subscriptions use `httpSubscriptionLink`, while mutations/queries use `httpLink`. Without `splitLink`, subscriptions will fail with HTTP errors because `httpLink` doesn't support the SSE protocol.
 
-**Version handling in useStateStream:** The hook handles 4 cases from `applyBroadcastMessage()`: `ok` (apply patch to cache), `behind` (client missed a version — invalidate and refetch), `patch-failed` (patch couldn't apply — invalidate and refetch), `stale` (client is ahead because the mutation response arrived before the SSE patch — ignore). Getting these wrong causes UI glitches or infinite refetch loops.
+**Version handling in useStateStream:** The hook handles 4 cases from `applyPatchMessage()`: `ok` (apply patch to cache), `behind` (client missed a version — invalidate and refetch), `patch-failed` (patch couldn't apply — invalidate and refetch), `stale` (client is ahead because the mutation response arrived before the SSE patch — ignore). Getting these wrong causes UI glitches or infinite refetch loops.
 
 ## Key Patterns
 
 - `App.tsx` uses `splitLink` — routes subscriptions through `httpSubscriptionLink` (SSE), mutations/queries through `httpLink`
-- `useStateStream` hook subscribes to `onStateChange` SSE, applies incremental patches via `applyBroadcastMessage()` from `@rotorsoft/act-sse`
+- `useStateStream` hook subscribes to `onStateChange` SSE, applies incremental patches via `applyPatchMessage()` from `@rotorsoft/act-http/sse`
 - `useEventStream` hook subscribes to `onEvent` SSE, deduplicates by event ID, and calls `utils.<query>.invalidate()` on relevant events
 - `useAuth` hook provides `AuthProvider` context with `signIn`, `signUp`, `signOut`, and role-based access (`isAdmin`)
 
@@ -109,14 +109,14 @@ createRoot(document.getElementById("root")!).render(
 );
 ```
 
-## packages/app/src/client/hooks/useStateStream.ts (incremental state sync via act-sse)
+## packages/app/src/client/hooks/useStateStream.ts (incremental state sync via @rotorsoft/act-http/sse)
 
 Receives incremental patches or full state from the server, applies them to the React Query cache with version validation. Falls back to full refetch on version mismatch.
 
 ```typescript
 // packages/app/src/client/hooks/useStateStream.ts
 import { useCallback, useState } from "react";
-import { applyBroadcastMessage } from "@rotorsoft/act-sse";
+import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 import { trpc } from "../trpc.js";
 
 export function useStateStream(streamId: string | null, identityId?: string) {
@@ -135,7 +135,7 @@ export function useStateStream(streamId: string | null, identityId?: string) {
       onData: (msg) => {
         if (!streamId) return;
         const cached = utils.getState.getData({ streamId }) as any;
-        const result = applyBroadcastMessage(msg as any, cached);
+        const result = applyPatchMessage(msg as any, cached);
 
         if (result.ok) {
           utils.getState.setData({ streamId }, result.state as any);
