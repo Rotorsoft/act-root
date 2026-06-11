@@ -27,7 +27,7 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-sqlite` — SQLite/libSQL adapter (embedded/single-node)
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
   - `@rotorsoft/act-sse` — Server-Sent Events for incremental state broadcast
-  - `@rotorsoft/act-http` — HTTP integrations (umbrella): `webhook` for reaction-driven POST delivery, plus an `sse` submodule that mirrors `@rotorsoft/act-sse`
+  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, an `sse` submodule that mirrors `@rotorsoft/act-sse`, plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
   - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
@@ -123,6 +123,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | Production deployment checklist | [docs/docs/guides/production-checklist.md](docs/docs/guides/production-checklist.md) |
 | Database-backed projections (Drizzle, batched replay) | [docs/docs/guides/projections-to-database.md](docs/docs/guides/projections-to-database.md) |
 | External integration (inline `webhook` vs forwarded bus, idempotency contract, recovery) | [docs/docs/guides/external-integration.md](docs/docs/guides/external-integration.md) |
+| Auto-generated API surfaces (`trpc`, `hono`, `openapi` subpaths + deployment recipes) | [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md) |
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
 | Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
 

@@ -105,3 +105,17 @@ const Events = {
 pnpm dev:calculator
 pnpm -F calculator test
 ```
+
+## Over the wire — multi-transport demo
+
+The calculator also backs `packages/server` and `packages/client`, where the same `calculatorApp` is exposed simultaneously over **tRPC**, **Hono REST**, and an **OpenAPI** document — all generated from one registry via `@rotorsoft/act-http`. The Vite client offers a transport toggle so you can press a key over tRPC, then the same key over REST, and watch both hit the same stream:
+
+```bash
+pnpm dev:http     # boots server (:4000) + client (:3000)
+```
+
+- Client UI: [http://localhost:3000](http://localhost:3000) (with the tRPC/REST toggle and an API-docs link)
+- Server landing page: [http://localhost:4000](http://localhost:4000)
+- Interactive API docs: [http://localhost:4000/docs](http://localhost:4000/docs) (Scalar reference reading the live `/openapi.json`)
+
+See the [auto-generated API guide](../guides/auto-generated-api.md) for the narrative on what each transport does and how to wire your own auth seam into the generators.
