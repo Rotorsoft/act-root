@@ -2,7 +2,7 @@ import { calculatorApp, calculatorRouter } from "@act/calculator";
 import { serve } from "@hono/node-server";
 import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
-import { createHTTPHandler } from "@trpc/server/adapters/standalone";
+import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
@@ -27,11 +27,6 @@ import { cors } from "hono/cors";
  */
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
-
-// The generator builds the router with `initTRPC.context<{}>().create()`,
-// so the standalone handler accepts the empty default context — no
-// `createContext` needed.
-const trpcHandler = createHTTPHandler({ router: calculatorRouter });
 
 const restApi = honoTransport(calculatorApp, {
   actor: () => ({ id: "1", name: "Calculator" }),
@@ -73,70 +68,18 @@ app.route("/", restApi);
 // Serve the OpenAPI document.
 app.get("/openapi.json", (c) => c.json(apiDoc));
 
-// tRPC bridge — proxy `/trpc/*` to the tRPC HTTP handler. tRPC's
-// standalone adapter expects the `/trpc` prefix stripped; we
-// rewrite before delegating, and back-port the response into a
-// Hono `Response`.
-app.all("/trpc/*", async (c) => {
-  const url = new URL(c.req.url);
-  url.pathname = url.pathname.replace(/^\/trpc/, "");
-  const body =
-    c.req.method === "POST" || c.req.method === "PUT"
-      ? await c.req.text()
-      : undefined;
-  return new Promise<Response>((resolve, reject) => {
-    const headers: Record<string, string> = {};
-    let status = 200;
-    const chunks: Buffer[] = [];
-    const responseChunks: Buffer[] = [];
-
-    const fakeReq = {
-      method: c.req.method,
-      url: `${url.pathname}${url.search}`,
-      headers: Object.fromEntries(
-        Array.from(c.req.raw.headers.entries()).map(([k, v]) => [
-          k.toLowerCase(),
-          v,
-        ])
-      ),
-      on(event: string, cb: (...args: unknown[]) => void) {
-        if (event === "data" && body) cb(Buffer.from(body));
-        if (event === "end") cb();
-      },
-    } as unknown as Parameters<typeof trpcHandler>[0];
-
-    const fakeRes = {
-      setHeader(name: string, value: string) {
-        headers[name.toLowerCase()] = value;
-      },
-      writeHead(s: number, h?: Record<string, string>) {
-        status = s;
-        if (h) Object.assign(headers, h);
-      },
-      write(chunk: Buffer | string) {
-        chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
-        responseChunks.push(
-          typeof chunk === "string" ? Buffer.from(chunk) : chunk
-        );
-      },
-      end(chunk?: Buffer | string) {
-        if (chunk)
-          responseChunks.push(
-            typeof chunk === "string" ? Buffer.from(chunk) : chunk
-          );
-        resolve(
-          new Response(Buffer.concat(responseChunks), {
-            status,
-            headers,
-          })
-        );
-      },
-      on() {},
-    } as unknown as Parameters<typeof trpcHandler>[1];
-
-    Promise.resolve(trpcHandler(fakeReq, fakeRes)).catch(reject);
-  });
-});
+// tRPC bridge — proxy `/trpc/*` to tRPC's fetch adapter. The fetch
+// adapter speaks `Request` / `Response` natively, which is exactly
+// what Hono's `c.req.raw` hands us — no Node `IncomingMessage` /
+// `ServerResponse` shim needed (the previous standalone-adapter
+// shim missed `.once()` and broke at runtime).
+app.all("/trpc/*", (c) =>
+  fetchRequestHandler({
+    endpoint: "/trpc",
+    req: c.req.raw,
+    router: calculatorRouter,
+  })
+);
 
 // Interactive API docs at /docs — Scalar API Reference renders the
 // OpenAPI document into a clean three-pane explorer with a built-in
