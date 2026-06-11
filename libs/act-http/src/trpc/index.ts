@@ -70,6 +70,14 @@ import {
  *   validated action input, and the original tRPC context; returns
  *   the target stream. Singleton aggregates return a constant;
  *   per-tenant aggregates pull from input or context.
+ * - `expectedVersion` (optional) — optimistic-concurrency resolver.
+ *   When set, the procedure threads the resolved value through
+ *   `target.expectedVersion` so `app.do` refuses to commit if the
+ *   stream has moved. Hosts typically read it from an `If-Match`
+ *   header on the underlying HTTP request, or pull it from the
+ *   client's last-known snapshot. Returning `undefined` skips the
+ *   check for that call — handy when only some actions are
+ *   concurrency-sensitive.
  * - `idempotency` (optional) — when set, the procedure honors
  *   `Idempotency-Key` via the shared
  *   {@link withIdempotency} helper. The host supplies the
@@ -91,6 +99,11 @@ export type TrpcOptions<Ctx> = {
     input: unknown,
     ctx: Ctx
   ) => string | Promise<string>;
+  readonly expectedVersion?: (
+    action_name: string,
+    input: unknown,
+    ctx: Ctx
+  ) => number | undefined | Promise<number | undefined>;
   readonly idempotency?: {
     readonly store: IdempotencyStore;
     readonly keyFrom: (ctx: Ctx) => string | undefined;
@@ -244,7 +257,17 @@ export function trpc<Ctx extends object = object>(
         const host_ctx = ctx as unknown as Ctx & { actor: Actor };
         try {
           const stream = await options.stream(action_name, input, host_ctx);
-          const target = { stream, actor: host_ctx.actor };
+          const expected_version = options.expectedVersion
+            ? await options.expectedVersion(action_name, input, host_ctx)
+            : undefined;
+          const target =
+            expected_version === undefined
+              ? { stream, actor: host_ctx.actor }
+              : {
+                  stream,
+                  actor: host_ctx.actor,
+                  expectedVersion: expected_version,
+                };
 
           if (options.idempotency) {
             const key = options.idempotency.keyFrom(host_ctx);

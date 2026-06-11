@@ -147,6 +147,8 @@ const router = trpc(app, {
   actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
   // Resolve the target stream per call; singleton aggregates return a constant.
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
+  // Optional optimistic concurrency — return `undefined` to skip the check.
+  expectedVersion: (action, input, ctx) => readIfMatchHeader(ctx),
 });
 
 createHTTPServer({ router }).listen(4000);
@@ -240,7 +242,7 @@ Auto-generated tRPC router for the act-http-api epic (#835).
 
 - **`trpc(app, options) → Router`** — generator function. Walks `app.registry.actions` once and emits a flat top-level mutation per action. Each procedure runs the internal `authenticated(options.actor)` middleware (so `ctx.actor: Actor` is set on the downstream context), resolves the target stream via `options.stream(action, input, ctx)`, and calls `app.do(action, { stream, actor }, input)`. Known framework errors map through `toApiError` to the conventional tRPC codes; unknown throws surface as `INTERNAL_SERVER_ERROR`.
 - **`authenticated(extractor) → middleware`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own procedure chain (logging + tracing + custom auth flavors) use `t.procedure.use(authenticated(extractor))` to inject `ctx.actor` without going through the generator. The middleware is structurally-typed so any host `t` instance accepts it.
-- **`TrpcOptions<Ctx>`** — `{ actor, stream, idempotency? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result).
+- **`TrpcOptions<Ctx>`** — `{ actor, stream, expectedVersion?, idempotency? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `expectedVersion` is optional — `(action, input, ctx) => number | undefined` — when set, the procedure threads the resolved value through `Target.expectedVersion` so `app.do` enforces optimistic concurrency; hosts typically read it from an `If-Match` header or the client's last-known snapshot, and returning `undefined` skips the check for that call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result).
 
 ### `/sse` subpath
 

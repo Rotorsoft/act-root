@@ -147,6 +147,51 @@ describe("trpc(app, options) — generated router", () => {
     });
   });
 
+  describe("expectedVersion (optimistic concurrency)", () => {
+    test("threads the resolved value through Target.expectedVersion", async ({
+      app,
+    }) => {
+      const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
+      const router = trpc<Ctx>(app as never, {
+        ...default_options(),
+        expectedVersion: () => 7,
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+
+      await caller.PressKey({ key: "5" });
+      expect(do_spy).toHaveBeenCalledWith(
+        "PressKey",
+        {
+          stream: "tenant-acme",
+          actor: { id: "u-1", name: "alice" },
+          expectedVersion: 7,
+        },
+        { key: "5" }
+      );
+    });
+
+    test("undefined return value skips the check (no expectedVersion on target)", async ({
+      app,
+    }) => {
+      const do_spy = vi.spyOn(app, "do").mockResolvedValueOnce([]);
+      const router = trpc<Ctx>(app as never, {
+        ...default_options(),
+        expectedVersion: () => undefined,
+      });
+      const t = initTRPC.context<Ctx>().create();
+      const caller: AnyCaller = t.createCallerFactory(router)(make_ctx());
+
+      await caller.PressKey({ key: "5" });
+      expect(do_spy).toHaveBeenCalledWith(
+        "PressKey",
+        // No `expectedVersion` key — the target is the plain shape.
+        { stream: "tenant-acme", actor: { id: "u-1", name: "alice" } },
+        { key: "5" }
+      );
+    });
+  });
+
   describe("framework error mapping (via toApiError)", () => {
     const cases: ReadonlyArray<{
       readonly label: string;
