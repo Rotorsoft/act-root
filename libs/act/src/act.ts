@@ -299,7 +299,12 @@ export class Act<
     (() => void | Promise<void>) | undefined
   >;
   /** Public registry — kept as-is per the no-prefix-on-public convention. */
-  public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
+  public readonly registry: Registry<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    keyof TStateMap & string
+  >;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
   /**
@@ -434,7 +439,7 @@ export class Act<
    *   instance; later slices fan out one `DrainController` per lane.
    */
   constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
@@ -589,8 +594,14 @@ export class Act<
     );
     this._autoclose = states_with_policy.length
       ? new AutocloseController({
-          autoclose_policy: this.registry.autoclose_policy,
-          autoclose_archiver: this.registry.autoclose_archiver,
+          // Internal cycle takes the loose `(string) => …` signature; the
+          // public `registry.autoclose_policy` narrows to
+          // `keyof TStateMap & string`. Thin lambdas bridge across the
+          // narrowing — runtime semantics are unchanged.
+          autoclose_policy: (name) =>
+            this.registry.autoclose_policy(name as keyof TStateMap & string),
+          autoclose_archiver: (name) =>
+            this.registry.autoclose_archiver(name as keyof TStateMap & string),
           event_to_state: this._event_to_state,
           reactive_events_size: this._reactive_events.size,
           load: this._es.load,

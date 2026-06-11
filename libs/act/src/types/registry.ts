@@ -57,6 +57,11 @@ export type SchemaRegister<TSchemaReg> = {
  * @template TSchemaReg - State schemas.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
+ * @template TStateNames - Union of registered state name literals. Threaded
+ *   by `Act` from the builder's `TStateMap` so the per-state lookup
+ *   methods narrow `state_name` to the actual set of registered states
+ *   instead of accepting any `string`. Defaults to `string` so loose
+ *   references like `Registry<any, any, any>` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of `sensitive(...)`-marked fields per
@@ -81,21 +86,22 @@ export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
+  TStateNames extends string = string,
 > = {
   readonly actions: {
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   readonly disclosure_predicate: (
-    stateName: string
+    state_name: TStateNames
   ) =>
     | ((
         event: Committed<TEvents, keyof TEvents & string>,
         actor: Actor
       ) => boolean)
     | null;
-  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
+  readonly deprecated_events: (state_name: TStateNames) => ReadonlySet<string>;
   /**
    * Lookup of the `.autocloses(predicate)` declaration per state name.
    * Returns `null` when the state opted out of online close — the
@@ -103,7 +109,7 @@ export type Registry<
    * so the per-cycle cost is paid only by opt-in states.
    */
   readonly autoclose_policy: (
-    state_name: string
+    state_name: TStateNames
   ) =>
     | ((
         stream: string,
@@ -119,7 +125,7 @@ export type Registry<
    * `CloseTarget.archive` only when present.
    */
   readonly autoclose_archiver: (
-    state_name: string
+    state_name: TStateNames
   ) =>
     | ((
         stream: string,

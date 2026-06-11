@@ -273,8 +273,8 @@ describe("run_autoclose_cycle — slice 2", () => {
       _reactive_events: ReadonlySet<string>;
     };
     const result = await run_autoclose_cycle({
-      autoclose_policy: app.registry.autoclose_policy,
-      autoclose_archiver: app.registry.autoclose_archiver,
+      autoclose_policy: app.registry.autoclose_policy as never,
+      autoclose_archiver: app.registry.autoclose_archiver as never,
       event_to_state: internals._event_to_state as never,
       reactive_events_size: internals._reactive_events.size,
       load: internals._es.load as never,
@@ -304,8 +304,8 @@ describe("run_autoclose_cycle — slice 2", () => {
       _reactive_events: ReadonlySet<string>;
     };
     const result = await run_autoclose_cycle({
-      autoclose_policy: app.registry.autoclose_policy,
-      autoclose_archiver: app.registry.autoclose_archiver,
+      autoclose_policy: app.registry.autoclose_policy as never,
+      autoclose_archiver: app.registry.autoclose_archiver as never,
       event_to_state: internals._event_to_state as never,
       reactive_events_size: internals._reactive_events.size,
       load: internals._es.load as never,
@@ -335,8 +335,8 @@ describe("run_autoclose_cycle — slice 2", () => {
     };
     const t0 = Date.now();
     const result = await run_autoclose_cycle({
-      autoclose_policy: app.registry.autoclose_policy,
-      autoclose_archiver: app.registry.autoclose_archiver,
+      autoclose_policy: app.registry.autoclose_policy as never,
+      autoclose_archiver: app.registry.autoclose_archiver as never,
       event_to_state: internals._event_to_state as never,
       reactive_events_size: internals._reactive_events.size,
       load: internals._es.load as never,

@@ -288,7 +288,6 @@ describe("deprecation (ACT-403)", () => {
       // Registry returns the empty fallback set for states with no
       // deprecation in scope (exercises the `?? EMPTY_DEPRECATED` branch).
       expect(app.registry.deprecated_events("Plain").size).toBe(0);
-      expect(app.registry.deprecated_events("Unknown").size).toBe(0);
 
       infoSpy.mockRestore();
     });

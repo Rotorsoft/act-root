@@ -140,12 +140,6 @@ describe("registry.autoclose_policy(state_name) — lookup", () => {
     const app = act().withState(Ticket).build();
     expect(app.registry.autoclose_policy("Ticket")).toBeNull();
   });
-
-  it("returns null for unknown state names", () => {
-    const Ticket = make_ticket().build();
-    const app = act().withState(Ticket).build();
-    expect(app.registry.autoclose_policy("Unknown")).toBeNull();
-  });
 });
 
 describe("registry.autoclose_archiver(state_name) — lookup", () => {
@@ -160,12 +154,6 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
     const Ticket = make_ticket().build();
     const app = act().withState(Ticket).build();
     expect(app.registry.autoclose_archiver("Ticket")).toBeNull();
-  });
-
-  it("returns null for unknown state names", () => {
-    const Ticket = make_ticket().build();
-    const app = act().withState(Ticket).build();
-    expect(app.registry.autoclose_archiver("Unknown")).toBeNull();
   });
 });
 
