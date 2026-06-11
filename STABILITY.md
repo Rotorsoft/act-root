@@ -12,7 +12,7 @@ Breaking changes to anything in this list require a **major** version bump and a
 
 The fluent surfaces exported from `@rotorsoft/act`:
 
-- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.build`
+- `state(...)` — including `.init`, `.emits`, `.patch`, `.on` (with optional `ActionOptions` second argument for per-action retry policy), `.given`, `.emit`, `.snap`, `.discloses` (sensitive-data epic #566 — disclosure predicate for `sensitive(...)`-marked event fields), `.autocloses` (online close-the-books epic #802 — predicate the autoclose cycle calls per candidate stream), `.archives` (online close-the-books epic #802 — companion archiver run while the stream is guarded, before truncate), `.build`
 - `slice(...)` — including `.actions`, `.given`, `.build`
 - `projection(...)` — including `.from`, `.on`, `.build`
 - `act(...)` — including `.with`, `.build`

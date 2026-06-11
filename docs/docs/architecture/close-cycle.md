@@ -176,6 +176,81 @@ Calling `close()` on an already-closed stream is a no-op:
 
 For a stream that's been *restarted* but not tombstoned (one `__snapshot__` event at v=0), Phase 1 calls `query_stats` with `exclude: [SNAP_EVENT]` so the snapshot is filtered out server-side — leaving the stream absent from the result map. Without a head, Phase 2 doesn't include the stream in `safe`, so the restarted-but-empty stream stays untouched. To force-tombstone a restarted stream, commit at least one domain event first.
 
+## Online close-the-books (#837 / epic #802)
+
+`Act.close(targets)` is the **explicit** close path — the operator hands the framework a list of stream names, the cycle runs once, the streams get truncated. Online close is the **declarative** version of the same primitive: each state's builder declares a predicate, the framework polls candidates on a background ticker, and eligible streams pass through the same `run_close_cycle` pipeline above.
+
+### Surface
+
+Two state-builder declarators:
+
+- `.autocloses(predicate)` — `(stream, head: Committed<TEvents,...>, count) => boolean`. The cycle calls this once per candidate stream; truthy results queue for truncate.
+- `.archives(fn)` — `(stream, head) => Promise<void>`. Optional companion. Runs while the stream is guarded but **before** truncate so the host can persist events to durable storage (S3, cold tier) before the tombstone lands.
+
+Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.discloses`). Absent → the state opts out of online close entirely (zero per-tick cost).
+
+Four `ActOptions` knobs, validated at `act().build()`:
+
+- `autocloseCycleMs` — cycle cadence in ms. Default 60_000, range `[10_000, 3_600_000]`.
+- `closeBatchSize` — max truncate candidates per flush batch. Default 64, range `[1, 1024]`.
+- `closeYieldMs` — delay between batches. Default 0, range `[0, 1000]`. SQLite operators raise this to release the writer lock.
+- `closeOnError` — whether a thrown predicate counts as "close this stream". Default false (skip the stream, log the error).
+
+### The cycle per tick
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  AutocloseController.run_once (#837 slice 3)            │
+│  ─ guard against overlapping ticks                      │
+│  ─ compute close_correlation(correlator, $autoclose)    │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  run_autoclose_cycle (#837 slice 2)                     │
+│  ─ Store.query_stats({}, { count: true,                 │
+│      exclude: [TOMBSTONE_EVENT] })                      │
+│  ─ for each stream:                                     │
+│      owner = event_to_state.get(head.name)              │
+│      predicate = registry.autoclose_policy(owner.name)  │
+│      if predicate(stream, head, count) → candidate      │
+│      (state.archive threaded as CloseTarget.archive)    │
+│  ─ flush every closeBatchSize candidates via            │
+│      run_close_cycle (phases 0-6 above)                 │
+│  ─ closeYieldMs between batches                         │
+└────────────────────────┬────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────┐
+│  Controller: if truncated.size > 0 →                    │
+│    emit("closed", close_result)                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+The crucial composition: **online close doesn't reinvent any phase**. It builds a candidate list and hands it to `run_close_cycle`. Safety-partition, tombstone-guard, archive-while-guarded, atomic truncate — all the invariants on this page apply to the autoclose path unchanged.
+
+### Lifecycle
+
+- Construction-time: the orchestrator builds the controller only when at least one state declares `.autocloses(...)`. Otherwise `_autoclose` stays `undefined` and the orchestrator pays zero per-tick cost.
+- `start_correlations()` starts the ticker; `stop_correlations()` (and therefore `shutdown()` / `dispose()`) stops it.
+- The ticker `unref()`s its Timeout so a forgotten autoclose worker doesn't keep the process alive after the rest of the app shuts down.
+
+### What's NOT online-close
+
+- **Restarting** streams. Online close always tombstones — `restart: true` is an explicit-close-only feature. Hosts that want "rotate this stream every 24h" run an explicit `app.close({ stream, restart: true })` from their own scheduler.
+- **Cross-state coordination**. Each state's predicate sees only its own candidates. There's no "close stream A only if stream B is closed" primitive — the host runs that policy explicitly if they need it.
+- **Per-tick partial commits**. The cycle either succeeds or fails per batch; a thrown predicate inside a batch logs and skips the stream (or closes it, under `closeOnError: true`). The batch itself never half-truncates.
+
+### Pointers
+
+- `libs/act/src/internal/autoclose-cycle.ts` — `run_autoclose_cycle` + `AutocloseController`
+- `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
+- `libs/act/test/autoclose-builder.spec.ts` — declarator + registry + validation
+- `libs/act/test/autoclose-cycle.spec.ts` — cycle behavior against `InMemoryStore`
+- `libs/act/test/autoclose-controller.spec.ts` — controller lifecycle + reentrancy + ticker error handling
+- `libs/act-pg/test/autoclose.spec.ts` / `libs/act-sqlite/test/autoclose.spec.ts` — adapter integration
+- [Online close-the-books policies](../guides/close-policies.md) — operator-facing guide for picking and writing predicates
+
 ## Pointers
 
 - `libs/act/src/internal/close-cycle.ts` — phase-by-phase orchestration, `runCloseCycle`

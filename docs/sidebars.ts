@@ -12,6 +12,7 @@ const sidebars: SidebarsConfig = {
         "guides/projections-to-database",
         "guides/external-integration",
         "guides/auto-generated-api",
+        "guides/close-policies",
         "guides/sensitive-data",
         "guides/pii-encryption-at-rest",
         "guides/production-checklist",

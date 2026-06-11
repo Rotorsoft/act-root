@@ -676,6 +676,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -686,7 +687,6 @@ import {
   close_correlation,
   DrainController,
   type DrainOps,
-  AutocloseController,
   default_correlator,
   type EsOps,
   type EventLaneSet,
@@ -14085,6 +14085,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -14095,7 +14096,6 @@ import {
   close_correlation,
   DrainController,
   type DrainOps,
-  AutocloseController,
   default_correlator,
   type EsOps,
   type EventLaneSet,

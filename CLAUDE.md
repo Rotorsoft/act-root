@@ -117,7 +117,8 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | Correlation, drain, settle internals | [docs/docs/architecture/correlation-and-drain.md](docs/docs/architecture/correlation-and-drain.md) |
 | Cross-process reactions (`Store.notify`) | [docs/docs/architecture/cross-process-reactions.md](docs/docs/architecture/cross-process-reactions.md) |
 | Reaction priority lanes (saturated drain) | [docs/docs/architecture/priority-lanes.md](docs/docs/architecture/priority-lanes.md) |
-| Close-the-books phase semantics | [docs/docs/architecture/close-cycle.md](docs/docs/architecture/close-cycle.md) |
+| Close-the-books phase semantics (explicit + online) | [docs/docs/architecture/close-cycle.md](docs/docs/architecture/close-cycle.md) |
+| Online close-the-books policies — `.autocloses` / `.archives` | [docs/docs/guides/close-policies.md](docs/docs/guides/close-policies.md) |
 | Event schema evolution (versioned event names) | [docs/docs/architecture/event-schema-evolution.md](docs/docs/architecture/event-schema-evolution.md) |
 | Store / Cache / Logger contracts and adapters | [docs/docs/architecture/extension-points.md](docs/docs/architecture/extension-points.md) |
 | Production deployment checklist | [docs/docs/guides/production-checklist.md](docs/docs/guides/production-checklist.md) |
