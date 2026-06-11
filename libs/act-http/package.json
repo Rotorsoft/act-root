@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-http",
   "type": "module",
   "version": "1.3.0",
-  "description": "HTTP integrations for act apps — webhooks and SSE",
+  "description": "HTTP integrations for act apps \u2014 webhooks and SSE",
   "keywords": [
     "typescript",
     "http",
@@ -30,6 +30,11 @@
       "types": "./dist/@types/api/index.d.ts",
       "import": "./dist/api/index.js",
       "require": "./dist/api/index.cjs"
+    },
+    "./hono": {
+      "types": "./dist/@types/hono/index.d.ts",
+      "import": "./dist/hono/index.js",
+      "require": "./dist/hono/index.cjs"
     },
     "./receiver": {
       "types": "./dist/@types/receiver/index.d.ts",
@@ -85,10 +90,10 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
+    "@hono/node-server": "^2.0.4",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.17.0",
-    "@hono/node-server": "^2.0.4",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
     "hono": "^4.12.24"
@@ -117,8 +122,9 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "devDependencies": {
-    "@rotorsoft/act-ops": "workspace:^",
     "@hono/node-server": "^2.0.4",
+    "@hono/zod-validator": "^0.8.0",
+    "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": "^11.17.0",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",

@@ -171,6 +171,45 @@ const authed = t.procedure.use(authenticated(myExtractor));
 // procedures alongside the generated ones.
 ```
 
+### `hono` — auto-generated REST surface
+
+```ts
+import { hono } from "@rotorsoft/act-http/hono";
+import { serve } from "@hono/node-server";
+
+const api = hono(app, {
+  // ActorExtractor from `@rotorsoft/act-http/api` — host's auth seam.
+  actor: (c) => resolveActorFromJwt(c),
+  // Resolve the target stream per call; singleton aggregates return a constant.
+  stream: (action, input, c) => `tenant-${c.req.header("x-tenant")}`,
+  // Optional optimistic concurrency — return `undefined` to skip the check.
+  expectedVersion: (action, input, c) => {
+    const v = c.req.header("if-match");
+    return v ? Number.parseInt(v, 10) : undefined;
+  },
+});
+
+serve({ fetch: api.fetch, port: 4000 });
+// POST /api/actions/OpenTicket  body: { title }
+// → 200 [Snapshot] | 4xx ApiError envelope
+```
+
+The generator walks `app.registry.actions` once and registers one `POST /actions/<actionName>` per action under the configured `basePath` (default `/api`). Bodies are validated with `@hono/zod-validator` against the action's registered Zod schema; failures short-circuit with `400`. The internal `authenticated(extractor)` middleware runs `options.actor` once per request and stashes the resolved `Actor` under `c.get("actor")`, available to any downstream middleware (logging, tracing, hand-written routes mounted on the same Hono instance). `Idempotency-Key` is read from the request header by default; `keyFrom` overrides for hosts that prefer a custom convention.
+
+Errors map through the shared `toApiError(...)` table at `@rotorsoft/act-http/api`: `ConcurrencyError → 412 / CONCURRENCY`, `InvariantError → 409 / INVARIANT`, `ValidationError → 422 / VALIDATION`, `StreamClosedError → 410 / STREAM_CLOSED`, `NonRetryableError → 400 / NON_RETRYABLE`. The envelope (`{ error, detail?, code? }`) is the same shape every other act-http transport ships so a client speaking REST plus tRPC never sees two formats for the same framework error.
+
+Edge-runtime ready — Hono runs unchanged on Node, Bun, Cloudflare Workers, Vercel Edge, and AWS Lambda. Operators wiring `idempotency` on edge runtimes should verify the `IdempotencyStore` is edge-compatible (in-memory works per worker; cross-worker requires a distributed store).
+
+```ts
+// Compose the auth middleware into your own Hono chain instead:
+import { Hono } from "hono";
+import { authenticated, type ActMiddlewareVariables } from "@rotorsoft/act-http/hono";
+
+const api = new Hono<{ Variables: ActMiddlewareVariables }>();
+api.use("*", authenticated((c) => resolveActorFromJwt(c)));
+// Hand-written routes alongside the generated ones now see c.get("actor") typed.
+```
+
 ### `sse` — live state broadcast
 
 ```ts
@@ -243,6 +282,15 @@ Auto-generated tRPC router for the act-http-api epic (#835).
 - **`trpc(app, options) → Router`** — generator function. Walks `app.registry.actions` once and emits a flat top-level mutation per action. Each procedure runs the internal `authenticated(options.actor)` middleware (so `ctx.actor: Actor` is set on the downstream context), resolves the target stream via `options.stream(action, input, ctx)`, and calls `app.do(action, { stream, actor }, input)`. Known framework errors map through `toApiError` to the conventional tRPC codes; unknown throws surface as `INTERNAL_SERVER_ERROR`.
 - **`authenticated(extractor) → middleware`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own procedure chain (logging + tracing + custom auth flavors) use `t.procedure.use(authenticated(extractor))` to inject `ctx.actor` without going through the generator. The middleware is structurally-typed so any host `t` instance accepts it.
 - **`TrpcOptions<Ctx>`** — `{ actor, stream, expectedVersion?, idempotency? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `expectedVersion` is optional — `(action, input, ctx) => number | undefined` — when set, the procedure threads the resolved value through `Target.expectedVersion` so `app.do` enforces optimistic concurrency; hosts typically read it from an `If-Match` header or the client's last-known snapshot, and returning `undefined` skips the check for that call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result).
+
+### `/hono` subpath
+
+Auto-generated REST surface for the act-http-api epic (#835).
+
+- **`hono(app, options) → Hono`** — generator function. Walks `app.registry.actions` once and registers a `POST /actions/<actionName>` per action under `basePath` (default `/api`). Body is validated with `@hono/zod-validator` against the action's Zod schema; failures short-circuit with `400`. The internal `authenticated(options.actor)` middleware stashes the resolved `Actor` under `c.get("actor")`. Routes return `200 Snapshot[]` on success, `4xx ApiError` envelope (with the conventional HTTP status) on framework errors, `500 / INTERNAL` on unknown throws.
+- **`authenticated(extractor) → MiddlewareHandler`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own Hono chain wire `api.use("*", authenticated(extractor))` and downstream routes read `c.get("actor"): Actor`. Errors thrown by the extractor surface as `401 / UNAUTHORIZED`.
+- **`HonoOptions`** — `{ actor, stream, expectedVersion?, idempotency?, basePath? }`. `actor` is the `ActorExtractor`. `stream` returns the target stream per call. `expectedVersion` threads `Target.expectedVersion` for optimistic concurrency — returning `undefined` skips the check. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom?: (c) => string | undefined }` — when set, the route honors `Idempotency-Key` via `withIdempotency`; default `keyFrom` reads the `Idempotency-Key` header. Duplicate claims return `409 / CONFLICT`. `basePath` defaults to `/api`.
+- **`ActMiddlewareVariables`** — `{ actor: Actor }`. Use as the `Variables` generic on a host Hono instance to get `c.get("actor")` typed downstream of `authenticated`.
 
 ### `/sse` subpath
 
