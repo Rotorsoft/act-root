@@ -310,7 +310,7 @@ importers:
         specifier: workspace:^
         version: link:../act
       '@rotorsoft/act-crypto':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../act-crypto
       pg:
         specifier: ^8.21.0
@@ -351,7 +351,7 @@ importers:
         specifier: workspace:^
         version: link:../act
       '@rotorsoft/act-crypto':
-        specifier: workspace:*
+        specifier: workspace:^
         version: link:../act-crypto
       zod:
         specifier: ^4.4.3
@@ -384,9 +384,6 @@ importers:
       '@rotorsoft/act':
         specifier: '>=1.10.1'
         version: link:../../libs/act
-      '@rotorsoft/act-http':
-        specifier: workspace:*
-        version: link:../../libs/act-http
       '@trpc/server':
         specifier: 11.17.0
         version: 11.17.0(typescript@6.0.3)
