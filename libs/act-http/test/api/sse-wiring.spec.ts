@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
@@ -95,6 +96,26 @@ describe("SseConnectionCounter", () => {
   });
 });
 
+describe("fireAndForget", () => {
+  it("resolves to the op's value on success", async () => {
+    const out = await fireAndForget(() => Promise.resolve(42));
+    expect(out).toBe(42);
+  });
+
+  it("swallows rejection and resolves to undefined", async () => {
+    const out = await fireAndForget(() => Promise.reject(new Error("closed")));
+    expect(out).toBeUndefined();
+  });
+
+  it("doesn't leak an unhandled rejection when the caller drops the result", async () => {
+    // Intentionally do not await — fireAndForget should still
+    // attach the .catch so Node's unhandled-rejection hook stays quiet.
+    fireAndForget(() => Promise.reject(new Error("dropped")));
+    // Give microtasks a chance to settle.
+    await new Promise((r) => setTimeout(r, 0));
+  });
+});
+
 describe("runSseSubscription", () => {
   type S = { _v: number; n: number };
 
@@ -161,6 +182,24 @@ describe("runSseSubscription", () => {
     setTimeout(() => channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]), 5);
     const frames = await take(gen, 1);
     expect(frames[0]).toMatchObject({ kind: "patch" });
+    expect(counter.open).toBe(0);
+  });
+
+  it("drains queued patches without re-awaiting when multiple arrive between yields", async () => {
+    const channel = new BroadcastChannel<S>();
+    const counter = new SseConnectionCounter(5);
+    const gen = runSseSubscription(channel, "k", counter, undefined);
+    // Two synchronous publications — both queue before the consumer
+    // can pull the first. The second-iteration `pending.length === 0`
+    // check goes false, so the loop skips the await and shifts the
+    // already-queued patch out without re-arming `resolve_wait`.
+    setTimeout(() => {
+      channel.publish("k", { _v: 1, n: 1 }, [{ n: 1 }]);
+      channel.publish("k", { _v: 2, n: 2 }, [{ n: 2 }]);
+    }, 5);
+    const frames = await take(gen, 2);
+    expect(frames[0]).toMatchObject({ kind: "patch" });
+    expect(frames[1]).toMatchObject({ kind: "patch" });
     expect(counter.open).toBe(0);
   });
 

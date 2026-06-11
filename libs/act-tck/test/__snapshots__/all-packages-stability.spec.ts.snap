@@ -28956,6 +28956,7 @@ export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
 export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   type SseAccounting,
@@ -29130,6 +29131,21 @@ export class SseConnectionCounter {
   get open(): number {
     return this._open;
   }
+}
+
+/**
+ * Wrap a fire-and-forget Promise-returning operation so its
+ * rejection is swallowed in place of leaking an unhandled
+ * rejection. Used by the Hono heartbeat tick (the interval callback
+ * isn't \`await\`ed, so its rejection has nowhere to go) and by any
+ * other "best-effort write" the transports run.
+ *
+ * Pure: same input → same output, no side effects on the caller.
+ * Returns the chained Promise so the caller can also \`await\`
+ * completion if they want to (the Hono heartbeat doesn't).
+ */
+export function fireAndForget<T>(op: () => Promise<T>): Promise<T | undefined> {
+  return op().catch(() => undefined);
 }
 
 /**
@@ -29656,6 +29672,7 @@ import { streamSSE } from "hono/streaming";
 import {
   type ActorExtractor,
   type ApiError,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
@@ -29884,9 +29901,9 @@ export function hono<TApp extends ActSurface = ActSurface>(
         return streamSSE(c, async (sse_stream) => {
           sse_stream.onAbort(() => controller.abort());
           const heartbeat = setInterval(() => {
-            sse_stream
-              .writeSSE({ event: "ping", data: "" })
-              .catch(() => undefined);
+            fireAndForget(() =>
+              sse_stream.writeSSE({ event: "ping", data: "" })
+            );
           }, sse_config.heartbeatMs);
           try {
             for await (const frame of runSseSubscription(
@@ -30023,6 +30040,7 @@ export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
 export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   type SseAccounting,
@@ -30197,6 +30215,21 @@ export class SseConnectionCounter {
   get open(): number {
     return this._open;
   }
+}
+
+/**
+ * Wrap a fire-and-forget Promise-returning operation so its
+ * rejection is swallowed in place of leaking an unhandled
+ * rejection. Used by the Hono heartbeat tick (the interval callback
+ * isn't \`await\`ed, so its rejection has nowhere to go) and by any
+ * other "best-effort write" the transports run.
+ *
+ * Pure: same input → same output, no side effects on the caller.
+ * Returns the chained Promise so the caller can also \`await\`
+ * completion if they want to (the Hono heartbeat doesn't).
+ */
+export function fireAndForget<T>(op: () => Promise<T>): Promise<T | undefined> {
+  return op().catch(() => undefined);
 }
 
 /**
@@ -33831,6 +33864,7 @@ export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
 export {
   DEFAULT_SSE_HEARTBEAT_MS,
   DEFAULT_SSE_MAX_CONNECTIONS,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   type SseAccounting,
@@ -34005,6 +34039,21 @@ export class SseConnectionCounter {
   get open(): number {
     return this._open;
   }
+}
+
+/**
+ * Wrap a fire-and-forget Promise-returning operation so its
+ * rejection is swallowed in place of leaking an unhandled
+ * rejection. Used by the Hono heartbeat tick (the interval callback
+ * isn't \`await\`ed, so its rejection has nowhere to go) and by any
+ * other "best-effort write" the transports run.
+ *
+ * Pure: same input → same output, no side effects on the caller.
+ * Returns the chained Promise so the caller can also \`await\`
+ * completion if they want to (the Hono heartbeat doesn't).
+ */
+export function fireAndForget<T>(op: () => Promise<T>): Promise<T | undefined> {
+  return op().catch(() => undefined);
 }
 
 /**

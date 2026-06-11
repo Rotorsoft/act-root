@@ -54,6 +54,7 @@ import { streamSSE } from "hono/streaming";
 import {
   type ActorExtractor,
   type ApiError,
+  fireAndForget,
   resolveSseConfig,
   runSseSubscription,
   SseConnectionCounter,
@@ -282,9 +283,9 @@ export function hono<TApp extends ActSurface = ActSurface>(
         return streamSSE(c, async (sse_stream) => {
           sse_stream.onAbort(() => controller.abort());
           const heartbeat = setInterval(() => {
-            sse_stream
-              .writeSSE({ event: "ping", data: "" })
-              .catch(() => undefined);
+            fireAndForget(() =>
+              sse_stream.writeSSE({ event: "ping", data: "" })
+            );
           }, sse_config.heartbeatMs);
           try {
             for await (const frame of runSseSubscription(

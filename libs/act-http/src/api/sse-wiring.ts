@@ -165,6 +165,21 @@ export class SseConnectionCounter {
 }
 
 /**
+ * Wrap a fire-and-forget Promise-returning operation so its
+ * rejection is swallowed in place of leaking an unhandled
+ * rejection. Used by the Hono heartbeat tick (the interval callback
+ * isn't `await`ed, so its rejection has nowhere to go) and by any
+ * other "best-effort write" the transports run.
+ *
+ * Pure: same input → same output, no side effects on the caller.
+ * Returns the chained Promise so the caller can also `await`
+ * completion if they want to (the Hono heartbeat doesn't).
+ */
+export function fireAndForget<T>(op: () => Promise<T>): Promise<T | undefined> {
+  return op().catch(() => undefined);
+}
+
+/**
  * Frame yielded by the per-state SSE subscription generator. The
  * initial cached state (when present) arrives as `kind: "state"`;
  * every subsequent broadcast publication arrives as `kind: "patch"`
