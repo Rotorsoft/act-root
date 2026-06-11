@@ -20,7 +20,7 @@ import { Hono } from "hono";
  *   GET  /openapi.json                 ← OpenAPI 3.1 document
  *   GET  /                             ← landing page with links
  *
- * Run via `pnpm dev:trpc` (the Vite client picks up the URL at
+ * Run via `pnpm dev:http` (the Vite client picks up the URL at
  * http://localhost:5173 and offers a transport toggle that
  * exercises both tRPC and REST against this same server).
  */

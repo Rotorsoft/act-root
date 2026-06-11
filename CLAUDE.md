@@ -51,7 +51,7 @@ pnpm scrub            # remove all node_modules + build artifacts
 
 pnpm dev:calculator   # run examples
 pnpm dev:wolfdesk
-pnpm dev:trpc         # server + client concurrently
+pnpm dev:http         # multi-transport demo (trpc + hono rest + openapi) — server + client concurrently
 
 vitest                                                # watch mode
 pnpm -F calculator test                               # one package

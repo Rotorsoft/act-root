@@ -1,13 +1,14 @@
 # client
 
-A minimal React + Vite + tRPC client for the calculator example. Demonstrates how to call an Act-backed tRPC router from a browser with full end-to-end type safety.
+A minimal React + Vite client for the calculator example. Demonstrates how to call an Act-backed tRPC router from a browser with full end-to-end type safety **and** how to swap to the generated Hono REST surface with one toggle — both transports walking the same Act registry on the server.
 
-> Workspace package, not published. Run via `pnpm dev:trpc` from the monorepo root (boots both server and client).
+> Workspace package, not published. Run via `pnpm dev:http` from the monorepo root (boots both server and client).
 
 ## What it does
 
-- Renders a 4×5 calculator keypad
-- Calls `PressKey` / `Clear` mutations on the server-hosted `calculatorRouter`
+- Renders a 4×5 calculator keypad with a **transport toggle** (tRPC ↔ REST) and a link to the live `/openapi.json`
+- In tRPC mode: calls `PressKey` / `Clear` mutations on the server-hosted `calculatorRouter`
+- In REST mode: `POST`s to `/api/actions/PressKey` / `/api/actions/Clear` against the same server
 - Displays the latest snapshot returned from each mutation (`{ left, operator, right }`)
 - Reuses **types from the calculator package** (`Digits`, `Operators`, `CalculatorRouter`) — no duplicated schemas, no codegen
 
@@ -15,7 +16,7 @@ A minimal React + Vite + tRPC client for the calculator example. Demonstrates ho
 
 ```bash
 # From the monorepo root — runs server (4000) and client (3000) concurrently
-pnpm dev:trpc
+pnpm dev:http
 
 # Or just the client
 pnpm -F client dev
@@ -23,7 +24,7 @@ pnpm -F client dev
 
 The Vite dev server listens on port `3000` (`vite.config.ts`). Open [http://localhost:3000](http://localhost:3000).
 
-The client expects the tRPC server at `http://localhost:4000` (hard-coded in `src/trpc.ts`). The root `dev:trpc` script sets the matching `CORS_ORIGIN` on the server automatically — when running the server standalone, set `CORS_ORIGIN=http://localhost:3000` yourself.
+The client expects the server at `http://localhost:4000` (hard-coded as `SERVER_BASE` in `src/trpc.ts`, reused by `src/restClient.ts`). The root `dev:http` script sets the matching `CORS_ORIGIN` on the server automatically — when running the server standalone, set `CORS_ORIGIN=http://localhost:3000` yourself.
 
 ## Layout
 
