@@ -1,4 +1,5 @@
 import EventEmitter from "node:events";
+import { z } from "zod";
 import {
   ALL_LANES,
   type AuditDeps,
@@ -127,18 +128,40 @@ export const DEFAULT_CLOSE_BATCH_SIZE = 64;
  */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
 
-const AUTOCLOSE_CYCLE_MS_MIN = 10_000;
-const AUTOCLOSE_CYCLE_MS_MAX = 3_600_000;
-const CLOSE_BATCH_SIZE_MIN = 1;
-const CLOSE_BATCH_SIZE_MAX = 1024;
-const CLOSE_YIELD_MS_MIN = 0;
-const CLOSE_YIELD_MS_MAX = 1000;
+/**
+ * Zod schema for the autoclose knobs on {@link ActOptions}. Same
+ * declarative-validation pattern the framework uses elsewhere
+ * (`libs/act/src/config.ts`, every event/action schema, every
+ * reaction-option shape). Defaults, ranges, and integer constraints
+ * live in one place — no parallel `DEFAULT_*` + `*_MIN` / `*_MAX`
+ * declarations to keep in sync. Out-of-range values throw `ZodError`
+ * at `act().build()` so misconfiguration surfaces at startup, not
+ * on the first cycle tick.
+ *
+ * @internal
+ */
+const AutoCloseSchema = z.object({
+  autocloseCycleMs: z
+    .number()
+    .min(10_000)
+    .max(3_600_000)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+  closeBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024)
+    .default(DEFAULT_CLOSE_BATCH_SIZE),
+  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
+  closeOnError: z.boolean().default(false),
+});
 
 /**
  * Resolved autoclose configuration after validation and default
  * expansion. Internal — the orchestrator's autoclose controller
  * runs against this shape. Fields are snake_case per the internal
- * type-field convention.
+ * type-field convention; {@link resolve_autoclose_config} does the
+ * camelCase→snake_case mapping from the public `ActOptions` shape.
  *
  * @internal
  */
@@ -152,50 +175,24 @@ export type AutoCloseConfig = {
 /**
  * Validate and apply defaults for the autoclose knobs on
  * {@link ActOptions}. Called from `act().build()`. Out-of-range
- * values throw `RangeError` so misconfiguration surfaces at startup,
- * not on the first cycle tick.
+ * values throw at startup, not on the first cycle tick.
  *
  * @internal
  */
 export function resolve_autoclose_config(
   options: ActOptions | undefined
 ): AutoCloseConfig {
-  const cycle_ms = options?.autocloseCycleMs ?? DEFAULT_AUTOCLOSE_CYCLE_MS;
-  const batch_size = options?.closeBatchSize ?? DEFAULT_CLOSE_BATCH_SIZE;
-  const yield_ms = options?.closeYieldMs ?? DEFAULT_CLOSE_YIELD_MS;
-  if (
-    !Number.isFinite(cycle_ms) ||
-    cycle_ms < AUTOCLOSE_CYCLE_MS_MIN ||
-    cycle_ms > AUTOCLOSE_CYCLE_MS_MAX
-  ) {
-    throw new RangeError(
-      `autocloseCycleMs must be in [${AUTOCLOSE_CYCLE_MS_MIN}, ${AUTOCLOSE_CYCLE_MS_MAX}], got ${cycle_ms}`
-    );
-  }
-  if (
-    !Number.isFinite(batch_size) ||
-    !Number.isInteger(batch_size) ||
-    batch_size < CLOSE_BATCH_SIZE_MIN ||
-    batch_size > CLOSE_BATCH_SIZE_MAX
-  ) {
-    throw new RangeError(
-      `closeBatchSize must be an integer in [${CLOSE_BATCH_SIZE_MIN}, ${CLOSE_BATCH_SIZE_MAX}], got ${batch_size}`
-    );
-  }
-  if (
-    !Number.isFinite(yield_ms) ||
-    yield_ms < CLOSE_YIELD_MS_MIN ||
-    yield_ms > CLOSE_YIELD_MS_MAX
-  ) {
-    throw new RangeError(
-      `closeYieldMs must be in [${CLOSE_YIELD_MS_MIN}, ${CLOSE_YIELD_MS_MAX}], got ${yield_ms}`
-    );
-  }
+  const parsed = AutoCloseSchema.parse({
+    autocloseCycleMs: options?.autocloseCycleMs,
+    closeBatchSize: options?.closeBatchSize,
+    closeYieldMs: options?.closeYieldMs,
+    closeOnError: options?.closeOnError,
+  });
   return {
-    cycle_ms,
-    batch_size,
-    yield_ms,
-    close_on_error: options?.closeOnError ?? false,
+    cycle_ms: parsed.autocloseCycleMs,
+    batch_size: parsed.closeBatchSize,
+    yield_ms: parsed.closeYieldMs,
+    close_on_error: parsed.closeOnError,
   };
 }
 
