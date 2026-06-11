@@ -9,6 +9,7 @@
     "../libs/act-http/src/sse/index.ts",
     "../libs/act-http/src/trpc/index.ts",
     "../libs/act-http/src/hono/index.ts",
+    "../libs/act-http/src/openapi/index.ts",
     "../libs/act-http/src/receiver/index.ts",
     "../libs/act-http/src/receiver/trpc/index.ts",
     "../libs/act-http/src/receiver/express/index.ts",

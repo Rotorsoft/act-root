@@ -99,6 +99,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-http (openapi)",
+          href: "/docs/api/act-http/src/openapi",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-ops/idempotency",
           href: "/docs/api/act-ops/src/idempotency",
         },

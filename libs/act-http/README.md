@@ -210,6 +210,31 @@ api.use("*", authenticated((c) => resolveActorFromJwt(c)));
 // Hand-written routes alongside the generated ones now see c.get("actor") typed.
 ```
 
+### `openapi` — OpenAPI 3.1 document emitter
+
+```ts
+import { openapi } from "@rotorsoft/act-http/openapi";
+
+const doc = openapi(app, {
+  info: { title: "Wolfdesk API", version: "1.0.0" },
+  servers: [{ url: "https://api.example.com" }],
+  // Document the optional cross-cutting headers that the live REST API accepts.
+  idempotency: true,
+  expectedVersion: true,
+});
+
+// Serve alongside the Hono adapter:
+api.get("/openapi.json", (c) => c.json(doc));
+```
+
+Pure data emit — no runtime dep on Hono or tRPC. The doc walks `app.registry.actions` once at function call and emits one `POST <basePath>/actions/<actionName>` operation per action, deriving the request-body schema from each action's Zod definition via Zod 4's native `z.toJSONSchema` (OpenAPI 3.1 uses JSON Schema 2020-12 as its schema dialect — no conversion layer needed).
+
+**The doc describes the Hono REST surface, not tRPC.** tRPC's URL convention (`POST /trpc/<procedure>`, JSON-RPC-style body framing, batching) doesn't model cleanly as OpenAPI operations; tRPC consumers share types directly via `typeof router` and don't need a doc. The path shape this emitter produces matches `@rotorsoft/act-http/hono` by construction: same default `basePath` (`/api`), same request/response shapes, same error envelope. If the operator overrides `basePath` on the Hono adapter, pass the same value here so the doc keeps describing the live routes. tRPC and Hono can run side-by-side at different mount points on the same Act instance.
+
+The same shared `ApiError` envelope underwrites cross-transport consistency: it's referenced once from `components.responses` and every error code (`400`, `409`, `410`, `412`, `422`, `500`) points at it. The doc and the live REST API agree on framework-error shapes by construction.
+
+Output is deterministic given the same registry — entries land in `Object.entries(app.registry.actions)` iteration order. CI can snapshot the result to catch unintended API-surface changes; one merge that quietly changes a Zod schema or adds a new action surfaces as a doc diff in the same PR.
+
 ### `sse` — live state broadcast
 
 ```ts
@@ -291,6 +316,14 @@ Auto-generated REST surface for the act-http-api epic (#835).
 - **`authenticated(extractor) → MiddlewareHandler`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own Hono chain wire `api.use("*", authenticated(extractor))` and downstream routes read `c.get("actor"): Actor`. Errors thrown by the extractor surface as `401 / UNAUTHORIZED`.
 - **`HonoOptions`** — `{ actor, stream, expectedVersion?, idempotency?, basePath? }`. `actor` is the `ActorExtractor`. `stream` returns the target stream per call. `expectedVersion` threads `Target.expectedVersion` for optimistic concurrency — returning `undefined` skips the check. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom?: (c) => string | undefined }` — when set, the route honors `Idempotency-Key` via `withIdempotency`; default `keyFrom` reads the `Idempotency-Key` header. Duplicate claims return `409 / CONFLICT`. `basePath` defaults to `/api`.
 - **`ActMiddlewareVariables`** — `{ actor: Actor }`. Use as the `Variables` generic on a host Hono instance to get `c.get("actor")` typed downstream of `authenticated`.
+
+### `/openapi` subpath
+
+OpenAPI 3.1 document emitter for the act-http-api epic (#835).
+
+- **`openapi(app, options) → OpenAPIDocument`** — generator function. Walks `app.registry.actions` once and returns a valid OpenAPI 3.1 document object. Each action becomes a `POST <basePath>/actions/<actionName>` operation; the request-body schema comes from Zod 4's `z.toJSONSchema` against the action's registered schema. Error responses reference the shared `#/components/responses/ApiError`. Output is pure data — serve as `/openapi.json`, write to disk during CI, pipe to client codegen.
+- **`OpenAPIOptions`** — `{ info, servers?, basePath?, idempotency?, expectedVersion? }`. `info.title` and `info.version` are required non-empty strings. `servers[].url` may contain `{variable}` template syntax; bare URLs are validated through `URL`'s parser. `basePath` defaults to `/api` (mirrors the Hono sibling). `idempotency` and `expectedVersion` are booleans (default `false`); when `true`, every mutation operation documents the corresponding optional header (`Idempotency-Key` / `If-Match`).
+- **`OpenAPIDocument`** + a structural subset of the OpenAPI 3.1 types (`OpenAPIInfo`, `OpenAPIServer`, `OpenAPIPathItem`, `OpenAPIOperation`, `OpenAPIParameter`, `OpenAPIRequestBody`, `OpenAPIResponse`, `OpenAPIComponents`). Intentionally lighter than the full `openapi-types` package so post-processing doesn't fight the type system; cast to a fuller type when downstream consumers need it.
 
 ### `/sse` subpath
 

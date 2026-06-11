@@ -36,6 +36,11 @@
       "import": "./dist/hono/index.js",
       "require": "./dist/hono/index.cjs"
     },
+    "./openapi": {
+      "types": "./dist/@types/openapi/index.d.ts",
+      "import": "./dist/openapi/index.js",
+      "require": "./dist/openapi/index.cjs"
+    },
     "./receiver": {
       "types": "./dist/@types/receiver/index.d.ts",
       "import": "./dist/receiver/index.js",

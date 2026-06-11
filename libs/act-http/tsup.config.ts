@@ -12,6 +12,7 @@ export default defineConfig({
     "src/api/index.ts",
     "src/trpc/index.ts",
     "src/hono/index.ts",
+    "src/openapi/index.ts",
   ],
   format: ["esm", "cjs"],
   dts: false,
