@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.3.0...@rotorsoft/act-http-v1.4.0) (2026-06-11)
+
+
+### Features
+
+* **act-http:** [#844](https://github.com/rotorsoft/act-root/issues/844) — @rotorsoft/act-http/hono subpath generates a typed REST surface ([3a5274c](https://github.com/rotorsoft/act-root/commit/3a5274cb15255f747f5a988d1755a6892d142652))
+
 # [@rotorsoft/act-http-v1.3.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.2.1...@rotorsoft/act-http-v1.3.0) (2026-06-11)
 
 
