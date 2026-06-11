@@ -7,7 +7,7 @@
   "type": "module",
   "scripts": {
     "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
-    "dev:stackblitz": "npm install --prefer-offline --no-audit --no-fund && LOG_LEVEL=trace tsx watch src/main.ts",
+    "dev:stackblitz": "LOG_LEVEL=trace tsx watch src/main.ts",
     "dev:rebuild": "tsx src/rebuild-demo.ts",
     "dev:close": "tsx src/close-demo.ts",
     "dev:audit": "tsx src/audit-demo.ts"
