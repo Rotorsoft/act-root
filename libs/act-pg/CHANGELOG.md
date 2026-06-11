@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.5.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.5.0...@rotorsoft/act-pg-v1.5.1) (2026-06-11)
+
+
+### Bug Fixes
+
+* **act-pg,act-sqlite,calculator:** stackblitz-installable workspace deps ([20e1e2f](https://github.com/rotorsoft/act-root/commit/20e1e2f4fbf6e0b98f44beae250f18a09515d1c8))
+
 # [@rotorsoft/act-pg-v1.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.4.3...@rotorsoft/act-pg-v1.5.0) (2026-06-10)
 
 
