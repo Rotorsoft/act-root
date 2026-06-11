@@ -1,8 +1,8 @@
 {
   "name": "@rotorsoft/act-http",
   "type": "module",
-  "version": "1.2.1",
-  "description": "HTTP integrations for act apps \u2014 webhooks and SSE",
+  "version": "1.3.0",
+  "description": "HTTP integrations for act apps — webhooks and SSE",
   "keywords": [
     "typescript",
     "http",
