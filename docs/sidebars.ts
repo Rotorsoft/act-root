@@ -89,6 +89,11 @@ const sidebars: SidebarsConfig = {
         },
         {
           type: "link",
+          label: "@rotorsoft/act-http (trpc)",
+          href: "/docs/api/act-http/src/trpc",
+        },
+        {
+          type: "link",
           label: "@rotorsoft/act-ops/idempotency",
           href: "/docs/api/act-ops/src/idempotency",
         },

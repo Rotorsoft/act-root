@@ -31102,6 +31102,535 @@ export type Subscriber<S extends BroadcastState = BroadcastState> = (
 "
 `;
 
+exports[`@rotorsoft/act-http — public API stability > stable public surface for ./trpc 1`] = `
+"// === actor.ts ===
+import type { Actor } from "@rotorsoft/act";
+
+/**
+ * Extractor function the host supplies to resolve an {@link Actor}
+ * from an incoming request. The framework keeps auth out of the
+ * package — JWT vs session vs API key is the host's call — and asks
+ * for this single closure that every transport (tRPC, Hono, OpenAPI
+ * docs) composes against.
+ *
+ * The \`request\` argument is intentionally generic. Each transport
+ * narrows it at the call site (\`IncomingMessage\` for Hono, the tRPC
+ * context object for tRPC, etc.) — keeping the contract here
+ * transport-agnostic means one extractor implementation plugs into
+ * every adapter unchanged.
+ *
+ * Async is allowed so the extractor can verify a JWT against a
+ * remote JWKS endpoint without forcing every host to synchronously
+ * cache.
+ */
+export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
+
+// === errors.ts ===
+import {
+  ConcurrencyError,
+  InvariantError,
+  NonRetryableError,
+  StreamClosedError,
+  ValidationError,
+} from "@rotorsoft/act";
+
+/**
+ * Uniform error envelope shipped over the wire by every act-http
+ * transport. Hosts get the same shape from REST, tRPC, and OpenAPI —
+ * a client that talks to two transports doesn't have to invent two
+ * error parsers.
+ *
+ * - \`error\` — the framework error name (\`"ValidationError"\`,
+ *   \`"InvariantError"\`, …). Stable identifier, safe to switch on.
+ * - \`detail\` — the framework's message text. Human-readable; not
+ *   parsed by clients.
+ * - \`code\` — a machine-readable status code from {@link ERROR_MAP}
+ *   for clients that prefer enum-style branching over name strings.
+ */
+export type ApiError = {
+  error: string;
+  detail?: string;
+  code?: string;
+};
+
+/**
+ * Status + code pair for one known framework error.
+ */
+export type ErrorMapEntry = {
+  status: number;
+  code: string;
+};
+
+/**
+ * The single table that maps framework error types to HTTP status
+ * codes and machine-readable codes. One table, three consumers
+ * (Hono, tRPC, OpenAPI) — cross-transport consistency by
+ * construction.
+ *
+ * Operators wanting different mappings wrap the generated transport
+ * rather than mutating this — the consistency is the load-bearing
+ * property, not the specific status codes.
+ */
+export const ERROR_MAP = {
+  ValidationError: { status: 422, code: "VALIDATION" },
+  InvariantError: { status: 409, code: "INVARIANT" },
+  ConcurrencyError: { status: 412, code: "CONCURRENCY" },
+  StreamClosedError: { status: 410, code: "STREAM_CLOSED" },
+  NonRetryableError: { status: 400, code: "NON_RETRYABLE" },
+} as const satisfies Record<string, ErrorMapEntry>;
+
+const lookup_known = (
+  err: unknown
+): { name: keyof typeof ERROR_MAP } | null => {
+  if (err instanceof ValidationError) return { name: "ValidationError" };
+  if (err instanceof InvariantError) return { name: "InvariantError" };
+  if (err instanceof ConcurrencyError) return { name: "ConcurrencyError" };
+  if (err instanceof StreamClosedError) return { name: "StreamClosedError" };
+  if (err instanceof NonRetryableError) return { name: "NonRetryableError" };
+  return null;
+};
+
+/**
+ * Translate an unknown thrown value into the canonical
+ * {@link ApiError} envelope plus HTTP status. Each transport's error
+ * boundary calls this once and forwards the result to the wire.
+ *
+ * Known framework errors map per {@link ERROR_MAP}. Everything else
+ * surfaces as a 500 with \`code: "INTERNAL"\`; the \`detail\` field is
+ * populated when the throw was an \`Error\` instance, omitted
+ * otherwise (a thrown string or object doesn't get to leak its
+ * payload to the client).
+ */
+export function toApiError(err: unknown): { status: number; body: ApiError } {
+  const known = lookup_known(err);
+  if (known) {
+    const entry = ERROR_MAP[known.name];
+    return {
+      status: entry.status,
+      body: {
+        error: known.name,
+        detail: (err as Error).message,
+        code: entry.code,
+      },
+    };
+  }
+  if (err instanceof Error) {
+    return {
+      status: 500,
+      body: { error: "InternalError", detail: err.message, code: "INTERNAL" },
+    };
+  }
+  return {
+    status: 500,
+    body: { error: "InternalError", code: "INTERNAL" },
+  };
+}
+
+// === idempotency.ts ===
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+
+/**
+ * Result of a {@link withIdempotency} call.
+ *
+ * - \`{ deduped: false, result }\` — the claim was fresh; the handler
+ *   ran and produced \`result\`.
+ * - \`{ deduped: true }\` — the claim was already taken; the handler
+ *   was *not* invoked. The caller decides how to respond (typically
+ *   a 2xx with no body, matching the receiver-side convention).
+ *
+ * Note: the contract does not cache the previous response. A
+ * duplicate call returns the deduped marker only — replaying the
+ * original handler's output would require a response-caching
+ * adapter, which is out of scope here. The receiver-side convention
+ * (and the convention the generated transports follow) is "ack the
+ * duplicate; do nothing else."
+ */
+export type IdempotencyResult<T> =
+  | { deduped: false; result: T }
+  | { deduped: true };
+
+/**
+ * Wrap an action handler so the framework honors \`Idempotency-Key\`
+ * dedup. Acquires the key via {@link IdempotencyStore.claim}, runs
+ * the handler exactly when the claim was fresh, and skips the
+ * handler entirely on a duplicate.
+ *
+ * Reuses the contract \`@rotorsoft/act-ops/idempotency\` already
+ * defines for the receiver-side \`Idempotency-Key\` story. A single
+ * \`IdempotencyStore\` implementation covers both halves of the "Act
+ * over the wire" surface — receiver and generated API.
+ */
+export async function withIdempotency<T>(
+  store: IdempotencyStore,
+  key: string,
+  handler: () => Promise<T>
+): Promise<IdempotencyResult<T>> {
+  const fresh = await store.claim(key);
+  if (!fresh) {
+    return { deduped: true };
+  }
+  return { deduped: false, result: await handler() };
+}
+
+// === index.ts ===
+/**
+ * @packageDocumentation
+ * @module act-http/trpc
+ *
+ * tRPC subpath for the auto-generated API epic (#835). Walks the
+ * registry of a built \`Act\` once at function call and emits a typed
+ * router that exposes every registered action as a flat \`mutation\`,
+ * matching the shape hand-written tRPC routers in the Act ecosystem
+ * already use.
+ *
+ * Usage:
+ *
+ * \`\`\`ts
+ * import { trpc } from "@rotorsoft/act-http/trpc";
+ *
+ * const router = trpc(app, {
+ *   actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
+ *   stream: (action, input, ctx) => input.stream ?? ctx.tenant,
+ * });
+ *
+ * // Client sees:
+ * //   appRouter.PressKey.mutate({ key: "5" })
+ * //   appRouter.OpenTicket.mutate({ title: "..." })
+ * \`\`\`
+ *
+ * The route shape is flat: one procedure per registered action at
+ * the top level. Action names are the unique identifiers across
+ * the registry (the framework already enforces no duplicates), so
+ * an extra namespace tier would be overhead in the common case.
+ * Pure mutations for this slice; query/projection wiring lives in
+ * a follow-up. See \`libs/act-http/README.md\` for the full surface
+ * walkthrough.
+ *
+ * **Actor lives on the context.** The generator wires an internal
+ * tRPC middleware that runs the host's
+ * {@link TrpcOptions.actor | actor extractor} once per call and
+ * injects the resolved {@link Actor} onto the downstream context as
+ * \`ctx.actor\`. Every generated mutation reads from there — auth
+ * resolves at the procedure boundary, not inside each action body,
+ * and any composed middleware (logging, tracing) sees the same
+ * \`ctx.actor\`. The middleware factory is also exported as
+ * {@link authenticated} for hosts that need to compose it into
+ * their own procedure chain.
+ *
+ * Composes the shared utilities at \`@rotorsoft/act-http/api\`:
+ * {@link ActorExtractor} for the auth seam, {@link toApiError} for
+ * the uniform error→status/code mapping, {@link withIdempotency}
+ * for \`Idempotency-Key\` dedup. Three transports (this one, Hono,
+ * OpenAPI) ride the same utilities so a client talking to two
+ * transports never sees two error shapes for the same framework
+ * error.
+ */
+import type { Act, Actor, Schema, Schemas } from "@rotorsoft/act";
+import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
+import { initTRPC, TRPCError } from "@trpc/server";
+import {
+  type ActorExtractor,
+  toApiError,
+  withIdempotency,
+} from "../api/index.js";
+
+/**
+ * Per-call options for {@link trpc}. The host supplies the three
+ * seams the package can't make decisions on:
+ *
+ * - \`actor\` — auth resolver. Receives the tRPC context, returns the
+ *   \`Actor\` that flows onto \`ctx.actor\` for every generated
+ *   procedure (via an internal {@link authenticated}).
+ * - \`stream\` — stream-id resolver. Receives the action name, the
+ *   validated action input, and the original tRPC context; returns
+ *   the target stream. Singleton aggregates return a constant;
+ *   per-tenant aggregates pull from input or context.
+ * - \`expectedVersion\` (optional) — optimistic-concurrency resolver.
+ *   When set, the procedure threads the resolved value through
+ *   \`target.expectedVersion\` so \`app.do\` refuses to commit if the
+ *   stream has moved. Hosts typically read it from an \`If-Match\`
+ *   header on the underlying HTTP request, or pull it from the
+ *   client's last-known snapshot. Returning \`undefined\` skips the
+ *   check for that call — handy when only some actions are
+ *   concurrency-sensitive.
+ * - \`idempotency\` (optional) — when set, the procedure honors
+ *   \`Idempotency-Key\` via the shared
+ *   {@link withIdempotency} helper. The host supplies the
+ *   \`IdempotencyStore\` and a \`keyFrom\` extractor that reads the key
+ *   out of the tRPC context (typically a header). On a duplicate
+ *   claim, the procedure throws a \`CONFLICT\` \`TRPCError\` — the
+ *   receiver-side convention of "ack the duplicate" doesn't carry
+ *   over because the contract intentionally does not cache the
+ *   original handler's result.
+ *
+ * @template Ctx The host's tRPC context shape. Flows end-to-end —
+ *   procedures see this exact context type (plus \`actor\`) at
+ *   runtime.
+ */
+export type TrpcOptions<Ctx> = {
+  readonly actor: ActorExtractor;
+  readonly stream: (
+    action_name: string,
+    input: unknown,
+    ctx: Ctx
+  ) => string | Promise<string>;
+  readonly expectedVersion?: (
+    action_name: string,
+    input: unknown,
+    ctx: Ctx
+  ) => number | undefined | Promise<number | undefined>;
+  readonly idempotency?: {
+    readonly store: IdempotencyStore;
+    readonly keyFrom: (ctx: Ctx) => string | undefined;
+  };
+};
+
+/**
+ * Build a tRPC middleware that runs an {@link ActorExtractor} once
+ * per call and forwards the resolved {@link Actor} on the
+ * downstream context as \`ctx.actor\`. The generator at
+ * {@link trpc} uses this internally; it's also exported so hosts
+ * that want to compose their own procedure chain (logging,
+ * tracing, custom auth flavors) can wire it directly:
+ *
+ * \`\`\`ts
+ * import { initTRPC } from "@trpc/server";
+ * import { authenticated } from "@rotorsoft/act-http/trpc";
+ *
+ * type Ctx = { user?: { id: string; name: string } };
+ * const t = initTRPC.context<Ctx>().create();
+ *
+ * const authed = t.procedure.use(
+ *   authenticated((ctx) => {
+ *     if (!ctx.user) throw new Error("not authenticated");
+ *     return { id: ctx.user.id, name: ctx.user.name };
+ *   })
+ * );
+ *
+ * // Inside any procedure built off \`authed\`, \`ctx.actor: Actor\`.
+ * \`\`\`
+ *
+ * The middleware is unaware of the host's \`t\` instance — it returns
+ * a structurally-typed function that any tRPC \`procedure.use(...)\`
+ * accepts. Errors thrown by the extractor surface unchanged
+ * (typically wrap them as \`TRPCError({ code: "UNAUTHORIZED" })\`
+ * in the extractor body).
+ */
+// biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape lives behind \`unstable-core-do-not-import\`; structural typing carries the host's \`t\` validation.
+export function authenticated(extractor: ActorExtractor): any {
+  return async function actor_middleware({
+    ctx,
+    next,
+  }: {
+    ctx: object;
+    next: (opts: { ctx: object }) => Promise<unknown>;
+  }) {
+    const actor = await extractor(ctx);
+    return next({ ctx: { ...ctx, actor } });
+  };
+}
+
+/**
+ * Map a thrown framework error onto a \`TRPCError\`. Known errors get
+ * their conventional tRPC code (\`ConcurrencyError\` → \`CONFLICT\`,
+ * \`ValidationError\` → \`UNPROCESSABLE_CONTENT\`, etc.); unknown throws
+ * surface as \`INTERNAL_SERVER_ERROR\`. Every transport in the
+ * act-http epic passes through the same {@link toApiError} table,
+ * so a client talking to both this subpath and the REST sibling
+ * sees one envelope per framework error.
+ *
+ * @internal
+ */
+function to_trpc_error(err: unknown): TRPCError {
+  const { status, body } = toApiError(err);
+  const code = status_to_trpc_code(status);
+  return new TRPCError({
+    code,
+    message: body.detail ?? body.error,
+    cause: err instanceof Error ? err : undefined,
+  });
+}
+
+/**
+ * Minimal status → tRPC code map. Only the statuses
+ * {@link ERROR_MAP} produces (plus 500) appear here; anything else
+ * collapses to \`INTERNAL_SERVER_ERROR\`.
+ *
+ * @internal
+ */
+function status_to_trpc_code(status: number): TRPCError["code"] {
+  switch (status) {
+    case 400:
+      return "BAD_REQUEST";
+    case 409:
+      return "CONFLICT";
+    case 410:
+      return "PRECONDITION_FAILED";
+    case 412:
+      return "CONFLICT";
+    case 422:
+      return "UNPROCESSABLE_CONTENT";
+    default:
+      return "INTERNAL_SERVER_ERROR";
+  }
+}
+
+/**
+ * Build a typed tRPC router from a built \`Act\` instance.
+ *
+ * Walks \`app.registry.actions\` once and emits one flat mutation per
+ * action under \`router.<actionName>\`. The framework already enforces
+ * no duplicate action names across states, so a flat tier reads
+ * cleanly at the client and matches the hand-written router shape
+ * adopters already have. Each mutation:
+ *
+ * 1. Runs the internal {@link authenticated} — \`options.actor\`
+ *    resolves the {@link Actor} once and injects it onto
+ *    \`ctx.actor\`.
+ * 2. Resolves the target stream via \`options.stream(name, input, ctx)\`.
+ * 3. (Optionally) claims the \`Idempotency-Key\` via
+ *    {@link withIdempotency} — throws \`CONFLICT\` on duplicate.
+ * 4. Calls \`app.do(name, { stream, actor: ctx.actor }, input)\`.
+ * 5. Maps any thrown framework error onto a \`TRPCError\` via
+ *    {@link toApiError}.
+ *
+ * The returned router's procedure inputs come straight from each
+ * action's Zod schema; outputs are the framework's
+ * \`Snapshot<TState, TEvents>[]\` shape. Strong typing flows
+ * end-to-end via tRPC's normal inference path — the client sees
+ * \`appRouter.Calculator.PressKey.mutate({ key: "5" })\` as a typed
+ * call without any codegen.
+ *
+ * @template Ctx The tRPC context shape the host's runtime feeds in.
+ *   Flows through \`actor\`, \`stream\`, and \`idempotency.keyFrom\` so
+ *   the operator's existing context types just work. The internal
+ *   middleware augments \`Ctx\` with \`{ actor: Actor }\` on the
+ *   downstream procedure context.
+ *
+ * @param app A built \`Act\` orchestrator.
+ * @param options Auth, stream, and (optional) idempotency seams.
+ * @returns A tRPC router covering every registered action, grouped
+ *   by owning state.
+ */
+export function trpc<Ctx extends object = object>(
+  // biome-ignore lint/suspicious/noExplicitAny: erased — the generator walks the registry at runtime, not the typed surface
+  app: Act<any, Schemas, Schemas, Record<string, Schema>>,
+  options: TrpcOptions<Ctx>
+) {
+  const t = initTRPC.context<Ctx>().create();
+  const authed = t.procedure.use(authenticated(options.actor));
+
+  const handlers: Record<string, ReturnType<typeof authed.mutation>> = {};
+  for (const [action_name, state] of Object.entries(app.registry.actions)) {
+    handlers[action_name] = authed
+      .input(state.actions[action_name] as never)
+      .mutation(async ({ input, ctx }) => {
+        // tRPC's internal \`Simplify<Ctx>\` transform produces a type
+        // that's structurally identical to \`Ctx & { actor }\` but not
+        // assignable to the generic parameter. The cast restores the
+        // link; the runtime ctx IS the augmented context.
+        const host_ctx = ctx as unknown as Ctx & { actor: Actor };
+        try {
+          const stream = await options.stream(action_name, input, host_ctx);
+          const expected_version = options.expectedVersion
+            ? await options.expectedVersion(action_name, input, host_ctx)
+            : undefined;
+          const target =
+            expected_version === undefined
+              ? { stream, actor: host_ctx.actor }
+              : {
+                  stream,
+                  actor: host_ctx.actor,
+                  expectedVersion: expected_version,
+                };
+
+          if (options.idempotency) {
+            const key = options.idempotency.keyFrom(host_ctx);
+            if (!key) {
+              throw new TRPCError({
+                code: "BAD_REQUEST",
+                message: "Idempotency-Key required",
+              });
+            }
+            const outcome = await withIdempotency(
+              options.idempotency.store,
+              key,
+              () =>
+                app.do(action_name as never, target as never, input as never)
+            );
+            if (outcome.deduped) {
+              throw new TRPCError({
+                code: "CONFLICT",
+                message:
+                  "Idempotency-Key already used; original result not cached",
+              });
+            }
+            return outcome.result;
+          }
+
+          return await app.do(
+            action_name as never,
+            target as never,
+            input as never
+          );
+        } catch (err) {
+          if (err instanceof TRPCError) throw err;
+          throw to_trpc_error(err);
+        }
+      });
+  }
+
+  return t.router(handlers as never);
+}
+
+// === index.ts ===
+/**
+ * @packageDocumentation
+ * @module act-http/api
+ *
+ * Shared utilities for the act-http auto-generated API surfaces.
+ * Three concerns that every transport (tRPC, Hono, OpenAPI) has to
+ * address — actor extraction, error envelope mapping,
+ * \`Idempotency-Key\` wiring — defined once here and composed by each
+ * transport sibling subpath.
+ *
+ * - {@link ActorExtractor} — the host-supplied closure that resolves
+ *   an \`Actor\` from an incoming request. Auth (JWT, session, API
+ *   key) stays in the host; the package only asks for this one
+ *   function.
+ * - {@link ApiError}, {@link ERROR_MAP}, {@link toApiError} — the
+ *   uniform error envelope and the status/code mapping every
+ *   transport uses. Cross-transport consistency by construction.
+ * - {@link withIdempotency} — the helper that wraps action handlers
+ *   in an \`Idempotency-Key\` claim. Reuses the
+ *   \`@rotorsoft/act-ops/idempotency\` contract that
+ *   \`@rotorsoft/act-http/receiver\` already speaks, so receivers and
+ *   generated APIs share one \`IdempotencyStore\` implementation.
+ *
+ * Sibling subpaths in the same package consume the utilities here:
+ *
+ * - \`@rotorsoft/act-http/trpc\` — tRPC adapter (#843).
+ * - \`@rotorsoft/act-http/hono\` — Hono adapter (#844).
+ * - \`@rotorsoft/act-http/openapi\` — OpenAPI emitter (#845).
+ *
+ * Existing siblings unrelated to the generated-API work:
+ *
+ * - \`@rotorsoft/act-http/webhook\` — outbound POST delivery.
+ * - \`@rotorsoft/act-http/sse\` — incremental state broadcast.
+ * - \`@rotorsoft/act-http/receiver\` — inbound webhook ingestion.
+ */
+
+export type { ActorExtractor } from "./actor.js";
+export {
+  type ApiError,
+  ERROR_MAP,
+  type ErrorMapEntry,
+  toApiError,
+} from "./errors.js";
+export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+"
+`;
+
 exports[`@rotorsoft/act-http — public API stability > stable public surface for ./webhook 1`] = `
 "// === classify.ts ===
 import { NonRetryableHttpError, RetryableHttpError } from "./types.js";

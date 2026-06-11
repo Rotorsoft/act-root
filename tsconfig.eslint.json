@@ -28,6 +28,7 @@
         "./libs/act-http/src/receiver/trpc/index.ts"
       ],
       "@rotorsoft/act-http/sse": ["./libs/act-http/src/sse/index.ts"],
+      "@rotorsoft/act-http/trpc": ["./libs/act-http/src/trpc/index.ts"],
       "@rotorsoft/act-http/webhook": ["./libs/act-http/src/webhook/index.ts"],
       "@rotorsoft/act-ops/idempotency": [
         "./libs/act-ops/src/idempotency/index.ts"
