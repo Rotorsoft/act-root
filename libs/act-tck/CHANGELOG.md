@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.9.0...@rotorsoft/act-tck-v1.10.0) (2026-06-11)
+
+
+### Features
+
+* **server:** [#847](https://github.com/rotorsoft/act-root/issues/847) — multi-transport calculator demo (trpc + hono rest + openapi) ([8e959a7](https://github.com/rotorsoft/act-root/commit/8e959a75732bc44e2c58c40d3f17e83ffb8d2f9c))
+
 # [@rotorsoft/act-tck-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.8.0...@rotorsoft/act-tck-v1.9.0) (2026-06-11)
 
 
