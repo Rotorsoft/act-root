@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.11.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.10.0...@rotorsoft/act-tck-v1.11.0) (2026-06-11)
+
+
+### Features
+
+* **act-http:** [#846](https://github.com/rotorsoft/act-root/issues/846) — generated SSE subscriptions on trpc + hono ([142955d](https://github.com/rotorsoft/act-root/commit/142955ddb93b750ff705b9b1a0a20bfe23b6d126)), closes [#835](https://github.com/rotorsoft/act-root/issues/835)
+
 # [@rotorsoft/act-tck-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.9.0...@rotorsoft/act-tck-v1.10.0) (2026-06-11)
 
 
