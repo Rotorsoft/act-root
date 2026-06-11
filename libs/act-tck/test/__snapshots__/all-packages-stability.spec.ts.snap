@@ -1113,12 +1113,7 @@ export class Act<
    *   instance; later slices fan out one \`DrainController\` per lane.
    */
   constructor(
-    registry: Registry<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      keyof TStateMap & string
-    >,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
@@ -14567,12 +14562,7 @@ export class Act<
    *   instance; later slices fan out one \`DrainController\` per lane.
    */
   constructor(
-    registry: Registry<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      keyof TStateMap & string
-    >,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
