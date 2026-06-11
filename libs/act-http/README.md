@@ -446,6 +446,7 @@ Public API governed by the [Act Stability Charter](../../STABILITY.md). Both sub
 
 ## Documentation
 
+- **[Auto-generated API surfaces](https://rotorsoft.github.io/act-root/docs/guides/auto-generated-api)** — narrative walkthrough of the `/trpc`, `/hono`, `/openapi` subpaths plus the shared utilities at `/api`. Authentication seam, idempotency, optimistic concurrency, deployment recipes (Node, Lambda, Cloudflare, Next.js), and migrating from a hand-written router.
 - **[External integration patterns](https://rotorsoft.github.io/act-root/docs/guides/external-integration)** — inline `webhook` vs forwarded bus, receiver-side idempotency contract, the recovery loop.
 - **[Real-time with SSE](https://rotorsoft.github.io/act-root/docs/concepts/real-time)** — concept guide for the `/sse` surface.
 - **[Error handling](https://rotorsoft.github.io/act-root/docs/concepts/error-handling)** — backoff, `NonRetryableError`, blocked streams, `unblock` recovery.

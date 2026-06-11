@@ -339,6 +339,14 @@ Concrete scenarios:
 - **Logger stays singleton.** `ActOptions.scoped` doesn't include a logger; all Acts in a process share `log()`. Per-Act logger overrides aren't required by current scenarios — add via child binding (`log().child({ tenant: ... })`) at the call site if you need correlation.
 - **Performance.** ALS adds no measurable overhead in modern Node — the port getter is ~65 ns whether scoped or not, and `app.do()` / `app.load()` show no difference between scoped and unscoped Acts. See [`libs/act/PERFORMANCE.md` § Per-Act scoped ports](https://github.com/Rotorsoft/act-root/blob/master/libs/act/PERFORMANCE.md).
 
+## `IAct` is a public surface too
+
+The three port contracts above are the *infrastructure* extension points — replace the in-memory default with PostgreSQL, swap the LRU cache for Redis, drop in pino instead of `console`. But `IAct` itself (the orchestrator's public interface) is also load-bearing for a different class of extension: HTTP transports that wrap an Act registry without owning it.
+
+`@rotorsoft/act-http`'s auto-generated API surfaces (`/trpc`, `/hono`, `/openapi`) take a built `IAct` instance and walk its `registry.actions` to emit one route per action. Each route resolves an actor + stream from the request and calls `app.do(action, target, payload)` — `app.do`'s signature (`(action: string, target: Target, payload: unknown) => Promise<Snapshot[]>`) is the contract those generators depend on. Same for `app.query`, `app.query_array`, `app.load`, and the registry shape on `app.registry.actions`.
+
+That makes `IAct` part of the public surface for the package as much as the port contracts are. `STABILITY.md` already covers it: `libs/act/src/act.ts` (the `IAct` interface and lifecycle event shapes) is listed alongside `libs/act/src/types/ports.ts` as a charter-covered surface. Changes to `IAct.do` / `query` / `query_array` / `registry.actions` shape need the same additive-vs-breaking analysis as a port-contract change, with the same migration-note discipline when they're breaking. See the [auto-generated API guide](../guides/auto-generated-api.md) for the consumer side.
+
 ## Pointers
 
 - `libs/act/src/ports.ts` — `port()` factory and the three default ports

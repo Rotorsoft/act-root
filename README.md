@@ -136,7 +136,7 @@ Then ask Claude Code: **"Build me an app from this spec: `<link-or-file>`"**.
 
 - [Calculator](./packages/calculator/src/) — actions are key presses, a digit board tracks how many times each digit has been pressed. The hello-world for the framework.
 - [WolfDesk](./packages/wolfdesk/src/) — reference implementation of the WolfDesk ticketing system from Vlad Khononov's [_Learning Domain-Driven Design_](https://a.co/d/1udDtcE). Multi-slice domain, real workflows, blocked-stream recovery, webhook integration.
-- [tRPC client + server](./packages/server/src/) — exposes the calculator as a web app. The shape the AI-scaffolding skill produces.
+- [Multi-transport HTTP demo](./packages/server/src/) — exposes the calculator over **tRPC**, **Hono REST**, and **OpenAPI** on a single Hono root, all generated from one Act registry via `@rotorsoft/act-http`. The Vite client toggles between transports against the same stream. See the [auto-generated API guide](./docs/docs/guides/auto-generated-api.md) for the narrative; the shape the AI-scaffolding skill produces.
 
 ## Contributing
 

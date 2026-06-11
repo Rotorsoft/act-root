@@ -30,6 +30,18 @@ await app.do("increment",
 );
 console.log(await app.load(Counter, "counter1"));`;
 
+const GENERATED_TRANSPORTS_CODE = `import { trpc } from "@rotorsoft/act-http/trpc";
+import { hono } from "@rotorsoft/act-http/hono";
+import { openapi } from "@rotorsoft/act-http/openapi";
+
+// One Act, three transports — same actor / stream seams,
+// same ApiError envelope, no codegen.
+const tRouter = trpc(app, { actor, stream });
+const restApi = hono(app, { actor, stream });
+const apiDoc  = openapi(app, {
+  info: { title: "Wolfdesk API", version: "1.0.0" },
+});`;
+
 type PatternId = "slices" | "projections" | "partial" | "invariants" | "orchestrator";
 
 const PATTERNS: Record<
@@ -285,6 +297,7 @@ function Hero() {
         <div className={styles.heroPills}>
           <span className={styles.heroPill}>Actions → State ← Reactions</span>
           <span className={styles.heroPill}>Postgres · SQLite · In-Memory</span>
+          <span className={styles.heroPill}>tRPC · REST · OpenAPI</span>
           <span className={styles.heroPill}>Zod-typed</span>
         </div>
       </div>
@@ -533,6 +546,56 @@ function CompositionPatterns() {
   );
 }
 
+function GeneratedTransports() {
+  const guideUrl = useBaseUrl("/docs/guides/auto-generated-api");
+  return (
+    <section className={styles.section}>
+      <div className={styles.sectionHeader}>
+        <h2 className={styles.sectionTitle}>
+          <span className="act-gradient-text">From registry</span> to wire
+        </h2>
+        <p className={styles.sectionSub}>
+          A built Act is a typed registry of actions. <code>@rotorsoft/act-http</code> walks
+          it once and emits tRPC, Hono REST, and an OpenAPI 3.1 document — same actor and
+          stream seams across every transport, same error envelope, no codegen step.
+        </p>
+      </div>
+
+      <div className={styles.quickstartCard}>
+        <CodeBlock language="typescript">{GENERATED_TRANSPORTS_CODE}</CodeBlock>
+
+        <div className={styles.transportRow}>
+          <div className={styles.transportCard}>
+            <span className={styles.transportTag}>tRPC</span>
+            <p>
+              Typed React/Node client via <code>typeof router</code>. Mount with
+              <code> fetchRequestHandler</code> on any fetch-shaped runtime.
+            </p>
+          </div>
+          <div className={styles.transportCard}>
+            <span className={styles.transportTag}>Hono REST</span>
+            <p>
+              <code>POST /api/actions/&lt;name&gt;</code> per action. Runs unchanged on
+              Node, Bun, Cloudflare Workers, Vercel Edge, AWS Lambda.
+            </p>
+          </div>
+          <div className={styles.transportCard}>
+            <span className={styles.transportTag}>OpenAPI 3.1</span>
+            <p>
+              Pure-data emitter. Describes the live REST surface; pair with Scalar or
+              Redoc for an interactive explorer.
+            </p>
+          </div>
+        </div>
+
+        <Link className={`button button--primary button--lg ${styles.qsCta}`} to={guideUrl}>
+          Read the API guide
+        </Link>
+      </div>
+    </section>
+  );
+}
+
 function Features() {
   return (
     <section className={styles.section}>
@@ -631,6 +694,7 @@ export default function Home() {
         <Quickstart />
         <Sandboxes />
         <CompositionPatterns />
+        <GeneratedTransports />
         <Features />
         <FinalCta />
       </main>
