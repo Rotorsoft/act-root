@@ -15,6 +15,7 @@
       "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
       "@rotorsoft/act-http/trpc": ["../libs/act-http/src/trpc/index.ts"],
       "@rotorsoft/act-http/hono": ["../libs/act-http/src/hono/index.ts"],
+      "@rotorsoft/act-http/openapi": ["../libs/act-http/src/openapi/index.ts"],
       "@rotorsoft/act-http/receiver/trpc": [
         "../libs/act-http/src/receiver/trpc/index.ts"
       ],
