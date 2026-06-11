@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@rotorsoft/act": ">=1.10.1",
-    "@rotorsoft/act-pg": ">=1.4.0",
+    "@rotorsoft/act-pg": ">=1.4.2",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
     "pg": "^8.21.0",
