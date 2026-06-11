@@ -365,10 +365,7 @@ export function act<
     string,
     (stream: string, head: any, count: number) => boolean
   >();
-  const _aa = new Map<
-    string,
-    (stream: string, head: any) => Promise<void>
-  >();
+  const _aa = new Map<string, (stream: string, head: any) => Promise<void>>();
   const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
