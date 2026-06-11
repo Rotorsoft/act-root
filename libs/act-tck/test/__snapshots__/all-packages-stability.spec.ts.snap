@@ -29426,8 +29426,16 @@ export type OpenAPIInfo = {
   readonly description?: string;
   readonly summary?: string;
   readonly termsOfService?: string;
-  readonly contact?: { readonly name?: string; readonly url?: string; readonly email?: string };
-  readonly license?: { readonly name: string; readonly identifier?: string; readonly url?: string };
+  readonly contact?: {
+    readonly name?: string;
+    readonly url?: string;
+    readonly email?: string;
+  };
+  readonly license?: {
+    readonly name: string;
+    readonly identifier?: string;
+    readonly url?: string;
+  };
 };
 
 export type OpenAPIServer = {
@@ -29435,7 +29443,11 @@ export type OpenAPIServer = {
   readonly description?: string;
   readonly variables?: Record<
     string,
-    { readonly default: string; readonly enum?: ReadonlyArray<string>; readonly description?: string }
+    {
+      readonly default: string;
+      readonly enum?: ReadonlyArray<string>;
+      readonly description?: string;
+    }
   >;
 };
 
@@ -29462,13 +29474,21 @@ export type OpenAPIParameter = {
 
 export type OpenAPIRequestBody = {
   readonly required?: boolean;
-  readonly content: Record<string, { readonly schema: Record<string, unknown> }>;
+  readonly content: Record<
+    string,
+    { readonly schema: Record<string, unknown> }
+  >;
 };
 
-export type OpenAPIResponse = {
-  readonly description: string;
-  readonly content?: Record<string, { readonly schema: Record<string, unknown> }>;
-} | { readonly $ref: string };
+export type OpenAPIResponse =
+  | {
+      readonly description: string;
+      readonly content?: Record<
+        string,
+        { readonly schema: Record<string, unknown> }
+      >;
+    }
+  | { readonly $ref: string };
 
 export type OpenAPIComponents = {
   readonly schemas: Record<string, Record<string, unknown>>;
@@ -29545,7 +29565,10 @@ function validate_options(options: OpenAPIOptions): void {
       // Server URL may contain \`{variable}\` template syntax — substitute
       // each capture with \`x\` before parsing so the URL parser accepts
       // it. Anything that doesn't parse after substitution is malformed.
-      const stripped = server.url.replace(/\\{[^}]+\\}/g, "x");
+      // The character class forbids both \`{\` and \`}\` inside the template,
+      // matching OpenAPI's variable-name grammar exactly and eliminating
+      // the catastrophic-backtracking surface CodeQL flags on \`[^}]+\`.
+      const stripped = server.url.replace(/\\{[^{}]+\\}/g, "x");
       try {
         new URL(stripped);
       } catch {
