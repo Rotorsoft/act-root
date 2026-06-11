@@ -49,7 +49,7 @@
   },
   "dependencies": {
     "@libsql/client": "^0.17.3",
-    "@rotorsoft/act-crypto": "workspace:*"
+    "@rotorsoft/act-crypto": "workspace:^"
   },
   "peerDependencies": {
     "@rotorsoft/act": "workspace:^",

@@ -48,7 +48,7 @@
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {
-    "@rotorsoft/act-crypto": "workspace:*",
+    "@rotorsoft/act-crypto": "workspace:^",
     "pg": "^8.21.0"
   },
   "peerDependencies": {
