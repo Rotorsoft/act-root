@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-tck",
   "type": "module",
-  "version": "1.7.0",
+  "version": "1.8.0",
   "description": "Test Compatibility Kit for @rotorsoft/act Store, Cache, and Logger ports",
   "keywords": [
     "typescript",
