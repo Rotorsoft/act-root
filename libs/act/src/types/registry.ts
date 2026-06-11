@@ -96,6 +96,36 @@ export type Registry<
       ) => boolean)
     | null;
   readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
+  /**
+   * Lookup of the `.autocloses(predicate)` declaration per state name.
+   * Returns `null` when the state opted out of online close — the
+   * orchestrator's autoclose cycle skips states with a `null` policy
+   * so the per-cycle cost is paid only by opt-in states.
+   */
+  readonly autoclose_policy: (
+    state_name: string
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>,
+        count: number
+      ) => boolean)
+    | null;
+  /**
+   * Lookup of the `.archives(fn)` declaration per state name. Returns
+   * `null` when the state didn't declare an archiver — the cycle
+   * truncates without an archive step, matching the default behavior
+   * of explicit `app.close({ stream })` calls. Threaded into
+   * `CloseTarget.archive` only when present.
+   */
+  readonly autoclose_archiver: (
+    state_name: string
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>
+      ) => Promise<void>)
+    | null;
 };
 
 /**

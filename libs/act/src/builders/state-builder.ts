@@ -9,6 +9,8 @@ import type {
   ActionHandler,
   ActionOptions,
   Actor,
+  AutoCloseArchiver,
+  AutoClosePredicate,
   Committed,
   GivenHandlers,
   Invariant,
@@ -407,6 +409,97 @@ export type ActionBuilder<
     ) => boolean
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
+   * Declares the online close predicate for this state. The
+   * orchestrator's autoclose cycle iterates the state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via `Store.truncate` on the
+   * next batch.
+   *
+   * One predicate per state. A second `.autocloses(...)` call replaces
+   * the first (same shape as `.snap` / `.discloses` — state-level, not
+   * per-event). Absent → the state opts out of online close entirely;
+   * the cycle skips it and pays zero per-tick cost for it.
+   *
+   * The predicate receives `head: Committed<TEvents, ...>` so reading
+   * `head.event.name` autocompletes to the state's declared event
+   * union — exactly the signature the policy factories from sub
+   * #839 (terminal-event), #838 (retention), and #840 (cardinality)
+   * produce.
+   *
+   * Custom policies that don't fit the three factories drop in as
+   * inline predicates — the factories return the same shape, so
+   * mixing is friction-free.
+   *
+   * @param predicate `(stream, head, count) => boolean`. `true`
+   *   schedules the stream for the next truncate batch.
+   * @returns The ActionBuilder for chaining.
+   *
+   * @example Terminal-event close (a Ticket closes when it's resolved).
+   * ```typescript
+   * state({ Ticket: ticketSchema })
+   *   .init(() => defaults)
+   *   .emits({ TicketOpened, TicketResolved })
+   *   // ...
+   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   * ```
+   *
+   * @example Retention-window close (a Session closes when it's older
+   *   than 24h).
+   * ```typescript
+   * .autocloses((_stream, head) =>
+   *   Date.now() - head.created.getTime() > 24 * 60 * 60 * 1000)
+   * ```
+   *
+   * @example Cardinality-bound close (an audit log rotates after 10k
+   *   events).
+   * ```typescript
+   * .autocloses((_stream, _head, count) => count >= 10_000)
+   * ```
+   */
+  autocloses: (
+    predicate: AutoClosePredicate<TEvents>
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  /**
+   * Declares the archiver the online close cycle runs **before**
+   * truncating a stream this state's `.autocloses(...)` predicate
+   * accepted. Hosts use it to write events to durable storage (S3,
+   * an analytics warehouse, cold tier) before the tombstone lands,
+   * so the truncate doesn't lose history that the operator still
+   * needs.
+   *
+   * Threads into `CloseTarget.archive` via the same plumbing
+   * `app.close({ stream, archive })` already uses — the cycle holds
+   * the stream's guard while the archiver runs, and a thrown
+   * archiver leaves the stream guarded but un-truncated. No partial
+   * truncate state, no data loss; the cycle retries the candidate
+   * on the next tick.
+   *
+   * One archiver per state. A second `.archives(...)` call replaces
+   * the first (same shape as `.snap` / `.discloses` /
+   * `.autocloses`). Absent → the cycle truncates without an archive
+   * step.
+   *
+   * @param archive `(stream, head) => Promise<void>`. Runs while
+   *   the stream is locked against new writes; the truncate runs
+   *   immediately after a successful resolve.
+   * @returns The ActionBuilder for chaining.
+   *
+   * @example Archive to S3 before truncate.
+   * ```typescript
+   * state({ Ticket: ticketSchema })
+   *   .emits({ TicketOpened, TicketResolved })
+   *   // ...
+   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   *   .archives(async (stream) => {
+   *     const events = await loadEvents(stream);
+   *     await s3.upload(`tickets/${stream}.jsonl`, events);
+   *   })
+   * ```
+   */
+  archives: (
+    archive: AutoCloseArchiver<TEvents>
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  /**
    * Finalizes and builds the state definition.
    *
    * Call this method after defining all actions, invariants, and patches to create
@@ -694,6 +787,29 @@ function action_builder<
       // Replace on every call — matches snap's state-level semantics. Operators
       // who need per-event differences branch inside the predicate.
       internal.disclose = disclose;
+      return builder;
+    },
+
+    autocloses(predicate: AutoClosePredicate<TEvents>) {
+      if (typeof predicate !== "function") {
+        throw new Error(
+          ".autocloses(predicate) requires a function; got " + typeof predicate
+        );
+      }
+      // Replace on every call — matches snap / discloses state-level
+      // semantics. Operators with multi-condition policies AND/OR
+      // inside one predicate.
+      internal.autoclose = predicate;
+      return builder;
+    },
+
+    archives(archive: AutoCloseArchiver<TEvents>) {
+      if (typeof archive !== "function") {
+        throw new Error(
+          ".archives(archive) requires a function; got " + typeof archive
+        );
+      }
+      internal.archive = archive;
       return builder;
     },
 

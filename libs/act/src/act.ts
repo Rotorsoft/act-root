@@ -103,6 +103,102 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
 /**
+ * Default {@link ActOptions.autocloseCycleMs}: 60 s. Sized for typical
+ * business-app close cadences (close-when-resolved on tickets,
+ * close-when-stale on sessions) where same-second response is not the
+ * goal. Operators with tighter requirements override; the floor is
+ * 10 s (any tighter is the wrong primitive).
+ */
+export const DEFAULT_AUTOCLOSE_CYCLE_MS = 60_000;
+
+/**
+ * Default {@link ActOptions.closeBatchSize}: 64. Bounds the
+ * `Store.query_streams` page size + the truncate fan-out per cycle
+ * tick so a "close everything" misconfiguration can't take down the
+ * writer.
+ */
+export const DEFAULT_CLOSE_BATCH_SIZE = 64;
+
+/**
+ * Default {@link ActOptions.closeYieldMs}: 0. The cycle yields a
+ * microtask between truncates by default; SQLite operators set a
+ * positive value to release the writer lock.
+ */
+export const DEFAULT_CLOSE_YIELD_MS = 0;
+
+const AUTOCLOSE_CYCLE_MS_MIN = 10_000;
+const AUTOCLOSE_CYCLE_MS_MAX = 3_600_000;
+const CLOSE_BATCH_SIZE_MIN = 1;
+const CLOSE_BATCH_SIZE_MAX = 1024;
+const CLOSE_YIELD_MS_MIN = 0;
+const CLOSE_YIELD_MS_MAX = 1000;
+
+/**
+ * Resolved autoclose configuration after validation and default
+ * expansion. Internal — the orchestrator's autoclose controller
+ * runs against this shape. Fields are snake_case per the internal
+ * type-field convention.
+ *
+ * @internal
+ */
+export type AutoCloseConfig = {
+  readonly cycle_ms: number;
+  readonly batch_size: number;
+  readonly yield_ms: number;
+  readonly close_on_error: boolean;
+};
+
+/**
+ * Validate and apply defaults for the autoclose knobs on
+ * {@link ActOptions}. Called from `act().build()`. Out-of-range
+ * values throw `RangeError` so misconfiguration surfaces at startup,
+ * not on the first cycle tick.
+ *
+ * @internal
+ */
+export function resolve_autoclose_config(
+  options: ActOptions | undefined
+): AutoCloseConfig {
+  const cycle_ms = options?.autocloseCycleMs ?? DEFAULT_AUTOCLOSE_CYCLE_MS;
+  const batch_size = options?.closeBatchSize ?? DEFAULT_CLOSE_BATCH_SIZE;
+  const yield_ms = options?.closeYieldMs ?? DEFAULT_CLOSE_YIELD_MS;
+  if (
+    !Number.isFinite(cycle_ms) ||
+    cycle_ms < AUTOCLOSE_CYCLE_MS_MIN ||
+    cycle_ms > AUTOCLOSE_CYCLE_MS_MAX
+  ) {
+    throw new RangeError(
+      `autocloseCycleMs must be in [${AUTOCLOSE_CYCLE_MS_MIN}, ${AUTOCLOSE_CYCLE_MS_MAX}], got ${cycle_ms}`
+    );
+  }
+  if (
+    !Number.isFinite(batch_size) ||
+    !Number.isInteger(batch_size) ||
+    batch_size < CLOSE_BATCH_SIZE_MIN ||
+    batch_size > CLOSE_BATCH_SIZE_MAX
+  ) {
+    throw new RangeError(
+      `closeBatchSize must be an integer in [${CLOSE_BATCH_SIZE_MIN}, ${CLOSE_BATCH_SIZE_MAX}], got ${batch_size}`
+    );
+  }
+  if (
+    !Number.isFinite(yield_ms) ||
+    yield_ms < CLOSE_YIELD_MS_MIN ||
+    yield_ms > CLOSE_YIELD_MS_MAX
+  ) {
+    throw new RangeError(
+      `closeYieldMs must be in [${CLOSE_YIELD_MS_MIN}, ${CLOSE_YIELD_MS_MAX}], got ${yield_ms}`
+    );
+  }
+  return {
+    cycle_ms,
+    batch_size,
+    yield_ms,
+    close_on_error: options?.closeOnError ?? false,
+  };
+}
+
+/**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
  * Drives the typing of `emit` / `on` / `off` — the event-name argument
  * narrows its payload at the call site.
@@ -198,6 +294,48 @@ export type ActOptions<TLanes extends string = string> = {
    * lifecycle event so observability sidecars work).
    */
   readonly drain?: boolean;
+  /**
+   * Online close cycle cadence in ms (#837 / epic #802). The
+   * app-level autoclose controller ticks at this interval, iterates
+   * states with `.autocloses(...)` declared, and schedules
+   * truncate-and-seed for streams whose predicate returned `true`.
+   *
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
+   * `[10_000, 3_600_000]` at `act().build()`; out-of-range throws.
+   *
+   * Zero-cost when no state declares `.autocloses(...)` — the
+   * controller is never constructed in that case.
+   */
+  readonly autocloseCycleMs?: number;
+  /**
+   * Max number of streams the autoclose cycle considers per tick per
+   * state (#837). Bounds memory + truncate fan-out so a misconfigured
+   * predicate that matches "everything" can't take down the writer.
+   *
+   * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
+   * `[1, 1024]`. Above 1024, the builder throws — operators with
+   * genuine high-throughput needs opt out by passing a custom
+   * predicate that pre-filters.
+   */
+  readonly closeBatchSize?: number;
+  /**
+   * Microsecond yield delay between successive `Store.truncate`
+   * calls within one cycle tick (#837). Defaults to `0` (microtask
+   * yield only). SQLite operators set a positive value to let the
+   * writer lock release between rows; PG / InMemory adapters
+   * generally don't need it because they don't serialize writers
+   * globally.
+   *
+   * Validated `[0, 1000]`.
+   */
+  readonly closeYieldMs?: number;
+  /**
+   * Whether predicate exceptions should mark the stream as closed
+   * (#837). Default `false` — a thrown predicate is logged and the
+   * stream is skipped that cycle. Set `true` to close on error
+   * (defensive policy for "if I can't evaluate, assume terminal").
+   */
+  readonly closeOnError?: boolean;
 };
 
 export class Act<
@@ -413,6 +551,10 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    // Validate autoclose knobs eagerly so out-of-range values throw
+    // at build time, not on the first cycle tick. Slice 1 discards
+    // the resolved config; slice 3 stores it for the controller.
+    resolve_autoclose_config(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
