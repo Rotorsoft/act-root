@@ -135,6 +135,40 @@ On failure: the adapter responds with the framework's idiomatic 400 (`missing-ke
 
 The framework-agnostic core (`checkWebhook`) and the underlying primitives (`extractIdempotencyKey`, `verifyWebhook`) are exported from `@rotorsoft/act-http/receiver` for receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP, …) or for receivers with custom policy (e.g. "missing key falls back to body-derived dedup"). Use the `receiver` builder when you can; fall back to the framework `webhookMiddleware`, then the primitives.
 
+### `trpc` — auto-generated tRPC router
+
+```ts
+import { trpc } from "@rotorsoft/act-http/trpc";
+import { initTRPC } from "@trpc/server";
+import { createHTTPServer } from "@trpc/server/adapters/standalone";
+
+const router = trpc(app, {
+  // ActorExtractor from `@rotorsoft/act-http/api` — host's auth seam.
+  actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
+  // Resolve the target stream per call; singleton aggregates return a constant.
+  stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
+});
+
+createHTTPServer({ router }).listen(4000);
+
+// Client (same types, no codegen):
+// await client.OpenTicket.mutate({ title: "support" });
+```
+
+The generator walks `app.registry.actions` once and emits a flat top-level mutation per action. The internal `authenticated(extractor)` middleware runs `options.actor` once per call and injects the resolved `Actor` onto `ctx.actor`, so any procedure logic downstream of the chain sees the same actor. `actor` and `stream` are required; `idempotency` is optional — when configured, the mutation reads `Idempotency-Key` via `keyFrom(ctx)` and throws `CONFLICT` on duplicate claims (the contract intentionally doesn't cache original results, matching the receiver-side "ack the duplicate" semantics).
+
+Errors map through the shared `toApiError(...)` table at `@rotorsoft/act-http/api`: `ConcurrencyError` → `CONFLICT`, `InvariantError` → `CONFLICT`, `ValidationError` → `UNPROCESSABLE_CONTENT`, `StreamClosedError` → `PRECONDITION_FAILED`, `NonRetryableError` → `BAD_REQUEST`, anything else → `INTERNAL_SERVER_ERROR`. The same envelope flows from every transport sibling so a client speaking two of them never sees two shapes for the same framework error.
+
+```ts
+// Compose the auth middleware into your own procedure chain instead:
+import { authenticated } from "@rotorsoft/act-http/trpc";
+
+const t = initTRPC.context<MyCtx>().create();
+const authed = t.procedure.use(authenticated(myExtractor));
+// `authed` carries `ctx.actor: Actor` downstream — use it for hand-written
+// procedures alongside the generated ones.
+```
+
 ### `sse` — live state broadcast
 
 ```ts
@@ -199,6 +233,14 @@ Shared utilities consumed by every transport in the auto-generated API umbrella 
 - **`toApiError(err) → { status, body }`** — the single mapping helper every transport calls in its error boundary. Known framework errors map per `ERROR_MAP`; everything else surfaces as 500 / `INTERNAL` (with `detail` only when the throw was an `Error` — thrown strings or objects don't leak payloads).
 - **`withIdempotency(store, key, handler)`** — wraps an action handler in an `Idempotency-Key` claim. Reuses `@rotorsoft/act-ops/idempotency` — same contract `@rotorsoft/act-http/receiver` already speaks, so one `IdempotencyStore` covers both halves of the "Act over the wire" surface. Returns `{ deduped: false, result }` on fresh claim, `{ deduped: true }` on duplicate (handler is not called).
 - **Types**: `IdempotencyResult<T>`, `ErrorMapEntry`.
+
+### `/trpc` subpath
+
+Auto-generated tRPC router for the act-http-api epic (#835).
+
+- **`trpc(app, options) → Router`** — generator function. Walks `app.registry.actions` once and emits a flat top-level mutation per action. Each procedure runs the internal `authenticated(options.actor)` middleware (so `ctx.actor: Actor` is set on the downstream context), resolves the target stream via `options.stream(action, input, ctx)`, and calls `app.do(action, { stream, actor }, input)`. Known framework errors map through `toApiError` to the conventional tRPC codes; unknown throws surface as `INTERNAL_SERVER_ERROR`.
+- **`authenticated(extractor) → middleware`** — standalone export of the auth middleware the generator uses internally. Hosts composing their own procedure chain (logging + tracing + custom auth flavors) use `t.procedure.use(authenticated(extractor))` to inject `ctx.actor` without going through the generator. The middleware is structurally-typed so any host `t` instance accepts it.
+- **`TrpcOptions<Ctx>`** — `{ actor, stream, idempotency? }`. `actor` is the `ActorExtractor` from `@rotorsoft/act-http/api`. `stream` returns the target stream per call. `idempotency` is optional — `{ store: IdempotencyStore; keyFrom: (ctx) => string | undefined }` — when set, the procedure honors `Idempotency-Key` via `withIdempotency`. Duplicate claims throw `CONFLICT` (the contract intentionally doesn't cache the original handler's result).
 
 ### `/sse` subpath
 

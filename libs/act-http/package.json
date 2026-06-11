@@ -2,7 +2,7 @@
   "name": "@rotorsoft/act-http",
   "type": "module",
   "version": "1.2.1",
-  "description": "HTTP integrations for act apps — webhooks and SSE",
+  "description": "HTTP integrations for act apps \u2014 webhooks and SSE",
   "keywords": [
     "typescript",
     "http",
@@ -26,25 +26,15 @@
     "dist"
   ],
   "exports": {
-    "./webhook": {
-      "types": "./dist/@types/webhook/index.d.ts",
-      "import": "./dist/webhook/index.js",
-      "require": "./dist/webhook/index.cjs"
-    },
-    "./sse": {
-      "types": "./dist/@types/sse/index.d.ts",
-      "import": "./dist/sse/index.js",
-      "require": "./dist/sse/index.cjs"
+    "./api": {
+      "types": "./dist/@types/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "require": "./dist/api/index.cjs"
     },
     "./receiver": {
       "types": "./dist/@types/receiver/index.d.ts",
       "import": "./dist/receiver/index.js",
       "require": "./dist/receiver/index.cjs"
-    },
-    "./receiver/trpc": {
-      "types": "./dist/@types/receiver/trpc/index.d.ts",
-      "import": "./dist/receiver/trpc/index.js",
-      "require": "./dist/receiver/trpc/index.cjs"
     },
     "./receiver/express": {
       "types": "./dist/@types/receiver/express/index.d.ts",
@@ -61,10 +51,25 @@
       "import": "./dist/receiver/hono/index.js",
       "require": "./dist/receiver/hono/index.cjs"
     },
-    "./api": {
-      "types": "./dist/@types/api/index.d.ts",
-      "import": "./dist/api/index.js",
-      "require": "./dist/api/index.cjs"
+    "./receiver/trpc": {
+      "types": "./dist/@types/receiver/trpc/index.d.ts",
+      "import": "./dist/receiver/trpc/index.js",
+      "require": "./dist/receiver/trpc/index.cjs"
+    },
+    "./sse": {
+      "types": "./dist/@types/sse/index.d.ts",
+      "import": "./dist/sse/index.js",
+      "require": "./dist/sse/index.cjs"
+    },
+    "./trpc": {
+      "types": "./dist/@types/trpc/index.d.ts",
+      "import": "./dist/trpc/index.js",
+      "require": "./dist/trpc/index.cjs"
+    },
+    "./webhook": {
+      "types": "./dist/@types/webhook/index.d.ts",
+      "import": "./dist/webhook/index.js",
+      "require": "./dist/webhook/index.cjs"
     }
   },
   "sideEffects": false,
