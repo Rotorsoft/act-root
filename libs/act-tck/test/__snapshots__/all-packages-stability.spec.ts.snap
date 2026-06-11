@@ -676,7 +676,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
-  type AutoCloseConfig,
+  type AutocloseConfig,
   AutocloseController,
   audit,
   build_drain,
@@ -693,7 +693,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -781,15 +781,15 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
 // Re-export the autoclose config surface (#837 / epic #802) so
 // operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolve_autoclose_config } from "@rotorsoft/act"\`. The
+// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
 // implementation lives in \`internal/autoclose-config.ts\` to keep
 // this orchestrator file focused on the \`Act\` class.
 export {
-  type AutoCloseConfig,
+  type AutocloseConfig,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
 } from "./internal/index.js";
 
 /**
@@ -978,11 +978,11 @@ export class Act<
   private readonly _states: Map<string, State<any, any, any>>;
   /**
    * Resolved autoclose configuration (#837 / epic #802). Frozen at
-   * \`act().build()\` via {@link resolve_autoclose_config}.
+   * \`act().build()\` via {@link resolveAutocloseConfig}.
    *
    * @internal
    */
-  private readonly _autoclose_config: AutoCloseConfig;
+  private readonly _autoclose_config: AutocloseConfig;
   /**
    * App-level autoclose controller. \`undefined\` when no state declares
    * \`.autocloses(...)\` — the controller is never constructed, so
@@ -1163,7 +1163,7 @@ export class Act<
     this._drain = options.drain !== false;
     // Validate autoclose knobs eagerly so out-of-range values throw
     // at build time, not on the first cycle tick.
-    this._autoclose_config = resolve_autoclose_config(options);
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -2916,7 +2916,7 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  *   \`.emits({...})\`. \`head.event.name\` autocompletes to
  *   \`keyof TEvents\`.
  */
-export type AutoClosePredicate<TEvents extends Schemas> = (
+export type AutoclosePredicate<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>,
   count: number
@@ -2941,7 +2941,7 @@ export type AutoClosePredicate<TEvents extends Schemas> = (
  *
  * @template TEvents Event schemas declared by the owning state.
  */
-export type AutoCloseArchiver<TEvents extends Schemas> = (
+export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>
 ) => Promise<void>;
@@ -4306,7 +4306,7 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
  *
  * @internal
  */
-const AutoCloseSchema = z.object({
+const AutocloseOptionsSchema = z.object({
   autocloseCycleMs: z
     .number()
     .min(10_000)
@@ -4324,42 +4324,26 @@ const AutoCloseSchema = z.object({
 
 /**
  * Resolved autoclose configuration after validation and default
- * expansion. Internal — the orchestrator's autoclose controller
- * runs against this shape. Fields are snake_case per the internal
- * type-field convention; {@link resolve_autoclose_config} does the
- * camelCase→snake_case mapping from the public \`ActOptions\` shape.
- *
- * @internal
+ * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
+ * fields follow the public-camelCase convention and mirror the
+ * \`ActOptions\` knob names directly — no per-resolver renaming layer.
  */
-export type AutoCloseConfig = {
-  readonly cycle_ms: number;
-  readonly batch_size: number;
-  readonly yield_ms: number;
-  readonly close_on_error: boolean;
-};
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
 /**
  * Validate and apply defaults for the autoclose knobs on
  * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
- * values throw at startup, not on the first cycle tick.
- *
- * @internal
+ * values throw \`ZodError\` at startup, not on the first cycle tick.
  */
-export function resolve_autoclose_config(
+export function resolveAutocloseConfig(
   options: ActOptions | undefined
-): AutoCloseConfig {
-  const parsed = AutoCloseSchema.parse({
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
     autocloseCycleMs: options?.autocloseCycleMs,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,
   });
-  return {
-    cycle_ms: parsed.autocloseCycleMs,
-    batch_size: parsed.closeBatchSize,
-    yield_ms: parsed.closeYieldMs,
-    close_on_error: parsed.closeOnError,
-  };
 }
 
 // === autoclose-cycle.ts ===
@@ -4385,7 +4369,7 @@ export function resolve_autoclose_config(
  * @internal
  */
 
-import type { AutoCloseConfig } from "../act.js";
+import type { AutocloseConfig } from "../act.js";
 import { store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Actor,
@@ -4437,7 +4421,7 @@ export type AutocloseCycleDeps = {
   /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
   readonly tombstone: EsOps["tombstone"];
   readonly logger: Logger;
-  readonly config: AutoCloseConfig;
+  readonly config: AutocloseConfig;
   /**
    * Correlation id for this tick. The caller computes it via the
    * configured {@link Correlator}; every truncate the cycle stages
@@ -4506,7 +4490,7 @@ export async function run_autoclose_cycle(
   // pagination — that's \`query_streams\` for subscription positions,
   // not events). The cycle iterates the map, applies each state's
   // predicate to the matching streams, and flushes truncate batches
-  // when \`batch_size\` candidates accumulate. \`closeYieldMs\` paces
+  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
   // batches on adapters where the writer lock matters.
   const stats = await s.query_stats(
     {},
@@ -4527,7 +4511,7 @@ export async function run_autoclose_cycle(
       truncated.set(stream, entry);
     }
     for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.yield_ms);
+    await yield_between_batches(deps.config.closeYieldMs);
   };
 
   let candidates: CloseTarget[] = [];
@@ -4552,7 +4536,7 @@ export async function run_autoclose_cycle(
           err instanceof Error ? err.message : String(err)
         }\`
       );
-      close = deps.config.close_on_error;
+      close = deps.config.closeOnError;
     }
 
     if (!close) continue;
@@ -4561,7 +4545,7 @@ export async function run_autoclose_cycle(
     const archive = archiver ? () => archiver(stream, head) : undefined;
     candidates.push({ stream, archive });
 
-    if (candidates.length >= deps.config.batch_size) {
+    if (candidates.length >= deps.config.closeBatchSize) {
       await flush_batch(candidates);
       candidates = [];
     }
@@ -4650,7 +4634,7 @@ export class AutocloseController {
           }\`
         );
       });
-    }, this.deps.config.cycle_ms);
+    }, this.deps.config.autocloseCycleMs);
     // Don't let the interval keep the process alive — Node's
     // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).
@@ -9059,11 +9043,11 @@ export * from "./utils.js";
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
-  type AutoCloseConfig,
+  type AutocloseConfig,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {
   AutocloseController,
@@ -12817,8 +12801,8 @@ import type {
   ActionHandler,
   ActionOptions,
   Actor,
-  AutoCloseArchiver,
-  AutoClosePredicate,
+  AutocloseArchiver,
+  AutoclosePredicate,
   Committed,
   GivenHandlers,
   Invariant,
@@ -13265,7 +13249,7 @@ export type ActionBuilder<
    * \`\`\`
    */
   autocloses: (
-    predicate: AutoClosePredicate<TEvents>
+    predicate: AutoclosePredicate<TEvents>
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -13305,7 +13289,7 @@ export type ActionBuilder<
    * \`\`\`
    */
   archives: (
-    archive: AutoCloseArchiver<TEvents>
+    archive: AutocloseArchiver<TEvents>
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Finalizes and builds the state definition.
@@ -13598,7 +13582,7 @@ function action_builder<
       return builder;
     },
 
-    autocloses(predicate: AutoClosePredicate<TEvents>) {
+    autocloses(predicate: AutoclosePredicate<TEvents>) {
       if (typeof predicate !== "function") {
         throw new Error(
           ".autocloses(predicate) requires a function; got " + typeof predicate
@@ -13611,7 +13595,7 @@ function action_builder<
       return builder;
     },
 
-    archives(archive: AutoCloseArchiver<TEvents>) {
+    archives(archive: AutocloseArchiver<TEvents>) {
       if (typeof archive !== "function") {
         throw new Error(
           ".archives(archive) requires a function; got " + typeof archive
@@ -14124,7 +14108,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
-  type AutoCloseConfig,
+  type AutocloseConfig,
   AutocloseController,
   audit,
   build_drain,
@@ -14141,7 +14125,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -14229,15 +14213,15 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
 // Re-export the autoclose config surface (#837 / epic #802) so
 // operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolve_autoclose_config } from "@rotorsoft/act"\`. The
+// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
 // implementation lives in \`internal/autoclose-config.ts\` to keep
 // this orchestrator file focused on the \`Act\` class.
 export {
-  type AutoCloseConfig,
+  type AutocloseConfig,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
 } from "./internal/index.js";
 
 /**
@@ -14426,11 +14410,11 @@ export class Act<
   private readonly _states: Map<string, State<any, any, any>>;
   /**
    * Resolved autoclose configuration (#837 / epic #802). Frozen at
-   * \`act().build()\` via {@link resolve_autoclose_config}.
+   * \`act().build()\` via {@link resolveAutocloseConfig}.
    *
    * @internal
    */
-  private readonly _autoclose_config: AutoCloseConfig;
+  private readonly _autoclose_config: AutocloseConfig;
   /**
    * App-level autoclose controller. \`undefined\` when no state declares
    * \`.autocloses(...)\` — the controller is never constructed, so
@@ -14611,7 +14595,7 @@ export class Act<
     this._drain = options.drain !== false;
     // Validate autoclose knobs eagerly so out-of-range values throw
     // at build time, not on the first cycle tick.
-    this._autoclose_config = resolve_autoclose_config(options);
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -16364,7 +16348,7 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  *   \`.emits({...})\`. \`head.event.name\` autocompletes to
  *   \`keyof TEvents\`.
  */
-export type AutoClosePredicate<TEvents extends Schemas> = (
+export type AutoclosePredicate<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>,
   count: number
@@ -16389,7 +16373,7 @@ export type AutoClosePredicate<TEvents extends Schemas> = (
  *
  * @template TEvents Event schemas declared by the owning state.
  */
-export type AutoCloseArchiver<TEvents extends Schemas> = (
+export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>
 ) => Promise<void>;
@@ -17754,7 +17738,7 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
  *
  * @internal
  */
-const AutoCloseSchema = z.object({
+const AutocloseOptionsSchema = z.object({
   autocloseCycleMs: z
     .number()
     .min(10_000)
@@ -17772,42 +17756,26 @@ const AutoCloseSchema = z.object({
 
 /**
  * Resolved autoclose configuration after validation and default
- * expansion. Internal — the orchestrator's autoclose controller
- * runs against this shape. Fields are snake_case per the internal
- * type-field convention; {@link resolve_autoclose_config} does the
- * camelCase→snake_case mapping from the public \`ActOptions\` shape.
- *
- * @internal
+ * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
+ * fields follow the public-camelCase convention and mirror the
+ * \`ActOptions\` knob names directly — no per-resolver renaming layer.
  */
-export type AutoCloseConfig = {
-  readonly cycle_ms: number;
-  readonly batch_size: number;
-  readonly yield_ms: number;
-  readonly close_on_error: boolean;
-};
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
 /**
  * Validate and apply defaults for the autoclose knobs on
  * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
- * values throw at startup, not on the first cycle tick.
- *
- * @internal
+ * values throw \`ZodError\` at startup, not on the first cycle tick.
  */
-export function resolve_autoclose_config(
+export function resolveAutocloseConfig(
   options: ActOptions | undefined
-): AutoCloseConfig {
-  const parsed = AutoCloseSchema.parse({
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
     autocloseCycleMs: options?.autocloseCycleMs,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,
   });
-  return {
-    cycle_ms: parsed.autocloseCycleMs,
-    batch_size: parsed.closeBatchSize,
-    yield_ms: parsed.closeYieldMs,
-    close_on_error: parsed.closeOnError,
-  };
 }
 
 // === autoclose-cycle.ts ===
@@ -17833,7 +17801,7 @@ export function resolve_autoclose_config(
  * @internal
  */
 
-import type { AutoCloseConfig } from "../act.js";
+import type { AutocloseConfig } from "../act.js";
 import { store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Actor,
@@ -17885,7 +17853,7 @@ export type AutocloseCycleDeps = {
   /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
   readonly tombstone: EsOps["tombstone"];
   readonly logger: Logger;
-  readonly config: AutoCloseConfig;
+  readonly config: AutocloseConfig;
   /**
    * Correlation id for this tick. The caller computes it via the
    * configured {@link Correlator}; every truncate the cycle stages
@@ -17954,7 +17922,7 @@ export async function run_autoclose_cycle(
   // pagination — that's \`query_streams\` for subscription positions,
   // not events). The cycle iterates the map, applies each state's
   // predicate to the matching streams, and flushes truncate batches
-  // when \`batch_size\` candidates accumulate. \`closeYieldMs\` paces
+  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
   // batches on adapters where the writer lock matters.
   const stats = await s.query_stats(
     {},
@@ -17975,7 +17943,7 @@ export async function run_autoclose_cycle(
       truncated.set(stream, entry);
     }
     for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.yield_ms);
+    await yield_between_batches(deps.config.closeYieldMs);
   };
 
   let candidates: CloseTarget[] = [];
@@ -18000,7 +17968,7 @@ export async function run_autoclose_cycle(
           err instanceof Error ? err.message : String(err)
         }\`
       );
-      close = deps.config.close_on_error;
+      close = deps.config.closeOnError;
     }
 
     if (!close) continue;
@@ -18009,7 +17977,7 @@ export async function run_autoclose_cycle(
     const archive = archiver ? () => archiver(stream, head) : undefined;
     candidates.push({ stream, archive });
 
-    if (candidates.length >= deps.config.batch_size) {
+    if (candidates.length >= deps.config.closeBatchSize) {
       await flush_batch(candidates);
       candidates = [];
     }
@@ -18098,7 +18066,7 @@ export class AutocloseController {
           }\`
         );
       });
-    }, this.deps.config.cycle_ms);
+    }, this.deps.config.autocloseCycleMs);
     // Don't let the interval keep the process alive — Node's
     // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).
@@ -22270,11 +22238,11 @@ export * from "./sandbox.js";
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
-  type AutoCloseConfig,
+  type AutocloseConfig,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {
   AutocloseController,
@@ -26927,7 +26895,7 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  *   \`.emits({...})\`. \`head.event.name\` autocompletes to
  *   \`keyof TEvents\`.
  */
-export type AutoClosePredicate<TEvents extends Schemas> = (
+export type AutoclosePredicate<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>,
   count: number
@@ -26952,7 +26920,7 @@ export type AutoClosePredicate<TEvents extends Schemas> = (
  *
  * @template TEvents Event schemas declared by the owning state.
  */
-export type AutoCloseArchiver<TEvents extends Schemas> = (
+export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>
 ) => Promise<void>;
@@ -30680,7 +30648,7 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  *
  * @internal
  */
-const SseNumericSchema = z.object({
+const SseOptionsSchema = z.object({
   maxConnections: z
     .number()
     .min(1)
@@ -30702,7 +30670,7 @@ const SseNumericSchema = z.object({
  * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const parsed = SseNumericSchema.parse({
+  const parsed = SseOptionsSchema.parse({
     maxConnections: options.maxConnections,
     heartbeatMs: options.heartbeatMs,
   });
@@ -31765,7 +31733,7 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  *
  * @internal
  */
-const SseNumericSchema = z.object({
+const SseOptionsSchema = z.object({
   maxConnections: z
     .number()
     .min(1)
@@ -31787,7 +31755,7 @@ const SseNumericSchema = z.object({
  * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const parsed = SseNumericSchema.parse({
+  const parsed = SseOptionsSchema.parse({
     maxConnections: options.maxConnections,
     heartbeatMs: options.heartbeatMs,
   });
@@ -32296,7 +32264,7 @@ function is_valid_server_url(url: string): boolean {
  *
  * @internal
  */
-const OpenAPIValidationSchema = z.object({
+const OpenAPIOptionsSchema = z.object({
   info: z.object({
     title: z
       .string({ message: "openapi: info.title is required (non-empty string)" })
@@ -32321,7 +32289,7 @@ const OpenAPIValidationSchema = z.object({
 });
 
 function validate_options(options: OpenAPIOptions): void {
-  OpenAPIValidationSchema.parse({
+  OpenAPIOptionsSchema.parse({
     info: { title: options.info?.title, version: options.info?.version },
     servers: options.servers,
   });
@@ -35625,7 +35593,7 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  *
  * @internal
  */
-const SseNumericSchema = z.object({
+const SseOptionsSchema = z.object({
   maxConnections: z
     .number()
     .min(1)
@@ -35647,7 +35615,7 @@ const SseNumericSchema = z.object({
  * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const parsed = SseNumericSchema.parse({
+  const parsed = SseOptionsSchema.parse({
     maxConnections: options.maxConnections,
     heartbeatMs: options.heartbeatMs,
   });

@@ -88,7 +88,7 @@ export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
  *
  * @internal
  */
-const SseNumericSchema = z.object({
+const SseOptionsSchema = z.object({
   maxConnections: z
     .number()
     .min(1)
@@ -110,7 +110,7 @@ const SseNumericSchema = z.object({
  * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const parsed = SseNumericSchema.parse({
+  const parsed = SseOptionsSchema.parse({
     maxConnections: options.maxConnections,
     heartbeatMs: options.heartbeatMs,
   });

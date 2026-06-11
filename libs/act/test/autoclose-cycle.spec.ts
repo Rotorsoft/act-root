@@ -16,7 +16,7 @@ import {
   act,
   cache,
   dispose,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
   state,
   store,
   ZodEmpty,
@@ -94,7 +94,7 @@ function build_app_with_archive(
  */
 function run_cycle(
   app: unknown,
-  config_overrides?: Parameters<typeof resolve_autoclose_config>[0]
+  config_overrides?: Parameters<typeof resolveAutocloseConfig>[0]
 ) {
   // The Act instance owns several private fields the cycle reads
   // (`_event_to_state`, `_es`, `_logger`, `_reactive_events`); the
@@ -117,7 +117,7 @@ function run_cycle(
     load: es.load,
     tombstone: es.tombstone,
     logger: a._logger as never,
-    config: resolve_autoclose_config(config_overrides),
+    config: resolveAutocloseConfig(config_overrides),
     correlation: "autoclose-test-cycle",
   });
 }
@@ -280,7 +280,7 @@ describe("run_autoclose_cycle — slice 2", () => {
       load: internals._es.load as never,
       tombstone: internals._es.tombstone as never,
       logger: internals._logger,
-      config: resolve_autoclose_config({ closeOnError: true }),
+      config: resolveAutocloseConfig({ closeOnError: true }),
       correlation: "autoclose-test-cycle-closeOnError",
     });
 
@@ -288,7 +288,7 @@ describe("run_autoclose_cycle — slice 2", () => {
     expect(result.close_result.truncated.has("y-1")).toBe(true);
   });
 
-  test("respects `batch_size` — caps candidates per cycle tick", async () => {
+  test("respects `closeBatchSize` — caps candidates per cycle tick", async () => {
     const app = build_app();
     // Commit several resolvable streams so the cycle has more
     // candidates than the batch size allows.
@@ -311,9 +311,9 @@ describe("run_autoclose_cycle — slice 2", () => {
       load: internals._es.load as never,
       tombstone: internals._es.tombstone as never,
       logger: internals._logger,
-      // Force batch_size = 2 so the cycle stages multiple truncate
+      // Force closeBatchSize = 2 so the cycle stages multiple truncate
       // batches; sum across batches should still close all five.
-      config: resolve_autoclose_config({ closeBatchSize: 2 }),
+      config: resolveAutocloseConfig({ closeBatchSize: 2 }),
       correlation: "autoclose-test-cycle-batch",
     });
 
@@ -342,7 +342,7 @@ describe("run_autoclose_cycle — slice 2", () => {
       load: internals._es.load as never,
       tombstone: internals._es.tombstone as never,
       logger: internals._logger,
-      config: resolve_autoclose_config({
+      config: resolveAutocloseConfig({
         closeBatchSize: 1,
         closeYieldMs: 50,
       }),

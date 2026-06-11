@@ -54,7 +54,7 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
  *
  * @internal
  */
-const AutoCloseSchema = z.object({
+const AutocloseOptionsSchema = z.object({
   autocloseCycleMs: z
     .number()
     .min(10_000)
@@ -72,40 +72,24 @@ const AutoCloseSchema = z.object({
 
 /**
  * Resolved autoclose configuration after validation and default
- * expansion. Internal — the orchestrator's autoclose controller
- * runs against this shape. Fields are snake_case per the internal
- * type-field convention; {@link resolve_autoclose_config} does the
- * camelCase→snake_case mapping from the public `ActOptions` shape.
- *
- * @internal
+ * expansion. Reachable through the public root (`@rotorsoft/act`) so
+ * fields follow the public-camelCase convention and mirror the
+ * `ActOptions` knob names directly — no per-resolver renaming layer.
  */
-export type AutoCloseConfig = {
-  readonly cycle_ms: number;
-  readonly batch_size: number;
-  readonly yield_ms: number;
-  readonly close_on_error: boolean;
-};
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
 
 /**
  * Validate and apply defaults for the autoclose knobs on
  * {@link ActOptions}. Called from `act().build()`. Out-of-range
- * values throw at startup, not on the first cycle tick.
- *
- * @internal
+ * values throw `ZodError` at startup, not on the first cycle tick.
  */
-export function resolve_autoclose_config(
+export function resolveAutocloseConfig(
   options: ActOptions | undefined
-): AutoCloseConfig {
-  const parsed = AutoCloseSchema.parse({
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
     autocloseCycleMs: options?.autocloseCycleMs,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,
   });
-  return {
-    cycle_ms: parsed.autocloseCycleMs,
-    batch_size: parsed.closeBatchSize,
-    yield_ms: parsed.closeYieldMs,
-    close_on_error: parsed.closeOnError,
-  };
 }

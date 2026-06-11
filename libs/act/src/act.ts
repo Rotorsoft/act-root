@@ -2,7 +2,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
-  type AutoCloseConfig,
+  type AutocloseConfig,
   AutocloseController,
   audit,
   build_drain,
@@ -19,7 +19,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -107,15 +107,15 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
 // Re-export the autoclose config surface (#837 / epic #802) so
 // operators can keep `import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolve_autoclose_config } from "@rotorsoft/act"`. The
+// resolveAutocloseConfig } from "@rotorsoft/act"`. The
 // implementation lives in `internal/autoclose-config.ts` to keep
 // this orchestrator file focused on the `Act` class.
 export {
-  type AutoCloseConfig,
+  type AutocloseConfig,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
 } from "./internal/index.js";
 
 /**
@@ -304,11 +304,11 @@ export class Act<
   private readonly _states: Map<string, State<any, any, any>>;
   /**
    * Resolved autoclose configuration (#837 / epic #802). Frozen at
-   * `act().build()` via {@link resolve_autoclose_config}.
+   * `act().build()` via {@link resolveAutocloseConfig}.
    *
    * @internal
    */
-  private readonly _autoclose_config: AutoCloseConfig;
+  private readonly _autoclose_config: AutocloseConfig;
   /**
    * App-level autoclose controller. `undefined` when no state declares
    * `.autocloses(...)` — the controller is never constructed, so
@@ -489,7 +489,7 @@ export class Act<
     this._drain = options.drain !== false;
     // Validate autoclose knobs eagerly so out-of-range values throw
     // at build time, not on the first cycle tick.
-    this._autoclose_config = resolve_autoclose_config(options);
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 

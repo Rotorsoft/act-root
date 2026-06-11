@@ -262,6 +262,21 @@ Anything reachable from a package's `src/index.ts` (or subpath `index.ts` for `a
 
 **The boundary is enforced mechanically** by `runStabilityTck` from `@rotorsoft/act-tck`. Every package has a `test/stability.spec.ts` that snapshots the source text of every declared entry point plus its transitive relative re-exports. Any rename / removal / signature change on the public surface shows up as a snapshot diff in the PR. New packages opt in by adding `@rotorsoft/act-tck` as a devDep + project reference and dropping in their own `stability.spec.ts`.
 
+### Config-validation schemas
+
+Any options bag that ships to `act().build()` / `openapi(app, ...)` / similar entry points is validated with Zod, not hand-written `if (x < min) throw` ladders. Out-of-range values throw `ZodError` at the entry point so misconfiguration surfaces at startup, not on the first cycle tick. The standard:
+
+| Element | Convention |
+|---|---|
+| Schema name | `<Type>OptionsSchema` — `AutocloseOptionsSchema`, `SseOptionsSchema`, `OpenAPIOptionsSchema` |
+| Schema visibility | Internal `const`, never re-exported. The public surface is the inferred type + resolver, not the schema itself. |
+| Inferred type | `type <Type>Config = z.infer<typeof <Type>OptionsSchema>` |
+| Resolver | `resolve<Type>Config(options: <Type>Options): <Type>Config` — camelCase, parses + applies defaults in one call |
+| Defaults | `DEFAULT_*` SCREAMING_SNAKE constants, referenced from the schema via `.default(DEFAULT_*)` so there's one source of truth |
+| Custom error messages | `{ message: "..." }` on the individual constraint when callers depend on the wording (test assertions, structured logs). Don't override Zod's default for shape errors callers don't read. |
+
+Precedents: `libs/act/src/internal/autoclose-config.ts`, `libs/act-http/src/api/sse-wiring.ts`, `libs/act-http/src/openapi/index.ts`. New config bags follow the same shape — never reinvent `*_MIN` / `*_MAX` companion constants or scatter ladders across the resolver.
+
 ## Troubleshooting
 
 See [error-handling.md](docs/docs/concepts/error-handling.md) — covers `ValidationError`, `InvariantError`, `ConcurrencyError`, `StreamClosedError`, `NonRetryableError`, the retry pattern, blocked streams, per-reaction options, recovery via `app.unblock` / `app.blocked_streams`, and debugging (logging, lifecycle events, `query_array`/`query_streams` introspection).

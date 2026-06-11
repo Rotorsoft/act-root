@@ -569,7 +569,7 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  *   `.emits({...})`. `head.event.name` autocompletes to
  *   `keyof TEvents`.
  */
-export type AutoClosePredicate<TEvents extends Schemas> = (
+export type AutoclosePredicate<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>,
   count: number
@@ -594,7 +594,7 @@ export type AutoClosePredicate<TEvents extends Schemas> = (
  *
  * @template TEvents Event schemas declared by the owning state.
  */
-export type AutoCloseArchiver<TEvents extends Schemas> = (
+export type AutocloseArchiver<TEvents extends Schemas> = (
   stream: string,
   head: Committed<TEvents, keyof TEvents>
 ) => Promise<void>;

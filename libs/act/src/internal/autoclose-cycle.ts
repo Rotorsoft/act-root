@@ -20,7 +20,7 @@
  * @internal
  */
 
-import type { AutoCloseConfig } from "../act.js";
+import type { AutocloseConfig } from "../act.js";
 import { store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
   Actor,
@@ -72,7 +72,7 @@ export type AutocloseCycleDeps = {
   /** `EsOps.tombstone`, forwarded to {@link run_close_cycle}. */
   readonly tombstone: EsOps["tombstone"];
   readonly logger: Logger;
-  readonly config: AutoCloseConfig;
+  readonly config: AutocloseConfig;
   /**
    * Correlation id for this tick. The caller computes it via the
    * configured {@link Correlator}; every truncate the cycle stages
@@ -141,7 +141,7 @@ export async function run_autoclose_cycle(
   // pagination — that's `query_streams` for subscription positions,
   // not events). The cycle iterates the map, applies each state's
   // predicate to the matching streams, and flushes truncate batches
-  // when `batch_size` candidates accumulate. `closeYieldMs` paces
+  // when `closeBatchSize` candidates accumulate. `closeYieldMs` paces
   // batches on adapters where the writer lock matters.
   const stats = await s.query_stats(
     {},
@@ -162,7 +162,7 @@ export async function run_autoclose_cycle(
       truncated.set(stream, entry);
     }
     for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.yield_ms);
+    await yield_between_batches(deps.config.closeYieldMs);
   };
 
   let candidates: CloseTarget[] = [];
@@ -187,7 +187,7 @@ export async function run_autoclose_cycle(
           err instanceof Error ? err.message : String(err)
         }`
       );
-      close = deps.config.close_on_error;
+      close = deps.config.closeOnError;
     }
 
     if (!close) continue;
@@ -196,7 +196,7 @@ export async function run_autoclose_cycle(
     const archive = archiver ? () => archiver(stream, head) : undefined;
     candidates.push({ stream, archive });
 
-    if (candidates.length >= deps.config.batch_size) {
+    if (candidates.length >= deps.config.closeBatchSize) {
       await flush_batch(candidates);
       candidates = [];
     }
@@ -285,7 +285,7 @@ export class AutocloseController {
           }`
         );
       });
-    }, this.deps.config.cycle_ms);
+    }, this.deps.config.autocloseCycleMs);
     // Don't let the interval keep the process alive — Node's
     // `setInterval` returns a `Timeout` with `unref()` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).

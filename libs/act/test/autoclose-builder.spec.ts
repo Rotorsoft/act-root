@@ -15,7 +15,7 @@ import {
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
-  resolve_autoclose_config,
+  resolveAutocloseConfig,
   state,
   ZodEmpty,
 } from "../src/index.js";
@@ -169,86 +169,84 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
   });
 });
 
-describe("resolve_autoclose_config — defaults + validation", () => {
+describe("resolveAutocloseConfig — defaults + validation", () => {
   it("applies all defaults when no knobs are set", () => {
-    const cfg = resolve_autoclose_config(undefined);
-    expect(cfg.cycle_ms).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
-    expect(cfg.batch_size).toBe(DEFAULT_CLOSE_BATCH_SIZE);
-    expect(cfg.yield_ms).toBe(DEFAULT_CLOSE_YIELD_MS);
-    expect(cfg.close_on_error).toBe(false);
+    const cfg = resolveAutocloseConfig(undefined);
+    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
+    expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
+    expect(cfg.closeOnError).toBe(false);
   });
 
   it("applies defaults when ActOptions has none of the autoclose keys", () => {
-    const cfg = resolve_autoclose_config({});
-    expect(cfg.cycle_ms).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
-    expect(cfg.batch_size).toBe(DEFAULT_CLOSE_BATCH_SIZE);
-    expect(cfg.yield_ms).toBe(DEFAULT_CLOSE_YIELD_MS);
-    expect(cfg.close_on_error).toBe(false);
+    const cfg = resolveAutocloseConfig({});
+    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
+    expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
+    expect(cfg.closeOnError).toBe(false);
   });
 
   it("preserves caller-supplied knobs", () => {
-    const cfg = resolve_autoclose_config({
+    const cfg = resolveAutocloseConfig({
       autocloseCycleMs: 30_000,
       closeBatchSize: 128,
       closeYieldMs: 5,
       closeOnError: true,
     });
-    expect(cfg.cycle_ms).toBe(30_000);
-    expect(cfg.batch_size).toBe(128);
-    expect(cfg.yield_ms).toBe(5);
-    expect(cfg.close_on_error).toBe(true);
+    expect(cfg.autocloseCycleMs).toBe(30_000);
+    expect(cfg.closeBatchSize).toBe(128);
+    expect(cfg.closeYieldMs).toBe(5);
+    expect(cfg.closeOnError).toBe(true);
   });
 
   it("rejects autocloseCycleMs below the 10 s floor", () => {
-    expect(() =>
-      resolve_autoclose_config({ autocloseCycleMs: 5_000 })
-    ).toThrow();
+    expect(() => resolveAutocloseConfig({ autocloseCycleMs: 5_000 })).toThrow();
   });
 
   it("rejects autocloseCycleMs above the 1 h ceiling", () => {
     expect(() =>
-      resolve_autoclose_config({ autocloseCycleMs: 3_600_001 })
+      resolveAutocloseConfig({ autocloseCycleMs: 3_600_001 })
     ).toThrow();
   });
 
   it("rejects non-finite autocloseCycleMs", () => {
     expect(() =>
-      resolve_autoclose_config({ autocloseCycleMs: Number.NaN })
+      resolveAutocloseConfig({ autocloseCycleMs: Number.NaN })
     ).toThrow();
     expect(() =>
-      resolve_autoclose_config({ autocloseCycleMs: Number.POSITIVE_INFINITY })
+      resolveAutocloseConfig({ autocloseCycleMs: Number.POSITIVE_INFINITY })
     ).toThrow();
   });
 
   it("rejects closeBatchSize below 1", () => {
-    expect(() => resolve_autoclose_config({ closeBatchSize: 0 })).toThrow();
+    expect(() => resolveAutocloseConfig({ closeBatchSize: 0 })).toThrow();
   });
 
   it("rejects closeBatchSize above 1024", () => {
-    expect(() => resolve_autoclose_config({ closeBatchSize: 1025 })).toThrow();
+    expect(() => resolveAutocloseConfig({ closeBatchSize: 1025 })).toThrow();
   });
 
   it("rejects non-integer closeBatchSize", () => {
-    expect(() => resolve_autoclose_config({ closeBatchSize: 12.5 })).toThrow();
+    expect(() => resolveAutocloseConfig({ closeBatchSize: 12.5 })).toThrow();
   });
 
   it("rejects non-finite closeBatchSize", () => {
     expect(() =>
-      resolve_autoclose_config({ closeBatchSize: Number.NaN })
+      resolveAutocloseConfig({ closeBatchSize: Number.NaN })
     ).toThrow();
   });
 
   it("rejects closeYieldMs below 0", () => {
-    expect(() => resolve_autoclose_config({ closeYieldMs: -1 })).toThrow();
+    expect(() => resolveAutocloseConfig({ closeYieldMs: -1 })).toThrow();
   });
 
   it("rejects closeYieldMs above 1000", () => {
-    expect(() => resolve_autoclose_config({ closeYieldMs: 1001 })).toThrow();
+    expect(() => resolveAutocloseConfig({ closeYieldMs: 1001 })).toThrow();
   });
 
   it("rejects non-finite closeYieldMs", () => {
     expect(() =>
-      resolve_autoclose_config({ closeYieldMs: Number.NaN })
+      resolveAutocloseConfig({ closeYieldMs: Number.NaN })
     ).toThrow();
   });
 });

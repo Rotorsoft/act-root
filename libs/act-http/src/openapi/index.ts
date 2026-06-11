@@ -267,7 +267,7 @@ function is_valid_server_url(url: string): boolean {
  *
  * @internal
  */
-const OpenAPIValidationSchema = z.object({
+const OpenAPIOptionsSchema = z.object({
   info: z.object({
     title: z
       .string({ message: "openapi: info.title is required (non-empty string)" })
@@ -292,7 +292,7 @@ const OpenAPIValidationSchema = z.object({
 });
 
 function validate_options(options: OpenAPIOptions): void {
-  OpenAPIValidationSchema.parse({
+  OpenAPIOptionsSchema.parse({
     info: { title: options.info?.title, version: options.info?.version },
     servers: options.servers,
   });

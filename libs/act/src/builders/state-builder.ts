@@ -9,8 +9,8 @@ import type {
   ActionHandler,
   ActionOptions,
   Actor,
-  AutoCloseArchiver,
-  AutoClosePredicate,
+  AutocloseArchiver,
+  AutoclosePredicate,
   Committed,
   GivenHandlers,
   Invariant,
@@ -457,7 +457,7 @@ export type ActionBuilder<
    * ```
    */
   autocloses: (
-    predicate: AutoClosePredicate<TEvents>
+    predicate: AutoclosePredicate<TEvents>
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -497,7 +497,7 @@ export type ActionBuilder<
    * ```
    */
   archives: (
-    archive: AutoCloseArchiver<TEvents>
+    archive: AutocloseArchiver<TEvents>
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Finalizes and builds the state definition.
@@ -790,7 +790,7 @@ function action_builder<
       return builder;
     },
 
-    autocloses(predicate: AutoClosePredicate<TEvents>) {
+    autocloses(predicate: AutoclosePredicate<TEvents>) {
       if (typeof predicate !== "function") {
         throw new Error(
           ".autocloses(predicate) requires a function; got " + typeof predicate
@@ -803,7 +803,7 @@ function action_builder<
       return builder;
     },
 
-    archives(archive: AutoCloseArchiver<TEvents>) {
+    archives(archive: AutocloseArchiver<TEvents>) {
       if (typeof archive !== "function") {
         throw new Error(
           ".archives(archive) requires a function; got " + typeof archive
