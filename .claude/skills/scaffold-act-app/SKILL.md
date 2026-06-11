@@ -125,7 +125,7 @@ my-app/
 │       │   │   ├── context.ts    # Request context + token verification
 │       │   │   ├── helpers.ts    # serializeEvents() for SSE payloads
 │       │   │   ├── auth.ts       # Token signing, password hashing
-│       │   │   ├── broadcast.ts      # BroadcastChannel + PresenceTracker (act-sse)
+│       │   │   ├── broadcast.ts      # BroadcastChannel + PresenceTracker (via @rotorsoft/act-http/sse)
 │       │   │   ├── auth.routes.ts    # Auth endpoints (login, signup, OAuth)
 │       │   │   ├── domain.routes.ts  # Domain mutations + queries
 │       │   │   └── events.routes.ts  # SSE subscriptions (state + events)
@@ -206,16 +206,16 @@ For production deployment (PostgresStore, background processing, automated jobs)
 - [ ] Invariants enforce all business rules
 - [ ] Reactions pass triggering event for causation tracking
 - [ ] Projections co-located with slices, with query and clear functions
-- [ ] Projections register only lifecycle event handlers when using act-sse broadcast
+- [ ] Projections register only lifecycle event handlers when using @rotorsoft/act-http/sse broadcast
 - [ ] Tests use InMemoryStore with `store().seed()` and `clear*()` in `beforeEach`, `dispose()()` in `afterAll`
 - [ ] Domain package has no infrastructure dependencies
 - [ ] All packages use `"type": "module"` and TypeScript strict mode
 - [ ] tRPC API decomposed into route files with typed middleware
-- [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-sse`
+- [ ] `broadcast.ts` sets up `BroadcastChannel` + `PresenceTracker` from `@rotorsoft/act-http/sse`
 - [ ] `broadcastState()` called after every `app.do()` — sets `_v` from `snap.event.version`
 - [ ] SSE `onStateChange` subscription uses `broadcast.subscribe()` for incremental state push
 - [ ] SSE `onEvent` subscription wired with `app.on("settled")` for event replay
 - [ ] `app.settle()` called after mutations (non-blocking, debounced, emits "settled" after reactions)
-- [ ] Client `useStateStream` hook uses `applyBroadcastMessage()` from `@rotorsoft/act-sse`
+- [ ] Client `useStateStream` hook uses `applyPatchMessage()` from `@rotorsoft/act-http/sse`
 - [ ] Client uses `splitLink` for SSE subscriptions + HTTP for mutations/queries
 - [ ] Types compile with `npx tsc --noEmit`

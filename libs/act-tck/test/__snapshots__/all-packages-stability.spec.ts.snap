@@ -28632,6 +28632,135 @@ import type { Actor } from "@rotorsoft/act";
  */
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
 
+// === broadcast.ts ===
+import { patch as apply_patch } from "@rotorsoft/act-patch";
+import { StateCache } from "./state-cache.js";
+import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
+
+/**
+ * Server-side broadcast channel for incremental state sync over SSE.
+ *
+ * Manages per-stream subscriber sets and an LRU state cache. When state
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
+ *
+ * ## Usage
+ *
+ * \`\`\`typescript
+ * const broadcast = new BroadcastChannel<MyState>();
+ *
+ * // After every app.do():
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
+ *
+ * // In SSE subscription:
+ * const cleanup = broadcast.subscribe(streamId, (msg) => {
+ *   pending = msg;
+ *   resolve?.();
+ * });
+ *
+ * // Initial state for reconnects:
+ * const cached = broadcast.get_state(streamId);
+ * \`\`\`
+ *
+ * ## Version Contract
+ *
+ * The \`_v\` field on state MUST be set from \`snap.event.version\` (the event
+ * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
+ * single source of truth for ordering — no separate version counters.
+ */
+export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
+  private channels = new Map<string, Set<Subscriber<S>>>();
+  private state_cache: StateCache<S>;
+
+  constructor(options?: { cache_size?: number }) {
+    this.state_cache = new StateCache<S>(options?.cache_size ?? 50);
+  }
+
+  /**
+   * Publish domain patches from a commit.
+   * patches[i] corresponds to version baseV + i + 1.
+   *
+   * @param streamId - The event store stream ID
+   * @param state - Full state with \`_v\` set from \`snap.event.version\`
+   * @param patches - Array of domain patches, one per emitted event
+   */
+  publish(
+    streamId: string,
+    state: S,
+    patches: Partial<S>[] = []
+  ): PatchMessage<S> {
+    this.state_cache.set(streamId, state);
+
+    const baseV = state._v - patches.length;
+    const msg: PatchMessage<S> = {};
+    patches.forEach((p, i) => {
+      msg[baseV + i + 1] = p;
+    });
+
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Publish a state update that doesn't change the event version
+   * (e.g. presence overlay, computed field refresh).
+   * Uses the same version as the cached state, single entry.
+   */
+  publish_overlay(
+    streamId: string,
+    overlay_patch: Partial<S>
+  ): PatchMessage<S> | undefined {
+    const prev = this.state_cache.get(streamId);
+    if (!prev) return undefined;
+
+    const state = apply_patch(prev, overlay_patch) as S;
+    this.state_cache.set(streamId, state);
+
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Subscribe to broadcast messages for a stream.
+   * Returns a cleanup function that removes the subscription.
+   */
+  subscribe(streamId: string, cb: Subscriber<S>): () => void {
+    if (!this.channels.has(streamId)) this.channels.set(streamId, new Set());
+    this.channels.get(streamId)!.add(cb);
+    return () => {
+      this.channels.get(streamId)?.delete(cb);
+      if (this.channels.get(streamId)?.size === 0) {
+        this.channels.delete(streamId);
+      }
+    };
+  }
+
+  /** Get the number of subscribers for a stream. */
+  get_subscriber_count(streamId: string): number {
+    return this.channels.get(streamId)?.size ?? 0;
+  }
+
+  /** Get the cached state for a stream (for reconnects / initial SSE yield). */
+  get_state(streamId: string): S | undefined {
+    return this.state_cache.get(streamId);
+  }
+
+  /** Direct access to the state cache (for app-specific reads like presence). */
+  get cache(): StateCache<S> {
+    return this.state_cache;
+  }
+}
+
 // === errors.ts ===
 import {
   ConcurrencyError,
@@ -28824,6 +28953,350 @@ export {
   toApiError,
 } from "./errors.js";
 export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+export {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_MAX_CONNECTIONS,
+  resolveSseConfig,
+  runSseSubscription,
+  type SseAccounting,
+  type SseConfig,
+  SseConnectionCounter,
+  type SseOptions,
+  type SseSubscriptionFrame,
+} from "./sse-wiring.js";
+
+// === sse-wiring.ts ===
+import type { BroadcastChannel } from "../sse/broadcast.js";
+import type { BroadcastState } from "../sse/types.js";
+
+/**
+ * SSE wiring options shared by the auto-generated \`trpc\` and \`hono\`
+ * transports. When supplied, each transport emits one streaming
+ * subscription per registered state name, all reading from the same
+ * host-supplied {@link BroadcastChannel}.
+ *
+ * The host owns publication: every \`app.do(...)\` call site must
+ * forward the resulting snapshots to \`channel.publish(...)\` for
+ * subscribers to see updates. The framework deliberately doesn't
+ * auto-publish because the derived state usually needs app-specific
+ * overlays (presence, computed fields) that only the host can supply.
+ *
+ * Defaults are sized for typical business-app dashboards (dozens to
+ * hundreds of human viewers per process). Both numeric knobs are
+ * validated at transport-function construction; out-of-range values
+ * throw \`RangeError\` immediately so misconfiguration surfaces at
+ * startup instead of at first connection.
+ */
+export type SseOptions = {
+  /**
+   * The {@link BroadcastChannel} the generator's subscriptions hook
+   * into. Host owns its lifecycle; the generator does not construct
+   * one for you because the channel's \`<S>\` shape is app-specific and
+   * passing it in keeps the type chain typed end-to-end at the host.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  readonly channel: BroadcastChannel<any>;
+  /**
+   * Hard cap on concurrent open subscriptions per generator
+   * instance. The 501st simultaneous open returns \`503\` (Hono) or
+   * throws \`TOO_MANY_REQUESTS\` (tRPC) — never a silent stall.
+   *
+   * Default \`500\`. Validated range \`[1, 10_000]\`. Above 10k the
+   * framework refuses to construct: at that point the FD ceiling
+   * and per-connection memory force horizontal scaling regardless
+   * of tuning, so the right move is sticky LB + per-process cap,
+   * not a higher single-process limit.
+   */
+  readonly maxConnections?: number;
+  /**
+   * Keep-alive cadence in milliseconds. Most reverse proxies idle
+   * connections out after ~60 seconds; the default \`30_000\` stays
+   * comfortably under.
+   *
+   * Validated range \`[15_000, 300_000]\`. Under 15 s wastes
+   * bandwidth on a business workload; over 5 min risks proxy drops.
+   */
+  readonly heartbeatMs?: number;
+};
+
+/**
+ * Resolved SSE configuration after validation and default expansion.
+ * Internal — the resolved values are what every transport actually
+ * runs against.
+ *
+ * @internal
+ */
+export type SseConfig = {
+  readonly channel: BroadcastChannel<BroadcastState>;
+  readonly maxConnections: number;
+  readonly heartbeatMs: number;
+};
+
+/**
+ * Default cap on concurrent open subscriptions per generator
+ * instance. Sized for typical business-app dashboards (dozens to a
+ * few hundred viewers); high enough not to surprise small
+ * deployments, low enough not to mask a missing horizontal-scale
+ * strategy on big ones.
+ */
+export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
+
+/**
+ * Default keep-alive cadence (30 s). Sits comfortably under the
+ * 60 s idle timeout most reverse proxies impose.
+ */
+export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
+
+const MAX_CONNECTIONS_MIN = 1;
+const MAX_CONNECTIONS_MAX = 10_000;
+const HEARTBEAT_MS_MIN = 15_000;
+const HEARTBEAT_MS_MAX = 300_000;
+
+/**
+ * Validate and apply defaults to host-supplied {@link SseOptions}.
+ *
+ * Throws \`RangeError\` when either numeric knob is outside its
+ * documented range. Pure: same input → same output, no side
+ * effects, no I/O. Each transport calls this once at the start of
+ * \`hono(...)\` / \`trpc(...)\`.
+ */
+export function resolveSseConfig(options: SseOptions): SseConfig {
+  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
+  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
+  if (
+    !Number.isFinite(max_connections) ||
+    max_connections < MAX_CONNECTIONS_MIN ||
+    max_connections > MAX_CONNECTIONS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
+    );
+  }
+  if (
+    !Number.isFinite(heartbeat_ms) ||
+    heartbeat_ms < HEARTBEAT_MS_MIN ||
+    heartbeat_ms > HEARTBEAT_MS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
+    );
+  }
+  return {
+    channel: options.channel,
+    maxConnections: max_connections,
+    heartbeatMs: heartbeat_ms,
+  };
+}
+
+/**
+ * Per-generator concurrent-open counter. Constructed once inside
+ * \`hono(...)\` / \`trpc(...)\` and consulted at every subscription
+ * open: failure to acquire means the cap has been hit and the
+ * transport reports \`503\` / \`TOO_MANY_REQUESTS\` to the caller.
+ *
+ * The counter is intentionally process-local. SSE doesn't multiplex
+ * across processes; operators wanting more than \`maxConnections\`
+ * viewers run multiple processes behind a sticky load balancer.
+ */
+export class SseConnectionCounter {
+  public readonly limit: number;
+  private _open = 0;
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  /**
+   * Reserve one slot. Returns \`true\` when accepted (caller must
+   * eventually {@link release} the slot, even on error paths) or
+   * \`false\` when the cap is already reached.
+   */
+  acquire(): boolean {
+    if (this._open >= this.limit) return false;
+    this._open++;
+    return true;
+  }
+
+  /**
+   * Free a previously-{@link acquire}d slot. Always runs from a
+   * \`finally\` block in the transport's subscription handler so
+   * crashed handlers don't leak count.
+   */
+  release(): void {
+    if (this._open > 0) this._open--;
+  }
+
+  /** Currently-open count. Test/observability hook. */
+  get open(): number {
+    return this._open;
+  }
+}
+
+/**
+ * Frame yielded by the per-state SSE subscription generator. The
+ * initial cached state (when present) arrives as \`kind: "state"\`;
+ * every subsequent broadcast publication arrives as \`kind: "patch"\`
+ * with the channel's \`PatchMessage\` payload.
+ */
+export type SseSubscriptionFrame<S> =
+  | { readonly kind: "state"; readonly data: S }
+  | { readonly kind: "patch"; readonly data: unknown };
+
+/**
+ * Subscription accounting hook. Implementations have a chance to
+ * acquire a slot before the loop starts and to release it once the
+ * loop's \`finally\` block runs — used by the tRPC side to enforce
+ * \`maxConnections\` from inside the generator, where it can throw
+ * \`TRPCError\` cleanly. Hono enforces the cap outside the loop (so a
+ * full counter returns \`503\` *before* streamSSE writes headers), then
+ * passes \`undefined\` here.
+ */
+export type SseAccounting = {
+  acquire(): boolean;
+  release(): void;
+};
+
+/**
+ * The shared subscription loop both transports run. Optionally
+ * acquires one slot on the supplied {@link SseAccounting}, yields the
+ * cached state (when present), then forwards every channel
+ * publication as a \`kind: "patch"\` frame until either the consumer
+ * breaks (calling \`iter.return()\`) or the supplied abort signal fires.
+ *
+ * Exported as the testable seam — the Hono and tRPC sibling
+ * generators wrap this so the signal-driven cleanup and counter
+ * accounting live in one place.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+export async function* runSseSubscription<S extends { _v: number } = any>(
+  channel: BroadcastChannel<S>,
+  stream_id: string,
+  accounting: SseAccounting | undefined,
+  signal: AbortSignal | undefined,
+  on_cap_exceeded?: () => never
+): AsyncGenerator<SseSubscriptionFrame<S>> {
+  if (accounting && !accounting.acquire() && on_cap_exceeded) {
+    on_cap_exceeded();
+  }
+  const pending: unknown[] = [];
+  let resolve_wait: (() => void) | null = null;
+  const unsubscribe = channel.subscribe(stream_id, (msg) => {
+    pending.push(msg);
+    resolve_wait?.();
+  });
+  const on_abort = () => resolve_wait?.();
+  signal?.addEventListener("abort", on_abort);
+  try {
+    const cached = channel.get_state(stream_id);
+    if (cached !== undefined) {
+      yield { kind: "state", data: cached };
+    }
+    while (!signal?.aborted) {
+      if (pending.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolve_wait = resolve;
+        });
+        if (signal?.aborted) break;
+      }
+      const msg = pending.shift();
+      yield { kind: "patch", data: msg };
+    }
+  } finally {
+    signal?.removeEventListener("abort", on_abort);
+    unsubscribe();
+    accounting?.release();
+  }
+}
+
+// === state-cache.ts ===
+import type { BroadcastState } from "./types.js";
+
+/**
+ * Generic LRU cache for aggregate state objects.
+ *
+ * Keyed by stream ID. Each entry stores the full state (with \`_v\` from the
+ * event store). Used as the "previous state" baseline for computing patches,
+ * and as the fast path for reconnects.
+ *
+ * The cache is shared between the broadcast hot path and read queries.
+ * Projections should maintain their own cache to avoid double-apply bugs.
+ */
+export class StateCache<S extends BroadcastState = BroadcastState> {
+  private cache = new Map<string, S>();
+  private maxSize: number;
+
+  constructor(maxSize = 50) {
+    this.maxSize = maxSize;
+  }
+
+  /** Get a cached state, promoting it to MRU position. */
+  get(key: string): S | undefined {
+    const s = this.cache.get(key);
+    if (s) {
+      this.cache.delete(key);
+      this.cache.set(key, s);
+    }
+    return s;
+  }
+
+  /** Set a cached state, evicting the LRU entry if at capacity. */
+  set(key: string, state: S): void {
+    this.cache.delete(key);
+    this.cache.set(key, state);
+    if (this.cache.size > this.maxSize) {
+      this.cache.delete(this.cache.keys().next().value!);
+    }
+  }
+
+  /** Remove a cached entry. */
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
+  /** Check if a key exists in the cache. */
+  has(key: string): boolean {
+    return this.cache.has(key);
+  }
+
+  /** Current number of cached entries. */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /** Direct access to the underlying map (for iteration). */
+  entries(): IterableIterator<[string, S]> {
+    return this.cache.entries();
+  }
+}
+
+// === types.ts ===
+import type { DeepPartial } from "@rotorsoft/act-patch";
+
+/**
+ * Base constraint for state objects managed by the broadcast system.
+ * Apps extend this with their own domain state shape.
+ */
+export type BroadcastState = Record<string, unknown> & {
+  /** Event store stream version — set by the broadcast layer from snap.event.version */
+  _v: number;
+};
+
+/**
+ * SSE message: version-keyed domain patches.
+ * Keys are stringified version numbers, values are domain patches (deep partials).
+ * Multi-event commits produce multiple version-keyed entries.
+ */
+export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
+  number,
+  DeepPartial<S>
+>;
+
+/**
+ * Subscriber callback — receives version-keyed patch messages.
+ */
+export type Subscriber<S extends BroadcastState = BroadcastState> = (
+  msg: PatchMessage<S>
+) => void;
 "
 `;
 
@@ -28849,6 +29322,135 @@ import type { Actor } from "@rotorsoft/act";
  * cache.
  */
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
+
+// === broadcast.ts ===
+import { patch as apply_patch } from "@rotorsoft/act-patch";
+import { StateCache } from "./state-cache.js";
+import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
+
+/**
+ * Server-side broadcast channel for incremental state sync over SSE.
+ *
+ * Manages per-stream subscriber sets and an LRU state cache. When state
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
+ *
+ * ## Usage
+ *
+ * \`\`\`typescript
+ * const broadcast = new BroadcastChannel<MyState>();
+ *
+ * // After every app.do():
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
+ *
+ * // In SSE subscription:
+ * const cleanup = broadcast.subscribe(streamId, (msg) => {
+ *   pending = msg;
+ *   resolve?.();
+ * });
+ *
+ * // Initial state for reconnects:
+ * const cached = broadcast.get_state(streamId);
+ * \`\`\`
+ *
+ * ## Version Contract
+ *
+ * The \`_v\` field on state MUST be set from \`snap.event.version\` (the event
+ * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
+ * single source of truth for ordering — no separate version counters.
+ */
+export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
+  private channels = new Map<string, Set<Subscriber<S>>>();
+  private state_cache: StateCache<S>;
+
+  constructor(options?: { cache_size?: number }) {
+    this.state_cache = new StateCache<S>(options?.cache_size ?? 50);
+  }
+
+  /**
+   * Publish domain patches from a commit.
+   * patches[i] corresponds to version baseV + i + 1.
+   *
+   * @param streamId - The event store stream ID
+   * @param state - Full state with \`_v\` set from \`snap.event.version\`
+   * @param patches - Array of domain patches, one per emitted event
+   */
+  publish(
+    streamId: string,
+    state: S,
+    patches: Partial<S>[] = []
+  ): PatchMessage<S> {
+    this.state_cache.set(streamId, state);
+
+    const baseV = state._v - patches.length;
+    const msg: PatchMessage<S> = {};
+    patches.forEach((p, i) => {
+      msg[baseV + i + 1] = p;
+    });
+
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Publish a state update that doesn't change the event version
+   * (e.g. presence overlay, computed field refresh).
+   * Uses the same version as the cached state, single entry.
+   */
+  publish_overlay(
+    streamId: string,
+    overlay_patch: Partial<S>
+  ): PatchMessage<S> | undefined {
+    const prev = this.state_cache.get(streamId);
+    if (!prev) return undefined;
+
+    const state = apply_patch(prev, overlay_patch) as S;
+    this.state_cache.set(streamId, state);
+
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Subscribe to broadcast messages for a stream.
+   * Returns a cleanup function that removes the subscription.
+   */
+  subscribe(streamId: string, cb: Subscriber<S>): () => void {
+    if (!this.channels.has(streamId)) this.channels.set(streamId, new Set());
+    this.channels.get(streamId)!.add(cb);
+    return () => {
+      this.channels.get(streamId)?.delete(cb);
+      if (this.channels.get(streamId)?.size === 0) {
+        this.channels.delete(streamId);
+      }
+    };
+  }
+
+  /** Get the number of subscribers for a stream. */
+  get_subscriber_count(streamId: string): number {
+    return this.channels.get(streamId)?.size ?? 0;
+  }
+
+  /** Get the cached state for a stream (for reconnects / initial SSE yield). */
+  get_state(streamId: string): S | undefined {
+    return this.state_cache.get(streamId);
+  }
+
+  /** Direct access to the state cache (for app-specific reads like presence). */
+  get cache(): StateCache<S> {
+    return this.state_cache;
+  }
+}
 
 // === errors.ts ===
 import {
@@ -29050,9 +29652,14 @@ import type { Actor, Target } from "@rotorsoft/act";
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import type { Context, MiddlewareHandler } from "hono";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import {
   type ActorExtractor,
   type ApiError,
+  resolveSseConfig,
+  runSseSubscription,
+  SseConnectionCounter,
+  type SseOptions,
   toApiError,
   withIdempotency,
 } from "../api/index.js";
@@ -29109,6 +29716,23 @@ export type HonoOptions = {
     readonly store: IdempotencyStore;
     readonly keyFrom?: (c: Context) => string | undefined;
   };
+  /**
+   * Optional SSE wiring. When set, the generator emits one
+   * \`GET <basePath>/sse/<stateName>?stream=<streamId>\` per unique
+   * state name in the registry. The endpoint runs the host
+   * {@link actor} extractor, looks up the streamId from
+   * \`?stream=...\`, opens a \`text/event-stream\`, yields the cached
+   * state (if any), and forwards every patch published to the
+   * shared {@link SseOptions.channel}. A heartbeat keeps proxies
+   * from idling the connection out; the per-process connection cap
+   * returns \`503 Service Unavailable\` (with \`Retry-After: 1\`) when
+   * full so operators never see silent stalls.
+   *
+   * Off by default — most APIs don't expose live state to every
+   * client, and opening one is widening both the auth and cost
+   * surface.
+   */
+  readonly sse?: SseOptions;
   readonly basePath?: string;
 };
 
@@ -29219,6 +29843,71 @@ export function hono<TApp extends ActSurface = ActSurface>(
   api.use("*", authenticated(options.actor));
 
   const key_from = options.idempotency?.keyFrom ?? default_key_from;
+
+  // Wire SSE subscriptions before the mutation routes so the
+  // \`/sse/*\` paths sit alongside \`/actions/*\`. The cap counter is
+  // shared by every state-name's GET route on this generator
+  // instance so a noisy room on one state doesn't get a free pass
+  // on another.
+  if (options.sse) {
+    const sse_config = resolveSseConfig(options.sse);
+    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const state_names = new Set<string>();
+    for (const action of Object.values(app.registry.actions)) {
+      state_names.add(action.name);
+    }
+    for (const state_name of state_names) {
+      api.get(\`/sse/\${state_name}\`, async (c) => {
+        const stream_id = c.req.query("stream");
+        if (!stream_id) {
+          const body: ApiError = {
+            error: "BadRequest",
+            detail: "stream query parameter is required",
+            code: "BAD_REQUEST",
+          };
+          return c.json(body, 400);
+        }
+        if (!sse_counter.acquire()) {
+          c.header("Retry-After", "1");
+          const body: ApiError = {
+            error: "ServiceUnavailable",
+            detail: "max concurrent SSE connections reached",
+            code: "SSE_BUSY",
+          };
+          return c.json(body, 503);
+        }
+        // The route already acquired the slot above so streamSSE
+        // could return \`503\` before writing headers if the cap was
+        // full. The shared loop runs without accounting; the route
+        // releases the slot in \`finally\`.
+        const controller = new AbortController();
+        return streamSSE(c, async (sse_stream) => {
+          sse_stream.onAbort(() => controller.abort());
+          const heartbeat = setInterval(() => {
+            sse_stream
+              .writeSSE({ event: "ping", data: "" })
+              .catch(() => undefined);
+          }, sse_config.heartbeatMs);
+          try {
+            for await (const frame of runSseSubscription(
+              sse_config.channel,
+              stream_id,
+              undefined,
+              controller.signal
+            )) {
+              await sse_stream.writeSSE({
+                event: frame.kind,
+                data: JSON.stringify(frame.data),
+              });
+            }
+          } finally {
+            clearInterval(heartbeat);
+            sse_counter.release();
+          }
+        });
+      });
+    }
+  }
 
   for (const [action_name, state] of Object.entries(app.registry.actions)) {
     const schema = state.actions[action_name];
@@ -29331,6 +30020,350 @@ export {
   toApiError,
 } from "./errors.js";
 export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+export {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_MAX_CONNECTIONS,
+  resolveSseConfig,
+  runSseSubscription,
+  type SseAccounting,
+  type SseConfig,
+  SseConnectionCounter,
+  type SseOptions,
+  type SseSubscriptionFrame,
+} from "./sse-wiring.js";
+
+// === sse-wiring.ts ===
+import type { BroadcastChannel } from "../sse/broadcast.js";
+import type { BroadcastState } from "../sse/types.js";
+
+/**
+ * SSE wiring options shared by the auto-generated \`trpc\` and \`hono\`
+ * transports. When supplied, each transport emits one streaming
+ * subscription per registered state name, all reading from the same
+ * host-supplied {@link BroadcastChannel}.
+ *
+ * The host owns publication: every \`app.do(...)\` call site must
+ * forward the resulting snapshots to \`channel.publish(...)\` for
+ * subscribers to see updates. The framework deliberately doesn't
+ * auto-publish because the derived state usually needs app-specific
+ * overlays (presence, computed fields) that only the host can supply.
+ *
+ * Defaults are sized for typical business-app dashboards (dozens to
+ * hundreds of human viewers per process). Both numeric knobs are
+ * validated at transport-function construction; out-of-range values
+ * throw \`RangeError\` immediately so misconfiguration surfaces at
+ * startup instead of at first connection.
+ */
+export type SseOptions = {
+  /**
+   * The {@link BroadcastChannel} the generator's subscriptions hook
+   * into. Host owns its lifecycle; the generator does not construct
+   * one for you because the channel's \`<S>\` shape is app-specific and
+   * passing it in keeps the type chain typed end-to-end at the host.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  readonly channel: BroadcastChannel<any>;
+  /**
+   * Hard cap on concurrent open subscriptions per generator
+   * instance. The 501st simultaneous open returns \`503\` (Hono) or
+   * throws \`TOO_MANY_REQUESTS\` (tRPC) — never a silent stall.
+   *
+   * Default \`500\`. Validated range \`[1, 10_000]\`. Above 10k the
+   * framework refuses to construct: at that point the FD ceiling
+   * and per-connection memory force horizontal scaling regardless
+   * of tuning, so the right move is sticky LB + per-process cap,
+   * not a higher single-process limit.
+   */
+  readonly maxConnections?: number;
+  /**
+   * Keep-alive cadence in milliseconds. Most reverse proxies idle
+   * connections out after ~60 seconds; the default \`30_000\` stays
+   * comfortably under.
+   *
+   * Validated range \`[15_000, 300_000]\`. Under 15 s wastes
+   * bandwidth on a business workload; over 5 min risks proxy drops.
+   */
+  readonly heartbeatMs?: number;
+};
+
+/**
+ * Resolved SSE configuration after validation and default expansion.
+ * Internal — the resolved values are what every transport actually
+ * runs against.
+ *
+ * @internal
+ */
+export type SseConfig = {
+  readonly channel: BroadcastChannel<BroadcastState>;
+  readonly maxConnections: number;
+  readonly heartbeatMs: number;
+};
+
+/**
+ * Default cap on concurrent open subscriptions per generator
+ * instance. Sized for typical business-app dashboards (dozens to a
+ * few hundred viewers); high enough not to surprise small
+ * deployments, low enough not to mask a missing horizontal-scale
+ * strategy on big ones.
+ */
+export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
+
+/**
+ * Default keep-alive cadence (30 s). Sits comfortably under the
+ * 60 s idle timeout most reverse proxies impose.
+ */
+export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
+
+const MAX_CONNECTIONS_MIN = 1;
+const MAX_CONNECTIONS_MAX = 10_000;
+const HEARTBEAT_MS_MIN = 15_000;
+const HEARTBEAT_MS_MAX = 300_000;
+
+/**
+ * Validate and apply defaults to host-supplied {@link SseOptions}.
+ *
+ * Throws \`RangeError\` when either numeric knob is outside its
+ * documented range. Pure: same input → same output, no side
+ * effects, no I/O. Each transport calls this once at the start of
+ * \`hono(...)\` / \`trpc(...)\`.
+ */
+export function resolveSseConfig(options: SseOptions): SseConfig {
+  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
+  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
+  if (
+    !Number.isFinite(max_connections) ||
+    max_connections < MAX_CONNECTIONS_MIN ||
+    max_connections > MAX_CONNECTIONS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
+    );
+  }
+  if (
+    !Number.isFinite(heartbeat_ms) ||
+    heartbeat_ms < HEARTBEAT_MS_MIN ||
+    heartbeat_ms > HEARTBEAT_MS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
+    );
+  }
+  return {
+    channel: options.channel,
+    maxConnections: max_connections,
+    heartbeatMs: heartbeat_ms,
+  };
+}
+
+/**
+ * Per-generator concurrent-open counter. Constructed once inside
+ * \`hono(...)\` / \`trpc(...)\` and consulted at every subscription
+ * open: failure to acquire means the cap has been hit and the
+ * transport reports \`503\` / \`TOO_MANY_REQUESTS\` to the caller.
+ *
+ * The counter is intentionally process-local. SSE doesn't multiplex
+ * across processes; operators wanting more than \`maxConnections\`
+ * viewers run multiple processes behind a sticky load balancer.
+ */
+export class SseConnectionCounter {
+  public readonly limit: number;
+  private _open = 0;
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  /**
+   * Reserve one slot. Returns \`true\` when accepted (caller must
+   * eventually {@link release} the slot, even on error paths) or
+   * \`false\` when the cap is already reached.
+   */
+  acquire(): boolean {
+    if (this._open >= this.limit) return false;
+    this._open++;
+    return true;
+  }
+
+  /**
+   * Free a previously-{@link acquire}d slot. Always runs from a
+   * \`finally\` block in the transport's subscription handler so
+   * crashed handlers don't leak count.
+   */
+  release(): void {
+    if (this._open > 0) this._open--;
+  }
+
+  /** Currently-open count. Test/observability hook. */
+  get open(): number {
+    return this._open;
+  }
+}
+
+/**
+ * Frame yielded by the per-state SSE subscription generator. The
+ * initial cached state (when present) arrives as \`kind: "state"\`;
+ * every subsequent broadcast publication arrives as \`kind: "patch"\`
+ * with the channel's \`PatchMessage\` payload.
+ */
+export type SseSubscriptionFrame<S> =
+  | { readonly kind: "state"; readonly data: S }
+  | { readonly kind: "patch"; readonly data: unknown };
+
+/**
+ * Subscription accounting hook. Implementations have a chance to
+ * acquire a slot before the loop starts and to release it once the
+ * loop's \`finally\` block runs — used by the tRPC side to enforce
+ * \`maxConnections\` from inside the generator, where it can throw
+ * \`TRPCError\` cleanly. Hono enforces the cap outside the loop (so a
+ * full counter returns \`503\` *before* streamSSE writes headers), then
+ * passes \`undefined\` here.
+ */
+export type SseAccounting = {
+  acquire(): boolean;
+  release(): void;
+};
+
+/**
+ * The shared subscription loop both transports run. Optionally
+ * acquires one slot on the supplied {@link SseAccounting}, yields the
+ * cached state (when present), then forwards every channel
+ * publication as a \`kind: "patch"\` frame until either the consumer
+ * breaks (calling \`iter.return()\`) or the supplied abort signal fires.
+ *
+ * Exported as the testable seam — the Hono and tRPC sibling
+ * generators wrap this so the signal-driven cleanup and counter
+ * accounting live in one place.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+export async function* runSseSubscription<S extends { _v: number } = any>(
+  channel: BroadcastChannel<S>,
+  stream_id: string,
+  accounting: SseAccounting | undefined,
+  signal: AbortSignal | undefined,
+  on_cap_exceeded?: () => never
+): AsyncGenerator<SseSubscriptionFrame<S>> {
+  if (accounting && !accounting.acquire() && on_cap_exceeded) {
+    on_cap_exceeded();
+  }
+  const pending: unknown[] = [];
+  let resolve_wait: (() => void) | null = null;
+  const unsubscribe = channel.subscribe(stream_id, (msg) => {
+    pending.push(msg);
+    resolve_wait?.();
+  });
+  const on_abort = () => resolve_wait?.();
+  signal?.addEventListener("abort", on_abort);
+  try {
+    const cached = channel.get_state(stream_id);
+    if (cached !== undefined) {
+      yield { kind: "state", data: cached };
+    }
+    while (!signal?.aborted) {
+      if (pending.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolve_wait = resolve;
+        });
+        if (signal?.aborted) break;
+      }
+      const msg = pending.shift();
+      yield { kind: "patch", data: msg };
+    }
+  } finally {
+    signal?.removeEventListener("abort", on_abort);
+    unsubscribe();
+    accounting?.release();
+  }
+}
+
+// === state-cache.ts ===
+import type { BroadcastState } from "./types.js";
+
+/**
+ * Generic LRU cache for aggregate state objects.
+ *
+ * Keyed by stream ID. Each entry stores the full state (with \`_v\` from the
+ * event store). Used as the "previous state" baseline for computing patches,
+ * and as the fast path for reconnects.
+ *
+ * The cache is shared between the broadcast hot path and read queries.
+ * Projections should maintain their own cache to avoid double-apply bugs.
+ */
+export class StateCache<S extends BroadcastState = BroadcastState> {
+  private cache = new Map<string, S>();
+  private maxSize: number;
+
+  constructor(maxSize = 50) {
+    this.maxSize = maxSize;
+  }
+
+  /** Get a cached state, promoting it to MRU position. */
+  get(key: string): S | undefined {
+    const s = this.cache.get(key);
+    if (s) {
+      this.cache.delete(key);
+      this.cache.set(key, s);
+    }
+    return s;
+  }
+
+  /** Set a cached state, evicting the LRU entry if at capacity. */
+  set(key: string, state: S): void {
+    this.cache.delete(key);
+    this.cache.set(key, state);
+    if (this.cache.size > this.maxSize) {
+      this.cache.delete(this.cache.keys().next().value!);
+    }
+  }
+
+  /** Remove a cached entry. */
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
+  /** Check if a key exists in the cache. */
+  has(key: string): boolean {
+    return this.cache.has(key);
+  }
+
+  /** Current number of cached entries. */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /** Direct access to the underlying map (for iteration). */
+  entries(): IterableIterator<[string, S]> {
+    return this.cache.entries();
+  }
+}
+
+// === types.ts ===
+import type { DeepPartial } from "@rotorsoft/act-patch";
+
+/**
+ * Base constraint for state objects managed by the broadcast system.
+ * Apps extend this with their own domain state shape.
+ */
+export type BroadcastState = Record<string, unknown> & {
+  /** Event store stream version — set by the broadcast layer from snap.event.version */
+  _v: number;
+};
+
+/**
+ * SSE message: version-keyed domain patches.
+ * Keys are stringified version numbers, values are domain patches (deep partials).
+ * Multi-event commits produce multiple version-keyed entries.
+ */
+export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
+  number,
+  DeepPartial<S>
+>;
+
+/**
+ * Subscriber callback — receives version-keyed patch messages.
+ */
+export type Subscriber<S extends BroadcastState = BroadcastState> = (
+  msg: PatchMessage<S>
+) => void;
 "
 `;
 
@@ -32048,6 +33081,135 @@ import type { Actor } from "@rotorsoft/act";
  */
 export type ActorExtractor = (request: unknown) => Actor | Promise<Actor>;
 
+// === broadcast.ts ===
+import { patch as apply_patch } from "@rotorsoft/act-patch";
+import { StateCache } from "./state-cache.js";
+import type { BroadcastState, PatchMessage, Subscriber } from "./types.js";
+
+/**
+ * Server-side broadcast channel for incremental state sync over SSE.
+ *
+ * Manages per-stream subscriber sets and an LRU state cache. When state
+ * changes, forwards domain patches (from event handlers) to all subscribers
+ * as version-keyed messages.
+ *
+ * ## Usage
+ *
+ * \`\`\`typescript
+ * const broadcast = new BroadcastChannel<MyState>();
+ *
+ * // After every app.do():
+ * const snaps = await app.do(...);
+ * const patches = snaps.map(s => s.patch).filter(Boolean);
+ * const state = deriveState(snaps.at(-1));
+ * broadcast.publish(streamId, state, patches);
+ *
+ * // In SSE subscription:
+ * const cleanup = broadcast.subscribe(streamId, (msg) => {
+ *   pending = msg;
+ *   resolve?.();
+ * });
+ *
+ * // Initial state for reconnects:
+ * const cached = broadcast.get_state(streamId);
+ * \`\`\`
+ *
+ * ## Version Contract
+ *
+ * The \`_v\` field on state MUST be set from \`snap.event.version\` (the event
+ * store's monotonic stream version) BEFORE calling \`publish()\`. This is the
+ * single source of truth for ordering — no separate version counters.
+ */
+export class BroadcastChannel<S extends BroadcastState = BroadcastState> {
+  private channels = new Map<string, Set<Subscriber<S>>>();
+  private state_cache: StateCache<S>;
+
+  constructor(options?: { cache_size?: number }) {
+    this.state_cache = new StateCache<S>(options?.cache_size ?? 50);
+  }
+
+  /**
+   * Publish domain patches from a commit.
+   * patches[i] corresponds to version baseV + i + 1.
+   *
+   * @param streamId - The event store stream ID
+   * @param state - Full state with \`_v\` set from \`snap.event.version\`
+   * @param patches - Array of domain patches, one per emitted event
+   */
+  publish(
+    streamId: string,
+    state: S,
+    patches: Partial<S>[] = []
+  ): PatchMessage<S> {
+    this.state_cache.set(streamId, state);
+
+    const baseV = state._v - patches.length;
+    const msg: PatchMessage<S> = {};
+    patches.forEach((p, i) => {
+      msg[baseV + i + 1] = p;
+    });
+
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Publish a state update that doesn't change the event version
+   * (e.g. presence overlay, computed field refresh).
+   * Uses the same version as the cached state, single entry.
+   */
+  publish_overlay(
+    streamId: string,
+    overlay_patch: Partial<S>
+  ): PatchMessage<S> | undefined {
+    const prev = this.state_cache.get(streamId);
+    if (!prev) return undefined;
+
+    const state = apply_patch(prev, overlay_patch) as S;
+    this.state_cache.set(streamId, state);
+
+    const msg: PatchMessage<S> = { [state._v]: overlay_patch };
+    const subs = this.channels.get(streamId);
+    if (subs?.size) {
+      for (const cb of subs) cb(msg);
+    }
+    return msg;
+  }
+
+  /**
+   * Subscribe to broadcast messages for a stream.
+   * Returns a cleanup function that removes the subscription.
+   */
+  subscribe(streamId: string, cb: Subscriber<S>): () => void {
+    if (!this.channels.has(streamId)) this.channels.set(streamId, new Set());
+    this.channels.get(streamId)!.add(cb);
+    return () => {
+      this.channels.get(streamId)?.delete(cb);
+      if (this.channels.get(streamId)?.size === 0) {
+        this.channels.delete(streamId);
+      }
+    };
+  }
+
+  /** Get the number of subscribers for a stream. */
+  get_subscriber_count(streamId: string): number {
+    return this.channels.get(streamId)?.size ?? 0;
+  }
+
+  /** Get the cached state for a stream (for reconnects / initial SSE yield). */
+  get_state(streamId: string): S | undefined {
+    return this.state_cache.get(streamId);
+  }
+
+  /** Direct access to the state cache (for app-specific reads like presence). */
+  get cache(): StateCache<S> {
+    return this.state_cache;
+  }
+}
+
 // === errors.ts ===
 import {
   ConcurrencyError,
@@ -32258,8 +33420,13 @@ import {
   type TRPCBuiltRouter,
   TRPCError,
 } from "@trpc/server";
+import { z } from "zod";
 import {
   type ActorExtractor,
+  resolveSseConfig,
+  runSseSubscription,
+  SseConnectionCounter,
+  type SseOptions,
   toApiError,
   withIdempotency,
 } from "../api/index.js";
@@ -32313,6 +33480,22 @@ export type TrpcOptions<Ctx> = {
     readonly store: IdempotencyStore;
     readonly keyFrom: (ctx: Ctx) => string | undefined;
   };
+  /**
+   * Optional SSE wiring. When set, the generator emits one
+   * subscription per unique state name in the registry, grouped on
+   * the returned router as
+   * \`router.subscribe.<stateName>.useSubscription({ stream })\`.
+   * Each subscription yields \`{ kind: "state", data }\` once with
+   * the cached state (when present) and then \`{ kind: "patch",
+   * data }\` for every patch the shared
+   * {@link SseOptions.channel} publishes. The per-process
+   * connection cap surfaces as a \`TOO_MANY_REQUESTS\` \`TRPCError\`.
+   *
+   * Off by default — most APIs don't expose live state to every
+   * client, and opening one is widening both the auth and cost
+   * surface.
+   */
+  readonly sse?: SseOptions;
 };
 
 /**
@@ -32562,6 +33745,35 @@ export function trpc<
       });
   }
 
+  if (options.sse) {
+    const sse_config = resolveSseConfig(options.sse);
+    const sse_counter = new SseConnectionCounter(sse_config.maxConnections);
+    const state_names = new Set<string>();
+    for (const action of Object.values(app.registry.actions)) {
+      state_names.add(action.name);
+    }
+    const sse_handlers: Record<string, unknown> = {};
+    for (const state_name of state_names) {
+      sse_handlers[state_name] = t.procedure
+        .input(z.object({ stream: z.string().min(1) }))
+        .subscription(({ input, signal }) =>
+          runSseSubscription(
+            sse_config.channel,
+            input.stream,
+            sse_counter,
+            signal,
+            () => {
+              throw new TRPCError({
+                code: "TOO_MANY_REQUESTS",
+                message: "max concurrent SSE subscriptions reached",
+              });
+            }
+          )
+        );
+    }
+    handlers.subscribe = t.router(sse_handlers as never) as never;
+  }
+
   // The runtime router IS structurally compatible with
   // \`GeneratedRouter<TApp>\` (one mutation per action key), but tRPC's
   // \`BuiltRouter\` carries an internal \`Unwrap<Ctx>\` that the d.ts
@@ -32616,6 +33828,350 @@ export {
   toApiError,
 } from "./errors.js";
 export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+export {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_MAX_CONNECTIONS,
+  resolveSseConfig,
+  runSseSubscription,
+  type SseAccounting,
+  type SseConfig,
+  SseConnectionCounter,
+  type SseOptions,
+  type SseSubscriptionFrame,
+} from "./sse-wiring.js";
+
+// === sse-wiring.ts ===
+import type { BroadcastChannel } from "../sse/broadcast.js";
+import type { BroadcastState } from "../sse/types.js";
+
+/**
+ * SSE wiring options shared by the auto-generated \`trpc\` and \`hono\`
+ * transports. When supplied, each transport emits one streaming
+ * subscription per registered state name, all reading from the same
+ * host-supplied {@link BroadcastChannel}.
+ *
+ * The host owns publication: every \`app.do(...)\` call site must
+ * forward the resulting snapshots to \`channel.publish(...)\` for
+ * subscribers to see updates. The framework deliberately doesn't
+ * auto-publish because the derived state usually needs app-specific
+ * overlays (presence, computed fields) that only the host can supply.
+ *
+ * Defaults are sized for typical business-app dashboards (dozens to
+ * hundreds of human viewers per process). Both numeric knobs are
+ * validated at transport-function construction; out-of-range values
+ * throw \`RangeError\` immediately so misconfiguration surfaces at
+ * startup instead of at first connection.
+ */
+export type SseOptions = {
+  /**
+   * The {@link BroadcastChannel} the generator's subscriptions hook
+   * into. Host owns its lifecycle; the generator does not construct
+   * one for you because the channel's \`<S>\` shape is app-specific and
+   * passing it in keeps the type chain typed end-to-end at the host.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  readonly channel: BroadcastChannel<any>;
+  /**
+   * Hard cap on concurrent open subscriptions per generator
+   * instance. The 501st simultaneous open returns \`503\` (Hono) or
+   * throws \`TOO_MANY_REQUESTS\` (tRPC) — never a silent stall.
+   *
+   * Default \`500\`. Validated range \`[1, 10_000]\`. Above 10k the
+   * framework refuses to construct: at that point the FD ceiling
+   * and per-connection memory force horizontal scaling regardless
+   * of tuning, so the right move is sticky LB + per-process cap,
+   * not a higher single-process limit.
+   */
+  readonly maxConnections?: number;
+  /**
+   * Keep-alive cadence in milliseconds. Most reverse proxies idle
+   * connections out after ~60 seconds; the default \`30_000\` stays
+   * comfortably under.
+   *
+   * Validated range \`[15_000, 300_000]\`. Under 15 s wastes
+   * bandwidth on a business workload; over 5 min risks proxy drops.
+   */
+  readonly heartbeatMs?: number;
+};
+
+/**
+ * Resolved SSE configuration after validation and default expansion.
+ * Internal — the resolved values are what every transport actually
+ * runs against.
+ *
+ * @internal
+ */
+export type SseConfig = {
+  readonly channel: BroadcastChannel<BroadcastState>;
+  readonly maxConnections: number;
+  readonly heartbeatMs: number;
+};
+
+/**
+ * Default cap on concurrent open subscriptions per generator
+ * instance. Sized for typical business-app dashboards (dozens to a
+ * few hundred viewers); high enough not to surprise small
+ * deployments, low enough not to mask a missing horizontal-scale
+ * strategy on big ones.
+ */
+export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
+
+/**
+ * Default keep-alive cadence (30 s). Sits comfortably under the
+ * 60 s idle timeout most reverse proxies impose.
+ */
+export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
+
+const MAX_CONNECTIONS_MIN = 1;
+const MAX_CONNECTIONS_MAX = 10_000;
+const HEARTBEAT_MS_MIN = 15_000;
+const HEARTBEAT_MS_MAX = 300_000;
+
+/**
+ * Validate and apply defaults to host-supplied {@link SseOptions}.
+ *
+ * Throws \`RangeError\` when either numeric knob is outside its
+ * documented range. Pure: same input → same output, no side
+ * effects, no I/O. Each transport calls this once at the start of
+ * \`hono(...)\` / \`trpc(...)\`.
+ */
+export function resolveSseConfig(options: SseOptions): SseConfig {
+  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
+  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
+  if (
+    !Number.isFinite(max_connections) ||
+    max_connections < MAX_CONNECTIONS_MIN ||
+    max_connections > MAX_CONNECTIONS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
+    );
+  }
+  if (
+    !Number.isFinite(heartbeat_ms) ||
+    heartbeat_ms < HEARTBEAT_MS_MIN ||
+    heartbeat_ms > HEARTBEAT_MS_MAX
+  ) {
+    throw new RangeError(
+      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
+    );
+  }
+  return {
+    channel: options.channel,
+    maxConnections: max_connections,
+    heartbeatMs: heartbeat_ms,
+  };
+}
+
+/**
+ * Per-generator concurrent-open counter. Constructed once inside
+ * \`hono(...)\` / \`trpc(...)\` and consulted at every subscription
+ * open: failure to acquire means the cap has been hit and the
+ * transport reports \`503\` / \`TOO_MANY_REQUESTS\` to the caller.
+ *
+ * The counter is intentionally process-local. SSE doesn't multiplex
+ * across processes; operators wanting more than \`maxConnections\`
+ * viewers run multiple processes behind a sticky load balancer.
+ */
+export class SseConnectionCounter {
+  public readonly limit: number;
+  private _open = 0;
+
+  constructor(limit: number) {
+    this.limit = limit;
+  }
+
+  /**
+   * Reserve one slot. Returns \`true\` when accepted (caller must
+   * eventually {@link release} the slot, even on error paths) or
+   * \`false\` when the cap is already reached.
+   */
+  acquire(): boolean {
+    if (this._open >= this.limit) return false;
+    this._open++;
+    return true;
+  }
+
+  /**
+   * Free a previously-{@link acquire}d slot. Always runs from a
+   * \`finally\` block in the transport's subscription handler so
+   * crashed handlers don't leak count.
+   */
+  release(): void {
+    if (this._open > 0) this._open--;
+  }
+
+  /** Currently-open count. Test/observability hook. */
+  get open(): number {
+    return this._open;
+  }
+}
+
+/**
+ * Frame yielded by the per-state SSE subscription generator. The
+ * initial cached state (when present) arrives as \`kind: "state"\`;
+ * every subsequent broadcast publication arrives as \`kind: "patch"\`
+ * with the channel's \`PatchMessage\` payload.
+ */
+export type SseSubscriptionFrame<S> =
+  | { readonly kind: "state"; readonly data: S }
+  | { readonly kind: "patch"; readonly data: unknown };
+
+/**
+ * Subscription accounting hook. Implementations have a chance to
+ * acquire a slot before the loop starts and to release it once the
+ * loop's \`finally\` block runs — used by the tRPC side to enforce
+ * \`maxConnections\` from inside the generator, where it can throw
+ * \`TRPCError\` cleanly. Hono enforces the cap outside the loop (so a
+ * full counter returns \`503\` *before* streamSSE writes headers), then
+ * passes \`undefined\` here.
+ */
+export type SseAccounting = {
+  acquire(): boolean;
+  release(): void;
+};
+
+/**
+ * The shared subscription loop both transports run. Optionally
+ * acquires one slot on the supplied {@link SseAccounting}, yields the
+ * cached state (when present), then forwards every channel
+ * publication as a \`kind: "patch"\` frame until either the consumer
+ * breaks (calling \`iter.return()\`) or the supplied abort signal fires.
+ *
+ * Exported as the testable seam — the Hono and tRPC sibling
+ * generators wrap this so the signal-driven cleanup and counter
+ * accounting live in one place.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+export async function* runSseSubscription<S extends { _v: number } = any>(
+  channel: BroadcastChannel<S>,
+  stream_id: string,
+  accounting: SseAccounting | undefined,
+  signal: AbortSignal | undefined,
+  on_cap_exceeded?: () => never
+): AsyncGenerator<SseSubscriptionFrame<S>> {
+  if (accounting && !accounting.acquire() && on_cap_exceeded) {
+    on_cap_exceeded();
+  }
+  const pending: unknown[] = [];
+  let resolve_wait: (() => void) | null = null;
+  const unsubscribe = channel.subscribe(stream_id, (msg) => {
+    pending.push(msg);
+    resolve_wait?.();
+  });
+  const on_abort = () => resolve_wait?.();
+  signal?.addEventListener("abort", on_abort);
+  try {
+    const cached = channel.get_state(stream_id);
+    if (cached !== undefined) {
+      yield { kind: "state", data: cached };
+    }
+    while (!signal?.aborted) {
+      if (pending.length === 0) {
+        await new Promise<void>((resolve) => {
+          resolve_wait = resolve;
+        });
+        if (signal?.aborted) break;
+      }
+      const msg = pending.shift();
+      yield { kind: "patch", data: msg };
+    }
+  } finally {
+    signal?.removeEventListener("abort", on_abort);
+    unsubscribe();
+    accounting?.release();
+  }
+}
+
+// === state-cache.ts ===
+import type { BroadcastState } from "./types.js";
+
+/**
+ * Generic LRU cache for aggregate state objects.
+ *
+ * Keyed by stream ID. Each entry stores the full state (with \`_v\` from the
+ * event store). Used as the "previous state" baseline for computing patches,
+ * and as the fast path for reconnects.
+ *
+ * The cache is shared between the broadcast hot path and read queries.
+ * Projections should maintain their own cache to avoid double-apply bugs.
+ */
+export class StateCache<S extends BroadcastState = BroadcastState> {
+  private cache = new Map<string, S>();
+  private maxSize: number;
+
+  constructor(maxSize = 50) {
+    this.maxSize = maxSize;
+  }
+
+  /** Get a cached state, promoting it to MRU position. */
+  get(key: string): S | undefined {
+    const s = this.cache.get(key);
+    if (s) {
+      this.cache.delete(key);
+      this.cache.set(key, s);
+    }
+    return s;
+  }
+
+  /** Set a cached state, evicting the LRU entry if at capacity. */
+  set(key: string, state: S): void {
+    this.cache.delete(key);
+    this.cache.set(key, state);
+    if (this.cache.size > this.maxSize) {
+      this.cache.delete(this.cache.keys().next().value!);
+    }
+  }
+
+  /** Remove a cached entry. */
+  delete(key: string): void {
+    this.cache.delete(key);
+  }
+
+  /** Check if a key exists in the cache. */
+  has(key: string): boolean {
+    return this.cache.has(key);
+  }
+
+  /** Current number of cached entries. */
+  get size(): number {
+    return this.cache.size;
+  }
+
+  /** Direct access to the underlying map (for iteration). */
+  entries(): IterableIterator<[string, S]> {
+    return this.cache.entries();
+  }
+}
+
+// === types.ts ===
+import type { DeepPartial } from "@rotorsoft/act-patch";
+
+/**
+ * Base constraint for state objects managed by the broadcast system.
+ * Apps extend this with their own domain state shape.
+ */
+export type BroadcastState = Record<string, unknown> & {
+  /** Event store stream version — set by the broadcast layer from snap.event.version */
+  _v: number;
+};
+
+/**
+ * SSE message: version-keyed domain patches.
+ * Keys are stringified version numbers, values are domain patches (deep partials).
+ * Multi-event commits produce multiple version-keyed entries.
+ */
+export type PatchMessage<S extends BroadcastState = BroadcastState> = Record<
+  number,
+  DeepPartial<S>
+>;
+
+/**
+ * Subscriber callback — receives version-keyed patch messages.
+ */
+export type Subscriber<S extends BroadcastState = BroadcastState> = (
+  msg: PatchMessage<S>
+) => void;
 "
 `;
 

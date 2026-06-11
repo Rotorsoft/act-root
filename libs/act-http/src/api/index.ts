@@ -42,3 +42,14 @@ export {
   toApiError,
 } from "./errors.js";
 export { type IdempotencyResult, withIdempotency } from "./idempotency.js";
+export {
+  DEFAULT_SSE_HEARTBEAT_MS,
+  DEFAULT_SSE_MAX_CONNECTIONS,
+  resolveSseConfig,
+  runSseSubscription,
+  type SseAccounting,
+  type SseConfig,
+  SseConnectionCounter,
+  type SseOptions,
+  type SseSubscriptionFrame,
+} from "./sse-wiring.js";
