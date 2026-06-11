@@ -1,3 +1,4 @@
+import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import type { BroadcastState } from "../sse/types.js";
 
@@ -79,44 +80,44 @@ export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
  */
 export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
 
-const MAX_CONNECTIONS_MIN = 1;
-const MAX_CONNECTIONS_MAX = 10_000;
-const HEARTBEAT_MS_MIN = 15_000;
-const HEARTBEAT_MS_MAX = 300_000;
+/**
+ * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
+ * ranges, and (eventual) integer constraints live in one place — same
+ * declarative-validation pattern the rest of the framework uses for
+ * configuration shapes.
+ *
+ * @internal
+ */
+const SseOptionsSchema = z.object({
+  maxConnections: z
+    .number()
+    .min(1)
+    .max(10_000)
+    .default(DEFAULT_SSE_MAX_CONNECTIONS),
+  heartbeatMs: z
+    .number()
+    .min(15_000)
+    .max(300_000)
+    .default(DEFAULT_SSE_HEARTBEAT_MS),
+});
 
 /**
  * Validate and apply defaults to host-supplied {@link SseOptions}.
  *
- * Throws `RangeError` when either numeric knob is outside its
- * documented range. Pure: same input → same output, no side
- * effects, no I/O. Each transport calls this once at the start of
- * `hono(...)` / `trpc(...)`.
+ * Out-of-range values throw at the call site — each transport calls
+ * this once at the start of `hono(...)` / `trpc(...)` so
+ * misconfiguration surfaces at construction, not at first
+ * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
-  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
-  if (
-    !Number.isFinite(max_connections) ||
-    max_connections < MAX_CONNECTIONS_MIN ||
-    max_connections > MAX_CONNECTIONS_MAX
-  ) {
-    throw new RangeError(
-      `sse.maxConnections must be in [${MAX_CONNECTIONS_MIN}, ${MAX_CONNECTIONS_MAX}], got ${max_connections}`
-    );
-  }
-  if (
-    !Number.isFinite(heartbeat_ms) ||
-    heartbeat_ms < HEARTBEAT_MS_MIN ||
-    heartbeat_ms > HEARTBEAT_MS_MAX
-  ) {
-    throw new RangeError(
-      `sse.heartbeatMs must be in [${HEARTBEAT_MS_MIN}, ${HEARTBEAT_MS_MAX}], got ${heartbeat_ms}`
-    );
-  }
+  const parsed = SseOptionsSchema.parse({
+    maxConnections: options.maxConnections,
+    heartbeatMs: options.heartbeatMs,
+  });
   return {
     channel: options.channel,
-    maxConnections: max_connections,
-    heartbeatMs: heartbeat_ms,
+    maxConnections: parsed.maxConnections,
+    heartbeatMs: parsed.heartbeatMs,
   };
 }
 

@@ -356,10 +356,16 @@ export function act<
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
-  // registry.deprecated_events. Populated on the first .build() call.
+  // registry.deprecated_events / registry.autoclose_policy. Populated
+  // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
   const _de = new Map<string, ReadonlySet<string>>();
+  const _ac = new Map<
+    string,
+    (stream: string, head: any, count: number) => boolean
+  >();
+  const _aa = new Map<string, (stream: string, head: any) => Promise<void>>();
   const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
@@ -367,6 +373,8 @@ export function act<
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
+    autoclose_policy: (state_name) => _ac.get(state_name) ?? null,
+    autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
@@ -599,6 +607,8 @@ export function act<
           }
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
+            if (state.autoclose) _ac.set(state.name, state.autoclose);
+            if (state.archive) _aa.set(state.name, state.archive);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const event_name of Object.keys(state.events)) {
               const fields = _sf.get(event_name);
@@ -666,6 +676,8 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  type AutocloseConfig,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -681,6 +693,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -765,6 +778,19 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the \`"settled"\` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+// Re-export the autoclose config surface (#837 / epic #802) so
+// operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
+// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
+// implementation lives in \`internal/autoclose-config.ts\` to keep
+// this orchestrator file focused on the \`Act\` class.
+export {
+  type AutocloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolveAutocloseConfig,
+} from "./internal/index.js";
 
 /**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
@@ -862,6 +888,48 @@ export type ActOptions<TLanes extends string = string> = {
    * lifecycle event so observability sidecars work).
    */
   readonly drain?: boolean;
+  /**
+   * Online close cycle cadence in ms (#837 / epic #802). The
+   * app-level autoclose controller ticks at this interval, iterates
+   * states with \`.autocloses(...)\` declared, and schedules
+   * truncate-and-seed for streams whose predicate returned \`true\`.
+   *
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
+   * \`[10_000, 3_600_000]\` at \`act().build()\`; out-of-range throws.
+   *
+   * Zero-cost when no state declares \`.autocloses(...)\` — the
+   * controller is never constructed in that case.
+   */
+  readonly autocloseCycleMs?: number;
+  /**
+   * Max number of streams the autoclose cycle considers per tick per
+   * state (#837). Bounds memory + truncate fan-out so a misconfigured
+   * predicate that matches "everything" can't take down the writer.
+   *
+   * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
+   * \`[1, 1024]\`. Above 1024, the builder throws — operators with
+   * genuine high-throughput needs opt out by passing a custom
+   * predicate that pre-filters.
+   */
+  readonly closeBatchSize?: number;
+  /**
+   * Microsecond yield delay between successive \`Store.truncate\`
+   * calls within one cycle tick (#837). Defaults to \`0\` (microtask
+   * yield only). SQLite operators set a positive value to let the
+   * writer lock release between rows; PG / InMemory adapters
+   * generally don't need it because they don't serialize writers
+   * globally.
+   *
+   * Validated \`[0, 1000]\`.
+   */
+  readonly closeYieldMs?: number;
+  /**
+   * Whether predicate exceptions should mark the stream as closed
+   * (#837). Default \`false\` — a thrown predicate is logged and the
+   * stream is skipped that cycle. Set \`true\` to close on error
+   * (defensive policy for "if I can't evaluate, assume terminal").
+   */
+  readonly closeOnError?: boolean;
 };
 
 export class Act<
@@ -905,9 +973,30 @@ export class Act<
     (() => void | Promise<void>) | undefined
   >;
   /** Public registry — kept as-is per the no-prefix-on-public convention. */
-  public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
+  public readonly registry: Registry<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    keyof TStateMap & string
+  >;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
+  /**
+   * Resolved autoclose configuration (#837 / epic #802). Frozen at
+   * \`act().build()\` via {@link resolveAutocloseConfig}.
+   *
+   * @internal
+   */
+  private readonly _autoclose_config: AutocloseConfig;
+  /**
+   * App-level autoclose controller. \`undefined\` when no state declares
+   * \`.autocloses(...)\` — the controller is never constructed, so
+   * \`start_correlations()\` / \`stop_correlations()\` skip the autoclose
+   * lifecycle and the orchestrator pays zero per-tick cost.
+   *
+   * @internal
+   */
+  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -1024,7 +1113,7 @@ export class Act<
    *   instance; later slices fan out one \`DrainController\` per lane.
    */
   constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
@@ -1077,6 +1166,9 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    // Validate autoclose knobs eagerly so out-of-range values throw
+    // at build time, not on the first cycle tick.
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -1166,6 +1258,35 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
+
+    // #837 — construct the autoclose controller only when at least one
+    // state declared \`.autocloses(...)\`. Zero-cost otherwise: the
+    // controller field stays \`undefined\` and \`start_correlations()\` /
+    // \`stop_correlations()\` skip the autoclose lifecycle entirely.
+    const states_with_policy = [...this._states.values()].filter(
+      (s) => s.autoclose
+    );
+    this._autoclose = states_with_policy.length
+      ? new AutocloseController({
+          // Internal cycle takes the loose \`(string) => …\` signature; the
+          // public \`registry.autoclose_policy\` narrows to
+          // \`keyof TStateMap & string\`. Thin lambdas bridge across the
+          // narrowing — runtime semantics are unchanged.
+          autoclose_policy: (name) =>
+            this.registry.autoclose_policy(name as keyof TStateMap & string),
+          autoclose_archiver: (name) =>
+            this.registry.autoclose_archiver(name as keyof TStateMap & string),
+          event_to_state: this._event_to_state,
+          reactive_events_size: this._reactive_events.size,
+          load: this._es.load,
+          tombstone: this._es.tombstone,
+          logger: this._logger,
+          config: this._autoclose_config,
+          correlator: this._correlator,
+          close_actor: { id: "$autoclose", name: "autoclose" },
+          on_closed: (result) => this.emit("closed", result),
+        })
+      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
@@ -1815,7 +1936,12 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    return this._correlate.start_polling(query, frequency, callback);
+    const started = this._correlate.start_polling(query, frequency, callback);
+    // #837 — start the autoclose ticker on the same lifecycle hook
+    // operators already call for the correlate worker. \`undefined\`
+    // when no state declares \`.autocloses(...)\` (zero-cost path).
+    this._autoclose?.start();
+    return started;
   }
 
   /**
@@ -1837,6 +1963,7 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    this._autoclose?.stop();
   }
 
   /**
@@ -2782,6 +2909,55 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
 };
 
 /**
+ * Predicate consulted by the online close cycle once per candidate
+ * stream of a state with \`.autocloses(...)\` declared. Returning \`true\`
+ * schedules the stream for atomic truncate-and-seed via
+ * {@link Store.truncate} on the next batch.
+ *
+ * The \`head\` argument is the latest committed (non-tombstone) event on
+ * the stream; predicates that gate on the last event name (e.g. the
+ * terminal-event policy from sub #839) read \`head.name\` directly and
+ * the type system autocompletes it to the state's event union.
+ * \`count\` is the stream's total event count.
+ *
+ * Predicates run in process per cycle tick; they MUST be pure and
+ * fast — slow predicates serialize behind the cycle's batch.
+ *
+ * @template TEvents Event schemas declared by the owning state via
+ *   \`.emits({...})\`. \`head.event.name\` autocompletes to
+ *   \`keyof TEvents\`.
+ */
+export type AutoclosePredicate<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>,
+  count: number
+) => boolean;
+
+/**
+ * Side-effect callback the online close cycle runs **before**
+ * truncating a stream that the state's \`.autocloses(...)\` predicate
+ * accepted. Hosts use it to write the stream's events somewhere
+ * durable (S3, cold storage, an analytics warehouse) before the
+ * tombstone lands. The cycle threads this into
+ * {@link CloseTarget.archive} so the existing close-cycle's
+ * archive-while-guarded invariant carries over: the stream is locked
+ * against new writes while the archiver runs, and a thrown archiver
+ * leaves the stream guarded but un-truncated (no data loss, the
+ * cycle retries the candidate next tick).
+ *
+ * State-level (one per state, last-write-wins). Hosts with per-stream
+ * archiving differences branch inside the function. Absent →
+ * truncate runs without an archive step (matches the explicit
+ * \`app.close({ stream })\` default).
+ *
+ * @template TEvents Event schemas declared by the owning state.
+ */
+export type AutocloseArchiver<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>
+) => Promise<void>;
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -2821,6 +2997,36 @@ export type State<
   // signature so users still get a type-checked predicate at the
   // call site.
   disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
+  /**
+   * Online close predicate set by \`.autocloses(predicate)\`. The
+   * orchestrator's autoclose cycle iterates this state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via {@link Store.truncate}.
+   * Absent → the state opts out of online close entirely (zero
+   * per-cycle cost).
+   *
+   * Bivariant method-shorthand for the same reason as \`disclose\` —
+   * keeps \`State<specific>\` assignable to \`State<any, any, any>\`. The
+   * \`.autocloses()\` builder method keeps the narrow signature.
+   */
+  autoclose?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>,
+    count: number
+  ): boolean;
+  /**
+   * Archiver set by \`.archives(fn)\`. The online close cycle threads
+   * this into {@link CloseTarget.archive} for every truncate it
+   * stages, so the existing close-cycle's archive-while-guarded
+   * invariant carries over to the autoclose path. Absent → the cycle
+   * truncates without an archive step. Bivariant method-shorthand
+   * for the same \`State<specific>\` → \`State<any, any, any>\` reason
+   * as \`disclose\` / \`autoclose\`.
+   */
+  archive?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>
+  ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -4053,6 +4259,455 @@ export type AuditFinding =
       event_id: number;
       reason: "future-created" | "out-of-order";
     };
+
+// === autoclose-config.ts ===
+/**
+ * @module autoclose-config
+ * @category Internal
+ *
+ * Defaults, Zod schema, and resolver for the autoclose knobs on
+ * {@link ActOptions} (#837 / epic #802). Split out of \`act.ts\` so the
+ * orchestrator file stays focused on the \`Act\` class and the
+ * autoclose surface lives with the cycle + controller that consume
+ * it. The validation pattern matches the rest of the framework —
+ * Zod schema with \`.min().max().default(...)\` per field — so the
+ * upcoming policy-factory subs (#838 retention, #839 terminal,
+ * #840 cardinality) can \`.extend(...)\` it for their own
+ * per-policy options without reinventing range checks.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { ActOptions } from "../act.js";
+
+/**
+ * Default {@link ActOptions.autocloseCycleMs}: 60 s. Sized for typical
+ * business-app close cadences (close-when-resolved on tickets,
+ * close-when-stale on sessions) where same-second response is not the
+ * goal. Operators with tighter requirements override; the floor is
+ * 10 s (any tighter is the wrong primitive).
+ */
+export const DEFAULT_AUTOCLOSE_CYCLE_MS = 60_000;
+
+/**
+ * Default {@link ActOptions.closeBatchSize}: 64. Bounds the
+ * \`Store.query_streams\` page size + the truncate fan-out per cycle
+ * tick so a "close everything" misconfiguration can't take down the
+ * writer.
+ */
+export const DEFAULT_CLOSE_BATCH_SIZE = 64;
+
+/**
+ * Default {@link ActOptions.closeYieldMs}: 0. The cycle yields a
+ * microtask between truncates by default; SQLite operators set a
+ * positive value to release the writer lock.
+ */
+export const DEFAULT_CLOSE_YIELD_MS = 0;
+
+/**
+ * Zod schema for the autoclose knobs on {@link ActOptions}. Same
+ * declarative-validation pattern the framework uses elsewhere
+ * (\`libs/act/src/config.ts\`, every event/action schema, every
+ * reaction-option shape). Defaults, ranges, and integer constraints
+ * live in one place — no parallel \`DEFAULT_*\` + \`*_MIN\` / \`*_MAX\`
+ * declarations to keep in sync. Out-of-range values throw \`ZodError\`
+ * at \`act().build()\` so misconfiguration surfaces at startup, not
+ * on the first cycle tick.
+ *
+ * @internal
+ */
+const AutocloseOptionsSchema = z.object({
+  autocloseCycleMs: z
+    .number()
+    .min(10_000)
+    .max(3_600_000)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+  closeBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024)
+    .default(DEFAULT_CLOSE_BATCH_SIZE),
+  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
+  closeOnError: z.boolean().default(false),
+});
+
+/**
+ * Resolved autoclose configuration after validation and default
+ * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
+ * fields follow the public-camelCase convention and mirror the
+ * \`ActOptions\` knob names directly — no per-resolver renaming layer.
+ */
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
+
+/**
+ * Validate and apply defaults for the autoclose knobs on
+ * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
+ * values throw \`ZodError\` at startup, not on the first cycle tick.
+ */
+export function resolveAutocloseConfig(
+  options: ActOptions | undefined
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
+    autocloseCycleMs: options?.autocloseCycleMs,
+    closeBatchSize: options?.closeBatchSize,
+    closeYieldMs: options?.closeYieldMs,
+    closeOnError: options?.closeOnError,
+  });
+}
+
+// === autoclose-cycle.ts ===
+/**
+ * @module autoclose-cycle
+ * @category Internal
+ *
+ * The online close-the-books cycle (#837 / epic #802). Paginates the
+ * store's streams, applies each state's \`.autocloses(predicate)\` to
+ * the matching candidates, then hands the eligible streams to the
+ * existing {@link run_close_cycle} so the tombstone-guard +
+ * archive-while-guarded + atomic-truncate invariants carry over from
+ * the explicit \`app.close(targets)\` path.
+ *
+ * Pure orchestration. The caller (the app-level controller in slice
+ * 3) owns the cadence (\`setInterval(...)\`), the lifecycle events
+ * (\`emit("closed", ...)\`), and the per-tick correlation id.
+ *
+ * Zero-cost when no state declares \`.autocloses(...)\` — the caller
+ * never invokes this function in that case (the controller isn't
+ * constructed).
+ *
+ * @internal
+ */
+
+import type { AutocloseConfig } from "../act.js";
+import { store, TOMBSTONE_EVENT } from "../ports.js";
+import type {
+  Actor,
+  CloseResult,
+  CloseTarget,
+  Correlator,
+  Logger,
+  State,
+  TruncateResult,
+} from "../types/index.js";
+import { run_close_cycle } from "./close-cycle.js";
+import { close_correlation } from "./correlator.js";
+import type { EsOps } from "./event-sourcing.js";
+
+/**
+ * Dependencies the autoclose cycle needs. Decoupled from \`Act\` so
+ * the cycle can be exercised from tests in isolation against an
+ * \`InMemoryStore\` without spinning a full Act.
+ *
+ * @internal
+ */
+export type AutocloseCycleDeps = {
+  /**
+   * Lookup of \`.autocloses(predicate)\` per state name. The cycle
+   * skips streams whose owning state returns \`null\` here, so opt-out
+   * states pay zero per-stream cost beyond the \`event_to_state\`
+   * lookup.
+   */
+  readonly autoclose_policy: (
+    state_name: string
+  ) => ((stream: string, head: any, count: number) => boolean) | null;
+  /**
+   * Lookup of \`.archives(fn)\` per state name. When present, the
+   * cycle threads it into the corresponding {@link CloseTarget.archive}
+   * so the existing close-cycle's archive-while-guarded invariant
+   * applies — a thrown archiver leaves the stream guarded but
+   * un-truncated, and the cycle re-evaluates the candidate next
+   * tick.
+   */
+  readonly autoclose_archiver: (
+    state_name: string
+  ) => ((stream: string, head: any) => Promise<void>) | null;
+  /** event-name → owning-state lookup (already computed at build). */
+  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
+  /** Reactive-event count, forwarded to {@link run_close_cycle}. */
+  readonly reactive_events_size: number;
+  /** \`EsOps.load\`, forwarded to {@link run_close_cycle}. */
+  readonly load: EsOps["load"];
+  /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
+  readonly tombstone: EsOps["tombstone"];
+  readonly logger: Logger;
+  readonly config: AutocloseConfig;
+  /**
+   * Correlation id for this tick. The caller computes it via the
+   * configured {@link Correlator}; every truncate the cycle stages
+   * shares this id so close-cycle commits land under one correlation
+   * key (matching the existing \`app.close(targets)\` behavior).
+   */
+  readonly correlation: string;
+};
+
+/**
+ * Aggregated result of one autoclose tick. The caller forwards
+ * \`close_result\` to the \`closed\` lifecycle event; \`inspected\` /
+ * \`evaluated\` / \`predicate_errors\` feed observability sidecars.
+ *
+ * @internal
+ */
+export type AutocloseCycleResult = {
+  /** Total streams the cycle paginated through this tick. */
+  readonly inspected: number;
+  /** Streams whose owning state had a policy and the predicate ran. */
+  readonly evaluated: number;
+  /** Predicate exceptions caught + classified per \`closeOnError\`. */
+  readonly predicate_errors: number;
+  /** Forwarded from {@link run_close_cycle} — truncated + skipped. */
+  readonly close_result: CloseResult;
+};
+
+/**
+ * Yield to the event loop for \`ms\` milliseconds (or one microtask
+ * tick when \`ms === 0\`). The autoclose cycle inserts this between
+ * truncate batches so SQLite operators can let the writer lock
+ * release between rows — PG / InMemory don't serialize writers
+ * globally and run with \`ms = 0\` (microtask yield only).
+ *
+ * @internal
+ */
+function yield_between_batches(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run one autoclose tick against the configured store. Returns
+ * after every stream has been paginated through and every eligible
+ * batch handed to {@link run_close_cycle}.
+ *
+ * The cycle never throws — predicate exceptions are caught and
+ * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
+ * whether they count as "close this stream"). Store errors during
+ * pagination propagate to the caller (the controller logs them and
+ * skips to the next tick).
+ *
+ * @internal
+ */
+export async function run_autoclose_cycle(
+  deps: AutocloseCycleDeps
+): Promise<AutocloseCycleResult> {
+  const s = store();
+  let inspected = 0;
+  let evaluated = 0;
+  let predicate_errors = 0;
+  const truncated: TruncateResult = new Map();
+  const skipped: string[] = [];
+
+  // \`query_stats\` returns every event-stream in one map (no cursor
+  // pagination — that's \`query_streams\` for subscription positions,
+  // not events). The cycle iterates the map, applies each state's
+  // predicate to the matching streams, and flushes truncate batches
+  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
+  // batches on adapters where the writer lock matters.
+  const stats = await s.query_stats(
+    {},
+    { count: true, exclude: [TOMBSTONE_EVENT] }
+  );
+
+  const flush_batch = async (candidates: CloseTarget[]) => {
+    if (candidates.length === 0) return;
+    const result = await run_close_cycle(candidates, {
+      reactive_events_size: deps.reactive_events_size,
+      event_to_state: deps.event_to_state,
+      load: deps.load,
+      tombstone: deps.tombstone,
+      logger: deps.logger,
+      correlation: deps.correlation,
+    });
+    for (const [stream, entry] of result.truncated) {
+      truncated.set(stream, entry);
+    }
+    for (const stream of result.skipped) skipped.push(stream);
+    await yield_between_batches(deps.config.closeYieldMs);
+  };
+
+  let candidates: CloseTarget[] = [];
+
+  for (const [stream, { head, count }] of stats) {
+    inspected += 1;
+    // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
+    // includes streams with at least one non-excluded event.
+    const owner = deps.event_to_state.get(head.name);
+    if (!owner) continue;
+    const predicate = deps.autoclose_policy(owner.name);
+    if (!predicate) continue;
+
+    let close = false;
+    try {
+      close = predicate(stream, head, count ?? 0);
+      evaluated += 1;
+    } catch (err) {
+      predicate_errors += 1;
+      deps.logger.error(
+        \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
+          err instanceof Error ? err.message : String(err)
+        }\`
+      );
+      close = deps.config.closeOnError;
+    }
+
+    if (!close) continue;
+
+    const archiver = deps.autoclose_archiver(owner.name);
+    const archive = archiver ? () => archiver(stream, head) : undefined;
+    candidates.push({ stream, archive });
+
+    if (candidates.length >= deps.config.closeBatchSize) {
+      await flush_batch(candidates);
+      candidates = [];
+    }
+  }
+
+  // Flush the trailing batch.
+  await flush_batch(candidates);
+
+  return {
+    inspected,
+    evaluated,
+    predicate_errors,
+    close_result: { truncated, skipped },
+  };
+}
+
+/**
+ * Dependencies the app-level autoclose controller needs. Same shape
+ * as {@link AutocloseCycleDeps} minus \`correlation\` (the controller
+ * computes one per tick from the supplied {@link Correlator}) and
+ * plus the lifecycle-event sink (\`on_closed\`) and the actor sentinel
+ * for the correlator (\`close_actor\`).
+ *
+ * @internal
+ */
+export type AutocloseControllerDeps = Omit<
+  AutocloseCycleDeps,
+  "correlation"
+> & {
+  /**
+   * Correlator the controller invokes per tick to stamp the cycle's
+   * truncate commits. Reuses the orchestrator's configured
+   * correlator so close commits share the app's id scheme — same as
+   * the existing \`app.close(targets)\` path.
+   */
+  readonly correlator: Correlator;
+  /** Sentinel actor for the close correlation (matches \`Act.close\`). */
+  readonly close_actor: Actor;
+  /**
+   * Fan-out for the per-tick result. The controller calls this once
+   * per tick that closes at least one stream, with the cycle's
+   * {@link CloseResult}. The Act orchestrator wires this to
+   * \`emit("closed", result)\`.
+   */
+  readonly on_closed: (result: CloseResult) => void;
+};
+
+/**
+ * App-level autoclose controller. Owns the ticker (\`setInterval\`),
+ * the per-tick reentrancy guard (a slow tick doesn't pile on the
+ * next interval), and the lifecycle-event fan-out. Tests invoke
+ * {@link run_once} directly; the orchestrator's
+ * \`start_correlations()\` / \`stop_correlations()\` lifecycle starts +
+ * stops the ticker.
+ *
+ * @internal
+ */
+export class AutocloseController {
+  public readonly deps: AutocloseControllerDeps;
+  private _timer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Reentrancy guard. The interval fires the next tick on cadence
+   * regardless of how long the previous one took; this flag drops
+   * overlapping ticks so the cycle stays sequential per controller.
+   */
+  private _running = false;
+
+  constructor(deps: AutocloseControllerDeps) {
+    this.deps = deps;
+  }
+
+  /**
+   * Start the cycle ticker. Returns \`false\` if already running so
+   * accidental double-start doesn't stack timers (matches
+   * \`_correlate.start_polling\` semantics).
+   */
+  start(): boolean {
+    if (this._timer) return false;
+    // Fire-and-forget interval — the callback wraps \`run_once\` in a
+    // try/catch so a thrown cycle doesn't kill the timer.
+    this._timer = setInterval(() => {
+      this.run_once().catch((err) => {
+        this.deps.logger.error(
+          \`Autoclose cycle errored: \${
+            err instanceof Error ? err.message : String(err)
+          }\`
+        );
+      });
+    }, this.deps.config.autocloseCycleMs);
+    // Don't let the interval keep the process alive — Node's
+    // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
+    // targets Node ≥22, so the runtime guard is unnecessary).
+    this._timer.unref();
+    return true;
+  }
+
+  /**
+   * Stop the cycle ticker. Idempotent.
+   */
+  stop(): void {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = undefined;
+    }
+  }
+
+  /**
+   * Whether the ticker is currently running.
+   */
+  get is_running(): boolean {
+    return this._timer !== undefined;
+  }
+
+  /**
+   * Run one cycle synchronously. The controller's interval callback
+   * delegates here; tests can invoke it directly to deterministically
+   * exercise the cycle without spinning real timers.
+   *
+   * Overlapping invocations short-circuit: if a previous tick is
+   * still running, this one drops and returns \`null\`. The orchestrator
+   * never sees a queue of pending ticks regardless of how slow the
+   * predicate / archive / truncate are.
+   */
+  async run_once(): Promise<AutocloseCycleResult | null> {
+    if (this._running) return null;
+    this._running = true;
+    try {
+      const correlation = close_correlation(
+        this.deps.correlator,
+        this.deps.close_actor
+      );
+      const result = await run_autoclose_cycle({
+        autoclose_policy: this.deps.autoclose_policy,
+        autoclose_archiver: this.deps.autoclose_archiver,
+        event_to_state: this.deps.event_to_state,
+        reactive_events_size: this.deps.reactive_events_size,
+        load: this.deps.load,
+        tombstone: this.deps.tombstone,
+        logger: this.deps.logger,
+        config: this.deps.config,
+        correlation,
+      });
+      if (result.close_result.truncated.size > 0) {
+        this.deps.on_closed(result.close_result);
+      }
+      return result;
+    } finally {
+      this._running = false;
+    }
+  }
+}
 
 // === backoff.ts ===
 /**
@@ -8398,6 +9053,20 @@ export * from "./utils.js";
  */
 
 export { type AuditDeps, audit } from "./audit.js";
+export {
+  type AutocloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolveAutocloseConfig,
+} from "./autoclose-config.js";
+export {
+  AutocloseController,
+  type AutocloseControllerDeps,
+  type AutocloseCycleDeps,
+  type AutocloseCycleResult,
+  run_autoclose_cycle,
+} from "./autoclose-cycle.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -11238,6 +11907,11 @@ export type SchemaRegister<TSchemaReg> = {
  * @template TSchemaReg - State schemas.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
+ * @template TStateNames - Union of registered state name literals. Threaded
+ *   by \`Act\` from the builder's \`TStateMap\` so the per-state lookup
+ *   methods narrow \`state_name\` to the actual set of registered states
+ *   instead of accepting any \`string\`. Defaults to \`string\` so loose
+ *   references like \`Registry<any, any, any>\` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
@@ -11262,21 +11936,52 @@ export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
+  TStateNames extends string = string,
 > = {
   readonly actions: {
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   readonly disclosure_predicate: (
-    stateName: string
+    state_name: TStateNames
   ) =>
     | ((
         event: Committed<TEvents, keyof TEvents & string>,
         actor: Actor
       ) => boolean)
     | null;
-  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
+  readonly deprecated_events: (state_name: TStateNames) => ReadonlySet<string>;
+  /**
+   * Lookup of the \`.autocloses(predicate)\` declaration per state name.
+   * Returns \`null\` when the state opted out of online close — the
+   * orchestrator's autoclose cycle skips states with a \`null\` policy
+   * so the per-cycle cost is paid only by opt-in states.
+   */
+  readonly autoclose_policy: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>,
+        count: number
+      ) => boolean)
+    | null;
+  /**
+   * Lookup of the \`.archives(fn)\` declaration per state name. Returns
+   * \`null\` when the state didn't declare an archiver — the cycle
+   * truncates without an archive step, matching the default behavior
+   * of explicit \`app.close({ stream })\` calls. Threaded into
+   * \`CloseTarget.archive\` only when present.
+   */
+  readonly autoclose_archiver: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>
+      ) => Promise<void>)
+    | null;
 };
 
 /**
@@ -12113,6 +12818,8 @@ import type {
   ActionHandler,
   ActionOptions,
   Actor,
+  AutocloseArchiver,
+  AutoclosePredicate,
   Committed,
   GivenHandlers,
   Invariant,
@@ -12511,6 +13218,97 @@ export type ActionBuilder<
     ) => boolean
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
+   * Declares the online close predicate for this state. The
+   * orchestrator's autoclose cycle iterates the state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via \`Store.truncate\` on the
+   * next batch.
+   *
+   * One predicate per state. A second \`.autocloses(...)\` call replaces
+   * the first (same shape as \`.snap\` / \`.discloses\` — state-level, not
+   * per-event). Absent → the state opts out of online close entirely;
+   * the cycle skips it and pays zero per-tick cost for it.
+   *
+   * The predicate receives \`head: Committed<TEvents, ...>\` so reading
+   * \`head.event.name\` autocompletes to the state's declared event
+   * union — exactly the signature the policy factories from sub
+   * #839 (terminal-event), #838 (retention), and #840 (cardinality)
+   * produce.
+   *
+   * Custom policies that don't fit the three factories drop in as
+   * inline predicates — the factories return the same shape, so
+   * mixing is friction-free.
+   *
+   * @param predicate \`(stream, head, count) => boolean\`. \`true\`
+   *   schedules the stream for the next truncate batch.
+   * @returns The ActionBuilder for chaining.
+   *
+   * @example Terminal-event close (a Ticket closes when it's resolved).
+   * \`\`\`typescript
+   * state({ Ticket: ticketSchema })
+   *   .init(() => defaults)
+   *   .emits({ TicketOpened, TicketResolved })
+   *   // ...
+   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   * \`\`\`
+   *
+   * @example Retention-window close (a Session closes when it's older
+   *   than 24h).
+   * \`\`\`typescript
+   * .autocloses((_stream, head) =>
+   *   Date.now() - head.created.getTime() > 24 * 60 * 60 * 1000)
+   * \`\`\`
+   *
+   * @example Cardinality-bound close (an audit log rotates after 10k
+   *   events).
+   * \`\`\`typescript
+   * .autocloses((_stream, _head, count) => count >= 10_000)
+   * \`\`\`
+   */
+  autocloses: (
+    predicate: AutoclosePredicate<TEvents>
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  /**
+   * Declares the archiver the online close cycle runs **before**
+   * truncating a stream this state's \`.autocloses(...)\` predicate
+   * accepted. Hosts use it to write events to durable storage (S3,
+   * an analytics warehouse, cold tier) before the tombstone lands,
+   * so the truncate doesn't lose history that the operator still
+   * needs.
+   *
+   * Threads into \`CloseTarget.archive\` via the same plumbing
+   * \`app.close({ stream, archive })\` already uses — the cycle holds
+   * the stream's guard while the archiver runs, and a thrown
+   * archiver leaves the stream guarded but un-truncated. No partial
+   * truncate state, no data loss; the cycle retries the candidate
+   * on the next tick.
+   *
+   * One archiver per state. A second \`.archives(...)\` call replaces
+   * the first (same shape as \`.snap\` / \`.discloses\` /
+   * \`.autocloses\`). Absent → the cycle truncates without an archive
+   * step.
+   *
+   * @param archive \`(stream, head) => Promise<void>\`. Runs while
+   *   the stream is locked against new writes; the truncate runs
+   *   immediately after a successful resolve.
+   * @returns The ActionBuilder for chaining.
+   *
+   * @example Archive to S3 before truncate.
+   * \`\`\`typescript
+   * state({ Ticket: ticketSchema })
+   *   .emits({ TicketOpened, TicketResolved })
+   *   // ...
+   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   *   .archives(async (stream) => {
+   *     const events = await loadEvents(stream);
+   *     await s3.upload(\`tickets/\${stream}.jsonl\`, events);
+   *   })
+   * \`\`\`
+   */
+  archives: (
+    archive: AutocloseArchiver<TEvents>
+  ) => ActionBuilder<TState, TEvents, TActions, TName>;
+  /**
    * Finalizes and builds the state definition.
    *
    * Call this method after defining all actions, invariants, and patches to create
@@ -12798,6 +13596,29 @@ function action_builder<
       // Replace on every call — matches snap's state-level semantics. Operators
       // who need per-event differences branch inside the predicate.
       internal.disclose = disclose;
+      return builder;
+    },
+
+    autocloses(predicate: AutoclosePredicate<TEvents>) {
+      if (typeof predicate !== "function") {
+        throw new Error(
+          ".autocloses(predicate) requires a function; got " + typeof predicate
+        );
+      }
+      // Replace on every call — matches snap / discloses state-level
+      // semantics. Operators with multi-condition policies AND/OR
+      // inside one predicate.
+      internal.autoclose = predicate;
+      return builder;
+    },
+
+    archives(archive: AutocloseArchiver<TEvents>) {
+      if (typeof archive !== "function") {
+        throw new Error(
+          ".archives(archive) requires a function; got " + typeof archive
+        );
+      }
+      internal.archive = archive;
       return builder;
     },
 
@@ -13304,6 +14125,8 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  type AutocloseConfig,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -13319,6 +14142,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -13403,6 +14227,19 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the \`"settled"\` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+// Re-export the autoclose config surface (#837 / epic #802) so
+// operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
+// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
+// implementation lives in \`internal/autoclose-config.ts\` to keep
+// this orchestrator file focused on the \`Act\` class.
+export {
+  type AutocloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolveAutocloseConfig,
+} from "./internal/index.js";
 
 /**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
@@ -13500,6 +14337,48 @@ export type ActOptions<TLanes extends string = string> = {
    * lifecycle event so observability sidecars work).
    */
   readonly drain?: boolean;
+  /**
+   * Online close cycle cadence in ms (#837 / epic #802). The
+   * app-level autoclose controller ticks at this interval, iterates
+   * states with \`.autocloses(...)\` declared, and schedules
+   * truncate-and-seed for streams whose predicate returned \`true\`.
+   *
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
+   * \`[10_000, 3_600_000]\` at \`act().build()\`; out-of-range throws.
+   *
+   * Zero-cost when no state declares \`.autocloses(...)\` — the
+   * controller is never constructed in that case.
+   */
+  readonly autocloseCycleMs?: number;
+  /**
+   * Max number of streams the autoclose cycle considers per tick per
+   * state (#837). Bounds memory + truncate fan-out so a misconfigured
+   * predicate that matches "everything" can't take down the writer.
+   *
+   * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
+   * \`[1, 1024]\`. Above 1024, the builder throws — operators with
+   * genuine high-throughput needs opt out by passing a custom
+   * predicate that pre-filters.
+   */
+  readonly closeBatchSize?: number;
+  /**
+   * Microsecond yield delay between successive \`Store.truncate\`
+   * calls within one cycle tick (#837). Defaults to \`0\` (microtask
+   * yield only). SQLite operators set a positive value to let the
+   * writer lock release between rows; PG / InMemory adapters
+   * generally don't need it because they don't serialize writers
+   * globally.
+   *
+   * Validated \`[0, 1000]\`.
+   */
+  readonly closeYieldMs?: number;
+  /**
+   * Whether predicate exceptions should mark the stream as closed
+   * (#837). Default \`false\` — a thrown predicate is logged and the
+   * stream is skipped that cycle. Set \`true\` to close on error
+   * (defensive policy for "if I can't evaluate, assume terminal").
+   */
+  readonly closeOnError?: boolean;
 };
 
 export class Act<
@@ -13543,9 +14422,30 @@ export class Act<
     (() => void | Promise<void>) | undefined
   >;
   /** Public registry — kept as-is per the no-prefix-on-public convention. */
-  public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
+  public readonly registry: Registry<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    keyof TStateMap & string
+  >;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
+  /**
+   * Resolved autoclose configuration (#837 / epic #802). Frozen at
+   * \`act().build()\` via {@link resolveAutocloseConfig}.
+   *
+   * @internal
+   */
+  private readonly _autoclose_config: AutocloseConfig;
+  /**
+   * App-level autoclose controller. \`undefined\` when no state declares
+   * \`.autocloses(...)\` — the controller is never constructed, so
+   * \`start_correlations()\` / \`stop_correlations()\` skip the autoclose
+   * lifecycle and the orchestrator pays zero per-tick cost.
+   *
+   * @internal
+   */
+  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -13662,7 +14562,7 @@ export class Act<
    *   instance; later slices fan out one \`DrainController\` per lane.
    */
   constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
@@ -13715,6 +14615,9 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    // Validate autoclose knobs eagerly so out-of-range values throw
+    // at build time, not on the first cycle tick.
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -13804,6 +14707,35 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
+
+    // #837 — construct the autoclose controller only when at least one
+    // state declared \`.autocloses(...)\`. Zero-cost otherwise: the
+    // controller field stays \`undefined\` and \`start_correlations()\` /
+    // \`stop_correlations()\` skip the autoclose lifecycle entirely.
+    const states_with_policy = [...this._states.values()].filter(
+      (s) => s.autoclose
+    );
+    this._autoclose = states_with_policy.length
+      ? new AutocloseController({
+          // Internal cycle takes the loose \`(string) => …\` signature; the
+          // public \`registry.autoclose_policy\` narrows to
+          // \`keyof TStateMap & string\`. Thin lambdas bridge across the
+          // narrowing — runtime semantics are unchanged.
+          autoclose_policy: (name) =>
+            this.registry.autoclose_policy(name as keyof TStateMap & string),
+          autoclose_archiver: (name) =>
+            this.registry.autoclose_archiver(name as keyof TStateMap & string),
+          event_to_state: this._event_to_state,
+          reactive_events_size: this._reactive_events.size,
+          load: this._es.load,
+          tombstone: this._es.tombstone,
+          logger: this._logger,
+          config: this._autoclose_config,
+          correlator: this._correlator,
+          close_actor: { id: "$autoclose", name: "autoclose" },
+          on_closed: (result) => this.emit("closed", result),
+        })
+      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
@@ -14453,7 +15385,12 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    return this._correlate.start_polling(query, frequency, callback);
+    const started = this._correlate.start_polling(query, frequency, callback);
+    // #837 — start the autoclose ticker on the same lifecycle hook
+    // operators already call for the correlate worker. \`undefined\`
+    // when no state declares \`.autocloses(...)\` (zero-cost path).
+    this._autoclose?.start();
+    return started;
   }
 
   /**
@@ -14475,6 +15412,7 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    this._autoclose?.stop();
   }
 
   /**
@@ -15420,6 +16358,55 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
 };
 
 /**
+ * Predicate consulted by the online close cycle once per candidate
+ * stream of a state with \`.autocloses(...)\` declared. Returning \`true\`
+ * schedules the stream for atomic truncate-and-seed via
+ * {@link Store.truncate} on the next batch.
+ *
+ * The \`head\` argument is the latest committed (non-tombstone) event on
+ * the stream; predicates that gate on the last event name (e.g. the
+ * terminal-event policy from sub #839) read \`head.name\` directly and
+ * the type system autocompletes it to the state's event union.
+ * \`count\` is the stream's total event count.
+ *
+ * Predicates run in process per cycle tick; they MUST be pure and
+ * fast — slow predicates serialize behind the cycle's batch.
+ *
+ * @template TEvents Event schemas declared by the owning state via
+ *   \`.emits({...})\`. \`head.event.name\` autocompletes to
+ *   \`keyof TEvents\`.
+ */
+export type AutoclosePredicate<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>,
+  count: number
+) => boolean;
+
+/**
+ * Side-effect callback the online close cycle runs **before**
+ * truncating a stream that the state's \`.autocloses(...)\` predicate
+ * accepted. Hosts use it to write the stream's events somewhere
+ * durable (S3, cold storage, an analytics warehouse) before the
+ * tombstone lands. The cycle threads this into
+ * {@link CloseTarget.archive} so the existing close-cycle's
+ * archive-while-guarded invariant carries over: the stream is locked
+ * against new writes while the archiver runs, and a thrown archiver
+ * leaves the stream guarded but un-truncated (no data loss, the
+ * cycle retries the candidate next tick).
+ *
+ * State-level (one per state, last-write-wins). Hosts with per-stream
+ * archiving differences branch inside the function. Absent →
+ * truncate runs without an archive step (matches the explicit
+ * \`app.close({ stream })\` default).
+ *
+ * @template TEvents Event schemas declared by the owning state.
+ */
+export type AutocloseArchiver<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>
+) => Promise<void>;
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -15459,6 +16446,36 @@ export type State<
   // signature so users still get a type-checked predicate at the
   // call site.
   disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
+  /**
+   * Online close predicate set by \`.autocloses(predicate)\`. The
+   * orchestrator's autoclose cycle iterates this state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via {@link Store.truncate}.
+   * Absent → the state opts out of online close entirely (zero
+   * per-cycle cost).
+   *
+   * Bivariant method-shorthand for the same reason as \`disclose\` —
+   * keeps \`State<specific>\` assignable to \`State<any, any, any>\`. The
+   * \`.autocloses()\` builder method keeps the narrow signature.
+   */
+  autoclose?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>,
+    count: number
+  ): boolean;
+  /**
+   * Archiver set by \`.archives(fn)\`. The online close cycle threads
+   * this into {@link CloseTarget.archive} for every truncate it
+   * stages, so the existing close-cycle's archive-while-guarded
+   * invariant carries over to the autoclose path. Absent → the cycle
+   * truncates without an archive step. Bivariant method-shorthand
+   * for the same \`State<specific>\` → \`State<any, any, any>\` reason
+   * as \`disclose\` / \`autoclose\`.
+   */
+  archive?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>
+  ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -16691,6 +17708,455 @@ export type AuditFinding =
       event_id: number;
       reason: "future-created" | "out-of-order";
     };
+
+// === autoclose-config.ts ===
+/**
+ * @module autoclose-config
+ * @category Internal
+ *
+ * Defaults, Zod schema, and resolver for the autoclose knobs on
+ * {@link ActOptions} (#837 / epic #802). Split out of \`act.ts\` so the
+ * orchestrator file stays focused on the \`Act\` class and the
+ * autoclose surface lives with the cycle + controller that consume
+ * it. The validation pattern matches the rest of the framework —
+ * Zod schema with \`.min().max().default(...)\` per field — so the
+ * upcoming policy-factory subs (#838 retention, #839 terminal,
+ * #840 cardinality) can \`.extend(...)\` it for their own
+ * per-policy options without reinventing range checks.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { ActOptions } from "../act.js";
+
+/**
+ * Default {@link ActOptions.autocloseCycleMs}: 60 s. Sized for typical
+ * business-app close cadences (close-when-resolved on tickets,
+ * close-when-stale on sessions) where same-second response is not the
+ * goal. Operators with tighter requirements override; the floor is
+ * 10 s (any tighter is the wrong primitive).
+ */
+export const DEFAULT_AUTOCLOSE_CYCLE_MS = 60_000;
+
+/**
+ * Default {@link ActOptions.closeBatchSize}: 64. Bounds the
+ * \`Store.query_streams\` page size + the truncate fan-out per cycle
+ * tick so a "close everything" misconfiguration can't take down the
+ * writer.
+ */
+export const DEFAULT_CLOSE_BATCH_SIZE = 64;
+
+/**
+ * Default {@link ActOptions.closeYieldMs}: 0. The cycle yields a
+ * microtask between truncates by default; SQLite operators set a
+ * positive value to release the writer lock.
+ */
+export const DEFAULT_CLOSE_YIELD_MS = 0;
+
+/**
+ * Zod schema for the autoclose knobs on {@link ActOptions}. Same
+ * declarative-validation pattern the framework uses elsewhere
+ * (\`libs/act/src/config.ts\`, every event/action schema, every
+ * reaction-option shape). Defaults, ranges, and integer constraints
+ * live in one place — no parallel \`DEFAULT_*\` + \`*_MIN\` / \`*_MAX\`
+ * declarations to keep in sync. Out-of-range values throw \`ZodError\`
+ * at \`act().build()\` so misconfiguration surfaces at startup, not
+ * on the first cycle tick.
+ *
+ * @internal
+ */
+const AutocloseOptionsSchema = z.object({
+  autocloseCycleMs: z
+    .number()
+    .min(10_000)
+    .max(3_600_000)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+  closeBatchSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(1024)
+    .default(DEFAULT_CLOSE_BATCH_SIZE),
+  closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
+  closeOnError: z.boolean().default(false),
+});
+
+/**
+ * Resolved autoclose configuration after validation and default
+ * expansion. Reachable through the public root (\`@rotorsoft/act\`) so
+ * fields follow the public-camelCase convention and mirror the
+ * \`ActOptions\` knob names directly — no per-resolver renaming layer.
+ */
+export type AutocloseConfig = z.infer<typeof AutocloseOptionsSchema>;
+
+/**
+ * Validate and apply defaults for the autoclose knobs on
+ * {@link ActOptions}. Called from \`act().build()\`. Out-of-range
+ * values throw \`ZodError\` at startup, not on the first cycle tick.
+ */
+export function resolveAutocloseConfig(
+  options: ActOptions | undefined
+): AutocloseConfig {
+  return AutocloseOptionsSchema.parse({
+    autocloseCycleMs: options?.autocloseCycleMs,
+    closeBatchSize: options?.closeBatchSize,
+    closeYieldMs: options?.closeYieldMs,
+    closeOnError: options?.closeOnError,
+  });
+}
+
+// === autoclose-cycle.ts ===
+/**
+ * @module autoclose-cycle
+ * @category Internal
+ *
+ * The online close-the-books cycle (#837 / epic #802). Paginates the
+ * store's streams, applies each state's \`.autocloses(predicate)\` to
+ * the matching candidates, then hands the eligible streams to the
+ * existing {@link run_close_cycle} so the tombstone-guard +
+ * archive-while-guarded + atomic-truncate invariants carry over from
+ * the explicit \`app.close(targets)\` path.
+ *
+ * Pure orchestration. The caller (the app-level controller in slice
+ * 3) owns the cadence (\`setInterval(...)\`), the lifecycle events
+ * (\`emit("closed", ...)\`), and the per-tick correlation id.
+ *
+ * Zero-cost when no state declares \`.autocloses(...)\` — the caller
+ * never invokes this function in that case (the controller isn't
+ * constructed).
+ *
+ * @internal
+ */
+
+import type { AutocloseConfig } from "../act.js";
+import { store, TOMBSTONE_EVENT } from "../ports.js";
+import type {
+  Actor,
+  CloseResult,
+  CloseTarget,
+  Correlator,
+  Logger,
+  State,
+  TruncateResult,
+} from "../types/index.js";
+import { run_close_cycle } from "./close-cycle.js";
+import { close_correlation } from "./correlator.js";
+import type { EsOps } from "./event-sourcing.js";
+
+/**
+ * Dependencies the autoclose cycle needs. Decoupled from \`Act\` so
+ * the cycle can be exercised from tests in isolation against an
+ * \`InMemoryStore\` without spinning a full Act.
+ *
+ * @internal
+ */
+export type AutocloseCycleDeps = {
+  /**
+   * Lookup of \`.autocloses(predicate)\` per state name. The cycle
+   * skips streams whose owning state returns \`null\` here, so opt-out
+   * states pay zero per-stream cost beyond the \`event_to_state\`
+   * lookup.
+   */
+  readonly autoclose_policy: (
+    state_name: string
+  ) => ((stream: string, head: any, count: number) => boolean) | null;
+  /**
+   * Lookup of \`.archives(fn)\` per state name. When present, the
+   * cycle threads it into the corresponding {@link CloseTarget.archive}
+   * so the existing close-cycle's archive-while-guarded invariant
+   * applies — a thrown archiver leaves the stream guarded but
+   * un-truncated, and the cycle re-evaluates the candidate next
+   * tick.
+   */
+  readonly autoclose_archiver: (
+    state_name: string
+  ) => ((stream: string, head: any) => Promise<void>) | null;
+  /** event-name → owning-state lookup (already computed at build). */
+  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
+  /** Reactive-event count, forwarded to {@link run_close_cycle}. */
+  readonly reactive_events_size: number;
+  /** \`EsOps.load\`, forwarded to {@link run_close_cycle}. */
+  readonly load: EsOps["load"];
+  /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
+  readonly tombstone: EsOps["tombstone"];
+  readonly logger: Logger;
+  readonly config: AutocloseConfig;
+  /**
+   * Correlation id for this tick. The caller computes it via the
+   * configured {@link Correlator}; every truncate the cycle stages
+   * shares this id so close-cycle commits land under one correlation
+   * key (matching the existing \`app.close(targets)\` behavior).
+   */
+  readonly correlation: string;
+};
+
+/**
+ * Aggregated result of one autoclose tick. The caller forwards
+ * \`close_result\` to the \`closed\` lifecycle event; \`inspected\` /
+ * \`evaluated\` / \`predicate_errors\` feed observability sidecars.
+ *
+ * @internal
+ */
+export type AutocloseCycleResult = {
+  /** Total streams the cycle paginated through this tick. */
+  readonly inspected: number;
+  /** Streams whose owning state had a policy and the predicate ran. */
+  readonly evaluated: number;
+  /** Predicate exceptions caught + classified per \`closeOnError\`. */
+  readonly predicate_errors: number;
+  /** Forwarded from {@link run_close_cycle} — truncated + skipped. */
+  readonly close_result: CloseResult;
+};
+
+/**
+ * Yield to the event loop for \`ms\` milliseconds (or one microtask
+ * tick when \`ms === 0\`). The autoclose cycle inserts this between
+ * truncate batches so SQLite operators can let the writer lock
+ * release between rows — PG / InMemory don't serialize writers
+ * globally and run with \`ms = 0\` (microtask yield only).
+ *
+ * @internal
+ */
+function yield_between_batches(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Run one autoclose tick against the configured store. Returns
+ * after every stream has been paginated through and every eligible
+ * batch handed to {@link run_close_cycle}.
+ *
+ * The cycle never throws — predicate exceptions are caught and
+ * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
+ * whether they count as "close this stream"). Store errors during
+ * pagination propagate to the caller (the controller logs them and
+ * skips to the next tick).
+ *
+ * @internal
+ */
+export async function run_autoclose_cycle(
+  deps: AutocloseCycleDeps
+): Promise<AutocloseCycleResult> {
+  const s = store();
+  let inspected = 0;
+  let evaluated = 0;
+  let predicate_errors = 0;
+  const truncated: TruncateResult = new Map();
+  const skipped: string[] = [];
+
+  // \`query_stats\` returns every event-stream in one map (no cursor
+  // pagination — that's \`query_streams\` for subscription positions,
+  // not events). The cycle iterates the map, applies each state's
+  // predicate to the matching streams, and flushes truncate batches
+  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
+  // batches on adapters where the writer lock matters.
+  const stats = await s.query_stats(
+    {},
+    { count: true, exclude: [TOMBSTONE_EVENT] }
+  );
+
+  const flush_batch = async (candidates: CloseTarget[]) => {
+    if (candidates.length === 0) return;
+    const result = await run_close_cycle(candidates, {
+      reactive_events_size: deps.reactive_events_size,
+      event_to_state: deps.event_to_state,
+      load: deps.load,
+      tombstone: deps.tombstone,
+      logger: deps.logger,
+      correlation: deps.correlation,
+    });
+    for (const [stream, entry] of result.truncated) {
+      truncated.set(stream, entry);
+    }
+    for (const stream of result.skipped) skipped.push(stream);
+    await yield_between_batches(deps.config.closeYieldMs);
+  };
+
+  let candidates: CloseTarget[] = [];
+
+  for (const [stream, { head, count }] of stats) {
+    inspected += 1;
+    // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
+    // includes streams with at least one non-excluded event.
+    const owner = deps.event_to_state.get(head.name);
+    if (!owner) continue;
+    const predicate = deps.autoclose_policy(owner.name);
+    if (!predicate) continue;
+
+    let close = false;
+    try {
+      close = predicate(stream, head, count ?? 0);
+      evaluated += 1;
+    } catch (err) {
+      predicate_errors += 1;
+      deps.logger.error(
+        \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
+          err instanceof Error ? err.message : String(err)
+        }\`
+      );
+      close = deps.config.closeOnError;
+    }
+
+    if (!close) continue;
+
+    const archiver = deps.autoclose_archiver(owner.name);
+    const archive = archiver ? () => archiver(stream, head) : undefined;
+    candidates.push({ stream, archive });
+
+    if (candidates.length >= deps.config.closeBatchSize) {
+      await flush_batch(candidates);
+      candidates = [];
+    }
+  }
+
+  // Flush the trailing batch.
+  await flush_batch(candidates);
+
+  return {
+    inspected,
+    evaluated,
+    predicate_errors,
+    close_result: { truncated, skipped },
+  };
+}
+
+/**
+ * Dependencies the app-level autoclose controller needs. Same shape
+ * as {@link AutocloseCycleDeps} minus \`correlation\` (the controller
+ * computes one per tick from the supplied {@link Correlator}) and
+ * plus the lifecycle-event sink (\`on_closed\`) and the actor sentinel
+ * for the correlator (\`close_actor\`).
+ *
+ * @internal
+ */
+export type AutocloseControllerDeps = Omit<
+  AutocloseCycleDeps,
+  "correlation"
+> & {
+  /**
+   * Correlator the controller invokes per tick to stamp the cycle's
+   * truncate commits. Reuses the orchestrator's configured
+   * correlator so close commits share the app's id scheme — same as
+   * the existing \`app.close(targets)\` path.
+   */
+  readonly correlator: Correlator;
+  /** Sentinel actor for the close correlation (matches \`Act.close\`). */
+  readonly close_actor: Actor;
+  /**
+   * Fan-out for the per-tick result. The controller calls this once
+   * per tick that closes at least one stream, with the cycle's
+   * {@link CloseResult}. The Act orchestrator wires this to
+   * \`emit("closed", result)\`.
+   */
+  readonly on_closed: (result: CloseResult) => void;
+};
+
+/**
+ * App-level autoclose controller. Owns the ticker (\`setInterval\`),
+ * the per-tick reentrancy guard (a slow tick doesn't pile on the
+ * next interval), and the lifecycle-event fan-out. Tests invoke
+ * {@link run_once} directly; the orchestrator's
+ * \`start_correlations()\` / \`stop_correlations()\` lifecycle starts +
+ * stops the ticker.
+ *
+ * @internal
+ */
+export class AutocloseController {
+  public readonly deps: AutocloseControllerDeps;
+  private _timer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Reentrancy guard. The interval fires the next tick on cadence
+   * regardless of how long the previous one took; this flag drops
+   * overlapping ticks so the cycle stays sequential per controller.
+   */
+  private _running = false;
+
+  constructor(deps: AutocloseControllerDeps) {
+    this.deps = deps;
+  }
+
+  /**
+   * Start the cycle ticker. Returns \`false\` if already running so
+   * accidental double-start doesn't stack timers (matches
+   * \`_correlate.start_polling\` semantics).
+   */
+  start(): boolean {
+    if (this._timer) return false;
+    // Fire-and-forget interval — the callback wraps \`run_once\` in a
+    // try/catch so a thrown cycle doesn't kill the timer.
+    this._timer = setInterval(() => {
+      this.run_once().catch((err) => {
+        this.deps.logger.error(
+          \`Autoclose cycle errored: \${
+            err instanceof Error ? err.message : String(err)
+          }\`
+        );
+      });
+    }, this.deps.config.autocloseCycleMs);
+    // Don't let the interval keep the process alive — Node's
+    // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
+    // targets Node ≥22, so the runtime guard is unnecessary).
+    this._timer.unref();
+    return true;
+  }
+
+  /**
+   * Stop the cycle ticker. Idempotent.
+   */
+  stop(): void {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = undefined;
+    }
+  }
+
+  /**
+   * Whether the ticker is currently running.
+   */
+  get is_running(): boolean {
+    return this._timer !== undefined;
+  }
+
+  /**
+   * Run one cycle synchronously. The controller's interval callback
+   * delegates here; tests can invoke it directly to deterministically
+   * exercise the cycle without spinning real timers.
+   *
+   * Overlapping invocations short-circuit: if a previous tick is
+   * still running, this one drops and returns \`null\`. The orchestrator
+   * never sees a queue of pending ticks regardless of how slow the
+   * predicate / archive / truncate are.
+   */
+  async run_once(): Promise<AutocloseCycleResult | null> {
+    if (this._running) return null;
+    this._running = true;
+    try {
+      const correlation = close_correlation(
+        this.deps.correlator,
+        this.deps.close_actor
+      );
+      const result = await run_autoclose_cycle({
+        autoclose_policy: this.deps.autoclose_policy,
+        autoclose_archiver: this.deps.autoclose_archiver,
+        event_to_state: this.deps.event_to_state,
+        reactive_events_size: this.deps.reactive_events_size,
+        load: this.deps.load,
+        tombstone: this.deps.tombstone,
+        logger: this.deps.logger,
+        config: this.deps.config,
+        correlation,
+      });
+      if (result.close_result.truncated.size > 0) {
+        this.deps.on_closed(result.close_result);
+      }
+      return result;
+    } finally {
+      this._running = false;
+    }
+  }
+}
 
 // === backoff.ts ===
 /**
@@ -20799,6 +22265,20 @@ export * from "./sandbox.js";
  */
 
 export { type AuditDeps, audit } from "./audit.js";
+export {
+  type AutocloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolveAutocloseConfig,
+} from "./autoclose-config.js";
+export {
+  AutocloseController,
+  type AutocloseControllerDeps,
+  type AutocloseCycleDeps,
+  type AutocloseCycleResult,
+  run_autoclose_cycle,
+} from "./autoclose-cycle.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -23620,6 +25100,11 @@ export type SchemaRegister<TSchemaReg> = {
  * @template TSchemaReg - State schemas.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
+ * @template TStateNames - Union of registered state name literals. Threaded
+ *   by \`Act\` from the builder's \`TStateMap\` so the per-state lookup
+ *   methods narrow \`state_name\` to the actual set of registered states
+ *   instead of accepting any \`string\`. Defaults to \`string\` so loose
+ *   references like \`Registry<any, any, any>\` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
@@ -23644,21 +25129,52 @@ export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
+  TStateNames extends string = string,
 > = {
   readonly actions: {
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   readonly disclosure_predicate: (
-    stateName: string
+    state_name: TStateNames
   ) =>
     | ((
         event: Committed<TEvents, keyof TEvents & string>,
         actor: Actor
       ) => boolean)
     | null;
-  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
+  readonly deprecated_events: (state_name: TStateNames) => ReadonlySet<string>;
+  /**
+   * Lookup of the \`.autocloses(predicate)\` declaration per state name.
+   * Returns \`null\` when the state opted out of online close — the
+   * orchestrator's autoclose cycle skips states with a \`null\` policy
+   * so the per-cycle cost is paid only by opt-in states.
+   */
+  readonly autoclose_policy: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>,
+        count: number
+      ) => boolean)
+    | null;
+  /**
+   * Lookup of the \`.archives(fn)\` declaration per state name. Returns
+   * \`null\` when the state didn't declare an archiver — the cycle
+   * truncates without an archive step, matching the default behavior
+   * of explicit \`app.close({ stream })\` calls. Threaded into
+   * \`CloseTarget.archive\` only when present.
+   */
+  readonly autoclose_archiver: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>
+      ) => Promise<void>)
+    | null;
 };
 
 /**
@@ -25395,6 +26911,55 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
 };
 
 /**
+ * Predicate consulted by the online close cycle once per candidate
+ * stream of a state with \`.autocloses(...)\` declared. Returning \`true\`
+ * schedules the stream for atomic truncate-and-seed via
+ * {@link Store.truncate} on the next batch.
+ *
+ * The \`head\` argument is the latest committed (non-tombstone) event on
+ * the stream; predicates that gate on the last event name (e.g. the
+ * terminal-event policy from sub #839) read \`head.name\` directly and
+ * the type system autocompletes it to the state's event union.
+ * \`count\` is the stream's total event count.
+ *
+ * Predicates run in process per cycle tick; they MUST be pure and
+ * fast — slow predicates serialize behind the cycle's batch.
+ *
+ * @template TEvents Event schemas declared by the owning state via
+ *   \`.emits({...})\`. \`head.event.name\` autocompletes to
+ *   \`keyof TEvents\`.
+ */
+export type AutoclosePredicate<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>,
+  count: number
+) => boolean;
+
+/**
+ * Side-effect callback the online close cycle runs **before**
+ * truncating a stream that the state's \`.autocloses(...)\` predicate
+ * accepted. Hosts use it to write the stream's events somewhere
+ * durable (S3, cold storage, an analytics warehouse) before the
+ * tombstone lands. The cycle threads this into
+ * {@link CloseTarget.archive} so the existing close-cycle's
+ * archive-while-guarded invariant carries over: the stream is locked
+ * against new writes while the archiver runs, and a thrown archiver
+ * leaves the stream guarded but un-truncated (no data loss, the
+ * cycle retries the candidate next tick).
+ *
+ * State-level (one per state, last-write-wins). Hosts with per-stream
+ * archiving differences branch inside the function. Absent →
+ * truncate runs without an archive step (matches the explicit
+ * \`app.close({ stream })\` default).
+ *
+ * @template TEvents Event schemas declared by the owning state.
+ */
+export type AutocloseArchiver<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>
+) => Promise<void>;
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -25434,6 +26999,36 @@ export type State<
   // signature so users still get a type-checked predicate at the
   // call site.
   disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
+  /**
+   * Online close predicate set by \`.autocloses(predicate)\`. The
+   * orchestrator's autoclose cycle iterates this state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via {@link Store.truncate}.
+   * Absent → the state opts out of online close entirely (zero
+   * per-cycle cost).
+   *
+   * Bivariant method-shorthand for the same reason as \`disclose\` —
+   * keeps \`State<specific>\` assignable to \`State<any, any, any>\`. The
+   * \`.autocloses()\` builder method keeps the narrow signature.
+   */
+  autoclose?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>,
+    count: number
+  ): boolean;
+  /**
+   * Archiver set by \`.archives(fn)\`. The online close cycle threads
+   * this into {@link CloseTarget.archive} for every truncate it
+   * stages, so the existing close-cycle's archive-while-guarded
+   * invariant carries over to the autoclose path. Absent → the cycle
+   * truncates without an archive step. Bivariant method-shorthand
+   * for the same \`State<specific>\` → \`State<any, any, any>\` reason
+   * as \`disclose\` / \`autoclose\`.
+   */
+  archive?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>
+  ): Promise<void>;
   /**
    * Build-time step delegates wired by \`act().build()\`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware
@@ -27979,6 +29574,11 @@ export type SchemaRegister<TSchemaReg> = {
  * @template TSchemaReg - State schemas.
  * @template TEvents - Event schemas.
  * @template TActions - Action schemas.
+ * @template TStateNames - Union of registered state name literals. Threaded
+ *   by \`Act\` from the builder's \`TStateMap\` so the per-state lookup
+ *   methods narrow \`state_name\` to the actual set of registered states
+ *   instead of accepting any \`string\`. Defaults to \`string\` so loose
+ *   references like \`Registry<any, any, any>\` keep working.
  * @property actions - Map of action names to state definitions.
  * @property events - Map of event names to event registration info.
  * @property sensitive_fields - Lookup of \`sensitive(...)\`-marked fields per
@@ -28003,21 +29603,52 @@ export type Registry<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
+  TStateNames extends string = string,
 > = {
   readonly actions: {
     [TKey in keyof TActions]: State<TSchemaReg[TKey], TEvents, TActions>;
   };
   readonly events: EventRegister<TEvents>;
-  readonly sensitive_fields: (eventName: string) => readonly string[];
+  readonly sensitive_fields: (event_name: string) => readonly string[];
   readonly disclosure_predicate: (
-    stateName: string
+    state_name: TStateNames
   ) =>
     | ((
         event: Committed<TEvents, keyof TEvents & string>,
         actor: Actor
       ) => boolean)
     | null;
-  readonly deprecated_events: (state_name: string) => ReadonlySet<string>;
+  readonly deprecated_events: (state_name: TStateNames) => ReadonlySet<string>;
+  /**
+   * Lookup of the \`.autocloses(predicate)\` declaration per state name.
+   * Returns \`null\` when the state opted out of online close — the
+   * orchestrator's autoclose cycle skips states with a \`null\` policy
+   * so the per-cycle cost is paid only by opt-in states.
+   */
+  readonly autoclose_policy: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>,
+        count: number
+      ) => boolean)
+    | null;
+  /**
+   * Lookup of the \`.archives(fn)\` declaration per state name. Returns
+   * \`null\` when the state didn't declare an archiver — the cycle
+   * truncates without an archive step, matching the default behavior
+   * of explicit \`app.close({ stream })\` calls. Threaded into
+   * \`CloseTarget.archive\` only when present.
+   */
+  readonly autoclose_archiver: (
+    state_name: TStateNames
+  ) =>
+    | ((
+        stream: string,
+        head: Committed<TEvents, keyof TEvents & string>
+      ) => Promise<void>)
+    | null;
 };
 
 /**
@@ -28967,6 +30598,7 @@ export {
 } from "./sse-wiring.js";
 
 // === sse-wiring.ts ===
+import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import type { BroadcastState } from "../sse/types.js";
 
@@ -29048,44 +30680,44 @@ export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
  */
 export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
 
-const MAX_CONNECTIONS_MIN = 1;
-const MAX_CONNECTIONS_MAX = 10_000;
-const HEARTBEAT_MS_MIN = 15_000;
-const HEARTBEAT_MS_MAX = 300_000;
+/**
+ * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
+ * ranges, and (eventual) integer constraints live in one place — same
+ * declarative-validation pattern the rest of the framework uses for
+ * configuration shapes.
+ *
+ * @internal
+ */
+const SseOptionsSchema = z.object({
+  maxConnections: z
+    .number()
+    .min(1)
+    .max(10_000)
+    .default(DEFAULT_SSE_MAX_CONNECTIONS),
+  heartbeatMs: z
+    .number()
+    .min(15_000)
+    .max(300_000)
+    .default(DEFAULT_SSE_HEARTBEAT_MS),
+});
 
 /**
  * Validate and apply defaults to host-supplied {@link SseOptions}.
  *
- * Throws \`RangeError\` when either numeric knob is outside its
- * documented range. Pure: same input → same output, no side
- * effects, no I/O. Each transport calls this once at the start of
- * \`hono(...)\` / \`trpc(...)\`.
+ * Out-of-range values throw at the call site — each transport calls
+ * this once at the start of \`hono(...)\` / \`trpc(...)\` so
+ * misconfiguration surfaces at construction, not at first
+ * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
-  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
-  if (
-    !Number.isFinite(max_connections) ||
-    max_connections < MAX_CONNECTIONS_MIN ||
-    max_connections > MAX_CONNECTIONS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
-    );
-  }
-  if (
-    !Number.isFinite(heartbeat_ms) ||
-    heartbeat_ms < HEARTBEAT_MS_MIN ||
-    heartbeat_ms > HEARTBEAT_MS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
-    );
-  }
+  const parsed = SseOptionsSchema.parse({
+    maxConnections: options.maxConnections,
+    heartbeatMs: options.heartbeatMs,
+  });
   return {
     channel: options.channel,
-    maxConnections: max_connections,
-    heartbeatMs: heartbeat_ms,
+    maxConnections: parsed.maxConnections,
+    heartbeatMs: parsed.heartbeatMs,
   };
 }
 
@@ -30051,6 +31683,7 @@ export {
 } from "./sse-wiring.js";
 
 // === sse-wiring.ts ===
+import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import type { BroadcastState } from "../sse/types.js";
 
@@ -30132,44 +31765,44 @@ export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
  */
 export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
 
-const MAX_CONNECTIONS_MIN = 1;
-const MAX_CONNECTIONS_MAX = 10_000;
-const HEARTBEAT_MS_MIN = 15_000;
-const HEARTBEAT_MS_MAX = 300_000;
+/**
+ * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
+ * ranges, and (eventual) integer constraints live in one place — same
+ * declarative-validation pattern the rest of the framework uses for
+ * configuration shapes.
+ *
+ * @internal
+ */
+const SseOptionsSchema = z.object({
+  maxConnections: z
+    .number()
+    .min(1)
+    .max(10_000)
+    .default(DEFAULT_SSE_MAX_CONNECTIONS),
+  heartbeatMs: z
+    .number()
+    .min(15_000)
+    .max(300_000)
+    .default(DEFAULT_SSE_HEARTBEAT_MS),
+});
 
 /**
  * Validate and apply defaults to host-supplied {@link SseOptions}.
  *
- * Throws \`RangeError\` when either numeric knob is outside its
- * documented range. Pure: same input → same output, no side
- * effects, no I/O. Each transport calls this once at the start of
- * \`hono(...)\` / \`trpc(...)\`.
+ * Out-of-range values throw at the call site — each transport calls
+ * this once at the start of \`hono(...)\` / \`trpc(...)\` so
+ * misconfiguration surfaces at construction, not at first
+ * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
-  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
-  if (
-    !Number.isFinite(max_connections) ||
-    max_connections < MAX_CONNECTIONS_MIN ||
-    max_connections > MAX_CONNECTIONS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
-    );
-  }
-  if (
-    !Number.isFinite(heartbeat_ms) ||
-    heartbeat_ms < HEARTBEAT_MS_MIN ||
-    heartbeat_ms > HEARTBEAT_MS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
-    );
-  }
+  const parsed = SseOptionsSchema.parse({
+    maxConnections: options.maxConnections,
+    heartbeatMs: options.heartbeatMs,
+  });
   return {
     channel: options.channel,
-    maxConnections: max_connections,
-    heartbeatMs: heartbeat_ms,
+    maxConnections: parsed.maxConnections,
+    heartbeatMs: parsed.heartbeatMs,
   };
 }
 
@@ -30640,31 +32273,66 @@ const API_ERROR_RESPONSE: OpenAPIResponse = {
   },
 };
 
+/**
+ * Server URL refinement: OpenAPI permits \`{variable}\` template syntax
+ * inside server URLs, so we substitute each capture with \`x\` before
+ * parsing. The character class forbids both \`{\` and \`}\` inside the
+ * template, matching OpenAPI's variable-name grammar exactly and
+ * eliminating the catastrophic-backtracking surface CodeQL flagged
+ * on \`[^}]+\`.
+ *
+ * @internal
+ */
+function is_valid_server_url(url: string): boolean {
+  try {
+    new URL(url.replace(/\\{[^{}]+\\}/g, "x"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zod schema for the minimum required shape of {@link OpenAPIOptions}.
+ * Same declarative-validation pattern the rest of the framework uses;
+ * the OpenAPI surface is mostly free-form (\`description\`, \`contact\`,
+ * \`license\` — the spec lets through anything that JSON-stringifies),
+ * so only the load-bearing fields land here. Hosts overriding into
+ * unusual shapes still get the rest of the doc emitted; this schema
+ * only fails the construction call when \`info.title\` / \`info.version\`
+ * is missing-or-empty or a \`servers[].url\` won't parse.
+ *
+ * @internal
+ */
+const OpenAPIOptionsSchema = z.object({
+  info: z.object({
+    title: z
+      .string({ message: "openapi: info.title is required (non-empty string)" })
+      .trim()
+      .min(1, "openapi: info.title is required (non-empty string)"),
+    version: z
+      .string({
+        message: "openapi: info.version is required (non-empty string)",
+      })
+      .trim()
+      .min(1, "openapi: info.version is required (non-empty string)"),
+  }),
+  servers: z
+    .array(
+      z.object({
+        url: z.string().refine(is_valid_server_url, {
+          message: "openapi: invalid server url",
+        }),
+      })
+    )
+    .optional(),
+});
+
 function validate_options(options: OpenAPIOptions): void {
-  if (!options.info?.title || options.info.title.trim() === "") {
-    throw new Error("openapi: info.title is required (non-empty string)");
-  }
-  if (!options.info?.version || options.info.version.trim() === "") {
-    throw new Error("openapi: info.version is required (non-empty string)");
-  }
-  if (options.servers) {
-    for (const server of options.servers) {
-      // Server URL may contain \`{variable}\` template syntax — substitute
-      // each capture with \`x\` before parsing so the URL parser accepts
-      // it. Anything that doesn't parse after substitution is malformed.
-      // The character class forbids both \`{\` and \`}\` inside the template,
-      // matching OpenAPI's variable-name grammar exactly and eliminating
-      // the catastrophic-backtracking surface CodeQL flags on \`[^}]+\`.
-      const stripped = server.url.replace(/\\{[^{}]+\\}/g, "x");
-      try {
-        new URL(stripped);
-      } catch {
-        throw new Error(
-          \`openapi: invalid server url \${JSON.stringify(server.url)}\`
-        );
-      }
-    }
-  }
+  OpenAPIOptionsSchema.parse({
+    info: { title: options.info?.title, version: options.info?.version },
+    servers: options.servers,
+  });
 }
 
 function strip_json_schema_meta(
@@ -33875,6 +35543,7 @@ export {
 } from "./sse-wiring.js";
 
 // === sse-wiring.ts ===
+import { z } from "zod";
 import type { BroadcastChannel } from "../sse/broadcast.js";
 import type { BroadcastState } from "../sse/types.js";
 
@@ -33956,44 +35625,44 @@ export const DEFAULT_SSE_MAX_CONNECTIONS = 500;
  */
 export const DEFAULT_SSE_HEARTBEAT_MS = 30_000;
 
-const MAX_CONNECTIONS_MIN = 1;
-const MAX_CONNECTIONS_MAX = 10_000;
-const HEARTBEAT_MS_MIN = 15_000;
-const HEARTBEAT_MS_MAX = 300_000;
+/**
+ * Zod schema for the numeric knobs on {@link SseOptions}. Defaults,
+ * ranges, and (eventual) integer constraints live in one place — same
+ * declarative-validation pattern the rest of the framework uses for
+ * configuration shapes.
+ *
+ * @internal
+ */
+const SseOptionsSchema = z.object({
+  maxConnections: z
+    .number()
+    .min(1)
+    .max(10_000)
+    .default(DEFAULT_SSE_MAX_CONNECTIONS),
+  heartbeatMs: z
+    .number()
+    .min(15_000)
+    .max(300_000)
+    .default(DEFAULT_SSE_HEARTBEAT_MS),
+});
 
 /**
  * Validate and apply defaults to host-supplied {@link SseOptions}.
  *
- * Throws \`RangeError\` when either numeric knob is outside its
- * documented range. Pure: same input → same output, no side
- * effects, no I/O. Each transport calls this once at the start of
- * \`hono(...)\` / \`trpc(...)\`.
+ * Out-of-range values throw at the call site — each transport calls
+ * this once at the start of \`hono(...)\` / \`trpc(...)\` so
+ * misconfiguration surfaces at construction, not at first
+ * connection.
  */
 export function resolveSseConfig(options: SseOptions): SseConfig {
-  const max_connections = options.maxConnections ?? DEFAULT_SSE_MAX_CONNECTIONS;
-  const heartbeat_ms = options.heartbeatMs ?? DEFAULT_SSE_HEARTBEAT_MS;
-  if (
-    !Number.isFinite(max_connections) ||
-    max_connections < MAX_CONNECTIONS_MIN ||
-    max_connections > MAX_CONNECTIONS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.maxConnections must be in [\${MAX_CONNECTIONS_MIN}, \${MAX_CONNECTIONS_MAX}], got \${max_connections}\`
-    );
-  }
-  if (
-    !Number.isFinite(heartbeat_ms) ||
-    heartbeat_ms < HEARTBEAT_MS_MIN ||
-    heartbeat_ms > HEARTBEAT_MS_MAX
-  ) {
-    throw new RangeError(
-      \`sse.heartbeatMs must be in [\${HEARTBEAT_MS_MIN}, \${HEARTBEAT_MS_MAX}], got \${heartbeat_ms}\`
-    );
-  }
+  const parsed = SseOptionsSchema.parse({
+    maxConnections: options.maxConnections,
+    heartbeatMs: options.heartbeatMs,
+  });
   return {
     channel: options.channel,
-    maxConnections: max_connections,
-    heartbeatMs: heartbeat_ms,
+    maxConnections: parsed.maxConnections,
+    heartbeatMs: parsed.heartbeatMs,
   };
 }
 

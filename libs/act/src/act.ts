@@ -2,6 +2,8 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  type AutocloseConfig,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -17,6 +19,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  resolveAutocloseConfig,
   run_close_cycle,
   SettleLoop,
   scan,
@@ -101,6 +104,19 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the `"settled"` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+// Re-export the autoclose config surface (#837 / epic #802) so
+// operators can keep `import { DEFAULT_AUTOCLOSE_CYCLE_MS,
+// resolveAutocloseConfig } from "@rotorsoft/act"`. The
+// implementation lives in `internal/autoclose-config.ts` to keep
+// this orchestrator file focused on the `Act` class.
+export {
+  type AutocloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolveAutocloseConfig,
+} from "./internal/index.js";
 
 /**
  * Lifecycle events emitted by {@link Act}, mapped to their payload type.
@@ -198,6 +214,48 @@ export type ActOptions<TLanes extends string = string> = {
    * lifecycle event so observability sidecars work).
    */
   readonly drain?: boolean;
+  /**
+   * Online close cycle cadence in ms (#837 / epic #802). The
+   * app-level autoclose controller ticks at this interval, iterates
+   * states with `.autocloses(...)` declared, and schedules
+   * truncate-and-seed for streams whose predicate returned `true`.
+   *
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
+   * `[10_000, 3_600_000]` at `act().build()`; out-of-range throws.
+   *
+   * Zero-cost when no state declares `.autocloses(...)` — the
+   * controller is never constructed in that case.
+   */
+  readonly autocloseCycleMs?: number;
+  /**
+   * Max number of streams the autoclose cycle considers per tick per
+   * state (#837). Bounds memory + truncate fan-out so a misconfigured
+   * predicate that matches "everything" can't take down the writer.
+   *
+   * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
+   * `[1, 1024]`. Above 1024, the builder throws — operators with
+   * genuine high-throughput needs opt out by passing a custom
+   * predicate that pre-filters.
+   */
+  readonly closeBatchSize?: number;
+  /**
+   * Microsecond yield delay between successive `Store.truncate`
+   * calls within one cycle tick (#837). Defaults to `0` (microtask
+   * yield only). SQLite operators set a positive value to let the
+   * writer lock release between rows; PG / InMemory adapters
+   * generally don't need it because they don't serialize writers
+   * globally.
+   *
+   * Validated `[0, 1000]`.
+   */
+  readonly closeYieldMs?: number;
+  /**
+   * Whether predicate exceptions should mark the stream as closed
+   * (#837). Default `false` — a thrown predicate is logged and the
+   * stream is skipped that cycle. Set `true` to close on error
+   * (defensive policy for "if I can't evaluate, assume terminal").
+   */
+  readonly closeOnError?: boolean;
 };
 
 export class Act<
@@ -241,9 +299,30 @@ export class Act<
     (() => void | Promise<void>) | undefined
   >;
   /** Public registry — kept as-is per the no-prefix-on-public convention. */
-  public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
+  public readonly registry: Registry<
+    TSchemaReg,
+    TEvents,
+    TActions,
+    keyof TStateMap & string
+  >;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
+  /**
+   * Resolved autoclose configuration (#837 / epic #802). Frozen at
+   * `act().build()` via {@link resolveAutocloseConfig}.
+   *
+   * @internal
+   */
+  private readonly _autoclose_config: AutocloseConfig;
+  /**
+   * App-level autoclose controller. `undefined` when no state declares
+   * `.autocloses(...)` — the controller is never constructed, so
+   * `start_correlations()` / `stop_correlations()` skip the autoclose
+   * lifecycle and the orchestrator pays zero per-tick cost.
+   *
+   * @internal
+   */
+  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -360,7 +439,7 @@ export class Act<
    *   instance; later slices fan out one `DrainController` per lane.
    */
   constructor(
-    registry: Registry<TSchemaReg, TEvents, TActions>,
+    registry: Registry<TSchemaReg, TEvents, TActions, keyof TStateMap & string>,
     states: Map<string, State<any, any, any>> = new Map(),
     batch_handlers: Map<string, BatchHandler<any>> = new Map(),
     options: ActOptions = {},
@@ -413,6 +492,9 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
+    // Validate autoclose knobs eagerly so out-of-range values throw
+    // at build time, not on the first cycle tick.
+    this._autoclose_config = resolveAutocloseConfig(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -502,6 +584,35 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
+
+    // #837 — construct the autoclose controller only when at least one
+    // state declared `.autocloses(...)`. Zero-cost otherwise: the
+    // controller field stays `undefined` and `start_correlations()` /
+    // `stop_correlations()` skip the autoclose lifecycle entirely.
+    const states_with_policy = [...this._states.values()].filter(
+      (s) => s.autoclose
+    );
+    this._autoclose = states_with_policy.length
+      ? new AutocloseController({
+          // Internal cycle takes the loose `(string) => …` signature; the
+          // public `registry.autoclose_policy` narrows to
+          // `keyof TStateMap & string`. Thin lambdas bridge across the
+          // narrowing — runtime semantics are unchanged.
+          autoclose_policy: (name) =>
+            this.registry.autoclose_policy(name as keyof TStateMap & string),
+          autoclose_archiver: (name) =>
+            this.registry.autoclose_archiver(name as keyof TStateMap & string),
+          event_to_state: this._event_to_state,
+          reactive_events_size: this._reactive_events.size,
+          load: this._es.load,
+          tombstone: this._es.tombstone,
+          logger: this._logger,
+          config: this._autoclose_config,
+          correlator: this._correlator,
+          close_actor: { id: "$autoclose", name: "autoclose" },
+          on_closed: (result) => this.emit("closed", result),
+        })
+      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late `store(adapter)` injection after build won't
@@ -1151,7 +1262,12 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    return this._correlate.start_polling(query, frequency, callback);
+    const started = this._correlate.start_polling(query, frequency, callback);
+    // #837 — start the autoclose ticker on the same lifecycle hook
+    // operators already call for the correlate worker. `undefined`
+    // when no state declares `.autocloses(...)` (zero-cost path).
+    this._autoclose?.start();
+    return started;
   }
 
   /**
@@ -1173,6 +1289,7 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    this._autoclose?.stop();
   }
 
   /**

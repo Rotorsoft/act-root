@@ -352,10 +352,16 @@ export function act<
   // through the public type signatures, runtime allocation is not.
   const states = new Map<string, State<any, any, any>>();
   // Caches behind registry.sensitive_fields / registry.disclosure_predicate /
-  // registry.deprecated_events. Populated on the first .build() call.
+  // registry.deprecated_events / registry.autoclose_policy. Populated
+  // on the first .build() call.
   const _sf = new Map<string, readonly string[]>();
   const _dp = new Map<string, (event: any, actor: Actor) => boolean>();
   const _de = new Map<string, ReadonlySet<string>>();
+  const _ac = new Map<
+    string,
+    (stream: string, head: any, count: number) => boolean
+  >();
+  const _aa = new Map<string, (stream: string, head: any) => Promise<void>>();
   const EMPTY_DEPRECATED: ReadonlySet<string> = new Set();
   const registry: Registry<TSchemaReg, TEvents, TActions> = {
     actions: {} as Registry<TSchemaReg, TEvents, TActions>["actions"],
@@ -363,6 +369,8 @@ export function act<
     sensitive_fields: (event_name) => _sf.get(event_name) ?? [],
     disclosure_predicate: (state_name) => _dp.get(state_name) ?? null,
     deprecated_events: (state_name) => _de.get(state_name) ?? EMPTY_DEPRECATED,
+    autoclose_policy: (state_name) => _ac.get(state_name) ?? null,
+    autoclose_archiver: (state_name) => _aa.get(state_name) ?? null,
   };
   const pending_projections: Projection<any>[] = [];
   const batch_handlers = new Map<string, BatchHandler<any>>();
@@ -595,6 +603,8 @@ export function act<
           }
           for (const state of states.values()) {
             if (state.disclose) _dp.set(state.name, state.disclose);
+            if (state.autoclose) _ac.set(state.name, state.autoclose);
+            if (state.archive) _aa.set(state.name, state.archive);
             const fields_by_event = new Map<string, readonly string[]>();
             for (const event_name of Object.keys(state.events)) {
               const fields = _sf.get(event_name);

@@ -551,6 +551,55 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
 };
 
 /**
+ * Predicate consulted by the online close cycle once per candidate
+ * stream of a state with `.autocloses(...)` declared. Returning `true`
+ * schedules the stream for atomic truncate-and-seed via
+ * {@link Store.truncate} on the next batch.
+ *
+ * The `head` argument is the latest committed (non-tombstone) event on
+ * the stream; predicates that gate on the last event name (e.g. the
+ * terminal-event policy from sub #839) read `head.name` directly and
+ * the type system autocompletes it to the state's event union.
+ * `count` is the stream's total event count.
+ *
+ * Predicates run in process per cycle tick; they MUST be pure and
+ * fast — slow predicates serialize behind the cycle's batch.
+ *
+ * @template TEvents Event schemas declared by the owning state via
+ *   `.emits({...})`. `head.event.name` autocompletes to
+ *   `keyof TEvents`.
+ */
+export type AutoclosePredicate<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>,
+  count: number
+) => boolean;
+
+/**
+ * Side-effect callback the online close cycle runs **before**
+ * truncating a stream that the state's `.autocloses(...)` predicate
+ * accepted. Hosts use it to write the stream's events somewhere
+ * durable (S3, cold storage, an analytics warehouse) before the
+ * tombstone lands. The cycle threads this into
+ * {@link CloseTarget.archive} so the existing close-cycle's
+ * archive-while-guarded invariant carries over: the stream is locked
+ * against new writes while the archiver runs, and a thrown archiver
+ * leaves the stream guarded but un-truncated (no data loss, the
+ * cycle retries the candidate next tick).
+ *
+ * State-level (one per state, last-write-wins). Hosts with per-stream
+ * archiving differences branch inside the function. Absent →
+ * truncate runs without an archive step (matches the explicit
+ * `app.close({ stream })` default).
+ *
+ * @template TEvents Event schemas declared by the owning state.
+ */
+export type AutocloseArchiver<TEvents extends Schemas> = (
+  stream: string,
+  head: Committed<TEvents, keyof TEvents>
+) => Promise<void>;
+
+/**
  * The full state definition, including schemas, handlers, and optional invariants and snapshot logic.
  * @template TState - State schema.
  * @template TEvents - Event schemas.
@@ -590,6 +639,36 @@ export type State<
   // signature so users still get a type-checked predicate at the
   // call site.
   disclose?(event: Committed<TEvents, keyof TEvents>, actor: Actor): boolean;
+  /**
+   * Online close predicate set by `.autocloses(predicate)`. The
+   * orchestrator's autoclose cycle iterates this state's streams once
+   * per tick and calls the predicate per candidate; truthy results are
+   * scheduled for atomic truncate-and-seed via {@link Store.truncate}.
+   * Absent → the state opts out of online close entirely (zero
+   * per-cycle cost).
+   *
+   * Bivariant method-shorthand for the same reason as `disclose` —
+   * keeps `State<specific>` assignable to `State<any, any, any>`. The
+   * `.autocloses()` builder method keeps the narrow signature.
+   */
+  autoclose?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>,
+    count: number
+  ): boolean;
+  /**
+   * Archiver set by `.archives(fn)`. The online close cycle threads
+   * this into {@link CloseTarget.archive} for every truncate it
+   * stages, so the existing close-cycle's archive-while-guarded
+   * invariant carries over to the autoclose path. Absent → the cycle
+   * truncates without an archive step. Bivariant method-shorthand
+   * for the same `State<specific>` → `State<any, any, any>` reason
+   * as `disclose` / `autoclose`.
+   */
+  archive?(
+    stream: string,
+    head: Committed<TEvents, keyof TEvents>
+  ): Promise<void>;
   /**
    * Build-time step delegates wired by `act().build()`. The orchestrator
    * calls these instead of branching on PII per event — for PII-aware

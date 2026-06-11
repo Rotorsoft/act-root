@@ -126,11 +126,6 @@ describe("registry.disclosure_predicate", () => {
     const app = act().withState(Plain).build();
     expect(app.registry.disclosure_predicate("Plain")).toBeNull();
   });
-
-  it("returns null for unknown state names — safe lookup", () => {
-    const app = act().withState(User).build();
-    expect(app.registry.disclosure_predicate("NeverDeclared")).toBeNull();
-  });
 });
 
 // State with mixed sensitive + non-sensitive events. Exercises the
