@@ -1,3 +1,15 @@
+# [@rotorsoft/act-http-v1.5.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.4.0...@rotorsoft/act-http-v1.5.0) (2026-06-11)
+
+
+### Bug Fixes
+
+* **act-http:** [#845](https://github.com/rotorsoft/act-root/issues/845) — tighten openapi server-url regex to avoid CodeQL ReDoS alert ([c450492](https://github.com/rotorsoft/act-root/commit/c4504928545ceb57d0a7af304f9c4c56b81483bb))
+
+
+### Features
+
+* **act-http:** [#845](https://github.com/rotorsoft/act-root/issues/845) — @rotorsoft/act-http/openapi subpath emits OpenAPI 3.1 documents ([6398c16](https://github.com/rotorsoft/act-root/commit/6398c1636ed893d30f8901caa89f1d8a2d4db61d))
+
 # [@rotorsoft/act-http-v1.4.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.3.0...@rotorsoft/act-http-v1.4.0) (2026-06-11)
 
 
