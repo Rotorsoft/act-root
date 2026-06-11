@@ -57,7 +57,6 @@
  * mount points on the same Act instance; the OpenAPI doc covers
  * the REST half only.
  */
-import type { Act, Schema, Schemas } from "@rotorsoft/act";
 import { z } from "zod";
 
 /**
@@ -355,8 +354,29 @@ function build_operation(
  *   empty, or if any `servers[].url` fails URL parsing after
  *   `{variable}` substitution.
  */
-export function openapi(
-  app: Act<Schemas, Schemas, Schemas, Record<string, Schema>>,
+/**
+ * Structural shape of the Act surface this emitter walks. Letting
+ * TApp infer to the caller's concrete `Act<TSchemaReg, ...>` instead
+ * of forcing it to fit a narrow framework-typed upper bound keeps
+ * the caller's variance from leaking — and avoids `any` in the
+ * signature.
+ *
+ * @internal
+ */
+type ActRegistryView = {
+  readonly registry: {
+    actions: Record<
+      string,
+      {
+        readonly name: string;
+        readonly actions: Record<string, unknown>;
+      }
+    >;
+  };
+};
+
+export function openapi<TApp extends ActRegistryView>(
+  app: TApp,
   options: OpenAPIOptions
 ): OpenAPIDocument {
   validate_options(options);

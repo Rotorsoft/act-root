@@ -14,12 +14,14 @@
   "license": "ISC",
   "dependencies": {
     "@act/calculator": "workspace:^",
+    "@hono/node-server": "^2.0.4",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
     "@trpc/server": "11.17.0",
     "cors": "^2.8.6",
+    "hono": "^4.12.25",
     "zod": "^4.4.3"
   },
   "devDependencies": {

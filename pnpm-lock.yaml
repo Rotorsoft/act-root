@@ -92,6 +92,9 @@ importers:
       chance:
         specifier: ^1.1.13
         version: 1.1.13
+      concurrently:
+        specifier: ^10.0.3
+        version: 10.0.3
       fast-check:
         specifier: ^4.8.0
         version: 4.8.0
@@ -291,7 +294,7 @@ importers:
         specifier: ^5.8.5
         version: 5.8.5
       hono:
-        specifier: ^4.12.24
+        specifier: ^4.12.25
         version: 4.12.25
       zod:
         specifier: ^4.4.3
@@ -381,6 +384,9 @@ importers:
       '@rotorsoft/act':
         specifier: '>=1.10.1'
         version: link:../../libs/act
+      '@rotorsoft/act-http':
+        specifier: workspace:*
+        version: link:../../libs/act-http
       '@trpc/server':
         specifier: 11.17.0
         version: 11.17.0(typescript@6.0.3)
@@ -540,6 +546,9 @@ importers:
       '@act/calculator':
         specifier: workspace:^
         version: link:../calculator
+      '@hono/node-server':
+        specifier: ^2.0.4
+        version: 2.0.4(hono@4.12.25)
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../../libs/act
@@ -558,6 +567,9 @@ importers:
       cors:
         specifier: ^2.8.6
         version: 2.8.6
+      hono:
+        specifier: ^4.12.25
+        version: 4.12.25
       zod:
         specifier: ^4.4.3
         version: 4.4.3
