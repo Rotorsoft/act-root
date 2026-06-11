@@ -4,6 +4,7 @@ import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
 import { createHTTPHandler } from "@trpc/server/adapters/standalone";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 
 /**
  * Multi-transport demo (#847). One Act instance, three transports
@@ -51,17 +52,20 @@ const apiDoc = openapi(calculatorApp, {
 
 const app = new Hono();
 
-// Shared CORS for both REST and OpenAPI fetches from the Vite client.
-app.use("*", async (c, next) => {
-  c.header("Access-Control-Allow-Origin", CORS_ORIGIN);
-  c.header(
-    "Access-Control-Allow-Headers",
-    "content-type, idempotency-key, if-match"
-  );
-  c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  if (c.req.method === "OPTIONS") return c.body(null, 204);
-  await next();
-});
+// Shared CORS for every transport. Hono's built-in middleware attaches
+// the headers at the response stage, so it covers both `c.json(...)`
+// returns (REST + openapi) and the tRPC bridge's hand-built
+// `new Response(...)` — the previous `c.header(...)` form set the
+// header on the context only, which the fresh Response from the bridge
+// discarded, breaking tRPC's preflight check.
+app.use(
+  "*",
+  cors({
+    origin: CORS_ORIGIN,
+    allowHeaders: ["content-type", "idempotency-key", "if-match"],
+    allowMethods: ["GET", "POST", "OPTIONS"],
+  })
+);
 
 // Mount the generated REST routes.
 app.route("/", restApi);
@@ -134,18 +138,48 @@ app.all("/trpc/*", async (c) => {
   });
 });
 
+// Interactive API docs at /docs — Scalar API Reference renders the
+// OpenAPI document into a clean three-pane explorer with a built-in
+// "Try It" client. CDN-hosted (no build step), reads from the live
+// `/openapi.json` so changes to the registry surface immediately.
+app.get("/docs", (c) =>
+  c.html(`<!doctype html>
+<html>
+<head>
+  <title>Calculator API — interactive docs</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <script id="api-reference" data-url="/openapi.json"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+</body>
+</html>`)
+);
+
 // Landing page so a curious operator can poke around in a browser.
 app.get("/", (c) =>
   c.html(`<!doctype html>
 <html><head><title>Calculator multi-transport demo</title>
-<style>body{font-family:sans-serif;max-width:720px;margin:2em auto;padding:0 1em}code{background:#f4f4f4;padding:.1em .3em;border-radius:3px}</style>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:760px;margin:2em auto;padding:0 1em;color:#1a1a1a;line-height:1.55}
+  h1{font-weight:600}
+  code{background:#f4f4f4;padding:.1em .3em;border-radius:3px;font-size:0.92em}
+  ul{padding-left:1.2em}
+  li{margin:.6em 0}
+  a{color:#0366d6;text-decoration:none}
+  a:hover{text-decoration:underline}
+  .label{display:inline-block;min-width:8em;font-weight:600}
+</style>
 </head><body>
 <h1>Calculator multi-transport demo</h1>
-<p>One <code>Act</code> instance — three transports.</p>
+<p>One <code>Act</code> instance — three transports walking the same registry.</p>
 <ul>
-  <li><strong>tRPC</strong> — typed client at <a href="http://localhost:5173">http://localhost:5173</a>, procedures under <code>POST /trpc/&lt;name&gt;</code></li>
-  <li><strong>Hono REST</strong> — generated REST routes under <code>POST /api/actions/&lt;name&gt;</code></li>
-  <li><strong>OpenAPI</strong> — <a href="/openapi.json">/openapi.json</a> (describes the REST routes; tRPC has <code>typeof router</code> instead)</li>
+  <li><span class="label">tRPC client</span> <a href="http://localhost:3000">http://localhost:3000</a> — typed React UI with a transport toggle</li>
+  <li><span class="label">tRPC procedures</span> <code>POST /trpc/PressKey</code>, <code>POST /trpc/Clear</code></li>
+  <li><span class="label">Hono REST</span> <code>POST /api/actions/PressKey</code>, <code>POST /api/actions/Clear</code></li>
+  <li><span class="label">API docs</span> <a href="/docs">/docs</a> — interactive Scalar reference (try it from the browser)</li>
+  <li><span class="label">OpenAPI spec</span> <a href="/openapi.json">/openapi.json</a> — raw JSON describing the REST routes</li>
 </ul>
 </body></html>`)
 );

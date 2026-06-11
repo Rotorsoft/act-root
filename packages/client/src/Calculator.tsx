@@ -70,12 +70,12 @@ export default function Calculator() {
           REST
         </label>
         <a
-          href="http://localhost:4000/openapi.json"
+          href="http://localhost:4000/docs"
           target="_blank"
           rel="noreferrer"
           className="openapi-link"
         >
-          OpenAPI
+          API docs
         </a>
       </div>
       <div className="display">{display || "0"}</div>
