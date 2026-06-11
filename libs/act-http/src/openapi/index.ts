@@ -249,7 +249,10 @@ function validate_options(options: OpenAPIOptions): void {
       // Server URL may contain `{variable}` template syntax — substitute
       // each capture with `x` before parsing so the URL parser accepts
       // it. Anything that doesn't parse after substitution is malformed.
-      const stripped = server.url.replace(/\{[^}]+\}/g, "x");
+      // The character class forbids both `{` and `}` inside the template,
+      // matching OpenAPI's variable-name grammar exactly and eliminating
+      // the catastrophic-backtracking surface CodeQL flags on `[^}]+`.
+      const stripped = server.url.replace(/\{[^{}]+\}/g, "x");
       try {
         new URL(stripped);
       } catch {

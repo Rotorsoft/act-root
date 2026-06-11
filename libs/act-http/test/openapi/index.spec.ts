@@ -250,6 +250,27 @@ describe("openapi(app, options) — doc emitter", () => {
       ).not.toThrow();
     });
 
+    test("handles brace-heavy input in linear time (no ReDoS)", ({ app }) => {
+      // Catastrophic-backtracking-style input for the original `[^}]+`
+      // pattern. The template-strip now uses `[^{}]+` to forbid nested
+      // braces, eliminating the exponential-matching surface CodeQL
+      // flagged. Whether the URL parses or not is orthogonal — the
+      // assertion is that the call completes quickly under adversarial
+      // input.
+      const start = Date.now();
+      try {
+        openapi(app as never, {
+          ...base_options(),
+          servers: [{ url: `https://${"{".repeat(2000)}.example.com` }],
+        });
+      } catch {
+        // Either outcome is fine — we just don't want this to hang.
+      }
+      // Linear regex + URL parse should finish well under 100ms even
+      // on a slow CI runner; a backtracking regex would exceed seconds.
+      expect(Date.now() - start).toBeLessThan(100);
+    });
+
     test("throws on missing info entirely", ({ app }) => {
       expect(() =>
         openapi(app as never, { info: undefined } as unknown as OpenAPIOptions)
