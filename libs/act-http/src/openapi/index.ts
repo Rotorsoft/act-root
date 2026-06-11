@@ -236,31 +236,66 @@ const API_ERROR_RESPONSE: OpenAPIResponse = {
   },
 };
 
+/**
+ * Server URL refinement: OpenAPI permits `{variable}` template syntax
+ * inside server URLs, so we substitute each capture with `x` before
+ * parsing. The character class forbids both `{` and `}` inside the
+ * template, matching OpenAPI's variable-name grammar exactly and
+ * eliminating the catastrophic-backtracking surface CodeQL flagged
+ * on `[^}]+`.
+ *
+ * @internal
+ */
+function is_valid_server_url(url: string): boolean {
+  try {
+    new URL(url.replace(/\{[^{}]+\}/g, "x"));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zod schema for the minimum required shape of {@link OpenAPIOptions}.
+ * Same declarative-validation pattern the rest of the framework uses;
+ * the OpenAPI surface is mostly free-form (`description`, `contact`,
+ * `license` — the spec lets through anything that JSON-stringifies),
+ * so only the load-bearing fields land here. Hosts overriding into
+ * unusual shapes still get the rest of the doc emitted; this schema
+ * only fails the construction call when `info.title` / `info.version`
+ * is missing-or-empty or a `servers[].url` won't parse.
+ *
+ * @internal
+ */
+const OpenAPIValidationSchema = z.object({
+  info: z.object({
+    title: z
+      .string({ message: "openapi: info.title is required (non-empty string)" })
+      .trim()
+      .min(1, "openapi: info.title is required (non-empty string)"),
+    version: z
+      .string({
+        message: "openapi: info.version is required (non-empty string)",
+      })
+      .trim()
+      .min(1, "openapi: info.version is required (non-empty string)"),
+  }),
+  servers: z
+    .array(
+      z.object({
+        url: z.string().refine(is_valid_server_url, {
+          message: "openapi: invalid server url",
+        }),
+      })
+    )
+    .optional(),
+});
+
 function validate_options(options: OpenAPIOptions): void {
-  if (!options.info?.title || options.info.title.trim() === "") {
-    throw new Error("openapi: info.title is required (non-empty string)");
-  }
-  if (!options.info?.version || options.info.version.trim() === "") {
-    throw new Error("openapi: info.version is required (non-empty string)");
-  }
-  if (options.servers) {
-    for (const server of options.servers) {
-      // Server URL may contain `{variable}` template syntax — substitute
-      // each capture with `x` before parsing so the URL parser accepts
-      // it. Anything that doesn't parse after substitution is malformed.
-      // The character class forbids both `{` and `}` inside the template,
-      // matching OpenAPI's variable-name grammar exactly and eliminating
-      // the catastrophic-backtracking surface CodeQL flags on `[^}]+`.
-      const stripped = server.url.replace(/\{[^{}]+\}/g, "x");
-      try {
-        new URL(stripped);
-      } catch {
-        throw new Error(
-          `openapi: invalid server url ${JSON.stringify(server.url)}`
-        );
-      }
-    }
-  }
+  OpenAPIValidationSchema.parse({
+    info: { title: options.info?.title, version: options.info?.version },
+    servers: options.servers,
+  });
 }
 
 function strip_json_schema_meta(

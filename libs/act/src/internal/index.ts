@@ -19,6 +19,13 @@
 
 export { type AuditDeps, audit } from "./audit.js";
 export {
+  type AutoCloseConfig,
+  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_CLOSE_BATCH_SIZE,
+  DEFAULT_CLOSE_YIELD_MS,
+  resolve_autoclose_config,
+} from "./autoclose-config.js";
+export {
   AutocloseController,
   type AutocloseControllerDeps,
   type AutocloseCycleDeps,
