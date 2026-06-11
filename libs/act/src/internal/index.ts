@@ -18,6 +18,13 @@
  */
 
 export { type AuditDeps, audit } from "./audit.js";
+export {
+  AutocloseController,
+  type AutocloseControllerDeps,
+  type AutocloseCycleDeps,
+  type AutocloseCycleResult,
+  run_autoclose_cycle,
+} from "./autoclose-cycle.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { run_close_cycle } from "./close-cycle.js";

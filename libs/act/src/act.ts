@@ -2,6 +2,7 @@ import EventEmitter from "node:events";
 import {
   ALL_LANES,
   type AuditDeps,
+  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -382,6 +383,22 @@ export class Act<
   public readonly registry: Registry<TSchemaReg, TEvents, TActions>;
   /** Map of state name → state definition; populated by the builder. */
   private readonly _states: Map<string, State<any, any, any>>;
+  /**
+   * Resolved autoclose configuration (#837 / epic #802). Frozen at
+   * `act().build()` via {@link resolve_autoclose_config}.
+   *
+   * @internal
+   */
+  private readonly _autoclose_config: AutoCloseConfig;
+  /**
+   * App-level autoclose controller. `undefined` when no state declares
+   * `.autocloses(...)` — the controller is never constructed, so
+   * `start_correlations()` / `stop_correlations()` skip the autoclose
+   * lifecycle and the orchestrator pays zero per-tick cost.
+   *
+   * @internal
+   */
+  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -552,9 +569,8 @@ export class Act<
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
     // Validate autoclose knobs eagerly so out-of-range values throw
-    // at build time, not on the first cycle tick. Slice 1 discards
-    // the resolved config; slice 3 stores it for the controller.
-    resolve_autoclose_config(options);
+    // at build time, not on the first cycle tick.
+    this._autoclose_config = resolve_autoclose_config(options);
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -644,6 +660,29 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
+
+    // #837 — construct the autoclose controller only when at least one
+    // state declared `.autocloses(...)`. Zero-cost otherwise: the
+    // controller field stays `undefined` and `start_correlations()` /
+    // `stop_correlations()` skip the autoclose lifecycle entirely.
+    const states_with_policy = [...this._states.values()].filter(
+      (s) => s.autoclose
+    );
+    this._autoclose = states_with_policy.length
+      ? new AutocloseController({
+          autoclose_policy: this.registry.autoclose_policy,
+          autoclose_archiver: this.registry.autoclose_archiver,
+          event_to_state: this._event_to_state,
+          reactive_events_size: this._reactive_events.size,
+          load: this._es.load,
+          tombstone: this._es.tombstone,
+          logger: this._logger,
+          config: this._autoclose_config,
+          correlator: this._correlator,
+          close_actor: { id: "$autoclose", name: "autoclose" },
+          on_closed: (result) => this.emit("closed", result),
+        })
+      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late `store(adapter)` injection after build won't
@@ -1293,7 +1332,12 @@ export class Act<
     frequency = 10_000,
     callback?: (subscribed: number) => void
   ): boolean {
-    return this._correlate.start_polling(query, frequency, callback);
+    const started = this._correlate.start_polling(query, frequency, callback);
+    // #837 — start the autoclose ticker on the same lifecycle hook
+    // operators already call for the correlate worker. `undefined`
+    // when no state declares `.autocloses(...)` (zero-cost path).
+    this._autoclose?.start();
+    return started;
   }
 
   /**
@@ -1315,6 +1359,7 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
+    this._autoclose?.stop();
   }
 
   /**

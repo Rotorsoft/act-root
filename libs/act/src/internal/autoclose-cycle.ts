@@ -23,13 +23,16 @@
 import type { AutoCloseConfig } from "../act.js";
 import { store, TOMBSTONE_EVENT } from "../ports.js";
 import type {
+  Actor,
   CloseResult,
   CloseTarget,
+  Correlator,
   Logger,
   State,
   TruncateResult,
 } from "../types/index.js";
 import { run_close_cycle } from "./close-cycle.js";
+import { close_correlation } from "./correlator.js";
 import type { EsOps } from "./event-sourcing.js";
 
 /**
@@ -208,4 +211,140 @@ export async function run_autoclose_cycle(
     predicate_errors,
     close_result: { truncated, skipped },
   };
+}
+
+/**
+ * Dependencies the app-level autoclose controller needs. Same shape
+ * as {@link AutocloseCycleDeps} minus `correlation` (the controller
+ * computes one per tick from the supplied {@link Correlator}) and
+ * plus the lifecycle-event sink (`on_closed`) and the actor sentinel
+ * for the correlator (`close_actor`).
+ *
+ * @internal
+ */
+export type AutocloseControllerDeps = Omit<
+  AutocloseCycleDeps,
+  "correlation"
+> & {
+  /**
+   * Correlator the controller invokes per tick to stamp the cycle's
+   * truncate commits. Reuses the orchestrator's configured
+   * correlator so close commits share the app's id scheme — same as
+   * the existing `app.close(targets)` path.
+   */
+  readonly correlator: Correlator;
+  /** Sentinel actor for the close correlation (matches `Act.close`). */
+  readonly close_actor: Actor;
+  /**
+   * Fan-out for the per-tick result. The controller calls this once
+   * per tick that closes at least one stream, with the cycle's
+   * {@link CloseResult}. The Act orchestrator wires this to
+   * `emit("closed", result)`.
+   */
+  readonly on_closed: (result: CloseResult) => void;
+};
+
+/**
+ * App-level autoclose controller. Owns the ticker (`setInterval`),
+ * the per-tick reentrancy guard (a slow tick doesn't pile on the
+ * next interval), and the lifecycle-event fan-out. Tests invoke
+ * {@link run_once} directly; the orchestrator's
+ * `start_correlations()` / `stop_correlations()` lifecycle starts +
+ * stops the ticker.
+ *
+ * @internal
+ */
+export class AutocloseController {
+  public readonly deps: AutocloseControllerDeps;
+  private _timer: ReturnType<typeof setInterval> | undefined;
+  /**
+   * Reentrancy guard. The interval fires the next tick on cadence
+   * regardless of how long the previous one took; this flag drops
+   * overlapping ticks so the cycle stays sequential per controller.
+   */
+  private _running = false;
+
+  constructor(deps: AutocloseControllerDeps) {
+    this.deps = deps;
+  }
+
+  /**
+   * Start the cycle ticker. Returns `false` if already running so
+   * accidental double-start doesn't stack timers (matches
+   * `_correlate.start_polling` semantics).
+   */
+  start(): boolean {
+    if (this._timer) return false;
+    // Fire-and-forget interval — the callback wraps `run_once` in a
+    // try/catch so a thrown cycle doesn't kill the timer.
+    this._timer = setInterval(() => {
+      this.run_once().catch((err) => {
+        this.deps.logger.error(
+          `Autoclose cycle errored: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      });
+    }, this.deps.config.cycle_ms);
+    // Don't let the interval keep the process alive — Node's
+    // `setInterval` returns a `Timeout` with `unref()` (the package
+    // targets Node ≥22, so the runtime guard is unnecessary).
+    this._timer.unref();
+    return true;
+  }
+
+  /**
+   * Stop the cycle ticker. Idempotent.
+   */
+  stop(): void {
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = undefined;
+    }
+  }
+
+  /**
+   * Whether the ticker is currently running.
+   */
+  get is_running(): boolean {
+    return this._timer !== undefined;
+  }
+
+  /**
+   * Run one cycle synchronously. The controller's interval callback
+   * delegates here; tests can invoke it directly to deterministically
+   * exercise the cycle without spinning real timers.
+   *
+   * Overlapping invocations short-circuit: if a previous tick is
+   * still running, this one drops and returns `null`. The orchestrator
+   * never sees a queue of pending ticks regardless of how slow the
+   * predicate / archive / truncate are.
+   */
+  async run_once(): Promise<AutocloseCycleResult | null> {
+    if (this._running) return null;
+    this._running = true;
+    try {
+      const correlation = close_correlation(
+        this.deps.correlator,
+        this.deps.close_actor
+      );
+      const result = await run_autoclose_cycle({
+        autoclose_policy: this.deps.autoclose_policy,
+        autoclose_archiver: this.deps.autoclose_archiver,
+        event_to_state: this.deps.event_to_state,
+        reactive_events_size: this.deps.reactive_events_size,
+        load: this.deps.load,
+        tombstone: this.deps.tombstone,
+        logger: this.deps.logger,
+        config: this.deps.config,
+        correlation,
+      });
+      if (result.close_result.truncated.size > 0) {
+        this.deps.on_closed(result.close_result);
+      }
+      return result;
+    } finally {
+      this._running = false;
+    }
+  }
 }
