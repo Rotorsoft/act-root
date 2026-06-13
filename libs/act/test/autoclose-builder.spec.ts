@@ -53,10 +53,16 @@ describe(".autocloses(predicate) — declarator", () => {
     expect(Ticket.autoclose).toBe(second);
   });
 
-  it("throws synchronously when the argument isn't a function", () => {
+  it("throws synchronously when the argument isn't a function or policy object", () => {
     expect(() =>
       make_ticket().autocloses("not a function" as unknown as never)
-    ).toThrow(/requires a function/);
+    ).toThrow(/requires a function or a policy object/);
+    expect(() => make_ticket().autocloses(42 as unknown as never)).toThrow(
+      /requires a function or a policy object/
+    );
+    expect(() => make_ticket().autocloses(null as unknown as never)).toThrow(
+      /requires a function or a policy object/
+    );
   });
 
   it("returns the same builder so chaining stays fluent", () => {

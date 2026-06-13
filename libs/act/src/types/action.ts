@@ -557,10 +557,10 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  * {@link Store.truncate} on the next batch.
  *
  * The `head` argument is the latest committed (non-tombstone) event on
- * the stream; predicates that gate on the last event name (e.g. the
- * terminal-event policy from sub #839) read `head.name` directly and
- * the type system autocompletes it to the state's event union.
- * `count` is the stream's total event count.
+ * the stream; predicates that gate on the last event name (the same
+ * shape `.autocloses({ is: "EventName" })` compiles to) read `head.name`
+ * directly and the type system autocompletes it to the state's event
+ * union. `count` is the stream's total event count.
  *
  * Predicates run in process per cycle tick; they MUST be pure and
  * fast — slow predicates serialize behind the cycle's batch.

@@ -112,12 +112,11 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // this orchestrator file focused on the `Act` class.
 export {
   type AutocloseConfig,
+  type AutoclosePolicy,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
-  type WhenOptions,
-  when,
 } from "./internal/index.js";
 
 /**

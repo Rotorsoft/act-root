@@ -5,6 +5,10 @@
  * Fluent interface for defining a strongly-typed state machine using Zod schemas.
  */
 import type { ZodType } from "zod";
+import {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+} from "../internal/index.js";
 import type {
   ActionHandler,
   ActionOptions,
@@ -420,44 +424,65 @@ export type ActionBuilder<
    * per-event). Absent → the state opts out of online close entirely;
    * the cycle skips it and pays zero per-tick cost for it.
    *
-   * The predicate receives `head: Committed<TEvents, ...>` so reading
-   * `head.event.name` autocompletes to the state's declared event
-   * union — exactly the signature the policy factories from sub
-   * #839 (terminal-event), #838 (retention), and #840 (cardinality)
-   * produce.
+   * Two forms:
    *
-   * Custom policies that don't fit the three factories drop in as
-   * inline predicates — the factories return the same shape, so
-   * mixing is friction-free.
+   * - **Declarative** — pass an {@link AutoclosePolicy} object literal
+   *   covering the three operational pressure points (`after`,
+   *   `is`, `reaches`). OR semantics across fields. Validated via Zod
+   *   at build time; misconfiguration throws before `act().build()`
+   *   completes. Covers the 90% case.
+   * - **Function** — pass a `(stream, head, count) => boolean`
+   *   predicate. Drops out to the full power of JS for per-stream
+   *   metadata predicates, AND-composition, or anything the
+   *   declarative form doesn't cover. The predicate receives `head:
+   *   Committed<TEvents, ...>` so reading `head.name` autocompletes
+   *   to the state's declared event union.
    *
-   * @param predicate `(stream, head, count) => boolean`. `true`
-   *   schedules the stream for the next truncate batch.
+   * @param predicate_or_policy Function form: predicate as above.
+   *   Object form: declarative {@link AutoclosePolicy} bag.
    * @returns The ActionBuilder for chaining.
    *
-   * @example Terminal-event close (a Ticket closes when it's resolved).
+   * @example Declarative — domain lifecycle (a Ticket closes when
+   *   resolved).
    * ```typescript
-   * state({ Ticket: ticketSchema })
-   *   .init(() => defaults)
-   *   .emits({ TicketOpened, TicketResolved })
-   *   // ...
-   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   * .autocloses({ is: "TicketResolved" })
    * ```
    *
-   * @example Retention-window close (a Session closes when it's older
-   *   than 24h).
+   * @example Declarative — multi-terminal (an Order closes on any of
+   *   three terminal events).
    * ```typescript
-   * .autocloses((_stream, head) =>
-   *   Date.now() - head.created.getTime() > 24 * 60 * 60 * 1000)
+   * .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
    * ```
    *
-   * @example Cardinality-bound close (an audit log rotates after 10k
-   *   events).
+   * @example Declarative — time retention (a Session closes after
+   *   24h).
    * ```typescript
-   * .autocloses((_stream, _head, count) => count >= 10_000)
+   * .autocloses({ after: { days: 1 } })
+   * ```
+   *
+   * @example Declarative — cardinality (an audit log rotates after
+   *   10k events).
+   * ```typescript
+   * .autocloses({ reaches: 10_000 })
+   * ```
+   *
+   * @example Declarative — stacked (OR across all three pressures).
+   * ```typescript
+   * .autocloses({
+   *   after: { days: 730 },     // 2-year retention floor
+   *   is: "TicketResolved",     // OR explicit close
+   *   reaches: 10_000,          // OR cardinality safety net
+   * })
+   * ```
+   *
+   * @example Function — custom predicate the declarative form can't
+   *   express (per-stream metadata).
+   * ```typescript
+   * .autocloses((stream, head) => stream.startsWith("ephemeral:"))
    * ```
    */
   autocloses: (
-    predicate: AutoclosePredicate<TEvents>
+    predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -790,10 +815,27 @@ function action_builder<
       return builder;
     },
 
-    autocloses(predicate: AutoclosePredicate<TEvents>) {
-      if (typeof predicate !== "function") {
+    autocloses(
+      predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
+    ) {
+      // Function form → use as-is. Object form → compile through the
+      // policy resolver (Zod-validates + builds the predicate). Reject
+      // anything else (numbers, strings, null) with a typeof-based
+      // message that points at the supported shapes.
+      let predicate: AutoclosePredicate<TEvents>;
+      if (typeof predicate_or_policy === "function") {
+        predicate = predicate_or_policy;
+      } else if (
+        predicate_or_policy !== null &&
+        typeof predicate_or_policy === "object"
+      ) {
+        predicate = compile_autoclose_policy(
+          predicate_or_policy
+        ) as AutoclosePredicate<TEvents>;
+      } else {
         throw new Error(
-          ".autocloses(predicate) requires a function; got " + typeof predicate
+          ".autocloses(...) requires a function or a policy object; got " +
+            typeof predicate_or_policy
         );
       }
       // Replace on every call — matches snap / discloses state-level
