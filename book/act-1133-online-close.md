@@ -92,7 +92,7 @@ The expensive call per tick is `Store.query_stats({}, { count: true })`. On Post
 
 ## What slice 4 ships
 
-This essay covers the foundation: the declarators, the cycle, the controller. Three policy-factory subs land separately on the same primitive: `retention(...)` (#838), `terminal(...)` (#839), `cardinality(...)` (#840). Each compiles to the same `(stream, head, count) => boolean` shape. Operators who want their policy declarative read them as `terminal("TicketResolved")` and inherit the predicate shape; operators with custom policies inline the predicate. The factory layer is sugar; the primitive is the predicate.
+This essay covers the foundation: the declarators, the cycle, the controller. The policy-factory layer lands in #838 as a single `when({...})` builder with OR semantics across `olderThan` / `on` / `count` — the three originally-separate factory tickets (#838 retention, #839 terminal, #840 cardinality) collapsed into one when the first call site showed every real policy stacks. The factory compiles to the same `(stream, head, count) => boolean` shape the foundation primitive consumes. Operators with stacked policies read them as `when({...})`; operators with custom policies inline the function. The factory layer is sugar; the primitive is the predicate.
 
 The TCK doesn't grow for this — no new Store contract. The cycle composes existing `query_stats` + `truncate` + `run_close_cycle`. Adapter coverage lands as one integration test per adapter (PG, SQLite) confirming the end-to-end shape works against a real backend. The cost-and-correctness story is exercised by the unit tests against `InMemoryStore`.
 

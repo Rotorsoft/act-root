@@ -57,60 +57,78 @@ await app.shutdown();       // stops the autoclose ticker
 
 Operators who never call `start_correlations()` never start the cycle. Apps that declare no `.autocloses(...)` never even *construct* the controller — the cost story for an opt-out app is exactly the cost of allocating one `undefined` field on `Act`.
 
-## The three working policies
+## The `when({...})` factory
 
-Three categories cover the bulk of real workloads. The respective policy-factory subs (#838 / #839 / #840) ship `retention(...)`, `terminal(...)`, and `cardinality(...)` helpers that compile into the predicate shape above. Until those land, inline the predicate by hand — the shape is the same.
-
-### Terminal-event policy
-
-"Close once the stream has reached a designated terminal state."
+Three operational pressure points cover the bulk of real workloads. The `when({...})` factory (#838) folds all three into one declarative builder with OR semantics across optional fields:
 
 ```ts
-.autocloses((_stream, head) => head.name === "TicketResolved")
+import { when } from "@rotorsoft/act";
+
+.autocloses(when({
+  olderThan: { days: 90 },   // time — head event older than 90 days
+  on: "TicketResolved",      // OR domain lifecycle — head event in this set
+  count: 10_000,             // OR resource — event count ≥ 10_000
+}))
 ```
 
-Workloads: resolved tickets, completed orders, expired sessions, withdrawn applications. Every stream has a clear "I'm done" event in its history, and once that event is the head, the stream stays inactive.
+Each field is optional and contributes independently. The predicate returns `true` when **any** provided field matches — omitted fields contribute nothing. `when({})` throws at factory-call time because empty config is a misconfiguration, not "match nothing."
 
-Cost: one `head.name` comparison per stream per tick. Cheapest of the three.
-
-### Retention-window policy
+### `olderThan: { days }` — time / compliance
 
 "Close once the head event is older than X."
 
 ```ts
-const MS_24H = 24 * 60 * 60 * 1000;
-.autocloses((_stream, head) =>
-  Date.now() - head.created.getTime() > MS_24H)
+.autocloses(when({ olderThan: { days: 90 } }))
 ```
 
-Workloads: ephemeral sessions, cache-like streams, GDPR-driven retention windows. The state doesn't have a terminal event but has a max-staleness budget.
+Workloads: GDPR/PII retention windows, session aggregates after N days idle, audit logs past statutory keep-window, abandoned drafts. The state may not have a terminal event but has a max-staleness budget.
+
+`days` is a `number` (fractional accepted — `{ days: 1/24 }` is 1 hour). Resolved windows below one minute throw at factory-call time; the cycle tick itself defaults to 60 s so sub-minute windows can't be honored anyway. Nested object leaves room for `{ hours }` / `{ ms }` if a real ask appears.
 
 Cost: one timestamp comparison per stream per tick.
 
-### Cardinality-bound policy
+### `on: "EventName"` — domain lifecycle
 
-"Close once the stream has accumulated more than N events."
-
-```ts
-.autocloses((_stream, _head, count) => count >= 10_000)
-```
-
-Workloads: audit logs, telemetry buckets — anything where the stream IS active but you want to rotate at a size threshold.
-
-Cost: `count` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path). The cycle still bounds total work via `closeBatchSize`, but a cardinality-only fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
-
-### Composing policies
-
-The three are just `boolean` predicates — composing them is plain JavaScript:
+"Close once the head event reaches a designated terminal state."
 
 ```ts
-.autocloses((stream, head, count) => {
-  if (head.name === "TicketResolved") return true;                  // terminal
-  if (Date.now() - head.created.getTime() > 7 * MS_24H) return true; // 7 days
-  if (count >= 100_000) return true;                                // hard cap
-  return false;
-})
+.autocloses(when({ on: "TicketResolved" }))
+.autocloses(when({ on: ["Shipped", "Delivered", "Cancelled"] }))
 ```
+
+Workloads: resolved tickets, completed orders, expired sessions, withdrawn applications, deleted user accounts, completed/failed jobs. Every stream has a clear "I'm done" event (or set of events); once one is the head, the stream stays inactive.
+
+Single string for the most common case (one terminal event); `readonly string[]` for multi-terminal states (`Order: Shipped | Delivered | Cancelled`). The factory matches `head.name` against the set; the act-builder still catches typo'd event names at build time via the existing event-registry check.
+
+Cost: one set membership check per stream per tick. Cheapest of the three.
+
+### `count: N` — resource
+
+"Close once the stream has accumulated N or more events."
+
+```ts
+.autocloses(when({ count: 10_000 }))
+```
+
+Workloads: long-running chat threads, IoT telemetry streams, hot audit logs, event-loop counters — anything where the stream IS active but you want to rotate at a size threshold to keep reducer cost predictable.
+
+Inclusive (`>=`) — the predicate fires at the moment the threshold is reached, not after.
+
+Cost: `count` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). The cycle still bounds total work via `closeBatchSize`, but a cardinality-heavy fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
+
+### Stacking — the OR composition
+
+Real policies stack. A ticket should close when explicitly resolved **OR** after 2-year retention even if abandoned **OR** if cardinality blows up:
+
+```ts
+.autocloses(when({
+  olderThan: { days: 730 },     // 2-year retention floor
+  on: "TicketResolved",         // OR explicit close
+  count: 10_000,                // OR cardinality safety net
+}))
+```
+
+That's why the surface is one factory and one object literal. Three separate factories (`retention(...) / terminal(...) / cardinality(...)`) would have forced callers into `anyOf(...)` ceremony at every site that stacks; `when({...})` makes the OR the default and the wrapper unnecessary. AND semantics and per-stream metadata predicates aren't in scope — fall back to the function form (`.autocloses((stream, head, count) => ...)`) for those.
 
 ## What runs under the hood
 
@@ -160,6 +178,7 @@ The host is responsible for:
 ## Pointers
 
 - `.autocloses` / `.archives` declarators: `libs/act/src/builders/state-builder.ts`
+- `when({...})` factory: `libs/act/src/internal/autoclose-when.ts`
 - Cycle function: `libs/act/src/internal/autoclose-cycle.ts`
 - [Close-cycle architecture](../architecture/close-cycle.md) — explicit + online close in one pipeline
 - [Error handling](../concepts/error-handling.md) — what `StreamClosedError` means for actions on a closed stream

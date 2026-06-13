@@ -116,6 +116,8 @@ export {
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
+  type WhenOptions,
+  when,
 } from "./internal/index.js";
 
 /**
