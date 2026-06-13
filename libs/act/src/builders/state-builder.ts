@@ -427,56 +427,63 @@ export type ActionBuilder<
    * Two forms:
    *
    * - **Declarative** — pass an {@link AutoclosePolicy} object literal
-   *   covering the three operational pressure points (`after`,
-   *   `is`, `reaches`). OR semantics across fields. Validated via Zod
-   *   at build time; misconfiguration throws before `act().build()`
+   *   covering the three operational pressure points (`after`, `is`,
+   *   `reaches`). Top-level fields combine with AND; an optional
+   *   `or: {...}` block opens an alternative OR path. Validated via
+   *   Zod at build time; misconfiguration throws before `act().build()`
    *   completes. Covers the 90% case.
    * - **Function** — pass a `(stream, head, count) => boolean`
    *   predicate. Drops out to the full power of JS for per-stream
-   *   metadata predicates, AND-composition, or anything the
-   *   declarative form doesn't cover. The predicate receives `head:
-   *   Committed<TEvents, ...>` so reading `head.name` autocompletes
-   *   to the state's declared event union.
+   *   metadata predicates, multi-branch policies (different cooldowns
+   *   per terminal event), or anything the declarative form doesn't
+   *   cover. The predicate receives `head: Committed<TEvents, ...>`
+   *   so reading `head.name` autocompletes to the state's declared
+   *   event union.
    *
    * @param predicate_or_policy Function form: predicate as above.
    *   Object form: declarative {@link AutoclosePolicy} bag.
    * @returns The ActionBuilder for chaining.
    *
-   * @example Declarative — domain lifecycle (a Ticket closes when
-   *   resolved).
+   * @example Declarative — cooldown after terminal (a Ticket closes
+   *   90 days after resolution).
    * ```typescript
-   * .autocloses({ is: "TicketResolved" })
+   * .autocloses({ is: "TicketResolved", after: { days: 90 } })
    * ```
    *
    * @example Declarative — multi-terminal (an Order closes on any of
-   *   three terminal events).
+   *   three terminal events, no cooldown).
    * ```typescript
    * .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
    * ```
    *
-   * @example Declarative — time retention (a Session closes after
-   *   24h).
+   * @example Declarative — time-only retention (a Session closes
+   *   after 24h regardless of head event).
    * ```typescript
    * .autocloses({ after: { days: 1 } })
    * ```
    *
-   * @example Declarative — cardinality (an audit log rotates after
-   *   10k events).
+   * @example Declarative — pure cardinality cap.
    * ```typescript
    * .autocloses({ reaches: 10_000 })
    * ```
    *
-   * @example Declarative — stacked (OR across all three pressures).
+   * @example Declarative — primary cooldown + safety-net backstop.
    * ```typescript
    * .autocloses({
-   *   after: { days: 730 },     // 2-year retention floor
-   *   is: "TicketResolved",     // OR explicit close
-   *   reaches: 10_000,          // OR cardinality safety net
+   *   is: "TicketResolved",     // primary trigger
+   *   after: { days: 90 },      // AND aged 90 days
+   *   or: { reaches: 10_000 },  // OR cardinality safety net
    * })
    * ```
    *
+   * @example Declarative — pure OR (only backstops, no primary
+   *   cooldown).
+   * ```typescript
+   * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
+   * ```
+   *
    * @example Function — custom predicate the declarative form can't
-   *   express (per-stream metadata).
+   *   express (per-stream metadata or per-terminal cooldown).
    * ```typescript
    * .autocloses((stream, head) => stream.startsWith("ephemeral:"))
    * ```

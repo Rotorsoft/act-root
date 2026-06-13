@@ -63,13 +63,14 @@ Three operational pressure points cover the bulk of real workloads. `.autocloses
 
 ```ts
 .autocloses({
-  after: { days: 90 },       // time — head older than 90 days
-  is: "TicketResolved",      // OR domain lifecycle — head event in this set
-  reaches: 10_000,           // OR resource — event count ≥ 10_000
+  is: "TicketResolved",      // domain lifecycle — head event in this set
+  after: { days: 90 },       // AND time — head older than 90 days
 })
 ```
 
-Reads: *"autocloses after 90 days, is Resolved, reaches 10k."* Each field is optional and contributes independently. The compiled predicate returns `true` when **any** provided field matches — omitted fields contribute nothing. `.autocloses({})` throws at build time because empty config is a misconfiguration, not "match nothing." Validation runs through a Zod schema, so out-of-range values surface at `act().build()`, not on the first cycle tick.
+Reads: *"autocloses is Resolved after 90 days."* Top-level fields combine with **AND** — the cycle truncates only when every condition holds. This captures the cooldown-after-terminal pattern that runs through almost every business app (close 90 days after `Resolved`, 14 days after `Delivered`, 30 days after a GDPR deletion request). For pure-OR backstops or mixed patterns, a separate `or: {...}` block opens an alternative path (see below).
+
+Each field is optional and contributes independently. `.autocloses({})` throws at build time because empty config is a misconfiguration, not "match nothing." Validation runs through a Zod schema with `.strict()` enabled, so out-of-range values and unknown keys both surface at `act().build()`, not on the first cycle tick.
 
 ### `after: { days }` — time / compliance
 
@@ -114,19 +115,44 @@ Inclusive (`>=`) — the predicate fires at the moment the threshold is reached,
 
 Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). The cycle still bounds total work via `closeBatchSize`, but a cardinality-heavy fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
 
-### Stacking — the OR composition
+### Stacking — top-level AND + `or` block
 
-Real policies stack. A ticket should close when explicitly resolved **OR** after 2-year retention even if abandoned **OR** if cardinality blows up:
+Top-level fields are AND-combined. Two reasons that's the right default:
+
+1. The **cooldown-after-terminal** pattern is universal. Close *after* `Resolved`, *after* `Delivered`, *after* a deletion request — all of these read as `is X AND after N` in English, and that's the matching semantics in the schema.
+2. The conditions inside a typical primary policy are conjunctive ("the ticket must be Resolved *and* aged enough"), not disjunctive.
+
+For pure-OR backstops or for mixing both shapes, use the optional `or: {...}` block. The policy fires when **either** the top-level AND group matches **or** any field inside `or` matches:
 
 ```ts
 .autocloses({
-  after: { days: 730 },         // 2-year retention floor
-  is: "TicketResolved",         // OR explicit close
-  reaches: 10_000,              // OR cardinality safety net
+  is: "TicketResolved",         // primary close trigger
+  after: { days: 90 },          // AND aged 90 days (return window)
+  or: { reaches: 10_000 },      // OR cardinality safety net (close at 10k regardless)
 })
 ```
 
-That's why the surface is one builder method, one object literal, no wrapping factory. Three separate factories (`retention(...) / terminal(...) / cardinality(...)`) would have forced callers into `anyOf(...)` ceremony at every site that stacks; the object literal makes OR the default and the wrapper unnecessary. AND semantics and per-stream metadata predicates aren't in scope — fall back to the function form (`.autocloses((stream, head, count) => ...)`) for those.
+Reads: *"autocloses is Resolved after 90 days, or reaches 10k."*
+
+The two-axis split mirrors the two ways close policies appear in practice:
+
+- **Primary close logic** (AND-shaped) lives at the top level — the conditions that *must all hold* for a normal close.
+- **Defensive backstops** (OR-shaped) live in `or` — independent triggers that close the stream regardless of the primary state, so unbounded growth doesn't escape the policy.
+
+Pure-OR policies (no top-level fields, only `or`) work too: `.autocloses({ or: { is: "Resolved", reaches: 10_000 } })` reads "autocloses or is Resolved or reaches 10k" — close when either alone is true. The empty top-level AND group never satisfies its own path on its own; only the `or` block can fire in that case.
+
+Multi-branch policies the schema doesn't express directly ("(`Resolved` + 90d) OR (`Cancelled` + 30d)" — different cooldowns per terminal) fall back to the function form:
+
+```ts
+.autocloses((_stream, head) => {
+  const ageMs = Date.now() - head.created.getTime();
+  if (head.name === "Resolved") return ageMs >= 90 * 86_400_000;
+  if (head.name === "Cancelled") return ageMs >= 30 * 86_400_000;
+  return false;
+})
+```
+
+The declarative form covers ~90% of real policies in one line. The function form covers the long tail.
 
 ## What runs under the hood
 
