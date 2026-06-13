@@ -128,6 +128,23 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
 | Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
 
+### Operator recipes
+
+When an Act application hits the edges (events table growing without bound, cooldowns after terminal state, regulated retention windows, partition-drop archival), the playbook lives in [`recipes/`](recipes/README.md) at the repo root — separate from `libs/` (framework code), `docs/` (framework reference), and `book/` (design-history essays).
+
+| Topic | File |
+|---|---|
+| Top-level operator landing + envelope of safe operation | [recipes/README.md](recipes/README.md) |
+| Scaling decision tree (symptoms → recipe) | [recipes/scaling/README.md](recipes/scaling/README.md) |
+| Close-the-books patterns (`.autocloses({...})`) | [recipes/scaling/close-the-books/README.md](recipes/scaling/close-the-books/README.md) |
+| Cold-tier archival (`.archives(...)` + S3 / JSONL) | [recipes/scaling/archival/README.md](recipes/scaling/archival/README.md) |
+| Partitioning gating page (the "don't" page) | [recipes/scaling/partitioning/README.md](recipes/scaling/partitioning/README.md) |
+| HASH-on-stream partition recipe (SQL + run.sh) | [recipes/scaling/partitioning/hash-on-stream/](recipes/scaling/partitioning/hash-on-stream/README.md) |
+| RANGE-on-id (single-aggregate giants, docs only) | [recipes/scaling/partitioning/range-on-id/](recipes/scaling/partitioning/range-on-id/README.md) |
+| RANGE-on-created (bulk archival via DROP PARTITION) | [recipes/scaling/partitioning/range-on-created/](recipes/scaling/partitioning/range-on-created/README.md) |
+
+Recipe conventions: each folder has a README + optional runnable artifacts (`.sql` files using `{{schema}}` / `{{table}}` placeholders, `run.sh` wrappers, `.ts` samples that compile against the live `@rotorsoft/act` API). The framework code stays unchanged — recipes are operator playbooks, not framework features. New recipes land here when an operator hits a real wall the existing pages don't cover.
+
 ### Performance evidence
 
 Per-package `PERFORMANCE.md` files track benchmark history with before/after numbers per optimization. READMEs link to them; READMEs themselves stay narrative.

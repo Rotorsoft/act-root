@@ -142,7 +142,7 @@ Created by `seed()`:
 
 The unpartitioned default schema is the right shape for almost every Act application. If you find yourself wondering whether your `events` table needs partitioning, the first answer is almost always `Act.close()` — see the [Production checklist](https://rotorsoft.github.io/act-root/docs/guides/production-checklist) and the [auto-close epic (#802)](https://github.com/Rotorsoft/act-root/issues/802) for the policies that keep a steady-state events table without partitioning.
 
-For the narrow set of workloads where `close()` genuinely can't help (regulated append-only audit logs, single-aggregate giants, retention-window bulk archival, parallel-rebuild bottlenecks), see [PARTITIONING.md](./PARTITIONING.md). The page leads with "don't" — read it before reaching for the SQL.
+For the narrow set of workloads where `close()` genuinely can't help (regulated append-only audit logs, single-aggregate giants, retention-window bulk archival, parallel-rebuild bottlenecks), the operator playbook lives at [`recipes/scaling/`](../../recipes/scaling/README.md) — the page leads with "don't" and walks through the gates before reaching any SQL.
 
 ## When to use this vs `act-sqlite`
 
@@ -181,7 +181,7 @@ Public API governed by the [Act Stability Charter](../../STABILITY.md). `Postgre
 - **[Concurrency model](https://rotorsoft.github.io/act-root/docs/architecture/concurrency-model)** — lease lifecycle, `claim`/`ack`/`block`/timeout, optimistic concurrency.
 - **[Writing a custom Store adapter](https://rotorsoft.github.io/act-root/docs/guides/writing-a-store)** — the recipe `PostgresStore` itself follows, for authors building against other databases.
 - **[PERFORMANCE.md](./PERFORMANCE.md)** — measured throughput numbers, including the `notify` latency benchmark.
-- **[PARTITIONING.md](./PARTITIONING.md)** — extreme-case escape valve when `close()` isn't enough. The page leads with reasons not to partition.
+- **[Scaling recipes](../../recipes/scaling/README.md)** — operator playbook for the symptoms `act-pg` apps hit at the edges (close-the-books, archival, partitioning). Read this before reaching for any DDL.
 
 ## License
 

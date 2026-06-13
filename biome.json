@@ -94,6 +94,7 @@
         "**/*.bench.ts",
         "packages/**",
         "performance/**",
+        "recipes/**",
         "libs/act-diagram/src/server/**"
       ],
       "linter": {
