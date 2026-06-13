@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.12.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.11.0...@rotorsoft/act-v1.12.0) (2026-06-13)
+
+
+### Features
+
+* **act:** [#838](https://github.com/rotorsoft/act-root/issues/838) — \`when({...})\` close-policy factory ([1404912](https://github.com/rotorsoft/act-root/commit/14049128a45291a337496135191e2251114d2b77)), closes [#839](https://github.com/rotorsoft/act-root/issues/839) [#840](https://github.com/rotorsoft/act-root/issues/840)
+
 # [@rotorsoft/act-v1.11.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.10.2...@rotorsoft/act-v1.11.0) (2026-06-11)
 
 
