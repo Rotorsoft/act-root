@@ -127,6 +127,7 @@ Then ask Claude Code: **"Build me an app from this spec: `<link-or-file>`"**.
 - [Concepts](https://rotorsoft.github.io/act-root/docs/intro) — state management, event sourcing, error handling, real-time, testing, configuration
 - [Architecture](https://rotorsoft.github.io/act-root/docs/architecture) — concurrency model, cache and snapshots, correlation and drain, cross-process reactions, priority lanes, close cycle, schema evolution, extension points
 - [Guides](https://rotorsoft.github.io/act-root/docs/intro) — production checklist, projections to a database, external integration, writing a custom store/cache/logger, contributing a new package
+- [Operator recipes](./recipes/README.md) — playbook for the moments when default Act + close-the-books runs out: archival, partitioning, retention windows. Lead with the gating page; most apps never need any of it
 - [API reference](https://rotorsoft.github.io/act-root/docs/api/) — typedoc, refreshed on every push to `master`
 - [Performance](./libs/act/PERFORMANCE.md) — throughput numbers per store, CI regression guard, optimization history
 - [Philosophy](./docs/PHILOSOPHY.md) — DDD / Event Sourcing / CQRS lineage, integration patterns, why this shape
