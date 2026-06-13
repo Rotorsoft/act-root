@@ -64,7 +64,7 @@ async function main() {
   // (ACT-1103) make the lane mechanic visible in the logs: every
   // DigitPressed routes through the "board" lane, every
   // OperatorPressed routes through the "result" lane. Identical
-  // behavior to a single lane in this small demo — the point is the
+  // behavior to a single lane in this small demo -- the point is the
   // observability.
   const app = act()
     .withState(Calculator)
@@ -107,9 +107,9 @@ async function main() {
     .build();
 
   // Lane routing shows up in the per-cycle `>> drained` trace
-  // (`LOG_LEVEL=trace`) — caption prefix carries the lane, outcome
-  // marker is colored, post-ack watermark trails the ✓. No extra
-  // app.on("acked") listener needed.
+  // (`LOG_LEVEL=trace`) -- caption prefix carries the lane, outcome
+  // marker is colored, post-ack watermark trails the ack mark. No
+  // extra app.on("acked") listener needed.
 
   // start the correlation pump
   app.start_correlations();
@@ -217,4 +217,7 @@ async function main() {
   app.stop_correlations();
 }
 
-void main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});
