@@ -8,6 +8,23 @@
 > first; it's a series of gates that exist precisely so this page is
 > reached on purpose, not by accident.
 
+> **CONSISTENCY WARNING — read this before you run anything.** `DROP
+> PARTITION` deletes events from the events table. Act's `app.load(stream)`
+> reconstructs state by replaying every event for that stream from
+> version 1 forward. If a partition you drop contains events for a
+> stream that's still alive (no tombstone seeded by `app.close()` or
+> `.autocloses({...})`), the next `load()` of that stream returns
+> **silently wrong state** — the reducer chain runs over an incomplete
+> event history and produces whatever happens to be derivable from the
+> surviving events. There is no error, no warning, no integrity check.
+> The state is just wrong.
+>
+> This recipe is only safe when every stream with events in the dropped
+> partition has *already been retired or snapshotted* before the drop.
+> The [Consistency: retire or snapshot before drop](#consistency-retire-or-snapshot-before-drop)
+> section below is mandatory reading. Skip it and you'll corrupt
+> aggregate state in production.
+
 ## What this recipe does
 
 It rewrites the `events` table as a `PARTITION BY RANGE (created)` table
@@ -222,6 +239,54 @@ you don't need a long-term cold-storage copy, you can skip step 2
 and go straight from `DETACH` to `DROP`. Document that decision —
 the next operator (or auditor) will want to know why step 2 is
 missing.
+
+## Consistency: retire or snapshot before drop
+
+`DROP PARTITION` deletes events. Act doesn't have a way to know events used to exist — it reconstructs aggregate state by replaying every event for a stream from version 1. When that replay starts at version 50 because the lower versions vanished, the state the reducer returns is whatever happens to be derivable from the surviving events. Silently wrong, no error.
+
+The framework gives you exactly two ways to keep state consistent in the presence of partition drops:
+
+1. **Retire the stream before the partition drops.** Run `app.close({ stream })` (or let `.autocloses({...})` retire it on its own cycle) before the events fall into a partition you'll later drop. A closed stream seeds a `__tombstone__` event as the sole surviving event — future `load()` of that stream returns the default state plus the tombstone, which is the correct "this is gone" semantic. The historical events can vanish without breaking anything, because nothing is supposed to load them anymore.
+
+2. **Snapshot the stream before the partition drops.** Run `app.snap(stream)` (or rely on the state's `.snap` predicate to insert one) before the cutoff. A snapshot writes a `__snapshot__` event with the current reduced state baked in; subsequent `load()` calls start from the snapshot and reduce forward, never reaching the dropped events. The snapshot itself lives in a recent partition that won't be dropped.
+
+In practice, this means the partition-drop archival pipeline has a prerequisite check it must run **before** the `DROP`:
+
+```sql
+-- For every stream with events in the partition you're about to drop,
+-- confirm there is either a tombstone or a snapshot at or after the
+-- partition's upper bound. This SELECT returns ZERO rows when the
+-- archive is safe. Any rows mean you'd corrupt those streams.
+SELECT DISTINCT e.stream
+FROM {{schema}}.{{table}} e
+WHERE e.created < '{{cutoff}}'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM {{schema}}.{{table}} guard
+    WHERE guard.stream = e.stream
+      AND guard.created >= '{{cutoff}}'
+      AND guard.name IN ('__tombstone__', '__snapshot__')
+  );
+```
+
+The recipe's `drop-partition.sql` runs this check as its first step. If it returns any rows, the script aborts with a clear message: "These streams have events in the partition you're about to drop and no retire/snapshot marker on or after the cutoff. Retire them via `app.close()` or snapshot them via `app.snap()` first, then re-run."
+
+### The two-tool composition that actually scales
+
+Real systems running range-on-created compose two policies:
+
+- **Per-stream retirement** — `.autocloses({...})` declares the policy by which streams become semantically dead and earn their tombstone. The autoclose cycle runs continuously and retires streams as they go terminal. By the time a partition ages out of the retention window, the streams that ended in that partition are already retired; their tombstones live in the partition for the month they retired.
+- **Table-wide retention floor** — `drop-partition.sql` runs on a cron and drops partitions older than the cutoff. Because retirement happens per-stream over time, by the time a partition is up for drop, every stream with events in it is either retired (tombstone in a future partition, OK to drop) or still alive (snapshot in a future partition, OK to drop).
+
+States that lack a natural terminal event — long-running ledgers, append-only audit trails on entities that never end — need explicit snapshots before drops, scheduled in lock-step with the partition rotation cadence. A cron that runs `app.snap()` on every alive state before each archival run is the typical shape.
+
+States whose streams cross the retention boundary without retirement *or* snapshotting are the failure case. The pre-drop guard catches them; the operator's options are (a) retire them, (b) snapshot them, (c) extend the retention window. There is no fourth option that preserves correctness.
+
+### Why the framework doesn't enforce this automatically
+
+The framework knows about `Store.truncate()` (the close cycle's tool) but doesn't own the partition lifecycle. `DROP PARTITION` is a DDL statement issued by an operator script running outside the framework's process. The framework can't intercept it, can't run the pre-flight check inside it, and can't roll it back if the check fails. The check has to live in the recipe — and the recipe makes it the first SQL statement in `drop-partition.sql` so it can't be skipped accidentally.
+
+If you're tempted to drop the check ("my retention window is 7 years, nothing alive runs that long") — write it down as a comment in your scheduled-job runbook, get a second pair of eyes, and put the guard back. A 7-year-old assumption is exactly the assumption that gets violated by next quarter's product feature.
 
 ## What this recipe is NOT
 

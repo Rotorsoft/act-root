@@ -157,11 +157,12 @@ covers cycle tuning (`autocloseCycleMs`, `closeBatchSize`,
 but a per-request close is overkill.
 
 **Stream rotation while keeping the entity alive.** Close always
-tombstones. For a long-running entity that needs its history
-rotated but stays live (a chat thread that's been going for two
-years and you want to flush the first year), use
-`app.close({ stream, restart: true })` — same primitive, different
-post-condition. The recipe page above covers when to reach for it.
+tombstones. For a long-running business entity that needs its
+history rotated but stays live (a multi-year customer relationship
+where the last year of activity is what's hot and the older history
+is reference-only), use `app.close({ stream, restart: true })` —
+same primitive, different post-condition. The recipe page above
+covers when to reach for it.
 
 **Cross-state coordination.** Each state's predicate sees only
 its own candidates. "Close stream A only after B is closed"

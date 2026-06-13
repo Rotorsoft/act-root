@@ -8,6 +8,18 @@
 -- There is no per-row recovery — the only path back is your real
 -- database backup, which is a long restore.
 --
+-- CONSISTENCY WARNING: `DROP PARTITION` deletes events. Act
+-- reconstructs aggregate state via `app.load(stream)` by replaying
+-- every event for the stream from version 1 forward. If you drop
+-- a partition containing events for a stream that's still alive
+-- (no tombstone or snapshot at or after the cutoff), the next
+-- `load()` returns silently wrong state. The first SQL block in
+-- this script is the pre-flight check that catches this case;
+-- if it raises, abort the run and retire / snapshot the named
+-- streams via `app.close()` or `app.snap()` first. Do not skip
+-- the check. See README.md → "Consistency: retire or snapshot
+-- before drop" for the full explanation.
+--
 -- Before wiring this into cron:
 --
 --   1. Verify the cold-storage dump step. The pg_dump call below
@@ -46,6 +58,55 @@
 \set ON_ERROR_STOP on
 
 BEGIN;
+
+-- =============================================================
+-- Step 0 — consistency guard (DO NOT REMOVE).
+-- =============================================================
+--
+-- For every stream that has events older than the cutoff, this
+-- check confirms there is ALSO a tombstone or snapshot marker
+-- on or after the cutoff. Streams that pass are either retired
+-- (tombstone) or snapshotted forward (their `load()` won't reach
+-- the dropped events). Streams that fail are the ones whose
+-- aggregate state would be silently corrupted by the drop.
+--
+-- The expected output of this query is ZERO rows. Any rows mean
+-- you must retire those streams via app.close() or snapshot them
+-- via app.snap() BEFORE re-running this script. The transaction
+-- is rolled back if the check fails — no partition is touched.
+DO $$
+DECLARE
+    unsafe_count int;
+BEGIN
+    SELECT count(DISTINCT e.stream)
+    INTO unsafe_count
+    FROM {{schema}}.{{table}} e
+    WHERE e.created < :'cutoff'::date
+      AND NOT EXISTS (
+        SELECT 1
+        FROM {{schema}}.{{table}} guard
+        WHERE guard.stream = e.stream
+          AND guard.created >= :'cutoff'::date
+          AND guard.name IN ('__tombstone__', '__snapshot__')
+      );
+
+    IF unsafe_count > 0 THEN
+        RAISE EXCEPTION
+            'partition-drop aborted: % stream(s) have events before % '
+            'with no tombstone or snapshot at or after that date. '
+            'Dropping now would silently corrupt aggregate state on '
+            'next load(). Run app.close() or app.snap() on those '
+            'streams first, then re-run this script.',
+            unsafe_count,
+            :'cutoff';
+    END IF;
+
+    RAISE NOTICE
+        'Consistency check passed: every stream with events before % '
+        'has a tombstone or snapshot marker on or after that date.',
+        :'cutoff';
+END
+$$;
 
 -- Build the list of partitions whose declared upper bound is
 -- already <= the cutoff. pg_inherits + relpartbound is the

@@ -63,7 +63,7 @@ The narrow set of workloads where `close()` genuinely can't help:
 
 1. **Regulated / append-only audit logs.** Financial ledgers, compliance trails, blockchain-adjacent systems where deletion is forbidden by policy or law. `Act.close()` is unavailable because tombstones are still "deletion" in the strict regulatory reading. The events table grows monotonically forever; index height, VACUUM duration, and planner stats eventually dominate tail latency. The recipe for this case is `recipes/scaling/partitioning/hash-on-stream/README.md` — HASH-on-stream colocates each aggregate's events in one partition, keeps single-stream reads cheap, and caps per-partition index height.
 
-2. **Single-aggregate giants.** One stream with millions of events on a single aggregate — a multi-year IoT device telemetry trail, a long-running ledger for one regulated entity, an audit trail for a critical workflow that runs for a decade. The aggregate can't be closed because the business still treats it as alive. HASH partitioning by `stream` does not help here (all the events for one stream land in one partition); range partitioning by `id` might. See `recipes/scaling/partitioning/range-on-id/README.md` — that recipe is documentation-only by design because the cut points are app-specific.
+2. **Single-aggregate giants.** One stream with millions of events on a single business-domain aggregate — a long-running ledger for one regulated entity, an audit trail for a critical workflow that runs for a decade, a compliance event log for a single legal entity. The aggregate can't be closed because the business still treats it as alive. HASH partitioning by `stream` does not help here (all the events for one stream land in one partition); range partitioning by `id` might. See `recipes/scaling/partitioning/range-on-id/README.md` — that recipe is documentation-only by design because the cut points are app-specific.
 
 3. **Bulk archival with retention windows.** Regulatory frameworks that require retention for N months and then mandate disposal. `Act.close()` deletes per-row, which is slow on hundreds of millions of rows; `DETACH PARTITION` + `DROP TABLE` is constant-time DDL regardless of partition size. Some regulators also accept partition-drop as "physical retention until partition retirement," which is more defensible than per-row delete. Recipe: `recipes/scaling/partitioning/range-on-created/README.md`. If you're chasing retention with non-regulatory motivations, check `recipes/scaling/archival/README.md` first — the `close()`-plus-archiver path is usually enough.
 
@@ -98,6 +98,23 @@ Notes on each:
 - **RANGE on `id`** is the only strategy that helps "single-aggregate giant" scenarios. It deliberately splits one stream across partitions, ordered by the global id. Recent partitions stay hot, older partitions go cold. Documentation-only: range partitioning is a per-app schema design (event volume, retention window, archival policy), not a turn-key recipe. The framework documents the *strategy*; the schema is yours to design.
 
 - **RANGE on `created`** is the strategy for bulk archival by retention window. Pair with `pg_partman` for partition creation and the drop-partition runner in the recipe for the archival half of the loop. Don't use this strategy if you don't have a clean retention boundary — picking a wrong cutoff means re-partitioning later, which is the same migration cost twice.
+
+## Consistency cost when a strategy involves `DROP PARTITION`
+
+Any strategy that drops partitions (most often `RANGE on created` for retention archival, occasionally `RANGE on id` for cold-storage tiering) deletes events from the events table. Act reconstructs aggregate state by replaying every event for a stream from version 1 forward, so if you drop a partition containing events for a stream that's still alive — no `__tombstone__` from `app.close()` / `.autocloses({...})`, no `__snapshot__` from `app.snap()` / a `.snap` predicate — the next `app.load(stream)` returns **silently wrong state**. The reducer runs over the surviving events as if the dropped ones never existed.
+
+There is no error. No integrity check. No warning. Just a corrupted aggregate.
+
+The recipes that involve `DROP PARTITION` (`range-on-created/drop-partition.sql`) ship with a pre-flight guard that runs as the first SQL statement: it lists every stream with events older than the cutoff that lacks a tombstone or snapshot at or after the cutoff. The guard raises and rolls back the transaction if any unsafe streams exist; the operator must retire them (`app.close()`) or snapshot them (`app.snap()`) before re-running.
+
+The two-tool composition that scales:
+
+- **Per-stream retirement** via `.autocloses({...})` so streams earn their tombstone in the partition where they go terminal. By the time that partition ages out of the retention window, the tombstones are safely in a future partition.
+- **Table-wide retention floor** via the drop runner, which checks the guard before touching DDL.
+
+For states that lack a natural terminal event, schedule explicit `app.snap()` calls in lock-step with the partition cadence — the snapshot writes to the always-current partition and survives the next drop. The recipe pages for `range-on-created` and `range-on-id` carry this guidance per-strategy; this section exists because the constraint cuts across every partitioning approach that can lose events.
+
+HASH-on-stream is the only strategy in this folder that's safe by construction — it never drops events, only relocates them across partitions.
 
 ## Costs you'll see no matter which strategy you pick
 

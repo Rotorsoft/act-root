@@ -13,6 +13,16 @@ and the commit/reaction rates measured in
 [libs/act-pg/PERFORMANCE.md](../../libs/act-pg/PERFORMANCE.md). If you haven't
 yet hit a measured wall, you don't need this folder.
 
+> **Make sure Act is the right tool first.** This decision tree assumes you're
+> running a business application — domain aggregates with lifecycles, invariants,
+> events that represent business facts. If your workload is telemetry, sensor
+> streams, log ingestion, or any other high-frequency append-only firehose
+> where events are *measurements*, the scaling story below doesn't apply
+> because Act isn't the right tool in the first place. Time-series databases
+> and stream processors exist for those workloads. See
+> [recipes/README.md](../README.md#act-is-for-business-apps) for the longer
+> framing on what Act is and isn't shaped for.
+
 If you have, the gates below run in order. Each gate is a question you answer
 before moving down. Most operators stop at Gate 1.
 
@@ -181,12 +191,12 @@ verbatim from [libs/act-pg/PARTITIONING.md](../../libs/act-pg/PARTITIONING.md):
 >    eventually dominate tail latency.
 >
 > 2. **Single-aggregate giants.** One stream with millions of events on a
->    single aggregate — a multi-year IoT device telemetry trail, a long-running
->    ledger for one regulated entity, an audit trail for a critical workflow
->    that runs for a decade. The aggregate can't be closed because the business
->    still treats it as alive. HASH partitioning by `stream` does not help here
->    (all the events for one stream land in one partition); range partitioning
->    by `id` might.
+>    single business-domain aggregate — a long-running ledger for one
+>    regulated entity, an audit trail for a critical workflow that runs for a
+>    decade, a compliance event log for a single legal entity. The aggregate
+>    can't be closed because the business still treats it as alive. HASH
+>    partitioning by `stream` does not help here (all the events for one
+>    stream land in one partition); range partitioning by `id` might.
 >
 > 3. **Bulk archival with retention windows.** Regulatory frameworks that
 >    require retention for N months and then mandate disposal. `Act.close()`

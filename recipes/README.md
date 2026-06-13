@@ -2,6 +2,20 @@
 
 Operator-facing playbook for running an Act application in production. This folder is for the moments where you've stopped writing domain code and started thinking about indexes, maintenance windows, and weekly cron jobs. Framework reference lives in `docs/docs/` and the design history is in `book/`; this tree is the operations handbook.
 
+## Act is for business apps
+
+Before any of the scaling recipes apply, the framework has to be the right tool. Act is built for **business applications** — domain-driven event-sourced systems with aggregates that have lifecycles, invariants, and human-comprehensible workflows. Orders, tickets, subscriptions, accounts, ledgers, claims, applications, sessions, audit trails for regulated processes. Workloads where events represent *business facts* — somebody did something, something was approved, a contract entered a new state — and the system's job is to keep the truth and react to it.
+
+Act is **not** built for telemetry, sensor streams, real-time analytics, log ingestion, or any other high-frequency append-only firehose where events are *measurements* rather than facts. Several reasons:
+
+- The framework's hot path is opinionated around correctness (Zod validation per event, single global `id` sequence, optimistic concurrency on `(stream, version)`, reaction routing through the drain pipeline). Every commit pays that opinion. Telemetry pipelines need the opposite trade — cheap ingest, no per-event validation, batch flushes.
+- The default storage adapter is Postgres. Postgres serves business apps beautifully and serves multi-million-events-per-second telemetry workloads poorly. The recipes in this folder all assume the PG side of that boundary; nothing here translates to ClickHouse or TimescaleDB or InfluxDB.
+- The state-machine model (one stream = one aggregate, reducer produces current state from event history) is exactly what you want for a business aggregate and exactly not what you want for measurements you'll only ever read as a time series.
+
+If your workload is telemetry-shaped, you want a time-series database, a stream processor, or a purpose-built ingest pipeline. Pick the right tool and skip the rest of this folder. If your workload is business-shaped, read on.
+
+## What "almost" means
+
 The framing the rest of this folder is built around: **default Act plus Postgres plus close-the-books handles almost every real workload.** This folder documents what "almost" actually means — the symptoms of the walls you might hit, and the recipes for getting past them.
 
 ## What "default Act handles" looks like

@@ -10,15 +10,15 @@ Default Act is fine for the overwhelming majority of apps. This recipe exists fo
 
 This is the answer to case #2 from [the gating page](../README.md):
 
-> **Single-aggregate giants.** One stream with millions of events on a single aggregate — a multi-year IoT device telemetry trail, a long-running ledger for one regulated entity, an audit trail for a critical workflow that runs for a decade. The aggregate can't be closed because the business still treats it as alive. HASH partitioning by `stream` does not help here (all the events for one stream land in one partition); range partitioning by `id` might.
+> **Single-aggregate giants.** One stream with millions of events on a single aggregate — a long-running ledger for one regulated entity, an audit trail for a critical workflow that runs for a decade. The aggregate can't be closed because the business still treats it as alive. HASH partitioning by `stream` does not help here (all the events for one stream land in one partition); range partitioning by `id` might.
 
-Concrete shapes that fit:
+Act targets business applications, so the "giant" here is a business-domain aggregate that legitimately accumulates events over years, not high-frequency telemetry (which doesn't fit Act's model in the first place — see the top-level [`recipes/README.md`](../../../README.md) for why). Concrete shapes that fit:
 
-- A telemetry stream for a single industrial sensor that emits an event every few seconds for a decade. By year five you're at a hundred million events in one stream.
 - A regulated entity's master ledger that books transactions across the lifetime of the business. The stream is the entity; closing it means closing the entity.
 - A workflow audit trail for a single long-running process — a clinical trial, a multi-year procurement contract, a credit facility — where the workflow is one durable thing and the audit is its history.
+- A compliance event log for a single legal entity that must retain every regulated event for the lifetime of the relationship.
 
-Notice what these have in common. The stream cardinality is **small** (often one). The per-stream event count is **enormous**. And closing the stream is not on the table: the business still treats the aggregate as alive.
+Notice what these have in common. The stream cardinality is **small** (often one). The per-stream event count is **enormous over time** (years, not seconds). And closing the stream is not on the table: the business still treats the aggregate as alive.
 
 ## Why HASH partitioning doesn't help
 
@@ -89,6 +89,8 @@ Then create child partitions for the existing id ranges (`FROM (0) TO (10000000)
 ## Operational concerns
 
 **Cold-storage migration.** Older partitions can move to cheaper storage with `ALTER TABLE {{schema}}.{{table}}_p_000000000 SET TABLESPACE cold_tier`. Reads still work, they're just slower. For the giant-stream case, "slower reads on history nobody asks for" is exactly the trade you want.
+
+**If you ever DROP an old partition, the consistency rules from the gating page apply.** Range-on-id partitions are usually moved to cold storage rather than dropped — the strategy is built around "keep everything, just stratify it." But operators sometimes drop the oldest range when retention policy says so, or when cold storage itself reaches its budget. The moment you do, you're in the same territory as range-on-created's drop path: every alive stream with events in the dropped range needs a `__tombstone__` (`app.close()` / `.autocloses({...})`) or a `__snapshot__` (`app.snap()` / state-level `.snap` predicate) **outside** the dropped range, or `app.load()` for that stream silently returns wrong state. See [the gating page's consistency section](../README.md#consistency-cost-when-a-strategy-involves-drop-partition) for the full explanation and the pre-flight check pattern. The recipe doesn't ship a drop runner for range-on-id because the cut points are app-specific; if you write one, copy the consistency guard from `recipes/scaling/partitioning/range-on-created/drop-partition.sql` and adapt the cutoff column from `created` to `id`.
 
 **Projection rebuild.** `app.reset(targets)` still works post-migration. It walks every partition in id order via MergeAppend, the same way an unpartitioned table would walk in id order. If the projection reads only the giant stream, the planner prunes the unrelated partitions (there aren't any — RANGE on `id` doesn't distinguish by stream). If the projection has a watermark, you can prune cold partitions out of the rebuild manually by capping the `id >= start_id` clause, which is cheap to do but requires changes outside the framework.
 

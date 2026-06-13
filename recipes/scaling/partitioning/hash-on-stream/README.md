@@ -54,10 +54,11 @@ your own data shape before committing.
 Quoting the gating page so you don't have to switch tabs:
 
 - **Single-aggregate giants** (case #2). "One stream with millions of events on
-  a single aggregate — a multi-year IoT device telemetry trail, a long-running
-  ledger for one regulated entity, an audit trail for a critical workflow that
-  runs for a decade." HASH partitioning by `stream` does not help here: all the
-  events for one stream hash to the same bucket and land in one partition.
+  a single business-domain aggregate — a long-running ledger for one regulated
+  entity, an audit trail for a critical workflow that runs for a decade, a
+  compliance event log for a single legal entity." HASH partitioning by
+  `stream` does not help here: all the events for one stream hash to the same
+  bucket and land in one partition.
   You'd be growing one partition without bound while the others sit empty. See
   [recipes/scaling/partitioning/range-on-id/README.md](../range-on-id/README.md)
   if this is your problem.
