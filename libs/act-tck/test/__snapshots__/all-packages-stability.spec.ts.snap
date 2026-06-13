@@ -786,6 +786,7 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
+  type AutoclosePolicy,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
@@ -2915,10 +2916,10 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  * {@link Store.truncate} on the next batch.
  *
  * The \`head\` argument is the latest committed (non-tombstone) event on
- * the stream; predicates that gate on the last event name (e.g. the
- * terminal-event policy from sub #839) read \`head.name\` directly and
- * the type system autocompletes it to the state's event union.
- * \`count\` is the stream's total event count.
+ * the stream; predicates that gate on the last event name (the same
+ * shape \`.autocloses({ is: "EventName" })\` compiles to) read \`head.name\`
+ * directly and the type system autocompletes it to the state's event
+ * union. \`count\` is the stream's total event count.
  *
  * Predicates run in process per cycle tick; they MUST be pure and
  * fast — slow predicates serialize behind the cycle's batch.
@@ -4707,6 +4708,251 @@ export class AutocloseController {
       this._running = false;
     }
   }
+}
+
+// === autoclose-policy.ts ===
+/**
+ * @module autoclose-policy
+ * @category Internal
+ *
+ * Declarative close-policy options consumed by \`.autocloses({...})\`
+ * (#838 / epic #802). Three optional fields cover the three
+ * operational pressure points every real close policy traces back to:
+ *
+ *   - \`after\`   — time / compliance ("autocloses **after** N days")
+ *   - \`is\`      — domain lifecycle ("autocloses ... **is** Resolved")
+ *   - \`reaches\` — resource ("autocloses ... **reaches** 10k events")
+ *
+ * Top-level fields combine with **AND** semantics. This captures the
+ * common cooldown-after-terminal pattern that runs through almost
+ * every business app — *"close 90 days after \`Resolved\`"*, *"close 14
+ * days after \`Delivered\`"*, *"close 30 days after a GDPR deletion
+ * request"*. All conditions must hold for the cycle to truncate.
+ *
+ * A separate \`or: {...}\` block opens an alternative path: when
+ * present, the policy fires if **either** the top-level AND group
+ * matches **or** any field inside \`or\` matches. Use it for safety
+ * nets — *"close (Resolved AND aged 90 days) OR if event count
+ * reaches 10k"*. The two-axis split mirrors the two ways close
+ * policies appear in practice: primary close logic (AND-shaped) and
+ * defensive backstops (OR-shaped).
+ *
+ * The state builder's \`.autocloses(...)\` overload distinguishes
+ * function (predicate) from object (policy) and routes the latter
+ * through {@link compile_autoclose_policy}, which validates via
+ * {@link AutoclosePolicySchema} and returns the compiled predicate.
+ * Operators with custom needs (per-stream metadata, multi-branch
+ * AND/OR like "(\`Resolved\` + 90d) OR (\`Cancelled\` + 30d)") keep the
+ * function form; the declarative form covers the 90% case.
+ *
+ * Validation runs at the builder call (\`act().build()\` time), so
+ * misconfiguration — empty bag, sub-1 \`reaches\`, sub-minute \`after\`,
+ * empty \`is\`, empty \`or\`, nested \`or\` inside \`or\`, unknown keys —
+ * throws at build, not on the first cycle tick.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { AutoclosePredicate, Schemas } from "../types/action.js";
+
+/**
+ * Lower bound on a resolved \`after\` window. Sub-minute windows are
+ * almost always misconfiguration — the autoclose cycle ticks at the
+ * order of \`autocloseCycleMs\` (default 60 s), so a 30 s window can't
+ * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_MS = 60_000;
+
+const AfterSchema = z
+  .object({
+    days: z
+      .number({ message: "autocloses: after.days must be a number" })
+      .positive("autocloses: after.days must be > 0"),
+  })
+  .refine((o) => o.days * 86_400_000 >= MIN_AFTER_MS, {
+    message: \`autocloses: after resolves to < \${MIN_AFTER_MS}ms (one minute), which is too short to be a meaningful retention window\`,
+  });
+
+const IsSchema = z.union([
+  z.string().min(1, "autocloses: is must be a non-empty event name"),
+  z
+    .array(
+      z.string().min(1, "autocloses: is entries must be non-empty event names")
+    )
+    .min(1, "autocloses: is must include at least one event name")
+    .readonly(),
+]);
+
+const ReachesSchema = z
+  .number({ message: "autocloses: reaches must be a number" })
+  .int("autocloses: reaches must be an integer")
+  .min(1, "autocloses: reaches must be >= 1");
+
+/**
+ * Schema for the \`or: {...}\` block — the OR-shaped alternative path.
+ * Same field set as the top-level policy minus \`or\` itself (so nested
+ * \`or\` inside \`or\` rejects via \`.strict()\` instead of recursing). At
+ * least one field required; empty \`{}\` is a misconfiguration.
+ *
+ * @internal
+ */
+const OrBlockSchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined || o.is !== undefined || o.reaches !== undefined,
+    {
+      message:
+        "autocloses: \`or\` block must include at least one of after / is / reaches",
+    }
+  );
+
+/**
+ * Zod schema for the declarative {@link AutoclosePolicy} bag.
+ * Internal \`const\` per the config-validation-schema standard (CLAUDE.md
+ * "Config-validation schemas") — the public surface is the inferred
+ * {@link AutoclosePolicy} type and the \`.autocloses({...})\` overload,
+ * never this schema. \`.strict()\` rejects unknown keys so typos surface
+ * at build instead of being silently ignored.
+ *
+ * @internal
+ */
+const AutoclosePolicySchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+    or: OrBlockSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined ||
+      o.is !== undefined ||
+      o.reaches !== undefined ||
+      o.or !== undefined,
+    {
+      message:
+        "autocloses: at least one of after / is / reaches / or must be specified — empty \`{}\` is a misconfiguration",
+    }
+  );
+
+/**
+ * Declarative close-policy options consumed by \`.autocloses({...})\`.
+ * Top-level fields are AND-combined; the optional \`or\` block opens an
+ * alternative OR-path. Omitted fields contribute nothing — they do
+ * not mean "match everything."
+ *
+ * @property after - Close when \`head.created\` is at least the resolved
+ *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
+ *   units later without polluting the top level. Fractional \`days\`
+ *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ * @property is - Close when \`head.name\` matches. String for the
+ *   single-terminal-event case (the most common); \`readonly string[]\`
+ *   for multi-terminal states (\`Order: Shipped | Delivered |
+ *   Cancelled\`).
+ * @property reaches - Close when the stream's event count is \`>= N\`
+ *   (inclusive — fires the moment the threshold is reached).
+ * @property or - Alternative OR-path. When present, the policy fires
+ *   if EITHER the top-level AND group matches OR any field inside
+ *   \`or\` matches. Used for safety-net backstops layered onto a
+ *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
+ *   10k"*). Nested \`or\` inside \`or\` rejects at build time.
+ */
+export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
+
+/** Compile a single \`after\` field into its predicate slice. @internal */
+function compile_after(
+  after: NonNullable<AutoclosePolicy["after"]>
+): AutoclosePredicate<Schemas> {
+  const after_ms = after.days * 86_400_000;
+  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+}
+
+/** Compile a single \`is\` field into its predicate slice. @internal */
+function compile_is(
+  is: NonNullable<AutoclosePolicy["is"]>
+): AutoclosePredicate<Schemas> {
+  const set = new Set(typeof is === "string" ? [is] : is);
+  return (_stream, head) => set.has(head.name as string);
+}
+
+/** Compile a single \`reaches\` field into its predicate slice. @internal */
+function compile_reaches(
+  reaches: NonNullable<AutoclosePolicy["reaches"]>
+): AutoclosePredicate<Schemas> {
+  return (_stream, _head, count) => count >= reaches;
+}
+
+/**
+ * Compile a declarative {@link AutoclosePolicy} into an
+ * {@link AutoclosePredicate}. The state-builder's
+ * \`.autocloses({...})\` overload calls this; tests can also build a
+ * state and read \`state.autoclose\` to grab the compiled predicate.
+ *
+ * Returned predicate fires when either:
+ *
+ *   1. **All** top-level non-\`or\` fields match (AND), or
+ *   2. **Any** field inside the \`or\` block matches.
+ *
+ * Top-level with zero non-\`or\` fields never satisfies path (1) — the
+ * \`every\` check on an empty list is short-circuited to \`false\` so the
+ * policy doesn't truncate the entire universe on an \`or\`-only
+ * declaration. (Validation rejects all-empty bags up front; this guard
+ * is the in-cycle equivalent for the synthesized empty AND-group.)
+ *
+ * Assignable to any \`AutoclosePredicate<TEvents>\` slot via
+ * function-parameter contravariance — the returned predicate inspects
+ * \`head.name\` as a plain string, so narrower event unions stay
+ * assignable.
+ *
+ * Throws \`ZodError\` at call time when the options are invalid (empty
+ * bag, non-positive \`reaches\`, sub-minute \`after\`, empty \`is\`, empty
+ * \`or\`, nested \`or\`, unknown keys).
+ *
+ * @internal
+ */
+export function compile_autoclose_policy(
+  options: AutoclosePolicy
+): AutoclosePredicate<Schemas> {
+  const parsed = AutoclosePolicySchema.parse(options);
+
+  // Top-level AND group — only the non-\`or\` fields.
+  const and_preds: AutoclosePredicate<Schemas>[] = [];
+  if (parsed.after) and_preds.push(compile_after(parsed.after));
+  if (parsed.is) and_preds.push(compile_is(parsed.is));
+  if (parsed.reaches) and_preds.push(compile_reaches(parsed.reaches));
+
+  // OR-block — at least one of its fields must match.
+  const or_preds: AutoclosePredicate<Schemas>[] = [];
+  if (parsed.or) {
+    if (parsed.or.after) or_preds.push(compile_after(parsed.or.after));
+    if (parsed.or.is) or_preds.push(compile_is(parsed.or.is));
+    if (parsed.or.reaches) or_preds.push(compile_reaches(parsed.or.reaches));
+  }
+
+  return (stream, head, count) => {
+    // AND path: every top-level field matches AND the group is non-empty
+    // (an \`or\`-only declaration leaves \`and_preds\` empty — that
+    // shouldn't auto-fire).
+    if (
+      and_preds.length > 0 &&
+      and_preds.every((p) => p(stream, head, count))
+    ) {
+      return true;
+    }
+    // OR path: any \`or\`-block field matches.
+    if (or_preds.some((p) => p(stream, head, count))) {
+      return true;
+    }
+    return false;
+  };
 }
 
 // === backoff.ts ===
@@ -9067,6 +9313,10 @@ export {
   type AutocloseCycleResult,
   run_autoclose_cycle,
 } from "./autoclose-cycle.js";
+export {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+} from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -12814,6 +13064,10 @@ export function slice<
  * Fluent interface for defining a strongly-typed state machine using Zod schemas.
  */
 import type { ZodType } from "zod";
+import {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+} from "../internal/index.js";
 import type {
   ActionHandler,
   ActionOptions,
@@ -13229,44 +13483,72 @@ export type ActionBuilder<
    * per-event). Absent → the state opts out of online close entirely;
    * the cycle skips it and pays zero per-tick cost for it.
    *
-   * The predicate receives \`head: Committed<TEvents, ...>\` so reading
-   * \`head.event.name\` autocompletes to the state's declared event
-   * union — exactly the signature the policy factories from sub
-   * #839 (terminal-event), #838 (retention), and #840 (cardinality)
-   * produce.
+   * Two forms:
    *
-   * Custom policies that don't fit the three factories drop in as
-   * inline predicates — the factories return the same shape, so
-   * mixing is friction-free.
+   * - **Declarative** — pass an {@link AutoclosePolicy} object literal
+   *   covering the three operational pressure points (\`after\`, \`is\`,
+   *   \`reaches\`). Top-level fields combine with AND; an optional
+   *   \`or: {...}\` block opens an alternative OR path. Validated via
+   *   Zod at build time; misconfiguration throws before \`act().build()\`
+   *   completes. Covers the 90% case.
+   * - **Function** — pass a \`(stream, head, count) => boolean\`
+   *   predicate. Drops out to the full power of JS for per-stream
+   *   metadata predicates, multi-branch policies (different cooldowns
+   *   per terminal event), or anything the declarative form doesn't
+   *   cover. The predicate receives \`head: Committed<TEvents, ...>\`
+   *   so reading \`head.name\` autocompletes to the state's declared
+   *   event union.
    *
-   * @param predicate \`(stream, head, count) => boolean\`. \`true\`
-   *   schedules the stream for the next truncate batch.
+   * @param predicate_or_policy Function form: predicate as above.
+   *   Object form: declarative {@link AutoclosePolicy} bag.
    * @returns The ActionBuilder for chaining.
    *
-   * @example Terminal-event close (a Ticket closes when it's resolved).
+   * @example Declarative — cooldown after terminal (a Ticket closes
+   *   90 days after resolution).
    * \`\`\`typescript
-   * state({ Ticket: ticketSchema })
-   *   .init(() => defaults)
-   *   .emits({ TicketOpened, TicketResolved })
-   *   // ...
-   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   * .autocloses({ is: "TicketResolved", after: { days: 90 } })
    * \`\`\`
    *
-   * @example Retention-window close (a Session closes when it's older
-   *   than 24h).
+   * @example Declarative — multi-terminal (an Order closes on any of
+   *   three terminal events, no cooldown).
    * \`\`\`typescript
-   * .autocloses((_stream, head) =>
-   *   Date.now() - head.created.getTime() > 24 * 60 * 60 * 1000)
+   * .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
    * \`\`\`
    *
-   * @example Cardinality-bound close (an audit log rotates after 10k
-   *   events).
+   * @example Declarative — time-only retention (a Session closes
+   *   after 24h regardless of head event).
    * \`\`\`typescript
-   * .autocloses((_stream, _head, count) => count >= 10_000)
+   * .autocloses({ after: { days: 1 } })
+   * \`\`\`
+   *
+   * @example Declarative — pure cardinality cap.
+   * \`\`\`typescript
+   * .autocloses({ reaches: 10_000 })
+   * \`\`\`
+   *
+   * @example Declarative — primary cooldown + safety-net backstop.
+   * \`\`\`typescript
+   * .autocloses({
+   *   is: "TicketResolved",     // primary trigger
+   *   after: { days: 90 },      // AND aged 90 days
+   *   or: { reaches: 10_000 },  // OR cardinality safety net
+   * })
+   * \`\`\`
+   *
+   * @example Declarative — pure OR (only backstops, no primary
+   *   cooldown).
+   * \`\`\`typescript
+   * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
+   * \`\`\`
+   *
+   * @example Function — custom predicate the declarative form can't
+   *   express (per-stream metadata or per-terminal cooldown).
+   * \`\`\`typescript
+   * .autocloses((stream, head) => stream.startsWith("ephemeral:"))
    * \`\`\`
    */
   autocloses: (
-    predicate: AutoclosePredicate<TEvents>
+    predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -13599,10 +13881,27 @@ function action_builder<
       return builder;
     },
 
-    autocloses(predicate: AutoclosePredicate<TEvents>) {
-      if (typeof predicate !== "function") {
+    autocloses(
+      predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
+    ) {
+      // Function form → use as-is. Object form → compile through the
+      // policy resolver (Zod-validates + builds the predicate). Reject
+      // anything else (numbers, strings, null) with a typeof-based
+      // message that points at the supported shapes.
+      let predicate: AutoclosePredicate<TEvents>;
+      if (typeof predicate_or_policy === "function") {
+        predicate = predicate_or_policy;
+      } else if (
+        predicate_or_policy !== null &&
+        typeof predicate_or_policy === "object"
+      ) {
+        predicate = compile_autoclose_policy(
+          predicate_or_policy
+        ) as AutoclosePredicate<TEvents>;
+      } else {
         throw new Error(
-          ".autocloses(predicate) requires a function; got " + typeof predicate
+          ".autocloses(...) requires a function or a policy object; got " +
+            typeof predicate_or_policy
         );
       }
       // Replace on every call — matches snap / discloses state-level
@@ -14235,6 +14534,7 @@ export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 // this orchestrator file focused on the \`Act\` class.
 export {
   type AutocloseConfig,
+  type AutoclosePolicy,
   DEFAULT_AUTOCLOSE_CYCLE_MS,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
@@ -16364,10 +16664,10 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  * {@link Store.truncate} on the next batch.
  *
  * The \`head\` argument is the latest committed (non-tombstone) event on
- * the stream; predicates that gate on the last event name (e.g. the
- * terminal-event policy from sub #839) read \`head.name\` directly and
- * the type system autocompletes it to the state's event union.
- * \`count\` is the stream's total event count.
+ * the stream; predicates that gate on the last event name (the same
+ * shape \`.autocloses({ is: "EventName" })\` compiles to) read \`head.name\`
+ * directly and the type system autocompletes it to the state's event
+ * union. \`count\` is the stream's total event count.
  *
  * Predicates run in process per cycle tick; they MUST be pure and
  * fast — slow predicates serialize behind the cycle's batch.
@@ -18156,6 +18456,251 @@ export class AutocloseController {
       this._running = false;
     }
   }
+}
+
+// === autoclose-policy.ts ===
+/**
+ * @module autoclose-policy
+ * @category Internal
+ *
+ * Declarative close-policy options consumed by \`.autocloses({...})\`
+ * (#838 / epic #802). Three optional fields cover the three
+ * operational pressure points every real close policy traces back to:
+ *
+ *   - \`after\`   — time / compliance ("autocloses **after** N days")
+ *   - \`is\`      — domain lifecycle ("autocloses ... **is** Resolved")
+ *   - \`reaches\` — resource ("autocloses ... **reaches** 10k events")
+ *
+ * Top-level fields combine with **AND** semantics. This captures the
+ * common cooldown-after-terminal pattern that runs through almost
+ * every business app — *"close 90 days after \`Resolved\`"*, *"close 14
+ * days after \`Delivered\`"*, *"close 30 days after a GDPR deletion
+ * request"*. All conditions must hold for the cycle to truncate.
+ *
+ * A separate \`or: {...}\` block opens an alternative path: when
+ * present, the policy fires if **either** the top-level AND group
+ * matches **or** any field inside \`or\` matches. Use it for safety
+ * nets — *"close (Resolved AND aged 90 days) OR if event count
+ * reaches 10k"*. The two-axis split mirrors the two ways close
+ * policies appear in practice: primary close logic (AND-shaped) and
+ * defensive backstops (OR-shaped).
+ *
+ * The state builder's \`.autocloses(...)\` overload distinguishes
+ * function (predicate) from object (policy) and routes the latter
+ * through {@link compile_autoclose_policy}, which validates via
+ * {@link AutoclosePolicySchema} and returns the compiled predicate.
+ * Operators with custom needs (per-stream metadata, multi-branch
+ * AND/OR like "(\`Resolved\` + 90d) OR (\`Cancelled\` + 30d)") keep the
+ * function form; the declarative form covers the 90% case.
+ *
+ * Validation runs at the builder call (\`act().build()\` time), so
+ * misconfiguration — empty bag, sub-1 \`reaches\`, sub-minute \`after\`,
+ * empty \`is\`, empty \`or\`, nested \`or\` inside \`or\`, unknown keys —
+ * throws at build, not on the first cycle tick.
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { AutoclosePredicate, Schemas } from "../types/action.js";
+
+/**
+ * Lower bound on a resolved \`after\` window. Sub-minute windows are
+ * almost always misconfiguration — the autoclose cycle ticks at the
+ * order of \`autocloseCycleMs\` (default 60 s), so a 30 s window can't
+ * be honored anyway. Rejecting at build keeps the failure mode noisy.
+ */
+const MIN_AFTER_MS = 60_000;
+
+const AfterSchema = z
+  .object({
+    days: z
+      .number({ message: "autocloses: after.days must be a number" })
+      .positive("autocloses: after.days must be > 0"),
+  })
+  .refine((o) => o.days * 86_400_000 >= MIN_AFTER_MS, {
+    message: \`autocloses: after resolves to < \${MIN_AFTER_MS}ms (one minute), which is too short to be a meaningful retention window\`,
+  });
+
+const IsSchema = z.union([
+  z.string().min(1, "autocloses: is must be a non-empty event name"),
+  z
+    .array(
+      z.string().min(1, "autocloses: is entries must be non-empty event names")
+    )
+    .min(1, "autocloses: is must include at least one event name")
+    .readonly(),
+]);
+
+const ReachesSchema = z
+  .number({ message: "autocloses: reaches must be a number" })
+  .int("autocloses: reaches must be an integer")
+  .min(1, "autocloses: reaches must be >= 1");
+
+/**
+ * Schema for the \`or: {...}\` block — the OR-shaped alternative path.
+ * Same field set as the top-level policy minus \`or\` itself (so nested
+ * \`or\` inside \`or\` rejects via \`.strict()\` instead of recursing). At
+ * least one field required; empty \`{}\` is a misconfiguration.
+ *
+ * @internal
+ */
+const OrBlockSchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined || o.is !== undefined || o.reaches !== undefined,
+    {
+      message:
+        "autocloses: \`or\` block must include at least one of after / is / reaches",
+    }
+  );
+
+/**
+ * Zod schema for the declarative {@link AutoclosePolicy} bag.
+ * Internal \`const\` per the config-validation-schema standard (CLAUDE.md
+ * "Config-validation schemas") — the public surface is the inferred
+ * {@link AutoclosePolicy} type and the \`.autocloses({...})\` overload,
+ * never this schema. \`.strict()\` rejects unknown keys so typos surface
+ * at build instead of being silently ignored.
+ *
+ * @internal
+ */
+const AutoclosePolicySchema = z
+  .object({
+    after: AfterSchema.optional(),
+    is: IsSchema.optional(),
+    reaches: ReachesSchema.optional(),
+    or: OrBlockSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (o) =>
+      o.after !== undefined ||
+      o.is !== undefined ||
+      o.reaches !== undefined ||
+      o.or !== undefined,
+    {
+      message:
+        "autocloses: at least one of after / is / reaches / or must be specified — empty \`{}\` is a misconfiguration",
+    }
+  );
+
+/**
+ * Declarative close-policy options consumed by \`.autocloses({...})\`.
+ * Top-level fields are AND-combined; the optional \`or\` block opens an
+ * alternative OR-path. Omitted fields contribute nothing — they do
+ * not mean "match everything."
+ *
+ * @property after - Close when \`head.created\` is at least the resolved
+ *   window in the past. Nested object leaves room for \`hours\` / \`ms\`
+ *   units later without polluting the top level. Fractional \`days\`
+ *   accepted (\`{ days: 1/24 }\` is 1 hour) so sub-day windows work.
+ * @property is - Close when \`head.name\` matches. String for the
+ *   single-terminal-event case (the most common); \`readonly string[]\`
+ *   for multi-terminal states (\`Order: Shipped | Delivered |
+ *   Cancelled\`).
+ * @property reaches - Close when the stream's event count is \`>= N\`
+ *   (inclusive — fires the moment the threshold is reached).
+ * @property or - Alternative OR-path. When present, the policy fires
+ *   if EITHER the top-level AND group matches OR any field inside
+ *   \`or\` matches. Used for safety-net backstops layered onto a
+ *   primary cooldown policy (e.g. *"(Resolved AND 90 days) OR reaches
+ *   10k"*). Nested \`or\` inside \`or\` rejects at build time.
+ */
+export type AutoclosePolicy = z.infer<typeof AutoclosePolicySchema>;
+
+/** Compile a single \`after\` field into its predicate slice. @internal */
+function compile_after(
+  after: NonNullable<AutoclosePolicy["after"]>
+): AutoclosePredicate<Schemas> {
+  const after_ms = after.days * 86_400_000;
+  return (_stream, head) => Date.now() - head.created.getTime() >= after_ms;
+}
+
+/** Compile a single \`is\` field into its predicate slice. @internal */
+function compile_is(
+  is: NonNullable<AutoclosePolicy["is"]>
+): AutoclosePredicate<Schemas> {
+  const set = new Set(typeof is === "string" ? [is] : is);
+  return (_stream, head) => set.has(head.name as string);
+}
+
+/** Compile a single \`reaches\` field into its predicate slice. @internal */
+function compile_reaches(
+  reaches: NonNullable<AutoclosePolicy["reaches"]>
+): AutoclosePredicate<Schemas> {
+  return (_stream, _head, count) => count >= reaches;
+}
+
+/**
+ * Compile a declarative {@link AutoclosePolicy} into an
+ * {@link AutoclosePredicate}. The state-builder's
+ * \`.autocloses({...})\` overload calls this; tests can also build a
+ * state and read \`state.autoclose\` to grab the compiled predicate.
+ *
+ * Returned predicate fires when either:
+ *
+ *   1. **All** top-level non-\`or\` fields match (AND), or
+ *   2. **Any** field inside the \`or\` block matches.
+ *
+ * Top-level with zero non-\`or\` fields never satisfies path (1) — the
+ * \`every\` check on an empty list is short-circuited to \`false\` so the
+ * policy doesn't truncate the entire universe on an \`or\`-only
+ * declaration. (Validation rejects all-empty bags up front; this guard
+ * is the in-cycle equivalent for the synthesized empty AND-group.)
+ *
+ * Assignable to any \`AutoclosePredicate<TEvents>\` slot via
+ * function-parameter contravariance — the returned predicate inspects
+ * \`head.name\` as a plain string, so narrower event unions stay
+ * assignable.
+ *
+ * Throws \`ZodError\` at call time when the options are invalid (empty
+ * bag, non-positive \`reaches\`, sub-minute \`after\`, empty \`is\`, empty
+ * \`or\`, nested \`or\`, unknown keys).
+ *
+ * @internal
+ */
+export function compile_autoclose_policy(
+  options: AutoclosePolicy
+): AutoclosePredicate<Schemas> {
+  const parsed = AutoclosePolicySchema.parse(options);
+
+  // Top-level AND group — only the non-\`or\` fields.
+  const and_preds: AutoclosePredicate<Schemas>[] = [];
+  if (parsed.after) and_preds.push(compile_after(parsed.after));
+  if (parsed.is) and_preds.push(compile_is(parsed.is));
+  if (parsed.reaches) and_preds.push(compile_reaches(parsed.reaches));
+
+  // OR-block — at least one of its fields must match.
+  const or_preds: AutoclosePredicate<Schemas>[] = [];
+  if (parsed.or) {
+    if (parsed.or.after) or_preds.push(compile_after(parsed.or.after));
+    if (parsed.or.is) or_preds.push(compile_is(parsed.or.is));
+    if (parsed.or.reaches) or_preds.push(compile_reaches(parsed.or.reaches));
+  }
+
+  return (stream, head, count) => {
+    // AND path: every top-level field matches AND the group is non-empty
+    // (an \`or\`-only declaration leaves \`and_preds\` empty — that
+    // shouldn't auto-fire).
+    if (
+      and_preds.length > 0 &&
+      and_preds.every((p) => p(stream, head, count))
+    ) {
+      return true;
+    }
+    // OR path: any \`or\`-block field matches.
+    if (or_preds.some((p) => p(stream, head, count))) {
+      return true;
+    }
+    return false;
+  };
 }
 
 // === backoff.ts ===
@@ -22279,6 +22824,10 @@ export {
   type AutocloseCycleResult,
   run_autoclose_cycle,
 } from "./autoclose-cycle.js";
+export {
+  type AutoclosePolicy,
+  compile_autoclose_policy,
+} from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export { run_close_cycle } from "./close-cycle.js";
@@ -26917,10 +27466,10 @@ export type DoOptions<_TEvents extends Schemas = Schemas> = {
  * {@link Store.truncate} on the next batch.
  *
  * The \`head\` argument is the latest committed (non-tombstone) event on
- * the stream; predicates that gate on the last event name (e.g. the
- * terminal-event policy from sub #839) read \`head.name\` directly and
- * the type system autocompletes it to the state's event union.
- * \`count\` is the stream's total event count.
+ * the stream; predicates that gate on the last event name (the same
+ * shape \`.autocloses({ is: "EventName" })\` compiles to) read \`head.name\`
+ * directly and the type system autocompletes it to the state's event
+ * union. \`count\` is the stream's total event count.
  *
  * Predicates run in process per cycle tick; they MUST be pure and
  * fast — slow predicates serialize behind the cycle's batch.

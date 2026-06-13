@@ -57,60 +57,102 @@ await app.shutdown();       // stops the autoclose ticker
 
 Operators who never call `start_correlations()` never start the cycle. Apps that declare no `.autocloses(...)` never even *construct* the controller — the cost story for an opt-out app is exactly the cost of allocating one `undefined` field on `Act`.
 
-## The three working policies
+## The declarative `.autocloses({...})` form
 
-Three categories cover the bulk of real workloads. The respective policy-factory subs (#838 / #839 / #840) ship `retention(...)`, `terminal(...)`, and `cardinality(...)` helpers that compile into the predicate shape above. Until those land, inline the predicate by hand — the shape is the same.
-
-### Terminal-event policy
-
-"Close once the stream has reached a designated terminal state."
+Three operational pressure points cover the bulk of real workloads. `.autocloses` accepts either a predicate function (the long-tail escape hatch) or a declarative options object (#838) with verb-shaped fields that compose at the call site like a sentence:
 
 ```ts
-.autocloses((_stream, head) => head.name === "TicketResolved")
+.autocloses({
+  is: "TicketResolved",      // domain lifecycle — head event in this set
+  after: { days: 90 },       // AND time — head older than 90 days
+})
 ```
 
-Workloads: resolved tickets, completed orders, expired sessions, withdrawn applications. Every stream has a clear "I'm done" event in its history, and once that event is the head, the stream stays inactive.
+Reads: *"autocloses is Resolved after 90 days."* Top-level fields combine with **AND** — the cycle truncates only when every condition holds. This captures the cooldown-after-terminal pattern that runs through almost every business app (close 90 days after `Resolved`, 14 days after `Delivered`, 30 days after a GDPR deletion request). For pure-OR backstops or mixed patterns, a separate `or: {...}` block opens an alternative path (see below).
 
-Cost: one `head.name` comparison per stream per tick. Cheapest of the three.
+Each field is optional and contributes independently. `.autocloses({})` throws at build time because empty config is a misconfiguration, not "match nothing." Validation runs through a Zod schema with `.strict()` enabled, so out-of-range values and unknown keys both surface at `act().build()`, not on the first cycle tick.
 
-### Retention-window policy
+### `after: { days }` — time / compliance
 
 "Close once the head event is older than X."
 
 ```ts
-const MS_24H = 24 * 60 * 60 * 1000;
-.autocloses((_stream, head) =>
-  Date.now() - head.created.getTime() > MS_24H)
+.autocloses({ after: { days: 90 } })
 ```
 
-Workloads: ephemeral sessions, cache-like streams, GDPR-driven retention windows. The state doesn't have a terminal event but has a max-staleness budget.
+Workloads: GDPR/PII retention windows, session aggregates after N days idle, audit logs past statutory keep-window, abandoned drafts. The state may not have a terminal event but has a max-staleness budget.
+
+`days` is a `number` (fractional accepted — `{ days: 1/24 }` is 1 hour). Resolved windows below one minute throw at build time; the cycle tick itself defaults to 60 s so sub-minute windows can't be honored anyway. Nested object leaves room for `{ hours }` / `{ ms }` if a real ask appears.
 
 Cost: one timestamp comparison per stream per tick.
 
-### Cardinality-bound policy
+### `is: "EventName"` — domain lifecycle
 
-"Close once the stream has accumulated more than N events."
+"Close once the head event reaches a designated terminal state."
 
 ```ts
-.autocloses((_stream, _head, count) => count >= 10_000)
+.autocloses({ is: "TicketResolved" })
+.autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
 ```
 
-Workloads: audit logs, telemetry buckets — anything where the stream IS active but you want to rotate at a size threshold.
+Workloads: resolved tickets, completed orders, expired sessions, withdrawn applications, deleted user accounts, completed/failed jobs. Every stream has a clear "I'm done" event (or set of events); once one is the head, the stream stays inactive.
 
-Cost: `count` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path). The cycle still bounds total work via `closeBatchSize`, but a cardinality-only fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
+Single string for the most common case (one terminal event); `readonly string[]` for multi-terminal states (`Order: Shipped | Delivered | Cancelled`). The compiled predicate matches `head.name` against the set; the act-builder still catches typo'd event names at build time via the existing event-registry check.
 
-### Composing policies
+Cost: one set membership check per stream per tick. Cheapest of the three.
 
-The three are just `boolean` predicates — composing them is plain JavaScript:
+### `reaches: N` — resource
+
+"Close once the stream has accumulated N or more events."
 
 ```ts
-.autocloses((stream, head, count) => {
-  if (head.name === "TicketResolved") return true;                  // terminal
-  if (Date.now() - head.created.getTime() > 7 * MS_24H) return true; // 7 days
-  if (count >= 100_000) return true;                                // hard cap
+.autocloses({ reaches: 10_000 })
+```
+
+Workloads: long-running chat threads, IoT telemetry streams, hot audit logs, event-loop counters — anything where the stream IS active but you want to rotate at a size threshold to keep reducer cost predictable.
+
+Inclusive (`>=`) — the predicate fires at the moment the threshold is reached, not after.
+
+Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). The cycle still bounds total work via `closeBatchSize`, but a cardinality-heavy fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
+
+### Stacking — top-level AND + `or` block
+
+Top-level fields are AND-combined. Two reasons that's the right default:
+
+1. The **cooldown-after-terminal** pattern is universal. Close *after* `Resolved`, *after* `Delivered`, *after* a deletion request — all of these read as `is X AND after N` in English, and that's the matching semantics in the schema.
+2. The conditions inside a typical primary policy are conjunctive ("the ticket must be Resolved *and* aged enough"), not disjunctive.
+
+For pure-OR backstops or for mixing both shapes, use the optional `or: {...}` block. The policy fires when **either** the top-level AND group matches **or** any field inside `or` matches:
+
+```ts
+.autocloses({
+  is: "TicketResolved",         // primary close trigger
+  after: { days: 90 },          // AND aged 90 days (return window)
+  or: { reaches: 10_000 },      // OR cardinality safety net (close at 10k regardless)
+})
+```
+
+Reads: *"autocloses is Resolved after 90 days, or reaches 10k."*
+
+The two-axis split mirrors the two ways close policies appear in practice:
+
+- **Primary close logic** (AND-shaped) lives at the top level — the conditions that *must all hold* for a normal close.
+- **Defensive backstops** (OR-shaped) live in `or` — independent triggers that close the stream regardless of the primary state, so unbounded growth doesn't escape the policy.
+
+Pure-OR policies (no top-level fields, only `or`) work too: `.autocloses({ or: { is: "Resolved", reaches: 10_000 } })` reads "autocloses or is Resolved or reaches 10k" — close when either alone is true. The empty top-level AND group never satisfies its own path on its own; only the `or` block can fire in that case.
+
+Multi-branch policies the schema doesn't express directly ("(`Resolved` + 90d) OR (`Cancelled` + 30d)" — different cooldowns per terminal) fall back to the function form:
+
+```ts
+.autocloses((_stream, head) => {
+  const ageMs = Date.now() - head.created.getTime();
+  if (head.name === "Resolved") return ageMs >= 90 * 86_400_000;
+  if (head.name === "Cancelled") return ageMs >= 30 * 86_400_000;
   return false;
 })
 ```
+
+The declarative form covers ~90% of real policies in one line. The function form covers the long tail.
 
 ## What runs under the hood
 
@@ -160,6 +202,7 @@ The host is responsible for:
 ## Pointers
 
 - `.autocloses` / `.archives` declarators: `libs/act/src/builders/state-builder.ts`
+- Declarative policy schema + compiler: `libs/act/src/internal/autoclose-policy.ts`
 - Cycle function: `libs/act/src/internal/autoclose-cycle.ts`
 - [Close-cycle architecture](../architecture/close-cycle.md) — explicit + online close in one pipeline
 - [Error handling](../concepts/error-handling.md) — what `StreamClosedError` means for actions on a closed stream
