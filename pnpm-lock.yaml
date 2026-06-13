@@ -609,7 +609,7 @@ importers:
         specifier: '>=1.10.2'
         version: link:../../libs/act
       '@rotorsoft/act-pg':
-        specifier: '>=1.4.2'
+        specifier: '>=1.4.3'
         version: link:../../libs/act-pg
       cli-table3:
         specifier: ^0.6.5
