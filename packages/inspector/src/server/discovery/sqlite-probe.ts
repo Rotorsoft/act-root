@@ -35,7 +35,7 @@ const REQUIRED_EVENT_COLUMNS = ["stream", "version", "meta"] as const;
  * treats `~` as a literal directory name, so we have to expand it
  * here. Any path without a leading `~` passes through unchanged.
  */
-function expandTilde(p: string): string {
+export function expandTilde(p: string): string {
   if (p === "~") return homedir();
   if (p.startsWith("~/") || p.startsWith("~\\")) {
     return path.join(homedir(), p.slice(2));
