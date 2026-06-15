@@ -7,12 +7,13 @@
  * in `afterEach` so the tempdir doesn't linger between tests.
  */
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   discoverSqlite,
+  expandTilde,
   probeSqliteFile,
 } from "../../src/server/discovery/sqlite-probe.js";
 
@@ -138,29 +139,18 @@ describe("discoverSqlite", () => {
     expect(path.basename(result[0]!.file)).toBe("valid.db");
   });
 
-  it("expands a leading `~/` to the operator's home directory", async () => {
-    // Build an Act file in $HOME directly so a tilde-only path finds
-    // it. We pick a marker filename unlikely to collide with anything
-    // a developer keeps in their home dir, and clean up after.
-    const { homedir } = await import("node:os");
-    const marker = `act-inspector-tilde-test-${process.pid}-${Date.now()}.db`;
-    const file = path.join(homedir(), marker);
-    // Full regex-metachar escape — CodeQL's `js/incomplete-sanitization`
-    // flags partial escapes (e.g. dots only), even when the input shape
-    // makes other metacharacters impossible.
-    const escapeForRegex = (s: string) =>
-      s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    try {
-      await buildActSqlite(file);
-      const result = await discoverSqlite({
-        dir: "~",
-        glob: `^${escapeForRegex(marker)}$`,
-      });
-      expect(result).toHaveLength(1);
-      expect(result[0]!.file).toBe(file);
-    } finally {
-      await rm(file, { force: true });
-    }
+  it("expands a leading `~` / `~/` / `~\\` to the operator's home directory", () => {
+    // Pure expansion check — exercises the only branch that needs
+    // testing without touching the operator's real home dir. The
+    // `readdir(expandedDir)` integration in `discoverSqlite` is
+    // already covered by every other test in this describe block.
+    const home = homedir();
+    expect(expandTilde("~")).toBe(home);
+    expect(expandTilde("~/foo/bar")).toBe(path.join(home, "foo/bar"));
+    expect(expandTilde("~\\foo\\bar")).toBe(path.join(home, "foo\\bar"));
+    expect(expandTilde("/abs/path")).toBe("/abs/path");
+    expect(expandTilde("relative/path")).toBe("relative/path");
+    expect(expandTilde("")).toBe("");
   });
 
   it("returns [] when given an invalid regex glob", async () => {
