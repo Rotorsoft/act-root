@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.3...@rotorsoft/act-diagram-v1.0.4) (2026-06-16)
+
+
+### Bug Fixes
+
+* **deps:** update lucide monorepo to ^1.18.0 ([c5e6c86](https://github.com/rotorsoft/act-root/commit/c5e6c867cfdade3b44b24aa36a3dc960ae310fa8))
+
 # [@rotorsoft/act-diagram-v1.0.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.2...@rotorsoft/act-diagram-v1.0.3) (2026-06-09)
 
 # [@rotorsoft/act-diagram-v1.0.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.1...@rotorsoft/act-diagram-v1.0.2) (2026-06-07)
