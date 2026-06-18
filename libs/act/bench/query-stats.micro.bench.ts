@@ -77,17 +77,17 @@ async function perStreamHeads(
 for (const N of SWEEP_STREAMS) {
   describe(`query_stats N=${N} streams × ${EVENTS_PER_STREAM} events`, () => {
     bench("per-stream query() loop (pre-ACT-639)", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await perStreamHeads(seeded[N]!);
     });
 
     bench("query_stats — heads only", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await store.query_stats(seeded[N]!);
     });
 
     bench("query_stats — count + names (full scan)", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await store.query_stats(seeded[N]!, { count: true, names: true });
     });
   });

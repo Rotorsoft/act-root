@@ -70,17 +70,17 @@ async function perStreamHeads(streams: string[]) {
 for (const N of SWEEP_STREAMS) {
   describe(`PG query_stats N=${N} streams x ${EVENTS_PER_STREAM} events`, () => {
     bench("per-stream query() loop (pre-ACT-639)", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await perStreamHeads(seeded[N]!);
     });
 
     bench("query_stats — heads only (DISTINCT ON, indexed)", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await store.query_stats(seeded[N]!);
     });
 
     bench("query_stats — count + names (CTE + jsonb_object_agg)", async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       await store.query_stats(seeded[N]!, { count: true, names: true });
     });
   });

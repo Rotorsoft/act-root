@@ -922,7 +922,7 @@ export type ScanOptions = {
    * the sink means a failing migration leaves the target byte-for-byte
    * unchanged.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: heterogeneous per-key migrations
+  // `any`: heterogeneous per-key migrations
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**

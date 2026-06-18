@@ -28,7 +28,7 @@ class NotifyStore extends InMemoryStore {
   public subscribed = 0;
   public unsubscribed = 0;
   public lastHandler: ((n: StoreNotification) => void) | null = null;
-  // biome-ignore lint/style/useNamingConvention: matches Store.notify
+  // `notify` name matches Store.notify
   notify = async (handler: (notification: StoreNotification) => void) => {
     this.subscribed++;
     this.lastHandler = handler;

@@ -1257,7 +1257,7 @@ export const inspectorRouter = t.router({
       // applied) before committing to a destructive run.
       const previewSample: Committed<Schemas, keyof Schemas>[] = [];
       const PREVIEW_LIMIT = 50;
-      // biome-ignore lint/suspicious/noExplicitAny: target gets cast through to app.restore
+      // `any`: target gets cast through to app.restore
       let target: any;
       let disposeTarget: () => Promise<void> = async () => {};
       let downloadPath: string | null = null;
@@ -1365,7 +1365,7 @@ export const inspectorRouter = t.router({
               s
             )
         : undefined;
-      // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+      // `any`: caller-defined per-key generics
       let event_migrations:
         | Record<string, EventMigration<any, any>>
         | undefined;
@@ -1383,7 +1383,7 @@ export const inspectorRouter = t.router({
             "event_migrations_path must be a relative path under the inspector cwd"
           );
         const mod = (await import(abs)) as {
-          // biome-ignore lint/suspicious/noExplicitAny: caller-defined per-key generics
+          // `any`: caller-defined per-key generics
           default?: Record<string, EventMigration<any, any>>;
         };
         if (!mod.default || typeof mod.default !== "object")

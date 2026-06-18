@@ -47,7 +47,7 @@ const test = fixture(builder);
 type Ctx = { actorId: string };
 
 const default_options = (
-  // biome-ignore lint/suspicious/noExplicitAny: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
+  // `any`: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
   channel: BroadcastChannel<any>,
   sse_overrides: Record<string, number> = {}
 ): TrpcOptions<Ctx> => ({

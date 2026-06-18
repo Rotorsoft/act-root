@@ -72,7 +72,7 @@ async function perStreamHeads(streams: string[]) {
 describe("close-cycle bulk-scan benchmark", () => {
   for (const N of SIZES) {
     it(`N=${N} streams — query_stats vs per-stream loop`, async () => {
-      // biome-ignore lint/style/noNonNullAssertion: seeded in beforeAll
+      // seeded in beforeAll
       const streams = seeded[N]!;
 
       // Warmup pass each — vitest's JIT may compile the first call.

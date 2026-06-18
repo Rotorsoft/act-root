@@ -3281,7 +3281,7 @@ export type ScanOptions = {
    * the sink means a failing migration leaves the target byte-for-byte
    * unchanged.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: heterogeneous per-key migrations
+  // \`any\`: heterogeneous per-key migrations
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**
@@ -3843,7 +3843,7 @@ const make_restart_candidate_pass: PassFactory = (deps, options) => {
         // names map is sparse — \`__snapshot__\` key absent when the
         // stream has never been snapshotted (a common case for the
         // restart-candidate signal).
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     drain: () => findings,
@@ -3932,7 +3932,7 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
       candidates.push({
         stream,
         total: count!,
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     async finalize(deps) {
@@ -9092,7 +9092,7 @@ export class InMemoryStore implements Store {
       } else if (filter?.stream !== undefined) {
         ok = filter.stream_exact
           ? stream === filter.stream
-          : // biome-ignore lint/style/noNonNullAssertion: stream_re set when stream is regex
+          : // stream_re set when stream is regex
             stream_re!.test(stream);
       }
       scope_cache.set(stream, ok);
@@ -9121,7 +9121,7 @@ export class InMemoryStore implements Store {
       a.count++;
       if (want_names) {
         const n = String(e.name);
-        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when want_names
+        // a.names initialized above when want_names
         a.names![n] = (a.names![n] ?? 0) + 1;
       }
     }
@@ -14292,12 +14292,11 @@ export function trace_cycle<TEvents extends Schemas>(
       const key = f?.source
         ? \`\${hue(C_STREAM, stream)}\${dim(\`<-\${f.source}\`)}\`
         : hue(C_STREAM, stream);
-      const events =
-        f && f.events.length
-          ? \` \${dim(
-              \`[\${f.events.map(({ id, name }) => \`#\${id} \${String(name)}\`).join(", ")}]\`
-            )}\`
-          : "";
+      const events = f?.events.length
+        ? \` \${dim(
+            \`[\${f.events.map(({ id, name }) => \`#\${id} \${String(name)}\`).join(", ")}]\`
+          )}\`
+        : "";
       // Build ack + fail segments independently — both can fire for
       // the same stream in the partial-success-then-failure case.
       const acked_at = acked_by_stream.get(stream);
@@ -17029,7 +17028,7 @@ export type ScanOptions = {
    * the sink means a failing migration leaves the target byte-for-byte
    * unchanged.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: heterogeneous per-key migrations
+  // \`any\`: heterogeneous per-key migrations
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**
@@ -17591,7 +17590,7 @@ const make_restart_candidate_pass: PassFactory = (deps, options) => {
         // names map is sparse — \`__snapshot__\` key absent when the
         // stream has never been snapshotted (a common case for the
         // restart-candidate signal).
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     drain: () => findings,
@@ -17680,7 +17679,7 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
       candidates.push({
         stream,
         total: count!,
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     async finalize(deps) {
@@ -22617,7 +22616,7 @@ export class InMemoryStore implements Store {
       } else if (filter?.stream !== undefined) {
         ok = filter.stream_exact
           ? stream === filter.stream
-          : // biome-ignore lint/style/noNonNullAssertion: stream_re set when stream is regex
+          : // stream_re set when stream is regex
             stream_re!.test(stream);
       }
       scope_cache.set(stream, ok);
@@ -22646,7 +22645,7 @@ export class InMemoryStore implements Store {
       a.count++;
       if (want_names) {
         const n = String(e.name);
-        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when want_names
+        // a.names initialized above when want_names
         a.names![n] = (a.names![n] ?? 0) + 1;
       }
     }
@@ -26779,12 +26778,11 @@ export function trace_cycle<TEvents extends Schemas>(
       const key = f?.source
         ? \`\${hue(C_STREAM, stream)}\${dim(\`<-\${f.source}\`)}\`
         : hue(C_STREAM, stream);
-      const events =
-        f && f.events.length
-          ? \` \${dim(
-              \`[\${f.events.map(({ id, name }) => \`#\${id} \${String(name)}\`).join(", ")}]\`
-            )}\`
-          : "";
+      const events = f?.events.length
+        ? \` \${dim(
+            \`[\${f.events.map(({ id, name }) => \`#\${id} \${String(name)}\`).join(", ")}]\`
+          )}\`
+        : "";
       // Build ack + fail segments independently — both can fire for
       // the same stream in the partial-success-then-failure case.
       const acked_at = acked_by_stream.get(stream);
@@ -27831,7 +27829,7 @@ export type ScanOptions = {
    * the sink means a failing migration leaves the target byte-for-byte
    * unchanged.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: heterogeneous per-key migrations
+  // \`any\`: heterogeneous per-key migrations
   readonly event_migrations?: Record<string, EventMigration<any, any>>;
 
   /**
@@ -31176,7 +31174,7 @@ export type SseOptions = {
    * one for you because the channel's \`<S>\` shape is app-specific and
    * passing it in keeps the type chain typed end-to-end at the host.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  // \`any\`: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
   readonly channel: BroadcastChannel<any>;
   /**
    * Hard cap on concurrent open subscriptions per generator
@@ -31364,7 +31362,7 @@ export type SseAccounting = {
  * generators wrap this so the signal-driven cleanup and counter
  * accounting live in one place.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+// \`any\`: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
 export async function* runSseSubscription<S extends { _v: number } = any>(
   channel: BroadcastChannel<S>,
   stream_id: string,
@@ -32261,7 +32259,7 @@ export type SseOptions = {
    * one for you because the channel's \`<S>\` shape is app-specific and
    * passing it in keeps the type chain typed end-to-end at the host.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  // \`any\`: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
   readonly channel: BroadcastChannel<any>;
   /**
    * Hard cap on concurrent open subscriptions per generator
@@ -32449,7 +32447,7 @@ export type SseAccounting = {
  * generators wrap this so the signal-driven cleanup and counter
  * accounting live in one place.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+// \`any\`: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
 export async function* runSseSubscription<S extends { _v: number } = any>(
   channel: BroadcastChannel<S>,
   stream_id: string,
@@ -33413,7 +33411,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
     build(): Receiver {
       built = true;
 
-      // biome-ignore lint/suspicious/noExplicitAny: server lifecycle handle from @hono/node-server
+      // \`any\`: server lifecycle handle from @hono/node-server
       let server: any | undefined;
 
       return {
@@ -34768,14 +34766,14 @@ import { type CheckWebhookOptions, checkWebhook } from "../check.js";
  * tRPC context must include \`headers\` and \`rawBody\`, and downstream
  * handlers see \`ctx.idempotency = { key, deduped }\`.
  */
-// biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape
+// \`any\`: tRPC's internal middleware shape
 export function webhookMiddleware(options: CheckWebhookOptions): any {
   return async function check(opts: {
     ctx: {
       headers: Record<string, string | string[] | undefined>;
       rawBody: string;
     };
-    // biome-ignore lint/suspicious/noExplicitAny: see above
+    // \`any\`: see above
     next: (next: { ctx: any }) => Promise<any>;
   }) {
     const result = await checkWebhook(
@@ -36121,7 +36119,7 @@ export type SseOptions = {
    * one for you because the channel's \`<S>\` shape is app-specific and
    * passing it in keeps the type chain typed end-to-end at the host.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  // \`any\`: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
   readonly channel: BroadcastChannel<any>;
   /**
    * Hard cap on concurrent open subscriptions per generator
@@ -36309,7 +36307,7 @@ export type SseAccounting = {
  * generators wrap this so the signal-driven cleanup and counter
  * accounting live in one place.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+// \`any\`: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
 export async function* runSseSubscription<S extends { _v: number } = any>(
   channel: BroadcastChannel<S>,
   stream_id: string,

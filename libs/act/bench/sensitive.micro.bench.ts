@@ -42,7 +42,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 describe("orchestrator — non-sensitive workload (master vs PR baseline)", () => {
   let streamId = 0;
-  // biome-ignore lint/suspicious/noExplicitAny: bench-only, narrow generic preserved at runtime
+  // `any`: bench-only, narrow generic preserved at runtime
   let app: any;
 
   bench(
