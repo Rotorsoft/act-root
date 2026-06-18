@@ -12,7 +12,7 @@
     "drizzle:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@libsql/client": "^0.17.3",
+    "@libsql/client": "^0.17.4",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-http": "workspace:^",
     "@rotorsoft/act-pg": "workspace:^",
