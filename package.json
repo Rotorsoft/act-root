@@ -71,7 +71,7 @@
     "@types/chance": "^1.1.8",
     "@types/minimist": "^1.2.5",
     "@types/node": "^25.9.3",
-    "@vitest/coverage-v8": "^4.1.8",
+    "@vitest/coverage-v8": "^4.1.9",
     "chance": "^1.1.13",
     "concurrently": "^10.0.3",
     "fast-check": "^4.8.0",
@@ -85,7 +85,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
     "vite-tsconfig-paths": "^6.1.1",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   },
   "simple-git-hooks": {
     "commit-msg": "npx --no -- commitlint --edit $1",
