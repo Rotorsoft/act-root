@@ -48,7 +48,7 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
-    "@libsql/client": "^0.17.3",
+    "@libsql/client": "^0.17.4",
     "@rotorsoft/act-crypto": "workspace:^"
   },
   "peerDependencies": {
