@@ -95,7 +95,7 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.0.4",
+    "@hono/node-server": "^2.0.5",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.17.0",
