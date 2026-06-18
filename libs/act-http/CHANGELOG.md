@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.7.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.7.1...@rotorsoft/act-http-v1.7.2) (2026-06-18)
+
+
+### Bug Fixes
+
+* **deps:** update dependency @hono/node-server to ^2.0.5 ([498af83](https://github.com/rotorsoft/act-root/commit/498af83aaaa092a36ca73b1f7a9325f3d61ef986))
+
 # [@rotorsoft/act-http-v1.7.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.7.0...@rotorsoft/act-http-v1.7.1) (2026-06-11)
 
 # [@rotorsoft/act-http-v1.7.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.6.0...@rotorsoft/act-http-v1.7.0) (2026-06-11)
