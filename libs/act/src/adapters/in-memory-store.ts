@@ -871,7 +871,7 @@ export class InMemoryStore implements Store {
       } else if (filter?.stream !== undefined) {
         ok = filter.stream_exact
           ? stream === filter.stream
-          : // biome-ignore lint/style/noNonNullAssertion: stream_re set when stream is regex
+          : // stream_re set when stream is regex
             stream_re!.test(stream);
       }
       scope_cache.set(stream, ok);
@@ -900,7 +900,7 @@ export class InMemoryStore implements Store {
       a.count++;
       if (want_names) {
         const n = String(e.name);
-        // biome-ignore lint/style/noNonNullAssertion: a.names initialized above when want_names
+        // a.names initialized above when want_names
         a.names![n] = (a.names![n] ?? 0) + 1;
       }
     }

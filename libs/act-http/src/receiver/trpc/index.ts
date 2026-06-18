@@ -54,14 +54,14 @@ import { type CheckWebhookOptions, checkWebhook } from "../check.js";
  * tRPC context must include `headers` and `rawBody`, and downstream
  * handlers see `ctx.idempotency = { key, deduped }`.
  */
-// biome-ignore lint/suspicious/noExplicitAny: tRPC's internal middleware shape
+// `any`: tRPC's internal middleware shape
 export function webhookMiddleware(options: CheckWebhookOptions): any {
   return async function check(opts: {
     ctx: {
       headers: Record<string, string | string[] | undefined>;
       rawBody: string;
     };
-    // biome-ignore lint/suspicious/noExplicitAny: see above
+    // `any`: see above
     next: (next: { ctx: any }) => Promise<any>;
   }) {
     const result = await checkWebhook(

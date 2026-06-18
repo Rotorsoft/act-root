@@ -85,7 +85,7 @@ describe("scan (pre-flight, no committer)", () => {
 
   it("throws when `created` isn't a Date", async () => {
     await expect(
-      // biome-ignore lint/suspicious/noExplicitAny: invalid input shape
+      // `any`: invalid input shape
       scan(fromArray([baseEvent({ created: "2024-01-01" as any })]))
     ).rejects.toThrow(/Invalid event at index 1/);
   });
@@ -547,7 +547,7 @@ describe("Act.restore (orchestrator)", () => {
     const realRestore = ctx.store.restore!.bind(ctx.store);
     (ctx.store as { restore: unknown }).restore = async (driver: unknown) => {
       restoreCalls++;
-      // biome-ignore lint/suspicious/noExplicitAny: test spy
+      // `any`: test spy
       return realRestore(driver as any);
     };
     try {

@@ -156,7 +156,7 @@ export function build_model(
   // Also states from act builders
   for (const a of raw_acts) {
     for (const st of a.states ?? []) {
-      if (!st || st._tag !== "State" || state_by_ref.has(st)) continue;
+      if (st?._tag !== "State" || state_by_ref.has(st)) continue;
       try {
         state_by_ref.set(st, build_state(model, st));
       } catch (e) {

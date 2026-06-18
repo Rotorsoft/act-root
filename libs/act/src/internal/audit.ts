@@ -387,7 +387,7 @@ const make_restart_candidate_pass: PassFactory = (deps, options) => {
         // names map is sparse — `__snapshot__` key absent when the
         // stream has never been snapshotted (a common case for the
         // restart-candidate signal).
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     drain: () => findings,
@@ -476,7 +476,7 @@ const make_snapshot_drift_pass: PassFactory = (deps, options) => {
       candidates.push({
         stream,
         total: count!,
-        snaps: names!["__snapshot__"] ?? 0,
+        snaps: names!.__snapshot__ ?? 0,
       });
     },
     async finalize(deps) {

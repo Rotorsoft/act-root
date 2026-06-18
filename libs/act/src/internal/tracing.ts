@@ -361,12 +361,11 @@ export function trace_cycle<TEvents extends Schemas>(
       const key = f?.source
         ? `${hue(C_STREAM, stream)}${dim(`<-${f.source}`)}`
         : hue(C_STREAM, stream);
-      const events =
-        f && f.events.length
-          ? ` ${dim(
-              `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
-            )}`
-          : "";
+      const events = f?.events.length
+        ? ` ${dim(
+            `[${f.events.map(({ id, name }) => `#${id} ${String(name)}`).join(", ")}]`
+          )}`
+        : "";
       // Build ack + fail segments independently — both can fire for
       // the same stream in the partial-success-then-failure case.
       const acked_at = acked_by_stream.get(stream);

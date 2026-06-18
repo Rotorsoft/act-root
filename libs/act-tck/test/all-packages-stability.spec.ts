@@ -46,7 +46,7 @@ function discover_packages(): Pkg[] {
     for (const [subpath, mapping] of Object.entries(exports)) {
       const import_path =
         typeof mapping === "string" ? mapping : mapping?.import;
-      if (!import_path || !import_path.endsWith(".js")) continue;
+      if (!import_path?.endsWith(".js")) continue;
       // ./dist/api/index.js → src/api/index.ts
       const rel = import_path
         .replace(/^\.\/dist\//, "")

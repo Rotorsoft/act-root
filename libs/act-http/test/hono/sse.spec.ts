@@ -43,7 +43,7 @@ const Ticket = state({
 const builder = act().withState(Calculator).withState(Ticket);
 const test = fixture(builder);
 
-// biome-ignore lint/suspicious/noExplicitAny: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
+// `any`: tests intentionally use a wide channel shape so the helper composes with empty and typed states alike
 const default_options = (channel: BroadcastChannel<any>): HonoOptions => ({
   actor: () => ({ id: "u-1", name: "alice" }),
   stream: () => "calc-1",

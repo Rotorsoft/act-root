@@ -27,7 +27,7 @@ export type SseOptions = {
    * one for you because the channel's `<S>` shape is app-specific and
    * passing it in keeps the type chain typed end-to-end at the host.
    */
-  // biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
+  // `any`: the channel's BroadcastState shape is opaque to the generator — narrowing it would force every state into one structural bound that doesn't fit real apps
   readonly channel: BroadcastChannel<any>;
   /**
    * Hard cap on concurrent open subscriptions per generator
@@ -215,7 +215,7 @@ export type SseAccounting = {
  * generators wrap this so the signal-driven cleanup and counter
  * accounting live in one place.
  */
-// biome-ignore lint/suspicious/noExplicitAny: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
+// `any`: the channel's BroadcastState shape is opaque to the loop — narrowing it would force every state into one structural bound that doesn't fit real apps
 export async function* runSseSubscription<S extends { _v: number } = any>(
   channel: BroadcastChannel<S>,
   stream_id: string,

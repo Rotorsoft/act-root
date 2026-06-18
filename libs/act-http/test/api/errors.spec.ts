@@ -61,10 +61,10 @@ describe("toApiError", () => {
   it("maps InvariantError to 409 + INVARIANT", () => {
     const err = new InvariantError(
       "doIt",
-      // biome-ignore lint/suspicious/noExplicitAny: placeholder payload for the mapping test
+      // `any`: placeholder payload for the mapping test
       { foo: "bar" } as any,
       { stream: "s", actor: { id: "1", name: "u" } },
-      // biome-ignore lint/suspicious/noExplicitAny: minimal snapshot stand-in for the mapping test
+      // `any`: minimal snapshot stand-in for the mapping test
       {} as any,
       "guard tripped"
     );

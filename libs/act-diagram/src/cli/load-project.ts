@@ -95,7 +95,7 @@ export async function load_project(
   };
 
   const root_stat = await stat(root_dir).catch(() => null);
-  if (!root_stat || !root_stat.isDirectory()) {
+  if (!root_stat?.isDirectory()) {
     return { files, truncated };
   }
   await visit(root_dir.replace(/\\/g, "/"), "");

@@ -116,7 +116,7 @@ export function receiver(options: ReceiverOptions): ReceiverBuilder {
     build(): Receiver {
       built = true;
 
-      // biome-ignore lint/suspicious/noExplicitAny: server lifecycle handle from @hono/node-server
+      // `any`: server lifecycle handle from @hono/node-server
       let server: any | undefined;
 
       return {
