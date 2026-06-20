@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.13.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.13.2...@rotorsoft/act-tck-v1.13.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* **act-sse:** re-export @rotorsoft/act-http/sse instead of duplicating it ([26ab476](https://github.com/rotorsoft/act-root/commit/26ab4760c6cabcfa6092569bb7bedecae9d33dd7)), closes [#981](https://github.com/rotorsoft/act-root/issues/981)
+
 # [@rotorsoft/act-tck-v1.13.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.13.1...@rotorsoft/act-tck-v1.13.2) (2026-06-20)
 
 
