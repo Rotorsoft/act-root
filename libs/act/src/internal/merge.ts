@@ -221,8 +221,10 @@ function merge_patches(
  * Merges reactions from one event register into another. The target is
  * assumed to already contain entries for every event name in the source
  * (e.g., act-builder's `.withSlice()` registers the slice's states first,
- * which seeds the target events). Reaction names collide by `set()`
- * semantics — last write wins.
+ * which seeds the target events). Reactions are keyed by `handler.name`;
+ * two distinct handlers sharing a name on the same event throw rather than
+ * silently overwriting (ACT-979). Re-merging the identical reaction object
+ * is idempotent — mirrors {@link register_batch_handler}.
  */
 export function merge_event_register(
   target: Record<string, { reactions: Map<string, unknown> }>,
@@ -232,6 +234,12 @@ export function merge_event_register(
     const target_reg = target[event_name];
     if (!target_reg) continue;
     for (const [name, reaction] of source_reg.reactions) {
+      const existing = target_reg.reactions.get(name);
+      if (existing !== undefined && existing !== reaction)
+        throw new Error(
+          `Duplicate reaction "${name}" for event "${event_name}". ` +
+            `Reaction handlers are keyed by function name; rename one of them.`
+        );
       target_reg.reactions.set(name, reaction);
     }
   }

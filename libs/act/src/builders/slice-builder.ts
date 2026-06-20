@@ -274,6 +274,11 @@ export function slice<
           throw new Error(
             `Reaction handler for "${String(event)}" must be a named function`
           );
+        if (events[event].reactions.has(handler.name))
+          throw new Error(
+            `Duplicate reaction "${handler.name}" for event "${String(event)}". ` +
+              `Reaction handlers are keyed by function name; rename one of them.`
+          );
         // Register once with the default _this_ resolver. If `.to()` is
         // chained next, it patches the same reaction's resolver in place
         // — no second Map.set() round-trip.

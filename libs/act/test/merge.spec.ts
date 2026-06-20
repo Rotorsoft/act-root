@@ -30,14 +30,27 @@ describe("merge_event_register", () => {
     expect("Unknown" in target).toBe(false);
   });
 
-  it("uses last-write-wins for same reaction name on the same event", () => {
+  it("throws on two distinct reactions sharing a name on the same event (ACT-979)", () => {
     const target = {
       E: { reactions: new Map<string, unknown>([["dup", "old"]]) },
     };
     const source = {
       E: { reactions: new Map<string, unknown>([["dup", "new"]]) },
     };
-    merge_event_register(target, source);
-    expect(target.E.reactions.get("dup")).toBe("new");
+    expect(() => merge_event_register(target, source)).toThrow(
+      'Duplicate reaction "dup" for event "E"'
+    );
+  });
+
+  it("is idempotent when the identical reaction object is re-merged", () => {
+    const same = { handler: () => {} };
+    const target = {
+      E: { reactions: new Map<string, unknown>([["r", same]]) },
+    };
+    const source = {
+      E: { reactions: new Map<string, unknown>([["r", same]]) },
+    };
+    expect(() => merge_event_register(target, source)).not.toThrow();
+    expect(target.E.reactions.get("r")).toBe(same);
   });
 });

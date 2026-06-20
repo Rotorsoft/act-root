@@ -205,6 +205,11 @@ function _projection<
             throw new Error(
               `Projection handler for "${event}" must be a named function`
             );
+          if (register.reactions.has(handler.name))
+            throw new Error(
+              `Duplicate projection handler "${handler.name}" for event "${event}". ` +
+                `Projection handlers are keyed by function name; rename one of them.`
+            );
           register.reactions.set(handler.name, reaction);
 
           // Same builder, widened generic — no recursive call.
