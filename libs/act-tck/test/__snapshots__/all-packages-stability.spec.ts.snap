@@ -38081,7 +38081,7 @@ export class PostgresStore implements Store {
           stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
           source varchar(100) COLLATE pg_catalog."default",
           at int NOT NULL DEFAULT -1,
-          retry smallint NOT NULL DEFAULT 0,
+          retry smallint NOT NULL DEFAULT -1,
           blocked boolean NOT NULL DEFAULT false,
           error text,
           leased_by text,
@@ -38512,11 +38512,12 @@ export class PostgresStore implements Store {
         //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
         const { rowCount: inserted } = await client.query(
           \`
-          INSERT INTO \${this._fqs} (stream, source, priority, lane)
+          INSERT INTO \${this._fqs} (stream, source, priority, lane, retry)
           SELECT s->>'stream',
                  s->>'source',
                  COALESCE((s->>'priority')::int, 0),
-                 COALESCE(s->>'lane', 'default')
+                 COALESCE(s->>'lane', 'default'),
+                 -1
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           \`,
@@ -38717,7 +38718,7 @@ export class PostgresStore implements Store {
   }
 
   async reset(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = \`SET at = -1, retry = 0, blocked = false, error = NULL,
+    const set_clause = \`SET at = -1, retry = -1, blocked = false, error = NULL,
                           leased_by = NULL, leased_until = NULL\`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
@@ -39786,7 +39787,7 @@ export class SqliteStore implements Store {
         stream TEXT PRIMARY KEY,
         source TEXT,
         at INTEGER NOT NULL DEFAULT -1,
-        retry INTEGER NOT NULL DEFAULT 0,
+        retry INTEGER NOT NULL DEFAULT -1,
         blocked INTEGER NOT NULL DEFAULT 0,
         error TEXT NOT NULL DEFAULT '',
         leased_by TEXT,
@@ -39996,7 +39997,7 @@ export class SqliteStore implements Store {
         lane = "default",
       } of streams) {
         const inserted = await tx.execute({
-          sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane) VALUES (?, ?, ?, ?)",
+          sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane, retry) VALUES (?, ?, ?, ?, -1)",
           args: [stream, source ?? null, priority, lane],
         });
         if (inserted.rowsAffected > 0) {
@@ -40089,10 +40090,13 @@ export class SqliteStore implements Store {
       // + leading (newest first). The candidates list arrives sorted
       // by \`priority DESC, at ASC\` from the SELECT above, so the
       // \`slice(0, lagging)\` already does the right thing.
-      const lag = candidates.slice(0, lagging);
+      const lag = candidates
+        .slice(0, lagging)
+        .map((c) => ({ ...c, lagging: true }));
       const lead = [...candidates]
         .sort((a, b) => b.at - a.at)
-        .slice(0, leading);
+        .slice(0, leading)
+        .map((c) => ({ ...c, lagging: false }));
       const seen = new Set<string>();
       const combined = [...lag, ...lead].filter((p) => {
         if (seen.has(p.stream)) return false;
@@ -40103,8 +40107,8 @@ export class SqliteStore implements Store {
       const leases: Lease[] = [];
       const until = new Date(Date.now() + millis).toISOString();
       for (const row of combined) {
-        await tx.execute({
-          sql: "UPDATE streams SET leased_by = ?, leased_until = ?, retry = retry + 1 WHERE stream = ?",
+        const updated = await tx.execute({
+          sql: "UPDATE streams SET leased_by = ?, leased_until = ?, retry = retry + 1 WHERE stream = ? RETURNING retry",
           args: [by, until, row.stream],
         });
         leases.push({
@@ -40112,8 +40116,8 @@ export class SqliteStore implements Store {
           source: row.source,
           at: row.at,
           by,
-          retry: 0,
-          lagging: row.at < 0,
+          retry: Number(updated.rows[0].retry),
+          lagging: row.lagging,
           lane: row.lane,
         });
       }
@@ -40211,7 +40215,7 @@ export class SqliteStore implements Store {
 
   // --- reset: transactional, accepts names or filter ---
   async reset(input: string[] | StreamFilter) {
-    const set_clause = \`SET at = -1, retry = 0, blocked = 0, error = '',
+    const set_clause = \`SET at = -1, retry = -1, blocked = 0, error = '',
                           leased_by = NULL, leased_until = NULL\`;
     const tx = await this.client.transaction("write");
     try {
@@ -42366,6 +42370,73 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           await fresh.seed();
           const claimed = await fresh.claim(1, 1, \`w-\${uid()}\`, 1000);
           expect(claimed).toEqual([]);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
+    // ACT-980: the TCK previously asserted only the *shape* of claim()
+    // results, letting adapters diverge on \`Lease.retry\` and \`Lease.lagging\`
+    // — the two signals the drain controller reads to time \`blockOnError\`
+    // and to balance frontiers. These cases pin the *semantics* so every
+    // adapter is interchangeable, not merely structurally conformant.
+    describe("lease semantics", () => {
+      // Frontier budgets (\`lagging\`/\`leading\`) apply across every claimable
+      // stream in the store, so these cases run against a fresh, isolated
+      // instance with exactly one subscribed stream — that makes the
+      // budgets deterministic regardless of what the shared suite left
+      // behind.
+      it("returns retry=0 on first claim and increments on re-claim without ack", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = \`lease-retry-\${uid()}\`;
+          await fresh.subscribe([{ stream: s }]);
+          await fresh.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          // First claim = first attempt. A 0ms lease is released
+          // immediately, so the re-claim below sees a claimable stream
+          // deterministically (no wall-clock race on lease expiry).
+          const first = await fresh.claim(1, 0, \`w-\${uid()}\`, 0);
+          const f = first.find((l) => l.stream === s);
+          expect(f).toBeDefined();
+          expect(f!.retry).toBe(0);
+          // Re-claim without an intervening ack = the first retry.
+          const second = await fresh.claim(1, 0, \`w-\${uid()}\`, 100_000);
+          const sec = second.find((l) => l.stream === s);
+          expect(sec).toBeDefined();
+          expect(sec!.retry).toBe(1);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("reports lagging=true from the lagging frontier and false from the leading frontier", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = \`lease-lag-\${uid()}\`;
+          await fresh.subscribe([{ stream: s }]);
+          await fresh.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          // Lagging-only budget: the stream is claimed from the lagging
+          // frontier → lagging must be true.
+          const lag = await fresh.claim(1, 0, \`w-\${uid()}\`, 0);
+          expect(lag.find((l) => l.stream === s)?.lagging).toBe(true);
+          // Leading-only budget on the released lease: claimed from the
+          // leading frontier → lagging must be false. \`lagging\` is
+          // frontier membership, not a function of the stream's watermark.
+          const lead = await fresh.claim(0, 1, \`w-\${uid()}\`, 100_000);
+          expect(lead.find((l) => l.stream === s)?.lagging).toBe(false);
         } finally {
           await fresh.dispose();
         }

@@ -213,7 +213,7 @@ export class SqliteStore implements Store {
         stream TEXT PRIMARY KEY,
         source TEXT,
         at INTEGER NOT NULL DEFAULT -1,
-        retry INTEGER NOT NULL DEFAULT 0,
+        retry INTEGER NOT NULL DEFAULT -1,
         blocked INTEGER NOT NULL DEFAULT 0,
         error TEXT NOT NULL DEFAULT '',
         leased_by TEXT,
@@ -423,7 +423,7 @@ export class SqliteStore implements Store {
         lane = "default",
       } of streams) {
         const inserted = await tx.execute({
-          sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane) VALUES (?, ?, ?, ?)",
+          sql: "INSERT OR IGNORE INTO streams (stream, source, priority, lane, retry) VALUES (?, ?, ?, ?, -1)",
           args: [stream, source ?? null, priority, lane],
         });
         if (inserted.rowsAffected > 0) {
@@ -516,10 +516,13 @@ export class SqliteStore implements Store {
       // + leading (newest first). The candidates list arrives sorted
       // by `priority DESC, at ASC` from the SELECT above, so the
       // `slice(0, lagging)` already does the right thing.
-      const lag = candidates.slice(0, lagging);
+      const lag = candidates
+        .slice(0, lagging)
+        .map((c) => ({ ...c, lagging: true }));
       const lead = [...candidates]
         .sort((a, b) => b.at - a.at)
-        .slice(0, leading);
+        .slice(0, leading)
+        .map((c) => ({ ...c, lagging: false }));
       const seen = new Set<string>();
       const combined = [...lag, ...lead].filter((p) => {
         if (seen.has(p.stream)) return false;
@@ -530,8 +533,8 @@ export class SqliteStore implements Store {
       const leases: Lease[] = [];
       const until = new Date(Date.now() + millis).toISOString();
       for (const row of combined) {
-        await tx.execute({
-          sql: "UPDATE streams SET leased_by = ?, leased_until = ?, retry = retry + 1 WHERE stream = ?",
+        const updated = await tx.execute({
+          sql: "UPDATE streams SET leased_by = ?, leased_until = ?, retry = retry + 1 WHERE stream = ? RETURNING retry",
           args: [by, until, row.stream],
         });
         leases.push({
@@ -539,8 +542,8 @@ export class SqliteStore implements Store {
           source: row.source,
           at: row.at,
           by,
-          retry: 0,
-          lagging: row.at < 0,
+          retry: Number(updated.rows[0].retry),
+          lagging: row.lagging,
           lane: row.lane,
         });
       }
@@ -638,7 +641,7 @@ export class SqliteStore implements Store {
 
   // --- reset: transactional, accepts names or filter ---
   async reset(input: string[] | StreamFilter) {
-    const set_clause = `SET at = -1, retry = 0, blocked = 0, error = '',
+    const set_clause = `SET at = -1, retry = -1, blocked = 0, error = '',
                           leased_by = NULL, leased_until = NULL`;
     const tx = await this.client.transaction("write");
     try {
