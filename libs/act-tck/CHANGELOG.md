@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.13.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.13.0...@rotorsoft/act-tck-v1.13.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **act:** throw on duplicate reaction/projection handler names ([974b6fd](https://github.com/rotorsoft/act-root/commit/974b6fda59f1f97374d4493cea87aa93e0c3a28e)), closes [#979](https://github.com/rotorsoft/act-root/issues/979)
+
 # [@rotorsoft/act-tck-v1.13.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.12.0...@rotorsoft/act-tck-v1.13.0) (2026-06-13)
 
 
