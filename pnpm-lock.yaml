@@ -363,9 +363,9 @@ importers:
 
   libs/act-sse:
     dependencies:
-      '@rotorsoft/act-patch':
+      '@rotorsoft/act-http':
         specifier: workspace:^
-        version: link:../act-patch
+        version: link:../act-http
 
   libs/act-tck:
     devDependencies:

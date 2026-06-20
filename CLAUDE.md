@@ -26,8 +26,8 @@ pnpm monorepo with two main sections:
   - `@rotorsoft/act-pg` — PostgreSQL adapter (production)
   - `@rotorsoft/act-sqlite` — SQLite/libSQL adapter (embedded/single-node)
   - `@rotorsoft/act-patch` — immutable deep-merge patch utility
-  - `@rotorsoft/act-sse` — Server-Sent Events for incremental state broadcast
-  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, an `sse` submodule that mirrors `@rotorsoft/act-sse`, plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
+  - `@rotorsoft/act-sse` — **deprecated** Server-Sent Events package; now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home), kept only for migration and scheduled for removal
+  - `@rotorsoft/act-http` — HTTP integrations (umbrella). `webhook` for reaction-driven POST delivery, `receiver` for inbound webhook ingestion, the canonical `sse` subpath for incremental state broadcast (the surface the deprecated `@rotorsoft/act-sse` re-exports), plus the auto-generated API subpaths (`trpc`, `hono`, `openapi`) that walk a built `IAct` registry and emit one route per action — guide at [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md)
   - `@rotorsoft/act-pino` — pino-backed `Logger` adapter
   - `@rotorsoft/act-crypto` — authenticated envelope encryption (AES-256-GCM + versioned wire format) for adapters that want column-level encryption with operator-controlled keys. Leaf package — adapters depend on it, core does not.
   - `@rotorsoft/act-ops` — operational primitives (idempotency, retry budgets, poison-message classification). **Zero dep on `@rotorsoft/act`** by design — so non-Act receivers (forwarded-bus consumers, Express endpoints, queue workers) can speak the same contract without pulling in the orchestrator
