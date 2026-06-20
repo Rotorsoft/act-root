@@ -282,8 +282,8 @@ importers:
         specifier: workspace:^
         version: link:../act-ops
       '@trpc/server':
-        specifier: ^11.17.0
-        version: 11.17.0(typescript@6.0.3)
+        specifier: ^11.18.0
+        version: 11.18.0(typescript@6.0.3)
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6
