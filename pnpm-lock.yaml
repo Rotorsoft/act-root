@@ -25,7 +25,7 @@ overrides:
   lodash-es@<=4.17.23: '>=4.18.0'
   follow-redirects@<=1.15.11: '>=1.16.0'
   fast-uri@<=3.1.1: '>=4.0.0'
-  '@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3': '>=8.0.0'
+  '@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3': '>=8.0.1'
   ws@>=8.0.0 <8.20.1: '>=8.21.0'
   webpack-dev-server@<=5.2.3: '>=5.2.5'
   uuid@<11.1.1: '>=14.0.0'
@@ -5419,10 +5419,6 @@ packages:
 
   end-of-stream@1.4.5:
     resolution: {integrity: sha512-ooEGc6HP26xXq/N+GCGOT0JKCLDGrq2bQUZrQ7gyrJiZANJ/8YDTxTpQBXGMn+WbIQXNVpyWymm7KYVICQnyOg==}
-
-  enhanced-resolve@5.21.2:
-    resolution: {integrity: sha512-xe9vQb5kReirPUxgQrXA3ihgbCqssmTiM7cOZ+Gzu+VeGWgpV98lLZvp0dl4yriyAePcewxGUs9UpKD8PET9KQ==}
-    engines: {node: '>=10.13.0'}
 
   enhanced-resolve@5.21.6:
     resolution: {integrity: sha512-aNnGCvbJ/RIyWo1IuhNdVjnNF+EjH9wpzpNHt+ci/m9He9LJvUN8wrCcXjp9cWsGNAuvSpVFTx/vraAFQ8qGjQ==}
@@ -14783,11 +14779,6 @@ snapshots:
     dependencies:
       once: 1.4.0
 
-  enhanced-resolve@5.21.2:
-    dependencies:
-      graceful-fs: 4.2.11
-      tapable: 2.3.3
-
   enhanced-resolve@5.21.6:
     dependencies:
       graceful-fs: 4.2.11
@@ -19433,7 +19424,7 @@ snapshots:
       acorn-import-phases: 1.0.4(acorn@8.16.0)
       browserslist: 4.28.2
       chrome-trace-event: 1.0.4
-      enhanced-resolve: 5.21.2
+      enhanced-resolve: 5.21.6
       es-module-lexer: 2.0.0
       eslint-scope: 5.1.1
       events: 3.3.0
