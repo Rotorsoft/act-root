@@ -601,6 +601,73 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
+    // ACT-980: the TCK previously asserted only the *shape* of claim()
+    // results, letting adapters diverge on `Lease.retry` and `Lease.lagging`
+    // — the two signals the drain controller reads to time `blockOnError`
+    // and to balance frontiers. These cases pin the *semantics* so every
+    // adapter is interchangeable, not merely structurally conformant.
+    describe("lease semantics", () => {
+      // Frontier budgets (`lagging`/`leading`) apply across every claimable
+      // stream in the store, so these cases run against a fresh, isolated
+      // instance with exactly one subscribed stream — that makes the
+      // budgets deterministic regardless of what the shared suite left
+      // behind.
+      it("returns retry=0 on first claim and increments on re-claim without ack", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `lease-retry-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          await fresh.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          // First claim = first attempt. A 0ms lease is released
+          // immediately, so the re-claim below sees a claimable stream
+          // deterministically (no wall-clock race on lease expiry).
+          const first = await fresh.claim(1, 0, `w-${uid()}`, 0);
+          const f = first.find((l) => l.stream === s);
+          expect(f).toBeDefined();
+          expect(f!.retry).toBe(0);
+          // Re-claim without an intervening ack = the first retry.
+          const second = await fresh.claim(1, 0, `w-${uid()}`, 100_000);
+          const sec = second.find((l) => l.stream === s);
+          expect(sec).toBeDefined();
+          expect(sec!.retry).toBe(1);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+
+      it("reports lagging=true from the lagging frontier and false from the leading frontier", async () => {
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const s = `lease-lag-${uid()}`;
+          await fresh.subscribe([{ stream: s }]);
+          await fresh.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+          // Lagging-only budget: the stream is claimed from the lagging
+          // frontier → lagging must be true.
+          const lag = await fresh.claim(1, 0, `w-${uid()}`, 0);
+          expect(lag.find((l) => l.stream === s)?.lagging).toBe(true);
+          // Leading-only budget on the released lease: claimed from the
+          // leading frontier → lagging must be false. `lagging` is
+          // frontier membership, not a function of the stream's watermark.
+          const lead = await fresh.claim(0, 1, `w-${uid()}`, 100_000);
+          expect(lead.find((l) => l.stream === s)?.lagging).toBe(false);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
     describe("block", () => {
       it("hides blocked streams from claim", async () => {
         const s = `block-${uid()}`;

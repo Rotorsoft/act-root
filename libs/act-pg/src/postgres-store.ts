@@ -410,7 +410,7 @@ export class PostgresStore implements Store {
           stream varchar(100) COLLATE pg_catalog."default" PRIMARY KEY,
           source varchar(100) COLLATE pg_catalog."default",
           at int NOT NULL DEFAULT -1,
-          retry smallint NOT NULL DEFAULT 0,
+          retry smallint NOT NULL DEFAULT -1,
           blocked boolean NOT NULL DEFAULT false,
           error text,
           leased_by text,
@@ -841,11 +841,12 @@ export class PostgresStore implements Store {
         //  3. UPDATE lane unconditionally — current subscribe wins (ACT-1103).
         const { rowCount: inserted } = await client.query(
           `
-          INSERT INTO ${this._fqs} (stream, source, priority, lane)
+          INSERT INTO ${this._fqs} (stream, source, priority, lane, retry)
           SELECT s->>'stream',
                  s->>'source',
                  COALESCE((s->>'priority')::int, 0),
-                 COALESCE(s->>'lane', 'default')
+                 COALESCE(s->>'lane', 'default'),
+                 -1
           FROM jsonb_array_elements($1::jsonb) AS s
           ON CONFLICT (stream) DO NOTHING
           `,
@@ -1046,7 +1047,7 @@ export class PostgresStore implements Store {
   }
 
   async reset(input: string[] | StreamFilter): Promise<number> {
-    const set_clause = `SET at = -1, retry = 0, blocked = false, error = NULL,
+    const set_clause = `SET at = -1, retry = -1, blocked = false, error = NULL,
                           leased_by = NULL, leased_until = NULL`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
