@@ -8,7 +8,7 @@
   },
   "references": [
     {
-      "path": "../act-patch/tsconfig.build.json"
+      "path": "../act-http/tsconfig.build.json"
     }
   ],
   "include": ["src"],

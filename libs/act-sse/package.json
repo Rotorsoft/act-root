@@ -47,6 +47,6 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "dependencies": {
-    "@rotorsoft/act-patch": "workspace:^"
+    "@rotorsoft/act-http": "workspace:^"
   }
 }
