@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.5.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.5.2...@rotorsoft/act-sqlite-v1.5.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* **act-tck:** pin claim() lease semantics and align pg/sqlite adapters ([86f940e](https://github.com/rotorsoft/act-root/commit/86f940e14112afa9def0876878cfc3d46562ca7b)), closes [#980](https://github.com/rotorsoft/act-root/issues/980)
+
 # [@rotorsoft/act-sqlite-v1.5.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.5.1...@rotorsoft/act-sqlite-v1.5.2) (2026-06-18)
 
 
