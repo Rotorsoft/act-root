@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.13.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.12.1...@rotorsoft/act-v1.13.0) (2026-06-20)
+
+
+### Features
+
+* **act-tck:** run store property + concurrency contracts on durable adapters ([f5c9412](https://github.com/rotorsoft/act-root/commit/f5c9412e487a4be6be5fae551b7cdab13b28062d)), closes [#982](https://github.com/rotorsoft/act-root/issues/982)
+
 # [@rotorsoft/act-v1.12.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.12.0...@rotorsoft/act-v1.12.1) (2026-06-20)
 
 
