@@ -48,11 +48,13 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
+    "@fast-check/vitest": ">=0.4.1",
     "@rotorsoft/act": "workspace:^",
     "vitest": ">=4.1.9",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@fast-check/vitest": "^0.4.1",
     "@rotorsoft/act": "workspace:^",
     "vitest": "^4.1.9",
     "zod": "^4.4.3"

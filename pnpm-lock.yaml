@@ -369,6 +369,9 @@ importers:
 
   libs/act-tck:
     devDependencies:
+      '@fast-check/vitest':
+        specifier: ^0.4.1
+        version: 0.4.1(vitest@4.1.9)
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../act

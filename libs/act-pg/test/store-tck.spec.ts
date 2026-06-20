@@ -10,5 +10,10 @@ runStoreTck({
       table: "tck_store",
       notify: true,
     }),
-  capabilities: { notify: true, restore: true, pii_isolation: true },
+  capabilities: {
+    notify: true,
+    restore: true,
+    pii_isolation: true,
+    concurrent_claim: true,
+  },
 });

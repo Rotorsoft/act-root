@@ -59,6 +59,17 @@ export type StoreCapabilities = {
    * path, idempotency, and isolation across streams.
    */
   readonly pii_isolation?: boolean;
+  /**
+   * Adapter supports competing consumers — two workers may call
+   * `claim()` concurrently and the store hands each stream to at most
+   * one of them (PostgreSQL via `FOR UPDATE SKIP LOCKED`; the in-memory
+   * store via single-threaded atomic claim). When `true`, the TCK runs
+   * the concurrency suite. Single-writer embedded stores (e.g. SQLite,
+   * where concurrent write transactions raise `SQLITE_BUSY` rather than
+   * serializing) leave this `false`: their deployment model is a single
+   * drain worker per database file.
+   */
+  readonly concurrent_claim?: boolean;
 };
 
 /**
@@ -662,6 +673,59 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // frontier membership, not a function of the stream's watermark.
           const lead = await fresh.claim(0, 1, `w-${uid()}`, 100_000);
           expect(lead.find((l) => l.stream === s)?.lagging).toBe(false);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
+    // ACT-982: competing-consumer correctness was previously proven only by
+    // the PG-specific multi-process stress harness. This makes it a portable
+    // contract for adapters that support concurrent claimers (gated by
+    // `concurrent_claim`): two distinct workers claiming the same candidate
+    // set concurrently must never both lease the same stream within the
+    // lease window. Single-writer stores (SQLite) opt out — see the
+    // capability docs.
+    describe.skipIf(!caps.concurrent_claim)("concurrency (capability)", () => {
+      it("never double-leases a stream across concurrent claimers", async () => {
+        // Fresh isolated instance: the two workers below claim with large
+        // budgets across every claimable stream, so a shared store would
+        // both perturb this test and leave 60s leases that pollute later
+        // suites. Mirrors the lease-semantics cases.
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const streams = Array.from(
+            { length: 8 },
+            () => `concurrent-${uid()}`
+          );
+          await fresh.subscribe(streams.map((stream) => ({ stream })));
+          for (const stream of streams) {
+            await fresh.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          const owned = new Set(streams);
+          // Overlapping budgets so both workers target the same set;
+          // SKIP LOCKED (pg) / atomic lease (in-memory) must hand each
+          // stream to at most one worker.
+          const [a, b] = await Promise.all([
+            fresh.claim(100, 100, `wA-${uid()}`, 60_000),
+            fresh.claim(100, 100, `wB-${uid()}`, 60_000),
+          ]);
+          // Combine both workers' leases. Operating on the union (rather
+          // than per-worker sets) keeps the callbacks covered even when one
+          // worker wins every stream and the other comes back empty.
+          const claimed = [...a, ...b]
+            .map((l) => l.stream)
+            .filter((stream) => owned.has(stream));
+          // No stream leased twice (no double-lease across workers)...
+          expect(new Set(claimed).size).toBe(claimed.length);
+          // ...and every stream leased exactly once (none lost).
+          expect(claimed.length).toBe(owned.size);
         } finally {
           await fresh.dispose();
         }

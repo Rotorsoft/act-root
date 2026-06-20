@@ -94,9 +94,12 @@ export function streamPatternToLike(input: string): string {
  *
  * Provides persistent event storage using SQLite via `@libsql/client`.
  * All write operations use transactions for ACID guarantees.
- * Since SQLite serializes writes at the database level, the concurrency
- * model is equivalent to PostgreSQL's `FOR UPDATE SKIP LOCKED` for
- * single-server deployments.
+ *
+ * SQLite is a single-writer store: concurrent write transactions raise
+ * `SQLITE_BUSY` rather than serializing transparently, so it does not
+ * support competing consumers the way PostgreSQL's `FOR UPDATE SKIP LOCKED`
+ * does (the TCK leaves `concurrent_claim` off for this reason). The intended
+ * model is a single drain worker per database file.
  *
  * **`Store.notify` is intentionally not implemented.** The notify hook is
  * a cross-process wake-up signal that lets a horizontally-scaled Act
@@ -453,8 +456,9 @@ export class SqliteStore implements Store {
     }
   }
 
-  // --- claim: write transaction (SQLite serializes writes = equivalent
-  //     to PG FOR UPDATE SKIP LOCKED for single-server) ---
+  // --- claim: write transaction. Single-writer: concurrent claims from
+  //     separate connections raise SQLITE_BUSY, so this assumes one drain
+  //     worker per database file (see class doc; TCK `concurrent_claim` off).
   async claim(
     lagging: number,
     leading: number,

@@ -39668,9 +39668,12 @@ export function streamPatternToLike(input: string): string {
  *
  * Provides persistent event storage using SQLite via \`@libsql/client\`.
  * All write operations use transactions for ACID guarantees.
- * Since SQLite serializes writes at the database level, the concurrency
- * model is equivalent to PostgreSQL's \`FOR UPDATE SKIP LOCKED\` for
- * single-server deployments.
+ *
+ * SQLite is a single-writer store: concurrent write transactions raise
+ * \`SQLITE_BUSY\` rather than serializing transparently, so it does not
+ * support competing consumers the way PostgreSQL's \`FOR UPDATE SKIP LOCKED\`
+ * does (the TCK leaves \`concurrent_claim\` off for this reason). The intended
+ * model is a single drain worker per database file.
  *
  * **\`Store.notify\` is intentionally not implemented.** The notify hook is
  * a cross-process wake-up signal that lets a horizontally-scaled Act
@@ -40027,8 +40030,9 @@ export class SqliteStore implements Store {
     }
   }
 
-  // --- claim: write transaction (SQLite serializes writes = equivalent
-  //     to PG FOR UPDATE SKIP LOCKED for single-server) ---
+  // --- claim: write transaction. Single-writer: concurrent claims from
+  //     separate connections raise SQLITE_BUSY, so this assumes one drain
+  //     worker per database file (see class doc; TCK \`concurrent_claim\` off).
   async claim(
     lagging: number,
     leading: number,
@@ -41169,6 +41173,8 @@ export type { LoggerTckOptions } from "./logger-tck.js";
 export { runLoggerTck } from "./logger-tck.js";
 export type { StabilityTckOptions } from "./stability-tck.js";
 export { runStabilityTck } from "./stability-tck.js";
+export type { StorePropertyTckOptions } from "./store-property-tck.js";
+export { runStorePropertyTck } from "./store-property-tck.js";
 export type { StoreCapabilities, StoreTckOptions } from "./store-tck.js";
 export { runStoreTck } from "./store-tck.js";
 
@@ -41405,6 +41411,254 @@ async function load_surface(entry: string): Promise<string> {
     .join("\\n");
 }
 
+// === store-property-tck.ts ===
+import { fc, test } from "@fast-check/vitest";
+import type { Store } from "@rotorsoft/act/types";
+import { afterAll, beforeAll, describe, expect } from "vitest";
+import type { CounterEvents } from "./fixtures/events.js";
+import { collect, inc, make_meta } from "./fixtures/helpers.js";
+
+/**
+ * Property-based contract for the store-level invariants the drain pipeline
+ * depends on — commit version monotonicity, claim/lease no-leak, watermark
+ * monotonicity, and block exclusion. These ran only against \`InMemoryStore\`
+ * before ACT-982; running them against the durable adapters too is the only
+ * way to catch a divergence the example-based TCK cases miss.
+ *
+ * Each predicate resets the store (\`drop\` + \`seed\`) so randomized runs are
+ * isolated. Durable adapters should pass a reduced \`numRuns\` and their own
+ * dedicated schema/file so a parallel test worker can't clobber the table.
+ */
+export type StorePropertyTckOptions = {
+  /** Adapter name for the describe block. */
+  name: string;
+  /** Produces the store under test (created once, reset between runs). */
+  factory: () => Store | Promise<Store>;
+  /** fast-check runs per property. Default 100; lower for durable adapters. */
+  numRuns?: number;
+};
+
+const streamArb = fc.constantFrom("s1", "s2", "s3");
+const commitArb = fc.record({
+  stream: streamArb,
+  count: fc.integer({ min: 1, max: 3 }),
+});
+
+const claimStreamArb = fc.constantFrom("a", "b", "c");
+const opArb = fc.oneof(
+  fc.record({ kind: fc.constant("commit" as const), stream: claimStreamArb }),
+  fc.record({ kind: fc.constant("claim" as const) }),
+  fc.record({ kind: fc.constant("ack-all" as const) }),
+  fc.record({ kind: fc.constant("block-all" as const) })
+);
+
+const events = (count: number) => Array.from({ length: count }, () => inc(1));
+
+export const runStorePropertyTck = (options: StorePropertyTckOptions): void => {
+  const numRuns = options.numRuns ?? 100;
+
+  describe(\`TCK / Store properties / \${options.name}\`, () => {
+    let store: Store;
+
+    beforeAll(async () => {
+      store = await options.factory();
+      await store.seed();
+    });
+    afterAll(async () => {
+      await store.dispose();
+    });
+
+    // Clean slate per randomized run. claim() spans every claimable stream
+    // in the table, so namespacing alone can't isolate the claim properties;
+    // a full reset is the only safe option.
+    const reset = async () => {
+      await store.drop();
+      await store.seed();
+    };
+
+    describe("commit version invariants", () => {
+      test.prop([fc.array(commitArb, { minLength: 0, maxLength: 30 })], {
+        numRuns,
+      })(
+        "per-stream versions are 0..N-1 in commit order, regardless of interleaving",
+        async (commits) => {
+          await reset();
+          const expected = new Map<string, number>();
+          for (const { stream, count } of commits) {
+            const before = expected.get(stream) ?? -1;
+            const committed = await store.commit<CounterEvents>(
+              stream,
+              events(count),
+              make_meta({ stream })
+            );
+            committed.forEach((e, i) => {
+              expect(e.version).toBe(before + 1 + i);
+            });
+            expected.set(stream, before + count);
+          }
+          for (const stream of new Set(commits.map((c) => c.stream))) {
+            const seen = await collect(store, { stream, stream_exact: true });
+            seen.forEach((e, i) => {
+              expect(e.version).toBe(i);
+            });
+          }
+        }
+      );
+
+      test.prop([fc.array(commitArb, { minLength: 1, maxLength: 20 })], {
+        numRuns,
+      })(
+        "bad expectedVersion throws and commits no events",
+        async (commits) => {
+          await reset();
+          for (const { stream, count } of commits) {
+            await store.commit<CounterEvents>(
+              stream,
+              events(count),
+              make_meta({ stream })
+            );
+          }
+          const stream = commits[0].stream;
+          const before = await collect(store, { stream, stream_exact: true });
+          // Actual head is before.length - 1, so before.length is wrong.
+          await expect(
+            store.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream }),
+              before.length
+            )
+          ).rejects.toThrow();
+          const after = await collect(store, { stream, stream_exact: true });
+          expect(after.length).toBe(before.length);
+        }
+      );
+    });
+
+    describe("claim/lease lifecycle invariants", () => {
+      test.prop([fc.array(opArb, { minLength: 1, maxLength: 30 })], {
+        numRuns,
+      })(
+        "no leaks: claims are always acked or blocked, never lost",
+        async (ops) => {
+          await reset();
+          await store.subscribe([
+            { stream: "a" },
+            { stream: "b" },
+            { stream: "c" },
+          ]);
+          let totalClaims = 0;
+          let totalResolved = 0;
+          let pending: Awaited<ReturnType<Store["claim"]>> = [];
+          for (const op of ops) {
+            if (op.kind === "commit") {
+              await store.commit<CounterEvents>(
+                op.stream,
+                [inc(1)],
+                make_meta({ stream: op.stream })
+              );
+            } else if (op.kind === "claim") {
+              const claimed = await store.claim(5, 5, "worker", 60_000);
+              totalClaims += claimed.length;
+              pending = [...pending, ...claimed];
+            } else if (op.kind === "ack-all") {
+              const acked = await store.ack(pending);
+              totalResolved += acked.length;
+              pending = pending.filter(
+                (p) => !acked.find((a) => a.stream === p.stream)
+              );
+            } else {
+              const blocked = await store.block(
+                pending.map((p) => ({ ...p, error: "test" }))
+              );
+              totalResolved += blocked.length;
+              pending = pending.filter(
+                (p) => !blocked.find((b) => b.stream === p.stream)
+              );
+            }
+          }
+          expect(totalResolved + pending.length).toBe(totalClaims);
+        }
+      );
+
+      test.prop(
+        [
+          fc.array(claimStreamArb, { minLength: 1, maxLength: 5 }),
+          fc.array(claimStreamArb, { minLength: 0, maxLength: 5 }),
+        ],
+        { numRuns }
+      )(
+        "ack advances the watermark monotonically per stream",
+        async (commitsA, commitsB) => {
+          await reset();
+          const all = [...new Set([...commitsA, ...commitsB, "a", "b", "c"])];
+          await store.subscribe(all.map((stream) => ({ stream })));
+          for (const stream of commitsA) {
+            await store.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          const acked1 = await store.ack(
+            await store.claim(10, 10, "worker", 60_000)
+          );
+          // Seed every subscribed stream at -1 so the comparison below is
+          // unconditional — streams not acked in batch 1 just compare
+          // against -1, keeping the property branch-free for coverage.
+          const watermark1 = new Map(all.map((stream) => [stream, -1]));
+          for (const l of acked1) watermark1.set(l.stream, l.at);
+          for (const stream of commitsB) {
+            await store.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          const acked2 = await store.ack(
+            await store.claim(10, 10, "worker", 60_000)
+          );
+          for (const lease of acked2) {
+            expect(lease.at).toBeGreaterThanOrEqual(
+              watermark1.get(lease.stream) as number
+            );
+          }
+        }
+      );
+
+      test.prop([fc.array(claimStreamArb, { minLength: 1, maxLength: 5 })], {
+        numRuns,
+      })("blocked streams cannot be claimed again", async (commits) => {
+        await reset();
+        const streams = [...new Set(commits)];
+        await store.subscribe(streams.map((stream) => ({ stream })));
+        for (const stream of commits) {
+          await store.commit<CounterEvents>(
+            stream,
+            [inc(1)],
+            make_meta({ stream })
+          );
+        }
+        const claimed = await store.claim(10, 10, "worker", 60_000);
+        await store.block(claimed.map((l) => ({ ...l, error: "test" })));
+        const blockedSet = new Set(claimed.map((l) => l.stream));
+        // A control stream committed *after* the first claim is guaranteed
+        // claimable, so the re-claim is non-empty and the exclusion check
+        // below actually runs — while still proving no blocked stream
+        // reappears.
+        await store.subscribe([{ stream: "ctrl" }]);
+        await store.commit<CounterEvents>(
+          "ctrl",
+          [inc(1)],
+          make_meta({ stream: "ctrl" })
+        );
+        const reclaim = await store.claim(10, 10, "worker2", 60_000);
+        for (const l of reclaim) expect(blockedSet.has(l.stream)).toBe(false);
+      });
+    });
+  });
+};
+
 // === store-tck.ts ===
 import {
   act,
@@ -41467,6 +41721,17 @@ export type StoreCapabilities = {
    * path, idempotency, and isolation across streams.
    */
   readonly pii_isolation?: boolean;
+  /**
+   * Adapter supports competing consumers — two workers may call
+   * \`claim()\` concurrently and the store hands each stream to at most
+   * one of them (PostgreSQL via \`FOR UPDATE SKIP LOCKED\`; the in-memory
+   * store via single-threaded atomic claim). When \`true\`, the TCK runs
+   * the concurrency suite. Single-writer embedded stores (e.g. SQLite,
+   * where concurrent write transactions raise \`SQLITE_BUSY\` rather than
+   * serializing) leave this \`false\`: their deployment model is a single
+   * drain worker per database file.
+   */
+  readonly concurrent_claim?: boolean;
 };
 
 /**
@@ -42070,6 +42335,59 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           // frontier membership, not a function of the stream's watermark.
           const lead = await fresh.claim(0, 1, \`w-\${uid()}\`, 100_000);
           expect(lead.find((l) => l.stream === s)?.lagging).toBe(false);
+        } finally {
+          await fresh.dispose();
+        }
+      });
+    });
+
+    // ACT-982: competing-consumer correctness was previously proven only by
+    // the PG-specific multi-process stress harness. This makes it a portable
+    // contract for adapters that support concurrent claimers (gated by
+    // \`concurrent_claim\`): two distinct workers claiming the same candidate
+    // set concurrently must never both lease the same stream within the
+    // lease window. Single-writer stores (SQLite) opt out — see the
+    // capability docs.
+    describe.skipIf(!caps.concurrent_claim)("concurrency (capability)", () => {
+      it("never double-leases a stream across concurrent claimers", async () => {
+        // Fresh isolated instance: the two workers below claim with large
+        // budgets across every claimable stream, so a shared store would
+        // both perturb this test and leave 60s leases that pollute later
+        // suites. Mirrors the lease-semantics cases.
+        const fresh = await options.factory();
+        try {
+          await fresh.drop();
+          await fresh.seed();
+          const streams = Array.from(
+            { length: 8 },
+            () => \`concurrent-\${uid()}\`
+          );
+          await fresh.subscribe(streams.map((stream) => ({ stream })));
+          for (const stream of streams) {
+            await fresh.commit<CounterEvents>(
+              stream,
+              [inc(1)],
+              make_meta({ stream })
+            );
+          }
+          const owned = new Set(streams);
+          // Overlapping budgets so both workers target the same set;
+          // SKIP LOCKED (pg) / atomic lease (in-memory) must hand each
+          // stream to at most one worker.
+          const [a, b] = await Promise.all([
+            fresh.claim(100, 100, \`wA-\${uid()}\`, 60_000),
+            fresh.claim(100, 100, \`wB-\${uid()}\`, 60_000),
+          ]);
+          // Combine both workers' leases. Operating on the union (rather
+          // than per-worker sets) keeps the callbacks covered even when one
+          // worker wins every stream and the other comes back empty.
+          const claimed = [...a, ...b]
+            .map((l) => l.stream)
+            .filter((stream) => owned.has(stream));
+          // No stream leased twice (no double-lease across workers)...
+          expect(new Set(claimed).size).toBe(claimed.length);
+          // ...and every stream leased exactly once (none lost).
+          expect(claimed.length).toBe(owned.size);
         } finally {
           await fresh.dispose();
         }
