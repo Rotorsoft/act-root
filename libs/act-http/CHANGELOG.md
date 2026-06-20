@@ -1,3 +1,10 @@
+# [@rotorsoft/act-http-v1.7.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.7.2...@rotorsoft/act-http-v1.7.3) (2026-06-20)
+
+
+### Bug Fixes
+
+* **deps:** update trpc monorepo to v11.18.0 ([34b8aa5](https://github.com/rotorsoft/act-root/commit/34b8aa573555b2eeb2f742b27e48c4d1f9739edb))
+
 # [@rotorsoft/act-http-v1.7.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-http-v1.7.1...@rotorsoft/act-http-v1.7.2) (2026-06-18)
 
 
