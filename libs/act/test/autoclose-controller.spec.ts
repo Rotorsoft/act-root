@@ -239,4 +239,42 @@ describe("AutocloseController — slice 3", () => {
     await app.shutdown();
     expect(c.is_running).toBe(false);
   });
+
+  // ACT-984: the autoclose ticker is a periodic store poller and shares the
+  // orchestrator circuit breaker with the drain loop.
+  test("skips the tick while the circuit breaker is open", async () => {
+    const app = act()
+      .withState(Ticket)
+      .build({ circuitBreaker: { failureThreshold: 1, cooldownMs: 60_000 } });
+    const c = controller_of(app);
+    const query_stats = vi.spyOn(store(), "query_stats");
+    // Open the shared breaker (threshold 1).
+    (
+      app as unknown as { _breaker: { record_failure: (n: number) => void } }
+    )._breaker.record_failure(Date.now());
+    const result = await c.run_once();
+    expect(result).toBeNull(); // skipped — store not touched
+    expect(query_stats).not.toHaveBeenCalled();
+    query_stats.mockRestore();
+  });
+
+  test("records a store failure on the breaker and emits `error`", async () => {
+    const app = act()
+      .withState(Ticket)
+      .build({ circuitBreaker: { failureThreshold: 2, cooldownMs: 60_000 } });
+    const c = controller_of(app);
+    const errors: { error: unknown; circuit: string }[] = [];
+    app.on("error", (e) => errors.push(e));
+    const original = store().query_stats.bind(store());
+    (store() as unknown as { query_stats: unknown }).query_stats = () =>
+      Promise.reject(new Error("stats down"));
+    try {
+      await c.run_once().catch(() => {});
+      expect(errors).toHaveLength(1);
+      expect(errors[0].circuit).toBe("closed"); // 1 failure < threshold 2
+    } finally {
+      (store() as unknown as { query_stats: typeof original }).query_stats =
+        original;
+    }
+  });
 });

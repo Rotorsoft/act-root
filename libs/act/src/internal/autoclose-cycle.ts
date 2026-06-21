@@ -31,6 +31,7 @@ import type {
   State,
   TruncateResult,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 import { run_close_cycle } from "./close-cycle.js";
 import { close_correlation } from "./correlator.js";
 import type { EsOps } from "./event-sourcing.js";
@@ -242,6 +243,15 @@ export type AutocloseControllerDeps = Omit<
    * `emit("closed", result)`.
    */
   readonly on_closed: (result: CloseResult) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The autoclose ticker is
+   * a periodic store poller like the drain loop, so it consults the same
+   * breaker: it skips a tick while the breaker is open and records the
+   * outcome of each tick it does run.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's `error` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -322,6 +332,9 @@ export class AutocloseController {
    */
   async run_once(): Promise<AutocloseCycleResult | null> {
     if (this._running) return null;
+    // Circuit open: the store is failing, skip this tick rather than pile
+    // load on a down backend. The next tick after the cooldown retries.
+    if (!this.deps.breaker.can_attempt(Date.now())) return null;
     this._running = true;
     try {
       const correlation = close_correlation(
@@ -339,10 +352,18 @@ export class AutocloseController {
         config: this.deps.config,
         correlation,
       });
+      // The store responded — reset the shared breaker.
+      this.deps.breaker.record_success();
       if (result.close_result.truncated.size > 0) {
         this.deps.on_closed(result.close_result);
       }
       return result;
+    } catch (error) {
+      // A store op failed mid-tick. Record on the shared breaker and surface
+      // it, then rethrow so the interval callback's existing logging runs.
+      const circuit = this.deps.breaker.record_failure(Date.now());
+      this.deps.on_error(error, circuit);
+      throw error;
     } finally {
       this._running = false;
     }

@@ -21,6 +21,7 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -38,6 +39,15 @@ export type SettleDeps<TEvents extends Schemas> = {
   ) => Promise<{ subscribed: number; last_id: number }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The settle loop's
+   * `correlate` (subscribe + query) is a store consumer too: a successful
+   * pass records a success, a failed one records a failure and surfaces it
+   * via `on_error`, feeding the same breaker that paces the drain loop.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's `error` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -91,6 +101,8 @@ export class SettleLoop<TEvents extends Schemas> {
             ...correlate_query,
             after: this._deps.checkpoint(),
           });
+          // correlate (subscribe + query) succeeded — the store responded.
+          this._deps.breaker.record_success();
           last_drain = await this._deps.drain(drain_options);
           const made_progress =
             subscribed > 0 ||
@@ -100,7 +112,14 @@ export class SettleLoop<TEvents extends Schemas> {
         }
         if (last_drain) this._deps.on_settled(last_drain);
       })()
-        .catch((err) => this._deps.logger.error(err))
+        .catch((err) => {
+          // correlate / init failed (a store op). Record on the shared
+          // breaker and surface via the `error` event; the drain loop reads
+          // the same breaker to pace itself.
+          const circuit = this._deps.breaker.record_failure(Date.now());
+          this._deps.logger.error(err);
+          this._deps.on_error(err, circuit);
+        })
         .finally(() => {
           this._running = false;
         });

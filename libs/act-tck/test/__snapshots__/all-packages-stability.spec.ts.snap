@@ -688,6 +688,9 @@ import {
   build_es,
   build_handle,
   build_handle_batch,
+  CircuitBreaker,
+  type CircuitBreakerOptions,
+  type CircuitState,
   CorrelateCycle,
   classify_registry,
   close_correlation,
@@ -699,10 +702,15 @@ import {
   type Handle,
   type HandleBatch,
   resolveAutocloseConfig,
+  resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
   scan,
 } from "./internal/index.js";
+
+// Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
+export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
+
 import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
@@ -839,6 +847,16 @@ export type ActLifecycleEvents<
    * cache is invalidated by \`forget()\` itself before the event fires.
    */
   forgotten: { stream: string; at: Date; eventCount: number };
+  /**
+   * A store operation failed during the drain loop (ACT-984). Fires on
+   * every failed drain cycle — typically a {@link StoreError} from a
+   * degraded backend — carrying the orchestrator circuit breaker's state
+   * after the failure (\`open\` means the drain loop has backed off and will
+   * retry after the cooldown). Listen to alert on a degraded store; the
+   * framework logs the same error regardless. Emitted only when a listener
+   * is registered (Node's \`EventEmitter\` throws on an unhandled \`"error"\`).
+   */
+  error: { error: unknown; circuit: CircuitState };
 };
 
 /**
@@ -895,6 +913,14 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly drain?: boolean;
   /**
+   * Orchestrator circuit breaker for the drain loop (ACT-984). After
+   * \`failureThreshold\` consecutive store failures the breaker opens and
+   * the drain loop skips \`claim()\` for \`cooldownMs\` instead of hammering a
+   * down backend, then allows a half-open trial. Out-of-range values throw
+   * a \`ZodError\` at \`act().build()\`. Defaults: threshold 5, cooldown 30s.
+   */
+  readonly circuitBreaker?: CircuitBreakerOptions;
+  /**
    * Online close cycle cadence in ms (#837 / epic #802). The
    * app-level autoclose controller ticks at this interval, iterates
    * states with \`.autocloses(...)\` declared, and schedules
@@ -947,6 +973,8 @@ export class Act<
 > implements IAct<TEvents, TActions, TActor>
 {
   private _emitter = new EventEmitter();
+  /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
+  private readonly _breaker: CircuitBreaker;
   /** #803: gate the \`Store.notify\` subscription side. */
   private readonly _listen: boolean;
   /** #803: gate the local reaction pipeline (drain controllers, settle, correlate). */
@@ -1013,6 +1041,17 @@ export class Act<
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
     return this._emitter.emit(event, args);
+  }
+
+  /**
+   * Emit the \`error\` lifecycle event, guarded against Node's \`EventEmitter\`
+   * contract that an \`"error"\` emission with no listener is rethrown (which
+   * would crash the process from inside the drain catch). The drain loop
+   * already logged the error, so dropping it when nobody listens is safe.
+   */
+  private _emit_error(error: unknown, circuit: CircuitState): void {
+    if (this._emitter.listenerCount("error") > 0)
+      this.emit("error", { error, circuit });
   }
 
   /**
@@ -1172,9 +1211,12 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
-    // Validate autoclose knobs eagerly so out-of-range values throw
-    // at build time, not on the first cycle tick.
+    // Validate autoclose + circuit-breaker knobs eagerly so out-of-range
+    // values throw at build time, not on the first cycle tick.
     this._autoclose_config = resolveAutocloseConfig(options);
+    this._breaker = new CircuitBreaker(
+      resolveCircuitBreakerConfig(options.circuitBreaker)
+    );
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -1206,6 +1248,8 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        breaker: this._breaker,
+        on_error: (error, circuit) => this._emit_error(error, circuit),
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
         // adapter SQL collapses to the pre-1103 shape.
@@ -1261,6 +1305,8 @@ export class Act<
         correlate: (q) => this.correlate(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
+        breaker: this._breaker,
+        on_error: (error, circuit) => this._emit_error(error, circuit),
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -1291,6 +1337,8 @@ export class Act<
           correlator: this._correlator,
           close_actor: { id: "$autoclose", name: "autoclose" },
           on_closed: (result) => this.emit("closed", result),
+          breaker: this._breaker,
+          on_error: (error, circuit) => this._emit_error(error, circuit),
         })
       : undefined;
 
@@ -4397,6 +4445,7 @@ import type {
   State,
   TruncateResult,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 import { run_close_cycle } from "./close-cycle.js";
 import { close_correlation } from "./correlator.js";
 import type { EsOps } from "./event-sourcing.js";
@@ -4608,6 +4657,15 @@ export type AutocloseControllerDeps = Omit<
    * \`emit("closed", result)\`.
    */
   readonly on_closed: (result: CloseResult) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The autoclose ticker is
+   * a periodic store poller like the drain loop, so it consults the same
+   * breaker: it skips a tick while the breaker is open and records the
+   * outcome of each tick it does run.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's \`error\` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -4688,6 +4746,9 @@ export class AutocloseController {
    */
   async run_once(): Promise<AutocloseCycleResult | null> {
     if (this._running) return null;
+    // Circuit open: the store is failing, skip this tick rather than pile
+    // load on a down backend. The next tick after the cooldown retries.
+    if (!this.deps.breaker.can_attempt(Date.now())) return null;
     this._running = true;
     try {
       const correlation = close_correlation(
@@ -4705,10 +4766,18 @@ export class AutocloseController {
         config: this.deps.config,
         correlation,
       });
+      // The store responded — reset the shared breaker.
+      this.deps.breaker.record_success();
       if (result.close_result.truncated.size > 0) {
         this.deps.on_closed(result.close_result);
       }
       return result;
+    } catch (error) {
+      // A store op failed mid-tick. Record on the shared breaker and surface
+      // it, then rethrow so the interval callback's existing logging runs.
+      const circuit = this.deps.breaker.record_failure(Date.now());
+      this.deps.on_error(error, circuit);
+      throw error;
     } finally {
       this._running = false;
     }
@@ -5153,6 +5222,114 @@ export function classify_registry<
     event_to_state,
     event_to_lanes,
   };
+}
+
+// === circuit-breaker.ts ===
+/**
+ * @module internal/circuit-breaker
+ *
+ * Orchestrator-level circuit breaker for store operations. The drain loop
+ * polls \`claim()\` continuously; when the backing store goes down every poll
+ * throws a {@link StoreError}, and without a breaker the orchestrator would
+ * spin at the cycle cadence hammering a dead database and flooding the logs.
+ *
+ * The breaker collapses that into three states:
+ *
+ * - **closed** — normal operation; failures are counted.
+ * - **open** — \`failureThreshold\` consecutive failures tripped it; attempts
+ *   are skipped for \`cooldownMs\` so the store gets room to recover.
+ * - **half-open** — the cooldown elapsed; a single trial attempt is allowed.
+ *   Success closes the breaker; failure re-opens it and restarts the clock.
+ *
+ * Time is passed in (\`now\`) rather than read from the clock so the state
+ * machine is deterministic under test.
+ */
+
+import { z } from "zod";
+
+/** Circuit breaker state. */
+export type CircuitState = "closed" | "open" | "half-open";
+
+/** Resolved circuit-breaker configuration. */
+export type CircuitBreakerConfig = {
+  /** Consecutive store failures that trip the breaker open. */
+  readonly failureThreshold: number;
+  /** Milliseconds the breaker stays open before allowing a half-open trial. */
+  readonly cooldownMs: number;
+};
+
+export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+
+const CircuitBreakerOptionsSchema = z.object({
+  failureThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
+  cooldownMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(3_600_000)
+    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
+});
+
+/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
+export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
+
+/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
+export const resolveCircuitBreakerConfig = (
+  options?: CircuitBreakerOptions
+): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+
+export class CircuitBreaker {
+  private _failures = 0;
+  private _opened_at: number | undefined;
+  private readonly _threshold: number;
+  private readonly _cooldown_ms: number;
+
+  constructor(config: CircuitBreakerConfig) {
+    this._threshold = config.failureThreshold;
+    this._cooldown_ms = config.cooldownMs;
+  }
+
+  /** Current state given the wall-clock \`now\`. */
+  state(now: number): CircuitState {
+    if (this._opened_at === undefined) return "closed";
+    return now - this._opened_at >= this._cooldown_ms ? "half-open" : "open";
+  }
+
+  /** Whether an attempt is allowed now (closed or a half-open trial). */
+  can_attempt(now: number): boolean {
+    return this.state(now) !== "open";
+  }
+
+  /** A store op succeeded — reset to closed. */
+  record_success(): void {
+    this._failures = 0;
+    this._opened_at = undefined;
+  }
+
+  /**
+   * A store op failed. Opens the breaker when the consecutive-failure
+   * threshold is reached, or immediately re-opens (restarting the cooldown)
+   * if a half-open trial just failed. Returns the resulting state.
+   */
+  record_failure(now: number): CircuitState {
+    // Already tripped: this can only be reached from a half-open trial
+    // (open skips attempts), so the trial failed — re-open and restart.
+    if (this._opened_at !== undefined) {
+      this._opened_at = now;
+      return "open";
+    }
+    this._failures += 1;
+    if (this._failures >= this._threshold) {
+      this._opened_at = now;
+      return "open";
+    }
+    return "closed";
+  }
 }
 
 // === close-cycle.ts ===
@@ -6417,6 +6594,7 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -6657,6 +6835,17 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
+   * repeated store failures so the drain loop stops hammering a down
+   * backend; closed/half-open let attempts through.
+   */
+  readonly breaker: CircuitBreaker;
+  /**
+   * Surface a store/drain failure to the orchestrator (which emits the
+   * \`error\` lifecycle event). Carries the breaker state after the failure.
+   */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
@@ -6802,6 +6991,11 @@ export class DrainController<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+    // Circuit open: the store is failing, skip the claim entirely so we
+    // don't hammer a down backend. \`_armed\` stays set, so the next tick
+    // after the cooldown (half-open) retries.
+    if (!this._deps.breaker.can_attempt(Date.now()))
+      return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
     // Per-lane config wins over caller options (ACT-1103). The whole
@@ -6831,6 +7025,10 @@ export class DrainController<
         this._backoff.size > 0 ? this.is_deferred : undefined,
         this._deps.lane
       );
+
+      // The store responded (claim/fetch/ack/block all succeeded) — reset
+      // the breaker even when there was no work to do.
+      this._deps.breaker.record_success();
 
       if (!cycle) {
         // claim() returned no leases — fully caught up
@@ -6871,7 +7069,13 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
+      // A store op threw (StoreError, or any failure mid-cycle). Record it
+      // on the breaker, log it, and surface it to the orchestrator's
+      // \`error\` lifecycle event. \`_armed\` stays set so the next tick after
+      // the cooldown retries. EMPTY_DRAIN keeps the worker tick exception-free.
+      const circuit = this._deps.breaker.record_failure(Date.now());
       this._deps.logger.error(error);
+      this._deps.on_error(error, circuit);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
@@ -7036,6 +7240,7 @@ export const Errors = {
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
   NonRetryableError: "ERR_NON_RETRYABLE",
+  StoreError: "ERR_STORE",
 } as const;
 
 /**
@@ -7335,6 +7540,40 @@ export class StreamClosedError extends Error {
     super(\`Stream "\${stream}" is closed (tombstoned)\`);
     this.name = Errors.StreamClosedError;
     this.stream = stream;
+  }
+}
+
+/**
+ * Thrown by a {@link Store} adapter when an infrastructure operation fails
+ * for a reason that is *not* a domain condition — a dropped connection, a
+ * transaction rollback, a query timeout. It is the typed boundary between
+ * "the store is unavailable/degraded" and the domain errors above
+ * ({@link ConcurrencyError}, {@link StreamClosedError}), which describe
+ * legitimate outcomes the caller should branch on.
+ *
+ * Adapters wrap their driver errors in \`StoreError\` (preserving the
+ * original via \`cause\`) so the orchestrator can distinguish a degraded
+ * backend from "no work" and react accordingly — see the drain circuit
+ * breaker, which trips on repeated \`StoreError\`s and surfaces a
+ * \`drain_error\` lifecycle event instead of silently spinning on a down
+ * database.
+ *
+ * @example
+ * \`\`\`typescript
+ * app.on("drain_error", ({ error, circuit }) => {
+ *   if (error instanceof StoreError)
+ *     alert(\`store \${error.operation} failing; circuit=\${circuit}\`);
+ * });
+ * \`\`\`
+ */
+export class StoreError extends Error {
+  /** The store operation that failed (e.g. \`"claim"\`, \`"ack"\`, \`"commit"\`). */
+  public readonly operation: string;
+
+  constructor(operation: string, options?: { cause?: unknown }) {
+    super(\`Store operation "\${operation}" failed\`, options);
+    this.name = Errors.StoreError;
+    this.operation = operation;
   }
 }
 
@@ -9324,6 +9563,13 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
+export {
+  CircuitBreaker,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  type CircuitState,
+  resolveCircuitBreakerConfig,
+} from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
@@ -12677,6 +12923,7 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -12694,6 +12941,15 @@ export type SettleDeps<TEvents extends Schemas> = {
   ) => Promise<{ subscribed: number; last_id: number }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The settle loop's
+   * \`correlate\` (subscribe + query) is a store consumer too: a successful
+   * pass records a success, a failed one records a failure and surfaces it
+   * via \`on_error\`, feeding the same breaker that paces the drain loop.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's \`error\` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -12747,6 +13003,8 @@ export class SettleLoop<TEvents extends Schemas> {
             ...correlate_query,
             after: this._deps.checkpoint(),
           });
+          // correlate (subscribe + query) succeeded — the store responded.
+          this._deps.breaker.record_success();
           last_drain = await this._deps.drain(drain_options);
           const made_progress =
             subscribed > 0 ||
@@ -12756,7 +13014,14 @@ export class SettleLoop<TEvents extends Schemas> {
         }
         if (last_drain) this._deps.on_settled(last_drain);
       })()
-        .catch((err) => this._deps.logger.error(err))
+        .catch((err) => {
+          // correlate / init failed (a store op). Record on the shared
+          // breaker and surface via the \`error\` event; the drain loop reads
+          // the same breaker to pace itself.
+          const circuit = this._deps.breaker.record_failure(Date.now());
+          this._deps.logger.error(err);
+          this._deps.on_error(err, circuit);
+        })
         .finally(() => {
           this._running = false;
         });
@@ -14453,6 +14718,9 @@ import {
   build_es,
   build_handle,
   build_handle_batch,
+  CircuitBreaker,
+  type CircuitBreakerOptions,
+  type CircuitState,
   CorrelateCycle,
   classify_registry,
   close_correlation,
@@ -14464,10 +14732,15 @@ import {
   type Handle,
   type HandleBatch,
   resolveAutocloseConfig,
+  resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
   scan,
 } from "./internal/index.js";
+
+// Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
+export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
+
 import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
@@ -14604,6 +14877,16 @@ export type ActLifecycleEvents<
    * cache is invalidated by \`forget()\` itself before the event fires.
    */
   forgotten: { stream: string; at: Date; eventCount: number };
+  /**
+   * A store operation failed during the drain loop (ACT-984). Fires on
+   * every failed drain cycle — typically a {@link StoreError} from a
+   * degraded backend — carrying the orchestrator circuit breaker's state
+   * after the failure (\`open\` means the drain loop has backed off and will
+   * retry after the cooldown). Listen to alert on a degraded store; the
+   * framework logs the same error regardless. Emitted only when a listener
+   * is registered (Node's \`EventEmitter\` throws on an unhandled \`"error"\`).
+   */
+  error: { error: unknown; circuit: CircuitState };
 };
 
 /**
@@ -14660,6 +14943,14 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly drain?: boolean;
   /**
+   * Orchestrator circuit breaker for the drain loop (ACT-984). After
+   * \`failureThreshold\` consecutive store failures the breaker opens and
+   * the drain loop skips \`claim()\` for \`cooldownMs\` instead of hammering a
+   * down backend, then allows a half-open trial. Out-of-range values throw
+   * a \`ZodError\` at \`act().build()\`. Defaults: threshold 5, cooldown 30s.
+   */
+  readonly circuitBreaker?: CircuitBreakerOptions;
+  /**
    * Online close cycle cadence in ms (#837 / epic #802). The
    * app-level autoclose controller ticks at this interval, iterates
    * states with \`.autocloses(...)\` declared, and schedules
@@ -14712,6 +15003,8 @@ export class Act<
 > implements IAct<TEvents, TActions, TActor>
 {
   private _emitter = new EventEmitter();
+  /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
+  private readonly _breaker: CircuitBreaker;
   /** #803: gate the \`Store.notify\` subscription side. */
   private readonly _listen: boolean;
   /** #803: gate the local reaction pipeline (drain controllers, settle, correlate). */
@@ -14778,6 +15071,17 @@ export class Act<
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
     return this._emitter.emit(event, args);
+  }
+
+  /**
+   * Emit the \`error\` lifecycle event, guarded against Node's \`EventEmitter\`
+   * contract that an \`"error"\` emission with no listener is rethrown (which
+   * would crash the process from inside the drain catch). The drain loop
+   * already logged the error, so dropping it when nobody listens is safe.
+   */
+  private _emit_error(error: unknown, circuit: CircuitState): void {
+    if (this._emitter.listenerCount("error") > 0)
+      this.emit("error", { error, circuit });
   }
 
   /**
@@ -14937,9 +15241,12 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
-    // Validate autoclose knobs eagerly so out-of-range values throw
-    // at build time, not on the first cycle tick.
+    // Validate autoclose + circuit-breaker knobs eagerly so out-of-range
+    // values throw at build time, not on the first cycle tick.
     this._autoclose_config = resolveAutocloseConfig(options);
+    this._breaker = new CircuitBreaker(
+      resolveCircuitBreakerConfig(options.circuitBreaker)
+    );
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -14971,6 +15278,8 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        breaker: this._breaker,
+        on_error: (error, circuit) => this._emit_error(error, circuit),
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
         // adapter SQL collapses to the pre-1103 shape.
@@ -15026,6 +15335,8 @@ export class Act<
         correlate: (q) => this.correlate(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
+        breaker: this._breaker,
+        on_error: (error, circuit) => this._emit_error(error, circuit),
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -15056,6 +15367,8 @@ export class Act<
           correlator: this._correlator,
           close_actor: { id: "$autoclose", name: "autoclose" },
           on_closed: (result) => this.emit("closed", result),
+          breaker: this._breaker,
+          on_error: (error, circuit) => this._emit_error(error, circuit),
         })
       : undefined;
 
@@ -18162,6 +18475,7 @@ import type {
   State,
   TruncateResult,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 import { run_close_cycle } from "./close-cycle.js";
 import { close_correlation } from "./correlator.js";
 import type { EsOps } from "./event-sourcing.js";
@@ -18373,6 +18687,15 @@ export type AutocloseControllerDeps = Omit<
    * \`emit("closed", result)\`.
    */
   readonly on_closed: (result: CloseResult) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The autoclose ticker is
+   * a periodic store poller like the drain loop, so it consults the same
+   * breaker: it skips a tick while the breaker is open and records the
+   * outcome of each tick it does run.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's \`error\` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -18453,6 +18776,9 @@ export class AutocloseController {
    */
   async run_once(): Promise<AutocloseCycleResult | null> {
     if (this._running) return null;
+    // Circuit open: the store is failing, skip this tick rather than pile
+    // load on a down backend. The next tick after the cooldown retries.
+    if (!this.deps.breaker.can_attempt(Date.now())) return null;
     this._running = true;
     try {
       const correlation = close_correlation(
@@ -18470,10 +18796,18 @@ export class AutocloseController {
         config: this.deps.config,
         correlation,
       });
+      // The store responded — reset the shared breaker.
+      this.deps.breaker.record_success();
       if (result.close_result.truncated.size > 0) {
         this.deps.on_closed(result.close_result);
       }
       return result;
+    } catch (error) {
+      // A store op failed mid-tick. Record on the shared breaker and surface
+      // it, then rethrow so the interval callback's existing logging runs.
+      const circuit = this.deps.breaker.record_failure(Date.now());
+      this.deps.on_error(error, circuit);
+      throw error;
     } finally {
       this._running = false;
     }
@@ -18918,6 +19252,114 @@ export function classify_registry<
     event_to_state,
     event_to_lanes,
   };
+}
+
+// === circuit-breaker.ts ===
+/**
+ * @module internal/circuit-breaker
+ *
+ * Orchestrator-level circuit breaker for store operations. The drain loop
+ * polls \`claim()\` continuously; when the backing store goes down every poll
+ * throws a {@link StoreError}, and without a breaker the orchestrator would
+ * spin at the cycle cadence hammering a dead database and flooding the logs.
+ *
+ * The breaker collapses that into three states:
+ *
+ * - **closed** — normal operation; failures are counted.
+ * - **open** — \`failureThreshold\` consecutive failures tripped it; attempts
+ *   are skipped for \`cooldownMs\` so the store gets room to recover.
+ * - **half-open** — the cooldown elapsed; a single trial attempt is allowed.
+ *   Success closes the breaker; failure re-opens it and restarts the clock.
+ *
+ * Time is passed in (\`now\`) rather than read from the clock so the state
+ * machine is deterministic under test.
+ */
+
+import { z } from "zod";
+
+/** Circuit breaker state. */
+export type CircuitState = "closed" | "open" | "half-open";
+
+/** Resolved circuit-breaker configuration. */
+export type CircuitBreakerConfig = {
+  /** Consecutive store failures that trip the breaker open. */
+  readonly failureThreshold: number;
+  /** Milliseconds the breaker stays open before allowing a half-open trial. */
+  readonly cooldownMs: number;
+};
+
+export const DEFAULT_CIRCUIT_FAILURE_THRESHOLD = 5;
+export const DEFAULT_CIRCUIT_COOLDOWN_MS = 30_000;
+
+const CircuitBreakerOptionsSchema = z.object({
+  failureThreshold: z
+    .number()
+    .int()
+    .min(1)
+    .default(DEFAULT_CIRCUIT_FAILURE_THRESHOLD),
+  cooldownMs: z
+    .number()
+    .int()
+    .min(100)
+    .max(3_600_000)
+    .default(DEFAULT_CIRCUIT_COOLDOWN_MS),
+});
+
+/** Public, all-optional circuit-breaker options bag for \`act().build()\`. */
+export type CircuitBreakerOptions = z.input<typeof CircuitBreakerOptionsSchema>;
+
+/** Parse + apply defaults. Throws \`ZodError\` on out-of-range values. */
+export const resolveCircuitBreakerConfig = (
+  options?: CircuitBreakerOptions
+): CircuitBreakerConfig => CircuitBreakerOptionsSchema.parse(options ?? {});
+
+export class CircuitBreaker {
+  private _failures = 0;
+  private _opened_at: number | undefined;
+  private readonly _threshold: number;
+  private readonly _cooldown_ms: number;
+
+  constructor(config: CircuitBreakerConfig) {
+    this._threshold = config.failureThreshold;
+    this._cooldown_ms = config.cooldownMs;
+  }
+
+  /** Current state given the wall-clock \`now\`. */
+  state(now: number): CircuitState {
+    if (this._opened_at === undefined) return "closed";
+    return now - this._opened_at >= this._cooldown_ms ? "half-open" : "open";
+  }
+
+  /** Whether an attempt is allowed now (closed or a half-open trial). */
+  can_attempt(now: number): boolean {
+    return this.state(now) !== "open";
+  }
+
+  /** A store op succeeded — reset to closed. */
+  record_success(): void {
+    this._failures = 0;
+    this._opened_at = undefined;
+  }
+
+  /**
+   * A store op failed. Opens the breaker when the consecutive-failure
+   * threshold is reached, or immediately re-opens (restarting the cooldown)
+   * if a half-open trial just failed. Returns the resulting state.
+   */
+  record_failure(now: number): CircuitState {
+    // Already tripped: this can only be reached from a half-open trial
+    // (open skips attempts), so the trial failed — re-open and restart.
+    if (this._opened_at !== undefined) {
+      this._opened_at = now;
+      return "open";
+    }
+    this._failures += 1;
+    if (this._failures >= this._threshold) {
+      this._opened_at = now;
+      return "open";
+    }
+    return "closed";
+  }
 }
 
 // === close-cycle.ts ===
@@ -19959,6 +20401,7 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -20199,6 +20642,17 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
+   * repeated store failures so the drain loop stops hammering a down
+   * backend; closed/half-open let attempts through.
+   */
+  readonly breaker: CircuitBreaker;
+  /**
+   * Surface a store/drain failure to the orchestrator (which emits the
+   * \`error\` lifecycle event). Carries the breaker state after the failure.
+   */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
@@ -20344,6 +20798,11 @@ export class DrainController<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+    // Circuit open: the store is failing, skip the claim entirely so we
+    // don't hammer a down backend. \`_armed\` stays set, so the next tick
+    // after the cooldown (half-open) retries.
+    if (!this._deps.breaker.can_attempt(Date.now()))
+      return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
     // Per-lane config wins over caller options (ACT-1103). The whole
@@ -20373,6 +20832,10 @@ export class DrainController<
         this._backoff.size > 0 ? this.is_deferred : undefined,
         this._deps.lane
       );
+
+      // The store responded (claim/fetch/ack/block all succeeded) — reset
+      // the breaker even when there was no work to do.
+      this._deps.breaker.record_success();
 
       if (!cycle) {
         // claim() returned no leases — fully caught up
@@ -20413,7 +20876,13 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
+      // A store op threw (StoreError, or any failure mid-cycle). Record it
+      // on the breaker, log it, and surface it to the orchestrator's
+      // \`error\` lifecycle event. \`_armed\` stays set so the next tick after
+      // the cooldown retries. EMPTY_DRAIN keeps the worker tick exception-free.
+      const circuit = this._deps.breaker.record_failure(Date.now());
       this._deps.logger.error(error);
+      this._deps.on_error(error, circuit);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;
@@ -20578,6 +21047,7 @@ export const Errors = {
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
   NonRetryableError: "ERR_NON_RETRYABLE",
+  StoreError: "ERR_STORE",
 } as const;
 
 /**
@@ -20877,6 +21347,40 @@ export class StreamClosedError extends Error {
     super(\`Stream "\${stream}" is closed (tombstoned)\`);
     this.name = Errors.StreamClosedError;
     this.stream = stream;
+  }
+}
+
+/**
+ * Thrown by a {@link Store} adapter when an infrastructure operation fails
+ * for a reason that is *not* a domain condition — a dropped connection, a
+ * transaction rollback, a query timeout. It is the typed boundary between
+ * "the store is unavailable/degraded" and the domain errors above
+ * ({@link ConcurrencyError}, {@link StreamClosedError}), which describe
+ * legitimate outcomes the caller should branch on.
+ *
+ * Adapters wrap their driver errors in \`StoreError\` (preserving the
+ * original via \`cause\`) so the orchestrator can distinguish a degraded
+ * backend from "no work" and react accordingly — see the drain circuit
+ * breaker, which trips on repeated \`StoreError\`s and surfaces a
+ * \`drain_error\` lifecycle event instead of silently spinning on a down
+ * database.
+ *
+ * @example
+ * \`\`\`typescript
+ * app.on("drain_error", ({ error, circuit }) => {
+ *   if (error instanceof StoreError)
+ *     alert(\`store \${error.operation} failing; circuit=\${circuit}\`);
+ * });
+ * \`\`\`
+ */
+export class StoreError extends Error {
+  /** The store operation that failed (e.g. \`"claim"\`, \`"ack"\`, \`"commit"\`). */
+  public readonly operation: string;
+
+  constructor(operation: string, options?: { cause?: unknown }) {
+    super(\`Store operation "\${operation}" failed\`, options);
+    this.name = Errors.StoreError;
+    this.operation = operation;
   }
 }
 
@@ -22852,6 +23356,13 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
+export {
+  CircuitBreaker,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  type CircuitState,
+  resolveCircuitBreakerConfig,
+} from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
@@ -26355,6 +26866,7 @@ import type {
   Schemas,
   SettleOptions,
 } from "../types/index.js";
+import type { CircuitBreaker, CircuitState } from "./circuit-breaker.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -26372,6 +26884,15 @@ export type SettleDeps<TEvents extends Schemas> = {
   ) => Promise<{ subscribed: number; last_id: number }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The settle loop's
+   * \`correlate\` (subscribe + query) is a store consumer too: a successful
+   * pass records a success, a failed one records a failure and surfaces it
+   * via \`on_error\`, feeding the same breaker that paces the drain loop.
+   */
+  readonly breaker: CircuitBreaker;
+  /** Surface a store failure to the orchestrator's \`error\` lifecycle event. */
+  readonly on_error: (error: unknown, circuit: CircuitState) => void;
 };
 
 /**
@@ -26425,6 +26946,8 @@ export class SettleLoop<TEvents extends Schemas> {
             ...correlate_query,
             after: this._deps.checkpoint(),
           });
+          // correlate (subscribe + query) succeeded — the store responded.
+          this._deps.breaker.record_success();
           last_drain = await this._deps.drain(drain_options);
           const made_progress =
             subscribed > 0 ||
@@ -26434,7 +26957,14 @@ export class SettleLoop<TEvents extends Schemas> {
         }
         if (last_drain) this._deps.on_settled(last_drain);
       })()
-        .catch((err) => this._deps.logger.error(err))
+        .catch((err) => {
+          // correlate / init failed (a store op). Record on the shared
+          // breaker and surface via the \`error\` event; the drain loop reads
+          // the same breaker to pace itself.
+          const circuit = this._deps.breaker.record_failure(Date.now());
+          this._deps.logger.error(err);
+          this._deps.on_error(err, circuit);
+        })
         .finally(() => {
           this._running = false;
         });
@@ -28211,6 +28741,7 @@ export const Errors = {
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
   NonRetryableError: "ERR_NON_RETRYABLE",
+  StoreError: "ERR_STORE",
 } as const;
 
 /**
@@ -28510,6 +29041,40 @@ export class StreamClosedError extends Error {
     super(\`Stream "\${stream}" is closed (tombstoned)\`);
     this.name = Errors.StreamClosedError;
     this.stream = stream;
+  }
+}
+
+/**
+ * Thrown by a {@link Store} adapter when an infrastructure operation fails
+ * for a reason that is *not* a domain condition — a dropped connection, a
+ * transaction rollback, a query timeout. It is the typed boundary between
+ * "the store is unavailable/degraded" and the domain errors above
+ * ({@link ConcurrencyError}, {@link StreamClosedError}), which describe
+ * legitimate outcomes the caller should branch on.
+ *
+ * Adapters wrap their driver errors in \`StoreError\` (preserving the
+ * original via \`cause\`) so the orchestrator can distinguish a degraded
+ * backend from "no work" and react accordingly — see the drain circuit
+ * breaker, which trips on repeated \`StoreError\`s and surfaces a
+ * \`drain_error\` lifecycle event instead of silently spinning on a down
+ * database.
+ *
+ * @example
+ * \`\`\`typescript
+ * app.on("drain_error", ({ error, circuit }) => {
+ *   if (error instanceof StoreError)
+ *     alert(\`store \${error.operation} failing; circuit=\${circuit}\`);
+ * });
+ * \`\`\`
+ */
+export class StoreError extends Error {
+  /** The store operation that failed (e.g. \`"claim"\`, \`"ack"\`, \`"commit"\`). */
+  public readonly operation: string;
+
+  constructor(operation: string, options?: { cause?: unknown }) {
+    super(\`Store operation "\${operation}" failed\`, options);
+    this.name = Errors.StoreError;
+    this.operation = operation;
   }
 }
 
@@ -37694,6 +38259,7 @@ import {
   ConcurrencyError,
   log,
   SNAP_EVENT,
+  StoreError,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import {
@@ -38475,8 +39041,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("claim", { cause: error });
     } finally {
       client.release();
     }
@@ -38552,8 +39117,7 @@ export class PostgresStore implements Store {
       return { subscribed, watermark: rows[0]?.max ?? -1 };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return { subscribed: 0, watermark: -1 };
+      throw new StoreError("subscribe", { cause: error });
     } finally {
       client.release();
     }
@@ -38608,8 +39172,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("ack", { cause: error });
     } finally {
       client.release();
     }
@@ -38661,8 +39224,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("block", { cause: error });
     } finally {
       client.release();
     }
@@ -39589,6 +40151,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
+import { StoreError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -40026,7 +40589,7 @@ export class SqliteStore implements Store {
       return { subscribed, watermark: Number(wm.rows[0].w) };
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("subscribe", { cause: e });
     }
   }
 
@@ -40130,7 +40693,7 @@ export class SqliteStore implements Store {
       return leases;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("claim", { cause: e });
     }
   }
 
@@ -40151,7 +40714,7 @@ export class SqliteStore implements Store {
       return result;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("ack", { cause: e });
     }
   }
 
@@ -40172,7 +40735,7 @@ export class SqliteStore implements Store {
       return result;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("block", { cause: e });
     }
   }
 
