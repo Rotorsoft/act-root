@@ -21,7 +21,7 @@
     "@rotorsoft/act-pg": "workspace:^",
     "@trpc/server": "11.18.0",
     "cors": "^2.8.6",
-    "hono": "^4.12.25",
+    "hono": "^4.12.26",
     "zod": "^4.4.3"
   },
   "devDependencies": {
