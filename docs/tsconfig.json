@@ -1,6 +1,6 @@
 {
   // This file is not used in compilation. It is here just for a nice editor experience.
-  "extends": "../tsconfig.eslint.json",
+  "extends": "../tsconfig.workspace.json",
   "compilerOptions": {
     // act-diagram ships TSX (`client/`) under its `src/**` tree —
     // typedoc loads the whole include set into its TS program even
