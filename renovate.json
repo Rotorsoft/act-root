@@ -12,14 +12,27 @@
   "dependencyDashboard": true,
   "enabledManagers": ["npm", "github-actions"],
   "minimumReleaseAge": "3 days",
+  "schedule": ["before 5am on monday"],
+  "prConcurrentLimit": 10,
+  "prHourlyLimit": 0,
+  "suppressNotifications": ["prEditedNotification", "prIgnoreNotification"],
   "packageRules": [
+    {
+      "groupName": "Non-major dependencies",
+      "matchUpdateTypes": ["minor", "patch"]
+    },
+    {
+      "matchDepTypes": ["devDependencies"],
+      "groupName": "Dev dependencies"
+    },
     {
       "groupName": "Types packages",
       "matchPackageNames": ["/^@types//"]
     },
     {
-      "matchDepTypes": ["devDependencies"],
-      "groupName": "Dev dependencies"
+      "matchManagers": ["github-actions"],
+      "matchPackageNames": ["node"],
+      "minimumReleaseAge": "30 days"
     }
   ],
   "lockFileMaintenance": {
