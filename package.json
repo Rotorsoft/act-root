@@ -34,7 +34,7 @@
   "scripts": {
     "clean": "pnpm -r clean",
     "build": "pnpm -r build",
-    "typecheck": "pnpm build && tsc --noEmit --project tsconfig.eslint.json --jsx react-jsx",
+    "typecheck": "pnpm build && tsc --noEmit --project tsconfig.workspace.json --jsx react-jsx",
     "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
     "bench:micro": "vitest bench --run --config vitest.bench.config.ts",
     "bench:scenarios": "vitest run --config vitest.bench.config.ts",
@@ -84,7 +84,6 @@
     "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^8.0.16",
-    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.9"
   },
   "simple-git-hooks": {
