@@ -1,4 +1,4 @@
-import { dispose, SNAP_EVENT, store } from "@rotorsoft/act";
+import { dispose, SNAP_EVENT, StoreError, store } from "@rotorsoft/act";
 import { Chance } from "chance";
 import { Pool } from "pg";
 import { PostgresStore } from "../src/index.js";
@@ -213,12 +213,11 @@ describe("PostgresStore error paths", () => {
     ).rejects.toThrow("mocked INSERT error");
   });
 
-  it("should handle subscribe() error", async () => {
+  it("should throw StoreError on subscribe() error", async () => {
     vi.spyOn(Pool.prototype, "connect").mockImplementation(
       () => mockClient("INSERT") as any
     );
-    const result = await db.subscribe([{ stream: "x" }]);
-    expect(result).toEqual({ subscribed: 0, watermark: -1 });
+    await expect(db.subscribe([{ stream: "x" }])).rejects.toThrow(StoreError);
   });
 
   it("should handle reset() with null rowCount", async () => {
@@ -230,32 +229,31 @@ describe("PostgresStore error paths", () => {
     expect(result).toBe(0);
   });
 
-  it("should handle ack() error", async () => {
+  it("should throw StoreError on ack() error", async () => {
     vi.spyOn(Pool.prototype, "connect").mockImplementation(
       () => mockClient("UPDATE") as any
     );
-    const result = await db.ack([
-      { stream: "x", at: 0, by: "w", retry: 0, lagging: false },
-    ]);
-    expect(result).toEqual([]);
+    await expect(
+      db.ack([{ stream: "x", at: 0, by: "w", retry: 0, lagging: false }])
+    ).rejects.toThrow(StoreError);
   });
 
-  it("should handle claim() error", async () => {
+  it("should throw StoreError on claim() error", async () => {
     vi.spyOn(Pool.prototype, "connect").mockImplementation(
       () => mockClient("BEGIN") as any
     );
-    const result = await db.claim(1, 0, "w", 1000);
-    expect(result).toEqual([]);
+    await expect(db.claim(1, 0, "w", 1000)).rejects.toThrow(StoreError);
   });
 
-  it("should handle block() error", async () => {
+  it("should throw StoreError on block() error", async () => {
     vi.spyOn(Pool.prototype, "connect").mockImplementation(
       () => mockClient("UPDATE") as any
     );
-    const result = await db.block([
-      { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
-    ]);
-    expect(result).toEqual([]);
+    await expect(
+      db.block([
+        { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
+      ])
+    ).rejects.toThrow(StoreError);
   });
 
   it("should handle truncate() error", async () => {
@@ -306,18 +304,18 @@ describe("PostgresStore error paths", () => {
     vi.spyOn(Pool.prototype, "connect").mockImplementation(
       () => failAll() as any
     );
-    const result = await db.ack([
-      { stream: "x", at: 0, by: "w", retry: 0, lagging: false },
-    ]);
-    expect(result).toEqual([]);
-    const result2 = await db.claim(1, 0, "w", 1000);
-    expect(result2).toEqual([]);
-    const result3 = await db.subscribe([{ stream: "x" }]);
-    expect(result3).toEqual({ subscribed: 0, watermark: -1 });
-    const result4 = await db.block([
-      { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
-    ]);
-    expect(result4).toEqual([]);
+    // Even when the ROLLBACK itself fails, each op surfaces a StoreError
+    // (the original cause) rather than swallowing it.
+    await expect(
+      db.ack([{ stream: "x", at: 0, by: "w", retry: 0, lagging: false }])
+    ).rejects.toThrow(StoreError);
+    await expect(db.claim(1, 0, "w", 1000)).rejects.toThrow(StoreError);
+    await expect(db.subscribe([{ stream: "x" }])).rejects.toThrow(StoreError);
+    await expect(
+      db.block([
+        { stream: "x", at: 0, by: "w", retry: 0, lagging: false, error: "e" },
+      ])
+    ).rejects.toThrow(StoreError);
     await expect(
       db.commit("s", [{ name: "A", data: {} }], {
         correlation: "",

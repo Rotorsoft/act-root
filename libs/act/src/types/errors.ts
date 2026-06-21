@@ -23,6 +23,7 @@ export const Errors = {
   ConcurrencyError: "ERR_CONCURRENCY",
   StreamClosedError: "ERR_STREAM_CLOSED",
   NonRetryableError: "ERR_NON_RETRYABLE",
+  StoreError: "ERR_STORE",
 } as const;
 
 /**
@@ -322,6 +323,40 @@ export class StreamClosedError extends Error {
     super(`Stream "${stream}" is closed (tombstoned)`);
     this.name = Errors.StreamClosedError;
     this.stream = stream;
+  }
+}
+
+/**
+ * Thrown by a {@link Store} adapter when an infrastructure operation fails
+ * for a reason that is *not* a domain condition — a dropped connection, a
+ * transaction rollback, a query timeout. It is the typed boundary between
+ * "the store is unavailable/degraded" and the domain errors above
+ * ({@link ConcurrencyError}, {@link StreamClosedError}), which describe
+ * legitimate outcomes the caller should branch on.
+ *
+ * Adapters wrap their driver errors in `StoreError` (preserving the
+ * original via `cause`) so the orchestrator can distinguish a degraded
+ * backend from "no work" and react accordingly — see the drain circuit
+ * breaker, which trips on repeated `StoreError`s and surfaces a
+ * `drain_error` lifecycle event instead of silently spinning on a down
+ * database.
+ *
+ * @example
+ * ```typescript
+ * app.on("drain_error", ({ error, circuit }) => {
+ *   if (error instanceof StoreError)
+ *     alert(`store ${error.operation} failing; circuit=${circuit}`);
+ * });
+ * ```
+ */
+export class StoreError extends Error {
+  /** The store operation that failed (e.g. `"claim"`, `"ack"`, `"commit"`). */
+  public readonly operation: string;
+
+  constructor(operation: string, options?: { cause?: unknown }) {
+    super(`Store operation "${operation}" failed`, options);
+    this.name = Errors.StoreError;
+    this.operation = operation;
   }
 }
 

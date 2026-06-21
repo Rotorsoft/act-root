@@ -9,6 +9,9 @@ import {
   build_es,
   build_handle,
   build_handle_batch,
+  CircuitBreaker,
+  type CircuitBreakerOptions,
+  type CircuitState,
   CorrelateCycle,
   classify_registry,
   close_correlation,
@@ -20,10 +23,15 @@ import {
   type Handle,
   type HandleBatch,
   resolveAutocloseConfig,
+  resolveCircuitBreakerConfig,
   run_close_cycle,
   SettleLoop,
   scan,
 } from "./internal/index.js";
+
+// Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
+export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
+
 import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
 import type {
   Actor,
@@ -160,6 +168,16 @@ export type ActLifecycleEvents<
    * cache is invalidated by `forget()` itself before the event fires.
    */
   forgotten: { stream: string; at: Date; eventCount: number };
+  /**
+   * A store operation failed during the drain loop (ACT-984). Fires on
+   * every failed drain cycle — typically a {@link StoreError} from a
+   * degraded backend — carrying the orchestrator circuit breaker's state
+   * after the failure (`open` means the drain loop has backed off and will
+   * retry after the cooldown). Listen to alert on a degraded store; the
+   * framework logs the same error regardless. Emitted only when a listener
+   * is registered (Node's `EventEmitter` throws on an unhandled `"error"`).
+   */
+  error: { error: unknown; circuit: CircuitState };
 };
 
 /**
@@ -216,6 +234,14 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly drain?: boolean;
   /**
+   * Orchestrator circuit breaker for the drain loop (ACT-984). After
+   * `failureThreshold` consecutive store failures the breaker opens and
+   * the drain loop skips `claim()` for `cooldownMs` instead of hammering a
+   * down backend, then allows a half-open trial. Out-of-range values throw
+   * a `ZodError` at `act().build()`. Defaults: threshold 5, cooldown 30s.
+   */
+  readonly circuitBreaker?: CircuitBreakerOptions;
+  /**
    * Online close cycle cadence in ms (#837 / epic #802). The
    * app-level autoclose controller ticks at this interval, iterates
    * states with `.autocloses(...)` declared, and schedules
@@ -268,6 +294,8 @@ export class Act<
 > implements IAct<TEvents, TActions, TActor>
 {
   private _emitter = new EventEmitter();
+  /** ACT-984: orchestrator-owned circuit breaker shared by all drain lanes. */
+  private readonly _breaker: CircuitBreaker;
   /** #803: gate the `Store.notify` subscription side. */
   private readonly _listen: boolean;
   /** #803: gate the local reaction pipeline (drain controllers, settle, correlate). */
@@ -334,6 +362,23 @@ export class Act<
     args: ActLifecycleEvents<TSchemaReg, TEvents, TActions>[E]
   ): boolean {
     return this._emitter.emit(event, args);
+  }
+
+  /**
+   * The single store-failure handler: log it, then emit the `error`
+   * lifecycle event. Wired into the circuit breaker's `on_error`, so it
+   * runs on every `failed()` — drain / settle / autoclose just call
+   * `breaker.failed(now, error)` and never log or emit themselves.
+   *
+   * The emit is guarded against Node's `EventEmitter` contract that an
+   * unhandled `"error"` emission is rethrown (which would crash the process
+   * from inside the drain catch); logging is unconditional so failures are
+   * never silent.
+   */
+  private _emit_error(error: unknown, circuit: CircuitState): void {
+    this._logger.error(error);
+    if (this._emitter.listenerCount("error") > 0)
+      this.emit("error", { error, circuit });
   }
 
   /**
@@ -493,9 +538,28 @@ export class Act<
     this._reactive_events = reactive_events;
     this._listen = options.listen !== false;
     this._drain = options.drain !== false;
-    // Validate autoclose knobs eagerly so out-of-range values throw
-    // at build time, not on the first cycle tick.
+    // Validate autoclose + circuit-breaker knobs eagerly so out-of-range
+    // values throw at build time, not on the first cycle tick.
     this._autoclose_config = resolveAutocloseConfig(options);
+    this._breaker = new CircuitBreaker(
+      resolveCircuitBreakerConfig(options.circuitBreaker),
+      {
+        on_error: (error, circuit) => this._emit_error(error, circuit),
+        // Re-probe the store when the cooldown elapses, so recovery is
+        // automatic even on the default lane (which has no periodic poller).
+        // The breaker is shared by every store-polling loop (drain, the
+        // settle correlate, autoclose), so any of them can trip it — but a
+        // bare `drain()` only touches the store when the controller is armed,
+        // so a trip from a correlate failure could go unprobed. `settle()`
+        // always runs a correlate (a store query) before draining, so it
+        // re-probes regardless of which loop opened the breaker: one success
+        // closes it and every loop resumes on its own cadence. A failed probe
+        // re-opens the breaker and reschedules the wake.
+        on_retry: () => {
+          this.settle({ debounceMs: 0 });
+        },
+      }
+    );
     this._event_to_state = event_to_state;
     this._event_to_lanes = event_to_lanes;
 
@@ -527,6 +591,7 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        breaker: this._breaker,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
         // adapter SQL collapses to the pre-1103 shape.
@@ -576,12 +641,12 @@ export class Act<
     );
     this._settle = new SettleLoop<TEvents>(
       {
-        logger: this._logger,
         init: () => this._correlate.init(),
         checkpoint: () => this._correlate.checkpoint,
         correlate: (q) => this.correlate(q),
         drain: (o) => this.drain(o),
         on_settled: (drain) => this.emit("settled", drain),
+        breaker: this._breaker,
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
@@ -612,6 +677,7 @@ export class Act<
           correlator: this._correlator,
           close_actor: { id: "$autoclose", name: "autoclose" },
           on_closed: (result) => this.emit("closed", result),
+          breaker: this._breaker,
         })
       : undefined;
 
@@ -642,6 +708,7 @@ export class Act<
         this._emitter.removeAllListeners();
         this.stop_correlations();
         this.stop_settling();
+        this._breaker.stop();
         for (const c of this._drain_controllers.values()) c.stop();
         // `_wire_notify` swallows subscription errors and resolves to
         // `undefined`, so this promise never rejects.

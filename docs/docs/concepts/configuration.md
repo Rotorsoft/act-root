@@ -105,8 +105,9 @@ const app = act()
 const app = act()
   .withState(Counter)
   .build({
-    maxSubscribedStreams: 5_000, // default 1000
-    settleDebounceMs: 25,        // default 10
+    maxSubscribedStreams: 5_000,            // default 1000
+    settleDebounceMs: 25,                   // default 10
+    circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 }, // defaults 5 / 30_000
   });
 ```
 
@@ -115,6 +116,22 @@ const app = act()
 - **`onlyLanes`** (default: every declared lane) — restrict this process to a subset of declared drain lanes (ACT-1103). See [Lanes](#lanes) below.
 - **`listen`** (default `true`) — subscribe to `Store.notify` on this instance. Set `false` on writer-only instances: commits still notify, but the instance doesn't subscribe to the channel. The subscriber-connection budget is the practical scaling ceiling for the notify/listen pattern; writer-only fleets shouldn't spend it.
 - **`drain`** (default `true`) — run the local reaction pipeline. Set `false` to make `correlate()`, `drain()`, and `settle()` no-ops and skip auto-cycle workers. The `notified` lifecycle event still fires when `listen` is on, so observability sidecars (`listen: true, drain: false`) work.
+- **`circuitBreaker`** (defaults: `failureThreshold` 5, `cooldownMs` 30_000) — see [Circuit breaker](#circuit-breaker) below. Out-of-range values throw a `ZodError` at `build()`.
+
+### Circuit breaker
+
+Every `Act` owns one circuit breaker, shared by the drain, settle, and autoclose loops. After `failureThreshold` consecutive store failures it **opens** — those loops skip the store while it's open instead of hammering a down backend — and `cooldownMs` later it **schedules its own retry** (a drain attempt): a pass closes it, a failure re-opens it and reschedules. So recovery is automatic regardless of lane configuration. While the store stays down it keeps probing once per `cooldownMs` (each failed probe re-emits the [`error` event](./error-handling#store-failures-and-the-circuit-breaker)); the timer is `unref()`'d and cleared on recovery or `dispose()`. See [Store failures and the circuit breaker](./error-handling#store-failures-and-the-circuit-breaker).
+
+```typescript
+const app = act()
+  .withState(Counter)
+  .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 } });
+```
+
+- **`failureThreshold`** (default `5`) — consecutive store failures that trip the breaker open.
+- **`cooldownMs`** (default `30_000`) — how long it stays open before a half-open trial.
+
+A single-node deployment rarely needs to tune this; raise the threshold for flaky networks, lower the cooldown for faster recovery probing.
 
 ### Deployment shapes via `listen` / `drain`
 

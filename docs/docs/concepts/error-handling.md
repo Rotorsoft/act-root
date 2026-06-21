@@ -130,6 +130,48 @@ try {
 
 **Resolution:** Closed streams are terminal. To re-open one, call `app.close([{ stream, restart: true }])` — that seeds a fresh `__snapshot__` and the stream accepts actions again.
 
+## StoreError
+
+Thrown by a `Store` adapter when an **infrastructure** operation fails — a dropped connection, a transaction rollback, a query timeout. It's the typed boundary between "the store is unavailable/degraded" and the domain errors above (`ConcurrencyError`, `StreamClosedError`), which describe legitimate outcomes you branch on. The original driver error is preserved on `cause`, and the failed operation name on `operation`.
+
+```typescript
+import { StoreError } from "@rotorsoft/act";
+
+try {
+  await app.do("AddNote", target, { text: "..." });
+} catch (error) {
+  if (error instanceof StoreError) {
+    console.error(`store ${error.operation} failed`, error.cause);
+  }
+}
+```
+
+Adapters throw `StoreError` from `claim` / `ack` / `block` / `subscribe` (and the Postgres/SQLite adapters from their commit paths) instead of silently returning empty results — so a degraded backend can't be mistaken for "no work."
+
+## Store failures and the circuit breaker
+
+The drain, settle, and autoclose loops all hit the store. When it goes down, every attempt throws a `StoreError`. Rather than hammer a dead database, each `Act` owns a **circuit breaker** shared by those loops:
+
+- **closed** → normal; consecutive failures are counted.
+- **open** → after `failureThreshold` consecutive failures, any drain/settle/autoclose attempt *skips* the store while open, and the breaker schedules a **retry** `cooldownMs` out.
+- **half-open** → the scheduled retry re-attempts a drain; a pass closes the breaker, a failure re-opens it and reschedules the retry.
+
+Because the breaker schedules its own retry, recovery is **automatic** — you don't need a new commit, a periodic poller, or a manual `drain()`. While open, the loops simply skip the store; once the cooldown elapses the breaker re-trials it and closes as soon as the store is healthy again. (A thrown `StoreError` also keeps the drain controller armed, so the retry isn't mistaken for "caught up.")
+
+If the store stays down, the breaker keeps probing — **one attempt per `cooldownMs`, indefinitely** (always exactly one pending timer, `unref()`'d so it never blocks process exit). It never gives up, so it recovers whenever the store returns; the trade-off is that each failed probe re-emits the `error` event (an outage heartbeat — raise `cooldownMs` or dedupe in your handler if that's too chatty). The timer is cleared on the first successful probe and on `dispose()`. Tune it via [`ActOptions.circuitBreaker`](./configuration#circuit-breaker) (defaults: threshold 5, cooldown 30s).
+
+Subscribe to the **`error`** lifecycle event to alert on a degraded store — it fires on every failed store cycle with the error and the breaker state:
+
+```typescript
+app.on("error", ({ error, circuit }) => {
+  if (error instanceof StoreError)
+    metrics.increment("act.store_error", { op: error.operation, circuit });
+  // circuit === "open" means the loops have backed off and will retry after the cooldown
+});
+```
+
+The framework logs the error regardless of listeners; the event is emitted only when a listener is registered (Node's `EventEmitter` rethrows an unhandled `"error"`).
+
 ## Error Constants
 
 For string-based error matching (e.g., in tRPC error handlers):
@@ -141,6 +183,8 @@ import { Errors } from "@rotorsoft/act";
 // Errors.InvariantError     = "ERR_INVARIANT"
 // Errors.ConcurrencyError   = "ERR_CONCURRENCY"
 // Errors.StreamClosedError  = "ERR_STREAM_CLOSED"
+// Errors.NonRetryableError  = "ERR_NON_RETRYABLE"
+// Errors.StoreError         = "ERR_STORE"
 ```
 
 ## Production Error Handling
@@ -211,6 +255,7 @@ app.on("blocked", (blocked) => console.error("blocked", blocked));
 app.on("settled", (drain) => console.log("settled", drain));
 app.on("closed", (result) => console.log("closed", result));
 app.on("notified", (n) => console.log("cross-process commit", n));  // PostgresStore notify only
+app.on("error", ({ error, circuit }) => console.error("store failure", error, circuit));
 ```
 
 **Direct event inspection.** Bypass cache and reducers and look at what's actually in the store:

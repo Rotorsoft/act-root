@@ -1,4 +1,4 @@
-import { ConcurrencyError } from "@rotorsoft/act";
+import { ConcurrencyError, StoreError } from "@rotorsoft/act";
 import { SqliteStore } from "../src/index.js";
 
 type Stmt = string | { sql: string; args?: unknown[] };
@@ -151,34 +151,35 @@ describe("SqliteStore error paths", () => {
     expect(tx.rollback).toHaveBeenCalled();
   });
 
-  it("subscribe: rolls back and rethrows on INSERT failure", async () => {
+  it("subscribe: rolls back and wraps INSERT failure in StoreError", async () => {
     const client = mockClientFailOn("INSERT OR IGNORE INTO streams");
     (db as unknown as { client: unknown }).client = client;
-    await expect(db.subscribe([{ stream: "x" }])).rejects.toThrow(
-      /INSERT OR IGNORE/
-    );
+    const err = await db.subscribe([{ stream: "x" }]).catch((e) => e);
+    expect(err).toBeInstanceOf(StoreError);
+    expect(err.operation).toBe("subscribe");
+    expect((err.cause as Error).message).toMatch(/INSERT OR IGNORE/);
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("claim: rolls back and rethrows on SELECT failure", async () => {
+  it("claim: rolls back and wraps SELECT failure in StoreError", async () => {
     const client = mockClientFailOn(
       "SELECT stream, source, at, priority, lane FROM streams"
     );
     (db as unknown as { client: unknown }).client = client;
-    await expect(db.claim(1, 0, "w", 1000)).rejects.toThrow(/SELECT stream/);
+    await expect(db.claim(1, 0, "w", 1000)).rejects.toThrow(StoreError);
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("ack: rolls back and rethrows on UPDATE failure", async () => {
+  it("ack: rolls back and wraps UPDATE failure in StoreError", async () => {
     const client = mockClientFailOn("UPDATE streams SET at");
     (db as unknown as { client: unknown }).client = client;
     await expect(
       db.ack([{ stream: "x", at: 1, by: "w", retry: 0, lagging: false }])
-    ).rejects.toThrow(/UPDATE streams SET at/);
+    ).rejects.toThrow(StoreError);
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
-  it("block: rolls back and rethrows on UPDATE failure", async () => {
+  it("block: rolls back and wraps UPDATE failure in StoreError", async () => {
     const client = mockClientFailOn("UPDATE streams SET blocked");
     (db as unknown as { client: unknown }).client = client;
     await expect(
@@ -192,7 +193,7 @@ describe("SqliteStore error paths", () => {
           error: "e",
         },
       ])
-    ).rejects.toThrow(/UPDATE streams SET blocked/);
+    ).rejects.toThrow(StoreError);
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
