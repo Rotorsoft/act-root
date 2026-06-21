@@ -11,7 +11,7 @@ overrides:
   undici: '>=8.5.0'
   rollup: '>=4.62.0'
   minimatch@<3.1.4: '>=10.2.5'
-  serialize-javascript: '>=7.0.5'
+  serialize-javascript: '>=7.0.6'
   svgo: '>=4.0.1'
   brace-expansion@<5.0.5: '>=5.0.6'
   node-forge@<1.4.0: '>=1.4.0'
@@ -3993,12 +3993,6 @@ packages:
       '@trpc/client': 11.18.0
       '@trpc/server': 11.18.0
       react: '>=18.2.0'
-      typescript: '>=5.7.2'
-
-  '@trpc/server@11.17.0':
-    resolution: {integrity: sha512-jbAOUe0PpUTCYqziyu+8vYXZdDXPudZgnEhWCQ2NjKnVEjfE93RqHTt1oycZJv/HNf51YlRXfEEwSIAbb161rw==}
-    hasBin: true
-    peerDependencies:
       typescript: '>=5.7.2'
 
   '@trpc/server@11.18.0':
@@ -8425,8 +8419,8 @@ packages:
     resolution: {integrity: sha512-1gnZf7DFcoIcajTjTwjwuDjzuz4PPcY2StKPlsGAQ1+YH20IRVrBaXSWmdjowTJ6u8Rc01PoYOGHXfP1mYcZNQ==}
     engines: {node: '>= 18'}
 
-  serialize-javascript@7.0.5:
-    resolution: {integrity: sha512-F4LcB0UqUl1zErq+1nYEEzSHJnIwb3AF2XWB94b+afhrekOUijwooAYqFyRbjYkm2PAKBabx6oYv/xDxNi8IBw==}
+  serialize-javascript@7.0.6:
+    resolution: {integrity: sha512-ATTK5Q4gFVg0YDp1my2vqygyvhcklD/UV5GIlYHooGTn/NogJqIzpetkD6E5kmuVULqz/S9inUL25XcAgDRJQg==}
     engines: {node: '>=20.0.0'}
 
   serve-handler@6.1.7:
@@ -13329,10 +13323,6 @@ snapshots:
       react: 19.2.7
       typescript: 6.0.3
 
-  '@trpc/server@11.17.0(typescript@6.0.3)':
-    dependencies:
-      typescript: 6.0.3
-
   '@trpc/server@11.18.0(typescript@6.0.3)':
     dependencies:
       typescript: 6.0.3
@@ -14371,7 +14361,7 @@ snapshots:
       globby: 13.2.2
       normalize-path: 3.0.0
       schema-utils: 4.3.3
-      serialize-javascript: 7.0.5
+      serialize-javascript: 7.0.6
       webpack: 5.105.4(@swc/core@1.15.24)(esbuild@0.27.2)
 
   core-js-compat@3.49.0:
@@ -14461,7 +14451,7 @@ snapshots:
       jest-worker: 29.7.0
       postcss: 8.5.15
       schema-utils: 4.3.3
-      serialize-javascript: 7.0.5
+      serialize-javascript: 7.0.6
       webpack: 5.105.4(@swc/core@1.15.24)(esbuild@0.27.2)
     optionalDependencies:
       clean-css: 5.3.3
@@ -18418,7 +18408,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  serialize-javascript@7.0.5: {}
+  serialize-javascript@7.0.6: {}
 
   serve-handler@6.1.7:
     dependencies:
