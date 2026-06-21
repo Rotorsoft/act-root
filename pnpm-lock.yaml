@@ -208,7 +208,7 @@ importers:
   libs/act-diagram:
     dependencies:
       lucide-react:
-        specifier: ^1.20.0
+        specifier: ^1.21.0
         version: 1.21.0(react@19.2.7)
       sucrase:
         specifier: ^3.35.1
@@ -483,7 +483,7 @@ importers:
         specifier: ^3.1.0
         version: 3.1.0
       lucide-react:
-        specifier: ^1.20.0
+        specifier: ^1.21.0
         version: 1.21.0(react@19.2.7)
       pg:
         specifier: ^8.21.0
