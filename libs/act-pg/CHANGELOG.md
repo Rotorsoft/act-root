@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.7.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.6.0...@rotorsoft/act-pg-v1.7.0) (2026-06-22)
+
+
+### Features
+
+* **act:** add StoreError and orchestrator circuit breaker for store failures ([71852c6](https://github.com/rotorsoft/act-root/commit/71852c6be437a64af3df49adcc582e0d7c3d7147)), closes [#984](https://github.com/rotorsoft/act-root/issues/984)
+
 # [@rotorsoft/act-pg-v1.6.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.5.2...@rotorsoft/act-pg-v1.6.0) (2026-06-20)
 
 
