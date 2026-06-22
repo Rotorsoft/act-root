@@ -23,6 +23,7 @@ import {
   ConcurrencyError,
   log,
   SNAP_EVENT,
+  StoreError,
   TOMBSTONE_EVENT,
 } from "@rotorsoft/act";
 import {
@@ -804,8 +805,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("claim", { cause: error });
     } finally {
       client.release();
     }
@@ -881,8 +881,7 @@ export class PostgresStore implements Store {
       return { subscribed, watermark: rows[0]?.max ?? -1 };
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return { subscribed: 0, watermark: -1 };
+      throw new StoreError("subscribe", { cause: error });
     } finally {
       client.release();
     }
@@ -937,8 +936,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("ack", { cause: error });
     } finally {
       client.release();
     }
@@ -990,8 +988,7 @@ export class PostgresStore implements Store {
       }));
     } catch (error) {
       await client.query("ROLLBACK").catch(() => {});
-      logger.error(error);
-      return [];
+      throw new StoreError("block", { cause: error });
     } finally {
       client.release();
     }

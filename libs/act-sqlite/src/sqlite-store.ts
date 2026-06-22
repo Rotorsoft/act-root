@@ -15,6 +15,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
+import { StoreError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -452,7 +453,7 @@ export class SqliteStore implements Store {
       return { subscribed, watermark: Number(wm.rows[0].w) };
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("subscribe", { cause: e });
     }
   }
 
@@ -556,7 +557,7 @@ export class SqliteStore implements Store {
       return leases;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("claim", { cause: e });
     }
   }
 
@@ -577,7 +578,7 @@ export class SqliteStore implements Store {
       return result;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("ack", { cause: e });
     }
   }
 
@@ -598,7 +599,7 @@ export class SqliteStore implements Store {
       return result;
     } catch (e) {
       await tx.rollback();
-      throw e;
+      throw new StoreError("block", { cause: e });
     }
   }
 

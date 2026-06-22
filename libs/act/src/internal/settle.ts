@@ -16,11 +16,11 @@
 import type {
   Drain,
   DrainOptions,
-  Logger,
   Query,
   Schemas,
   SettleOptions,
 } from "../types/index.js";
+import type { CircuitBreaker } from "./circuit-breaker.js";
 
 /**
  * Callbacks the settle loop needs from the orchestrator. Modeled as an
@@ -30,7 +30,6 @@ import type {
  * @internal
  */
 export type SettleDeps<TEvents extends Schemas> = {
-  readonly logger: Logger;
   readonly init: () => Promise<void>;
   readonly checkpoint: () => number;
   readonly correlate: (
@@ -38,6 +37,14 @@ export type SettleDeps<TEvents extends Schemas> = {
   ) => Promise<{ subscribed: number; last_id: number }>;
   readonly drain: (options: DrainOptions) => Promise<Drain<TEvents>>;
   readonly on_settled: (drain: Drain<TEvents>) => void;
+  /**
+   * Shared orchestrator circuit breaker (ACT-984). The settle loop's
+   * `correlate` (subscribe + query) is a store consumer too: a successful
+   * pass records `passed()`, a failed one `failed(now, err)` — feeding the
+   * same breaker that paces the drain loop, which also surfaces the failure
+   * to the `error` lifecycle event.
+   */
+  readonly breaker: CircuitBreaker;
 };
 
 /**
@@ -91,6 +98,8 @@ export class SettleLoop<TEvents extends Schemas> {
             ...correlate_query,
             after: this._deps.checkpoint(),
           });
+          // correlate (subscribe + query) succeeded — the store responded.
+          this._deps.breaker.passed();
           last_drain = await this._deps.drain(drain_options);
           const made_progress =
             subscribed > 0 ||
@@ -100,7 +109,12 @@ export class SettleLoop<TEvents extends Schemas> {
         }
         if (last_drain) this._deps.on_settled(last_drain);
       })()
-        .catch((err) => this._deps.logger.error(err))
+        .catch((err) => {
+          // correlate / init failed (a store op). Record on the shared
+          // breaker, which logs it and surfaces the `error` event; the
+          // drain loop reads the same breaker to pace itself.
+          this._deps.breaker.failed(Date.now(), err);
+        })
         .finally(() => {
           this._running = false;
         });

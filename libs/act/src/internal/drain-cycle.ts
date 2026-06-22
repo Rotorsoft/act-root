@@ -29,6 +29,7 @@ import type {
   SchemaRegister,
   Schemas,
 } from "../types/index.js";
+import type { CircuitBreaker } from "./circuit-breaker.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -269,6 +270,14 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
+   * repeated store failures so the drain loop stops hammering a down
+   * backend; closed/half-open let attempts through. It also surfaces each
+   * failure (via its own `on_error`, wired by the orchestrator to the
+   * `error` lifecycle event), so callers just `failed(now, error)`.
+   */
+  readonly breaker: CircuitBreaker;
   /** Lane this controller drains. Undefined = spans all lanes (legacy single-controller). */
   readonly lane?: string;
   /** Per-lane defaults applied when caller doesn't override via DrainOptions. */
@@ -414,6 +423,11 @@ export class DrainController<
   async drain(options: DrainOptions = {}): Promise<Drain<TEvents>> {
     if (!this._armed) return EMPTY_DRAIN as Drain<TEvents>;
     if (this._locked) return EMPTY_DRAIN as Drain<TEvents>;
+    // Circuit open: the store is failing, skip the claim entirely so we
+    // don't hammer a down backend. `_armed` stays set, so the next tick
+    // after the cooldown (half-open) retries.
+    if (this._deps.breaker.state(Date.now()) === "open")
+      return EMPTY_DRAIN as Drain<TEvents>;
 
     const d = this._deps.defaults ?? {};
     // Per-lane config wins over caller options (ACT-1103). The whole
@@ -443,6 +457,10 @@ export class DrainController<
         this._backoff.size > 0 ? this.is_deferred : undefined,
         this._deps.lane
       );
+
+      // The store responded (claim/fetch/ack/block all succeeded) — reset
+      // the breaker even when there was no work to do.
+      this._deps.breaker.passed();
 
       if (!cycle) {
         // claim() returned no leases — fully caught up
@@ -483,7 +501,11 @@ export class DrainController<
 
       return { fetched, leased, acked, blocked };
     } catch (error) {
-      this._deps.logger.error(error);
+      // A store op threw (StoreError, or any failure mid-cycle). Record it
+      // on the breaker, which logs it and surfaces the `error` lifecycle
+      // event. `_armed` stays set so the breaker's retry re-attempts after
+      // the cooldown. EMPTY_DRAIN keeps the worker tick exception-free.
+      this._deps.breaker.failed(Date.now(), error);
       return EMPTY_DRAIN as Drain<TEvents>;
     } finally {
       this._locked = false;

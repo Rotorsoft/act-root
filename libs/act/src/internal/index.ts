@@ -38,6 +38,13 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
+export {
+  CircuitBreaker,
+  type CircuitBreakerConfig,
+  type CircuitBreakerOptions,
+  type CircuitState,
+  resolveCircuitBreakerConfig,
+} from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
