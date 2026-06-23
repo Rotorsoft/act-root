@@ -161,9 +161,24 @@ async function partition_by_safety(
 
   // Read-only probe: query_streams returns subscription positions without
   // leasing or mutating retry state.
+  //
+  // `source` is matched as a regex against close-target stream names — the
+  // framework-wide convention (see `QueryStreams.source` docs and
+  // `InMemoryStore.claim`). Compiled patterns are cached because dynamic
+  // reactions commonly produce many subscriptions sharing one source
+  // pattern, so the callback fires repeatedly with the same `source`.
   const pending_set = new Set<string>();
+  const source_regex = new Map<string, RegExp>();
+  const get_regex = (source: string): RegExp => {
+    let re = source_regex.get(source);
+    if (!re) {
+      re = new RegExp(source);
+      source_regex.set(source, re);
+    }
+    return re;
+  };
   await store().query_streams((position) => {
-    const source_re = position.source ? RegExp(position.source) : undefined;
+    const source_re = position.source ? get_regex(position.source) : undefined;
     for (const [stream, info] of stream_info) {
       if ((!source_re || source_re.test(stream)) && position.at < info.max_id) {
         pending_set.add(stream);
