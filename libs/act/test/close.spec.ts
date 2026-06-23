@@ -417,6 +417,32 @@ describe("close", () => {
     expect(truncated.size).toBe(0);
   });
 
+  it("reuses one compiled regex across subscriptions sharing a source", async () => {
+    // Two dynamic targets resolve to the SAME source pattern, so the
+    // close-cycle safety probe sees two subscription positions with an
+    // identical `source` string — the second hits the compiled-regex
+    // cache (`get_regex`) instead of recompiling. Both positions lag the
+    // source stream, so it's correctly skipped.
+    const sharedApp = act()
+      .withState(counter)
+      .on("incremented")
+      .do(async function fanOut() {
+        await Promise.resolve();
+      })
+      .to((e) => ({ target: `proj-${e.data.by}`, source: "shared-src" }))
+      .build();
+
+    await sharedApp.do("increment", { stream: "shared-src", actor }, { by: 1 });
+    await sharedApp.do("increment", { stream: "shared-src", actor }, { by: 2 });
+    await sharedApp.correlate();
+
+    const { skipped, truncated } = await sharedApp.close([
+      { stream: "shared-src" },
+    ]);
+    expect(skipped).toEqual(["shared-src"]);
+    expect(truncated.size).toBe(0);
+  });
+
   it("should handle closing empty stream while reactions exist for other streams", async () => {
     await app.do("increment", { stream: "has-events", actor }, { by: 1 });
     await app.correlate();
