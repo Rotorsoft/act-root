@@ -41,7 +41,7 @@ const to_alias = ([key, [target]]: [string, string[]]) => ({
   find: new RegExp(
     `^${key.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, "(.*)")}$`
   ),
-  replacement: resolve(root, target.replace("*", "$1")),
+  replacement: resolve(root, target.replace(/\*/g, "$1")),
 });
 const alias = [
   ...Object.entries(paths)
