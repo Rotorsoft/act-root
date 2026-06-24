@@ -133,4 +133,69 @@ describe("sqlite store (adapter-specific)", () => {
     expect(leases.find((l) => l.stream === "src-no-match")).toBeUndefined();
     if (leases.length) await store().ack(leases.map((l) => ({ ...l, at: 0 })));
   });
+
+  // The TCK keyset-pagination case exercises only the cheap heads-only
+  // path (no count/names). This drives the *full-scan* path (#1010) so
+  // the `limit`/`after` cursor on the CTE-based query is covered too.
+  it("paginates query_stats full-scan path (count) by limit + after", async () => {
+    const streams = ["qsfs-a", "qsfs-b", "qsfs-c", "qsfs-d"];
+    for (const s of streams) {
+      await store().commit(s, [{ name: "fs", data: {} }], {
+        correlation: "",
+        causation: {},
+      });
+    }
+
+    const page1 = await store().query_stats(
+      { stream: "qsfs-.*" },
+      { count: true, names: true, limit: 2 }
+    );
+    const k1 = [...page1.keys()];
+    expect(k1).toEqual(["qsfs-a", "qsfs-b"]);
+    expect(page1.get("qsfs-a")?.count).toBe(1);
+    expect(page1.get("qsfs-a")?.names).toEqual({ fs: 1 });
+
+    const page2 = await store().query_stats(
+      { stream: "qsfs-.*" },
+      { count: true, limit: 2, after: k1.at(-1) }
+    );
+    expect([...page2.keys()]).toEqual(["qsfs-c", "qsfs-d"]);
+
+    const page3 = await store().query_stats(
+      { stream: "qsfs-.*" },
+      { count: true, limit: 2, after: [...page2.keys()].at(-1) }
+    );
+    expect(page3.size).toBe(0);
+  });
+
+  // Heads-only path with `tail: true` + `limit`: the tail subquery must
+  // cover exactly the limited head stream set, not re-scan all streams.
+  it("paginates query_stats heads-only path with tail by limit + after", async () => {
+    const streams = ["qsht-a", "qsht-b", "qsht-c"];
+    for (const s of streams) {
+      await store().commit(
+        s,
+        [
+          { name: "ht", data: {} },
+          { name: "ht", data: {} },
+        ],
+        { correlation: "", causation: {} }
+      );
+    }
+
+    const page1 = await store().query_stats(
+      { stream: "qsht-.*" },
+      { tail: true, limit: 2 }
+    );
+    expect([...page1.keys()]).toEqual(["qsht-a", "qsht-b"]);
+    expect(page1.get("qsht-a")?.head.version).toBe(1);
+    expect(page1.get("qsht-a")?.tail?.version).toBe(0);
+
+    const page2 = await store().query_stats(
+      { stream: "qsht-.*" },
+      { tail: true, limit: 2, after: [...page1.keys()].at(-1) }
+    );
+    expect([...page2.keys()]).toEqual(["qsht-c"]);
+    expect(page2.get("qsht-c")?.tail?.version).toBe(0);
+  });
 });

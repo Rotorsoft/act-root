@@ -75,6 +75,14 @@ export type AutocloseCycleDeps = {
   readonly logger: Logger;
   readonly config: AutocloseConfig;
   /**
+   * Keyset cursor for this tick's page: the cycle fetches the page of
+   * streams sorting strictly after this name (`undefined` starts from
+   * the beginning). The controller carries the returned
+   * {@link AutocloseCycleResult.next_after} forward across ticks so the
+   * sweep advances one bounded page per tick.
+   */
+  readonly after?: string;
+  /**
    * Correlation id for this tick. The caller computes it via the
    * configured {@link Correlator}; every truncate the cycle stages
    * shares this id so close-cycle commits land under one correlation
@@ -99,6 +107,13 @@ export type AutocloseCycleResult = {
   readonly predicate_errors: number;
   /** Forwarded from {@link run_close_cycle} — truncated + skipped. */
   readonly close_result: CloseResult;
+  /**
+   * Keyset cursor for the next tick: the last stream name of this
+   * tick's page when a full page was returned (more streams may
+   * follow), or `undefined` when the page was short — the sweep
+   * reached the end and the next tick wraps to the beginning.
+   */
+  readonly next_after: string | undefined;
 };
 
 /**
@@ -116,14 +131,21 @@ function yield_between_batches(ms: number): Promise<void> {
 }
 
 /**
- * Run one autoclose tick against the configured store. Returns
- * after every stream has been paginated through and every eligible
- * batch handed to {@link run_close_cycle}.
+ * Run one autoclose tick against the configured store. Each tick
+ * fetches a single bounded page of streams — those sorting after
+ * {@link AutocloseCycleDeps.after}, up to `closeBatchSize` — applies
+ * each state's predicate, and hands the eligible candidates to
+ * {@link run_close_cycle} in one batch (so exactly one safety probe
+ * runs per tick). The returned {@link AutocloseCycleResult.next_after}
+ * is the cursor the controller carries to the next tick; the sweep
+ * advances one page per tick and wraps when a short page signals the
+ * end. Per-tick cost is therefore bounded by the page size rather than
+ * the total stream count.
  *
  * The cycle never throws — predicate exceptions are caught and
  * logged (counted in `predicate_errors`; `closeOnError` controls
  * whether they count as "close this stream"). Store errors during
- * pagination propagate to the caller (the controller logs them and
+ * the page query propagate to the caller (the controller logs them and
  * skips to the next tick).
  *
  * @internal
@@ -132,44 +154,26 @@ export async function run_autoclose_cycle(
   deps: AutocloseCycleDeps
 ): Promise<AutocloseCycleResult> {
   const s = store();
-  let inspected = 0;
   let evaluated = 0;
   let predicate_errors = 0;
   const truncated: TruncateResult = new Map();
   const skipped: string[] = [];
 
-  // `query_stats` returns every event-stream in one map (no cursor
-  // pagination — that's `query_streams` for subscription positions,
-  // not events). The cycle iterates the map, applies each state's
-  // predicate to the matching streams, and flushes truncate batches
-  // when `closeBatchSize` candidates accumulate. `closeYieldMs` paces
-  // batches on adapters where the writer lock matters.
+  // One bounded page per tick: streams sorting after the carried cursor,
+  // capped at `closeBatchSize`, ordered by stream name.
+  const page = deps.config.closeBatchSize;
   const stats = await s.query_stats(
     {},
-    { count: true, exclude: [TOMBSTONE_EVENT] }
+    {
+      count: true,
+      exclude: [TOMBSTONE_EVENT],
+      after: deps.after,
+      limit: page,
+    }
   );
 
-  const flush_batch = async (candidates: CloseTarget[]) => {
-    if (candidates.length === 0) return;
-    const result = await run_close_cycle(candidates, {
-      reactive_events_size: deps.reactive_events_size,
-      event_to_state: deps.event_to_state,
-      load: deps.load,
-      tombstone: deps.tombstone,
-      logger: deps.logger,
-      correlation: deps.correlation,
-    });
-    for (const [stream, entry] of result.truncated) {
-      truncated.set(stream, entry);
-    }
-    for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.closeYieldMs);
-  };
-
-  let candidates: CloseTarget[] = [];
-
+  const candidates: CloseTarget[] = [];
   for (const [stream, { head, count }] of stats) {
-    inspected += 1;
     // `head` is non-optional on `StreamStats` — `query_stats` only
     // includes streams with at least one non-excluded event.
     const owner = deps.event_to_state.get(head.name);
@@ -196,21 +200,36 @@ export async function run_autoclose_cycle(
     const archiver = deps.autoclose_archiver(owner.name);
     const archive = archiver ? () => archiver(stream, head) : undefined;
     candidates.push({ stream, archive });
-
-    if (candidates.length >= deps.config.closeBatchSize) {
-      await flush_batch(candidates);
-      candidates = [];
-    }
   }
 
-  // Flush the trailing batch.
-  await flush_batch(candidates);
+  // One batch per tick → one safety probe per tick. The page size
+  // already bounds the candidate count.
+  if (candidates.length > 0) {
+    const result = await run_close_cycle(candidates, {
+      reactive_events_size: deps.reactive_events_size,
+      event_to_state: deps.event_to_state,
+      load: deps.load,
+      tombstone: deps.tombstone,
+      logger: deps.logger,
+      correlation: deps.correlation,
+    });
+    for (const [stream, entry] of result.truncated)
+      truncated.set(stream, entry);
+    for (const stream of result.skipped) skipped.push(stream);
+    await yield_between_batches(deps.config.closeYieldMs);
+  }
+
+  // Full page → more streams may follow, carry the last name forward.
+  // Short page → end of the sweep, wrap to the beginning next tick.
+  const inspected = stats.size;
+  const next_after = inspected === page ? [...stats.keys()].at(-1) : undefined;
 
   return {
     inspected,
     evaluated,
     predicate_errors,
     close_result: { truncated, skipped },
+    next_after,
   };
 }
 
@@ -225,7 +244,7 @@ export async function run_autoclose_cycle(
  */
 export type AutocloseControllerDeps = Omit<
   AutocloseCycleDeps,
-  "correlation"
+  "correlation" | "after"
 > & {
   /**
    * Correlator the controller invokes per tick to stamp the cycle's
@@ -272,6 +291,14 @@ export class AutocloseController {
    * overlapping ticks so the cycle stays sequential per controller.
    */
   private _running = false;
+  /**
+   * Rolling keyset cursor carried across ticks. Each tick sweeps the
+   * page after this name; the cycle returns the next cursor (or
+   * `undefined` at the end, wrapping to the start). In-memory only —
+   * a restart re-sweeps from the beginning, which is harmless because
+   * already-closed streams are tombstoned and excluded from the scan.
+   */
+  private _sweep_after: string | undefined;
 
   constructor(deps: AutocloseControllerDeps) {
     this.deps = deps;
@@ -345,8 +372,12 @@ export class AutocloseController {
         tombstone: this.deps.tombstone,
         logger: this.deps.logger,
         config: this.deps.config,
+        after: this._sweep_after,
         correlation,
       });
+      // Advance the rolling cursor: carry the next page's start forward,
+      // or wrap to the beginning when the sweep reached the end.
+      this._sweep_after = result.next_after;
       // The store responded — reset the shared breaker.
       this.deps.breaker.passed();
       if (result.close_result.truncated.size > 0) {

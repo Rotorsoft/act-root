@@ -1160,6 +1160,19 @@ export class PostgresStore implements Store {
           : `source ~ $${values.length}`
       );
     }
+    if (query?.source_matches !== undefined && query.source_matches.length) {
+      // Reverse-match narrowing: the inverse of the `source` filter.
+      // The stored `source` is treated as the regex pattern, and a row
+      // qualifies when any supplied candidate name matches it (`n ~ source`).
+      // A NULL/empty source has no source constraint — it consumes from
+      // every stream, so it always qualifies. Composes (AND) with others.
+      values.push(query.source_matches);
+      conditions.push(
+        `(source IS NULL OR source = '' OR EXISTS (
+          SELECT 1 FROM unnest($${values.length}::text[]) AS n WHERE n ~ source
+        ))`
+      );
+    }
     if (query?.blocked !== undefined) {
       values.push(query.blocked);
       conditions.push(`blocked = $${values.length}`);
@@ -1256,6 +1269,8 @@ export class PostgresStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const stats_limit = options?.limit;
     const full_scan = want_count || want_names;
 
     // Empty array short-circuit — saves a round trip on a no-op.
@@ -1290,6 +1305,13 @@ export class PostgresStore implements Store {
       params.push(before);
       where.push(`e.id < $${params.length}`);
     }
+    if (after !== undefined) {
+      // Keyset pagination cursor — exclusive on stream name. Results are
+      // ordered by stream ascending so callers chain
+      // `[...map.keys()].at(-1)` as the next cursor.
+      params.push(after);
+      where.push(`e.stream > $${params.length}`);
+    }
 
     const from_clause = `${this._fqt} e`;
     // Always emit a WHERE clause — `WHERE TRUE` short-circuits the
@@ -1304,13 +1326,15 @@ export class PostgresStore implements Store {
           params,
           want_tail,
           want_count,
-          want_names
+          want_names,
+          stats_limit
         )
       : this._query_stats_heads_only<E>(
           from_clause,
           where_clause,
           params,
-          want_tail
+          want_tail,
+          stats_limit
         );
   }
 
@@ -1323,12 +1347,19 @@ export class PostgresStore implements Store {
     from_clause: string,
     where_clause: string,
     params: unknown[],
-    want_tail: boolean
+    want_tail: boolean,
+    stats_limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta`;
-    const head_sql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version DESC`;
+    // `DISTINCT ON (e.stream) ... ORDER BY e.stream` already yields one row
+    // per stream in stream-name order, so a trailing LIMIT caps the number
+    // of streams returned. The head and tail queries share the same
+    // ordering, so the same LIMIT selects the identical first-N streams.
+    const limit_clause =
+      stats_limit !== undefined ? ` LIMIT ${stats_limit}` : "";
+    const head_sql = `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version DESC${limit_clause}`;
     const tail_sql = want_tail
-      ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version ASC`
+      ? `SELECT DISTINCT ON (e.stream) ${cols} FROM ${from_clause} ${where_clause} ORDER BY e.stream, e.version ASC${limit_clause}`
       : null;
 
     const [headRes, tailRes] = await Promise.all([
@@ -1368,7 +1399,8 @@ export class PostgresStore implements Store {
     params: unknown[],
     want_tail: boolean,
     want_count: boolean,
-    want_names: boolean
+    want_names: boolean,
+    stats_limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const tail_cte = want_tail
       ? `, tails AS (SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version ASC)`
@@ -1410,6 +1442,8 @@ export class PostgresStore implements Store {
       FROM heads h
       LEFT JOIN agg a ON a.stream = h.stream
       ${tail_join}
+      ORDER BY h.stream
+      ${stats_limit !== undefined ? `LIMIT ${stats_limit}` : ""}
     `;
 
     const res = await this._pool.query<

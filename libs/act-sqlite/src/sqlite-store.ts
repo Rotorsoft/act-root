@@ -817,6 +817,8 @@ export class SqliteStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const limit = options?.limit;
     const full_scan = want_count || want_names;
 
     if (Array.isArray(input) && input.length === 0) {
@@ -853,6 +855,13 @@ export class SqliteStore implements Store {
       where.push(`e.id < ?`);
       args.push(before);
     }
+    // Keyset pagination cursor (#1010): exclusive — return only streams
+    // whose name sorts strictly after `after`. Applied at the event level
+    // so the per-stream head/agg rows downstream only cover the page.
+    if (after !== undefined) {
+      where.push(`e.stream > ?`);
+      args.push(after);
+    }
 
     const from_clause = `events e`;
     // Always emit a WHERE clause — `WHERE 1=1` short-circuits the
@@ -867,13 +876,15 @@ export class SqliteStore implements Store {
           args,
           want_tail,
           want_count,
-          want_names
+          want_names,
+          limit
         )
       : this._query_stats_heads_only<E>(
           from_clause,
           where_clause,
           args,
-          want_tail
+          want_tail,
+          limit
         );
   }
 
@@ -885,26 +896,44 @@ export class SqliteStore implements Store {
     from_clause: string,
     where_clause: string,
     args: unknown[],
-    want_tail: boolean
+    want_tail: boolean,
+    limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const cols = `e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii`;
+    // Keyset pagination (#1010): order heads by stream ascending so the
+    // caller can use the last key as the next `after` cursor; cap with
+    // LIMIT when set (unbounded otherwise).
+    const limit_clause = limit !== undefined ? " LIMIT ?" : "";
     const head_sql = `SELECT * FROM (
       SELECT ${cols}, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version DESC) AS rn
       FROM ${from_clause}
       ${where_clause}
-    ) WHERE rn = 1`;
+    ) WHERE rn = 1 ORDER BY stream${limit_clause}`;
+    const head_args = limit !== undefined ? [...args, limit] : args;
+    // The tail query shares the same WHERE; when paginating it must cover
+    // exactly the limited head stream set, so it joins against the same
+    // ordered+limited heads subquery rather than re-scanning all streams.
     const tail_sql = want_tail
-      ? `SELECT * FROM (
+      ? `SELECT t.* FROM (
           SELECT ${cols}, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version ASC) AS rn
           FROM ${from_clause}
           ${where_clause}
-        ) WHERE rn = 1`
+        ) t
+        WHERE t.rn = 1 AND t.stream IN (
+          SELECT stream FROM (
+            SELECT e.stream, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version DESC) AS rn
+            FROM ${from_clause}
+            ${where_clause}
+          ) WHERE rn = 1 ORDER BY stream${limit_clause}
+        )`
       : null;
+    const tail_args =
+      limit !== undefined ? [...args, ...args, limit] : [...args, ...args];
 
     const [headRes, tailRes] = await Promise.all([
-      this.client.execute({ sql: head_sql, args: args as any[] }),
+      this.client.execute({ sql: head_sql, args: head_args as any[] }),
       tail_sql
-        ? this.client.execute({ sql: tail_sql, args: args as any[] })
+        ? this.client.execute({ sql: tail_sql, args: tail_args as any[] })
         : null,
     ]);
 
@@ -954,7 +983,8 @@ export class SqliteStore implements Store {
     args: unknown[],
     want_tail: boolean,
     want_count: boolean,
-    want_names: boolean
+    want_names: boolean,
+    limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const tail_cte = want_tail
       ? `, tails AS (
@@ -992,6 +1022,7 @@ export class SqliteStore implements Store {
         SELECT * FROM (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY stream ORDER BY version DESC) AS rn FROM ef
         ) WHERE rn = 1
+        ORDER BY stream${limit !== undefined ? " LIMIT ?" : ""}
       )
       ${tail_cte}
       SELECT
@@ -1002,9 +1033,15 @@ export class SqliteStore implements Store {
       FROM heads h
       LEFT JOIN agg a ON a.stream = h.stream
       ${tail_join}
+      ORDER BY h.stream
     `;
 
-    const res = await this.client.execute({ sql, args: args as any[] });
+    // Keyset pagination (#1010): the `heads` CTE is ordered by stream and
+    // capped with LIMIT (when set); the final SELECT re-asserts stream
+    // order so the returned Map's key order is the next cursor. The LIMIT
+    // arg binds last when present (unbounded otherwise).
+    const full_args = limit !== undefined ? [...args, limit] : args;
+    const res = await this.client.execute({ sql, args: full_args as any[] });
 
     const to_committed = async (
       id: unknown,

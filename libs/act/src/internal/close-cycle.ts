@@ -195,11 +195,17 @@ async function partition_by_safety(
     return re;
   };
 
-  // Keyset-paginate the entire subscriptions table on the `after`
-  // cursor — `query_streams` caps each call at `limit` rows, so every
-  // page is inspected until a short page signals the last one. A
-  // lagging reaction marks its close target pending regardless of how
-  // far its subscription sorts past the first page.
+  // `source_matches` narrows the probe server-side to subscriptions that
+  // could consume from a stream we're closing — a best-effort hint, so
+  // the per-position source/target re-check below still runs and keeps
+  // the result correct even when a store returns a superset.
+  const targets = [...stream_info.keys()];
+
+  // Keyset-paginate the (narrowed) subscriptions on the `after` cursor —
+  // `query_streams` caps each call at `limit` rows, so every page is
+  // inspected until a short page signals the last one. A lagging reaction
+  // marks its close target pending regardless of how far its subscription
+  // sorts past the first page.
   let after: string | undefined;
   for (;;) {
     let last: string | undefined;
@@ -218,7 +224,7 @@ async function partition_by_safety(
           }
         }
       },
-      { after, limit: page_size }
+      { after, limit: page_size, source_matches: targets }
     );
     if (count < page_size) break;
     after = last;
