@@ -93,7 +93,7 @@ For apps with reactions, we can't tombstone a stream that still has pending reac
 
 Optimization: when `reactiveEvents.size === 0`, skip the safety probe entirely (every stream is safe). Most close operations on apps without reactions take this path.
 
-Otherwise, walk `query_streams` (read-only — no leasing, no state mutation). For each subscribed reader's position, mark any of our targets that still have unprocessed events behind that reader.
+Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through every registered position so no reader is missed when subscriptions exceed one page. For each subscribed reader's position, mark any of our targets that still have unprocessed events behind that reader.
 
 - **Reader is behind**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., after `await app.settle()`).
 - **Reader is at or past head**: target is `safe`.
