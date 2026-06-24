@@ -1,3 +1,16 @@
+# [@rotorsoft/act-v1.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.14.1...@rotorsoft/act-v1.15.0) (2026-06-24)
+
+
+### Bug Fixes
+
+* **act:** paginate close-cycle safety probe across all subscriptions ([719c41b](https://github.com/rotorsoft/act-root/commit/719c41b8e2815db800a1320c4d5e7acbef4e079f))
+
+
+### Features
+
+* **act:** bound the autoclose cycle with a paginated rolling sweep ([4261a81](https://github.com/rotorsoft/act-root/commit/4261a81571ea5648486a17383d633df31ff6fed5))
+* **act:** run autoclose as a low-frequency whole-store sweep with an off-hours window ([2df9755](https://github.com/rotorsoft/act-root/commit/2df9755abb28486d3f0187826e8bad1ee37bf5ad))
+
 # [@rotorsoft/act-v1.14.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.14.0...@rotorsoft/act-v1.14.1) (2026-06-23)
 
 # [@rotorsoft/act-v1.14.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.13.0...@rotorsoft/act-v1.14.0) (2026-06-22)
