@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   act,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -170,7 +170,7 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
 describe("resolveAutocloseConfig — defaults + validation", () => {
   it("applies all defaults when no knobs are set", () => {
     const cfg = resolveAutocloseConfig(undefined);
-    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
     expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
     expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
     expect(cfg.closeOnError).toBe(false);
@@ -178,7 +178,7 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
 
   it("applies defaults when ActOptions has none of the autoclose keys", () => {
     const cfg = resolveAutocloseConfig({});
-    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
     expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
     expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
     expect(cfg.closeOnError).toBe(false);
@@ -186,35 +186,43 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
 
   it("preserves caller-supplied knobs", () => {
     const cfg = resolveAutocloseConfig({
-      autocloseCycleMs: 600_000,
+      autocloseCycleMinutes: 600,
       closeBatchSize: 128,
       closeYieldMs: 5,
       closeOnError: true,
     });
-    expect(cfg.autocloseCycleMs).toBe(600_000);
+    expect(cfg.autocloseCycleMinutes).toBe(600);
     expect(cfg.closeBatchSize).toBe(128);
     expect(cfg.closeYieldMs).toBe(5);
     expect(cfg.closeOnError).toBe(true);
   });
 
-  it("rejects autocloseCycleMs below the 1 min floor", () => {
+  it("rejects autocloseCycleMinutes below the 1 minute floor", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: 59_999 })
+      resolveAutocloseConfig({ autocloseCycleMinutes: 0 })
     ).toThrow();
   });
 
-  it("rejects autocloseCycleMs above the 24 h ceiling", () => {
+  it("rejects autocloseCycleMinutes above the 24 h ceiling", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: 86_400_001 })
+      resolveAutocloseConfig({ autocloseCycleMinutes: 1441 })
     ).toThrow();
   });
 
-  it("rejects non-finite autocloseCycleMs", () => {
+  it("rejects a non-integer autocloseCycleMinutes", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: Number.NaN })
+      resolveAutocloseConfig({ autocloseCycleMinutes: 12.5 })
+    ).toThrow();
+  });
+
+  it("rejects non-finite autocloseCycleMinutes", () => {
+    expect(() =>
+      resolveAutocloseConfig({ autocloseCycleMinutes: Number.NaN })
     ).toThrow();
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: Number.POSITIVE_INFINITY })
+      resolveAutocloseConfig({
+        autocloseCycleMinutes: Number.POSITIVE_INFINITY,
+      })
     ).toThrow();
   });
 
@@ -332,9 +340,9 @@ describe("autoclose window membership", () => {
 });
 
 describe("act().build() — autoclose validation runs at build time", () => {
-  it("out-of-range autocloseCycleMs throws on build", () => {
+  it("out-of-range autocloseCycleMinutes throws on build", () => {
     expect(() =>
-      act().withState(make_ticket().build()).build({ autocloseCycleMs: 1 })
+      act().withState(make_ticket().build()).build({ autocloseCycleMinutes: 0 })
     ).toThrow();
   });
 
@@ -349,7 +357,7 @@ describe("act().build() — autoclose validation runs at build time", () => {
       .autocloses((_stream, head) => head.name === "TicketResolved")
       .build();
     const app = act().withState(Ticket).build({
-      autocloseCycleMs: 600_000,
+      autocloseCycleMinutes: 600,
       closeBatchSize: 32,
       closeYieldMs: 0,
     });

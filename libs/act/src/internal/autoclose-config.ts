@@ -19,16 +19,17 @@ import { z } from "zod";
 import type { ActOptions } from "../act.js";
 
 /**
- * Default {@link ActOptions.autocloseCycleMs}: 12 h. Autoclose is
- * low-urgency housekeeping — a stream eligible for close is "old"
- * (past a retention age) or "resolved a while ago" (terminal +
- * grace), never urgent — so the cycle runs a couple of times a day,
+ * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
+ * Autoclose is low-urgency housekeeping — a stream eligible for close
+ * is "old" (past a retention age) or "resolved a while ago" (terminal
+ * + grace), never urgent — so the cycle runs a couple of times a day,
  * not as a hot path. Each run sweeps the whole store; the cadence is
- * how often that sweep repeats. Range is 1 minute to 24 hours; the
- * floor exists for window polling (see {@link ActOptions.autocloseWindow}),
- * the ceiling lets operators run it once a day.
+ * how often that sweep repeats. Range is 1 minute to 24 hours (1440);
+ * the floor exists for window polling (see
+ * {@link ActOptions.autocloseWindow}), the ceiling lets operators run
+ * it once a day.
  */
-export const DEFAULT_AUTOCLOSE_CYCLE_MS = 43_200_000;
+export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
 
 /**
  * Default {@link ActOptions.closeBatchSize}: 64. Bounds the per-batch
@@ -114,11 +115,12 @@ const AutocloseWindowSchema = z
  * @internal
  */
 const AutocloseOptionsSchema = z.object({
-  autocloseCycleMs: z
+  autocloseCycleMinutes: z
     .number()
-    .min(60_000)
-    .max(86_400_000)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
   closeBatchSize: z
     .number()
     .int()
@@ -147,7 +149,7 @@ export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
   return AutocloseOptionsSchema.parse({
-    autocloseCycleMs: options?.autocloseCycleMs,
+    autocloseCycleMinutes: options?.autocloseCycleMinutes,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,

@@ -191,7 +191,7 @@ Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.disc
 
 Autoclose is low-urgency housekeeping, so each run sweeps the whole store and the cadence is how often that repeats — a couple of times a day, not a hot path. Five `ActOptions` knobs, validated at `act().build()`:
 
-- `autocloseCycleMs` — how often a sweep runs, in ms. Default 43_200_000 (12 h), range `[60_000, 86_400_000]` (1 minute to 24 hours).
+- `autocloseCycleMinutes` — how often a sweep runs, in minutes. Default 720 (12 h), range `[1, 1440]` (1 minute to 24 hours).
 - `closeBatchSize` — the per-batch page size within a run. A run pages through the whole store this many streams at a time, bounding memory and the per-batch write burst. Default 64, range `[1, 1024]`.
 - `closeYieldMs` — delay between batches. Default 0, range `[0, 1000]`. SQLite operators raise this to release the writer lock.
 - `closeOnError` — whether a thrown predicate counts as "close this stream". Default false (skip the stream, log the error).
@@ -237,7 +237,7 @@ Closed streams are tombstoned and excluded from `query_stats`, and they sort beh
 
 ### Sweep latency
 
-A stream isn't closed the instant it qualifies — it closes on the next run, up to one `autocloseCycleMs` away (and only during the off-hours window, if one is set). This fits autoclose semantics: eligibility always means "old" (past a retention age, or terminal-plus-grace), never "right this second." Tighten the window by shortening `autocloseCycleMs`.
+A stream isn't closed the instant it qualifies — it closes on the next run, up to one `autocloseCycleMinutes` away (and only during the off-hours window, if one is set). This fits autoclose semantics: eligibility always means "old" (past a retention age, or terminal-plus-grace), never "right this second." Tighten the window by shortening `autocloseCycleMinutes`.
 
 ### Lifecycle
 

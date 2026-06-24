@@ -293,7 +293,7 @@ export class AutocloseController {
     // `run_once`, so there's nothing left to do here but keep ticking.
     this._timer = setInterval(() => {
       this.run_once().catch(() => {});
-    }, this.deps.config.autocloseCycleMs);
+    }, this.deps.config.autocloseCycleMinutes * 60_000);
     // Don't let the interval keep the process alive — Node's
     // `setInterval` returns a `Timeout` with `unref()` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).

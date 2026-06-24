@@ -47,7 +47,7 @@ function controller_of(app: unknown) {
         start: () => boolean;
         stop: () => void;
         is_running: boolean;
-        deps: { config: { autocloseCycleMs: number } };
+        deps: { config: { autocloseCycleMinutes: number } };
       };
     }
   )._autoclose;
@@ -227,7 +227,9 @@ describe("AutocloseController — slice 3", () => {
     try {
       vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
       c.start();
-      vi.advanceTimersByTime(c.deps.config.autocloseCycleMs + 100);
+      vi.advanceTimersByTime(
+        c.deps.config.autocloseCycleMinutes * 60_000 + 100
+      );
       // Wait for the fire-and-forget tick to settle.
       await vi.runOnlyPendingTimersAsync();
       vi.useRealTimers();
@@ -259,7 +261,9 @@ describe("AutocloseController — slice 3", () => {
     try {
       vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
       c.start();
-      vi.advanceTimersByTime(c.deps.config.autocloseCycleMs + 100);
+      vi.advanceTimersByTime(
+        c.deps.config.autocloseCycleMinutes * 60_000 + 100
+      );
       await vi.runOnlyPendingTimersAsync();
       vi.useRealTimers();
       c.stop();

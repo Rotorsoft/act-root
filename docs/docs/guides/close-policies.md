@@ -44,7 +44,7 @@ Build the app, opt in to the lifecycle, and the cycle runs forever:
 const app = act()
   .withState(Ticket)
   .build({
-    autocloseCycleMs: 43_200_000, // default 12 h
+    autocloseCycleMinutes: 720, // default 12 h
     closeBatchSize: 64,           // default 64
     closeYieldMs: 0,              // default 0 (microtask only)
     closeOnError: false,          // default false (skip predicate-throwing streams)
@@ -113,7 +113,7 @@ Workloads: long-running chat threads, IoT telemetry streams, hot audit logs, eve
 
 Inclusive (`>=`) — the predicate fires at the moment the threshold is reached, not after.
 
-Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). Each batch is bounded to one `closeBatchSize` page, so the count scan never spikes with total stream count; for a cardinality-heavy fleet, schedule the run off live traffic via `autocloseWindow` and/or a longer `autocloseCycleMs`.
+Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). Each batch is bounded to one `closeBatchSize` page, so the count scan never spikes with total stream count; for a cardinality-heavy fleet, schedule the run off live traffic via `autocloseWindow` and/or a longer `autocloseCycleMinutes`.
 
 ### Stacking — top-level AND + `or` block
 
@@ -165,11 +165,11 @@ Autoclose is low-urgency housekeeping. Each run sweeps the **whole** store in bo
 
 Between batches the run sleeps `closeYieldMs` (lets SQLite operators release the writer lock; PG/InMemory leave it at 0), then pages forward, looping until a short page ends the sweep. A single run therefore reaches every eligible stream; `closeBatchSize` bounds per-batch memory and write burst, not the total a run closes. The controller emits the `closed` lifecycle event for each batch that closed at least one stream, with the full `CloseResult` (`{ truncated, skipped }`).
 
-A run repeats every `autocloseCycleMs` (default 12 h) — a couple of times a day, not a hot path. The optional `autocloseWindow` gate restricts runs to off-hours (below). The cost of the slow cadence is latency: an eligible stream closes on the next run, up to one `autocloseCycleMs` away (and only within the window if set). That's fine in practice, since autoclose eligibility always means "old" (past a retention age, or terminal plus a grace period), never "right now." Shorten `autocloseCycleMs` for a tighter bound.
+A run repeats every `autocloseCycleMinutes` (default 12 h) — a couple of times a day, not a hot path. The optional `autocloseWindow` gate restricts runs to off-hours (below). The cost of the slow cadence is latency: an eligible stream closes on the next run, up to one `autocloseCycleMinutes` away (and only within the window if set). That's fine in practice, since autoclose eligibility always means "old" (past a retention age, or terminal plus a grace period), never "right now." Shorten `autocloseCycleMinutes` for a tighter bound.
 
 ### Off-hours window
 
-`autocloseWindow: { start, end, timeZone? }` keeps runs out of peak traffic. The ticker still fires every `autocloseCycleMs`, but a tick only runs a sweep when the current hour is inside `[start, end)`. Hours are integers in `[0, 23]`, evaluated in `timeZone` (an IANA string, default `"UTC"`, DST-correct via `Intl`):
+`autocloseWindow: { start, end, timeZone? }` keeps runs out of peak traffic. The ticker still fires every `autocloseCycleMinutes`, but a tick only runs a sweep when the current hour is inside `[start, end)`. Hours are integers in `[0, 23]`, evaluated in `timeZone` (an IANA string, default `"UTC"`, DST-correct via `Intl`):
 
 ```ts
 .build({
@@ -177,7 +177,7 @@ A run repeats every `autocloseCycleMs` (default 12 h) — a couple of times a da
 })
 ```
 
-`start > end` is an overnight window (the example above runs 22:00–06:00). `start === end` is rejected at build. Omit the window to sweep on every tick. Every in-window tick runs a full sweep of the store, so size `autocloseCycleMs` to the window rather than expecting work to carry across ticks.
+`start > end` is an overnight window (the example above runs 22:00–06:00). `start === end` is rejected at build. Omit the window to sweep on every tick. Every in-window tick runs a full sweep of the store, so size `autocloseCycleMinutes` to the window rather than expecting work to carry across ticks.
 
 ## Cost knobs in practice
 
@@ -185,7 +185,7 @@ The defaults — a 12-hour cycle, batch of 64, microtask yield — are sized for
 
 | Knob | Default | When to raise | When to lower |
 |---|---|---|---|
-| `autocloseCycleMs` | `43_200_000` (12 h), range `[60_000, 86_400_000]` | Very-low-churn workloads where running more than once or twice a day buys nothing. | When eligible streams must close sooner than the worst-case one-cycle wait. Pair with `autocloseWindow` to keep frequent runs off peak traffic. |
+| `autocloseCycleMinutes` | `720` (12 h), range `[1, 1440]` | Very-low-churn workloads where running more than once or twice a day buys nothing. | When eligible streams must close sooner than the worst-case one-cycle wait. Pair with `autocloseWindow` to keep frequent runs off peak traffic. |
 | `closeBatchSize` | 64 | High-throughput Postgres where the truncate-roundtrip cost dominates and batching amortizes the per-batch safety probe. | SQLite (single-writer; large pages hold the lock too long) — pair with `closeYieldMs > 0`. |
 | `closeYieldMs` | 0 | SQLite (10–50 ms is typical). Multi-tenant environments where the run competes with user requests on the same DB. | Default; PG and InMemory never need to raise it. |
 | `autocloseWindow` | unset (every tick runs) | Set `{ start, end, timeZone? }` to confine runs to off-hours when cardinality `count` scans would compete with live traffic. | — |
@@ -210,7 +210,7 @@ The host is responsible for:
 
 - **Restart** (rotating a stream while keeping the entity alive). Online close always tombstones. Rotation stays on the explicit `app.close({ stream, restart: true })` path.
 - **Cross-state coordination** ("close stream A only if B is closed"). Each state's predicate sees only its own candidates. Compose in the host's scheduler if you need it.
-- **Hard real-time policy enforcement.** Runs repeat at `autocloseCycleMs` cadence (default 12 h), so a terminal event lingers until the next run before truncate — close is never same-second. If you need immediate close, call `app.close([{ stream }])` from the action handler that emits the terminal event.
+- **Hard real-time policy enforcement.** Runs repeat at `autocloseCycleMinutes` cadence (default 12 h), so a terminal event lingers until the next run before truncate — close is never same-second. If you need immediate close, call `app.close([{ stream }])` from the action handler that emits the terminal event.
 
 ## Pointers
 
