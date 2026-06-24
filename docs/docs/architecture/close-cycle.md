@@ -93,7 +93,7 @@ For apps with reactions, we can't tombstone a stream that still has pending reac
 
 Optimization: when `reactiveEvents.size === 0`, skip the safety probe entirely (every stream is safe). Most close operations on apps without reactions take this path.
 
-Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through every registered position so no reader is missed when subscriptions exceed one page. For each subscribed reader's position, mark any of our targets that still have unprocessed events behind that reader.
+Otherwise, walk `query_streams` (read-only — no leasing, no state mutation), keyset-paginating on the `after` cursor through **every** matching position so no reader is missed when subscriptions exceed one page. Before #1009 this probe used the default `limit: 100` with no pagination, which meant a lagging reaction whose subscription happened to sort past the first 100 was invisible — and its close target got truncated mid-flight. Now the probe pages exhaustively regardless of subscription count. It also passes `source_matches` scoped to the streams being closed this cycle, so the store fetches only the subscriptions whose `source` could match one of the targets. That's a server-side narrowing, not a correctness boundary: `source_matches` is best-effort, a store may hand back a superset, and the probe re-checks source and target in process for each row. For each subscribed reader's position, it marks any of our targets that still have unprocessed events behind that reader.
 
 - **Reader is behind**: target goes to `skipped`. Callable code can retry close after the reader catches up (e.g., after `await app.settle()`).
 - **Reader is at or past head**: target is `safe`.
@@ -192,7 +192,7 @@ Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.disc
 Four `ActOptions` knobs, validated at `act().build()`:
 
 - `autocloseCycleMs` — cycle cadence in ms. Default 60_000, range `[10_000, 3_600_000]`.
-- `closeBatchSize` — max truncate candidates per flush batch. Default 64, range `[1, 1024]`.
+- `closeBatchSize` — the per-tick sweep page size. Each tick fetches one `closeBatchSize` page of streams (ordered by name) and flushes that page as a single batch. Default 64, range `[1, 1024]`.
 - `closeYieldMs` — delay between batches. Default 0, range `[0, 1000]`. SQLite operators raise this to release the writer lock.
 - `closeOnError` — whether a thrown predicate counts as "close this stream". Default false (skip the stream, log the error).
 
@@ -207,17 +207,20 @@ Four `ActOptions` knobs, validated at `act().build()`:
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  run_autoclose_cycle (#837 slice 2)                     │
+│  run_autoclose_cycle (#837 slice 2, #1010 sweep)        │
 │  ─ Store.query_stats({}, { count: true,                 │
-│      exclude: [TOMBSTONE_EVENT] })                      │
-│  ─ for each stream:                                     │
+│      exclude: [TOMBSTONE_EVENT],                        │
+│      after: cursor, limit: closeBatchSize })            │
+│    → ONE bounded page, ordered by stream name           │
+│  ─ for each stream on the page:                         │
 │      owner = event_to_state.get(head.name)              │
 │      predicate = registry.autoclose_policy(owner.name)  │
 │      if predicate(stream, head, count) → candidate      │
 │      (state.archive threaded as CloseTarget.archive)    │
-│  ─ flush every closeBatchSize candidates via            │
-│      run_close_cycle (phases 0-6 above)                 │
-│  ─ closeYieldMs between batches                         │
+│  ─ flush this page's candidates as ONE batch via        │
+│      run_close_cycle (phases 0-6 above) → ONE probe     │
+│  ─ advance cursor to last stream on the page;           │
+│      a short page wraps the cursor back to the start    │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
@@ -228,6 +231,14 @@ Four `ActOptions` knobs, validated at `act().build()`:
 ```
 
 The crucial composition: **online close doesn't reinvent any phase**. It builds a candidate list and hands it to `run_close_cycle`. Safety-partition, tombstone-guard, archive-while-guarded, atomic truncate — all the invariants on this page apply to the autoclose path unchanged.
+
+### The bounded rolling sweep (#1010)
+
+The original cycle scanned the whole store on every tick: a single `query_stats({}, { count: true })` with no pagination, then a `run_close_cycle` flush per `closeBatchSize` worth of candidates — and each flush ran its own Phase 2 safety probe, so closing N streams meant `ceil(N / closeBatchSize)` full subscription scans inside one tick. On a fleet with many streams and many subscriptions, the per-tick cost grew with the totals, not with the work actually done.
+
+The cycle now sweeps **one bounded page per tick**. The controller carries a keyset cursor (`after`) across ticks; each tick fetches exactly one `closeBatchSize` page ordered by stream name, evaluates the predicate against just those streams, and flushes that page as a single batch. One page is one batch is exactly one Phase 2 safety probe — and that probe narrows server-side via `source_matches` scoped to the streams it's closing this tick. When a page comes back short, the sweep has reached the end and the cursor wraps to the start. Per-tick cost is therefore bounded by the page size, not by the total stream or subscription count, no matter how large the fleet grows.
+
+The trade-off is latency. A freshly-eligible stream isn't closed the instant it qualifies; it waits until the rolling cursor reaches its position, up to one full sweep of `total_streams / closeBatchSize` ticks (each `autocloseCycleMs` apart). That's acceptable for autoclose semantics, because eligibility always means "old" — past a retention age, or terminal-plus-grace-period — never "right this second." A stream that became eligible an hour ago does not suffer from being closed a few minutes into the next sweep. Operators who want a tighter close window shorten the sweep with a smaller `autocloseCycleMs` or a larger `closeBatchSize`.
 
 ### Lifecycle
 

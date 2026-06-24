@@ -113,7 +113,7 @@ Workloads: long-running chat threads, IoT telemetry streams, hot audit logs, eve
 
 Inclusive (`>=`) — the predicate fires at the moment the threshold is reached, not after.
 
-Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). The cycle still bounds total work via `closeBatchSize`, but a cardinality-heavy fleet should size `autocloseCycleMs` larger (5–10 min) so the scan doesn't dominate CPU.
+Cost: `reaches` requires the cycle's `query_stats` to scan events (`count: true` triggers the full-scan path on PG/SQLite). The per-tick scan is already bounded to one `closeBatchSize` page, so the work never spikes with total stream count; but for a cardinality-heavy fleet, sizing `autocloseCycleMs` larger (5–10 min) keeps the per-page count scan from competing with live traffic on the same DB.
 
 ### Stacking — top-level AND + `or` block
 
@@ -156,16 +156,19 @@ The declarative form covers ~90% of real policies in one line. The function form
 
 ## What runs under the hood
 
-`autoclose-cycle.ts` paginates the store's streams once per tick via `Store.query_stats({}, { count: true, exclude: [TOMBSTONE_EVENT] })`. For each stream:
+`autoclose-cycle.ts` sweeps the store in bounded pages: each tick fetches **one** `closeBatchSize` page of streams via `Store.query_stats({}, { count: true, exclude: [TOMBSTONE_EVENT], after: cursor, limit: closeBatchSize })`, ordered by stream name. For each stream on that page:
 
 1. Look up the owning state via `event_to_state.get(head.name)`.
 2. Look up the state's predicate via `registry.autoclose_policy(owner.name)`.
 3. If both exist, call `predicate(stream, head, count)`.
-4. Eligible candidates batch up into a list; once the batch hits `closeBatchSize`, the cycle calls `run_close_cycle(candidates)` — the same primitive `Act.close(targets)` uses, so the safety partition, tombstone guard, archive-while-guarded, and atomic truncate all apply unchanged.
-5. `closeYieldMs` pacing between batches lets SQLite operators release the writer lock; PG/InMemory operators leave it at 0.
-6. The controller emits the `closed` lifecycle event once per tick that closed at least one stream, with the full `CloseResult` (`{ truncated, skipped }`).
+4. Eligible candidates from the page flush as a single batch into `run_close_cycle(candidates)` — the same primitive `Act.close(targets)` uses, so the safety partition, tombstone guard, archive-while-guarded, and atomic truncate all apply unchanged.
+5. `closeYieldMs` pacing lets SQLite operators release the writer lock; PG/InMemory operators leave it at 0.
+6. The controller advances its cursor to the last stream on the page and remembers it for the next tick; a short page means the sweep reached the end, so the cursor wraps to the start.
+7. The controller emits the `closed` lifecycle event once per tick that closed at least one stream, with the full `CloseResult` (`{ truncated, skipped }`).
 
-The cycle never reinvents close-the-books — it just walks candidates into the existing pipeline.
+The cycle never reinvents close-the-books — it just walks one page of candidates into the existing pipeline. Because a tick only touches one page, per-tick cost is bounded by `closeBatchSize` rather than the total stream count, and the cycle keeps that bound no matter how large the fleet grows.
+
+The cost of bounding the work is latency: an eligible stream isn't closed the instant it qualifies, but when the rolling cursor next reaches its position — up to one full sweep of `total_streams / closeBatchSize` ticks away. That's a non-issue in practice, since autoclose eligibility always means "old" (past a retention age, or terminal plus a grace period), never "right now." If you do need a tighter window, shorten `autocloseCycleMs` or raise `closeBatchSize` so the sweep completes faster.
 
 ## Cost knobs in practice
 
@@ -173,8 +176,8 @@ The defaults — 60-second cycle, batch of 64, microtask yield — are sized for
 
 | Knob | Default | When to raise | When to lower |
 |---|---|---|---|
-| `autocloseCycleMs` | 60_000 | Cardinality predicates that scan events. Very-low-churn workloads where streams don't go terminal often. | High-churn workloads where streams pile up faster than a 60 s cycle can keep clean (rare). |
-| `closeBatchSize` | 64 | High-throughput Postgres where the truncate-roundtrip cost dominates and batching amortizes. | SQLite (single-writer; large batches hold the lock too long) — pair with `closeYieldMs > 0`. |
+| `autocloseCycleMs` | 60_000 | Cardinality predicates that scan events. Very-low-churn workloads where streams don't go terminal often. | High-churn workloads, or when you want a tighter sweep so eligible streams close sooner (a smaller cadence shortens the worst-case `total_streams / closeBatchSize` wait). |
+| `closeBatchSize` | 64 | High-throughput Postgres where the truncate-roundtrip cost dominates and batching amortizes — and a bigger page closes the whole sweep in fewer ticks. | SQLite (single-writer; large pages hold the lock too long) — pair with `closeYieldMs > 0`. |
 | `closeYieldMs` | 0 | SQLite (10–50 ms is typical). Multi-tenant environments where the cycle competes with user requests on the same DB. | Default; PG and InMemory never need to raise it. |
 | `closeOnError` | false | Defensive deployments — predicate exceptions mean "I can't evaluate, assume terminal." | Default; transient predicate bugs shouldn't auto-truncate live streams. |
 
