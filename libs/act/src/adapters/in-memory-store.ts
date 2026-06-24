@@ -772,6 +772,7 @@ export class InMemoryStore implements Store {
     const limit = query?.limit ?? 100;
     const after = query?.after;
     const blocked = query?.blocked;
+    const source_matches = query?.source_matches;
     const stream_re =
       query?.stream && !query.stream_exact
         ? new RegExp(query.stream)
@@ -780,6 +781,18 @@ export class InMemoryStore implements Store {
       query?.source && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
+    // Reverse-match: a stream qualifies when its stored `source` pattern
+    // matches at least one of the requested names. Patterns are compiled
+    // once and cached — many subscriptions share one source pattern.
+    const reverse_cache = new Map<string, RegExp>();
+    const reverse_match = (source: string): boolean => {
+      let re = reverse_cache.get(source);
+      if (!re) {
+        re = new RegExp(source);
+        reverse_cache.set(source, re);
+      }
+      return source_matches!.some((name) => re!.test(name));
+    };
 
     const sorted = [...this._streams.values()].sort((a, b) =>
       a.stream.localeCompare(b.stream)
@@ -804,6 +817,12 @@ export class InMemoryStore implements Store {
             : !source_re!.test(s.source)
         )
           continue;
+      }
+      if (source_matches !== undefined) {
+        // Absent/empty source = no source constraint = consumes from
+        // every stream, so it matches any requested name. Only a
+        // present source that matches none of them is excluded.
+        if (s.source && !reverse_match(s.source)) continue;
       }
       if (blocked !== undefined && s.blocked !== blocked) continue;
       if (query?.lane !== undefined && s.lane !== query.lane) continue;
@@ -851,6 +870,8 @@ export class InMemoryStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const limit = options?.limit;
 
     // Pre-compile per-stream scope predicate, cached as we go so each
     // distinct stream evaluates the regex once.
@@ -905,8 +926,13 @@ export class InMemoryStore implements Store {
       }
     }
 
+    // Order by stream name so `after`/`limit` keyset-paginate
+    // deterministically (matches query_streams ordering).
+    const ordered = [...acc.keys()].sort((x, y) => x.localeCompare(y));
     const out = new Map<string, StreamStats<E>>();
-    for (const [stream, a] of acc) {
+    for (const stream of ordered) {
+      if (after !== undefined && stream <= after) continue;
+      const a = acc.get(stream)!;
       const stats: {
         head: Committed<Schemas, keyof Schemas>;
         tail?: Committed<Schemas, keyof Schemas>;
@@ -917,6 +943,7 @@ export class InMemoryStore implements Store {
       if (want_count) stats.count = a.count;
       if (want_names) stats.names = a.names;
       out.set(stream, stats as StreamStats<E>);
+      if (limit !== undefined && out.size >= limit) break;
     }
     return out;
   }

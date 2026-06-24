@@ -12,13 +12,17 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
   act,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
   state,
   ZodEmpty,
 } from "../src/index.js";
+import {
+  hour_in_zone,
+  in_autoclose_window,
+} from "../src/internal/autoclose-config.js";
 
 const make_ticket = () =>
   state({
@@ -166,7 +170,7 @@ describe("registry.autoclose_archiver(state_name) — lookup", () => {
 describe("resolveAutocloseConfig — defaults + validation", () => {
   it("applies all defaults when no knobs are set", () => {
     const cfg = resolveAutocloseConfig(undefined);
-    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
     expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
     expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
     expect(cfg.closeOnError).toBe(false);
@@ -174,7 +178,7 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
 
   it("applies defaults when ActOptions has none of the autoclose keys", () => {
     const cfg = resolveAutocloseConfig({});
-    expect(cfg.autocloseCycleMs).toBe(DEFAULT_AUTOCLOSE_CYCLE_MS);
+    expect(cfg.autocloseCycleMinutes).toBe(DEFAULT_AUTOCLOSE_CYCLE_MINUTES);
     expect(cfg.closeBatchSize).toBe(DEFAULT_CLOSE_BATCH_SIZE);
     expect(cfg.closeYieldMs).toBe(DEFAULT_CLOSE_YIELD_MS);
     expect(cfg.closeOnError).toBe(false);
@@ -182,33 +186,43 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
 
   it("preserves caller-supplied knobs", () => {
     const cfg = resolveAutocloseConfig({
-      autocloseCycleMs: 30_000,
+      autocloseCycleMinutes: 600,
       closeBatchSize: 128,
       closeYieldMs: 5,
       closeOnError: true,
     });
-    expect(cfg.autocloseCycleMs).toBe(30_000);
+    expect(cfg.autocloseCycleMinutes).toBe(600);
     expect(cfg.closeBatchSize).toBe(128);
     expect(cfg.closeYieldMs).toBe(5);
     expect(cfg.closeOnError).toBe(true);
   });
 
-  it("rejects autocloseCycleMs below the 10 s floor", () => {
-    expect(() => resolveAutocloseConfig({ autocloseCycleMs: 5_000 })).toThrow();
-  });
-
-  it("rejects autocloseCycleMs above the 1 h ceiling", () => {
+  it("rejects autocloseCycleMinutes below the 1 minute floor", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: 3_600_001 })
+      resolveAutocloseConfig({ autocloseCycleMinutes: 0 })
     ).toThrow();
   });
 
-  it("rejects non-finite autocloseCycleMs", () => {
+  it("rejects autocloseCycleMinutes above the 24 h ceiling", () => {
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: Number.NaN })
+      resolveAutocloseConfig({ autocloseCycleMinutes: 1441 })
+    ).toThrow();
+  });
+
+  it("rejects a non-integer autocloseCycleMinutes", () => {
+    expect(() =>
+      resolveAutocloseConfig({ autocloseCycleMinutes: 12.5 })
+    ).toThrow();
+  });
+
+  it("rejects non-finite autocloseCycleMinutes", () => {
+    expect(() =>
+      resolveAutocloseConfig({ autocloseCycleMinutes: Number.NaN })
     ).toThrow();
     expect(() =>
-      resolveAutocloseConfig({ autocloseCycleMs: Number.POSITIVE_INFINITY })
+      resolveAutocloseConfig({
+        autocloseCycleMinutes: Number.POSITIVE_INFINITY,
+      })
     ).toThrow();
   });
 
@@ -243,12 +257,92 @@ describe("resolveAutocloseConfig — defaults + validation", () => {
       resolveAutocloseConfig({ closeYieldMs: Number.NaN })
     ).toThrow();
   });
+
+  it("defaults autocloseWindow to undefined", () => {
+    expect(resolveAutocloseConfig({}).autocloseWindow).toBeUndefined();
+  });
+
+  it("defaults autocloseWindow.timeZone to UTC", () => {
+    const cfg = resolveAutocloseConfig({
+      autocloseWindow: { start: 1, end: 5 },
+    });
+    expect(cfg.autocloseWindow).toEqual({ start: 1, end: 5, timeZone: "UTC" });
+  });
+
+  it("preserves a caller-supplied window timeZone", () => {
+    const cfg = resolveAutocloseConfig({
+      autocloseWindow: { start: 22, end: 6, timeZone: "America/New_York" },
+    });
+    expect(cfg.autocloseWindow?.timeZone).toBe("America/New_York");
+  });
+
+  it("rejects window hours outside [0, 23]", () => {
+    expect(() =>
+      resolveAutocloseConfig({ autocloseWindow: { start: -1, end: 5 } })
+    ).toThrow();
+    expect(() =>
+      resolveAutocloseConfig({ autocloseWindow: { start: 1, end: 24 } })
+    ).toThrow();
+  });
+
+  it("rejects a window where start equals end", () => {
+    expect(() =>
+      resolveAutocloseConfig({ autocloseWindow: { start: 3, end: 3 } })
+    ).toThrow();
+  });
+
+  it("rejects an invalid window timeZone", () => {
+    expect(() =>
+      resolveAutocloseConfig({
+        autocloseWindow: { start: 1, end: 5, timeZone: "Not/AZone" },
+      })
+    ).toThrow();
+  });
+});
+
+describe("autoclose window membership", () => {
+  it("hour_in_zone reads the wall-clock hour in the given zone", () => {
+    // 2024-06-01T12:00:00Z is 08:00 in New York (EDT, UTC-4).
+    const noonUtc = new Date("2024-06-01T12:00:00Z");
+    expect(hour_in_zone(noonUtc, "UTC")).toBe(12);
+    expect(hour_in_zone(noonUtc, "America/New_York")).toBe(8);
+  });
+
+  it("no window means always in window", () => {
+    expect(
+      in_autoclose_window(undefined, new Date("2024-06-01T12:00:00Z"))
+    ).toBe(true);
+  });
+
+  it("same-day window includes [start, end) and excludes the rest", () => {
+    const w = { start: 1, end: 5, timeZone: "UTC" };
+    expect(in_autoclose_window(w, new Date("2024-06-01T01:00:00Z"))).toBe(true);
+    expect(in_autoclose_window(w, new Date("2024-06-01T04:59:00Z"))).toBe(true);
+    expect(in_autoclose_window(w, new Date("2024-06-01T05:00:00Z"))).toBe(
+      false
+    );
+    expect(in_autoclose_window(w, new Date("2024-06-01T00:30:00Z"))).toBe(
+      false
+    );
+  });
+
+  it("overnight window (start > end) wraps past midnight", () => {
+    const w = { start: 22, end: 6, timeZone: "UTC" };
+    expect(in_autoclose_window(w, new Date("2024-06-01T23:00:00Z"))).toBe(true);
+    expect(in_autoclose_window(w, new Date("2024-06-01T03:00:00Z"))).toBe(true);
+    expect(in_autoclose_window(w, new Date("2024-06-01T12:00:00Z"))).toBe(
+      false
+    );
+    expect(in_autoclose_window(w, new Date("2024-06-01T06:00:00Z"))).toBe(
+      false
+    );
+  });
 });
 
 describe("act().build() — autoclose validation runs at build time", () => {
-  it("out-of-range autocloseCycleMs throws on build", () => {
+  it("out-of-range autocloseCycleMinutes throws on build", () => {
     expect(() =>
-      act().withState(make_ticket().build()).build({ autocloseCycleMs: 1 })
+      act().withState(make_ticket().build()).build({ autocloseCycleMinutes: 0 })
     ).toThrow();
   });
 
@@ -263,7 +357,7 @@ describe("act().build() — autoclose validation runs at build time", () => {
       .autocloses((_stream, head) => head.name === "TicketResolved")
       .build();
     const app = act().withState(Ticket).build({
-      autocloseCycleMs: 30_000,
+      autocloseCycleMinutes: 600,
       closeBatchSize: 32,
       closeYieldMs: 0,
     });

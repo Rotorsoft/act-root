@@ -165,6 +165,23 @@ export type StreamPosition = {
  *   literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   `source`.
+ * @property source_matches - **Best-effort** reverse-match narrowing:
+ *   prefer streams whose stored `source` **pattern matches at least one**
+ *   of the given names (i.e. `name ~ source`, the inverse of `source`
+ *   above which is `source ~ pattern`). A subscription with an absent or
+ *   empty `source` (no source constraint — it consumes from every
+ *   stream) ALWAYS qualifies, regardless of the names. Used by the
+ *   close-cycle safety probe to fetch only the subscriptions that could
+ *   consume from a set of close-target streams instead of scanning the
+ *   whole subscriptions table. **Callers must treat it as a hint, not an
+ *   exact filter:** a
+ *   store that can't express reverse-regex (e.g. an anchor-aware `LIKE`
+ *   approximation) MAY return a superset — typically by ignoring the
+ *   filter entirely — so callers that need exactness re-verify in
+ *   process (the probe already does). Stores that honor it server-side
+ *   advertise `source_matches` in the TCK's `StoreCapabilities`, which
+ *   gates the narrowing-behavior tests; correctness never depends on the
+ *   flag, only the row count fetched.
  * @property blocked - Restrict to blocked (`true`) or unblocked (`false`)
  *   streams. Omit for all.
  * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
@@ -178,6 +195,7 @@ export type QueryStreams = {
   readonly stream_exact?: boolean;
   readonly source?: string;
   readonly source_exact?: boolean;
+  readonly source_matches?: ReadonlyArray<string>;
   readonly blocked?: boolean;
   readonly lane?: string;
   readonly after?: string;
@@ -314,6 +332,16 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream look like at event N?" historical queries without changing
  *   the call shape. Cheap on both code paths (cheap-heads path narrows
  *   the index scan; full-scan path adds a `WHERE id < ?` predicate).
+ * @property after - Keyset pagination cursor: return only streams whose
+ *   name sorts strictly after this value (lexicographic). Pass the last
+ *   stream name from the previous page to fetch the next. Pairs with
+ *   `limit`; the result `Map` preserves stream-name order so the next
+ *   cursor is `[...result.keys()].at(-1)`.
+ * @property limit - Maximum number of streams to return. **Defaults to
+ *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
+ *   which defaults to 100. Omitting it preserves the historical
+ *   "return everything" behavior; set it (with `after`) to page through
+ *   large stream sets a bounded chunk at a time.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;
@@ -321,6 +349,8 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly names?: boolean;
   readonly exclude?: ReadonlyArray<EventName<E>>;
   readonly before?: number;
+  readonly after?: string;
+  readonly limit?: number;
 };
 
 /**
@@ -901,6 +931,12 @@ export interface Store extends Disposable, EventSource {
    * answering "what did this stream look like at event N?" without
    * special call shape.
    *
+   * **Ordering + pagination.** The returned `Map` is ordered by stream
+   * name. `options.after` (exclusive cursor) + `options.limit` keyset-
+   * paginate over that order — pass the last key of one page as the
+   * `after` of the next. `limit` defaults to unbounded, so callers that
+   * omit it keep receiving every matching stream in one call.
+   *
    * @example Cheap heads — close-cycle pattern (one round trip, no scan)
    * ```typescript
    * const stats = await store().query_stats(streams, {
@@ -946,6 +982,19 @@ export interface Store extends Disposable, EventSource {
    * });
    * const { head, tail } = stats.get("order-42") ?? {};
    * // head = latest event with id < 100_000; tail = earliest in range
+   * ```
+   *
+   * @example Page through every stream a bounded chunk at a time
+   * ```typescript
+   * let after: string | undefined;
+   * for (;;) {
+   *   const page = await store().query_stats({}, { after, limit: 500 });
+   *   if (page.size === 0) break;
+   *   for (const [stream, { head }] of page) {
+   *     // ... process stream ...
+   *   }
+   *   after = [...page.keys()].at(-1);
+   * }
    * ```
    *
    * @template E - Event schemas. Narrow at the call site to type-check

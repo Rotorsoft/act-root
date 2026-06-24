@@ -103,6 +103,39 @@ describe("pg store", () => {
     expect(result.length).toBe(0);
   });
 
+  it("should cap query_stats full-scan path with limit", async () => {
+    // Three streams sharing a prefix, committed out of name order so the
+    // ORDER BY stream / LIMIT pairing is actually exercised.
+    await store().commit("qs-limit-c", [{ name: "evt", data: { value: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().commit("qs-limit-a", [{ name: "evt", data: { value: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+    await store().commit("qs-limit-b", [{ name: "evt", data: { value: 1 } }], {
+      correlation: "c",
+      causation: {},
+    });
+
+    // `count` forces the full-scan path; `limit: 2` caps streams and the
+    // result Map is in stream-name order, so the first two are a + b.
+    const stats = await store().query_stats(
+      { stream: "^qs-limit-" },
+      { count: true, limit: 2 }
+    );
+    expect([...stats.keys()]).toEqual(["qs-limit-a", "qs-limit-b"]);
+    expect(stats.get("qs-limit-a")?.count).toBe(1);
+
+    // `after` cursor advances past the first page (exclusive on stream name).
+    const page2 = await store().query_stats(
+      { stream: "^qs-limit-" },
+      { count: true, after: "qs-limit-b" }
+    );
+    expect([...page2.keys()]).toEqual(["qs-limit-c"]);
+  });
+
   it("should cover query branch with no 'after' provided", async () => {
     // Commit a couple of events
     await store().commit(

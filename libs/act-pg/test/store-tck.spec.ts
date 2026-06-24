@@ -15,5 +15,6 @@ runStoreTck({
     restore: true,
     pii_isolation: true,
     concurrent_claim: true,
+    source_matches: true,
   },
 });

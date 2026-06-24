@@ -288,44 +288,26 @@ describe("run_autoclose_cycle — slice 2", () => {
     expect(result.close_result.truncated.has("y-1")).toBe(true);
   });
 
-  test("respects `closeBatchSize` — caps candidates per cycle tick", async () => {
+  test("one run drains the whole store, paging in `closeBatchSize` batches", async () => {
     const app = build_app();
-    // Commit several resolvable streams so the cycle has more
-    // candidates than the batch size allows.
+    // Five resolvable streams; closeBatchSize = 2 means the run pages
+    // through them two at a time. A single run closes all five (it loops
+    // pages internally until a short page ends the sweep).
     for (let i = 0; i < 5; i++) {
       await app.do("OpenTicket", { stream: `t-${i}`, actor }, { title: "a" });
       await app.do("ResolveTicket", { stream: `t-${i}`, actor }, {});
     }
 
-    const internals = app as unknown as {
-      _event_to_state: Map<string, unknown>;
-      _es: { load: unknown; tombstone: unknown };
-      _logger: never;
-      _reactive_events: ReadonlySet<string>;
-    };
-    const result = await run_autoclose_cycle({
-      autoclose_policy: app.registry.autoclose_policy as never,
-      autoclose_archiver: app.registry.autoclose_archiver as never,
-      event_to_state: internals._event_to_state as never,
-      reactive_events_size: internals._reactive_events.size,
-      load: internals._es.load as never,
-      tombstone: internals._es.tombstone as never,
-      logger: internals._logger,
-      // Force closeBatchSize = 2 so the cycle stages multiple truncate
-      // batches; sum across batches should still close all five.
-      config: resolveAutocloseConfig({ closeBatchSize: 2 }),
-      correlation: "autoclose-test-cycle-batch",
-    });
+    const result = await run_cycle(app, { closeBatchSize: 2 });
 
+    expect(result.inspected).toBe(5);
     expect(result.close_result.truncated.size).toBe(5);
   });
 
-  test("yields between batches when `closeYieldMs > 0`", async () => {
+  test("yields after a batch when `closeYieldMs > 0`", async () => {
     const app = build_app();
-    for (let i = 0; i < 3; i++) {
-      await app.do("OpenTicket", { stream: `t-${i}`, actor }, { title: "a" });
-      await app.do("ResolveTicket", { stream: `t-${i}`, actor }, {});
-    }
+    await app.do("OpenTicket", { stream: "t-1", actor }, { title: "a" });
+    await app.do("ResolveTicket", { stream: "t-1", actor }, {});
 
     const internals = app as unknown as {
       _event_to_state: Map<string, unknown>;
@@ -342,17 +324,13 @@ describe("run_autoclose_cycle — slice 2", () => {
       load: internals._es.load as never,
       tombstone: internals._es.tombstone as never,
       logger: internals._logger,
-      config: resolveAutocloseConfig({
-        closeBatchSize: 1,
-        closeYieldMs: 50,
-      }),
+      config: resolveAutocloseConfig({ closeYieldMs: 50 }),
       correlation: "autoclose-test-cycle-yield",
     });
     const elapsed = Date.now() - t0;
 
-    expect(result.close_result.truncated.size).toBe(3);
-    // 3 batches × ~50ms yield each ≥ 100 ms cumulative (one yield
-    // skipped after the final batch).
+    expect(result.close_result.truncated.size).toBe(1);
+    // The post-batch yield (ms > 0) ran.
     expect(elapsed).toBeGreaterThanOrEqual(50);
   });
 
@@ -415,11 +393,10 @@ describe("run_autoclose_cycle — slice 2", () => {
 
   test("falls back to count=0 when the store omits the count field", async () => {
     // Defensive fallback for adapters / stubs that return
-    // `StreamStats` without `count`. The cycle always asks for
-    // `count: true`, so the fallback is unreachable in practice —
-    // this test stubs `query_stats` to omit `count` and verifies the
-    // cycle still threads a value into the predicate without
-    // throwing.
+    // `StreamStats` without `count` even when asked. The cycle always
+    // requests `count: true`, so this stubs `query_stats` to omit
+    // `count` and verifies the cycle still threads a value (0) into the
+    // predicate without throwing.
     let observed_count: number | undefined;
     const PassThrough = state({ Passthrough: z.object({ open: z.boolean() }) })
       .init(() => ({ open: false }))

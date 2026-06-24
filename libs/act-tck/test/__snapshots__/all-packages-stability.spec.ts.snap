@@ -792,15 +792,15 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
-// Re-export the autoclose config surface (#837 / epic #802) so
-// operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
-// implementation lives in \`internal/autoclose-config.ts\` to keep
-// this orchestrator file focused on the \`Act\` class.
+// Re-export the autoclose config surface so operators can
+// \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"\`. The implementation lives in
+// \`internal/autoclose-config.ts\` to keep this orchestrator file
+// focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -921,27 +921,31 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
   /**
-   * Online close cycle cadence in ms (#837 / epic #802). The
-   * app-level autoclose controller ticks at this interval, iterates
-   * states with \`.autocloses(...)\` declared, and schedules
-   * truncate-and-seed for streams whose predicate returned \`true\`.
+   * How often the autoclose sweep runs, in minutes. Autoclose is
+   * low-urgency housekeeping, so each run sweeps the whole store once
+   * (paging through it in \`closeBatchSize\` batches) and this knob is
+   * how often that sweep repeats — a couple of times a day, not a hot
+   * path.
    *
-   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
-   * \`[10_000, 3_600_000]\` at \`act().build()\`; out-of-range throws.
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MINUTES} (720 = 12 h).
+   * Validated as an integer \`[1, 1440]\` (1 minute to 24 hours) at
+   * \`act().build()\`; out-of-range throws. When \`autocloseWindow\` is
+   * set, this is the poll interval and should be shorter than the
+   * window.
    *
    * Zero-cost when no state declares \`.autocloses(...)\` — the
    * controller is never constructed in that case.
    */
-  readonly autocloseCycleMs?: number;
+  readonly autocloseCycleMinutes?: number;
   /**
-   * Max number of streams the autoclose cycle considers per tick per
-   * state (#837). Bounds memory + truncate fan-out so a misconfigured
-   * predicate that matches "everything" can't take down the writer.
+   * Batch size for the sweep: the per-batch \`query_stats\` page size +
+   * the truncate fan-out within a run. A run pages through the whole
+   * store \`closeBatchSize\` streams at a time, so this bounds memory
+   * and the per-batch write burst without limiting how many streams a
+   * run can close in total.
    *
    * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
-   * \`[1, 1024]\`. Above 1024, the builder throws — operators with
-   * genuine high-throughput needs opt out by passing a custom
-   * predicate that pre-filters.
+   * \`[1, 1024]\`; above 1024 the builder throws.
    */
   readonly closeBatchSize?: number;
   /**
@@ -962,6 +966,21 @@ export type ActOptions<TLanes extends string = string> = {
    * (defensive policy for "if I can't evaluate, assume terminal").
    */
   readonly closeOnError?: boolean;
+  /**
+   * Optional off-hours window restricting when the sweep runs. The
+   * ticker still fires every \`autocloseCycleMinutes\`, but a tick only
+   * sweeps when the current hour falls inside \`[start, end)\`. Hours
+   * are \`[0, 23]\` integers in \`timeZone\` (IANA, default \`"UTC"\`,
+   * DST-correct); \`start > end\` is an overnight window (e.g.
+   * \`{ start: 22, end: 6 }\`). Every in-window tick runs a full sweep,
+   * so size \`autocloseCycleMinutes\` to the window. Omit to run on
+   * every tick regardless of clock time.
+   */
+  readonly autocloseWindow?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone?: string;
+  };
 };
 
 export class Act<
@@ -4355,19 +4374,23 @@ import { z } from "zod";
 import type { ActOptions } from "../act.js";
 
 /**
- * Default {@link ActOptions.autocloseCycleMs}: 60 s. Sized for typical
- * business-app close cadences (close-when-resolved on tickets,
- * close-when-stale on sessions) where same-second response is not the
- * goal. Operators with tighter requirements override; the floor is
- * 10 s (any tighter is the wrong primitive).
+ * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
+ * Autoclose is low-urgency housekeeping — a stream eligible for close
+ * is "old" (past a retention age) or "resolved a while ago" (terminal
+ * + grace), never urgent — so the cycle runs a couple of times a day,
+ * not as a hot path. Each run sweeps the whole store; the cadence is
+ * how often that sweep repeats. Range is 1 minute to 24 hours (1440);
+ * the floor exists for window polling (see
+ * {@link ActOptions.autocloseWindow}), the ceiling lets operators run
+ * it once a day.
  */
-export const DEFAULT_AUTOCLOSE_CYCLE_MS = 60_000;
+export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
 
 /**
- * Default {@link ActOptions.closeBatchSize}: 64. Bounds the
- * \`Store.query_streams\` page size + the truncate fan-out per cycle
- * tick so a "close everything" misconfiguration can't take down the
- * writer.
+ * Default {@link ActOptions.closeBatchSize}: 64. Bounds the per-batch
+ * \`query_stats\` page size + the truncate fan-out within a run so a
+ * full-store sweep streams through in bounded chunks instead of
+ * materializing every candidate or truncating thousands at once.
  */
 export const DEFAULT_CLOSE_BATCH_SIZE = 64;
 
@@ -4377,6 +4400,62 @@ export const DEFAULT_CLOSE_BATCH_SIZE = 64;
  * positive value to release the writer lock.
  */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
+
+/**
+ * Default time zone for {@link ActOptions.autocloseWindow} when the
+ * operator declares a window without one. UTC keeps the contract
+ * timezone-explicit; operators who think in local off-hours pass an
+ * IANA name.
+ */
+export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+
+/**
+ * True when \`tz\` is a time zone the runtime's \`Intl\` accepts. Used to
+ * reject typos in {@link ActOptions.autocloseWindow} at build time.
+ *
+ * @internal
+ */
+function is_valid_time_zone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zod schema for the optional off-hours window. Hours are \`[0, 23]\`
+ * integers; \`start === end\` is rejected because the half-open
+ * \`[start, end)\` window it would describe is empty (and would silently
+ * disable autoclose). \`start > end\` is allowed and means an overnight
+ * window (e.g. \`{ start: 22, end: 6 }\` is 22:00 through 06:00).
+ *
+ * @internal
+ */
+const AutocloseWindowSchema = z
+  .object({
+    start: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
+    end: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
+    timeZone: z
+      .string()
+      .refine(is_valid_time_zone, {
+        message: "autocloseWindow.timeZone must be a valid IANA time zone",
+      })
+      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
+  })
+  .refine((w) => w.start !== w.end, {
+    message:
+      "autocloseWindow.start and end must differ — an empty window disables autoclose",
+  });
 
 /**
  * Zod schema for the autoclose knobs on {@link ActOptions}. Same
@@ -4391,11 +4470,12 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
  * @internal
  */
 const AutocloseOptionsSchema = z.object({
-  autocloseCycleMs: z
+  autocloseCycleMinutes: z
     .number()
-    .min(10_000)
-    .max(3_600_000)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
   closeBatchSize: z
     .number()
     .int()
@@ -4404,6 +4484,7 @@ const AutocloseOptionsSchema = z.object({
     .default(DEFAULT_CLOSE_BATCH_SIZE),
   closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
   closeOnError: z.boolean().default(false),
+  autocloseWindow: AutocloseWindowSchema.optional(),
 });
 
 /**
@@ -4423,11 +4504,47 @@ export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
   return AutocloseOptionsSchema.parse({
-    autocloseCycleMs: options?.autocloseCycleMs,
+    autocloseCycleMinutes: options?.autocloseCycleMinutes,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,
+    autocloseWindow: options?.autocloseWindow,
   });
+}
+
+/**
+ * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
+ * via \`Intl\`. Split out so the window check can be unit-tested without
+ * spinning a controller.
+ *
+ * @internal
+ */
+export function hour_in_zone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  return Number(parts.find((p) => p.type === "hour")?.value);
+}
+
+/**
+ * Whether \`now\` falls inside the configured off-hours window. The
+ * window is half-open on hour boundaries — \`[start, end)\` — and wraps
+ * past midnight when \`start > end\`. With no window configured every
+ * tick runs, so callers treat \`undefined\` as "always in window."
+ *
+ * @internal
+ */
+export function in_autoclose_window(
+  window: AutocloseConfig["autocloseWindow"],
+  now: Date
+): boolean {
+  if (!window) return true;
+  const hour = hour_in_zone(now, window.timeZone);
+  return window.start < window.end
+    ? hour >= window.start && hour < window.end
+    : hour >= window.start || hour < window.end;
 }
 
 // === autoclose-cycle.ts ===
@@ -4464,6 +4581,7 @@ import type {
   State,
   TruncateResult,
 } from "../types/index.js";
+import { in_autoclose_window } from "./autoclose-config.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import { run_close_cycle } from "./close-cycle.js";
 import { close_correlation } from "./correlator.js";
@@ -4549,15 +4667,20 @@ function yield_between_batches(ms: number): Promise<void> {
 }
 
 /**
- * Run one autoclose tick against the configured store. Returns
- * after every stream has been paginated through and every eligible
- * batch handed to {@link run_close_cycle}.
+ * Run one autoclose tick against the configured store. Each tick
+ * fetches a single bounded page of streams — those sorting after
+ * {@link AutocloseCycleDeps.after}, up to \`closeBatchSize\` — applies
+ * each state's predicate, and hands that page's eligible candidates to
+ * {@link run_close_cycle} as one batch (one safety probe per batch).
+ * It pages through the whole store via the keyset cursor, yielding
+ * \`closeYieldMs\` between batches, so a single run reaches every
+ * eligible stream while bounding per-batch memory and write burst.
  *
  * The cycle never throws — predicate exceptions are caught and
  * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
  * whether they count as "close this stream"). Store errors during
- * pagination propagate to the caller (the controller logs them and
- * skips to the next tick).
+ * a page query propagate to the caller (the controller logs them and
+ * skips to the next run).
  *
  * @internal
  */
@@ -4571,73 +4694,70 @@ export async function run_autoclose_cycle(
   const truncated: TruncateResult = new Map();
   const skipped: string[] = [];
 
-  // \`query_stats\` returns every event-stream in one map (no cursor
-  // pagination — that's \`query_streams\` for subscription positions,
-  // not events). The cycle iterates the map, applies each state's
-  // predicate to the matching streams, and flushes truncate batches
-  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
-  // batches on adapters where the writer lock matters.
-  const stats = await s.query_stats(
-    {},
-    { count: true, exclude: [TOMBSTONE_EVENT] }
-  );
+  const page = deps.config.closeBatchSize;
+  // Page through the whole store one \`closeBatchSize\` batch at a time,
+  // closing each batch before fetching the next. Closed streams are
+  // tombstoned (excluded here) and sit behind the cursor, so the
+  // forward scan never revisits them.
+  let after: string | undefined;
+  for (;;) {
+    const stats = await s.query_stats(
+      {},
+      { count: true, exclude: [TOMBSTONE_EVENT], after, limit: page }
+    );
+    if (stats.size === 0) break;
+    inspected += stats.size;
 
-  const flush_batch = async (candidates: CloseTarget[]) => {
-    if (candidates.length === 0) return;
-    const result = await run_close_cycle(candidates, {
-      reactive_events_size: deps.reactive_events_size,
-      event_to_state: deps.event_to_state,
-      load: deps.load,
-      tombstone: deps.tombstone,
-      logger: deps.logger,
-      correlation: deps.correlation,
-    });
-    for (const [stream, entry] of result.truncated) {
-      truncated.set(stream, entry);
-    }
-    for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.closeYieldMs);
-  };
+    const candidates: CloseTarget[] = [];
+    for (const [stream, { head, count }] of stats) {
+      // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
+      // includes streams with at least one non-excluded event.
+      const owner = deps.event_to_state.get(head.name);
+      if (!owner) continue;
+      const predicate = deps.autoclose_policy(owner.name);
+      if (!predicate) continue;
 
-  let candidates: CloseTarget[] = [];
+      let close = false;
+      try {
+        close = predicate(stream, head, count ?? 0);
+        evaluated += 1;
+      } catch (err) {
+        predicate_errors += 1;
+        deps.logger.error(
+          \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
+            err instanceof Error ? err.message : String(err)
+          }\`
+        );
+        close = deps.config.closeOnError;
+      }
 
-  for (const [stream, { head, count }] of stats) {
-    inspected += 1;
-    // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
-    // includes streams with at least one non-excluded event.
-    const owner = deps.event_to_state.get(head.name);
-    if (!owner) continue;
-    const predicate = deps.autoclose_policy(owner.name);
-    if (!predicate) continue;
+      if (!close) continue;
 
-    let close = false;
-    try {
-      close = predicate(stream, head, count ?? 0);
-      evaluated += 1;
-    } catch (err) {
-      predicate_errors += 1;
-      deps.logger.error(
-        \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
-          err instanceof Error ? err.message : String(err)
-        }\`
-      );
-      close = deps.config.closeOnError;
+      const archiver = deps.autoclose_archiver(owner.name);
+      const archive = archiver ? () => archiver(stream, head) : undefined;
+      candidates.push({ stream, archive });
     }
 
-    if (!close) continue;
-
-    const archiver = deps.autoclose_archiver(owner.name);
-    const archive = archiver ? () => archiver(stream, head) : undefined;
-    candidates.push({ stream, archive });
-
-    if (candidates.length >= deps.config.closeBatchSize) {
-      await flush_batch(candidates);
-      candidates = [];
+    // One batch → one safety probe. The page size bounds the count.
+    if (candidates.length > 0) {
+      const result = await run_close_cycle(candidates, {
+        reactive_events_size: deps.reactive_events_size,
+        event_to_state: deps.event_to_state,
+        load: deps.load,
+        tombstone: deps.tombstone,
+        logger: deps.logger,
+        correlation: deps.correlation,
+      });
+      for (const [stream, entry] of result.truncated)
+        truncated.set(stream, entry);
+      for (const stream of result.skipped) skipped.push(stream);
+      await yield_between_batches(deps.config.closeYieldMs);
     }
+
+    // Short page → end of the sweep.
+    if (stats.size < page) break;
+    after = [...stats.keys()].at(-1);
   }
-
-  // Flush the trailing batch.
-  await flush_batch(candidates);
 
   return {
     inspected,
@@ -4658,7 +4778,7 @@ export async function run_autoclose_cycle(
  */
 export type AutocloseControllerDeps = Omit<
   AutocloseCycleDeps,
-  "correlation"
+  "correlation" | "after"
 > & {
   /**
    * Correlator the controller invokes per tick to stamp the cycle's
@@ -4723,7 +4843,7 @@ export class AutocloseController {
     // \`run_once\`, so there's nothing left to do here but keep ticking.
     this._timer = setInterval(() => {
       this.run_once().catch(() => {});
-    }, this.deps.config.autocloseCycleMs);
+    }, this.deps.config.autocloseCycleMinutes * 60_000);
     // Don't let the interval keep the process alive — Node's
     // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).
@@ -4763,6 +4883,10 @@ export class AutocloseController {
     // Circuit open: the store is failing, skip this tick rather than pile
     // load on a down backend. The next tick after the cooldown retries.
     if (this.deps.breaker.state(Date.now()) === "open") return null;
+    // Off-hours window: outside it, this tick does nothing. The ticker
+    // keeps firing; only the sweep is gated.
+    if (!in_autoclose_window(this.deps.config.autocloseWindow, new Date()))
+      return null;
     this._running = true;
     try {
       const correlation = close_correlation(
@@ -4847,7 +4971,7 @@ import type { AutoclosePredicate, Schemas } from "../types/action.js";
 /**
  * Lower bound on a resolved \`after\` window. Sub-minute windows are
  * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMs\` (default 60 s), so a 30 s window can't
+ * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
  * be honored anyway. Rejecting at build keeps the failure mode noisy.
  */
 const MIN_AFTER_MS = 60_000;
@@ -5446,7 +5570,22 @@ export type CloseCycleDeps = {
    * UUID.
    */
   readonly correlation: string;
+  /**
+   * Page size for the safety probe's \`query_streams\` pagination.
+   * Defaults to {@link SAFETY_PROBE_PAGE_SIZE}; production callers omit
+   * it, tests set a small value to exercise the multi-page path.
+   */
+  readonly probe_page_size?: number;
 };
+
+/**
+ * Page size for the safety probe's keyset pagination over the
+ * subscriptions table. Above \`query_streams\`'s default \`limit\` of 100
+ * to keep the round-trip count low while bounding per-page work.
+ *
+ * @internal
+ */
+export const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
@@ -5483,7 +5622,8 @@ export async function run_close_cycle(
   const safe = await partition_by_safety(
     stream_info,
     deps.reactive_events_size,
-    skipped
+    skipped,
+    deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
   );
   if (!safe.length) return { truncated: new Map(), skipped };
 
@@ -5558,7 +5698,8 @@ async function scan_stream_heads(
 async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
   reactive_events_size: number,
-  skipped: string[]
+  skipped: string[],
+  page_size: number
 ): Promise<string[]> {
   if (reactive_events_size === 0) return [...stream_info.keys()];
 
@@ -5580,14 +5721,41 @@ async function partition_by_safety(
     }
     return re;
   };
-  await store().query_streams((position) => {
-    const source_re = position.source ? get_regex(position.source) : undefined;
-    for (const [stream, info] of stream_info) {
-      if ((!source_re || source_re.test(stream)) && position.at < info.max_id) {
-        pending_set.add(stream);
-      }
-    }
-  });
+
+  // \`source_matches\` narrows the probe server-side to subscriptions that
+  // could consume from a stream we're closing — a best-effort hint, so
+  // the per-position source/target re-check below still runs and keeps
+  // the result correct even when a store returns a superset.
+  const targets = [...stream_info.keys()];
+
+  // Keyset-paginate the (narrowed) subscriptions on the \`after\` cursor —
+  // \`query_streams\` caps each call at \`limit\` rows, so every page is
+  // inspected until a short page signals the last one. A lagging reaction
+  // marks its close target pending regardless of how far its subscription
+  // sorts past the first page.
+  let after: string | undefined;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store().query_streams(
+      (position) => {
+        last = position.stream;
+        const source_re = position.source
+          ? get_regex(position.source)
+          : undefined;
+        for (const [stream, info] of stream_info) {
+          if (
+            (!source_re || source_re.test(stream)) &&
+            position.at < info.max_id
+          ) {
+            pending_set.add(stream);
+          }
+        }
+      },
+      { after, limit: page_size, source_matches: targets }
+    );
+    if (count < page_size) break;
+    after = last;
+  }
 
   const safe: string[] = [];
   for (const [stream] of stream_info) {
@@ -9315,6 +9483,7 @@ export class InMemoryStore implements Store {
     const limit = query?.limit ?? 100;
     const after = query?.after;
     const blocked = query?.blocked;
+    const source_matches = query?.source_matches;
     const stream_re =
       query?.stream && !query.stream_exact
         ? new RegExp(query.stream)
@@ -9323,6 +9492,18 @@ export class InMemoryStore implements Store {
       query?.source && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
+    // Reverse-match: a stream qualifies when its stored \`source\` pattern
+    // matches at least one of the requested names. Patterns are compiled
+    // once and cached — many subscriptions share one source pattern.
+    const reverse_cache = new Map<string, RegExp>();
+    const reverse_match = (source: string): boolean => {
+      let re = reverse_cache.get(source);
+      if (!re) {
+        re = new RegExp(source);
+        reverse_cache.set(source, re);
+      }
+      return source_matches!.some((name) => re!.test(name));
+    };
 
     const sorted = [...this._streams.values()].sort((a, b) =>
       a.stream.localeCompare(b.stream)
@@ -9347,6 +9528,12 @@ export class InMemoryStore implements Store {
             : !source_re!.test(s.source)
         )
           continue;
+      }
+      if (source_matches !== undefined) {
+        // Absent/empty source = no source constraint = consumes from
+        // every stream, so it matches any requested name. Only a
+        // present source that matches none of them is excluded.
+        if (s.source && !reverse_match(s.source)) continue;
       }
       if (blocked !== undefined && s.blocked !== blocked) continue;
       if (query?.lane !== undefined && s.lane !== query.lane) continue;
@@ -9394,6 +9581,8 @@ export class InMemoryStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const limit = options?.limit;
 
     // Pre-compile per-stream scope predicate, cached as we go so each
     // distinct stream evaluates the regex once.
@@ -9448,8 +9637,13 @@ export class InMemoryStore implements Store {
       }
     }
 
+    // Order by stream name so \`after\`/\`limit\` keyset-paginate
+    // deterministically (matches query_streams ordering).
+    const ordered = [...acc.keys()].sort((x, y) => x.localeCompare(y));
     const out = new Map<string, StreamStats<E>>();
-    for (const [stream, a] of acc) {
+    for (const stream of ordered) {
+      if (after !== undefined && stream <= after) continue;
+      const a = acc.get(stream)!;
       const stats: {
         head: Committed<Schemas, keyof Schemas>;
         tail?: Committed<Schemas, keyof Schemas>;
@@ -9460,6 +9654,7 @@ export class InMemoryStore implements Store {
       if (want_count) stats.count = a.count;
       if (want_names) stats.names = a.names;
       out.set(stream, stats as StreamStats<E>);
+      if (limit !== undefined && out.size >= limit) break;
     }
     return out;
   }
@@ -9623,7 +9818,7 @@ export * from "./utils.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -10310,6 +10505,23 @@ export type StreamPosition = {
  *   literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
+ * @property source_matches - **Best-effort** reverse-match narrowing:
+ *   prefer streams whose stored \`source\` **pattern matches at least one**
+ *   of the given names (i.e. \`name ~ source\`, the inverse of \`source\`
+ *   above which is \`source ~ pattern\`). A subscription with an absent or
+ *   empty \`source\` (no source constraint — it consumes from every
+ *   stream) ALWAYS qualifies, regardless of the names. Used by the
+ *   close-cycle safety probe to fetch only the subscriptions that could
+ *   consume from a set of close-target streams instead of scanning the
+ *   whole subscriptions table. **Callers must treat it as a hint, not an
+ *   exact filter:** a
+ *   store that can't express reverse-regex (e.g. an anchor-aware \`LIKE\`
+ *   approximation) MAY return a superset — typically by ignoring the
+ *   filter entirely — so callers that need exactness re-verify in
+ *   process (the probe already does). Stores that honor it server-side
+ *   advertise \`source_matches\` in the TCK's \`StoreCapabilities\`, which
+ *   gates the narrowing-behavior tests; correctness never depends on the
+ *   flag, only the row count fetched.
  * @property blocked - Restrict to blocked (\`true\`) or unblocked (\`false\`)
  *   streams. Omit for all.
  * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
@@ -10323,6 +10535,7 @@ export type QueryStreams = {
   readonly stream_exact?: boolean;
   readonly source?: string;
   readonly source_exact?: boolean;
+  readonly source_matches?: ReadonlyArray<string>;
   readonly blocked?: boolean;
   readonly lane?: string;
   readonly after?: string;
@@ -10459,6 +10672,16 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream look like at event N?" historical queries without changing
  *   the call shape. Cheap on both code paths (cheap-heads path narrows
  *   the index scan; full-scan path adds a \`WHERE id < ?\` predicate).
+ * @property after - Keyset pagination cursor: return only streams whose
+ *   name sorts strictly after this value (lexicographic). Pass the last
+ *   stream name from the previous page to fetch the next. Pairs with
+ *   \`limit\`; the result \`Map\` preserves stream-name order so the next
+ *   cursor is \`[...result.keys()].at(-1)\`.
+ * @property limit - Maximum number of streams to return. **Defaults to
+ *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
+ *   which defaults to 100. Omitting it preserves the historical
+ *   "return everything" behavior; set it (with \`after\`) to page through
+ *   large stream sets a bounded chunk at a time.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;
@@ -10466,6 +10689,8 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly names?: boolean;
   readonly exclude?: ReadonlyArray<EventName<E>>;
   readonly before?: number;
+  readonly after?: string;
+  readonly limit?: number;
 };
 
 /**
@@ -11046,6 +11271,12 @@ export interface Store extends Disposable, EventSource {
    * answering "what did this stream look like at event N?" without
    * special call shape.
    *
+   * **Ordering + pagination.** The returned \`Map\` is ordered by stream
+   * name. \`options.after\` (exclusive cursor) + \`options.limit\` keyset-
+   * paginate over that order — pass the last key of one page as the
+   * \`after\` of the next. \`limit\` defaults to unbounded, so callers that
+   * omit it keep receiving every matching stream in one call.
+   *
    * @example Cheap heads — close-cycle pattern (one round trip, no scan)
    * \`\`\`typescript
    * const stats = await store().query_stats(streams, {
@@ -11091,6 +11322,19 @@ export interface Store extends Disposable, EventSource {
    * });
    * const { head, tail } = stats.get("order-42") ?? {};
    * // head = latest event with id < 100_000; tail = earliest in range
+   * \`\`\`
+   *
+   * @example Page through every stream a bounded chunk at a time
+   * \`\`\`typescript
+   * let after: string | undefined;
+   * for (;;) {
+   *   const page = await store().query_stats({}, { after, limit: 500 });
+   *   if (page.size === 0) break;
+   *   for (const [stream, { head }] of page) {
+   *     // ... process stream ...
+   *   }
+   *   after = [...page.keys()].at(-1);
+   * }
    * \`\`\`
    *
    * @template E - Event schemas. Narrow at the call site to type-check
@@ -14895,15 +15139,15 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
-// Re-export the autoclose config surface (#837 / epic #802) so
-// operators can keep \`import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolveAutocloseConfig } from "@rotorsoft/act"\`. The
-// implementation lives in \`internal/autoclose-config.ts\` to keep
-// this orchestrator file focused on the \`Act\` class.
+// Re-export the autoclose config surface so operators can
+// \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"\`. The implementation lives in
+// \`internal/autoclose-config.ts\` to keep this orchestrator file
+// focused on the \`Act\` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -15024,27 +15268,31 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
   /**
-   * Online close cycle cadence in ms (#837 / epic #802). The
-   * app-level autoclose controller ticks at this interval, iterates
-   * states with \`.autocloses(...)\` declared, and schedules
-   * truncate-and-seed for streams whose predicate returned \`true\`.
+   * How often the autoclose sweep runs, in minutes. Autoclose is
+   * low-urgency housekeeping, so each run sweeps the whole store once
+   * (paging through it in \`closeBatchSize\` batches) and this knob is
+   * how often that sweep repeats — a couple of times a day, not a hot
+   * path.
    *
-   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
-   * \`[10_000, 3_600_000]\` at \`act().build()\`; out-of-range throws.
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MINUTES} (720 = 12 h).
+   * Validated as an integer \`[1, 1440]\` (1 minute to 24 hours) at
+   * \`act().build()\`; out-of-range throws. When \`autocloseWindow\` is
+   * set, this is the poll interval and should be shorter than the
+   * window.
    *
    * Zero-cost when no state declares \`.autocloses(...)\` — the
    * controller is never constructed in that case.
    */
-  readonly autocloseCycleMs?: number;
+  readonly autocloseCycleMinutes?: number;
   /**
-   * Max number of streams the autoclose cycle considers per tick per
-   * state (#837). Bounds memory + truncate fan-out so a misconfigured
-   * predicate that matches "everything" can't take down the writer.
+   * Batch size for the sweep: the per-batch \`query_stats\` page size +
+   * the truncate fan-out within a run. A run pages through the whole
+   * store \`closeBatchSize\` streams at a time, so this bounds memory
+   * and the per-batch write burst without limiting how many streams a
+   * run can close in total.
    *
    * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
-   * \`[1, 1024]\`. Above 1024, the builder throws — operators with
-   * genuine high-throughput needs opt out by passing a custom
-   * predicate that pre-filters.
+   * \`[1, 1024]\`; above 1024 the builder throws.
    */
   readonly closeBatchSize?: number;
   /**
@@ -15065,6 +15313,21 @@ export type ActOptions<TLanes extends string = string> = {
    * (defensive policy for "if I can't evaluate, assume terminal").
    */
   readonly closeOnError?: boolean;
+  /**
+   * Optional off-hours window restricting when the sweep runs. The
+   * ticker still fires every \`autocloseCycleMinutes\`, but a tick only
+   * sweeps when the current hour falls inside \`[start, end)\`. Hours
+   * are \`[0, 23]\` integers in \`timeZone\` (IANA, default \`"UTC"\`,
+   * DST-correct); \`start > end\` is an overnight window (e.g.
+   * \`{ start: 22, end: 6 }\`). Every in-window tick runs a full sweep,
+   * so size \`autocloseCycleMinutes\` to the window. Omit to run on
+   * every tick regardless of clock time.
+   */
+  readonly autocloseWindow?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone?: string;
+  };
 };
 
 export class Act<
@@ -18458,19 +18721,23 @@ import { z } from "zod";
 import type { ActOptions } from "../act.js";
 
 /**
- * Default {@link ActOptions.autocloseCycleMs}: 60 s. Sized for typical
- * business-app close cadences (close-when-resolved on tickets,
- * close-when-stale on sessions) where same-second response is not the
- * goal. Operators with tighter requirements override; the floor is
- * 10 s (any tighter is the wrong primitive).
+ * Default {@link ActOptions.autocloseCycleMinutes}: 720 (12 h).
+ * Autoclose is low-urgency housekeeping — a stream eligible for close
+ * is "old" (past a retention age) or "resolved a while ago" (terminal
+ * + grace), never urgent — so the cycle runs a couple of times a day,
+ * not as a hot path. Each run sweeps the whole store; the cadence is
+ * how often that sweep repeats. Range is 1 minute to 24 hours (1440);
+ * the floor exists for window polling (see
+ * {@link ActOptions.autocloseWindow}), the ceiling lets operators run
+ * it once a day.
  */
-export const DEFAULT_AUTOCLOSE_CYCLE_MS = 60_000;
+export const DEFAULT_AUTOCLOSE_CYCLE_MINUTES = 720;
 
 /**
- * Default {@link ActOptions.closeBatchSize}: 64. Bounds the
- * \`Store.query_streams\` page size + the truncate fan-out per cycle
- * tick so a "close everything" misconfiguration can't take down the
- * writer.
+ * Default {@link ActOptions.closeBatchSize}: 64. Bounds the per-batch
+ * \`query_stats\` page size + the truncate fan-out within a run so a
+ * full-store sweep streams through in bounded chunks instead of
+ * materializing every candidate or truncating thousands at once.
  */
 export const DEFAULT_CLOSE_BATCH_SIZE = 64;
 
@@ -18480,6 +18747,62 @@ export const DEFAULT_CLOSE_BATCH_SIZE = 64;
  * positive value to release the writer lock.
  */
 export const DEFAULT_CLOSE_YIELD_MS = 0;
+
+/**
+ * Default time zone for {@link ActOptions.autocloseWindow} when the
+ * operator declares a window without one. UTC keeps the contract
+ * timezone-explicit; operators who think in local off-hours pass an
+ * IANA name.
+ */
+export const DEFAULT_AUTOCLOSE_WINDOW_TZ = "UTC";
+
+/**
+ * True when \`tz\` is a time zone the runtime's \`Intl\` accepts. Used to
+ * reject typos in {@link ActOptions.autocloseWindow} at build time.
+ *
+ * @internal
+ */
+function is_valid_time_zone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zod schema for the optional off-hours window. Hours are \`[0, 23]\`
+ * integers; \`start === end\` is rejected because the half-open
+ * \`[start, end)\` window it would describe is empty (and would silently
+ * disable autoclose). \`start > end\` is allowed and means an overnight
+ * window (e.g. \`{ start: 22, end: 6 }\` is 22:00 through 06:00).
+ *
+ * @internal
+ */
+const AutocloseWindowSchema = z
+  .object({
+    start: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.start must be an hour in [0, 23]" }),
+    end: z
+      .number()
+      .int()
+      .min(0)
+      .max(23, { message: "autocloseWindow.end must be an hour in [0, 23]" }),
+    timeZone: z
+      .string()
+      .refine(is_valid_time_zone, {
+        message: "autocloseWindow.timeZone must be a valid IANA time zone",
+      })
+      .default(DEFAULT_AUTOCLOSE_WINDOW_TZ),
+  })
+  .refine((w) => w.start !== w.end, {
+    message:
+      "autocloseWindow.start and end must differ — an empty window disables autoclose",
+  });
 
 /**
  * Zod schema for the autoclose knobs on {@link ActOptions}. Same
@@ -18494,11 +18817,12 @@ export const DEFAULT_CLOSE_YIELD_MS = 0;
  * @internal
  */
 const AutocloseOptionsSchema = z.object({
-  autocloseCycleMs: z
+  autocloseCycleMinutes: z
     .number()
-    .min(10_000)
-    .max(3_600_000)
-    .default(DEFAULT_AUTOCLOSE_CYCLE_MS),
+    .int()
+    .min(1)
+    .max(1440)
+    .default(DEFAULT_AUTOCLOSE_CYCLE_MINUTES),
   closeBatchSize: z
     .number()
     .int()
@@ -18507,6 +18831,7 @@ const AutocloseOptionsSchema = z.object({
     .default(DEFAULT_CLOSE_BATCH_SIZE),
   closeYieldMs: z.number().min(0).max(1000).default(DEFAULT_CLOSE_YIELD_MS),
   closeOnError: z.boolean().default(false),
+  autocloseWindow: AutocloseWindowSchema.optional(),
 });
 
 /**
@@ -18526,11 +18851,47 @@ export function resolveAutocloseConfig(
   options: ActOptions | undefined
 ): AutocloseConfig {
   return AutocloseOptionsSchema.parse({
-    autocloseCycleMs: options?.autocloseCycleMs,
+    autocloseCycleMinutes: options?.autocloseCycleMinutes,
     closeBatchSize: options?.closeBatchSize,
     closeYieldMs: options?.closeYieldMs,
     closeOnError: options?.closeOnError,
+    autocloseWindow: options?.autocloseWindow,
   });
+}
+
+/**
+ * The current hour \`[0, 23]\` in the given IANA time zone, DST-correct
+ * via \`Intl\`. Split out so the window check can be unit-tested without
+ * spinning a controller.
+ *
+ * @internal
+ */
+export function hour_in_zone(now: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(now);
+  return Number(parts.find((p) => p.type === "hour")?.value);
+}
+
+/**
+ * Whether \`now\` falls inside the configured off-hours window. The
+ * window is half-open on hour boundaries — \`[start, end)\` — and wraps
+ * past midnight when \`start > end\`. With no window configured every
+ * tick runs, so callers treat \`undefined\` as "always in window."
+ *
+ * @internal
+ */
+export function in_autoclose_window(
+  window: AutocloseConfig["autocloseWindow"],
+  now: Date
+): boolean {
+  if (!window) return true;
+  const hour = hour_in_zone(now, window.timeZone);
+  return window.start < window.end
+    ? hour >= window.start && hour < window.end
+    : hour >= window.start || hour < window.end;
 }
 
 // === autoclose-cycle.ts ===
@@ -18567,6 +18928,7 @@ import type {
   State,
   TruncateResult,
 } from "../types/index.js";
+import { in_autoclose_window } from "./autoclose-config.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
 import { run_close_cycle } from "./close-cycle.js";
 import { close_correlation } from "./correlator.js";
@@ -18652,15 +19014,20 @@ function yield_between_batches(ms: number): Promise<void> {
 }
 
 /**
- * Run one autoclose tick against the configured store. Returns
- * after every stream has been paginated through and every eligible
- * batch handed to {@link run_close_cycle}.
+ * Run one autoclose tick against the configured store. Each tick
+ * fetches a single bounded page of streams — those sorting after
+ * {@link AutocloseCycleDeps.after}, up to \`closeBatchSize\` — applies
+ * each state's predicate, and hands that page's eligible candidates to
+ * {@link run_close_cycle} as one batch (one safety probe per batch).
+ * It pages through the whole store via the keyset cursor, yielding
+ * \`closeYieldMs\` between batches, so a single run reaches every
+ * eligible stream while bounding per-batch memory and write burst.
  *
  * The cycle never throws — predicate exceptions are caught and
  * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
  * whether they count as "close this stream"). Store errors during
- * pagination propagate to the caller (the controller logs them and
- * skips to the next tick).
+ * a page query propagate to the caller (the controller logs them and
+ * skips to the next run).
  *
  * @internal
  */
@@ -18674,73 +19041,70 @@ export async function run_autoclose_cycle(
   const truncated: TruncateResult = new Map();
   const skipped: string[] = [];
 
-  // \`query_stats\` returns every event-stream in one map (no cursor
-  // pagination — that's \`query_streams\` for subscription positions,
-  // not events). The cycle iterates the map, applies each state's
-  // predicate to the matching streams, and flushes truncate batches
-  // when \`closeBatchSize\` candidates accumulate. \`closeYieldMs\` paces
-  // batches on adapters where the writer lock matters.
-  const stats = await s.query_stats(
-    {},
-    { count: true, exclude: [TOMBSTONE_EVENT] }
-  );
+  const page = deps.config.closeBatchSize;
+  // Page through the whole store one \`closeBatchSize\` batch at a time,
+  // closing each batch before fetching the next. Closed streams are
+  // tombstoned (excluded here) and sit behind the cursor, so the
+  // forward scan never revisits them.
+  let after: string | undefined;
+  for (;;) {
+    const stats = await s.query_stats(
+      {},
+      { count: true, exclude: [TOMBSTONE_EVENT], after, limit: page }
+    );
+    if (stats.size === 0) break;
+    inspected += stats.size;
 
-  const flush_batch = async (candidates: CloseTarget[]) => {
-    if (candidates.length === 0) return;
-    const result = await run_close_cycle(candidates, {
-      reactive_events_size: deps.reactive_events_size,
-      event_to_state: deps.event_to_state,
-      load: deps.load,
-      tombstone: deps.tombstone,
-      logger: deps.logger,
-      correlation: deps.correlation,
-    });
-    for (const [stream, entry] of result.truncated) {
-      truncated.set(stream, entry);
-    }
-    for (const stream of result.skipped) skipped.push(stream);
-    await yield_between_batches(deps.config.closeYieldMs);
-  };
+    const candidates: CloseTarget[] = [];
+    for (const [stream, { head, count }] of stats) {
+      // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
+      // includes streams with at least one non-excluded event.
+      const owner = deps.event_to_state.get(head.name);
+      if (!owner) continue;
+      const predicate = deps.autoclose_policy(owner.name);
+      if (!predicate) continue;
 
-  let candidates: CloseTarget[] = [];
+      let close = false;
+      try {
+        close = predicate(stream, head, count ?? 0);
+        evaluated += 1;
+      } catch (err) {
+        predicate_errors += 1;
+        deps.logger.error(
+          \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
+            err instanceof Error ? err.message : String(err)
+          }\`
+        );
+        close = deps.config.closeOnError;
+      }
 
-  for (const [stream, { head, count }] of stats) {
-    inspected += 1;
-    // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
-    // includes streams with at least one non-excluded event.
-    const owner = deps.event_to_state.get(head.name);
-    if (!owner) continue;
-    const predicate = deps.autoclose_policy(owner.name);
-    if (!predicate) continue;
+      if (!close) continue;
 
-    let close = false;
-    try {
-      close = predicate(stream, head, count ?? 0);
-      evaluated += 1;
-    } catch (err) {
-      predicate_errors += 1;
-      deps.logger.error(
-        \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
-          err instanceof Error ? err.message : String(err)
-        }\`
-      );
-      close = deps.config.closeOnError;
+      const archiver = deps.autoclose_archiver(owner.name);
+      const archive = archiver ? () => archiver(stream, head) : undefined;
+      candidates.push({ stream, archive });
     }
 
-    if (!close) continue;
-
-    const archiver = deps.autoclose_archiver(owner.name);
-    const archive = archiver ? () => archiver(stream, head) : undefined;
-    candidates.push({ stream, archive });
-
-    if (candidates.length >= deps.config.closeBatchSize) {
-      await flush_batch(candidates);
-      candidates = [];
+    // One batch → one safety probe. The page size bounds the count.
+    if (candidates.length > 0) {
+      const result = await run_close_cycle(candidates, {
+        reactive_events_size: deps.reactive_events_size,
+        event_to_state: deps.event_to_state,
+        load: deps.load,
+        tombstone: deps.tombstone,
+        logger: deps.logger,
+        correlation: deps.correlation,
+      });
+      for (const [stream, entry] of result.truncated)
+        truncated.set(stream, entry);
+      for (const stream of result.skipped) skipped.push(stream);
+      await yield_between_batches(deps.config.closeYieldMs);
     }
+
+    // Short page → end of the sweep.
+    if (stats.size < page) break;
+    after = [...stats.keys()].at(-1);
   }
-
-  // Flush the trailing batch.
-  await flush_batch(candidates);
 
   return {
     inspected,
@@ -18761,7 +19125,7 @@ export async function run_autoclose_cycle(
  */
 export type AutocloseControllerDeps = Omit<
   AutocloseCycleDeps,
-  "correlation"
+  "correlation" | "after"
 > & {
   /**
    * Correlator the controller invokes per tick to stamp the cycle's
@@ -18826,7 +19190,7 @@ export class AutocloseController {
     // \`run_once\`, so there's nothing left to do here but keep ticking.
     this._timer = setInterval(() => {
       this.run_once().catch(() => {});
-    }, this.deps.config.autocloseCycleMs);
+    }, this.deps.config.autocloseCycleMinutes * 60_000);
     // Don't let the interval keep the process alive — Node's
     // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
     // targets Node ≥22, so the runtime guard is unnecessary).
@@ -18866,6 +19230,10 @@ export class AutocloseController {
     // Circuit open: the store is failing, skip this tick rather than pile
     // load on a down backend. The next tick after the cooldown retries.
     if (this.deps.breaker.state(Date.now()) === "open") return null;
+    // Off-hours window: outside it, this tick does nothing. The ticker
+    // keeps firing; only the sweep is gated.
+    if (!in_autoclose_window(this.deps.config.autocloseWindow, new Date()))
+      return null;
     this._running = true;
     try {
       const correlation = close_correlation(
@@ -18950,7 +19318,7 @@ import type { AutoclosePredicate, Schemas } from "../types/action.js";
 /**
  * Lower bound on a resolved \`after\` window. Sub-minute windows are
  * almost always misconfiguration — the autoclose cycle ticks at the
- * order of \`autocloseCycleMs\` (default 60 s), so a 30 s window can't
+ * order of \`autocloseCycleMinutes\` (default 12 h), so a 30 s window can't
  * be honored anyway. Rejecting at build keeps the failure mode noisy.
  */
 const MIN_AFTER_MS = 60_000;
@@ -19549,7 +19917,22 @@ export type CloseCycleDeps = {
    * UUID.
    */
   readonly correlation: string;
+  /**
+   * Page size for the safety probe's \`query_streams\` pagination.
+   * Defaults to {@link SAFETY_PROBE_PAGE_SIZE}; production callers omit
+   * it, tests set a small value to exercise the multi-page path.
+   */
+  readonly probe_page_size?: number;
 };
+
+/**
+ * Page size for the safety probe's keyset pagination over the
+ * subscriptions table. Above \`query_streams\`'s default \`limit\` of 100
+ * to keep the round-trip count low while bounding per-page work.
+ *
+ * @internal
+ */
+export const SAFETY_PROBE_PAGE_SIZE = 1000;
 
 /**
  * Per-stream scan result: latest non-tombstone domain event metadata.
@@ -19586,7 +19969,8 @@ export async function run_close_cycle(
   const safe = await partition_by_safety(
     stream_info,
     deps.reactive_events_size,
-    skipped
+    skipped,
+    deps.probe_page_size ?? SAFETY_PROBE_PAGE_SIZE
   );
   if (!safe.length) return { truncated: new Map(), skipped };
 
@@ -19661,7 +20045,8 @@ async function scan_stream_heads(
 async function partition_by_safety(
   stream_info: Map<string, StreamHead>,
   reactive_events_size: number,
-  skipped: string[]
+  skipped: string[],
+  page_size: number
 ): Promise<string[]> {
   if (reactive_events_size === 0) return [...stream_info.keys()];
 
@@ -19683,14 +20068,41 @@ async function partition_by_safety(
     }
     return re;
   };
-  await store().query_streams((position) => {
-    const source_re = position.source ? get_regex(position.source) : undefined;
-    for (const [stream, info] of stream_info) {
-      if ((!source_re || source_re.test(stream)) && position.at < info.max_id) {
-        pending_set.add(stream);
-      }
-    }
-  });
+
+  // \`source_matches\` narrows the probe server-side to subscriptions that
+  // could consume from a stream we're closing — a best-effort hint, so
+  // the per-position source/target re-check below still runs and keeps
+  // the result correct even when a store returns a superset.
+  const targets = [...stream_info.keys()];
+
+  // Keyset-paginate the (narrowed) subscriptions on the \`after\` cursor —
+  // \`query_streams\` caps each call at \`limit\` rows, so every page is
+  // inspected until a short page signals the last one. A lagging reaction
+  // marks its close target pending regardless of how far its subscription
+  // sorts past the first page.
+  let after: string | undefined;
+  for (;;) {
+    let last: string | undefined;
+    const { count } = await store().query_streams(
+      (position) => {
+        last = position.stream;
+        const source_re = position.source
+          ? get_regex(position.source)
+          : undefined;
+        for (const [stream, info] of stream_info) {
+          if (
+            (!source_re || source_re.test(stream)) &&
+            position.at < info.max_id
+          ) {
+            pending_set.add(stream);
+          }
+        }
+      },
+      { after, limit: page_size, source_matches: targets }
+    );
+    if (count < page_size) break;
+    after = last;
+  }
 
   const safe: string[] = [];
   for (const [stream] of stream_info) {
@@ -23195,6 +23607,7 @@ export class InMemoryStore implements Store {
     const limit = query?.limit ?? 100;
     const after = query?.after;
     const blocked = query?.blocked;
+    const source_matches = query?.source_matches;
     const stream_re =
       query?.stream && !query.stream_exact
         ? new RegExp(query.stream)
@@ -23203,6 +23616,18 @@ export class InMemoryStore implements Store {
       query?.source && !query.source_exact
         ? new RegExp(query.source)
         : undefined;
+    // Reverse-match: a stream qualifies when its stored \`source\` pattern
+    // matches at least one of the requested names. Patterns are compiled
+    // once and cached — many subscriptions share one source pattern.
+    const reverse_cache = new Map<string, RegExp>();
+    const reverse_match = (source: string): boolean => {
+      let re = reverse_cache.get(source);
+      if (!re) {
+        re = new RegExp(source);
+        reverse_cache.set(source, re);
+      }
+      return source_matches!.some((name) => re!.test(name));
+    };
 
     const sorted = [...this._streams.values()].sort((a, b) =>
       a.stream.localeCompare(b.stream)
@@ -23227,6 +23652,12 @@ export class InMemoryStore implements Store {
             : !source_re!.test(s.source)
         )
           continue;
+      }
+      if (source_matches !== undefined) {
+        // Absent/empty source = no source constraint = consumes from
+        // every stream, so it matches any requested name. Only a
+        // present source that matches none of them is excluded.
+        if (s.source && !reverse_match(s.source)) continue;
       }
       if (blocked !== undefined && s.blocked !== blocked) continue;
       if (query?.lane !== undefined && s.lane !== query.lane) continue;
@@ -23274,6 +23705,8 @@ export class InMemoryStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const limit = options?.limit;
 
     // Pre-compile per-stream scope predicate, cached as we go so each
     // distinct stream evaluates the regex once.
@@ -23328,8 +23761,13 @@ export class InMemoryStore implements Store {
       }
     }
 
+    // Order by stream name so \`after\`/\`limit\` keyset-paginate
+    // deterministically (matches query_streams ordering).
+    const ordered = [...acc.keys()].sort((x, y) => x.localeCompare(y));
     const out = new Map<string, StreamStats<E>>();
-    for (const [stream, a] of acc) {
+    for (const stream of ordered) {
+      if (after !== undefined && stream <= after) continue;
+      const a = acc.get(stream)!;
       const stats: {
         head: Committed<Schemas, keyof Schemas>;
         tail?: Committed<Schemas, keyof Schemas>;
@@ -23340,6 +23778,7 @@ export class InMemoryStore implements Store {
       if (want_count) stats.count = a.count;
       if (want_names) stats.names = a.names;
       out.set(stream, stats as StreamStats<E>);
+      if (limit !== undefined && out.size >= limit) break;
     }
     return out;
   }
@@ -23489,7 +23928,7 @@ export * from "./sandbox.js";
 export { type AuditDeps, audit } from "./audit.js";
 export {
   type AutocloseConfig,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -24157,6 +24596,23 @@ export type StreamPosition = {
  *   literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
+ * @property source_matches - **Best-effort** reverse-match narrowing:
+ *   prefer streams whose stored \`source\` **pattern matches at least one**
+ *   of the given names (i.e. \`name ~ source\`, the inverse of \`source\`
+ *   above which is \`source ~ pattern\`). A subscription with an absent or
+ *   empty \`source\` (no source constraint — it consumes from every
+ *   stream) ALWAYS qualifies, regardless of the names. Used by the
+ *   close-cycle safety probe to fetch only the subscriptions that could
+ *   consume from a set of close-target streams instead of scanning the
+ *   whole subscriptions table. **Callers must treat it as a hint, not an
+ *   exact filter:** a
+ *   store that can't express reverse-regex (e.g. an anchor-aware \`LIKE\`
+ *   approximation) MAY return a superset — typically by ignoring the
+ *   filter entirely — so callers that need exactness re-verify in
+ *   process (the probe already does). Stores that honor it server-side
+ *   advertise \`source_matches\` in the TCK's \`StoreCapabilities\`, which
+ *   gates the narrowing-behavior tests; correctness never depends on the
+ *   flag, only the row count fetched.
  * @property blocked - Restrict to blocked (\`true\`) or unblocked (\`false\`)
  *   streams. Omit for all.
  * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
@@ -24170,6 +24626,7 @@ export type QueryStreams = {
   readonly stream_exact?: boolean;
   readonly source?: string;
   readonly source_exact?: boolean;
+  readonly source_matches?: ReadonlyArray<string>;
   readonly blocked?: boolean;
   readonly lane?: string;
   readonly after?: string;
@@ -24306,6 +24763,16 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream look like at event N?" historical queries without changing
  *   the call shape. Cheap on both code paths (cheap-heads path narrows
  *   the index scan; full-scan path adds a \`WHERE id < ?\` predicate).
+ * @property after - Keyset pagination cursor: return only streams whose
+ *   name sorts strictly after this value (lexicographic). Pass the last
+ *   stream name from the previous page to fetch the next. Pairs with
+ *   \`limit\`; the result \`Map\` preserves stream-name order so the next
+ *   cursor is \`[...result.keys()].at(-1)\`.
+ * @property limit - Maximum number of streams to return. **Defaults to
+ *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
+ *   which defaults to 100. Omitting it preserves the historical
+ *   "return everything" behavior; set it (with \`after\`) to page through
+ *   large stream sets a bounded chunk at a time.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;
@@ -24313,6 +24780,8 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly names?: boolean;
   readonly exclude?: ReadonlyArray<EventName<E>>;
   readonly before?: number;
+  readonly after?: string;
+  readonly limit?: number;
 };
 
 /**
@@ -24893,6 +25362,12 @@ export interface Store extends Disposable, EventSource {
    * answering "what did this stream look like at event N?" without
    * special call shape.
    *
+   * **Ordering + pagination.** The returned \`Map\` is ordered by stream
+   * name. \`options.after\` (exclusive cursor) + \`options.limit\` keyset-
+   * paginate over that order — pass the last key of one page as the
+   * \`after\` of the next. \`limit\` defaults to unbounded, so callers that
+   * omit it keep receiving every matching stream in one call.
+   *
    * @example Cheap heads — close-cycle pattern (one round trip, no scan)
    * \`\`\`typescript
    * const stats = await store().query_stats(streams, {
@@ -24938,6 +25413,19 @@ export interface Store extends Disposable, EventSource {
    * });
    * const { head, tail } = stats.get("order-42") ?? {};
    * // head = latest event with id < 100_000; tail = earliest in range
+   * \`\`\`
+   *
+   * @example Page through every stream a bounded chunk at a time
+   * \`\`\`typescript
+   * let after: string | undefined;
+   * for (;;) {
+   *   const page = await store().query_stats({}, { after, limit: 500 });
+   *   if (page.size === 0) break;
+   *   for (const [stream, { head }] of page) {
+   *     // ... process stream ...
+   *   }
+   *   after = [...page.keys()].at(-1);
+   * }
    * \`\`\`
    *
    * @template E - Event schemas. Narrow at the call site to type-check
@@ -29508,6 +29996,23 @@ export type StreamPosition = {
  *   literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
+ * @property source_matches - **Best-effort** reverse-match narrowing:
+ *   prefer streams whose stored \`source\` **pattern matches at least one**
+ *   of the given names (i.e. \`name ~ source\`, the inverse of \`source\`
+ *   above which is \`source ~ pattern\`). A subscription with an absent or
+ *   empty \`source\` (no source constraint — it consumes from every
+ *   stream) ALWAYS qualifies, regardless of the names. Used by the
+ *   close-cycle safety probe to fetch only the subscriptions that could
+ *   consume from a set of close-target streams instead of scanning the
+ *   whole subscriptions table. **Callers must treat it as a hint, not an
+ *   exact filter:** a
+ *   store that can't express reverse-regex (e.g. an anchor-aware \`LIKE\`
+ *   approximation) MAY return a superset — typically by ignoring the
+ *   filter entirely — so callers that need exactness re-verify in
+ *   process (the probe already does). Stores that honor it server-side
+ *   advertise \`source_matches\` in the TCK's \`StoreCapabilities\`, which
+ *   gates the narrowing-behavior tests; correctness never depends on the
+ *   flag, only the row count fetched.
  * @property blocked - Restrict to blocked (\`true\`) or unblocked (\`false\`)
  *   streams. Omit for all.
  * @property lane - Restrict to streams in this drain lane (ACT-1103). Exact match.
@@ -29521,6 +30026,7 @@ export type QueryStreams = {
   readonly stream_exact?: boolean;
   readonly source?: string;
   readonly source_exact?: boolean;
+  readonly source_matches?: ReadonlyArray<string>;
   readonly blocked?: boolean;
   readonly lane?: string;
   readonly after?: string;
@@ -29657,6 +30163,16 @@ export type StreamStats<E extends Schemas = Schemas> = {
  *   stream look like at event N?" historical queries without changing
  *   the call shape. Cheap on both code paths (cheap-heads path narrows
  *   the index scan; full-scan path adds a \`WHERE id < ?\` predicate).
+ * @property after - Keyset pagination cursor: return only streams whose
+ *   name sorts strictly after this value (lexicographic). Pass the last
+ *   stream name from the previous page to fetch the next. Pairs with
+ *   \`limit\`; the result \`Map\` preserves stream-name order so the next
+ *   cursor is \`[...result.keys()].at(-1)\`.
+ * @property limit - Maximum number of streams to return. **Defaults to
+ *   unbounded** (every matching stream) — unlike {@link QueryStreams.limit},
+ *   which defaults to 100. Omitting it preserves the historical
+ *   "return everything" behavior; set it (with \`after\`) to page through
+ *   large stream sets a bounded chunk at a time.
  */
 export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly tail?: boolean;
@@ -29664,6 +30180,8 @@ export type QueryStatsOptions<E extends Schemas = Schemas> = {
   readonly names?: boolean;
   readonly exclude?: ReadonlyArray<EventName<E>>;
   readonly before?: number;
+  readonly after?: string;
+  readonly limit?: number;
 };
 
 /**
@@ -30244,6 +30762,12 @@ export interface Store extends Disposable, EventSource {
    * answering "what did this stream look like at event N?" without
    * special call shape.
    *
+   * **Ordering + pagination.** The returned \`Map\` is ordered by stream
+   * name. \`options.after\` (exclusive cursor) + \`options.limit\` keyset-
+   * paginate over that order — pass the last key of one page as the
+   * \`after\` of the next. \`limit\` defaults to unbounded, so callers that
+   * omit it keep receiving every matching stream in one call.
+   *
    * @example Cheap heads — close-cycle pattern (one round trip, no scan)
    * \`\`\`typescript
    * const stats = await store().query_stats(streams, {
@@ -30289,6 +30813,19 @@ export interface Store extends Disposable, EventSource {
    * });
    * const { head, tail } = stats.get("order-42") ?? {};
    * // head = latest event with id < 100_000; tail = earliest in range
+   * \`\`\`
+   *
+   * @example Page through every stream a bounded chunk at a time
+   * \`\`\`typescript
+   * let after: string | undefined;
+   * for (;;) {
+   *   const page = await store().query_stats({}, { after, limit: 500 });
+   *   if (page.size === 0) break;
+   *   for (const [stream, { head }] of page) {
+   *     // ... process stream ...
+   *   }
+   *   after = [...page.keys()].at(-1);
+   * }
    * \`\`\`
    *
    * @template E - Event schemas. Narrow at the call site to type-check
@@ -39542,6 +40079,19 @@ export class PostgresStore implements Store {
           : \`source ~ $\${values.length}\`
       );
     }
+    if (query?.source_matches !== undefined && query.source_matches.length) {
+      // Reverse-match narrowing: the inverse of the \`source\` filter.
+      // The stored \`source\` is treated as the regex pattern, and a row
+      // qualifies when any supplied candidate name matches it (\`n ~ source\`).
+      // A NULL/empty source has no source constraint — it consumes from
+      // every stream, so it always qualifies. Composes (AND) with others.
+      values.push(query.source_matches);
+      conditions.push(
+        \`(source IS NULL OR source = '' OR EXISTS (
+          SELECT 1 FROM unnest($\${values.length}::text[]) AS n WHERE n ~ source
+        ))\`
+      );
+    }
     if (query?.blocked !== undefined) {
       values.push(query.blocked);
       conditions.push(\`blocked = $\${values.length}\`);
@@ -39638,6 +40188,8 @@ export class PostgresStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const stats_limit = options?.limit;
     const full_scan = want_count || want_names;
 
     // Empty array short-circuit — saves a round trip on a no-op.
@@ -39672,6 +40224,13 @@ export class PostgresStore implements Store {
       params.push(before);
       where.push(\`e.id < $\${params.length}\`);
     }
+    if (after !== undefined) {
+      // Keyset pagination cursor — exclusive on stream name. Results are
+      // ordered by stream ascending so callers chain
+      // \`[...map.keys()].at(-1)\` as the next cursor.
+      params.push(after);
+      where.push(\`e.stream > $\${params.length}\`);
+    }
 
     const from_clause = \`\${this._fqt} e\`;
     // Always emit a WHERE clause — \`WHERE TRUE\` short-circuits the
@@ -39686,13 +40245,15 @@ export class PostgresStore implements Store {
           params,
           want_tail,
           want_count,
-          want_names
+          want_names,
+          stats_limit
         )
       : this._query_stats_heads_only<E>(
           from_clause,
           where_clause,
           params,
-          want_tail
+          want_tail,
+          stats_limit
         );
   }
 
@@ -39705,12 +40266,19 @@ export class PostgresStore implements Store {
     from_clause: string,
     where_clause: string,
     params: unknown[],
-    want_tail: boolean
+    want_tail: boolean,
+    stats_limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const cols = \`e.id, e.stream, e.version, e.name, e.data, e.created, e.meta\`;
-    const head_sql = \`SELECT DISTINCT ON (e.stream) \${cols} FROM \${from_clause} \${where_clause} ORDER BY e.stream, e.version DESC\`;
+    // \`DISTINCT ON (e.stream) ... ORDER BY e.stream\` already yields one row
+    // per stream in stream-name order, so a trailing LIMIT caps the number
+    // of streams returned. The head and tail queries share the same
+    // ordering, so the same LIMIT selects the identical first-N streams.
+    const limit_clause =
+      stats_limit !== undefined ? \` LIMIT \${stats_limit}\` : "";
+    const head_sql = \`SELECT DISTINCT ON (e.stream) \${cols} FROM \${from_clause} \${where_clause} ORDER BY e.stream, e.version DESC\${limit_clause}\`;
     const tail_sql = want_tail
-      ? \`SELECT DISTINCT ON (e.stream) \${cols} FROM \${from_clause} \${where_clause} ORDER BY e.stream, e.version ASC\`
+      ? \`SELECT DISTINCT ON (e.stream) \${cols} FROM \${from_clause} \${where_clause} ORDER BY e.stream, e.version ASC\${limit_clause}\`
       : null;
 
     const [headRes, tailRes] = await Promise.all([
@@ -39750,7 +40318,8 @@ export class PostgresStore implements Store {
     params: unknown[],
     want_tail: boolean,
     want_count: boolean,
-    want_names: boolean
+    want_names: boolean,
+    stats_limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const tail_cte = want_tail
       ? \`, tails AS (SELECT DISTINCT ON (stream) * FROM ef ORDER BY stream, version ASC)\`
@@ -39792,6 +40361,8 @@ export class PostgresStore implements Store {
       FROM heads h
       LEFT JOIN agg a ON a.stream = h.stream
       \${tail_join}
+      ORDER BY h.stream
+      \${stats_limit !== undefined ? \`LIMIT \${stats_limit}\` : ""}
     \`;
 
     const res = await this._pool.query<
@@ -41099,6 +41670,8 @@ export class SqliteStore implements Store {
     const want_count = options?.count ?? false;
     const want_names = options?.names ?? false;
     const before = options?.before;
+    const after = options?.after;
+    const limit = options?.limit;
     const full_scan = want_count || want_names;
 
     if (Array.isArray(input) && input.length === 0) {
@@ -41135,6 +41708,13 @@ export class SqliteStore implements Store {
       where.push(\`e.id < ?\`);
       args.push(before);
     }
+    // Keyset pagination cursor (#1010): exclusive — return only streams
+    // whose name sorts strictly after \`after\`. Applied at the event level
+    // so the per-stream head/agg rows downstream only cover the page.
+    if (after !== undefined) {
+      where.push(\`e.stream > ?\`);
+      args.push(after);
+    }
 
     const from_clause = \`events e\`;
     // Always emit a WHERE clause — \`WHERE 1=1\` short-circuits the
@@ -41149,13 +41729,15 @@ export class SqliteStore implements Store {
           args,
           want_tail,
           want_count,
-          want_names
+          want_names,
+          limit
         )
       : this._query_stats_heads_only<E>(
           from_clause,
           where_clause,
           args,
-          want_tail
+          want_tail,
+          limit
         );
   }
 
@@ -41167,26 +41749,44 @@ export class SqliteStore implements Store {
     from_clause: string,
     where_clause: string,
     args: unknown[],
-    want_tail: boolean
+    want_tail: boolean,
+    limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const cols = \`e.id, e.stream, e.version, e.name, e.data, e.created, e.meta, e.pii\`;
+    // Keyset pagination (#1010): order heads by stream ascending so the
+    // caller can use the last key as the next \`after\` cursor; cap with
+    // LIMIT when set (unbounded otherwise).
+    const limit_clause = limit !== undefined ? " LIMIT ?" : "";
     const head_sql = \`SELECT * FROM (
       SELECT \${cols}, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version DESC) AS rn
       FROM \${from_clause}
       \${where_clause}
-    ) WHERE rn = 1\`;
+    ) WHERE rn = 1 ORDER BY stream\${limit_clause}\`;
+    const head_args = limit !== undefined ? [...args, limit] : args;
+    // The tail query shares the same WHERE; when paginating it must cover
+    // exactly the limited head stream set, so it joins against the same
+    // ordered+limited heads subquery rather than re-scanning all streams.
     const tail_sql = want_tail
-      ? \`SELECT * FROM (
+      ? \`SELECT t.* FROM (
           SELECT \${cols}, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version ASC) AS rn
           FROM \${from_clause}
           \${where_clause}
-        ) WHERE rn = 1\`
+        ) t
+        WHERE t.rn = 1 AND t.stream IN (
+          SELECT stream FROM (
+            SELECT e.stream, ROW_NUMBER() OVER (PARTITION BY e.stream ORDER BY e.version DESC) AS rn
+            FROM \${from_clause}
+            \${where_clause}
+          ) WHERE rn = 1 ORDER BY stream\${limit_clause}
+        )\`
       : null;
+    const tail_args =
+      limit !== undefined ? [...args, ...args, limit] : [...args, ...args];
 
     const [headRes, tailRes] = await Promise.all([
-      this.client.execute({ sql: head_sql, args: args as any[] }),
+      this.client.execute({ sql: head_sql, args: head_args as any[] }),
       tail_sql
-        ? this.client.execute({ sql: tail_sql, args: args as any[] })
+        ? this.client.execute({ sql: tail_sql, args: tail_args as any[] })
         : null,
     ]);
 
@@ -41236,7 +41836,8 @@ export class SqliteStore implements Store {
     args: unknown[],
     want_tail: boolean,
     want_count: boolean,
-    want_names: boolean
+    want_names: boolean,
+    limit?: number
   ): Promise<Map<string, StreamStats<E>>> {
     const tail_cte = want_tail
       ? \`, tails AS (
@@ -41274,6 +41875,7 @@ export class SqliteStore implements Store {
         SELECT * FROM (
           SELECT *, ROW_NUMBER() OVER (PARTITION BY stream ORDER BY version DESC) AS rn FROM ef
         ) WHERE rn = 1
+        ORDER BY stream\${limit !== undefined ? " LIMIT ?" : ""}
       )
       \${tail_cte}
       SELECT
@@ -41284,9 +41886,15 @@ export class SqliteStore implements Store {
       FROM heads h
       LEFT JOIN agg a ON a.stream = h.stream
       \${tail_join}
+      ORDER BY h.stream
     \`;
 
-    const res = await this.client.execute({ sql, args: args as any[] });
+    // Keyset pagination (#1010): the \`heads\` CTE is ordered by stream and
+    // capped with LIMIT (when set); the final SELECT re-asserts stream
+    // order so the returned Map's key order is the next cursor. The LIMIT
+    // arg binds last when present (unbounded otherwise).
+    const full_args = limit !== undefined ? [...args, limit] : args;
+    const res = await this.client.execute({ sql, args: full_args as any[] });
 
     const to_committed = async (
       id: unknown,
@@ -42441,6 +43049,16 @@ export type StoreCapabilities = {
    * drain worker per database file.
    */
   readonly concurrent_claim?: boolean;
+  /**
+   * Adapter implements the {@link QueryStreams.source_matches} reverse-
+   * match filter — "subscriptions whose stored \`source\` pattern matches
+   * at least one of these names" (\`name ~ source\`). When \`true\`, the TCK
+   * runs the \`source_matches\` suite. Stores that can't express reverse-
+   * regex (e.g. an anchor-aware \`LIKE\` approximation) leave it \`false\`;
+   * the close-cycle safety probe then falls back to an unfiltered scan,
+   * so correctness never depends on this flag — only probe cost.
+   */
+  readonly source_matches?: boolean;
 };
 
 /**
@@ -42681,13 +43299,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("created_after/created_before filter by timestamp", async () => {
         const s = \`q-ts-\${uid()}\`;
-        const before = new Date(Date.now() - 60_000);
-        const future = new Date(Date.now() + 60_000);
-        await store.commit<CounterEvents>(
+        const committed = await store.commit<CounterEvents>(
           s,
           [inc(1)],
           make_meta({ stream: s })
         );
+        // Build the window from the event's OWN \`created\` (whatever clock
+        // the store stamped it with) so the assertion can't flake on a
+        // skew between the store's clock and the test runner's clock.
+        const ts = committed[0].created.getTime();
+        const before = new Date(ts - 60_000);
+        const future = new Date(ts + 60_000);
         const in_window = await collect(store, {
           stream: s,
           stream_exact: true,
@@ -42747,8 +43369,15 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // \`make_meta()\` with no stream — exercises the meta builder's
         // no-causation branch alongside the backward + created_before
         // path inside the adapter.
-        await store.commit<CounterEvents>(s, [inc(1)], make_meta());
-        const past = new Date(Date.now() - 60_000);
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta()
+        );
+        // \`created_before\` strictly before the event's own timestamp, so
+        // it must be skipped — relative to the store's clock, not the
+        // host's, to avoid clock-skew flakiness.
+        const past = new Date(committed[0].created.getTime() - 60_000);
         const got = await collect(store, {
           stream: s,
           stream_exact: true,
@@ -44174,7 +44803,112 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(t.get(s)?.count).toBeUndefined();
         expect(t.get(s)?.names).toBeUndefined();
       });
+
+      it("paginates with limit + after (keyset), ordered by stream name", async () => {
+        const tag = uid();
+        const streams = [
+          \`qsp-\${tag}-a\`,
+          \`qsp-\${tag}-b\`,
+          \`qsp-\${tag}-c\`,
+          \`qsp-\${tag}-d\`,
+        ];
+        for (const s of streams) {
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        }
+
+        const page1 = await store.query_stats<CounterEvents>(
+          { stream: \`qsp-\${tag}-.*\` },
+          { limit: 2 }
+        );
+        const k1 = [...page1.keys()];
+        expect(k1).toEqual([\`qsp-\${tag}-a\`, \`qsp-\${tag}-b\`]);
+
+        const page2 = await store.query_stats<CounterEvents>(
+          { stream: \`qsp-\${tag}-.*\` },
+          { limit: 2, after: k1.at(-1) }
+        );
+        const k2 = [...page2.keys()];
+        expect(k2).toEqual([\`qsp-\${tag}-c\`, \`qsp-\${tag}-d\`]);
+
+        // Final short page signals the end.
+        const page3 = await store.query_stats<CounterEvents>(
+          { stream: \`qsp-\${tag}-.*\` },
+          { limit: 2, after: k2.at(-1) }
+        );
+        expect(page3.size).toBe(0);
+
+        // Unbounded (no limit) returns every matching stream in one call.
+        const all = await store.query_stats<CounterEvents>({
+          stream: \`qsp-\${tag}-.*\`,
+        });
+        expect([...all.keys()].sort()).toEqual([...streams].sort());
+      });
     });
+
+    // Reverse-match probe filter (#1010): restrict to subscriptions whose
+    // stored \`source\` pattern matches at least one of the supplied names.
+    // Gated — stores that can't express reverse-regex omit it and callers
+    // fall back to an unfiltered scan.
+    describe.skipIf(!caps.source_matches)(
+      "query_streams source_matches (capability)",
+      () => {
+        it("returns only subscriptions whose source pattern matches a name", async () => {
+          const tag = uid();
+          // Two dynamic subscriptions with concrete sources, one with a
+          // regex source matching a family of streams.
+          const subConcreteA = \`sm-\${tag}-sub-a\`;
+          const subConcreteB = \`sm-\${tag}-sub-b\`;
+          const subRegex = \`sm-\${tag}-sub-regex\`;
+          const subNoSource = \`sm-\${tag}-sub-nosource\`;
+          const srcA = \`sm-\${tag}-order-1\`;
+          const srcB = \`sm-\${tag}-order-2\`;
+          const srcRegex = \`^sm-\${tag}-order-\`;
+          await store.subscribe([
+            { stream: subConcreteA, source: srcA },
+            { stream: subConcreteB, source: srcB },
+            { stream: subRegex, source: srcRegex },
+            // No source = no source constraint = matches every name.
+            { stream: subNoSource },
+          ]);
+
+          // Closing srcA: the concrete-A sub (source === srcA), the regex
+          // sub (source matches srcA), and the no-source sub (always)
+          // qualify; concrete-B does not.
+          const matched: string[] = [];
+          await store.query_streams((p) => matched.push(p.stream), {
+            stream: \`sm-\${tag}-sub-.*\`,
+            source_matches: [srcA],
+          });
+          expect(matched.sort()).toEqual(
+            [subConcreteA, subRegex, subNoSource].sort()
+          );
+
+          // A name no concrete/regex source matches → only the
+          // no-source sub (which always qualifies) comes back.
+          const none: string[] = [];
+          await store.query_streams((p) => none.push(p.stream), {
+            stream: \`sm-\${tag}-sub-.*\`,
+            source_matches: [\`sm-\${tag}-unrelated\`],
+          });
+          expect(none).toEqual([subNoSource]);
+
+          // Multiple names → union of matching subscriptions, plus the
+          // always-matching no-source sub.
+          const both: string[] = [];
+          await store.query_streams((p) => both.push(p.stream), {
+            stream: \`sm-\${tag}-sub-.*\`,
+            source_matches: [srcA, srcB],
+          });
+          expect(both.sort()).toEqual(
+            [subConcreteA, subConcreteB, subRegex, subNoSource].sort()
+          );
+        });
+      }
+    );
 
     describe("query_streams anchor contract", () => {
       // Same regex-anchor rules as \`query\`. Auto-anchoring by an adapter

@@ -70,6 +70,16 @@ export type StoreCapabilities = {
    * drain worker per database file.
    */
   readonly concurrent_claim?: boolean;
+  /**
+   * Adapter implements the {@link QueryStreams.source_matches} reverse-
+   * match filter — "subscriptions whose stored `source` pattern matches
+   * at least one of these names" (`name ~ source`). When `true`, the TCK
+   * runs the `source_matches` suite. Stores that can't express reverse-
+   * regex (e.g. an anchor-aware `LIKE` approximation) leave it `false`;
+   * the close-cycle safety probe then falls back to an unfiltered scan,
+   * so correctness never depends on this flag — only probe cost.
+   */
+  readonly source_matches?: boolean;
 };
 
 /**
@@ -310,13 +320,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("created_after/created_before filter by timestamp", async () => {
         const s = `q-ts-${uid()}`;
-        const before = new Date(Date.now() - 60_000);
-        const future = new Date(Date.now() + 60_000);
-        await store.commit<CounterEvents>(
+        const committed = await store.commit<CounterEvents>(
           s,
           [inc(1)],
           make_meta({ stream: s })
         );
+        // Build the window from the event's OWN `created` (whatever clock
+        // the store stamped it with) so the assertion can't flake on a
+        // skew between the store's clock and the test runner's clock.
+        const ts = committed[0].created.getTime();
+        const before = new Date(ts - 60_000);
+        const future = new Date(ts + 60_000);
         const in_window = await collect(store, {
           stream: s,
           stream_exact: true,
@@ -376,8 +390,15 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // `make_meta()` with no stream — exercises the meta builder's
         // no-causation branch alongside the backward + created_before
         // path inside the adapter.
-        await store.commit<CounterEvents>(s, [inc(1)], make_meta());
-        const past = new Date(Date.now() - 60_000);
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta()
+        );
+        // `created_before` strictly before the event's own timestamp, so
+        // it must be skipped — relative to the store's clock, not the
+        // host's, to avoid clock-skew flakiness.
+        const past = new Date(committed[0].created.getTime() - 60_000);
         const got = await collect(store, {
           stream: s,
           stream_exact: true,
@@ -1803,7 +1824,112 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(t.get(s)?.count).toBeUndefined();
         expect(t.get(s)?.names).toBeUndefined();
       });
+
+      it("paginates with limit + after (keyset), ordered by stream name", async () => {
+        const tag = uid();
+        const streams = [
+          `qsp-${tag}-a`,
+          `qsp-${tag}-b`,
+          `qsp-${tag}-c`,
+          `qsp-${tag}-d`,
+        ];
+        for (const s of streams) {
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        }
+
+        const page1 = await store.query_stats<CounterEvents>(
+          { stream: `qsp-${tag}-.*` },
+          { limit: 2 }
+        );
+        const k1 = [...page1.keys()];
+        expect(k1).toEqual([`qsp-${tag}-a`, `qsp-${tag}-b`]);
+
+        const page2 = await store.query_stats<CounterEvents>(
+          { stream: `qsp-${tag}-.*` },
+          { limit: 2, after: k1.at(-1) }
+        );
+        const k2 = [...page2.keys()];
+        expect(k2).toEqual([`qsp-${tag}-c`, `qsp-${tag}-d`]);
+
+        // Final short page signals the end.
+        const page3 = await store.query_stats<CounterEvents>(
+          { stream: `qsp-${tag}-.*` },
+          { limit: 2, after: k2.at(-1) }
+        );
+        expect(page3.size).toBe(0);
+
+        // Unbounded (no limit) returns every matching stream in one call.
+        const all = await store.query_stats<CounterEvents>({
+          stream: `qsp-${tag}-.*`,
+        });
+        expect([...all.keys()].sort()).toEqual([...streams].sort());
+      });
     });
+
+    // Reverse-match probe filter (#1010): restrict to subscriptions whose
+    // stored `source` pattern matches at least one of the supplied names.
+    // Gated — stores that can't express reverse-regex omit it and callers
+    // fall back to an unfiltered scan.
+    describe.skipIf(!caps.source_matches)(
+      "query_streams source_matches (capability)",
+      () => {
+        it("returns only subscriptions whose source pattern matches a name", async () => {
+          const tag = uid();
+          // Two dynamic subscriptions with concrete sources, one with a
+          // regex source matching a family of streams.
+          const subConcreteA = `sm-${tag}-sub-a`;
+          const subConcreteB = `sm-${tag}-sub-b`;
+          const subRegex = `sm-${tag}-sub-regex`;
+          const subNoSource = `sm-${tag}-sub-nosource`;
+          const srcA = `sm-${tag}-order-1`;
+          const srcB = `sm-${tag}-order-2`;
+          const srcRegex = `^sm-${tag}-order-`;
+          await store.subscribe([
+            { stream: subConcreteA, source: srcA },
+            { stream: subConcreteB, source: srcB },
+            { stream: subRegex, source: srcRegex },
+            // No source = no source constraint = matches every name.
+            { stream: subNoSource },
+          ]);
+
+          // Closing srcA: the concrete-A sub (source === srcA), the regex
+          // sub (source matches srcA), and the no-source sub (always)
+          // qualify; concrete-B does not.
+          const matched: string[] = [];
+          await store.query_streams((p) => matched.push(p.stream), {
+            stream: `sm-${tag}-sub-.*`,
+            source_matches: [srcA],
+          });
+          expect(matched.sort()).toEqual(
+            [subConcreteA, subRegex, subNoSource].sort()
+          );
+
+          // A name no concrete/regex source matches → only the
+          // no-source sub (which always qualifies) comes back.
+          const none: string[] = [];
+          await store.query_streams((p) => none.push(p.stream), {
+            stream: `sm-${tag}-sub-.*`,
+            source_matches: [`sm-${tag}-unrelated`],
+          });
+          expect(none).toEqual([subNoSource]);
+
+          // Multiple names → union of matching subscriptions, plus the
+          // always-matching no-source sub.
+          const both: string[] = [];
+          await store.query_streams((p) => both.push(p.stream), {
+            stream: `sm-${tag}-sub-.*`,
+            source_matches: [srcA, srcB],
+          });
+          expect(both.sort()).toEqual(
+            [subConcreteA, subConcreteB, subRegex, subNoSource].sort()
+          );
+        });
+      }
+    );
 
     describe("query_streams anchor contract", () => {
       // Same regex-anchor rules as `query`. Auto-anchoring by an adapter

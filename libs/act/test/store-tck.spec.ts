@@ -4,5 +4,10 @@ import { InMemoryStore } from "../src/adapters/in-memory-store.js";
 runStoreTck({
   name: "InMemoryStore",
   factory: () => new InMemoryStore(),
-  capabilities: { restore: true, pii_isolation: true, concurrent_claim: true },
+  capabilities: {
+    restore: true,
+    pii_isolation: true,
+    concurrent_claim: true,
+    source_matches: true,
+  },
 });

@@ -46,7 +46,7 @@ import type { AutoclosePredicate, Schemas } from "../types/action.js";
 /**
  * Lower bound on a resolved `after` window. Sub-minute windows are
  * almost always misconfiguration — the autoclose cycle ticks at the
- * order of `autocloseCycleMs` (default 60 s), so a 30 s window can't
+ * order of `autocloseCycleMinutes` (default 12 h), so a 30 s window can't
  * be honored anyway. Rejecting at build keeps the failure mode noisy.
  */
 const MIN_AFTER_MS = 60_000;

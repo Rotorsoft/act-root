@@ -113,15 +113,15 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
-// Re-export the autoclose config surface (#837 / epic #802) so
-// operators can keep `import { DEFAULT_AUTOCLOSE_CYCLE_MS,
-// resolveAutocloseConfig } from "@rotorsoft/act"`. The
-// implementation lives in `internal/autoclose-config.ts` to keep
-// this orchestrator file focused on the `Act` class.
+// Re-export the autoclose config surface so operators can
+// `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
+// from "@rotorsoft/act"`. The implementation lives in
+// `internal/autoclose-config.ts` to keep this orchestrator file
+// focused on the `Act` class.
 export {
   type AutocloseConfig,
   type AutoclosePolicy,
-  DEFAULT_AUTOCLOSE_CYCLE_MS,
+  DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
   resolveAutocloseConfig,
@@ -242,27 +242,31 @@ export type ActOptions<TLanes extends string = string> = {
    */
   readonly circuitBreaker?: CircuitBreakerOptions;
   /**
-   * Online close cycle cadence in ms (#837 / epic #802). The
-   * app-level autoclose controller ticks at this interval, iterates
-   * states with `.autocloses(...)` declared, and schedules
-   * truncate-and-seed for streams whose predicate returned `true`.
+   * How often the autoclose sweep runs, in minutes. Autoclose is
+   * low-urgency housekeeping, so each run sweeps the whole store once
+   * (paging through it in `closeBatchSize` batches) and this knob is
+   * how often that sweep repeats — a couple of times a day, not a hot
+   * path.
    *
-   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MS} (60 s). Validated
-   * `[10_000, 3_600_000]` at `act().build()`; out-of-range throws.
+   * Default {@link DEFAULT_AUTOCLOSE_CYCLE_MINUTES} (720 = 12 h).
+   * Validated as an integer `[1, 1440]` (1 minute to 24 hours) at
+   * `act().build()`; out-of-range throws. When `autocloseWindow` is
+   * set, this is the poll interval and should be shorter than the
+   * window.
    *
    * Zero-cost when no state declares `.autocloses(...)` — the
    * controller is never constructed in that case.
    */
-  readonly autocloseCycleMs?: number;
+  readonly autocloseCycleMinutes?: number;
   /**
-   * Max number of streams the autoclose cycle considers per tick per
-   * state (#837). Bounds memory + truncate fan-out so a misconfigured
-   * predicate that matches "everything" can't take down the writer.
+   * Batch size for the sweep: the per-batch `query_stats` page size +
+   * the truncate fan-out within a run. A run pages through the whole
+   * store `closeBatchSize` streams at a time, so this bounds memory
+   * and the per-batch write burst without limiting how many streams a
+   * run can close in total.
    *
    * Default {@link DEFAULT_CLOSE_BATCH_SIZE} (64). Validated
-   * `[1, 1024]`. Above 1024, the builder throws — operators with
-   * genuine high-throughput needs opt out by passing a custom
-   * predicate that pre-filters.
+   * `[1, 1024]`; above 1024 the builder throws.
    */
   readonly closeBatchSize?: number;
   /**
@@ -283,6 +287,21 @@ export type ActOptions<TLanes extends string = string> = {
    * (defensive policy for "if I can't evaluate, assume terminal").
    */
   readonly closeOnError?: boolean;
+  /**
+   * Optional off-hours window restricting when the sweep runs. The
+   * ticker still fires every `autocloseCycleMinutes`, but a tick only
+   * sweeps when the current hour falls inside `[start, end)`. Hours
+   * are `[0, 23]` integers in `timeZone` (IANA, default `"UTC"`,
+   * DST-correct); `start > end` is an overnight window (e.g.
+   * `{ start: 22, end: 6 }`). Every in-window tick runs a full sweep,
+   * so size `autocloseCycleMinutes` to the window. Omit to run on
+   * every tick regardless of clock time.
+   */
+  readonly autocloseWindow?: {
+    readonly start: number;
+    readonly end: number;
+    readonly timeZone?: string;
+  };
 };
 
 export class Act<

@@ -11,6 +11,7 @@ import {
   store,
   TOMBSTONE_EVENT,
 } from "../src/index.js";
+import { run_close_cycle } from "../src/internal/close-cycle.js";
 
 describe("close", () => {
   const counter = state({ Counter: z.object({ count: z.number() }) })
@@ -441,6 +442,46 @@ describe("close", () => {
     ]);
     expect(skipped).toEqual(["shared-src"]);
     expect(truncated.size).toBe(0);
+  });
+
+  it("safety probe paginates past the first page to find lagging reactions", async () => {
+    // Two dynamic subscriptions sort onto separate pages (probe_page_size:
+    // 1). The page-1 subscription sources from an unrelated stream so it
+    // never matches the close target; the lagging page-2 subscription
+    // sources from the close target. Only a probe that pages past page 1
+    // sees it and skips the close.
+    const pagedApp = act()
+      .withState(counter)
+      .on("incremented")
+      .do(async function fanOut() {
+        await Promise.resolve();
+      })
+      .to((e) =>
+        e.data.by === 1
+          ? { target: "a-unrelated", source: "other-src" }
+          : { target: "z-lagging", source: "paged-src" }
+      )
+      .build();
+
+    await pagedApp.do("increment", { stream: "paged-src", actor }, { by: 1 });
+    await pagedApp.do("increment", { stream: "paged-src", actor }, { by: 2 });
+    await pagedApp.correlate();
+
+    const a = pagedApp as unknown as Record<string, unknown>;
+    const reactive = a._reactive_events as { size: number };
+    const es = a._es as Record<string, never>;
+    const result = await run_close_cycle([{ stream: "paged-src" }], {
+      reactive_events_size: reactive.size,
+      event_to_state: a._event_to_state as never,
+      load: es.load,
+      tombstone: es.tombstone,
+      logger: a._logger as never,
+      correlation: "probe-pagination-test",
+      probe_page_size: 1,
+    });
+
+    expect(result.skipped).toEqual(["paged-src"]);
+    expect(result.truncated.size).toBe(0);
   });
 
   it("should handle closing empty stream while reactions exist for other streams", async () => {

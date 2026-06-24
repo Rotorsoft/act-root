@@ -18,7 +18,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match
-- `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`
+- `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`. The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
 - `restore(driver)` — *optional* atomic wipe-and-rebuild from an event source (see below)
 
@@ -66,6 +66,14 @@ runStoreTck({
 When `notify: true`, the TCK runs a structural smoke test (subscribe → dispose) to confirm the optional API is present and well-shaped. Cross-process LISTEN/NOTIFY semantics need two processes and stay in your adapter's own tests.
 
 The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
+
+## Paginating `query_stats` and the `source_matches` hint
+
+Two query options carry semantics that are easy to get subtly wrong, so the contract spells them out and the TCK enforces them.
+
+`query_stats` keyset-paginates by stream name. Order your result by stream name ascending; when `after` is set, return only streams sorting strictly after it (it's exclusive, never inclusive); when `limit` is set, stop after that many streams. The trap is the default: an **omitted** `limit` means unbounded — return every matching stream. That preserves the pre-pagination behavior every caller already relied on, and it's deliberately unlike `query_streams`, whose `limit` defaults to 100. Callers walk pages by feeding the last key they saw back as the next `after`, so your only job is consistent ordering and an honest exclusive cursor.
+
+`query_streams.source_matches` is the inverse of the existing `source` filter and, unlike everything else in the query, it's a *hint*. The `source` filter narrows to subscriptions whose pattern is matched by a value (`source ~ pattern`); `source_matches` narrows to subscriptions whose stored `source` pattern matches one of the supplied stream names (`name ~ source`). A subscription whose `source` is absent or empty has no source constraint and reacts to every stream, so it must always be included no matter what names are passed. If your backend can run regex in that direction, implement it for real — Postgres does it with `EXISTS(SELECT 1 FROM unnest($names) n WHERE n ~ source)` plus the null/empty-source always-match clause. If it can't, **not implementing it is a conformant choice**: ignore the field and return a superset. The framework's only caller (the close-cycle safety probe) re-checks source and target in process, so correctness holds whether you narrow precisely or hand back extra rows. Gate the narrowing tests behind the `source_matches` capability — declare it `true` only when your adapter actually filters, and the TCK leaves the narrowing assertions parked otherwise.
 
 ## Implementing `Store.restore` (optional)
 

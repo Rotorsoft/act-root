@@ -47,7 +47,7 @@ function controller_of(app: unknown) {
         start: () => boolean;
         stop: () => void;
         is_running: boolean;
-        deps: { config: { autocloseCycleMs: number } };
+        deps: { config: { autocloseCycleMinutes: number } };
       };
     }
   )._autoclose;
@@ -152,6 +152,48 @@ describe("AutocloseController — slice 3", () => {
     expect(closed_events).toHaveLength(0);
   });
 
+  test("a tick outside the off-hours window is skipped", async () => {
+    // Build a UTC window that does NOT contain the current hour, so the
+    // gate short-circuits run_once to null before any sweep.
+    const h = new Date().getUTCHours();
+    const app = act()
+      .withState(Ticket)
+      .build({
+        autocloseWindow: { start: (h + 1) % 24, end: (h + 2) % 24 },
+      });
+    await app.do("OpenTicket", { stream: "t-1", actor }, { title: "a" });
+    await app.do("ResolveTicket", { stream: "t-1", actor }, {});
+
+    const c = controller_of(app);
+    const result = await c.run_once();
+
+    expect(result).toBeNull();
+    // The eligible stream was not closed — the tick never ran.
+    const events: string[] = [];
+    await store().query((e) => events.push(String(e.name)), {
+      stream: "t-1",
+      stream_exact: true,
+    });
+    expect(events).toContain("TicketResolved");
+  });
+
+  test("a tick inside the off-hours window runs the sweep", async () => {
+    // A UTC window that DOES contain the current hour.
+    const h = new Date().getUTCHours();
+    const app = act()
+      .withState(Ticket)
+      .build({ autocloseWindow: { start: h, end: (h + 1) % 24 } });
+    await app.do("OpenTicket", { stream: "t-1", actor }, { title: "a" });
+    await app.do("ResolveTicket", { stream: "t-1", actor }, {});
+
+    const c = controller_of(app);
+    const result = await c.run_once();
+
+    expect(result).not.toBeNull();
+    const r = result as { close_result: { truncated: Map<string, unknown> } };
+    expect(r.close_result.truncated.has("t-1")).toBe(true);
+  });
+
   test("reentrancy guard: overlapping `run_once` drops the second call", async () => {
     const app = act().withState(Ticket).build();
     const c = controller_of(app);
@@ -185,7 +227,9 @@ describe("AutocloseController — slice 3", () => {
     try {
       vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
       c.start();
-      vi.advanceTimersByTime(c.deps.config.autocloseCycleMs + 100);
+      vi.advanceTimersByTime(
+        c.deps.config.autocloseCycleMinutes * 60_000 + 100
+      );
       // Wait for the fire-and-forget tick to settle.
       await vi.runOnlyPendingTimersAsync();
       vi.useRealTimers();
@@ -217,7 +261,9 @@ describe("AutocloseController — slice 3", () => {
     try {
       vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
       c.start();
-      vi.advanceTimersByTime(c.deps.config.autocloseCycleMs + 100);
+      vi.advanceTimersByTime(
+        c.deps.config.autocloseCycleMinutes * 60_000 + 100
+      );
       await vi.runOnlyPendingTimersAsync();
       vi.useRealTimers();
       c.stop();
