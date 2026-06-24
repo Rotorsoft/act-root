@@ -176,7 +176,7 @@ Calling `close()` on an already-closed stream is a no-op:
 
 For a stream that's been *restarted* but not tombstoned (one `__snapshot__` event at v=0), Phase 1 calls `query_stats` with `exclude: [SNAP_EVENT]` so the snapshot is filtered out server-side — leaving the stream absent from the result map. Without a head, Phase 2 doesn't include the stream in `safe`, so the restarted-but-empty stream stays untouched. To force-tombstone a restarted stream, commit at least one domain event first.
 
-## Online close-the-books (#837 / epic #802)
+## Online close-the-books
 
 `Act.close(targets)` is the **explicit** close path — the operator hands the framework a list of stream names, the cycle runs once, the streams get truncated. Online close is the **declarative** version of the same primitive: each state's builder declares a predicate, the framework polls candidates on a background ticker, and eligible streams pass through the same `run_close_cycle` pipeline above.
 
@@ -189,38 +189,39 @@ Two state-builder declarators:
 
 Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.discloses`). Absent → the state opts out of online close entirely (zero per-tick cost).
 
-Four `ActOptions` knobs, validated at `act().build()`:
+Autoclose is low-urgency housekeeping, so each run sweeps the whole store and the cadence is how often that repeats — a couple of times a day, not a hot path. Five `ActOptions` knobs, validated at `act().build()`:
 
-- `autocloseCycleMs` — cycle cadence in ms. Default 60_000, range `[10_000, 3_600_000]`.
-- `closeBatchSize` — the per-tick sweep page size. Each tick fetches one `closeBatchSize` page of streams (ordered by name) and flushes that page as a single batch. Default 64, range `[1, 1024]`.
+- `autocloseCycleMs` — how often a sweep runs, in ms. Default 43_200_000 (12 h), range `[60_000, 86_400_000]` (1 minute to 24 hours).
+- `closeBatchSize` — the per-batch page size within a run. A run pages through the whole store this many streams at a time, bounding memory and the per-batch write burst. Default 64, range `[1, 1024]`.
 - `closeYieldMs` — delay between batches. Default 0, range `[0, 1000]`. SQLite operators raise this to release the writer lock.
 - `closeOnError` — whether a thrown predicate counts as "close this stream". Default false (skip the stream, log the error).
+- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. A tick only sweeps when the current hour is inside `[start, end)`; hours are `[0, 23]` integers in `timeZone` (IANA, default UTC, DST-correct), and `start > end` is an overnight window. Omit to sweep on every tick.
 
-### The cycle per tick
+### A run
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  AutocloseController.run_once                           │
-│  ─ guard against overlapping ticks                      │
+│  ─ guard against overlapping runs                       │
+│  ─ skip if the off-hours window excludes the current hr  │
 │  ─ compute close_correlation(correlator, $autoclose)    │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
 ┌─────────────────────────────────────────────────────────┐
-│  run_autoclose_cycle                                    │
-│  ─ Store.query_stats({}, { count: true,                 │
+│  run_autoclose_cycle — page through the whole store      │
+│  loop until a short page ends the sweep:                 │
+│    Store.query_stats({}, { count: true,                 │
 │      exclude: [TOMBSTONE_EVENT],                        │
 │      after: cursor, limit: closeBatchSize })            │
-│    → ONE bounded page, ordered by stream name           │
-│  ─ for each stream on the page:                         │
+│    for each stream on the page:                          │
 │      owner = event_to_state.get(head.name)              │
 │      predicate = registry.autoclose_policy(owner.name)  │
 │      if predicate(stream, head, count) → candidate      │
 │      (state.archive threaded as CloseTarget.archive)    │
-│  ─ flush this page's candidates as ONE batch via        │
+│    flush this page's candidates as ONE batch via        │
 │      run_close_cycle (phases 0-6 above) → ONE probe     │
-│  ─ advance cursor to last stream on the page;           │
-│      a short page wraps the cursor back to the start    │
+│    yield closeYieldMs; advance cursor to the last stream │
 └────────────────────────┬────────────────────────────────┘
                          │
                          ▼
@@ -232,9 +233,11 @@ Four `ActOptions` knobs, validated at `act().build()`:
 
 The crucial composition: **online close doesn't reinvent any phase**. It builds a candidate list and hands it to `run_close_cycle`. Safety-partition, tombstone-guard, archive-while-guarded, atomic truncate — all the invariants on this page apply to the autoclose path unchanged.
 
+Closed streams are tombstoned and excluded from `query_stats`, and they sort behind the cursor, so the forward scan never revisits them. Each page is one batch is one safety probe; the `closeBatchSize` paging keeps a run from materializing every candidate or truncating thousands at once, even though a single run covers the whole store.
+
 ### Sweep latency
 
-A stream isn't closed the instant it qualifies. The cursor reaches its page on some later tick, up to one full sweep of `total_streams / closeBatchSize` ticks (each `autocloseCycleMs` apart) away. This fits autoclose semantics — eligibility always means "old" (past a retention age, or terminal-plus-grace), never "right this second" — so a stream that became eligible an hour ago is unharmed by closing a few minutes into the next sweep. Tighten the window with a smaller `autocloseCycleMs` or a larger `closeBatchSize`.
+A stream isn't closed the instant it qualifies — it closes on the next run, up to one `autocloseCycleMs` away (and only during the off-hours window, if one is set). This fits autoclose semantics: eligibility always means "old" (past a retention age, or terminal-plus-grace), never "right this second." Tighten the window by shortening `autocloseCycleMs`.
 
 ### Lifecycle
 

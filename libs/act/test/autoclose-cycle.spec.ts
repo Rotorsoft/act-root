@@ -288,65 +288,23 @@ describe("run_autoclose_cycle — slice 2", () => {
     expect(result.close_result.truncated.has("y-1")).toBe(true);
   });
 
-  test("`closeBatchSize` bounds each tick to one page; the sweep wraps across ticks", async () => {
+  test("one run drains the whole store, paging in `closeBatchSize` batches", async () => {
     const app = build_app();
-    // Five resolvable streams; closeBatchSize = 2 means a tick can only
-    // page through (and close) two at a time. The rolling `next_after`
-    // cursor drives the sweep across ticks until a short page wraps it.
+    // Five resolvable streams; closeBatchSize = 2 means the run pages
+    // through them two at a time. A single run closes all five (it loops
+    // pages internally until a short page ends the sweep).
     for (let i = 0; i < 5; i++) {
       await app.do("OpenTicket", { stream: `t-${i}`, actor }, { title: "a" });
       await app.do("ResolveTicket", { stream: `t-${i}`, actor }, {});
     }
 
-    const internals = app as unknown as {
-      _event_to_state: Map<string, unknown>;
-      _es: { load: unknown; tombstone: unknown };
-      _logger: never;
-      _reactive_events: ReadonlySet<string>;
-    };
-    const run_tick = (after: string | undefined) =>
-      run_autoclose_cycle({
-        autoclose_policy: app.registry.autoclose_policy as never,
-        autoclose_archiver: app.registry.autoclose_archiver as never,
-        event_to_state: internals._event_to_state as never,
-        reactive_events_size: internals._reactive_events.size,
-        load: internals._es.load as never,
-        tombstone: internals._es.tombstone as never,
-        logger: internals._logger,
-        config: resolveAutocloseConfig({ closeBatchSize: 2 }),
-        after,
-        correlation: "autoclose-test-cycle-batch",
-      });
+    const result = await run_cycle(app, { closeBatchSize: 2 });
 
-    // Tick 1: full page of 2 → next_after carries the 2nd stream name.
-    const t1 = await run_tick(undefined);
-    expect(t1.inspected).toBe(2);
-    expect(t1.close_result.truncated.size).toBe(2);
-    expect(t1.next_after).toBeDefined();
-
-    // Closing tombstones the first two, so they drop out of the scan
-    // (tombstones excluded). The cursor keeps the sweep moving forward.
-    const t2 = await run_tick(t1.next_after);
-    expect(t2.inspected).toBe(2);
-    expect(t2.close_result.truncated.size).toBe(2);
-    expect(t2.next_after).toBeDefined();
-
-    // Tick 3: only one stream remains after the cursor → short page →
-    // next_after wraps to undefined.
-    const t3 = await run_tick(t2.next_after);
-    expect(t3.inspected).toBe(1);
-    expect(t3.close_result.truncated.size).toBe(1);
-    expect(t3.next_after).toBeUndefined();
-
-    // All five closed across the three ticks.
-    const total =
-      t1.close_result.truncated.size +
-      t2.close_result.truncated.size +
-      t3.close_result.truncated.size;
-    expect(total).toBe(5);
+    expect(result.inspected).toBe(5);
+    expect(result.close_result.truncated.size).toBe(5);
   });
 
-  test("yields after the tick's batch when `closeYieldMs > 0`", async () => {
+  test("yields after a batch when `closeYieldMs > 0`", async () => {
     const app = build_app();
     await app.do("OpenTicket", { stream: "t-1", actor }, { title: "a" });
     await app.do("ResolveTicket", { stream: "t-1", actor }, {});
