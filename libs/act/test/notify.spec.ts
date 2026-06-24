@@ -130,13 +130,20 @@ describe("Act ↔ Store.notify auto-wiring", () => {
   it("wakes settle when notification carries a reactive event", async () => {
     const { app, capturedHandler } = await buildAppWithNotifyStore();
     const settled = vi.fn();
-    app.on("settled", settled);
+    // Resolve exactly when settle fires rather than guessing a fixed
+    // delay — settle() runs on a 0ms debounce, but a fixed sleep flakes
+    // under load. A real regression makes this await the test timeout.
+    const settledOnce = new Promise<void>((resolve) =>
+      app.on("settled", () => {
+        settled();
+        resolve();
+      })
+    );
     capturedHandler()!({
       stream: "remote-stream",
       events: [{ id: 1, name: "Pressed" }],
     });
-    // settle() runs on a 0ms debounce; yield twice to let the loop run.
-    await new Promise((r) => setTimeout(r, 20));
+    await settledOnce;
     expect(settled).toHaveBeenCalled();
   });
 

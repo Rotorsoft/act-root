@@ -43299,13 +43299,17 @@ export const runStoreTck = (options: StoreTckOptions): void => {
 
       it("created_after/created_before filter by timestamp", async () => {
         const s = \`q-ts-\${uid()}\`;
-        const before = new Date(Date.now() - 60_000);
-        const future = new Date(Date.now() + 60_000);
-        await store.commit<CounterEvents>(
+        const committed = await store.commit<CounterEvents>(
           s,
           [inc(1)],
           make_meta({ stream: s })
         );
+        // Build the window from the event's OWN \`created\` (whatever clock
+        // the store stamped it with) so the assertion can't flake on a
+        // skew between the store's clock and the test runner's clock.
+        const ts = committed[0].created.getTime();
+        const before = new Date(ts - 60_000);
+        const future = new Date(ts + 60_000);
         const in_window = await collect(store, {
           stream: s,
           stream_exact: true,
@@ -43365,8 +43369,15 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         // \`make_meta()\` with no stream — exercises the meta builder's
         // no-causation branch alongside the backward + created_before
         // path inside the adapter.
-        await store.commit<CounterEvents>(s, [inc(1)], make_meta());
-        const past = new Date(Date.now() - 60_000);
+        const committed = await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta()
+        );
+        // \`created_before\` strictly before the event's own timestamp, so
+        // it must be skipped — relative to the store's clock, not the
+        // host's, to avoid clock-skew flakiness.
+        const past = new Date(committed[0].created.getTime() - 60_000);
         const got = await collect(store, {
           stream: s,
           stream_exact: true,
