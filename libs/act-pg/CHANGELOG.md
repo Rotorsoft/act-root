@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.8.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.7.0...@rotorsoft/act-pg-v1.8.0) (2026-06-24)
+
+
+### Features
+
+* **act:** bound the autoclose cycle with a paginated rolling sweep ([4261a81](https://github.com/rotorsoft/act-root/commit/4261a81571ea5648486a17383d633df31ff6fed5))
+
 # [@rotorsoft/act-pg-v1.7.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.6.0...@rotorsoft/act-pg-v1.7.0) (2026-06-22)
 
 
