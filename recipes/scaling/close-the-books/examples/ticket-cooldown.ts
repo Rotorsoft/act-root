@@ -39,9 +39,9 @@ const Ticket = state({
 
 async function main() {
   const app = act().withState(Ticket).build({
-    // 60 s is the default cycle cadence; spelled out here so the
+    // 12 h is the default sweep cadence; spelled out here so the
     // example doubles as a knobs reference.
-    autocloseCycleMs: 60_000,
+    autocloseCycleMinutes: 720,
     closeBatchSize: 64,
   });
 

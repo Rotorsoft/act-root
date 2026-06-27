@@ -1,0 +1,17 @@
+{
+  "name": "@act/recipes",
+  "version": "0.1.0",
+  "description": "Operator recipe examples — type-checked against the live @rotorsoft/act API and the canonical @act/* models",
+  "author": "rotorsoft",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@rotorsoft/act": "workspace:^"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "^3.726.0",
+    "@types/node": "^25.9.3",
+    "zod": "^4.4.3"
+  }
+}

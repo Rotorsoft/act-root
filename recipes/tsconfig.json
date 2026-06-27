@@ -1,0 +1,8 @@
+{
+  "extends": "../packages/tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "composite": false
+  },
+  "include": ["scaling/**/examples/*.ts"]
+}
