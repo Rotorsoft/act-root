@@ -95,6 +95,7 @@
         "packages/**",
         "performance/**",
         "recipes/**",
+        "docs/src/snippets/**",
         "libs/act-diagram/src/server/**"
       ],
       "linter": {

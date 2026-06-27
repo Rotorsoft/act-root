@@ -88,6 +88,27 @@ const config: Config = {
         },
       };
     },
+    // Let the landing page import real source files as raw text via a
+    // `?raw` query, so its code samples are the canonical, type-checked
+    // models (e.g. `@act/calculator`) rather than hand-written strings
+    // that drift. See `docs/src/pages/index.tsx`.
+    function rawSourcePlugin(): Plugin {
+      return {
+        name: "raw-source-loader",
+        configureWebpack() {
+          return {
+            module: {
+              rules: [
+                {
+                  resourceQuery: /raw/,
+                  type: "asset/source",
+                },
+              ],
+            },
+          } as ReturnType<NonNullable<Plugin["configureWebpack"]>>;
+        },
+      };
+    },
   ],
 
   presets: [
