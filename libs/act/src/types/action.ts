@@ -125,7 +125,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  * @property `created_after?` - Filter events created after this date/time
  * @property `backward?` - Order descending when true
  * @property `correlation?` - Filter by correlation
- * @property `with_snaps?` - Include snapshots in the results, defaults to false
+ * @property `with_snaps?` - Include snapshot rows and, for an exact
+ *   single stream with no explicit `after`, resume the read at the
+ *   latest `__snapshot__` for that stream (pre-snapshot events are not
+ *   read) — so `load()` rebuilds state from the last snapshot without
+ *   scanning prior history. No snapshot → full stream; an explicit
+ *   `after` overrides the snapshot floor. Defaults to false (snapshot
+ *   rows excluded).
  */
 export type Query = z.infer<typeof QuerySchema>;
 

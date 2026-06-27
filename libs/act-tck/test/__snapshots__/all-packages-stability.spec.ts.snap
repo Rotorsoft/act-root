@@ -2575,7 +2575,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  * @property \`created_after?\` - Filter events created after this date/time
  * @property \`backward?\` - Order descending when true
  * @property \`correlation?\` - Filter by correlation
- * @property \`with_snaps?\` - Include snapshots in the results, defaults to false
+ * @property \`with_snaps?\` - Include snapshot rows and, for an exact
+ *   single stream with no explicit \`after\`, resume the read at the
+ *   latest \`__snapshot__\` for that stream (pre-snapshot events are not
+ *   read) — so \`load()\` rebuilds state from the last snapshot without
+ *   scanning prior history. No snapshot → full stream; an explicit
+ *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
+ *   rows excluded).
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -9100,6 +9106,24 @@ export class InMemoryStore implements Store {
       }
     } else {
       let i = (query?.after ?? -1) + 1;
+      // with_snaps resumes at the latest snapshot for an exact single
+      // stream (no explicit \`after\`): start the scan at that snapshot's
+      // position so pre-snapshot events aren't read. No snapshot → full
+      // scan; an explicit \`after\` wins.
+      if (
+        query?.with_snaps &&
+        query.stream_exact &&
+        query.stream !== undefined &&
+        query.after === undefined
+      ) {
+        for (let j = this._events.length - 1; j >= 0; j--) {
+          const e = this._events[j];
+          if (e.stream === query.stream && e.name === SNAP_EVENT) {
+            i = j;
+            break;
+          }
+        }
+      }
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
@@ -16922,7 +16946,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  * @property \`created_after?\` - Filter events created after this date/time
  * @property \`backward?\` - Order descending when true
  * @property \`correlation?\` - Filter by correlation
- * @property \`with_snaps?\` - Include snapshots in the results, defaults to false
+ * @property \`with_snaps?\` - Include snapshot rows and, for an exact
+ *   single stream with no explicit \`after\`, resume the read at the
+ *   latest \`__snapshot__\` for that stream (pre-snapshot events are not
+ *   read) — so \`load()\` rebuilds state from the last snapshot without
+ *   scanning prior history. No snapshot → full stream; an explicit
+ *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
+ *   rows excluded).
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -23224,6 +23254,24 @@ export class InMemoryStore implements Store {
       }
     } else {
       let i = (query?.after ?? -1) + 1;
+      // with_snaps resumes at the latest snapshot for an exact single
+      // stream (no explicit \`after\`): start the scan at that snapshot's
+      // position so pre-snapshot events aren't read. No snapshot → full
+      // scan; an explicit \`after\` wins.
+      if (
+        query?.with_snaps &&
+        query.stream_exact &&
+        query.stream !== undefined &&
+        query.after === undefined
+      ) {
+        for (let j = this._events.length - 1; j >= 0; j--) {
+          const e = this._events[j];
+          if (e.stream === query.stream && e.name === SNAP_EVENT) {
+            i = j;
+            break;
+          }
+        }
+      }
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
@@ -28232,7 +28280,13 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
  * @property \`created_after?\` - Filter events created after this date/time
  * @property \`backward?\` - Order descending when true
  * @property \`correlation?\` - Filter by correlation
- * @property \`with_snaps?\` - Include snapshots in the results, defaults to false
+ * @property \`with_snaps?\` - Include snapshot rows and, for an exact
+ *   single stream with no explicit \`after\`, resume the read at the
+ *   latest \`__snapshot__\` for that stream (pre-snapshot events are not
+ *   read) — so \`load()\` rebuilds state from the last snapshot without
+ *   scanning prior history. No snapshot → full stream; an explicit
+ *   \`after\` overrides the snapshot floor. Defaults to false (snapshot
+ *   rows excluded).
  */
 export type Query = z.infer<typeof QuerySchema>;
 
@@ -39320,8 +39374,17 @@ export class PostgresStore implements Store {
         ON \${this._fqt} (created, id);\`
       );
       await client.query(
-        \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_correlation_ix" 
+        \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_correlation_ix"
         ON \${this._fqt} ((meta ->> 'correlation') COLLATE pg_catalog."default");\`
+      );
+      // Partial index over snapshot rows only, so the with_snaps "resume
+      // at the latest snapshot" floor (MAX(id) WHERE stream=? AND
+      // name='__snapshot__') is an O(log) lookup and costs nothing for
+      // streams that have no snapshot (the index has no rows for them).
+      await client.query(
+        \`CREATE INDEX IF NOT EXISTS "\${this.config.table}_snapshot_ix"
+        ON \${this._fqt} (stream COLLATE pg_catalog."default", id)
+        WHERE name = '\${SNAP_EVENT}';\`
       );
 
       // Streams table
@@ -39443,6 +39506,14 @@ export class PostgresStore implements Store {
       if (typeof after !== "undefined") {
         values.push(after);
         conditions.push(\`id>$\${values.length}\`);
+      } else if (with_snaps && query.stream_exact && stream) {
+        // Resume at the latest snapshot for this stream so pre-snapshot
+        // events aren't scanned. No snapshot → MAX is NULL → -1 → full
+        // stream. An explicit \`after\` (above) wins.
+        values.push(stream);
+        conditions.push(
+          \`id >= (SELECT COALESCE(MAX(id), -1) FROM \${this._fqt} WHERE stream=$\${values.length} AND name='\${SNAP_EVENT}')\`
+        );
       } else {
         conditions.push("id>-1");
       }
@@ -41065,6 +41136,13 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_name ON events(name)"
     );
+    // Partial index over snapshot rows only, so the with_snaps "resume at
+    // the latest snapshot" floor (MAX(id) WHERE stream=? AND
+    // name='__snapshot__') is an O(log) lookup and costs nothing for
+    // streams with no snapshot (the index has no rows for them).
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
+    );
     await this.client.execute(\`
       CREATE TABLE IF NOT EXISTS streams (
         stream TEXT PRIMARY KEY,
@@ -41211,6 +41289,13 @@ export class SqliteStore implements Store {
     if (query?.after !== undefined) {
       sql += " AND id > ?";
       args.push(query.after);
+    } else if (query?.with_snaps && query.stream_exact && query.stream) {
+      // Resume at the latest snapshot for this stream so pre-snapshot
+      // events aren't scanned. No snapshot → MAX is NULL → -1 → full
+      // stream. An explicit \`after\` (above) wins.
+      sql +=
+        " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
+      args.push(query.stream);
     }
     if (query?.before !== undefined) {
       sql += " AND id < ?";
@@ -43240,6 +43325,65 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           limit: 2,
         });
         expect(limited).toHaveLength(2);
+      });
+
+      it("with_snaps resumes from the latest snapshot per stream", async () => {
+        const s = \`q-snap-\${uid()}\`;
+        // 2 pre-snapshot domain events ...
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        // ... a snapshot ...
+        const [snap] = await store.commit(
+          s,
+          [{ name: SNAP_EVENT, data: { count: 2 } }],
+          make_meta({ stream: s })
+        );
+        // ... and 3 events after it.
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+
+        // with_snaps resumes AT the latest snapshot: snapshot + the 3 after
+        // it, never the 2 pre-snapshot events.
+        const from_snap = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        expect(from_snap).toHaveLength(4);
+        expect(from_snap[0].name).toBe(SNAP_EVENT);
+
+        // Without with_snaps: the 5 domain events, snapshot excluded.
+        const domain = await collect(store, { stream: s, stream_exact: true });
+        expect(domain).toHaveLength(5);
+
+        // An explicit \`after\` overrides the snapshot floor.
+        const after_snap = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+          after: snap.id,
+        });
+        expect(after_snap).toHaveLength(3);
+
+        // A stream with no snapshot returns its full history under with_snaps.
+        const s2 = \`q-nosnap-\${uid()}\`;
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1), inc(1)],
+          make_meta({ stream: s2 })
+        );
+        const full = await collect(store, {
+          stream: s2,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        expect(full).toHaveLength(2);
       });
 
       it("supports backward traversal", async () => {

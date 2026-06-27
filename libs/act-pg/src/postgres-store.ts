@@ -401,8 +401,17 @@ export class PostgresStore implements Store {
         ON ${this._fqt} (created, id);`
       );
       await client.query(
-        `CREATE INDEX IF NOT EXISTS "${this.config.table}_correlation_ix" 
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_correlation_ix"
         ON ${this._fqt} ((meta ->> 'correlation') COLLATE pg_catalog."default");`
+      );
+      // Partial index over snapshot rows only, so the with_snaps "resume
+      // at the latest snapshot" floor (MAX(id) WHERE stream=? AND
+      // name='__snapshot__') is an O(log) lookup and costs nothing for
+      // streams that have no snapshot (the index has no rows for them).
+      await client.query(
+        `CREATE INDEX IF NOT EXISTS "${this.config.table}_snapshot_ix"
+        ON ${this._fqt} (stream COLLATE pg_catalog."default", id)
+        WHERE name = '${SNAP_EVENT}';`
       );
 
       // Streams table
@@ -524,6 +533,14 @@ export class PostgresStore implements Store {
       if (typeof after !== "undefined") {
         values.push(after);
         conditions.push(`id>$${values.length}`);
+      } else if (with_snaps && query.stream_exact && stream) {
+        // Resume at the latest snapshot for this stream so pre-snapshot
+        // events aren't scanned. No snapshot → MAX is NULL → -1 → full
+        // stream. An explicit `after` (above) wins.
+        values.push(stream);
+        conditions.push(
+          `id >= (SELECT COALESCE(MAX(id), -1) FROM ${this._fqt} WHERE stream=$${values.length} AND name='${SNAP_EVENT}')`
+        );
       } else {
         conditions.push("id>-1");
       }
