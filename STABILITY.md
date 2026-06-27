@@ -80,6 +80,12 @@ These may change in **any** release, including patches. Don't depend on them in 
 - **Adapter contracts** — new optional methods land in minor, with the orchestrator providing a default. New required methods or changed semantics land only in major.
 - **Events on disk** — schemas are never mutated. Breaking event shape changes use versioned event names (`TicketOpened` → `TicketOpened_v2`); see [Event Schema Evolution](docs/docs/architecture/event-schema-evolution.md). This is a runtime data contract, separate from the API contract above.
 
+## Migration guides
+
+Every breaking (major) release ships a migration guide in the **same PR** that lands the breaking change, so the upgrade path is documented before the version is cut. The conventions, page template, and release-PR checklist live in [MIGRATING.md](MIGRATING.md).
+
+The documentation site is [versioned](https://docusaurus.io/docs/versioning): the live `docs/` folder is the **Current** set and tracks the latest API, while each released line is snapshotted under `docs/versioned_docs/` and selectable from the navbar version dropdown. Older-major users get a pinned reference; the migration guide for a release sits next to the API docs it describes.
+
 ## Per-library status
 
 | Package | Tracks core 1.0? |
