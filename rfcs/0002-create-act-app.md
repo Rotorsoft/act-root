@@ -1,9 +1,20 @@
 # RFC 0002: create-act-app scaffolder
 
-- **Status:** draft <!-- draft | accepted | rejected | superseded -->
+- **Status:** rejected <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1037
 - **Author:** rotorsoft
 - **Created:** 2026-06-27
+
+## Resolution
+
+**Rejected** (open question 6 settled). Act's scaffolding story is **AI-first**:
+the `scaffold-act-app` skill turns a spec into a tailored, working app, and that
+is the supported front door. A deterministic `pnpm create @rotorsoft/act-app`
+package would be a maintained, drift-prone surface serving only the narrow
+un-assisted slice — not worth its keep against the skill plus the existing
+examples. Non-AI users are served by the examples and a "start from an example"
+docs path, not a generated-template package. The analysis below is kept as the
+record of why.
 
 ## Motivation
 
