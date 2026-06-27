@@ -52,6 +52,7 @@ const sidebars: SidebarsConfig = {
         "architecture/priority-lanes",
         "architecture/close-cycle",
         "architecture/event-schema-evolution",
+        "architecture/design-decisions",
         "architecture/extension-points",
       ],
     },
