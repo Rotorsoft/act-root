@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act",
   "type": "module",
-  "version": "1.15.0",
+  "version": "1.16.0",
   "description": "act core library",
   "keywords": [
     "typescript",
@@ -56,6 +56,7 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
+    "mutation": "stryker run",
     "bench:run": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-result.json",
     "bench:check": "tsx scripts/perf-check.ts",
     "bench:update": "NODE_ENV=test LOG_LEVEL=fatal tsx scripts/perf-bench.ts > perf-baseline.json",
@@ -68,6 +69,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@rotorsoft/act-tck": "workspace:^"
+    "@rotorsoft/act-tck": "workspace:^",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1"
   }
 }

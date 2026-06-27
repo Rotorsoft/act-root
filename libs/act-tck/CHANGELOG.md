@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.17.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.16.0...@rotorsoft/act-tck-v1.17.0) (2026-06-27)
+
+
+### Features
+
+* **act:** resume with_snaps reads from the latest snapshot per stream ([959f4a8](https://github.com/rotorsoft/act-root/commit/959f4a89e8213f7e71a408bdb82b2863cbca2cdd))
+
 # [@rotorsoft/act-tck-v1.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.15.1...@rotorsoft/act-tck-v1.16.0) (2026-06-24)
 
 

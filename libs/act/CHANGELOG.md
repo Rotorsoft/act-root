@@ -1,3 +1,10 @@
+# [@rotorsoft/act-v1.16.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.15.0...@rotorsoft/act-v1.16.0) (2026-06-27)
+
+
+### Features
+
+* **act:** resume with_snaps reads from the latest snapshot per stream ([959f4a8](https://github.com/rotorsoft/act-root/commit/959f4a89e8213f7e71a408bdb82b2863cbca2cdd))
+
 # [@rotorsoft/act-v1.15.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.14.1...@rotorsoft/act-v1.15.0) (2026-06-24)
 
 

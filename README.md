@@ -144,7 +144,7 @@ Fork, branch, install (`pnpm install`), test (`pnpm test`), lint (`pnpm lint`), 
 
 ## Versioning
 
-[SemVer](https://semver.org/). What semver protects and what it doesn't is in [STABILITY.md](./STABILITY.md); release notes and breaking changes are in [CHANGELOG.md](./CHANGELOG.md).
+[SemVer](https://semver.org/). What semver protects and what it doesn't is in [STABILITY.md](./STABILITY.md), which also publishes the [support window](./STABILITY.md#support-window) (which majors are maintained, for how long), the [deprecation policy](./STABILITY.md#deprecation-policy), and the [security-fix policy](./STABILITY.md#security-fixes). Release notes and breaking changes are in [CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

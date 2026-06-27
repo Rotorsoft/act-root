@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
         "guides/writing-a-store",
         "guides/writing-a-cache",
         "guides/writing-a-logger",
+        "guides/tck-conformance",
       ],
     },
     {

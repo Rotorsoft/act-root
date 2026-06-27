@@ -1,0 +1,112 @@
+name: Mutation
+
+# Mutation testing (StrykerJS) — issue #1028.
+#
+# NON-BLOCKING by design: this workflow PUBLISHES a mutation score per
+# package to the run summary but never fails the build. The per-package
+# Stryker configs set `thresholds.break: null` (see libs/*/stryker.conf.mjs),
+# so a low score is reported, not gated.
+#
+# TODO(#1028 follow-up): once a baseline mutation score lands for each
+# package, set `thresholds.break` in the package configs AND drop the
+# `continue-on-error` below so regressions fail the build.
+#
+# Mutation runs are slow (a full pass mutates every source file and re-runs
+# the suite per mutant), so this is intentionally OFF the per-PR hot path:
+# it runs weekly and on demand. Per-PR gating is deferred until baselines +
+# tighter scoping make it fast enough to gate.
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Monday 06:00 UTC.
+    - cron: "0 6 * * 1"
+
+jobs:
+  mutation:
+    runs-on: ubuntu-latest
+    # Non-blocking: a failing/low-scoring mutation run never reds the build.
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [act, act-pg, act-sqlite, act-tck]
+    services:
+      # Always provisioned; only @rotorsoft/act-pg's specs connect to it
+      # (port 5431, mirroring the unit-test CI job in ci-cd.yml).
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.0
+          cache: "pnpm"
+
+      - run: pnpm install
+
+      - name: Run mutation testing (${{ matrix.package }})
+        continue-on-error: true
+        run: pnpm --filter @rotorsoft/${{ matrix.package }} run mutation
+
+      # Compute the mutation score from Stryker's JSON report and append it
+      # to the run summary. Score = (Killed + Timeout) / (Killed + Timeout +
+      # Survived + NoCoverage) — the standard StrykerJS mutation score.
+      - name: Publish mutation score (${{ matrix.package }})
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = "${{ matrix.package }}";
+            const f = `libs/${pkg}/reports/mutation/mutation.json`;
+            const out = process.env.GITHUB_STEP_SUMMARY;
+            if (!fs.existsSync(f)) {
+              fs.appendFileSync(out, `## Mutation — ${pkg}\n\nNo report produced.\n\n`);
+              process.exit(0);
+            }
+            const report = JSON.parse(fs.readFileSync(f, "utf8"));
+            const counts = {};
+            for (const file of Object.values(report.files ?? {})) {
+              for (const m of file.mutants ?? []) {
+                counts[m.status] = (counts[m.status] ?? 0) + 1;
+              }
+            }
+            const detected = (counts.Killed ?? 0) + (counts.Timeout ?? 0);
+            const undetected = (counts.Survived ?? 0) + (counts.NoCoverage ?? 0);
+            const valid = detected + undetected;
+            const score = valid ? ((detected / valid) * 100).toFixed(2) : "n/a";
+            const md = [
+              `## Mutation — ${pkg}`,
+              "",
+              `**Mutation score: ${score}%** (non-blocking baseline)`,
+              "",
+              "| Status | Count |",
+              "|---|---:|",
+              ...Object.entries(counts).map(([k, v]) => `| ${k} | ${v} |`),
+              "",
+            ].join("\n");
+            fs.appendFileSync(out, md + "\n");
+          '
+
+      - name: Upload mutation report (${{ matrix.package }})
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-${{ matrix.package }}
+          path: libs/${{ matrix.package }}/reports/mutation/
+          if-no-files-found: ignore

@@ -1,3 +1,10 @@
+# [@rotorsoft/act-sqlite-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.8.0...@rotorsoft/act-sqlite-v1.9.0) (2026-06-27)
+
+
+### Features
+
+* **act:** resume with_snaps reads from the latest snapshot per stream ([959f4a8](https://github.com/rotorsoft/act-root/commit/959f4a89e8213f7e71a408bdb82b2863cbca2cdd))
+
 # [@rotorsoft/act-sqlite-v1.8.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-sqlite-v1.7.0...@rotorsoft/act-sqlite-v1.8.0) (2026-06-24)
 
 

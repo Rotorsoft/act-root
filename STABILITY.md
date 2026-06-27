@@ -80,6 +80,35 @@ These may change in **any** release, including patches. Don't depend on them in 
 - **Adapter contracts** — new optional methods land in minor, with the orchestrator providing a default. New required methods or changed semantics land only in major.
 - **Events on disk** — schemas are never mutated. Breaking event shape changes use versioned event names (`TicketOpened` → `TicketOpened_v2`); see [Event Schema Evolution](docs/docs/architecture/event-schema-evolution.md). This is a runtime data contract, separate from the API contract above.
 
+## Support window
+
+The charter above says *what* a major bump protects. This section says *how long* a given major is supported, so adopters can plan upgrades against a published window rather than guesswork.
+
+Act is maintained by a small team. The windows below are deliberately modest — we would rather state a window we can keep than advertise an LTS we can't staff.
+
+- **Active line — the latest published major.** Receives new features, bug fixes, and security patches. This is where development happens. Always upgrade within the active major to get fixes; there are no long-lived patch branches inside a major beyond the latest minor.
+- **Previous major — maintenance.** When a new major `N` ships, the prior major `N-1` enters a maintenance window of **at least 6 months** during which it receives **security fixes and critical correctness fixes only** (data loss, lost events, crashes). No new features, no non-critical fixes. After the window closes, `N-1` is end-of-life.
+- **Older majors (`N-2` and earlier) — unsupported.** Best-effort community help via [issues](https://github.com/rotorsoft/act-root/issues) and [discussions](https://github.com/rotorsoft/act-root/discussions), no guaranteed fixes or releases.
+
+During the current **0.x** line (pre-1.0), only the **latest published version** is supported. There are no maintenance branches before 1.0 — upgrade to the newest release to pick up fixes. The windows above take effect with the [1.0 release](https://github.com/Rotorsoft/act-root/milestone/1).
+
+The same window applies to every package that tracks core (see the table below): an `act-pg` or `act-sqlite` release is supported for as long as the core major it targets is.
+
+## Deprecation policy
+
+We remove public surface slowly and with warning. The general rule: **a deprecation is announced in a minor release and the surface is removed no earlier than the next major** — so anything you depend on survives at least until a major boundary you opt into, and you get advance notice before then.
+
+- **API surface** (builder methods, `IAct` methods, public types, lifecycle events). A deprecated entry point stays functional, is marked deprecated in its doc-comment and in the release notes for the minor that deprecates it, and is removed only in a subsequent major with a migration note in the changelog. Renames ship the old name as a deprecated alias for at least one minor where feasible (see [How we evolve in each category](#how-we-evolve-in-each-category)).
+- **Events on disk** are never deprecated out from under you — they are append-only history. Breaking an event's shape means adding a new versioned name (`Foo` → `Foo_v2`); the old reducer keeps replaying historical `Foo` events indefinitely. Adding `Foo_v2` to `.emits({...})` auto-deprecates `Foo` for *emission* only: new writes use the current version, replay of old events is untouched. See [Event Schema Evolution](docs/docs/architecture/event-schema-evolution.md).
+- **Deprecation is observable at startup.** The `_v<n>` versioned-event-name convention is load-bearing: `act().build()` emits a one-line advisory enumerating every deprecated event version in scope, and `app.registry.deprecated_events(state_name)` exposes the set programmatically for callers that want to enforce their own policy. Static `.emit("Foo")` targeting a deprecated version throws at build time, so the most common mistake fails fast.
+- **Deprecated packages** carry their own removal note. `@rotorsoft/act-sse` is the current example — its surface moved to `@rotorsoft/act-http/sse`, it receives bug fixes only, and it is scheduled for removal in a future major. Migrate by changing the import path.
+
+## Security fixes
+
+- **Reporting.** Report suspected vulnerabilities privately via a [GitHub security advisory](https://github.com/Rotorsoft/act-root/security/advisories/new) rather than a public issue. We aim to acknowledge a report within a few business days and to coordinate disclosure with the reporter once a fix is available.
+- **What gets patched.** Security fixes land on the **active major** and on any **previous major still inside its 6-month maintenance window** (see [Support window](#support-window)). Majors past end-of-life do not receive backports; the remedy there is upgrading. During 0.x, fixes land on the latest release only.
+- **Scope.** Vulnerabilities in `@rotorsoft/act` and the packages that track it are in scope. Issues in example apps under `packages/` (`calculator`, `wolfdesk`, `server`, `client`, `inspector`) are reference code, not published libraries — report them as ordinary issues. Dependency advisories are tracked via automated updates and patched in the active line.
+
 ## Per-library status
 
 | Package | Tracks core 1.0? |
@@ -101,6 +130,10 @@ Each library's `README.md` carries a one-line stability note linking back to thi
 - Documentation under `docs/` and `.claude/skills/` — these evolve continuously and are not versioned with the libraries.
 - Example packages under `packages/` — `calculator`, `wolfdesk`, `server`, `client`, `inspector` are reference implementations, not published libraries.
 - Tools and scripts under `scripts/`.
+
+## Adding new covered surface
+
+This charter protects what already exists; it doesn't gate what gets added. New public surface — a new export, builder method, port method, or lifecycle event — calcifies under semver the moment it ships. Before it does, write a one-page RFC: copy [`rfcs/0000-template.md`](rfcs/0000-template.md) to `rfcs/NNNN-<slug>.md` and capture the motivation, the exact surface added, the alternatives considered, and the charter impact. See [`rfcs/README.md`](rfcs/README.md) for what does and doesn't require one. The PR that adds the surface links the RFC.
 
 ## Questions or proposed changes
 
