@@ -170,7 +170,7 @@ Each lands as a separate spec; the assertion is always the same — `kept === 0`
 
 `runStoreTck` proves your adapter honors the contract in isolation. `runStoreDifferentialTck` proves it honors the contract _identically to the in-memory reference_ — the failure mode (ordering, `with_snaps` floor, `query_stats` / `query_streams` shape drift) that a single-adapter suite can't see. It replays one deterministic, seeded workload against every store you pass and compares their normalized outputs:
 
-```ts
+```ts no-check
 import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
 import { InMemoryStore } from "@rotorsoft/act";
 import { MysqlStore } from "../src/index.js";
