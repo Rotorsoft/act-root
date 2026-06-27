@@ -126,6 +126,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | External integration (inline `webhook` vs forwarded bus, idempotency contract, recovery) | [docs/docs/guides/external-integration.md](docs/docs/guides/external-integration.md) |
 | Auto-generated API surfaces (`trpc`, `hono`, `openapi` subpaths + deployment recipes) | [docs/docs/guides/auto-generated-api.md](docs/docs/guides/auto-generated-api.md) |
 | Adding a new `@rotorsoft/act-*` package | [docs/docs/guides/contributing-new-package.md](docs/docs/guides/contributing-new-package.md) |
+| Third-party adapter onboarding (TCK from a fresh repo + conformance badge) | [docs/docs/guides/tck-conformance.md](docs/docs/guides/tck-conformance.md) |
 | Inspecting contracts with the `act` CLI | [docs/docs/guides/contracts-cli.md](docs/docs/guides/contracts-cli.md) |
 
 ### Operator recipes
