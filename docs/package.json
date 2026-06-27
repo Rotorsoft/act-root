@@ -21,6 +21,8 @@
   "devDependencies": {
     "@docusaurus/core": "^3.10.1",
     "@docusaurus/faster": "^3.10.1",
+    "@rotorsoft/act": "workspace:^",
+    "zod": "^4.4.3",
     "@docusaurus/module-type-aliases": "3.10.1",
     "@docusaurus/preset-classic": "^3.10.1",
     "@docusaurus/tsconfig": "3.10.1",

@@ -8,27 +8,14 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import sdk from "@stackblitz/sdk";
 import styles from "./index.module.css";
+// Real, type-checked source (CI checks it against the live @rotorsoft/act
+// API), imported as text so the quickstart on this page can't drift.
+import quickstartSource from "../snippets/quickstart.ts?raw";
 
 const QUICKSTART_INSTALL = `npm install @rotorsoft/act zod`;
 
-const QUICKSTART_APP = `import { act, state } from "@rotorsoft/act";
-import { z } from "zod";
-
-const Counter = state({ Counter: z.object({ count: z.number() }) })
-  .init(() => ({ count: 0 }))
-  .emits({ Incremented: z.object({ amount: z.number() }) })
-  .patch({ Incremented: ({ data }, s) => ({ count: s.count + data.amount }) })
-  .on({ increment: z.object({ by: z.number() }) })
-    .emit((action) => ["Incremented", { amount: action.by }])
-  .build();
-
-const app = act().withState(Counter).build();
-
-await app.do("increment",
-  { stream: "counter1", actor: { id: "1", name: "User" } },
-  { by: 1 }
-);
-console.log(await app.load(Counter, "counter1"));`;
+// Drop the file's leading `//` header comment so only the example shows.
+const QUICKSTART_APP = quickstartSource.replace(/^(?:\/\/.*\n)+\n?/, "").trimEnd();
 
 const GENERATED_TRANSPORTS_CODE = `import { trpc } from "@rotorsoft/act-http/trpc";
 import { hono } from "@rotorsoft/act-http/hono";
@@ -540,6 +527,13 @@ function CompositionPatterns() {
           <p className={styles.patternsBlurb}>{current.blurb}</p>
           <CodeBlock language="typescript">{current.code}</CodeBlock>
           <p className={styles.patternsNote}>{current.note}</p>
+          <p className={styles.patternsNote}>
+            Abridged for the overview — the full, runnable model lives in{" "}
+            <Link to="https://github.com/rotorsoft/act-root/tree/master/packages/wolfdesk/src">
+              @act/wolfdesk
+            </Link>
+            .
+          </p>
         </div>
       </div>
     </section>
