@@ -38,50 +38,44 @@ call site like a sentence. Full reference lives at
 [docs/docs/guides/close-policies.md](../../../docs/docs/guides/close-policies.md);
 this page covers the two shapes that show up most.
 
+The canonical wolfdesk Ticket
+(`packages/wolfdesk/src/ticket-creation.ts`) declares both shapes
+in a single policy:
+
+```ts
+.autocloses({
+  is: ["TicketClosed", "TicketResolved"],  // terminal events
+  after: { days: 90 },                      // cooldown after terminal
+  or: { after: { days: 365 } },             // retention-floor backstop
+})
+```
+
 ### Cooldown after terminal (the AND case)
 
 The cooldown-after-terminal pattern runs through almost every
 business app: close N days after the terminal event. Top-level
 fields combine with AND, so the cycle truncates only when every
-condition holds.
-
-```ts
-.autocloses({
-  is: "TicketResolved",
-  after: { days: 90 },
-})
-```
-
-Reads: *"autocloses is Resolved after 90 days."* The stream stays
-queryable for a 90-day return / dispute / customer-success window
-after the ticket resolves, then retires itself. Same shape works
-for `Delivered` + 14 days on an order workflow, `Cancelled` +
-30 days on a subscription, `Paid` + 7 days on an invoice. The
-runnable example lives at
+condition holds. In wolfdesk's policy that's the `is` + `after`
+pair: a ticket that closed or resolved stays queryable for a
+90-day return / dispute / customer-success window, then retires
+itself. The same shape works for `Delivered` + 14 days on an
+order workflow, `Cancelled` + 30 days on a subscription, `Paid`
++ 7 days on an invoice. The runnable example lives at
 [examples/ticket-cooldown.ts](examples/ticket-cooldown.ts).
 
-### Pure-OR backstops (the or-block)
+### Retention-floor backstops (the or-block)
 
-Some streams have multiple independent close triggers and you
-want any of them to fire. The terminal event might never arrive
-(an abandoned session, a forgotten draft), so a retention floor
-needs to apply regardless. Or the stream is cardinality-bounded
-(a rotating audit log) and a row-count threshold should retire
-it independent of any domain event.
-
-```ts
-.autocloses({
-  is: "SessionEnded",
-  or: { after: { days: 365 } },
-})
-```
-
-Reads: *"autocloses is Ended, or after 365 days."* Sessions that
-ended close on the terminal event; sessions that never ended
-retire on the retention floor. Mix and match: a pure-OR policy
-with no top-level fields (`{ or: { is, after, reaches } }`) closes
-on any of the three triggers independently. The runnable example
-lives at [examples/retention-floor.ts](examples/retention-floor.ts).
+A terminal event might never arrive — an abandoned ticket, a
+forgotten draft — so a retention floor needs to apply regardless.
+The `or` block fires independently of the top-level AND group:
+wolfdesk's `or: { after: { days: 365 } }` retires any ticket that
+has lingered a year, whether or not it ever reached `TicketClosed`
+or `TicketResolved`. The two paths are evaluated separately, so a
+ticket retires on whichever fires first. Mix and match: a pure-OR
+policy with no top-level fields (`{ or: { is, after, reaches } }`)
+closes on any of its triggers independently, and a row-count
+threshold (`reaches: N`) retires a cardinality-bounded stream like
+a rotating audit log without any domain event at all.
 
 The full set of fields (`after: { days }`, `is: "EventName"` or
 `is: string[]`, `reaches: N`), AND/OR composition rules, and the
@@ -171,13 +165,11 @@ patterns belong in the host scheduler, not in `.autocloses(...)`.
 ## Examples in this folder
 
 - [examples/ticket-cooldown.ts](examples/ticket-cooldown.ts) —
-  Ticket state with `TicketOpened` / `TicketResolved`, closes
-  90 days after resolution. The primary cooldown pattern.
-- [examples/retention-floor.ts](examples/retention-floor.ts) —
-  Session state with `SessionStarted` / `SessionEnded`, closes
-  on the terminal event OR after 365 days. The terminal-with-
-  backstop pattern.
+  imports the canonical wolfdesk `app` and asserts
+  `app.registry.autoclose_policy("Ticket")` is registered, a
+  wiring check against the real model. The Ticket policy carries
+  both the 90-day cooldown AND-group and the 365-day
+  retention-floor `or` backstop.
 
-Both compile against `@rotorsoft/act` as published and run with
-`tsx` against the default in-memory store — no database needed
-to verify the declarator wires up.
+It compiles against `@rotorsoft/act` as published and runs with
+`tsx` — no database needed to verify the declarator wires up.

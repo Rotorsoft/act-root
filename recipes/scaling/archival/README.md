@@ -37,41 +37,27 @@ The shape that fits 80% of cases: dump each stream as one JSONL object per event
 
 **Throw on AWS errors.** Catch nothing. If `s3.send(...)` rejects, let it bubble — the framework's safety property turns a thrown archiver into "leave the stream alone, retry next tick." Swallowing the error and resolving would silently truncate the stream with no archive in cold storage.
 
-The sample at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) is a working file an operator can copy into their service and adapt.
+The sample at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) exports a model-agnostic `archiveStreamToS3(stream)` function: it queries the stream's events by name and uploads them as JSONL, so it works for any state. Copy it into your service and wire it with `.archives(...)`.
 
 ## Pair with `.autocloses({...})`
 
-The two declarators live on the same state and run on the same cycle. Concrete shape:
+The two declarators live on the same state and run on the same cycle. The archiver is just a function reference, so wiring it onto the canonical wolfdesk Ticket (`packages/wolfdesk/src/ticket-creation.ts`) is one line:
 
 ```ts
-import { state } from "@rotorsoft/act";
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { archiveStreamToS3 } from "./examples/s3-jsonl-archiver.js";
 
-const s3 = new S3Client({ region: process.env.AWS_REGION });
-const BUCKET = process.env.ARCHIVE_BUCKET!;
-
-const Ticket = state({ Ticket: ticketSchema })
-  .init(() => defaults)
-  .emits({ TicketOpened, TicketResolved })
-  // ... actions, patches, invariants
+export const TicketCreation = state({ Ticket: TicketCreationState })
+  // ...emits / patch / on / emit...
   .autocloses({
-    is: "TicketResolved",
+    is: ["TicketClosed", "TicketResolved"],
     after: { days: 90 },
+    or: { after: { days: 365 } },
   })
-  .archives(async (stream) => {
-    const events: unknown[] = [];
-    await store().query((e) => { events.push(e); }, { stream });
-    const body = events.map((e) => JSON.stringify(e)).join("\n");
-    await s3.send(new PutObjectCommand({
-      Bucket: BUCKET,
-      Key: `tickets/${stream}.jsonl`,
-      Body: body,
-    }));
-  })
+  .archives(archiveStreamToS3)
   .build();
 ```
 
-Reads: *"autocloses is Resolved after 90 days; archives to `tickets/${stream}.jsonl` first."* The cycle does the rest — predicate matches, archiver runs, truncate fires. See the full file at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts) for the wired state with action handlers and event schemas.
+The cycle does the rest — predicate matches, the archiver ships the stream's events to `${stream}.jsonl` in S3, truncate fires. See the full function at [examples/s3-jsonl-archiver.ts](examples/s3-jsonl-archiver.ts).
 
 ## What this recipe is NOT
 

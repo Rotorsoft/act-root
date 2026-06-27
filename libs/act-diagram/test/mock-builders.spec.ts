@@ -296,6 +296,14 @@ describe("mock_slice", () => {
     expect(built[0].projections).toContain(fakeProj);
   });
 
+  it("withState(undefined) pushes null (line 196 nullish branch)", () => {
+    const built: any[] = [];
+    mock_slice((info) => built.push(info))
+      .withState(undefined)
+      .build();
+    expect(built[0].states).toEqual([null]);
+  });
+
   it("withProjection(null) does not add to projections (line 192)", () => {
     const built: any[] = [];
     mock_slice((info) => built.push(info))

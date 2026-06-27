@@ -647,6 +647,9 @@ importers:
 
   recipes:
     dependencies:
+      '@act/wolfdesk':
+        specifier: workspace:^
+        version: link:../packages/wolfdesk
       '@rotorsoft/act':
         specifier: workspace:^
         version: link:../libs/act
