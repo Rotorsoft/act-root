@@ -52,6 +52,7 @@ const sidebars: SidebarsConfig = {
         "architecture/close-cycle",
         "architecture/event-schema-evolution",
         "architecture/extension-points",
+        "architecture/behavior-contracts",
       ],
     },
     {
