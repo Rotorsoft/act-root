@@ -45,6 +45,7 @@
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
     "build": "pnpm clean && tsup && pnpm types",
+    "mutation": "stryker run",
     "stress": "tsx test/stress/runner.ts"
   },
   "dependencies": {
@@ -57,6 +58,8 @@
   },
   "devDependencies": {
     "@rotorsoft/act-tck": "workspace:^",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "@types/pg": "^8.20.0"
   }
 }

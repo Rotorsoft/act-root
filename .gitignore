@@ -15,6 +15,11 @@ libs/act/perf-result.json
 libs/act/realistic-result.json
 package-lock.json
 
+# StrykerJS mutation testing — per-run reports + sandbox temp dirs.
+reports/
+.stryker-tmp/
+stryker.log
+
 # Claude Code: machine-specific overrides + transient state.
 .claude/settings.local.json
 .claude/.cache/

@@ -45,7 +45,8 @@
   "scripts": {
     "clean": "rm -rf dist",
     "types": "tsc --build tsconfig.build.json --emitDeclarationOnly",
-    "build": "pnpm clean && tsup && pnpm types"
+    "build": "pnpm clean && tsup && pnpm types",
+    "mutation": "stryker run"
   },
   "peerDependencies": {
     "@fast-check/vitest": ">=0.4.1",
@@ -56,6 +57,8 @@
   "devDependencies": {
     "@fast-check/vitest": "^0.4.1",
     "@rotorsoft/act": "workspace:^",
+    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/vitest-runner": "^9.6.1",
     "vitest": "^4.1.9",
     "zod": "^4.4.3"
   }
