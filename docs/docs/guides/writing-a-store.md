@@ -166,6 +166,27 @@ Some failure modes are dialect-specific and live in your adapter's own error-spe
 
 Each lands as a separate spec; the assertion is always the same — `kept === 0`, no events in the store afterwards, no partial state observable.
 
+### Differential testing against the reference adapter
+
+`runStoreTck` proves your adapter honors the contract in isolation. `runStoreDifferentialTck` proves it honors the contract _identically to the in-memory reference_ — the failure mode (ordering, `with_snaps` floor, `query_stats` / `query_streams` shape drift) that a single-adapter suite can't see. It replays one deterministic, seeded workload against every store you pass and compares their normalized outputs:
+
+```ts
+import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
+import { InMemoryStore } from "@rotorsoft/act";
+import { MysqlStore } from "../src/index.js";
+
+runStoreDifferentialTck({
+  name: "InMemory vs Mysql",
+  // First entry is the reference; every other store must match it.
+  stores: [
+    { name: "InMemoryStore", factory: () => new InMemoryStore() },
+    { name: "MysqlStore", factory: () => new MysqlStore({ /* … */ }) },
+  ],
+});
+```
+
+Normalization drops only the fields that legitimately differ between stores (absolute event ids, `created` timestamps, correlation/causation uuids); everything that defines correctness — stream, version, name, data, emission order — must be byte-for-byte equal. The in-tree adapters wire it as `store-differential-tck.spec.ts` alongside `store-tck.spec.ts`.
+
 ## Scaffolding `@rotorsoft/act-mysql` (worked example)
 
 ```
@@ -178,8 +199,9 @@ libs/act-mysql/
 │   ├── index.ts              # export { MysqlStore }
 │   └── mysql-store.ts        # implements Store
 ├── test/
-│   ├── store-tck.spec.ts     # runStoreTck({ factory: () => new MysqlStore(…) })
-│   └── store.error.spec.ts   # MySQL-specific error paths
+│   ├── store-tck.spec.ts             # runStoreTck({ factory: () => new MysqlStore(…) })
+│   ├── store-differential-tck.spec.ts # runStoreDifferentialTck({ stores: [InMemory, Mysql] })
+│   └── store.error.spec.ts           # MySQL-specific error paths
 └── README.md
 ```
 

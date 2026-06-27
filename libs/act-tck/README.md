@@ -39,6 +39,7 @@ That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internall
 ## API
 
 - **`runStoreTck(options)`** — every `Store` method, capability-gated where optional.
+- **`runStoreDifferentialTck(options)`** — drives one seeded workload against multiple `Store` instances and asserts identical normalized output (event order, `with_snaps` floor, `query_stats` / `query_streams`). Catches cross-adapter drift a single-adapter suite can't.
 - **`runCacheTck(options)`** — every `Cache` method, cross-stream isolation, dispose idempotency.
 - **`runLoggerTck(options)`** — structural smoke test of the `Logger` contract.
 - **`runStabilityTck(options)`** — snapshot-based public-API stability gate. Catches accidental rename / removal / signature drift on a package's public surface before it merges.
@@ -62,6 +63,32 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 - `query_streams` — filters, exact-match, pagination, blocked
 - `query_stats` — array + filter forms, opt-in count/tail/names, exclude + before, snapshot count via `names`
 - `notify` (capability-gated) — subscribe + dispose smoke test
+
+### `runStoreDifferentialTck`
+
+Where `runStoreTck` proves each adapter honors the contract in isolation, the differential harness proves they honor it _identically_. It replays one deterministic, seeded workload — commits, inline snapshots, truncates, subscriptions — against two or more `Store` instances (in-memory as the reference, durable adapters as comparands), then asserts their **normalized** outputs match exactly:
+
+- global forward `query` order
+- per-stream `with_snaps` snapshot floor
+- backward traversal order
+- `query_stats` head / tail / count / names (plus filter-form key order)
+- `query_streams` rows (source, watermark, blocked, priority, lane)
+
+Normalization drops only what legitimately differs between stores (absolute event ids, `created` timestamps, correlation/causation uuids). A one-adapter `with_snaps` regression surfaces as a diff against the reference. Wire it with the in-memory store first:
+
+```ts
+import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
+import { InMemoryStore } from "@rotorsoft/act";
+import { MysqlStore } from "../src/index.js";
+
+runStoreDifferentialTck({
+  name: "InMemory vs Mysql",
+  stores: [
+    { name: "InMemoryStore", factory: () => new InMemoryStore() },
+    { name: "MysqlStore", factory: () => new MysqlStore({ /* … */ }) },
+  ],
+});
+```
 
 ### `runCacheTck`
 
