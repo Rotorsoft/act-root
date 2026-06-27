@@ -190,6 +190,62 @@ jobs:
       - run: pnpm -F @rotorsoft/act bench:check
         if: needs.changes.outputs.perf-changed == 'true'
 
+      # Per-adapter perf gate on REAL adapters (act-1031). Unlike the core
+      # gate above (InMemory), these run against the docker Postgres on
+      # 5431 and a real on-disk SQLite — the only place adapter-level
+      # regressions (a lost index, a reintroduced N+1, a snapshot-floor
+      # read that scans the whole stream) actually surface.
+      #
+      # Budgets: p50 ≤ 2.0× baseline for act-pg (wide noise band on a real
+      # DB), p50 ≤ 1.5× for act-sqlite (embedded, tighter). Both skip the
+      # ratio check when the baseline p50 is below a 1.0 ms absolute floor
+      # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
+      #
+      # REPORT-ONLY for now (`continue-on-error: true`): a breach annotates
+      # the run but does NOT fail the build. This is intentional during
+      # rollout — the act-pg baseline ships empty (`{"results":[]}`) and is
+      # populated by CI / a maintainer running `bench:update` on a real DB,
+      # so the budget can't engage until the numbers prove stable across a
+      # few runs. Flip these to blocking (drop `continue-on-error`) once the
+      # baselines have a track record. The pg connection needs no extra env:
+      # PostgresStore defaults (host/db/user/password = postgres, the docker
+      # service's settings) already match, exactly like the act-pg tests.
+      - name: act-pg perf gate (report-only)
+        if: needs.changes.outputs.perf-changed == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm -F @rotorsoft/act-pg bench:run
+          pnpm -F @rotorsoft/act-pg bench:check 2>&1 | tee bench-pg.log
+      - name: act-sqlite perf gate (report-only)
+        if: needs.changes.outputs.perf-changed == 'true'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          pnpm -F @rotorsoft/act-sqlite bench:run
+          pnpm -F @rotorsoft/act-sqlite bench:check 2>&1 | tee bench-sqlite.log
+      - name: Append adapter perf results to step summary
+        if: |
+          always() &&
+          needs.changes.outputs.perf-changed == 'true'
+        run: |
+          {
+            echo "## Adapter perf gate (report-only)"
+            echo ""
+            echo "Real-adapter p50 regression budgets — act-pg 2.0×, act-sqlite"
+            echo "1.5×, both with a 1.0 ms absolute floor. Report-only until the"
+            echo "baselines prove stable, then flipped to blocking."
+            echo ""
+            echo "### act-pg"
+            echo '```'
+            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-pg.log 2>/dev/null || echo "(no act-pg output)"
+            echo '```'
+            echo "### act-sqlite"
+            echo '```'
+            sed -E $'s/\x1b\\[[0-9;]*m//g' bench-sqlite.log 2>/dev/null || echo "(no act-sqlite output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # Scenario benchmarks (Shape C). Each one has a built-in
       # regression assertion, so a real perf regression breaks the
       # build. The captured stdout ends up in the workflow's step

@@ -1,0 +1,47 @@
+{
+  "results": [
+    {
+      "name": "commit: single event",
+      "samples": 200,
+      "p50_ms": 0.2685,
+      "p95_ms": 0.3162,
+      "mean_ms": 0.2681,
+      "ops_per_sec": 3729
+    },
+    {
+      "name": "commit: 50-event batch",
+      "samples": 100,
+      "p50_ms": 0.9749,
+      "p95_ms": 1.0936,
+      "mean_ms": 0.9903,
+      "ops_per_sec": 1010,
+      "effective_per_sec": 50500
+    },
+    {
+      "name": "load: cold replay over snapshot floor",
+      "samples": 100,
+      "p50_ms": 0.2102,
+      "p95_ms": 0.2572,
+      "mean_ms": 0.2239,
+      "ops_per_sec": 4466
+    },
+    {
+      "name": "drain: correlate+drain 50 events",
+      "samples": 50,
+      "p50_ms": 1.1123,
+      "p95_ms": 1.2671,
+      "mean_ms": 1.129,
+      "ops_per_sec": 886,
+      "effective_per_sec": 44300
+    },
+    {
+      "name": "query_stats: page of 50 (count+names)",
+      "samples": 50,
+      "p50_ms": 1.7518,
+      "p95_ms": 1.8225,
+      "mean_ms": 1.6709,
+      "ops_per_sec": 598,
+      "effective_per_sec": 29900
+    }
+  ]
+}
