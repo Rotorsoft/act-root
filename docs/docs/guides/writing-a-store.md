@@ -28,7 +28,7 @@ Reading the JSDoc on each method is the first step. The TCK is the second.
 
 `@rotorsoft/act-tck` exports `runStoreTck`, a function you drop into your adapter's vitest suite:
 
-```ts
+```ts no-check
 // libs/act-mysql/test/store-tck.spec.ts
 import { runStoreTck } from "@rotorsoft/act-tck";
 import { MysqlStore } from "../src/index.js";
@@ -55,7 +55,7 @@ Adapter-specific tests (e.g., dialect-specific error paths, transaction edge cas
 
 Some methods are optional. `Store.notify` is the only one today — it's a cross-process wakeup hook implemented by Postgres' `LISTEN`/`NOTIFY` and skipped by single-node adapters like SQLite.
 
-```ts
+```ts no-check
 runStoreTck({
   name: "MysqlStore",
   factory: () => new MysqlStore({ /* … */ }),
@@ -83,7 +83,7 @@ Two query options carry semantics that are easy to get subtly wrong, so the cont
 
 The signature is intentionally inverted — your adapter is handed a driver function and called with a per-event insert callback that the orchestrator owns:
 
-```ts
+```ts no-check
 async restore(
   driver: (
     callback: (event: Committed<Schemas, keyof Schemas>) => Promise<number>
@@ -143,7 +143,7 @@ The compaction (`drop_snapshots`, `drop_closed_streams`) and migration (`event_m
 
 Once you've implemented the method, flip the capability flag:
 
-```ts
+```ts no-check
 runStoreTck({
   name: "MysqlStore",
   factory: () => new MysqlStore({ /* … */ }),
@@ -207,7 +207,7 @@ The README's testing section shows the TCK invocation so users can verify the ad
 
 The Postgres store is validated against `@rotorsoft/act-tck`:
 
-```ts
+```ts no-check
 import { runStoreTck } from "@rotorsoft/act-tck";
 import { MysqlStore } from "@rotorsoft/act-mysql";
 

@@ -46,7 +46,7 @@ npm install @rotorsoft/act-sse
 
 Manages per-stream subscriber sets and an LRU state cache for reconnects:
 
-```typescript
+```typescript no-check
 import { BroadcastChannel } from "@rotorsoft/act-sse";
 import type { BroadcastState, PatchMessage } from "@rotorsoft/act-sse";
 
@@ -65,7 +65,7 @@ const broadcast = new BroadcastChannel<AppState>({
 
 After every `app.do()`, forward each emitted snapshot's domain patch:
 
-```typescript
+```typescript no-check
 const snaps = await app.do("CreateItem", target, input);
 const last = snaps.at(-1)!;
 
@@ -92,7 +92,7 @@ broadcast.publish(streamId, state, patches);
 
 Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `publishOverlay()`:
 
-```typescript
+```typescript no-check
 broadcast.publishOverlay(streamId, {
   onlineUsers: presence.getOnline(streamId),
 });
@@ -104,7 +104,7 @@ This applies the overlay to the cached state, leaves `_v` unchanged, and emits a
 
 `PresenceTracker` is a ref-counted online-status tracker designed for multi-tab clients (each tab opens its own SSE; `add` / `remove` maintain a per-identity counter):
 
-```typescript
+```typescript no-check
 import { PresenceTracker } from "@rotorsoft/act-sse";
 
 const presence = new PresenceTracker();
@@ -124,7 +124,7 @@ presence.isOnline(streamId, identityId); // boolean
 
 `act-sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
 
-```typescript
+```typescript no-check
 import type { PatchMessage } from "@rotorsoft/act-sse";
 
 type Envelope<S> =
@@ -176,7 +176,7 @@ export const onStateChange = publicProcedure
 
 ### applyPatchMessage
 
-```typescript
+```typescript no-check
 import { applyPatchMessage } from "@rotorsoft/act-sse";
 
 onData: (env) => {
@@ -213,7 +213,7 @@ onData: (env) => {
 
 If a projection falls back to the broadcast cache on a miss, it reads state that already has event patches applied. Re-applying those same patches corrupts counters and indices.
 
-```typescript
+```typescript no-check
 // BUG — broadcast cache holds post-event snapshots
 let state = projCache.get(id) ?? broadcast.getState(id); // ← already patched!
 mutator(state); // patches applied a second time

@@ -45,7 +45,7 @@ That's all the generators do. There's no codegen step, no schema generator, no s
 
 The shape that lands in the multi-transport demo (`packages/server` in this repo):
 
-```ts
+```ts no-check
 import { act } from "@rotorsoft/act";
 import { hono } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
@@ -82,7 +82,7 @@ That's it — three transports against one registry. Add an action to the Calcul
 
 The generator emits a flat router — one mutation per registered action, keyed by the action name:
 
-```ts
+```ts no-check
 const router = trpc(app, {
   actor: (ctx) => ({ id: ctx.user.id, name: ctx.user.name }),
   stream: (action, input, ctx) => `tenant-${ctx.tenant}`,
@@ -109,7 +109,7 @@ The wolfdesk and calculator examples each take a different side of this trade-of
 
 Same registry, same options shape, REST instead of RPC:
 
-```ts
+```ts no-check
 import { hono } from "@rotorsoft/act-http/hono";
 import { serve } from "@hono/node-server";
 
@@ -134,7 +134,7 @@ Edge-runtime ready — Hono runs unchanged on Node, Bun, Cloudflare Workers, Ver
 
 A pure-data emitter — no runtime dep on Hono or tRPC. Returns an OpenAPI 3.1 document object you can serialize and serve, or pass to a docs renderer:
 
-```ts
+```ts no-check
 import { openapi } from "@rotorsoft/act-http/openapi";
 
 const doc = openapi(app, {
@@ -154,7 +154,7 @@ Zod 4's native `z.toJSONSchema` does the schema conversion — OpenAPI 3.1 uses 
 
 A clean way to serve the doc plus an interactive explorer in one shot — Scalar reads the live document from the same server:
 
-```ts
+```ts no-check
 api.get("/openapi.json", (c) => c.json(doc));
 api.get("/docs", (c) =>
   c.html(`<!doctype html>
@@ -172,7 +172,7 @@ api.get("/docs", (c) =>
 
 Three concerns surface in every transport. Defining them once at `@rotorsoft/act-http/api` is what keeps the transports honest:
 
-```ts
+```ts no-check
 import {
   type ActorExtractor,
   type ApiError,
@@ -212,7 +212,7 @@ The package deliberately doesn't ship JWT verification, session store integratio
 
 What the package ships instead is the `ActorExtractor` seam. Plug whatever you already have:
 
-```ts
+```ts no-check
 // JWT bearer
 const actor: ActorExtractor = async (ctx) => {
   const token = ctx.req.header("authorization")?.replace(/^Bearer /, "");
@@ -246,7 +246,7 @@ Errors thrown from the extractor surface as `401 / UNAUTHORIZED` on the Hono ada
 
 Both `/trpc` and `/hono` also export the underlying `authenticated(extractor)` middleware so you can compose it into your own chain alongside the generated routes:
 
-```ts
+```ts no-check
 // Hono
 import { Hono } from "hono";
 import { authenticated, type ActMiddlewareVariables } from "@rotorsoft/act-http/hono";
@@ -273,7 +273,7 @@ The conventional wiring is the `If-Match` header on REST or a last-known-version
 
 Same shape on every transport. The `idempotency` option takes an `IdempotencyStore` from `@rotorsoft/act-ops/idempotency` and an optional `keyFrom(ctx) => string | undefined` extractor:
 
-```ts
+```ts no-check
 import { hono } from "@rotorsoft/act-http/hono";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
@@ -289,7 +289,7 @@ const api = hono(app, {
 
 Document the header on the OpenAPI emitter the same way:
 
-```ts
+```ts no-check
 openapi(app, { info, servers, idempotency: true });
 ```
 
@@ -299,7 +299,7 @@ Behavior: fresh claim → handler runs, response normal. Duplicate claim → `40
 
 Both `trpc(app, { sse })` and `hono(app, { sse })` accept an optional SSE wiring that walks the registry and emits **one subscription per unique state name**, all reading from a host-supplied `BroadcastChannel`. The host continues to own publication; the generator owns subscription, accounting, cleanup, and the wire format — so the loop you used to hand-write (open SSE response, subscribe to channel, forward patches, manage heartbeat, decrement counter on close) collapses to one option.
 
-```ts
+```ts no-check
 import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { trpc } from "@rotorsoft/act-http/trpc";
 import { hono } from "@rotorsoft/act-http/hono";
@@ -377,7 +377,7 @@ The three generators were designed to run on every fetch-shaped runtime. Pick th
 
 The default shape used in `packages/server`:
 
-```ts
+```ts no-check
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -407,7 +407,7 @@ The `fetchRequestHandler` from `@trpc/server/adapters/fetch` is the right tRPC a
 
 Hono's `app.fetch` is the entrypoint every edge runtime expects:
 
-```ts
+```ts no-check
 // Vercel
 export default { fetch: app.fetch };
 
@@ -442,7 +442,7 @@ The OpenAPI document reflects the action surface, which is stable across event-v
 
 The pattern: replace the manual router with `trpc(app, options)` or `hono(app, options)` and check whether the client still type-checks.
 
-```ts
+```ts no-check
 // Before — hand-written tRPC router
 export const router = t.router({
   OpenTicket: t.procedure

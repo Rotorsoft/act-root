@@ -24,7 +24,7 @@ This guide walks through the declarative surface, the read-path semantics, the e
 
 Marking a Zod schema field with `sensitive(...)` is a pure annotation. The static type of the schema is unchanged; the function returns the same schema instance after registering a marker the orchestrator inspects at build time.
 
-```ts
+```ts no-check
 import { z } from "zod";
 import { sensitive, state } from "@rotorsoft/act";
 
@@ -78,7 +78,7 @@ One build-time constraint to know: a state whose events declare any `sensitive(.
 
 The bare-stream form is default-deny. The caller has no authorization context, so every sensitive field comes back as `"[REDACTED]"`:
 
-```ts
+```ts no-check
 const snap = await app.load(User, "user-42");
 // snap.event.data.email === "[REDACTED]"
 // snap.event.data.name  === "[REDACTED]"
@@ -89,7 +89,7 @@ Use this in background workers, observability probes, replay scripts — anywher
 
 The auth-aware form takes a `LoadTarget` carrying the actor, and runs the state's `.discloses(predicate)` against it:
 
-```ts
+```ts no-check
 const snap = await app.load(User, {
   stream: "user-42",
   actor: { id: "user-42", name: "Alice", role: "user" },
@@ -109,14 +109,14 @@ When a reaction genuinely needs PII (e.g. a welcome-email handler that has to re
 
 When a user requests deletion, you don't rewrite history. You wipe the PII column for every event on their stream, leaving the rest of the event log intact:
 
-```ts
+```ts no-check
 const { eventCount } = await app.forget("user-42");
 // eventCount === 7 (all events on the stream had their pii column nulled)
 ```
 
 The call is irreversible. After it returns, the row's `pii` column is `NULL`. Subsequent loads — even by an authorized actor — return `"[SHREDDED]"` for every sensitive field on those events, because the framework can tell the column was wiped versus merely redacted:
 
-```ts
+```ts no-check
 const snap = await app.load(User, {
   stream: "user-42",
   actor: adminActor, // .discloses returns true
@@ -130,7 +130,7 @@ const snap = await app.load(User, {
 
 The framework's `forget` flow does three things in order: it delegates to the store's `forget_pii(stream)` capability, invalidates the cache entry for the stream (so the next load reflects the wipe), and emits a `forgotten` lifecycle event with `{ stream, at, eventCount }`. The lifecycle event is your hook for compliance bookkeeping:
 
-```ts
+```ts no-check
 app.on("forgotten", async ({ stream, at, eventCount }) => {
   await auditLog.write({
     kind: "pii_forgotten",
@@ -147,7 +147,7 @@ app.on("forgotten", async ({ stream, at, eventCount }) => {
 
 A typical GDPR-erasure recipe looks like this:
 
-```ts
+```ts no-check
 async function handleErasureRequest(userId: string) {
   // 1. Wipe the PII column on the user's event stream.
   const { eventCount } = await app.forget(`user-${userId}`);

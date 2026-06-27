@@ -130,7 +130,7 @@ The "owning state" for each stream is found via `eventToState.get(lastEventName)
 
 Sequential. Each `target.archive?` callback is awaited in turn.
 
-```ts
+```ts no-check
 for (const stream of guarded) {
   const archiveFn = targetMap.get(stream)?.archive;
   if (archiveFn) await archiveFn();

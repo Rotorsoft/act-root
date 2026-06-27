@@ -55,7 +55,7 @@ Note the asymmetry: the action is `increment` (lowercase, intent), the event is 
 
 Create `index.ts`:
 
-```typescript
+```typescript no-check
 import { act } from "@rotorsoft/act";
 import { Counter } from "./counter.js";
 
@@ -82,7 +82,7 @@ What happened:
 
 Real domains have rules: "you can't decrement below zero", "you can't close a ticket twice", etc. Act expresses them as **invariants** — small pure functions checked before an action runs:
 
-```typescript
+```typescript no-check
 import { type Invariant } from "@rotorsoft/act";
 
 const mustStayPositive: Invariant<{ count: number }> = {
@@ -103,7 +103,7 @@ When the invariant fails, Act throws `InvariantError` *before* any event is comm
 
 The event log is the audit trail. You can query it directly:
 
-```typescript
+```typescript no-check
 const events = await app.query_array({ stream: "counter-1", stream_exact: true });
 events.forEach((e) => {
   console.log(`v${e.version}: ${e.name} by ${e.meta.causation.action.actor.name}`);
@@ -116,7 +116,7 @@ Every event carries its action's actor, correlation id (request trace), and caus
 
 You can also reconstruct state at a specific point in time:
 
-```typescript
+```typescript no-check
 // State just before event id 5
 const past = await app.load(Counter, "counter-1", undefined, { before: 5 });
 ```

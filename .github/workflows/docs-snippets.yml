@@ -1,0 +1,51 @@
+name: Docs Snippets
+
+# Type-checks every fenced ```ts block in docs/docs against the live
+# @rotorsoft/act source (issue #1033). Runs when docs change OR when a
+# library's public source changes — so an API rename that breaks a shown
+# snippet fails here, not just at a reader's keyboard.
+on:
+  pull_request:
+    paths:
+      - 'docs/docs/**'
+      - 'docs/scripts/**'
+      - 'docs/tsconfig.snippets.json'
+      - 'docs/package.json'
+      - 'libs/*/src/**'
+      - '.github/workflows/docs-snippets.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'docs/docs/**'
+      - 'docs/scripts/**'
+      - 'docs/tsconfig.snippets.json'
+      - 'libs/*/src/**'
+  workflow_dispatch:
+
+env:
+  SKIP_SIMPLE_GIT_HOOKS: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  snippets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.0
+          cache: "pnpm"
+
+      - run: pnpm install
+
+      # Tangle every non-skipped ```ts block into docs/.snippets/ and
+      # type-check the lot against the framework source.
+      - run: pnpm -F docs check:snippets
+
+      # Negative test: prove the harness rejects a deliberately-broken
+      # snippet, so a green run above means "snippets compile", not
+      # "the checker is a no-op".
+      - run: pnpm -F docs check:snippets:selftest

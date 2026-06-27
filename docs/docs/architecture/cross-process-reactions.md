@@ -23,7 +23,7 @@ For event-driven workloads where reactions matter, that 10 s floor is a deal-bre
 
 The `Store` interface has an optional method:
 
-```ts
+```ts no-check
 interface Store extends Disposable {
   // ...existing...
   notify?(
@@ -42,7 +42,7 @@ type StoreNotification = {
 
 When present, the orchestrator subscribes once at `build()` time and routes notifications to wake `settle()` automatically. The hook is **opt-in at the adapter level** — `PostgresStore` defaults `notify: false` so single-instance deployments pay zero overhead. Multi-process apps enable it explicitly:
 
-```ts
+```ts no-check
 store(new PostgresStore({ /* ... */, notify: true }));   // ← opt in
 const app = act()
   .withState(Order)
@@ -53,7 +53,7 @@ const app = act()
 
 Optionally, the user can also subscribe to the `notified` lifecycle event for SSE fan-out, dashboards, or audit:
 
-```ts
+```ts no-check
 app.on("notified", (n) => sse.broadcast(n));
 ```
 
@@ -78,7 +78,7 @@ The alternative (broadcast everything, let the consumer filter) was rejected as 
 
 Inject the store via `store(adapter)` **before** calling `act()...build()`. The orchestrator wires the notify subscription against whichever store is current at construction; late injection won't take effect.
 
-```ts
+```ts no-check
 // ✅ Correct
 store(new PostgresStore({...}));
 const app = act().withState(Order).build();

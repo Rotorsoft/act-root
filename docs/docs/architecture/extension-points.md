@@ -35,7 +35,7 @@ The `dispose()` port collects cleanup callbacks. Adapters' `dispose()` methods a
 
 The `Store` interface in `libs/act/src/types/ports.ts`. The framework needs the store to do these things:
 
-```ts
+```ts no-check
 interface Store extends Disposable, EventSource {
   // EventSource gives us:
   // query<E>(callback: (event: Committed<E>) => void, query?: Query): Promise<number>;
@@ -76,7 +76,7 @@ interface Store extends Disposable, EventSource {
 
 `forget_pii(stream: string): Promise<number>` is the physical-erasure half of the sensitive-data epic. The orchestrator calls it from `app.forget(stream)`; the adapter wipes the PII column for every event on the stream and returns the row count. `events.data` and the rest of the row are never touched, so the append-only invariant the rest of the framework depends on stays intact.
 
-```ts
+```ts no-check
 const wiped = await store.forget_pii("user-42");
 // wiped === 7 — seven events had their pii column nulled.
 ```
@@ -101,7 +101,7 @@ In-tree adapters that declare `pii_isolation`:
 
 Added by [ACT-1128](https://github.com/Rotorsoft/act-root/issues/787) / [#788](https://github.com/Rotorsoft/act-root/issues/788), the public types `EventSource` and `EventSink` (in `libs/act/src/types/action.ts`) split the read end and the write end of the restore pipeline into separate interfaces, so the same `Act.restore` driver can move events between any source and any sink:
 
-```ts
+```ts no-check
 interface EventSource extends Disposable {
   query<E>(callback: (event: Committed<E>) => void, query?: Query): Promise<number>;
 }
@@ -114,7 +114,7 @@ interface EventSink extends Disposable {
 
 The orchestrator now exposes:
 
-```ts
+```ts no-check
 app.restore(source: EventSource, opts?: ScanOptions, sink?: EventSink): Promise<ScanResult>
 ```
 
@@ -173,7 +173,7 @@ All transforms run inside scan's existing pagination loop and atomic-rollback co
 
 ## Cache contract
 
-```ts
+```ts no-check
 interface Cache extends Disposable {
   get<TState>(stream): Promise<CacheEntry<TState> | undefined>;
   set<TState>(stream, entry): Promise<void>;
@@ -233,7 +233,7 @@ interface Logger extends Disposable {
 
 ## Wiring it together — a minimal app
 
-```ts
+```ts no-check
 import { act, store, cache, log, dispose } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { InMemoryCache } from "@rotorsoft/act";  // re-exported from main
@@ -259,7 +259,7 @@ If any port is left to default, the framework wires the in-memory implementation
 
 The singleton path covers the common case: one Act instance per process, one store, one cache. When you need more than one Act in the same process — each with its own store and/or cache — pass an `ActOptions.scoped` bag at build time:
 
-```ts
+```ts no-check
 import { act, InMemoryCache } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 
@@ -279,7 +279,7 @@ The framework threads the bag through `AsyncLocalStorage` and wraps every public
 
 For more than a couple of Acts — multi-tenant SaaS, parallel test workers, side-by-side store experiments — hold the builder in a constant and call `.build({ scoped: ... })` once per tenant. The builder is reusable: the first build performs one-time work (projection merge, deprecation scan, startup advisory) and subsequent builds reuse the merged registry to produce independent Acts.
 
-```ts
+```ts no-check
 import { act, InMemoryCache, projection, state } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 

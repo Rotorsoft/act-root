@@ -4,6 +4,9 @@
   "private": true,
   "scripts": {
     "build:all": "typedoc --options typedoc.json && docusaurus build",
+    "snippets:extract": "node scripts/check-snippets.mjs",
+    "check:snippets": "node scripts/check-snippets.mjs && tsc --noEmit -p tsconfig.snippets.json",
+    "check:snippets:selftest": "node scripts/check-snippets.mjs --self-test",
     "swizzle": "docusaurus swizzle",
     "clear": "docusaurus clear",
     "serve": "docusaurus serve",

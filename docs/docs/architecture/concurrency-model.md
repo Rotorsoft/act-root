@@ -56,7 +56,7 @@ If two callers race on the same stream, only one wins. The loser sees `Concurren
 
 Inside `action()`, when `reactingTo` is provided (i.e., the action was triggered by a reaction handler), `expectedVersion` is *not* enforced:
 
-```ts
+```ts no-check
 // internal/event-sourcing.ts, action()
 reactingTo ? undefined : expected
 ```

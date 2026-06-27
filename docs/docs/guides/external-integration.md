@@ -24,7 +24,7 @@ The rest of this page expands each shape.
 
 The simplest shape: a reaction calls `webhook(...)` (from [`@rotorsoft/act-http/webhook`](https://github.com/Rotorsoft/act-root/tree/master/libs/act-http)), drain owns ordering and retries, and the failure paths fall back onto the framework's existing primitives.
 
-```ts
+```ts no-check
 import { slice } from "@rotorsoft/act";
 import { webhook } from "@rotorsoft/act-http/webhook";
 
@@ -90,7 +90,7 @@ Each of those is a signal to read the next section.
 
 When inline doesn't fit, the pattern is to publish events to a real message bus (Kafka, SQS, Redpanda, NATS, RabbitMQ) and let downstream consumers own delivery semantics. Act keeps its drain semantics for the *publish step*; the bus takes over from there.
 
-```ts
+```ts no-check
 import { slice } from "@rotorsoft/act";
 import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 
@@ -187,7 +187,7 @@ For custom callers — non-`webhook` reactions, queue forwarders, anything — p
 
 The dedup contract is shipped as a port — `IdempotencyStore` — in [`@rotorsoft/act-ops`](https://www.npmjs.com/package/@rotorsoft/act-ops), the zero-`act`-dependency home for receiver-side primitives. One method, by design:
 
-```ts
+```ts no-check
 import type { IdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 export interface IdempotencyStore {
@@ -207,7 +207,7 @@ Three implementations of the dedup store, ordered by deployment complexity. The 
 
 #### `InMemoryIdempotencyStore` from `@rotorsoft/act-ops/idempotency`
 
-```ts
+```ts no-check
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 
 const dedup = new InMemoryIdempotencyStore({
@@ -222,7 +222,7 @@ Bounded LRU + TTL. Sync return. Use when: receiver is single-process, dedup wind
 
 #### Redis `SET NX EX` (sketch — port not yet packaged)
 
-```ts
+```ts no-check
 class RedisIdempotencyStore implements IdempotencyStore {
   constructor(private readonly redis: RedisClient, private readonly ttlSeconds: number) {}
 
@@ -249,7 +249,7 @@ CREATE INDEX idx_idempotency_seen_at ON idempotency_keys (seen_at);
 DELETE FROM idempotency_keys WHERE seen_at < NOW() - INTERVAL '7 days';
 ```
 
-```ts
+```ts no-check
 class PostgresIdempotencyStore implements IdempotencyStore {
   constructor(private readonly db: Database) {}
 
@@ -289,7 +289,7 @@ The derived window is the bare envelope (per-retry backoff + per-attempt timeout
 
 If you'd rather skip the derivation and pick a generous round number, pass `ttlMs` directly — that's the "use 24h regardless" path most apps land on:
 
-```ts
+```ts no-check
 const dedup = new InMemoryIdempotencyStore({ ttlMs: 24 * 60 * 60 * 1000 });
 ```
 
@@ -312,7 +312,7 @@ Backoff sum: 6.2s. Add the per-attempt `timeoutMs` × `(maxRetries + 1)` = 2s ×
 
 For most receivers, the `receiver` builder from `@rotorsoft/act-http/receiver` is the recommended path. Declare typed handlers fluently with Zod schemas, configure the store + optional secret, call `.build()` to freeze the builder into the `Receiver` runtime, then `.listen()` (long-running Node) or `.fetch(request)` (Lambda / edge). The builder uses Hono internally — one code path covers Node, AWS Lambda, Cloudflare Workers, Vercel Edge, Bun, and Deno.
 
-```ts
+```ts no-check
 import { receiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { z } from "zod";
@@ -362,7 +362,7 @@ The built `Receiver` is fetch-shaped under the hood — same code runs on every 
 
 **AWS Lambda**:
 
-```ts
+```ts no-check
 import { receiver } from "@rotorsoft/act-http/receiver";
 import { InMemoryIdempotencyStore } from "@rotorsoft/act-ops/idempotency";
 import { handle } from "hono/aws-lambda";
@@ -376,7 +376,7 @@ export const handler = handle({ fetch: built.fetch });
 
 **Cloudflare Workers**:
 
-```ts
+```ts no-check
 import { receiver } from "@rotorsoft/act-http/receiver";
 
 const built = receiver({ port: 0, store: new InMemoryIdempotencyStore() })
@@ -388,7 +388,7 @@ export default { fetch: built.fetch };
 
 **Vercel Edge Functions** (Next.js App Router):
 
-```ts
+```ts no-check
 // app/api/webhooks/[name]/route.ts
 export const POST = async (request: Request) => built.fetch(request);
 ```
@@ -399,7 +399,7 @@ export const POST = async (request: Request) => built.fetch(request);
 
 When the receiver needs to compose with an existing HTTP stack (auth middleware, route-level rate limiting, an app already serving other routes), reach for the lower-level `webhookMiddleware` factory:
 
-```ts
+```ts no-check
 import { webhookMiddleware } from "@rotorsoft/act-http/receiver/hono";
 
 // In an existing Hono app — composes with your own routes
@@ -419,7 +419,7 @@ Available for tRPC (`/receiver/trpc`), Express (`/receiver/express`), Fastify (`
 
 For receivers whose framework isn't in the adapter list (Koa, raw Node `http`, gRPC-over-HTTP) or with custom policy, the framework-agnostic core is also exported:
 
-```ts
+```ts no-check
 import { checkWebhook } from "@rotorsoft/act-http/receiver";
 
 const result = await checkWebhook(req.headers, rawBody, { store, secret });
@@ -435,7 +435,7 @@ Idempotency stops you from processing the same event twice. It doesn't stop a th
 
 **Sender** — add a `secret` to the webhook config:
 
-```ts
+```ts no-check
 import { webhook } from "@rotorsoft/act-http/webhook";
 
 .on("OrderConfirmed")
@@ -460,7 +460,7 @@ The format mirrors the Stripe / GitHub / Slack convention modulo the `X-Webhook-
 
 **Receiver** — call `verifyWebhook` before processing:
 
-```ts
+```ts no-check
 import { verifyWebhook } from "@rotorsoft/act-http/receiver";
 
 const SECRET = process.env.WEBHOOK_SECRET!;
@@ -510,7 +510,7 @@ The integration is in production. Here's the day-2 surface.
 
 Both inline and forwarded paths can end up at the same place — a stream blocked by `block()`. Wire the `"blocked"` lifecycle event into your alerting:
 
-```ts
+```ts no-check
 app.on("blocked", (blocked) => {
   blocked.forEach(({ stream, error, retry }) => {
     metrics.counter("act.streams.blocked").increment({ stream });
@@ -525,7 +525,7 @@ app.on("blocked", (blocked) => {
 
 `app.blocked_streams()` returns every currently-blocked stream position. The 90% case for "show me what's broken right now":
 
-```ts
+```ts no-check
 const blocked = await app.blocked_streams();
 console.table(
   blocked.map(({ stream, retry, error, at }) => ({ stream, at, retry, error }))
@@ -538,7 +538,7 @@ For pagination or source filters, drop to `store().query_streams(callback, { blo
 
 `app.unblock(input)` clears the blocked flag and resumes from where the stream stopped — **not** from event 0. Two forms:
 
-```ts
+```ts no-check
 // Single targeted recovery.
 await app.unblock(["webhooks-out-customer-42"]);
 

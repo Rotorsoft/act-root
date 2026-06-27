@@ -24,7 +24,7 @@ The framework handles the mechanics of #1 (correlation, drain, retries, blocked-
 
 Drizzle schema (any ORM works the same way — Knex, Kysely, raw `pg`, …):
 
-```typescript
+```typescript no-check
 // db/schema.ts
 import { integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
@@ -40,7 +40,7 @@ export const tickets = pgTable("tickets", {
 
 Projection:
 
-```typescript
+```typescript no-check
 // projections/tickets.ts
 import { projection } from "@rotorsoft/act";
 import { eq, sql } from "drizzle-orm";
@@ -84,7 +84,7 @@ A few patterns worth highlighting:
 
 Wire it into your app:
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(TicketCreation)
   .withState(TicketOperations)
@@ -97,7 +97,7 @@ const app = act()
 
 The default handler runs each event in its own connection. For projections that need to update multiple tables atomically, pull the transaction explicitly:
 
-```typescript
+```typescript no-check
 .on({ OrderPlaced })
   .do(async function orderPlaced({ stream, data }) {
     await db.transaction(async (tx) => {
@@ -112,7 +112,7 @@ The default handler runs each event in its own connection. For projections that 
 
 If the transaction throws, the framework's drain pipeline retries the handler (subject to `maxRetries`), and `block()`s the stream after the retry budget is exhausted. The `__streams__` row records `blocked: true` and an error message — your monitoring should listen for the `"blocked"` lifecycle event:
 
-```typescript
+```typescript no-check
 app.on("blocked", (blocked) => {
   for (const { stream, error, retry } of blocked) {
     logger.error({ stream, error, retry }, "projection blocked");
@@ -130,7 +130,7 @@ When you change the projection's logic — add a column, fix an aggregation, cha
 
 For long event streams, replaying one event per transaction is slow. Define a `.batch(handler)` and Act will call it with every event for a stream in a single pass:
 
-```typescript
+```typescript no-check
 export const TicketProjection = projection("tickets")
   .on({ TicketOpened })
     .do(async function opened({ stream, data }) {
@@ -166,7 +166,7 @@ When `.batch()` is defined, Act always calls it instead of the per-event `.do()`
 
 ## The production rebuild flow
 
-```typescript
+```typescript no-check
 async function rebuildTicketsProjection() {
   // 1. Truncate the read model.
   await db.delete(tickets);

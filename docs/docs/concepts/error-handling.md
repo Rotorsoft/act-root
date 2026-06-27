@@ -11,7 +11,7 @@ Act defines four primary error types. Each signals a different class of problem 
 
 Thrown when an action or event payload fails Zod schema validation.
 
-```typescript
+```typescript no-check
 import { ValidationError } from "@rotorsoft/act";
 
 try {
@@ -29,7 +29,7 @@ try {
 
 Thrown when a business rule defined via `.given()` is violated before events are emitted.
 
-```typescript
+```typescript no-check
 import { InvariantError } from "@rotorsoft/act";
 
 try {
@@ -48,7 +48,7 @@ try {
 
 Thrown when optimistic concurrency control detects a conflict — another process committed events to the same stream between your `load()` and `commit()`.
 
-```typescript
+```typescript no-check
 import { ConcurrencyError } from "@rotorsoft/act";
 
 try {
@@ -66,7 +66,7 @@ try {
 
 Declare the retry budget on the action itself. The orchestrator owns the loop: on `ConcurrencyError` it invalidates the cache, applies an optional `backoff`, and re-runs from `load()`. Any other error rethrows immediately and does not consume the budget.
 
-```typescript
+```typescript no-check
 import { state } from "@rotorsoft/act";
 import { z } from "zod";
 
@@ -95,7 +95,7 @@ The action author knows whether the action contends for a hot stream; the caller
 
 If you need different retry behavior than what the action declares — for instance, a UI mutation that should fail fast and surface to the user even on a hot action — wrap the call:
 
-```typescript
+```typescript no-check
 async function withRetry(action, target, payload, maxRetries) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -116,7 +116,7 @@ This is an escape hatch — the declarative form on the action is the primary me
 
 Thrown when an action targets a stream that has been permanently closed (its head event is a `__tombstone__`). See [Close cycle](../architecture/close-cycle) for how a stream gets tombstoned.
 
-```typescript
+```typescript no-check
 import { StreamClosedError } from "@rotorsoft/act";
 
 try {
@@ -134,7 +134,7 @@ try {
 
 Thrown by a `Store` adapter when an **infrastructure** operation fails — a dropped connection, a transaction rollback, a query timeout. It's the typed boundary between "the store is unavailable/degraded" and the domain errors above (`ConcurrencyError`, `StreamClosedError`), which describe legitimate outcomes you branch on. The original driver error is preserved on `cause`, and the failed operation name on `operation`.
 
-```typescript
+```typescript no-check
 import { StoreError } from "@rotorsoft/act";
 
 try {
@@ -162,7 +162,7 @@ If the store stays down, the breaker keeps probing — **one attempt per `cooldo
 
 Subscribe to the **`error`** lifecycle event to alert on a degraded store — it fires on every failed store cycle with the error and the breaker state:
 
-```typescript
+```typescript no-check
 app.on("error", ({ error, circuit }) => {
   if (error instanceof StoreError)
     metrics.increment("act.store_error", { op: error.operation, circuit });
@@ -189,7 +189,7 @@ import { Errors } from "@rotorsoft/act";
 
 ## Production Error Handling
 
-```typescript
+```typescript no-check
 import { Errors } from "@rotorsoft/act";
 
 // tRPC mutation
@@ -227,7 +227,7 @@ Recovery uses `app.unblock(input)` (resume from where the stream stopped) or `ap
 
 Monitor blocked streams via the `"blocked"` lifecycle event:
 
-```typescript
+```typescript no-check
 app.on("blocked", (blocked) => {
   blocked.forEach(({ stream, error, retry }) => {
     console.error(`Stream ${stream} blocked after ${retry} retries: ${error}`);
@@ -248,7 +248,7 @@ LOG_LEVEL=trace pnpm dev
 
 **Lifecycle event subscriptions.** Every Act instance emits a fixed set of lifecycle events; subscribe in dev to see what the framework is doing:
 
-```ts
+```ts no-check
 app.on("committed", (events) => console.log("committed", events.map(e => e.name)));
 app.on("acked", (leases) => console.log("acked", leases));
 app.on("blocked", (blocked) => console.error("blocked", blocked));
@@ -260,7 +260,7 @@ app.on("error", ({ error, circuit }) => console.error("store failure", error, ci
 
 **Direct event inspection.** Bypass cache and reducers and look at what's actually in the store:
 
-```ts
+```ts no-check
 // All events on a stream (regex match by default)
 const events = await app.query_array({ stream: "order-123" });
 
@@ -277,7 +277,7 @@ For introspecting reaction watermarks (per-stream `at`, `retry`, `blocked`, `lea
 
 Each reaction handler accepts options that control retry and blocking behaviour:
 
-```typescript
+```typescript no-check
 .on("OrderPlaced")
   .do(handler, {
     maxRetries: 5,
@@ -297,7 +297,7 @@ Set `maxRetries: 0` for handlers that should never retry — typically those tha
 
 Without `backoff`, the framework re-claims a failed stream on the next drain cycle — typically within milliseconds. For handlers that talk to external systems (HTTP, queues, third-party APIs), that turns a 200ms transient outage into an exhausted retry budget. The `backoff` option paces the next attempt by deferring re-dispatch on this worker.
 
-```typescript
+```typescript no-check
 backoff: {
   strategy: "exponential",  // "fixed" | "linear" | "exponential"
   baseMs: 200,              // base delay
@@ -338,7 +338,7 @@ This means **`backoff` is always at-least-as-long-as configured**, never shorter
 
 The 80% pattern for external integration is "POST this event to a URL." Every team writes the same `fetch` wrapper — timeout, idempotency key, status-coded errors, JSON serialization. The [`@rotorsoft/act-http`](https://github.com/rotorsoft/act-root/tree/master/libs/act-http) umbrella package ships that wrapper as `webhook()`, a reaction-handler factory that composes with the `maxRetries` / `backoff` options above:
 
-```ts
+```ts no-check
 import { webhook } from "@rotorsoft/act-http/webhook";
 
 .on("OrderConfirmed")
@@ -389,7 +389,7 @@ The drain pipeline retries on any thrown error by default — `maxRetries` is a 
 
 `NonRetryableError` (exported from `@rotorsoft/act`) is the handler-side signal. The drain finalizer checks `error instanceof NonRetryableError` and forces `block = blockOnError` regardless of `lease.retry`. The stream blocks on the first failed attempt; no retries, no backoff window.
 
-```ts
+```ts no-check
 import { NonRetryableError } from "@rotorsoft/act";
 
 .on("PaymentReceived")
@@ -412,7 +412,7 @@ Important: `NonRetryableError` does **not** override `blockOnError: false`. If t
 
 When a stream blocks — whether from `NonRetryableError` (first attempt) or from exhausting `maxRetries` — the operator's recovery path is `app.unblock(input)`. The input is either an explicit list of stream names or a `StreamFilter` for bulk recovery:
 
-```ts
+```ts no-check
 // Single targeted recovery — by name.
 await app.unblock(["webhooks-out-customer-42"]);
 
@@ -440,7 +440,7 @@ Contrast with `app.reset(input)`, which is for projection rebuilds. `reset` acce
 
 For the "show me what's broken" operational query, `app.blocked_streams()` returns every currently-blocked stream position. Convenience wrapper around `store().query_streams(cb, { blocked: true })`:
 
-```ts
+```ts no-check
 const blocked = await app.blocked_streams();
 console.table(
   blocked.map(({ stream, retry, error }) => ({ stream, retry, error }))

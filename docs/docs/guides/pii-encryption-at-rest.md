@@ -239,7 +239,7 @@ const store = new PostgresStore({
 
 ### Setup (SQLite)
 
-```ts
+```ts no-check
 import { SqliteStore } from "@rotorsoft/act-sqlite";
 
 const store = new SqliteStore({
