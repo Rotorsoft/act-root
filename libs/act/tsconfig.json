@@ -11,5 +11,5 @@
       "path": "../act-tck/tsconfig.build.json"
     }
   ],
-  "exclude": ["dist", "node_modules"]
+  "exclude": ["dist", "node_modules", "vitest.stryker.config.ts"]
 }

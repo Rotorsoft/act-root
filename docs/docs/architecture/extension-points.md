@@ -9,6 +9,8 @@ Three pluggable contracts: `Store`, `Cache`, `Logger`. Each is exposed as a sing
 
 This page covers each contract, its invariants, and the concrete adapters in this repo. Anyone writing a new adapter should be able to read this page plus the contract source and build something correct.
 
+Writing a **third-party adapter** in its own repository? The [TCK conformance & the compatibility badge](../guides/tck-conformance.md) guide is the advertised path: how to depend on `@rotorsoft/act-tck` from a fresh repo, run `runStoreTck` / `runCacheTck` / `runLoggerTck` against your factory, guard your own surface with `runStabilityTck`, and display a conformance badge once green. The per-port deep dives — [writing-a-store](../guides/writing-a-store.md), [writing-a-cache](../guides/writing-a-cache.md), [writing-a-logger](../guides/writing-a-logger.md) — cover each contract method by method.
+
 ## The port pattern
 
 Every infrastructure dependency in the framework is reached via a port — a singleton getter that lazily initializes a default the first time it's called:
