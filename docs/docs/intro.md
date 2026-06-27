@@ -73,6 +73,10 @@ Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cac
 - **Time-travel** — `load()` accepts an `asOf` filter to reconstruct historical state
 - **Close the books** — `app.close()` archives, tombstones, or restarts streams
 
+### Deliberate choices & non-goals
+
+Coming from Axon, Marten, MassTransit, or Temporal? Some patterns those frameworks ship as named primitives — a compensation stack, an upcaster chain, an exactly-once projection checkpoint — are deliberately absent here, replaced by simpler shapes on machinery Act already has. [Deliberate choices & non-goals](./architecture/design-decisions.md) explains each call, how to reach the same outcome, and the one pattern that genuinely is still missing.
+
 ## Packages
 
 ### Core
