@@ -54,6 +54,7 @@ const sidebars: SidebarsConfig = {
         "architecture/event-schema-evolution",
         "architecture/design-decisions",
         "architecture/extension-points",
+        "architecture/behavior-contracts",
       ],
     },
     {

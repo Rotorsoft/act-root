@@ -122,6 +122,7 @@ If schemas aren't being captured for an event, the parser is best-effort: it wal
 | Event schema evolution (versioned event names) | [docs/docs/architecture/event-schema-evolution.md](docs/docs/architecture/event-schema-evolution.md) |
 | Deliberate ES design choices & non-goals (compensation, schema evolution, projection idempotency) | [docs/docs/architecture/design-decisions.md](docs/docs/architecture/design-decisions.md) |
 | Store / Cache / Logger contracts and adapters | [docs/docs/architecture/extension-points.md](docs/docs/architecture/extension-points.md) |
+| Behavior-contract checklist (documented runtime guarantees → backing tests) | [docs/docs/architecture/behavior-contracts.md](docs/docs/architecture/behavior-contracts.md) |
 | Production deployment checklist | [docs/docs/guides/production-checklist.md](docs/docs/guides/production-checklist.md) |
 | Database-backed projections (Drizzle, batched replay) | [docs/docs/guides/projections-to-database.md](docs/docs/guides/projections-to-database.md) |
 | External integration (inline `webhook` vs forwarded bus, idempotency contract, recovery) | [docs/docs/guides/external-integration.md](docs/docs/guides/external-integration.md) |
@@ -231,6 +232,8 @@ Sequence at the end of a feature branch:
    - **Internal subsystem refactors** (close-cycle, drain, settle, correlate) → check the matching `docs/docs/architecture/` page. Pseudocode and ASCII pipeline diagrams there often spell out the *old* shape ("Phase X: query backward, limit:1") — grep for the literal description, not just the method name.
    - **Lifecycle event additions/changes** → check `docs/docs/concepts/error-handling.md` and `docs/docs/guides/production-checklist.md`.
    The pattern that catches this: the PR's commit message says "we changed X" — every place that *describes* X in the docs needs the same update. Treat the docs as part of the public surface.
+
+   **A doc claim about runtime behavior ships with its test.** Any sentence in `docs/docs/**` or a public port/`Act` doc-comment that asserts a concrete runtime guarantee ("`with_snaps` resumes from the latest snapshot", "drain is at-least-once", "the cache is invalidated only on `ConcurrencyError`", "`subscribe` keeps the maximum priority") must have a TCK or unit test that fails if the claim stops holding. When you add or change such a claim, add or update its row in the [behavior-contract checklist](docs/docs/architecture/behavior-contracts.md). The `with_snaps` regression (#1024) shipped because the doc and the code diverged with nothing executable pinning the claim — the checklist is the standing guard against a repeat.
 5. Only then: announce "ready for review", show the diff summary, offer to open a PR via `/pr`.
 
 **Don't invent ad-hoc gates.** Running `pnpm typecheck` or eyeballing `pnpm test` output once doesn't substitute for the gate. Reach for the slash command first; narrow to ad-hoc tooling only for targeted debugging mid-development.
