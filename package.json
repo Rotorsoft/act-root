@@ -32,7 +32,7 @@
   },
   "homepage": "https://github.com/rotorsoft/act-root#readme",
   "scripts": {
-    "clean": "pnpm -r clean",
+    "clean": "pnpm -r run clean",
     "build": "pnpm -r build",
     "typecheck": "tsc --noEmit --project tsconfig.workspace.json --jsx react-jsx",
     "test": "pnpm -F shared drizzle:migrate && vitest run --coverage",
