@@ -5,6 +5,7 @@
   "description": "Wolfdesk example",
   "author": "rotorsoft",
   "license": "MIT",
+  "private": true,
   "scripts": {
     "dev": "pnpm drizzle:migrate && tsx watch src/main.ts",
     "drizzle:migrate": "drizzle-kit generate && drizzle-kit migrate",
