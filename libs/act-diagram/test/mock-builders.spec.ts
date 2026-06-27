@@ -68,6 +68,21 @@ describe("mock_state", () => {
     expect(built).toHaveLength(1);
   });
 
+  it("handles autocloses()/archives() in chain", () => {
+    const built: any[] = [];
+    mock_state({ S: {} }, (info) => built.push(info))
+      .init()
+      .emits({ Done: {} })
+      .on({ doIt: {} })
+      .emit("Done")
+      .autocloses({ is: "Done", after: { days: 90 } })
+      .archives(() => Promise.resolve())
+      .build();
+
+    expect(built).toHaveLength(1);
+    expect(built[0].events).toEqual({ Done: {} });
+  });
+
   it("handles emits(undefined) gracefully", () => {
     const built: any[] = [];
     mock_state({ S: {} }, (info) => built.push(info))
