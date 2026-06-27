@@ -1,3 +1,10 @@
+# [@rotorsoft/act-diagram-v1.0.7](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.6...@rotorsoft/act-diagram-v1.0.7) (2026-06-27)
+
+
+### Bug Fixes
+
+* **act-diagram:** keep close-policy methods in the mock builder chain ([82df7dd](https://github.com/rotorsoft/act-root/commit/82df7ddba87f7010a8f1891154092532cc39be17))
+
 # [@rotorsoft/act-diagram-v1.0.6](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-diagram-v1.0.5...@rotorsoft/act-diagram-v1.0.6) (2026-06-21)
 
 

@@ -73,6 +73,10 @@ Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cac
 - **Time-travel** — `load()` accepts an `asOf` filter to reconstruct historical state
 - **Close the books** — `app.close()` archives, tombstones, or restarts streams
 
+### Deliberate choices & non-goals
+
+Coming from Axon, Marten, MassTransit, or Temporal? Some patterns those frameworks ship as named primitives — a compensation stack, an upcaster chain, an exactly-once projection checkpoint — are deliberately absent here, replaced by simpler shapes on machinery Act already has. [Deliberate choices & non-goals](./architecture/design-decisions.md) explains each call, how to reach the same outcome, and the one pattern that genuinely is still missing.
+
 ## Packages
 
 ### Core
@@ -96,6 +100,15 @@ Infrastructure uses swappable adapters injected via `log()`, `store()`, and `cac
 
 - Node.js >= 22.18.0
 - pnpm >= 10.32.1
+
+## Stability and support
+
+Act follows [SemVer](https://semver.org/). The [Stability Charter](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md) is the published contract for what each version protects and how the project is supported:
+
+- **What semver covers** — the builder API, `IAct` interface, `Store`/`Cache`/`Logger` adapter contracts, lifecycle events, and public type exports. Internals, performance characteristics, and log formats are explicitly out of scope.
+- **[Support window](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#support-window)** — the latest major is actively maintained; the previous major gets security and critical-fix maintenance for at least 6 months after the next major ships. During the current 0.x line, only the latest release is supported.
+- **[Deprecation policy](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#deprecation-policy)** — public surface is deprecated in a minor release and removed no earlier than the next major. Events on disk are never broken; they evolve through [versioned event names](architecture/event-schema-evolution.md) (`Foo` → `Foo_v2`), with a startup advisory enumerating deprecated versions.
+- **[Security fixes](https://github.com/Rotorsoft/act-root/blob/master/STABILITY.md#security-fixes)** — report privately via a GitHub security advisory; fixes land on the active major and any previous major still inside its maintenance window.
 
 ## FAQ
 

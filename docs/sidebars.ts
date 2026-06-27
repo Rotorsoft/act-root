@@ -20,6 +20,7 @@ const sidebars: SidebarsConfig = {
         "guides/writing-a-store",
         "guides/writing-a-cache",
         "guides/writing-a-logger",
+        "guides/tck-conformance",
       ],
     },
     {
@@ -51,6 +52,7 @@ const sidebars: SidebarsConfig = {
         "architecture/priority-lanes",
         "architecture/close-cycle",
         "architecture/event-schema-evolution",
+        "architecture/design-decisions",
         "architecture/extension-points",
         "architecture/behavior-contracts",
       ],
