@@ -41,7 +41,7 @@ const Session = state({
 
 async function main() {
   const app = act().withState(Session).build({
-    autocloseCycleMs: 60_000,
+    autocloseCycleMinutes: 720,
     closeBatchSize: 64,
   });
 

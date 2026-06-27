@@ -1,6 +1,7 @@
 packages:
   - libs/**
   - packages/**
+  - recipes
   - docs
   - performance/act-performance
 allowBuilds:
