@@ -17,7 +17,7 @@ Act has no such primitive, and that is deliberate. A rollback stack is imperativ
 
 So compensation on Act is forward recovery. When a step fails, you emit a compensating event, and a reaction on that event drives whatever cleanup the failure demands. Consider a reservation workflow: an order reserves inventory, then attempts payment. Payment fails. There is no stack to pop. The payment slice emits `PaymentFailed`, and a reaction releases the reservation:
 
-```ts
+```ts no-check
 export const PaymentSlice = slice()
   .withState(Order)
   .withState(Reservation)
@@ -70,7 +70,7 @@ Act does not do this, and the reason is structural. An atomic watermark-plus-wri
 
 The contract is therefore short and absolute. A projection handler may run more than once for the same event. Replays happen on retry after a transient fault, on a worker crash between the write and the ack, on a deliberate rebuild, and on two workers briefly racing the same stream. Every write a handler makes must be safe to apply twice and produce the same result. In practice that means keying the write by something stable from the event — the event id, the stream and version, the stream name for last-writer-wins state — and expressing it as an upsert rather than a read-modify-write:
 
-```ts
+```ts no-check
 export const TicketProjection = projection("tickets")
   .on({ TicketOpened })
     .do(async function opened({ stream, data }) {
