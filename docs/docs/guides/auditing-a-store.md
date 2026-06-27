@@ -18,7 +18,7 @@ Earlier drafts proposed a standalone `@rotorsoft/act-scan` tool. Reshaped becaus
 
 ## The shape
 
-```typescript
+```typescript no-check
 import { app } from "./my-app.js";
 
 // Run everything
@@ -108,7 +108,7 @@ Future-dated `created` timestamps and per-stream out-of-order commits. Surfaces 
 
 ### CI gate: fail the build on schema drift since the last release
 
-```typescript
+```typescript no-check
 import { app } from "./my-app.js";
 import { exit } from "node:process";
 
@@ -128,7 +128,7 @@ if (findings.length > 0) {
 
 ### Nightly cron: surface migration backlog to Slack
 
-```typescript
+```typescript no-check
 const deprecatedFindings: unknown[] = [];
 for await (const f of app.audit(["deprecated-load"], {
   thresholds: { deprecated_min: 0.05 },
@@ -145,7 +145,7 @@ if (deprecatedFindings.length > 0) {
 
 ### Ad-hoc: which streams are ready to close?
 
-```typescript
+```typescript no-check
 for await (const f of app.audit(["close-candidate", "restart-candidate"], {
   thresholds: {
     idle_days: 60,
@@ -158,7 +158,7 @@ for await (const f of app.audit(["close-candidate", "restart-candidate"], {
 
 ### Scheduled health check: drain, snapshots, correlation
 
-```typescript
+```typescript no-check
 for await (const f of app.audit([
   "reaction-health",
   "snapshot-drift",

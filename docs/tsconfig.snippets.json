@@ -1,0 +1,55 @@
+{
+  // Type-checks tangled doc snippets (docs/.snippets/, written by
+  // scripts/check-snippets.mjs) against the live @rotorsoft/act source.
+  // Paths mirror docs/tsconfig.json so snippets resolve the same module
+  // graph the rest of the docs build uses. See issue #1033.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "composite": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": ["node", "vitest/globals"],
+    "paths": {
+      "@rotorsoft/act": ["../libs/act/src/index.ts"],
+      "@rotorsoft/act/types": ["../libs/act/src/types/index.ts"],
+      "@rotorsoft/act/test": ["../libs/act/src/test/index.ts"],
+      "@rotorsoft/act-diagram": ["../libs/act-diagram/src/index.ts"],
+      "@rotorsoft/act-http/webhook": ["../libs/act-http/src/webhook/index.ts"],
+      "@rotorsoft/act-http/sse": ["../libs/act-http/src/sse/index.ts"],
+      "@rotorsoft/act-http/trpc": ["../libs/act-http/src/trpc/index.ts"],
+      "@rotorsoft/act-http/hono": ["../libs/act-http/src/hono/index.ts"],
+      "@rotorsoft/act-http/openapi": ["../libs/act-http/src/openapi/index.ts"],
+      "@rotorsoft/act-http/receiver/trpc": [
+        "../libs/act-http/src/receiver/trpc/index.ts"
+      ],
+      "@rotorsoft/act-http/receiver/express": [
+        "../libs/act-http/src/receiver/express/index.ts"
+      ],
+      "@rotorsoft/act-http/receiver/fastify": [
+        "../libs/act-http/src/receiver/fastify/index.ts"
+      ],
+      "@rotorsoft/act-http/receiver/hono": [
+        "../libs/act-http/src/receiver/hono/index.ts"
+      ],
+      "@rotorsoft/act-http/receiver": [
+        "../libs/act-http/src/receiver/index.ts"
+      ],
+      "@rotorsoft/act-patch": ["../libs/act-patch/src/index.ts"],
+      "@rotorsoft/act-pg": ["../libs/act-pg/src/index.ts"],
+      "@rotorsoft/act-pino": ["../libs/act-pino/src/index.ts"],
+      "@rotorsoft/act-ops/idempotency": [
+        "../libs/act-ops/src/idempotency/index.ts"
+      ],
+      "@rotorsoft/act-ops/receiver": ["../libs/act-ops/src/receiver/index.ts"],
+      "@rotorsoft/act-sqlite": ["../libs/act-sqlite/src/index.ts"],
+      "@rotorsoft/act-tck": ["../libs/act-tck/src/index.ts"],
+      "@rotorsoft/act-crypto": ["../libs/act-crypto/src/index.ts"],
+      "@rotorsoft/act-sse": ["../libs/act-sse/src/index.ts"]
+    }
+  },
+  "include": [".snippets/**/*.ts"]
+}

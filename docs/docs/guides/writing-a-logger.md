@@ -29,7 +29,7 @@ The contract is intentionally narrow: the framework treats loggers as pluggable 
 
 ## The TCK is the spec
 
-```ts
+```ts no-check
 // libs/act-winston/test/logger-tck.spec.ts
 import { runLoggerTck } from "@rotorsoft/act-tck";
 import { WinstonLogger } from "../src/index.js";
@@ -72,7 +72,7 @@ The README's testing section:
 ````md
 ## Testing
 
-```ts
+```ts no-check
 import { runLoggerTck } from "@rotorsoft/act-tck";
 import { WinstonLogger } from "@rotorsoft/act-winston";
 

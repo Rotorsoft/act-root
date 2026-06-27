@@ -31,7 +31,7 @@ jobs.ts               → Background processing
 
 Three separate state definitions share the name `"Ticket"` and merge automatically:
 
-```typescript
+```typescript no-check
 // ticket-creation.ts
 const TicketCreation = state({ Ticket: TicketCreationState })
   .emits({ TicketOpened, TicketClosed, TicketResolved })
@@ -54,7 +54,7 @@ When composed via `act().withSlice(...)`, these merge into a single `"Ticket"` s
 
 Each feature is a self-contained slice with its state and reactions:
 
-```typescript
+```typescript no-check
 export const TicketCreationSlice = slice()
   .withState(TicketCreation)
   .withState(TicketOperations)    // included so the reaction can dispatch AssignTicket
@@ -83,7 +83,7 @@ The slice declares `TicketOperations` via `.withState()` because its reaction di
 
 When a ticket is opened, the creation slice automatically assigns an agent by dispatching an action on the operations state. Notice the dispatch needs an explicit synthetic actor — reactions are system-driven, not user-driven, so the example mints `{ id: randomUUID(), name: "assign reaction" }` for traceability:
 
-```typescript
+```typescript no-check
 .on("TicketOpened").do(async function assign(event, _stream, app) {
   await app.do(
     "AssignTicket",
@@ -100,7 +100,7 @@ When a ticket is opened, the creation slice automatically assigns an agent by di
 
 Business rules that check both state and the acting user:
 
-```typescript
+```typescript no-check
 // ticket-invariants.ts
 export const mustBeOpen: Invariant<{ status: string }> = {
   description: "Ticket must be open",
@@ -126,7 +126,7 @@ export const mustBeUserOrAgent: Invariant<
 
 A standalone projection maintains a read model across all ticket events:
 
-```typescript
+```typescript no-check
 export const TicketProjection = projection("tickets")
   .on({ TicketOpened })
     .do(async function opened({ stream, data }) {
@@ -149,7 +149,7 @@ export const TicketProjection = projection("tickets")
 
 Everything is wired together in `bootstrap.ts`:
 
-```typescript
+```typescript no-check
 export const app = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)

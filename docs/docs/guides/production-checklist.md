@@ -39,7 +39,7 @@ A few production-relevant defaults to override depending on workload:
 
 Without this, projections and reactions never run. The canonical pattern, set once at bootstrap:
 
-```typescript
+```typescript no-check
 app.on("committed", () => app.settle());
 ```
 
@@ -51,7 +51,7 @@ Tune the debounce via `act().build({ settleDebounceMs: 25 })` if your workload b
 
 When a reaction handler exceeds its retry budget, Act marks the stream `blocked: true` and stops processing it. Without an alert, you'll discover the problem when a customer notices their projection is stale.
 
-```typescript
+```typescript no-check
 app.on("blocked", (blocked) => {
   for (const { stream, error, retry } of blocked) {
     logger.error({ stream, error, retry }, "stream blocked");
@@ -68,7 +68,7 @@ Per-reaction defaults: `maxRetries: 3`, `blockOnError: true`. Tune via `.do(hand
 
 On cold start (process restart or LRU eviction), `load()` replays every event in the stream. For a 50,000-event stream, that's a perceptible delay. Snapshots cap the replay distance — define a snap predicate per state:
 
-```typescript
+```typescript no-check
 const Counter = state(/* … */)
   .init(/* … */)
   .emits(/* … */)
@@ -94,7 +94,7 @@ Act's optimistic concurrency catches stream-version conflicts (`ConcurrencyError
 
 This is a **caller** concern — typically a tRPC/Express middleware that caches responses by an `idempotencyKey` header:
 
-```typescript
+```typescript no-check
 const seen = new Map<string, { body: unknown; expiresAt: number }>();
 
 const idempotent = t.middleware(async ({ rawInput, next }) => {
@@ -119,7 +119,7 @@ For multi-instance deployments, swap the in-memory `Map` for Redis. The point is
 
 Signal handling is built in. Importing the framework registers `process.once` handlers for `SIGINT`, `SIGTERM`, `uncaughtException`, and `unhandledRejection`, all routed through `disposeAndExit`. You don't bind signal handlers yourself — register the cleanup that's specific to your application:
 
-```typescript
+```typescript no-check
 import { dispose } from "@rotorsoft/act";
 
 dispose(async () => {
@@ -135,7 +135,7 @@ When a signal fires, the shutdown sequence runs in this order: custom disposers 
 
 `dispose()` called with no argument returns the trigger function, useful for manual shutdown or tests:
 
-```typescript
+```typescript no-check
 afterAll(async () => {
   await dispose()();
 });
@@ -168,7 +168,7 @@ Three counters cover most operational questions:
 
 Hook them via the lifecycle events:
 
-```typescript
+```typescript no-check
 app.on("blocked", (xs) => metrics.gauge("act.streams.blocked", xs.length));
 app.on("settled", (drain) => {
   metrics.histogram("act.settle.duration_ms", performance.now() - tStart);
@@ -195,7 +195,7 @@ If your goal is "rebuild from yesterday's snapshot because the database disk die
 
 When you do use restore, plan around three follow-ups:
 
-```typescript
+```typescript no-check
 import { CsvFile, cache } from "@rotorsoft/act";
 
 // 1. Run the destructive restore. Connect to the target store first; restore
@@ -229,7 +229,7 @@ See [Concepts → Restoring a store](../concepts/event-sourcing.md#restoring-a-s
 
 For long-running streams that accumulate events you'll never replay (year-old order history, archived chat sessions), use `app.close()` to archive and truncate:
 
-```typescript
+```typescript no-check
 const result = await app.close([
   {
     stream: "order-2024-12345",
@@ -259,7 +259,7 @@ Closed streams are tombstoned — `app.do()` against them throws `StreamClosedEr
 
 If reactions in this app have heterogeneous timing profiles — webhook delivery measured in seconds alongside metric emission measured in microseconds — split them across lanes (ACT-1103). Without lanes, every reaction shares one `leaseMillis` and one `streamLimit`, and the slowest handler dictates the budget for everyone.
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Ticket)
   .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })

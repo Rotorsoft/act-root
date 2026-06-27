@@ -78,7 +78,7 @@ Step 7 is the key: every load that processes events past the cached point update
 
 Snapshots are created by user code via the `me.snap?` predicate at the end of every `action()`:
 
-```ts
+```ts no-check
 const last = snapshots.at(-1)!;
 const snapped = me.snap && me.snap(last);
 // ... cache.set with patches: snapped ? 0 : last.patches
@@ -122,7 +122,7 @@ The snapshot at v=10 means we replayed 32 events instead of 42 (the snapshot dat
 
 `load()` accepts an optional `AsOf` parameter:
 
-```ts
+```ts no-check
 type AsOf = Pick<Query, "before" | "created_before" | "created_after" | "limit">;
 ```
 

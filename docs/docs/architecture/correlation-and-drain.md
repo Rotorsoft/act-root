@@ -16,7 +16,7 @@ Both run lazily: nothing happens until a caller invokes `correlate()`, `drain()`
 
 A reaction is registered against an event name with a *resolver* and a handler:
 
-```ts
+```ts no-check
 .on("OrderPlaced")
   .do(async (event, stream, app) => { /* handler */ })
   .to((event) => ({ target: `order-${event.orderId}` }))   // dynamic resolver
@@ -135,7 +135,7 @@ Eviction cost: a redundant `store.subscribe` call when an evicted-but-still-acti
 
 `claim()` takes two budgets: `lagging` (streams with low watermarks) and `leading` (streams with high watermarks). The split is adaptive — `DrainController._ratio` starts at 0.5 and adjusts each cycle based on which frontier produced more events:
 
-```ts
+```ts no-check
 // internal/drain-ratio.ts (paraphrased)
 ratio = (laggingHandled - leadingHandled) / total
 clamped to [0.2, 0.8]

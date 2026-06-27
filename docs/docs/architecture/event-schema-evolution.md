@@ -15,7 +15,7 @@ The framework's stance: **versioned event names**, not upcasting. Old event vers
 
 The traditional event-sourcing approach. Define a single `OrderPlaced` event; when a new field is added, write an "upcaster" that transforms old payloads into the new shape at read time:
 
-```ts
+```ts no-check
 // Pseudocode for an upcasting framework
 function upcast(rawEvent) {
   if (rawEvent.version === 1) {
@@ -39,7 +39,7 @@ The framework's event log is the source of truth. Rewriting it is not on the tab
 
 Add a new event name with a version suffix; keep the old one in the registry; both have explicit reducers:
 
-```ts
+```ts no-check
 .emits({
   // v1: original schema (kept forever — historical events match this name)
   TicketOpened: z.object({
@@ -92,7 +92,7 @@ Add a new event name with a version suffix; keep the old one in the registry; bo
 
 Adding an optional field with a sensible default is not a breaking change:
 
-```ts
+```ts no-check
 .emits({
   // Was: title only. Now: title + optional priority with a default.
   TicketOpened: z.object({

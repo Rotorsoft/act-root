@@ -57,7 +57,7 @@ Two things to note versus the in-monorepo guides:
 
 Each port has one entry point. Pass it a display `name`, a `factory` that returns a fresh adapter per test, and (for the store) a `capabilities` bag declaring the optional methods you implement.
 
-```ts
+```ts no-check
 // test/cache-tck.spec.ts
 import { runCacheTck } from "@rotorsoft/act-tck";
 import { RedisCache } from "../src/index.js";
@@ -68,7 +68,7 @@ runCacheTck({
 });
 ```
 
-```ts
+```ts no-check
 // test/store-tck.spec.ts
 import { runStoreTck } from "@rotorsoft/act-tck";
 import { MysqlStore } from "../src/index.js";
@@ -85,7 +85,7 @@ runStoreTck({
 });
 ```
 
-```ts
+```ts no-check
 // test/logger-tck.spec.ts
 import { runLoggerTck } from "@rotorsoft/act-tck";
 import { MyLogger } from "../src/index.js";

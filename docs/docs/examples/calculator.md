@@ -15,7 +15,7 @@ A simple calculator demonstrating core Act patterns: state machines, multiple ev
 
 The calculator is a single state with left/right operands, an operator, and a result:
 
-```typescript
+```typescript no-check
 const State = z.object({
   left: z.string().optional(),
   right: z.string().optional(),
@@ -32,7 +32,7 @@ const Calculator = state({ Calculator: State })
 
 A single `PressKey` action emits different events based on the key pressed. Note the `=` branch reads `snapshot.state.operator` and throws if there's nothing to compute — invariants run before the emit handler, but action-side preconditions on dynamic state can also be enforced inside `.emit()`:
 
-```typescript
+```typescript no-check
 .on({ PressKey: z.object({ key: z.enum(KEYS) }) })
   .emit(({ key }, { state }) => {
     if (key === ".") return ["DotPressed", {}];
@@ -50,7 +50,7 @@ A single `PressKey` action emits different events based on the key pressed. Note
 
 Each event type has its own reducer logic:
 
-```typescript
+```typescript no-check
 .patch({
   DigitPressed: ({ data }, state) => append(state, data.digit),
   OperatorPressed: ({ data }, state) => compute(state, data.operator),
@@ -68,7 +68,7 @@ Each event type has its own reducer logic:
 
 The `Clear` action enforces that the calculator has state to clear:
 
-```typescript
+```typescript no-check
 .on({ Clear: ZodEmpty })
   .given([{
     description: "Must be dirty",
@@ -81,7 +81,7 @@ The `Clear` action enforces that the calculator has state to clear:
 
 Snapshots are taken every 12 events for cold-start performance:
 
-```typescript
+```typescript no-check
 .snap((s) => s.patches > 12)
 ```
 

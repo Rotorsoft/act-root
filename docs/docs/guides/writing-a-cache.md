@@ -11,7 +11,7 @@ title: Writing a custom Cache adapter
 
 The interface in [`libs/act/src/types/ports.ts`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/ports.ts) is small:
 
-```ts
+```ts no-check
 interface Cache extends Disposable {
   get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
   set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
@@ -24,7 +24,7 @@ Four methods plus `dispose`. The async signature is forward-compatible with exte
 
 ## The TCK is the spec
 
-```ts
+```ts no-check
 // libs/act-redis/test/cache-tck.spec.ts
 import { runCacheTck } from "@rotorsoft/act-tck";
 import { RedisCache } from "../src/index.js";
@@ -70,7 +70,7 @@ The README's testing section:
 ````md
 ## Testing
 
-```ts
+```ts no-check
 import { runCacheTck } from "@rotorsoft/act-tck";
 import { RedisCache } from "@rotorsoft/act-redis";
 

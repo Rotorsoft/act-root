@@ -22,7 +22,7 @@ The fix is to **close** stale streams: write a tombstone, truncate the events, t
 
 The state builder gains two new chainable methods. Both are state-level (one per state, last-write-wins, same semantics as `.snap` / `.discloses`). Absent → the state opts out entirely and pays zero per-cycle cost.
 
-```ts
+```ts no-check
 const Ticket = state({ Ticket: ticketSchema })
   .init(() => defaults)
   .emits({ TicketOpened, TicketResolved })
@@ -40,7 +40,7 @@ const Ticket = state({ Ticket: ticketSchema })
 
 Build the app, opt in to the lifecycle, and the cycle runs forever:
 
-```ts
+```ts no-check
 const app = act()
   .withState(Ticket)
   .build({
@@ -61,7 +61,7 @@ Operators who never call `start_correlations()` never start the cycle. Apps that
 
 Three operational pressure points cover the bulk of real workloads. `.autocloses` accepts either a predicate function (the long-tail escape hatch) or a declarative options object with verb-shaped fields that compose at the call site like a sentence:
 
-```ts
+```ts no-check
 .autocloses({
   is: "TicketResolved",      // domain lifecycle — head event in this set
   after: { days: 90 },       // AND time — head older than 90 days
@@ -76,7 +76,7 @@ Each field is optional and contributes independently. `.autocloses({})` throws a
 
 "Close once the head event is older than X."
 
-```ts
+```ts no-check
 .autocloses({ after: { days: 90 } })
 ```
 
@@ -90,7 +90,7 @@ Cost: one timestamp comparison per stream per run.
 
 "Close once the head event reaches a designated terminal state."
 
-```ts
+```ts no-check
 .autocloses({ is: "TicketResolved" })
 .autocloses({ is: ["Shipped", "Delivered", "Cancelled"] })
 ```
@@ -105,7 +105,7 @@ Cost: one set membership check per stream per run. Cheapest of the three.
 
 "Close once the stream has accumulated N or more events."
 
-```ts
+```ts no-check
 .autocloses({ reaches: 10_000 })
 ```
 
@@ -124,7 +124,7 @@ Top-level fields are AND-combined. Two reasons that's the right default:
 
 For pure-OR backstops or for mixing both shapes, use the optional `or: {...}` block. The policy fires when **either** the top-level AND group matches **or** any field inside `or` matches:
 
-```ts
+```ts no-check
 .autocloses({
   is: "TicketResolved",         // primary close trigger
   after: { days: 90 },          // AND aged 90 days (return window)
@@ -143,7 +143,7 @@ Pure-OR policies (no top-level fields, only `or`) work too: `.autocloses({ or: {
 
 Multi-branch policies the schema doesn't express directly ("(`Resolved` + 90d) OR (`Cancelled` + 30d)" — different cooldowns per terminal) fall back to the function form:
 
-```ts
+```ts no-check
 .autocloses((_stream, head) => {
   const ageMs = Date.now() - head.created.getTime();
   if (head.name === "Resolved") return ageMs >= 90 * 86_400_000;
@@ -171,7 +171,7 @@ A run repeats every `autocloseCycleMinutes` (default 12 h) — a couple of times
 
 `autocloseWindow: { start, end, timeZone? }` keeps runs out of peak traffic. The ticker still fires every `autocloseCycleMinutes`, but a tick only runs a sweep when the current hour is inside `[start, end)`. Hours are integers in `[0, 23]`, evaluated in `timeZone` (an IANA string, default `"UTC"`, DST-correct via `Intl`):
 
-```ts
+```ts no-check
 .build({
   autocloseWindow: { start: 22, end: 6, timeZone: "America/New_York" },
 })

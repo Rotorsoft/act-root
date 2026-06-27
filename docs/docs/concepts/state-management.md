@@ -43,7 +43,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 Multiple states sharing the same name merge automatically when composed in slices or the act orchestrator:
 
-```typescript
+```typescript no-check
 const TicketCreation = state({ Ticket: z.object({ title: z.string() }) })
   .init(() => ({ title: "" }))
   .emits({ TicketOpened: z.object({ title: z.string() }) })
@@ -72,7 +72,7 @@ This means a partial can redeclare an event in `.emits()` (to react to it via `.
 
 When a partial redeclares an event so it can `.on()` it (or for a slice that reacts to events owned by another slice), the **Zod schema in both partials must be the same JS reference**. The merge throws at build time if two partials declare the same event with different schema instances — silent contract drift is the failure mode this rule prevents.
 
-```typescript
+```typescript no-check
 // events/ticket.ts — single source of truth for the shared schema
 import { z } from "zod";
 
@@ -108,7 +108,7 @@ Cross-state collisions (two slices declaring the same event name in *different* 
 
 Business rules enforced before actions execute:
 
-```typescript
+```typescript no-check
 import { type Invariant } from "@rotorsoft/act";
 
 const mustBeOpen: Invariant<{ status: string }> = {
@@ -127,7 +127,7 @@ When an invariant fails, the framework throws an `InvariantError` with the descr
 
 For long-lived streams, configure snapshotting to avoid replaying the entire event history on cold starts:
 
-```typescript
+```typescript no-check
 .snap((snap) => snap.patches >= 50)  // snapshot every 50 events
 ```
 
@@ -147,7 +147,7 @@ Cache and snapshots are the same checkpoint pattern at different layers. Cache e
 
 Projections are read-model updaters that react to events:
 
-```typescript
+```typescript no-check
 import { projection } from "@rotorsoft/act";
 
 const TicketProjection = projection("tickets")
@@ -164,7 +164,7 @@ Projection handlers receive `(event, stream)` — no dispatcher, no state mutati
 
 Slices group partial states with scoped reactions into vertical feature modules:
 
-```typescript
+```typescript no-check
 import { slice } from "@rotorsoft/act";
 
 const TicketSlice = slice()
@@ -190,7 +190,7 @@ When a slice handler calls `app.do(action, target, payload)` without the fourth 
 
 The orchestrator composes everything:
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Counter)
   .withSlice(TicketSlice)
@@ -205,7 +205,7 @@ const snapshot = await app.load(Counter, "counter1");
 
 Both `app.do()` (returns one snapshot per emitted event) and `app.load()` (returns one snapshot for the latest replayed state) yield objects of this shape:
 
-```typescript
+```typescript no-check
 type Snapshot<TState> = {
   state: TState;       // current state after this event
   version: number;     // 0-indexed stream version
@@ -224,7 +224,7 @@ type Snapshot<TState> = {
 
 Extract inferred types from built State objects:
 
-```typescript
+```typescript no-check
 import type { InferEvents, InferActions } from "@rotorsoft/act";
 
 type Events = InferEvents<typeof Counter>;

@@ -30,7 +30,7 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 Read-model updaters that react to events:
 
-```typescript
+```typescript no-check
 import { projection } from "@rotorsoft/act";
 
 const CounterProjection = projection("counters")
@@ -43,7 +43,7 @@ const CounterProjection = projection("counters")
 
 For high-throughput rebuilds (e.g. catching up after a long downtime, or projecting onto a fresh read model), define a `.batch(handler)` that processes every event for a stream in a single transaction. When defined, `.batch()` is *always* called instead of the per-event `.do()` handlers.
 
-```typescript
+```typescript no-check
 const TicketProjection = projection("tickets")
   .on({ TicketOpened: TicketOpenedSchema })
     .do(async ({ stream, data }) => { /* per-event fallback */ })
@@ -68,7 +68,7 @@ const TicketProjection = projection("tickets")
 
 Vertical feature modules grouping states, projections, and reactions:
 
-```typescript
+```typescript no-check
 import { slice } from "@rotorsoft/act";
 
 const CounterSlice = slice()
@@ -84,7 +84,7 @@ const CounterSlice = slice()
 
 Compose everything into an application:
 
-```typescript
+```typescript no-check
 import { act } from "@rotorsoft/act";
 
 const app = act()
@@ -101,7 +101,7 @@ const app = act()
 
 `act().build(options?)` accepts a small `ActOptions` object for tuning the orchestrator:
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Counter)
   .build({
@@ -122,7 +122,7 @@ const app = act()
 
 Every `Act` owns one circuit breaker, shared by the drain, settle, and autoclose loops. After `failureThreshold` consecutive store failures it **opens** — those loops skip the store while it's open instead of hammering a down backend — and `cooldownMs` later it **schedules its own retry** (a drain attempt): a pass closes it, a failure re-opens it and reschedules. So recovery is automatic regardless of lane configuration. While the store stays down it keeps probing once per `cooldownMs` (each failed probe re-emits the [`error` event](./error-handling#store-failures-and-the-circuit-breaker)); the timer is `unref()`'d and cleared on recovery or `dispose()`. See [Store failures and the circuit breaker](./error-handling#store-failures-and-the-circuit-breaker).
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Counter)
   .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 } });
@@ -144,7 +144,7 @@ The two flags are orthogonal — independent costs, independent toggles:
 | `false` | `false` | Pure writer fleet (write-heavy frontend, ingest worker, API server). Notifies on commit but doesn't react. |
 | `true` | `false` | Observability sidecar. Sees every cross-process commit via the `notified` lifecycle event without processing it. |
 
-```typescript
+```typescript no-check
 // Writer fleet — scales horizontally without touching the subscriber budget.
 const writer = act().withState(Order).build({ listen: false, drain: false });
 
@@ -163,7 +163,7 @@ By default, every reaction lives in a single implicit `"default"` lane: one `Dra
 
 `.withLane({...})` declares an independent drain lane with its own controller, lease budget, claim limit, and cycle cadence. Reactions opt in via `.to({lane})`; reactions without an explicit lane stay in `"default"`.
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Ticket)
   .withLane({ name: "webhooks", leaseMillis: 30_000, streamLimit: 5, cycleMs: 500 })
@@ -190,7 +190,7 @@ Each declared lane field overrides caller-passed `DrainOptions` at drain time �
 
 The builder threads declared lane names into its `TLanes` generic. `.to({lane: "..."})` and `ActOptions.onlyLanes` are narrowed to that union at the call site — typos fail compile:
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Ticket)
   .withLane({ name: "webhooks" })
@@ -214,7 +214,7 @@ Slices declare their own lanes via the same `.withLane(...)` method; `act().with
 
 Two reactions routing to the same `(target, source)` stream must declare the same lane. Lanes have no ordering, so there's no `max()` merge analogous to priority — the build-time scan throws on disagreement:
 
-```typescript
+```typescript no-check
 // throws at act().build()
 act()
   .withState(Ticket)
@@ -305,7 +305,7 @@ store(new SqliteStore({ url: "file:myapp.db" }));
 
 Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default:
 
-```typescript
+```typescript no-check
 import { cache } from "@rotorsoft/act";
 
 // Default: InMemoryCache — no setup needed
@@ -315,7 +315,7 @@ cache(new RedisCache({ url: "redis://localhost:6379" }));
 
 The `Cache` interface is async for forward-compatibility with external caches:
 
-```typescript
+```typescript no-check
 interface Cache extends Disposable {
   get<TState>(stream: string): Promise<CacheEntry<TState> | undefined>;
   set<TState>(stream: string, entry: CacheEntry<TState>): Promise<void>;
@@ -328,7 +328,7 @@ interface Cache extends Disposable {
 
 All adapters (logger, store, cache, and custom disposers) are cleaned up via `dispose()()`:
 
-```typescript
+```typescript no-check
 import { dispose } from "@rotorsoft/act";
 
 // Register custom cleanup
@@ -344,7 +344,7 @@ await dispose()();
 
 Implement the `Store` interface for custom backends:
 
-```typescript
+```typescript no-check
 interface Store extends Disposable {
   seed(): Promise<void>;
   drop(): Promise<void>;

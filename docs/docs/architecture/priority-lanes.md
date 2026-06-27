@@ -23,7 +23,7 @@ When `streamLimit` is binding (more candidate streams than the worker can claim 
 
 A reaction's resolver gets an optional `priority` field:
 
-```ts
+```ts no-check
 .on("OrderConfirmed")
   .do(sendCriticalNotification)
   .to({ target: "notifications-out", priority: 10 })
@@ -31,7 +31,7 @@ A reaction's resolver gets an optional `priority` field:
 
 Or for dynamic resolvers:
 
-```ts
+```ts no-check
 .on("UserActivity")
   .do(updateLeaderboard)
   .to((e) => ({
@@ -53,7 +53,7 @@ If you need ordering changes inside a stream, the right tool is target filters a
 
 When multiple reactions target the same stream with different priorities — e.g., one slice registers `target: "shared", priority: 3` and another registers `target: "shared", priority: 7` — the **maximum** wins:
 
-```ts
+```ts no-check
 .on("Inc").do(r1).to({ target: "shared", priority: 3 })  // ignored
 .on("Inc").do(r2).to({ target: "shared", priority: 7 })  // sets the lane
 ```
@@ -64,7 +64,7 @@ The same `max()` invariant holds at runtime: `subscribe()` upserts priority via 
 
 `subscribe()` can only raise priority (via the max invariant). For runtime adjustments — including *decreases* — use `app.prioritize(filter, n)`:
 
-```ts
+```ts no-check
 // Boost a specific replay
 await app.prioritize({ stream: "^proj-orders$", stream_exact: false }, 10);
 

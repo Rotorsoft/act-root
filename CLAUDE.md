@@ -243,6 +243,7 @@ Why this exists: each step closes a failure mode that has actually shipped. The 
 - **`PERFORMANCE.md`** tracks evolution with per-optimization before/after numbers
 - New optimization → benchmark goes in `PERFORMANCE.md`, README links to it
 - Deep reference goes in `docs/docs/` (Docusaurus), procedural app-building guidance in `.claude/skills/scaffold-act-app/`, contributor workflow in `docs/docs/guides/`
+- **Doc snippets are type-checked.** Every fenced ` ```ts ` block in `docs/docs/**` is tangled and compiled against the live `@rotorsoft/act` source in CI (`pnpm -F docs check:snippets`). A new snippet must be a self-contained program or carry a `no-check` marker on its info string if it's a deliberate fragment. See [docs/scripts/README.md](docs/scripts/README.md).
 
 ## Rules for contributing to this repo
 

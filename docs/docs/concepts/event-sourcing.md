@@ -52,7 +52,7 @@ Cache is always-on with `InMemoryCache` (LRU, maxSize 1000) as the default. It e
 
 For distributed deployments, implement the `Cache` interface backed by Redis or another external store:
 
-```typescript
+```typescript no-check
 import { cache } from "@rotorsoft/act";
 
 cache(new RedisCache({ url: "redis://localhost:6379" }));
@@ -62,7 +62,7 @@ cache(new RedisCache({ url: "redis://localhost:6379" }));
 
 `load()` accepts an optional `asOf` argument for reading historical state. The framework bypasses the cache, replays events from the start with snapshots, and applies the cutoff filters:
 
-```typescript
+```typescript no-check
 // Snapshot just before event id 5000
 await app.load(Counter, "counter-1", undefined, { before: 5000 });
 
@@ -122,7 +122,7 @@ Act handles event-driven workflows through atomic stream claiming and correlatio
 
 Reactions are asynchronous handlers triggered by events. They can update other state streams, trigger external integrations, or drive cross-aggregate workflows:
 
-```typescript
+```typescript no-check
 const app = act()
   .withState(Account)
   .on("Deposited")
@@ -160,7 +160,7 @@ By default Act produces a readable, time-monotonic, lowercase id of the form `{s
 
 Apps that need a different scheme plug a delegate in via `ActOptions.correlator`:
 
-```ts
+```ts no-check
 import { act, type Correlator } from "@rotorsoft/act";
 
 const tenantPrefixed: Correlator = ({ state, action, actor }) => {
@@ -193,7 +193,7 @@ The delegate is only consulted on **originating actions** and on **close-the-boo
 4. **Handle** — execute reaction handlers
 5. **Ack/Block** — release successful claims or block failed streams
 
-```typescript
+```typescript no-check
 // In tests — explicit, deterministic
 await app.correlate();
 await app.drain();
@@ -215,7 +215,7 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 The recommended production pattern. `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event. The canonical wiring is to subscribe to `"committed"` once at bootstrap and let it trigger automatically — actions never call `settle()` directly:
 
-```typescript
+```typescript no-check
 // At app bootstrap — wire once
 app.on("committed", () => app.settle());
 
@@ -242,7 +242,7 @@ await app.do("CreateItem", target, input);
 
 Projections are derived data — disposable by design. To replay a projection from scratch (after a code change, schema fix, or new aggregation):
 
-```typescript
+```typescript no-check
 // 1. Reset the projection's reaction watermarks AND arm the drain flag
 await app.reset(["my-projection"]);
 
@@ -260,7 +260,7 @@ Use `app.reset` for **rebuilds** (watermark → -1, every event replayed). Use [
 
 `app.close([targets])` is the event-sourcing equivalent of "closing the books" in accounting: archive the detail, then truncate the operational store. Each target chooses between *tombstone* (permanent close) and *restart* (seed a fresh `__snapshot__` and keep accepting actions):
 
-```typescript
+```typescript no-check
 const result = await app.close([
   {
     stream: "order-123",
@@ -285,7 +285,7 @@ After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent 
 
 `app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild primitive — atomically replace the contents of a store from an event source. Use it for CSV-driven backups, cross-adapter migrations (PG → SQLite or vice versa), or compaction passes that drop `__snapshot__` events to shrink the log.
 
-```typescript
+```typescript no-check
 import { CsvFile } from "@rotorsoft/act";
 
 // Restore from a CSV file on disk into the connected store
@@ -312,7 +312,7 @@ await app.reset({ stream: "^proj-" });
 
 The source and sink slots accept anything implementing `EventSource` and `EventSink` respectively. The framework's `Store` adapters implement both (read end is `query`, write end is the optional `restore` capability). `CsvFile` ships in `@rotorsoft/act` and implements both ends so CSV files can sit in either slot:
 
-```typescript
+```typescript no-check
 import { CsvFile, store } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
@@ -348,7 +348,7 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 
 Transfer-time migrations let you reshape events as part of a `Act.restore(source, opts, sink)` call — typically when moving from an old store to a new (empty) store via the inspector. The connected (live) store is never modified; migrations apply only to the events that flow through `scan` into `sink`.
 
-```typescript
+```typescript no-check
 import { z } from "zod";
 import type { EventMigration } from "@rotorsoft/act";
 
@@ -400,7 +400,7 @@ Common confusions worth naming:
 
 ## Testing
 
-```typescript
+```typescript no-check
 import { store, dispose } from "@rotorsoft/act";
 
 beforeEach(async () => {

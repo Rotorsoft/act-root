@@ -11,7 +11,7 @@ Act is designed for testability. The in-memory defaults (InMemoryStore, InMemory
 
 Reach for the helpers from `@rotorsoft/act/test` first. They build on `ActOptions.scoped` (ACT-501) so every test gets its own `{ store, cache }` bag — no singleton contention, parallel-safe with `it.concurrent`.
 
-```typescript
+```typescript no-check
 import { act, type Target } from "@rotorsoft/act";
 import { fixture } from "@rotorsoft/act/test";
 import { Counter } from "../src/index.js";
@@ -46,7 +46,7 @@ No `beforeEach(store().seed())`, no `afterAll(dispose()())` — vitest's fixture
 
 ### `sandbox` for tests that need two Acts or shared setup
 
-```typescript
+```typescript no-check
 import { sandbox } from "@rotorsoft/act/test";
 
 it("two scoped Acts in one test — no cross-talk", async () => {
@@ -66,7 +66,7 @@ it("two scoped Acts in one test — no cross-talk", async () => {
 
 For PG- or SQLite-backed tests, pass a custom store factory:
 
-```typescript
+```typescript no-check
 const test = fixture(builder, {
   store: () => new PostgresStore({ schema: `t_${nanoid()}` }),
 });
@@ -78,7 +78,7 @@ Each test gets its own per-schema PG store, and `dispose` tears down the pool.
 
 Because each fixture instance gets its own store and cache, `test.concurrent` is safe out of the box:
 
-```typescript
+```typescript no-check
 const test = fixture(builder);
 
 test.concurrent("A", async ({ app }) => {
@@ -124,7 +124,7 @@ describe("Counter (legacy)", () => {
 
 ## Testing Actions and State
 
-```typescript
+```typescript no-check
 it("should increment", async () => {
   const t = target();
   await app.do("increment", t, { by: 5 });
@@ -146,7 +146,7 @@ it("should accumulate events", async () => {
 
 ## Testing Invariants
 
-```typescript
+```typescript no-check
 it("should reject closing a non-open ticket", async () => {
   const t = target();
   // Ticket doesn't exist yet — status is not "open"
@@ -171,7 +171,7 @@ it("should enforce business rules", async () => {
 
 Reactions don't run as part of `app.do()` — they're processed by `drain()` after the orchestrator has discovered new target streams via `correlate()`. The two are explicit in tests so the test controls exactly when reactions fire.
 
-```typescript
+```typescript no-check
 it("should process reactions", async () => {
   const t = target();
   await app.do("CreateItem", t, { name: "Test" });
@@ -191,7 +191,7 @@ For multi-hop reaction chains, repeat `correlate → drain` until a pass produce
 
 In-memory projections (Maps, arrays) persist across tests. Export `clear*()` functions:
 
-```typescript
+```typescript no-check
 // In projection module
 const items = new Map<string, ItemView>();
 
@@ -208,7 +208,7 @@ beforeEach(async () => {
 
 Query the event log to verify what was emitted:
 
-```typescript
+```typescript no-check
 it("should emit correct events", async () => {
   const t = target();
   await app.do("increment", t, { by: 5 });
@@ -222,7 +222,7 @@ it("should emit correct events", async () => {
 
 ## Testing Concurrency
 
-```typescript
+```typescript no-check
 it("should detect concurrent modifications", async () => {
   const t = target();
   await app.do("increment", t, { by: 1 });
