@@ -263,6 +263,65 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(limited).toHaveLength(2);
       });
 
+      it("with_snaps resumes from the latest snapshot per stream", async () => {
+        const s = `q-snap-${uid()}`;
+        // 2 pre-snapshot domain events ...
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+        // ... a snapshot ...
+        const [snap] = await store.commit(
+          s,
+          [{ name: SNAP_EVENT, data: { count: 2 } }],
+          make_meta({ stream: s })
+        );
+        // ... and 3 events after it.
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1), inc(1), inc(1)],
+          make_meta({ stream: s })
+        );
+
+        // with_snaps resumes AT the latest snapshot: snapshot + the 3 after
+        // it, never the 2 pre-snapshot events.
+        const from_snap = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        expect(from_snap).toHaveLength(4);
+        expect(from_snap[0].name).toBe(SNAP_EVENT);
+
+        // Without with_snaps: the 5 domain events, snapshot excluded.
+        const domain = await collect(store, { stream: s, stream_exact: true });
+        expect(domain).toHaveLength(5);
+
+        // An explicit `after` overrides the snapshot floor.
+        const after_snap = await collect(store, {
+          stream: s,
+          stream_exact: true,
+          with_snaps: true,
+          after: snap.id,
+        });
+        expect(after_snap).toHaveLength(3);
+
+        // A stream with no snapshot returns its full history under with_snaps.
+        const s2 = `q-nosnap-${uid()}`;
+        await store.commit<CounterEvents>(
+          s2,
+          [inc(1), inc(1)],
+          make_meta({ stream: s2 })
+        );
+        const full = await collect(store, {
+          stream: s2,
+          stream_exact: true,
+          with_snaps: true,
+        });
+        expect(full).toHaveLength(2);
+      });
+
       it("supports backward traversal", async () => {
         const s = `q-back-${uid()}`;
         const committed = await store.commit<CounterEvents>(

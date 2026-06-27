@@ -101,6 +101,13 @@ export function mock_state(
       };
     },
     snap: () => action_builder(_currentAction),
+    // Close-the-books policy methods. The diagram doesn't render the
+    // policy, but they must keep the chain alive — a real builder allows
+    // `.autocloses(...)` / `.archives(...)` between `.emit(...)` and
+    // `.build()`, so omitting them throws and silently drops the whole
+    // state from the parsed model.
+    autocloses: () => action_builder(_currentAction),
+    archives: () => action_builder(_currentAction),
     build: () => {
       on_build?.(info);
       return info;

@@ -389,6 +389,24 @@ export class InMemoryStore implements Store {
       }
     } else {
       let i = (query?.after ?? -1) + 1;
+      // with_snaps resumes at the latest snapshot for an exact single
+      // stream (no explicit `after`): start the scan at that snapshot's
+      // position so pre-snapshot events aren't read. No snapshot → full
+      // scan; an explicit `after` wins.
+      if (
+        query?.with_snaps &&
+        query.stream_exact &&
+        query.stream !== undefined &&
+        query.after === undefined
+      ) {
+        for (let j = this._events.length - 1; j >= 0; j--) {
+          const e = this._events[j];
+          if (e.stream === query.stream && e.name === SNAP_EVENT) {
+            i = j;
+            break;
+          }
+        }
+      }
       while (i < this._events.length) {
         const e = this._events[i++];
         if (query && !this.in_query(query, e)) continue;
