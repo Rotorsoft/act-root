@@ -61,6 +61,18 @@ export const TicketCreation = state({ Ticket: TicketCreationState })
   .given([mustBeOpen, mustBeUserOrAgent])
   .emit((_, __, { actor }) => ["TicketResolved", { resolvedById: actor.id }])
 
+  // Online close-the-books policy (the operator recipes reference this
+  // declaration instead of redefining a toy ticket). A ticket retires
+  // 90 days after it closes or resolves — the return / dispute /
+  // customer-success window — with a 365-day retention floor so a
+  // ticket that never reaches a terminal event still can't linger
+  // forever. The two paths fire independently (AND group OR backstop).
+  .autocloses({
+    is: ["TicketClosed", "TicketResolved"],
+    after: { days: 90 },
+    or: { after: { days: 365 } },
+  })
+
   .build();
 
 // --- Slice ---

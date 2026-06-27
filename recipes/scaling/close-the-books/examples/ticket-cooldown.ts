@@ -1,69 +1,39 @@
 /**
- * Cooldown-after-terminal close policy — the primary pattern.
+ * Cooldown-after-terminal close policy — the primary close-the-books
+ * pattern, demonstrated on the canonical wolfdesk model rather than a
+ * throwaway ticket.
  *
- * Tickets resolve, then sit in primary storage for a 90-day return /
- * dispute / customer-success window, then retire themselves on the
- * next autoclose cycle. The `.autocloses({...})` declarator does
- * the work; the rest of the file is a minimal harness so this can
- * be run end-to-end with `tsx` to confirm the API wiring.
+ * `@act/wolfdesk`'s `TicketCreation` state declares the policy directly
+ * (see `packages/wolfdesk/src/ticket-creation.ts`):
+ *
+ *   .autocloses({
+ *     is: ["TicketClosed", "TicketResolved"],   // terminal events
+ *     after: { days: 90 },                       // 90-day cooldown
+ *     or: { after: { days: 365 } },              // retention-floor backstop
+ *   })
+ *
+ * A resolved/closed ticket sits in primary storage for the 90-day
+ * return / dispute / customer-success window, then retires itself on
+ * the next autoclose sweep. The `or` backstop catches tickets that
+ * never reach a terminal event so abandoned streams can't linger past
+ * a year. This file is a minimal harness that confirms the policy is
+ * wired on the real model.
  *
  * Run:  pnpm tsx recipes/scaling/close-the-books/examples/ticket-cooldown.ts
  */
 
-import { act, state, ZodEmpty } from "@rotorsoft/act";
-import { z } from "zod";
-
-const Ticket = state({
-  Ticket: z.object({ title: z.string(), open: z.boolean() }),
-})
-  .init(() => ({ title: "", open: false }))
-  .emits({
-    TicketOpened: z.object({ title: z.string() }),
-    TicketResolved: ZodEmpty,
-  })
-  .patch({
-    TicketOpened: ({ data }) => ({ title: data.title, open: true }),
-    TicketResolved: (_e, state) => ({ ...state, open: false }),
-  })
-  .on({ OpenTicket: z.object({ title: z.string() }) })
-  .emit((a) => ["TicketOpened", { title: a.title }])
-  .on({ ResolveTicket: ZodEmpty })
-  .emit(() => ["TicketResolved", {}])
-  // The recipe — declarative form, top-level AND.
-  // "autocloses is Resolved after 90 days."
-  .autocloses({
-    is: "TicketResolved",
-    after: { days: 90 },
-  })
-  .build();
+import { app } from "@act/wolfdesk";
 
 async function main() {
-  const app = act().withState(Ticket).build({
-    // 12 h is the default sweep cadence; spelled out here so the
-    // example doubles as a knobs reference.
-    autocloseCycleMinutes: 720,
-    closeBatchSize: 64,
-  });
-
-  // The registry exposes the compiled predicate. Useful in tests
-  // to assert the policy survived `act().build()` validation.
+  // The registry exposes the compiled predicate that wolfdesk declared.
+  // Its presence proves the policy survived `act().build()` validation.
   const predicate = app.registry.autoclose_policy("Ticket");
   console.log("Ticket.autoclose registered:", typeof predicate === "function");
 
-  // Commit a ticket so the cycle has something to look at the first
-  // time it ticks. Default storage is in-memory, so no DB connection
-  // is needed to verify the wiring.
-  const actor = { id: "demo", name: "demo" };
-  await app.do("OpenTicket", { stream: "ticket-1", actor }, { title: "demo" });
-  await app.do("ResolveTicket", { stream: "ticket-1", actor }, {});
-
-  // `start_correlations()` also starts the autoclose ticker.
-  // A predicate keyed on `after: { days: 90 }` will not fire on a
-  // ticket that resolved seconds ago — the example proves the wiring
-  // up, not the eviction.
+  // `start_correlations()` also starts the autoclose ticker. A policy
+  // keyed on `after: { days: 90 }` won't fire on a ticket that resolved
+  // seconds ago — this proves the wiring, not the eviction.
   app.start_correlations();
-
-  // Tear down cleanly so the script exits.
   await app.shutdown();
 }
 
