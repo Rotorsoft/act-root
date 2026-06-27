@@ -35,9 +35,17 @@ case "$file_path" in
     exit 0 ;;
 esac
 
-# Identify the package that owns the file. The package root is the
-# nearest ancestor with a tsconfig.json — fall back to silent skip when
-# we can't locate one.
+# Repo root holds tsconfig.workspace.json, whose `paths` map @rotorsoft/*
+# and @act/* to source. Type-checking against it resolves cross-package
+# imports to `src`, so a freshly edited file checks without any dependency
+# being built first — the per-package config used composite `references`,
+# which forced resolution through built `dist` and blocked every edit in a
+# not-yet-built tree (the recurring TS6305 papercut).
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+[[ -f "$root/tsconfig.workspace.json" ]] || exit 0
+
+# Identify the package that owns the file (nearest ancestor with a
+# tsconfig.json) — used to scope which errors we surface.
 file_dir="$(dirname "$file_path")"
 pkg_dir="$file_dir"
 while [[ "$pkg_dir" != "/" && ! -f "$pkg_dir/tsconfig.json" ]]; do
@@ -46,20 +54,29 @@ done
 if [[ "$pkg_dir" == "/" ]]; then
   exit 0
 fi
+pkg_rel="${pkg_dir#"$root"/}"
 
-# Run the package's typecheck. We use --noEmit and rely on TS's
-# incremental build cache (tsbuildinfo) so repeat invocations are fast.
-# stderr is captured separately so we can surface compile errors clearly.
-cd "$pkg_dir" || exit 0
-output="$(npx tsc --noEmit -p tsconfig.json 2>&1)"
-exit_code=$?
+# Type-check the whole workspace project (--noEmit). An incremental cache
+# keeps repeat invocations fast after the first run; the cache lives under
+# the already-ignored .claude/.cache/.
+cache_dir="$root/.claude/.cache"
+mkdir -p "$cache_dir"
+cd "$root" || exit 0
+output="$(npx tsc --noEmit --incremental \
+  --tsBuildInfoFile "$cache_dir/typecheck-workspace.tsbuildinfo" \
+  --project tsconfig.workspace.json --jsx react-jsx 2>&1)"
 
-if [[ $exit_code -ne 0 ]]; then
+# Surface only errors in the edited file's package — the hook's job is to
+# catch what this edit just broke, not pre-existing errors elsewhere. tsc
+# prints repo-relative paths because it runs from the root.
+pkg_errors="$(printf '%s\n' "$output" | grep -E "^${pkg_rel}/" || true)"
+
+if [[ -n "$pkg_errors" ]]; then
   # Trim to the first 40 lines so the model doesn't drown in cascading
   # errors — the root cause is almost always in the first one.
-  trimmed="$(printf '%s\n' "$output" | head -40)"
+  trimmed="$(printf '%s\n' "$pkg_errors" | head -40)"
   jq -n \
-    --arg reason "TypeScript errors in $(basename "$pkg_dir") after editing ${file_path##*/}:
+    --arg reason "TypeScript errors in ${pkg_rel} after editing ${file_path##*/}:
 $trimmed
 Fix before continuing." \
     '{decision: "block", reason: $reason}'

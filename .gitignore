@@ -26,3 +26,4 @@ stryker.log
 .claude/settings.local.json
 .claude/.cache/
 .claude/scheduled_tasks.lock
+.claude/worktrees/

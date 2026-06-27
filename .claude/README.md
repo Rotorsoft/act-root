@@ -52,7 +52,7 @@ Need a wider surface for your own workflow? Add to `settings.local.json` (gitign
 
 | Event | Script | What it does |
 |---|---|---|
-| `PostToolUse` (Edit/Write) | `hooks/typecheck-touched.sh` | Runs `tsc --noEmit` on the package that owns the edited file. Fails the edit if TS errors are introduced — Claude sees the errors immediately and corrects course before the next operation. |
+| `PostToolUse` (Edit/Write) | `hooks/typecheck-touched.sh` | Runs `tsc --noEmit` against `tsconfig.workspace.json` (cross-package imports resolve to `src`, so no dependency needs building first) and surfaces errors scoped to the edited file's package. An incremental cache keeps repeat runs fast. Fails the edit if TS errors are introduced — Claude sees them immediately and corrects course. |
 | `Stop` | `hooks/stop-summary.sh` | Prints a short status line at turn end: branch, changed-file count, "src changed but no test changed" warning, last coverage summary. Surfaces "I forgot to run tests" without blocking. |
 | `UserPromptSubmit` | `hooks/inject-context.sh` | Cheap context injection on every new prompt: branch, uncommitted-file count, unpushed-commit count. Gives Claude ambient awareness without a tool call. |
 
@@ -193,7 +193,7 @@ Claude:
 The three hooks add ambient awareness no tool call would provide:
 
 - **On every prompt** — current branch, uncommitted-file count, unpushed commits. Lets Claude infer "we're mid-PR" vs. "fresh on master."
-- **After every Edit/Write** — incremental typecheck on the owning package. TS errors fail the edit; Claude sees them immediately.
+- **After every Edit/Write** — incremental workspace typecheck (resolves deps to `src`, no build needed), errors scoped to the edited package. TS errors fail the edit; Claude sees them immediately.
 - **On turn end** — change-counts and coverage summary. Surfaces "src changed, no test changed" as a one-liner so Claude doesn't claim "done" prematurely.
 
 You don't need to remember to run these. They're free.
