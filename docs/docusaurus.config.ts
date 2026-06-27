@@ -118,6 +118,19 @@ const config: Config = {
         docs: {
           sidebarPath: require.resolve("./sidebars.ts"),
           editUrl: "https://github.com/rotorsoft/act-root/edit/master/docs/",
+          // Docs versioning. The live `docs/` folder is the "current" set and
+          // stays the default served at `/docs/` so it always tracks the latest
+          // API (docs are not frozen with library releases — see STABILITY.md).
+          // Each breaking release snapshots a pinned copy via
+          // `pnpm --filter docs exec docusaurus docs:version <version>`, which
+          // older-major users can select from the navbar version dropdown.
+          lastVersion: "current",
+          versions: {
+            current: {
+              label: "Current",
+              path: "",
+            },
+          },
         },
         blog: false,
         theme: {
@@ -178,6 +191,10 @@ const config: Config = {
           to: "/docs/architecture",
           position: "left",
           label: "Architecture",
+        },
+        {
+          type: "docsVersionDropdown",
+          position: "right",
         },
         {
           href: "https://payhip.com/b/7ezLy",

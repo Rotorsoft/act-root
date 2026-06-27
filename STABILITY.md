@@ -109,6 +109,12 @@ We remove public surface slowly and with warning. The general rule: **a deprecat
 - **What gets patched.** Security fixes land on the **active major** and on any **previous major still inside its 6-month maintenance window** (see [Support window](#support-window)). Majors past end-of-life do not receive backports; the remedy there is upgrading. During 0.x, fixes land on the latest release only.
 - **Scope.** Vulnerabilities in `@rotorsoft/act` and the packages that track it are in scope. Issues in example apps under `packages/` (`calculator`, `wolfdesk`, `server`, `client`, `inspector`) are reference code, not published libraries — report them as ordinary issues. Dependency advisories are tracked via automated updates and patched in the active line.
 
+## Migration guides
+
+Every breaking (major) release ships a migration guide in the **same PR** that lands the breaking change, so the upgrade path is documented before the version is cut. The conventions, page template, and release-PR checklist live in [MIGRATING.md](MIGRATING.md).
+
+The documentation site is [versioned](https://docusaurus.io/docs/versioning): the live `docs/` folder is the **Current** set and tracks the latest API, while each released line is snapshotted under `docs/versioned_docs/` and selectable from the navbar version dropdown. Older-major users get a pinned reference; the migration guide for a release sits next to the API docs it describes.
+
 ## Per-library status
 
 | Package | Tracks core 1.0? |
