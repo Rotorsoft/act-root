@@ -44039,6 +44039,40 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         expect(second.subscribed).toBe(0);
       });
 
+      // Backs the port-doc contract on \`subscribe\`'s \`priority\` param:
+      // "When the same stream is subscribed by multiple reactions with
+      // different priorities, implementations must keep the maximum so
+      // the highest-priority reaction wins." Without this test the merge
+      // could silently regress to last-write-wins on any adapter.
+      it("keeps the maximum priority when a stream is re-subscribed", async () => {
+        const s = \`sub-pri-\${uid()}\`;
+        const read = async () => {
+          const got: { priority?: number } = {};
+          await store.query_streams(
+            (p) => {
+              got.priority = p.priority;
+            },
+            { stream: s, stream_exact: true }
+          );
+          return got.priority;
+        };
+
+        await store.subscribe([{ stream: s, priority: 3 }]);
+        expect(await read()).toBe(3);
+
+        // Higher priority wins.
+        await store.subscribe([{ stream: s, priority: 10 }]);
+        expect(await read()).toBe(10);
+
+        // Lower priority must NOT lower the stored value.
+        await store.subscribe([{ stream: s, priority: 1 }]);
+        expect(await read()).toBe(10);
+
+        // Default priority (0, omitted) must NOT lower it either.
+        await store.subscribe([{ stream: s }]);
+        expect(await read()).toBe(10);
+      });
+
       it("claims a subscribed stream and ack releases the lease", async () => {
         const s = \`claim-\${uid()}\`;
         await store.subscribe([{ stream: s }]);
