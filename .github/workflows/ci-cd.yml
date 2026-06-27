@@ -114,6 +114,10 @@ jobs:
 
       - run: pnpm install
       - run: pnpm typecheck
+      # `pnpm typecheck` no longer builds first (it resolves cross-package
+      # imports to `src` via tsconfig.workspace.json), so build explicitly to
+      # keep declaration-emit / tsup coverage on PRs.
+      - run: pnpm build
       - run: pnpm test
 
       # Section-presence check for libs/*/README.md — ticket #751.
