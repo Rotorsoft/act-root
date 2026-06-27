@@ -201,6 +201,8 @@ Source-of-truth for what lives where:
 
   Out of scope for the charter — change freely: anything in `libs/act/src/internal/`, performance characteristics, log formats, adapter implementation details outside the contract.
 
+- **Gating new public surface — write an RFC.** The charter catches *changes* to the public surface; the `rfcs/` process gates *additions* before they calcify. Any PR that adds a new public export, builder method, port method, or lifecycle event needs a one-page RFC (copy [`rfcs/0000-template.md`](rfcs/0000-template.md) → `rfcs/NNNN-<slug>.md`) capturing motivation, the surface added, alternatives considered, and stability impact. The PR template carries the checklist line; see [`rfcs/README.md`](rfcs/README.md) for what does and doesn't require one.
+
 - **Changing a port interface (Store, Cache, Logger).** When you add, remove, or change a method on a port in `libs/act/src/types/ports.ts`, you must also update the matching `runStoreTck` / `runCacheTck` / `runLoggerTck` in `libs/act-tck/src/`. The TCK is the executable contract — adapters validate themselves against it. Rules:
   1. Add or update cases in `libs/act-tck/src/{store,cache,logger}-tck.ts`.
   2. If the method is optional, add a flag to the matching `Capabilities` type and gate the new tests on it so existing adapters keep passing until they opt in.

@@ -131,6 +131,10 @@ Each library's `README.md` carries a one-line stability note linking back to thi
 - Example packages under `packages/` — `calculator`, `wolfdesk`, `server`, `client`, `inspector` are reference implementations, not published libraries.
 - Tools and scripts under `scripts/`.
 
+## Adding new covered surface
+
+This charter protects what already exists; it doesn't gate what gets added. New public surface — a new export, builder method, port method, or lifecycle event — calcifies under semver the moment it ships. Before it does, write a one-page RFC: copy [`rfcs/0000-template.md`](rfcs/0000-template.md) to `rfcs/NNNN-<slug>.md` and capture the motivation, the exact surface added, the alternatives considered, and the charter impact. See [`rfcs/README.md`](rfcs/README.md) for what does and doesn't require one. The PR that adds the surface links the RFC.
+
 ## Questions or proposed changes
 
 If you depend on a surface and aren't sure whether it's covered, open an issue. If you think something *should* be covered and isn't, open an issue — this charter is a living contract and we expect to tighten or loosen it as real-world usage exposes the edges.
