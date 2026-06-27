@@ -212,6 +212,13 @@ export class SqliteStore implements Store {
     await this.client.execute(
       "CREATE INDEX IF NOT EXISTS idx_events_name ON events(name)"
     );
+    // Partial index over snapshot rows only, so the with_snaps "resume at
+    // the latest snapshot" floor (MAX(id) WHERE stream=? AND
+    // name='__snapshot__') is an O(log) lookup and costs nothing for
+    // streams with no snapshot (the index has no rows for them).
+    await this.client.execute(
+      "CREATE INDEX IF NOT EXISTS idx_events_snapshot ON events(stream, id) WHERE name = '__snapshot__'"
+    );
     await this.client.execute(`
       CREATE TABLE IF NOT EXISTS streams (
         stream TEXT PRIMARY KEY,
@@ -358,6 +365,13 @@ export class SqliteStore implements Store {
     if (query?.after !== undefined) {
       sql += " AND id > ?";
       args.push(query.after);
+    } else if (query?.with_snaps && query.stream_exact && query.stream) {
+      // Resume at the latest snapshot for this stream so pre-snapshot
+      // events aren't scanned. No snapshot → MAX is NULL → -1 → full
+      // stream. An explicit `after` (above) wins.
+      sql +=
+        " AND id >= (SELECT COALESCE(MAX(id), -1) FROM events WHERE stream = ? AND name = '__snapshot__')";
+      args.push(query.stream);
     }
     if (query?.before !== undefined) {
       sql += " AND id < ?";
