@@ -1,4 +1,4 @@
-# server
+# @act/server
 
 A multi-transport HTTP server that mounts **every** `@rotorsoft/act-http` transport against the same `calculatorApp` from `@act/calculator` — tRPC, Hono REST, and a live OpenAPI document, all on one port.
 

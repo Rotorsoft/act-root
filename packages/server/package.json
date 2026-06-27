@@ -1,7 +1,8 @@
 {
-  "name": "server",
+  "name": "@act/server",
   "version": "0.0.1",
   "description": "sample trpc server",
+  "private": true,
   "type": "module",
   "author": {
     "name": "rotorsoft",

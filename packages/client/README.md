@@ -1,4 +1,4 @@
-# client
+# @act/client
 
 A minimal React + Vite client for the calculator example. Demonstrates how to call an Act-backed tRPC router from a browser with full end-to-end type safety **and** how to swap to the generated Hono REST surface with one toggle — both transports walking the same Act registry on the server.
 

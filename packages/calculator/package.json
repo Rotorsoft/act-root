@@ -4,6 +4,7 @@
   "description": "Calculator example",
   "author": "rotorsoft",
   "license": "MIT",
+  "private": true,
   "type": "module",
   "scripts": {
     "dev": "LOG_LEVEL=trace tsx watch src/main.ts",
