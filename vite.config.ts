@@ -16,7 +16,10 @@
  *
  * The alias map is *derived* from the `paths` in `tsconfig.workspace.json` —
  * the single source of truth, also consumed by `tsc --noEmit` — so the
- * type-checker and the test runner can never drift. That map also carries
+ * type-checker and the test runner can never drift. Those `paths` are
+ * themselves generated from each package's `exports` map by
+ * `scripts/derive-tsconfig-paths.mjs` (`pnpm paths:sync`; CI runs
+ * `pnpm paths:check`), so a new subpath export propagates here for free. That map also carries
  * the private `@act/*` namespace (the in-repo example apps — calculator /
  * server / client, not a published scope); no test imports those, but they
  * ride along so one map serves both tools. vitest discovers this root config
