@@ -29,9 +29,12 @@ export default {
   inPlace: true,
   coverageAnalysis: "perTest",
   mutate: ["src/**/*.ts", "!src/**/*.d.ts"],
-  reporters: ["clear-text", "progress", "json"],
+  reporters: ["clear-text", "progress", "json", "html"],
   jsonReporter: {
     fileName: "reports/mutation/mutation.json",
+  },
+  htmlReporter: {
+    fileName: "reports/mutation/index.html",
   },
   // Weekly-only gate floor (#1056). Baseline 93.0% → break 87.
   thresholds: { high: 93, low: 85, break: 87 },
