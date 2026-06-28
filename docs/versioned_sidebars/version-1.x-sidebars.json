@@ -17,7 +17,8 @@
         "guides/contributing-new-package",
         "guides/writing-a-store",
         "guides/writing-a-cache",
-        "guides/writing-a-logger"
+        "guides/writing-a-logger",
+        "guides/migrating-to-1.x"
       ]
     },
     {

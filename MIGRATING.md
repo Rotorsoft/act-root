@@ -25,7 +25,7 @@ straight to the `2.x` migration page, and vice-versa.
 
 | From → To | Guide | Highlights |
 |---|---|---|
-| _none yet_ | — | The `1.x` line is the first versioned snapshot; no breaking migration has shipped. |
+| → `1.x` | [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md) | First versioned snapshot. No breaking changes to migrate — the page documents the upgrade-within-major policy, how to read the versioned docs, and proves this template end to end. |
 
 ## Writing a migration guide (the convention)
 
