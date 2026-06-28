@@ -3,45 +3,45 @@
     {
       "name": "commit: single event",
       "samples": 200,
-      "p50_ms": 0.2685,
-      "p95_ms": 0.3162,
-      "mean_ms": 0.2681,
-      "ops_per_sec": 3729
+      "p50_ms": 0.9707,
+      "p95_ms": 1.2335,
+      "mean_ms": 1.0151,
+      "ops_per_sec": 985
     },
     {
       "name": "commit: 50-event batch",
       "samples": 100,
-      "p50_ms": 0.9749,
-      "p95_ms": 1.0936,
-      "mean_ms": 0.9903,
-      "ops_per_sec": 1010,
-      "effective_per_sec": 50500
+      "p50_ms": 3.4744,
+      "p95_ms": 4.9709,
+      "mean_ms": 3.5727,
+      "ops_per_sec": 280,
+      "effective_per_sec": 14000
     },
     {
       "name": "load: cold replay over snapshot floor",
       "samples": 100,
-      "p50_ms": 0.2102,
-      "p95_ms": 0.2572,
-      "mean_ms": 0.2239,
-      "ops_per_sec": 4466
+      "p50_ms": 0.5346,
+      "p95_ms": 0.9656,
+      "mean_ms": 0.5796,
+      "ops_per_sec": 1725
     },
     {
       "name": "drain: correlate+drain 50 events",
       "samples": 50,
-      "p50_ms": 1.1123,
-      "p95_ms": 1.2671,
-      "mean_ms": 1.129,
-      "ops_per_sec": 886,
-      "effective_per_sec": 44300
+      "p50_ms": 3.6843,
+      "p95_ms": 5.3046,
+      "mean_ms": 3.9358,
+      "ops_per_sec": 254,
+      "effective_per_sec": 12700
     },
     {
       "name": "query_stats: page of 50 (count+names)",
       "samples": 50,
-      "p50_ms": 1.7518,
-      "p95_ms": 1.8225,
-      "mean_ms": 1.6709,
-      "ops_per_sec": 598,
-      "effective_per_sec": 29900
+      "p50_ms": 3.3783,
+      "p95_ms": 3.6317,
+      "mean_ms": 3.3538,
+      "ops_per_sec": 298,
+      "effective_per_sec": 14900
     }
   ]
 }

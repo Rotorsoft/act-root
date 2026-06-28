@@ -285,13 +285,22 @@ have been fabricated.**
 Run `pnpm -F @rotorsoft/act-pg bench:update` against a real PG in a PR
 labeled `perf-baseline-update`, with the rationale documented here.
 
-### #1024 cold-load before/after (pg) — _reserved_
+### #1024 cold-load before/after (pg)
 
-> **TODO (fill when the pg baseline is generated):** the #1024 fix made
-> cold `load()` resume from the latest snapshot floor instead of
-> replaying the whole stream. The numbers below are to be captured by
-> running `bench:update` on a real Postgres — do not invent them.
->
-> | Path | p50 (before #1024) | p50 (after #1024) |
-> |---|---|---|
-> | `load: cold replay over snapshot floor` | _TBD_ | _TBD_ |
+The #1024 fix made `with_snaps` reads resume at the latest `__snapshot__`
+floor instead of scanning from the start of the stream, so a cache-miss
+cold `load()` reads only the snapshot + tail rather than the whole history.
+
+A/B on a real Postgres (local), single stream of **2000 pre-snapshot events
++ a snapshot + 50 tail events**, comparing the un-floored read (`after: -1`,
+the pre-#1024 behavior) against the floored read (#1024), p50 over 50 iters:
+
+| Path | p50 before #1024 (full scan) | p50 after #1024 (snapshot floor) | rows read |
+|---|---|---|---|
+| `query(with_snaps)` on a snapshotted stream | 5.27 ms | 0.62 ms | 2051 → 51 |
+
+**~8.4× faster**, and the gap widens linearly with stream length (the
+before-path is O(total events), the after-path O(events-since-snapshot)).
+The gated `load: cold replay over snapshot floor` scenario uses a small
+50/50 floor as a standing regression guard — if the floor silently breaks
+and the read scans the whole stream again, its p50 climbs past tolerance.

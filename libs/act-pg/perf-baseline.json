@@ -1,3 +1,56 @@
 {
-  "results": []
+  "results": [
+    {
+      "name": "commit: single event",
+      "samples": 100,
+      "p50_ms": 1.446,
+      "p95_ms": 1.5727,
+      "mean_ms": 1.4627,
+      "ops_per_sec": 684
+    },
+    {
+      "name": "commit: 50-event batch",
+      "samples": 50,
+      "p50_ms": 19.1228,
+      "p95_ms": 24.5077,
+      "mean_ms": 19.7244,
+      "ops_per_sec": 51,
+      "effective_per_sec": 2550
+    },
+    {
+      "name": "load: cold replay over snapshot floor",
+      "samples": 50,
+      "p50_ms": 0.9782,
+      "p95_ms": 1.0711,
+      "mean_ms": 0.9883,
+      "ops_per_sec": 1012
+    },
+    {
+      "name": "drain: correlate+drain 50 events",
+      "samples": 30,
+      "p50_ms": 19.6401,
+      "p95_ms": 22.8977,
+      "mean_ms": 19.9502,
+      "ops_per_sec": 50,
+      "effective_per_sec": 2500
+    },
+    {
+      "name": "query_stats: page of 50 (count+names)",
+      "samples": 30,
+      "p50_ms": 4.0613,
+      "p95_ms": 4.2659,
+      "mean_ms": 4.1009,
+      "ops_per_sec": 244,
+      "effective_per_sec": 12200
+    },
+    {
+      "name": "notify: commit→listener latency",
+      "samples": 30,
+      "p50_ms": 1.6252,
+      "p95_ms": 1.8401,
+      "mean_ms": 1.6316,
+      "ops_per_sec": 613,
+      "effective_per_sec": 613
+    }
+  ]
 }
