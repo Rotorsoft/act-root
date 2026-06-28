@@ -32,9 +32,12 @@ export default {
   inPlace: true,
   coverageAnalysis: "perTest",
   mutate: ["src/**/*.ts", "!src/**/*.d.ts"],
-  reporters: ["clear-text", "progress", "json"],
+  reporters: ["clear-text", "progress", "json", "html"],
   jsonReporter: {
     fileName: "reports/mutation/mutation.json",
+  },
+  htmlReporter: {
+    fileName: "reports/mutation/index.html",
   },
   // Non-blocking: no `break` threshold yet (see file header).
   thresholds: { high: 80, low: 60, break: null },
