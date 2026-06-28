@@ -282,7 +282,7 @@ const scenarios: Scenario[] = [
 let notifyReader: PostgresStore | undefined;
 let notifyWriter: PostgresStore | undefined;
 let notifyDisposer: (() => void | Promise<void>) | undefined;
-const notifyPending = new Map<string, () => void>();
+let notifyResolve: (() => void) | null = null;
 let notifySeq = 0;
 
 async function notifySetup() {
@@ -304,13 +304,15 @@ async function notifySetup() {
   // run — surface that loudly rather than silently reporting 0ms.
   if (!notifyReader.notify)
     throw new Error("PostgresStore.notify unavailable — cannot bench notify");
-  const disposer = await notifyReader.notify((n) => {
-    for (const e of n.events) {
-      const resolve = notifyPending.get(String(e.id));
-      if (resolve) {
-        notifyPending.delete(String(e.id));
-        resolve();
-      }
+  // Iterations are strictly sequential (one commit, one wait), so at most one
+  // waiter is ever in flight. Resolve it on the next delivery. (The payload
+  // only carries id+name, not stream, so we can't match a specific event — but
+  // single-in-flight makes that unnecessary.)
+  const disposer = await notifyReader.notify(() => {
+    const resolve = notifyResolve;
+    if (resolve) {
+      notifyResolve = null;
+      resolve();
     }
   });
   notifyDisposer = disposer;
@@ -318,9 +320,23 @@ async function notifySetup() {
 
 async function notifyRun() {
   const stream = `notify-${notifySeq++}`;
-  const [committed] = await notifyWriter!.commit(stream, incMsgs(1), meta);
-  await new Promise<void>((resolve) => {
-    notifyPending.set(String(committed.id), resolve);
+  // Register the waiter BEFORE committing so a fast NOTIFY can't be missed, and
+  // time-bound it so a dropped notification fails loudly instead of hanging the
+  // whole bench (the original unbounded wait stalled CI for 40+ minutes).
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      notifyResolve = null;
+      reject(new Error("notify: no delivery within 10s"));
+    }, 10_000);
+    notifyResolve = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    notifyWriter!.commit(stream, incMsgs(1), meta).catch((err) => {
+      clearTimeout(timer);
+      notifyResolve = null;
+      reject(err);
+    });
   });
 }
 
@@ -329,7 +345,7 @@ async function notifyTeardown() {
   await notifyReader?.dispose();
   await notifyWriter?.dispose();
   notifyReader = notifyWriter = notifyDisposer = undefined;
-  notifyPending.clear();
+  notifyResolve = null;
 }
 
 // ---------------------------------------------------------------------------
