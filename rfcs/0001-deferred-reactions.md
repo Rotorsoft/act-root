@@ -1,6 +1,6 @@
 # RFC 0001: Deferred reactions & timers
 
-- **Status:** draft <!-- draft | accepted | rejected | superseded -->
+- **Status:** accepted <!-- draft | accepted | rejected | superseded -->
 - **Issue:** #1049
 - **Author:** rotorsoft
 - **Created:** 2026-06-27
@@ -8,129 +8,161 @@
 ## Motivation
 
 Act has no way to make something happen *because time passed*. Every reaction
-fires because an event arrived; there is no primitive for "if no payment lands
-within 30 minutes, expire the order", "ping the customer 24 hours after the
-ticket goes quiet", or "on the 90th day after close, archive". This is the
-saga-timeout / deadline pattern, and it is table stakes for long-running
-workflows: Axon ships a `DeadlineManager`, NServiceBus and MassTransit ship saga
-timeouts, Temporal ships durable timers, EventStoreDB ships scheduled messages.
+fires because an event arrived; there is no primitive for "if no payment within
+30 min, emit `OrderExpired`", "ping the customer 24h after the ticket goes
+quiet", or "on the 90th day, archive" — a workflow waiting on the **absence** of
+an event. Peers all ship it (Axon `DeadlineManager`, NServiceBus/MassTransit
+saga timeouts, Temporal timers). The one time-driven feature Act has,
+`.autocloses`, is a hardcoded, single-purpose sweep.
 
-Today an Act user reaches for something outside the framework — an OS cron job, a
-`setTimeout` that dies with the process, a separate queue with a visibility
-delay. Each of those puts the schedule somewhere that isn't the log: it doesn't
-survive a restart the way events do, it isn't auditable or replayable, and it
-drifts out of sync with the state it's supposed to guard. The one time-driven
-feature Act *does* have, `.autocloses(...)`, proves the appetite — but it is a
-single hardcoded purpose (retire a stream N days after a terminal event) riding
-a bespoke sweep, not a primitive anyone can reuse.
+## Design: scheduling is a stream's next-visit time
 
-The need is a first-class, event-sourcing-native way to say "deliver X at time
-T" where the schedule is data in the store and the firing is the drain Act
-already runs.
+The key realization (which collapses an earlier, heavier draft): **the drain
+already revisits streams at a future time.** Every stream watermark carries
+`next_attempt_at`; that's how backoff works — the finalizer sets it, `claim()`
+skips the stream until then, and the same pending event is re-delivered. So
+`next_attempt_at` *is* the per-stream timing persistence, and scheduling is just
+letting a reaction set it **on purpose**.
+
+A timer, therefore, is not a new entity — it is **a stream + a reaction + a
+next-visit time**. No `schedules` table, no new `Store` port method, no cron
+dependency.
+
+## The `defer` outcome — the only new mechanic
+
+A reaction handler can signal `defer(when)`. The orchestrator then:
+
+- sets the **stream's** `next_attempt_at = when`,
+- does **not** advance the watermark, and
+- does **not** bump `retry_count` (a defer is not a failure).
+
+The drain re-delivers the same pending event when due, reusing the existing
+hold-and-redeliver path. `defer` acts **within the running reaction's
+`source → target` context** — there is no sourceless reaction.
+
+`when` is a structured options bag — never a cron string (that needs a parser
+dependency and is brittle):
+
+```ts
+{ after: { minutes: 30 } }        // relative deadline
+{ at: (event) => event.data.due } // absolute
+{ every: { hours: 1 } }           // recurrence: re-deliver each interval
+```
+
+Full cron expressions stay **userland**: parse → compute the next `Date` →
+`defer({ at })`. Core stays dependency-free.
+
+## How every case falls out — no sourceless timers
+
+- **Deadline** (has a source): react to `OrderPlaced`; if unpaid,
+  `defer({ after: { minutes: 30 } })` without advancing; re-check on
+  re-delivery; advance + act when met.
+- **Recurring** (has a source): `defer({ every: { hours: 1 } })` re-delivers the
+  *same* event each interval; the watermark never advances until you stop.
+- **autoclose** (has a source): a reaction on the *terminal* event defers the
+  close to `terminal + N days`, then closes on re-delivery. Source = terminal
+  event, target = the stream. The bespoke sweep is removed.
+- **Standalone timer** (the only "no source" case): no real event triggers it,
+  so the claim cycle delivers a **non-sourced signal** (see below) when the timer
+  stream is due. `app.schedule(stream, opts)` arms it; a reaction declared on the
+  signal does the work and may re-arm. Nothing is committed to the log.
+  **Sugar — deferred to a follow-up.**
+
+## Signal events are not sourced events
+
+A subtle but load-bearing distinction. An **event-sourced event** is a fact
+emitted by an action/reaction — persisted, immutable, replayable, reduced into
+state. A **timing signal** is none of those: it is a transient *trigger in the
+claim cycle* meaning "run this reaction now, because time T arrived." It carries
+no domain fact, so it **must never be committed to the log** — otherwise a
+projection rebuild would re-fire every historical timer and state would depend on
+wall-clock timing.
+
+The model: a **signal** is declarable so a reaction can target it (`.on(<signal>)`
+reads normally), but it is **never emitted by an action**. When the drain finds a
+timer stream due (`next_attempt_at ≤ now`) with no pending events, it synthesizes
+the signal *transiently* — not read from the store, not written back. The
+reaction's **output** (e.g. `OrderExpired`) is a real, sourced event. So:
+**trigger = ephemeral signal; outcome = durable event.**
+
+Consequences to document and uphold:
+
+- A signal never appears in `query`, never replays, never reduces into state.
+- Deadlines/recurrence (below) do **not** use signals — their trigger is a *real*
+  pending event re-delivered at `next_attempt_at`. Only standalone timers, which
+  have no domain event, use a signal.
+- Replay safety falls out for free: rebuilding a projection never re-fires timers,
+  because the signals were never in the log to begin with.
 
 ## Public surface added
 
-The guiding constraint: **no new runtime dependency** (no cron library), and a
-schedule is **data**, not wall-clock state living outside the log. OS/k8s cron
-stays an *optional external tick* that calls `app.drain()` — it paces cadence, it
-does not own the schedule. This RFC generalizes machinery Act already has
-(`HandleResult.next_attempt_at` on the lease/backoff path, and the autoclose
-sweep) rather than adding a parallel mechanism.
-
-Two capabilities, each adding public surface:
-
-- **Builder method — reaction deferral (deadline-on-an-event).** A reaction
-  handler can defer itself to a future time *without* consuming a retry or
-  blocking the stream. The triggering event stays pending (watermark not
-  advanced) with its next attempt floored at `T`; at `T` the drain re-delivers,
-  and the handler decides — condition met → act and advance, not yet → defer
-  again. Proposed shape (final name an open question below): a `defer` helper on
-  the handler's app argument, e.g. `app.defer({ after: { minutes: 30 } })` /
-  `app.defer({ at: <Date> })`, returning a sentinel the drain understands.
-  This is the timeout pattern with no new storage — it reuses
-  `next_attempt_at`.
-
-- **Builder method — scheduled timers (fire X at T, no triggering event).** A
-  declarative `.schedules({ ... })` chain on `state` (mirroring `.autocloses`)
-  and/or a programmatic `app.schedule(stream, event, at)`. The schedule is
-  recorded as data (a `TimerSet` / `TimerFired` event pair, or a due-time row)
-  and fired by the generalized sweep.
-
-- **Lifecycle / internal refactor (not new surface, but in scope).**
-  `.autocloses(...)` is refactored to be **one consumer** of the generalized
-  due-time sweep, so core carries a single time mechanism. Existing autoclose
-  behavior and its public surface are unchanged.
-
-- **Public types.** Whatever option/result types the two builder methods need
-  (e.g. a `Duration`-like `{ after }` shape, a `DeferResult`), named per
-  [CLAUDE.md § Naming conventions](../CLAUDE.md#naming-conventions) and
-  validated with a Zod `*OptionsSchema` + `resolve*Config` resolver per the
+- **Reaction outcome `defer(when)`** (exact shape — returned sentinel vs.
+  `app.defer(...)` — settled during Slice 2).
+- **`when` options type** (`after` / `at` / `every`), Zod-validated per the
   config-validation standard.
+- **Builder validation** rejecting invalid scheduling/`source`/`target`
+  configurations at `.build()` (same family as the cross-slice-schema throw and
+  the lane-disagreement throw).
+- *(follow-up)* `app.schedule(stream, opts)` / `app.unschedule(stream, key)`.
+- **No new `Store` port method, no `schedules` table.**
 
-Exact names and signatures are deliberately left to the open questions — this RFC
-is asking whether the *shape* (defer-on-handler + declarative/programmatic
-timers, sweep-fired, no cron) is right before any of it is named in stone.
+## Cancellation / reschedule
 
-## Alternatives considered
+- Re-defer overwrites `next_attempt_at`; advancing the watermark ends the
+  schedule.
+- One pending next-visit **per stream**, so independent schedules are **separate
+  streams** (a timer *is* a stream) rather than multiple rows on one — which is
+  what removes the need for a schedules table.
 
-- **Do nothing / "compose it above Act".** Tell users to run cron or a queue
-  with delayed delivery. Rejected as the default: it pushes the schedule out of
-  the log (no durability, no audit, no replay), and it leaves `.autocloses` as
-  an unexplained one-off. Note this stays *available* — the external-tick
-  recipe is still how you pace the sweep in production; what we reject is making
-  it the *only* answer.
+## Test clock
 
-- **Add a cron/scheduler library dependency to core.** Rejected. It contradicts
-  the "integration helpers live in their own package, core stays minimal" rule,
-  and wall-clock cron is the wrong model: the durable thing is the schedule, and
-  Act already owns the tick (the drain). A library would duplicate, not reuse.
+- Inject `now()` (an `ActOptions`/internal seam, default `Date.now`), and drive
+  the sweep with explicit `app.drain()` — never a background timer in tests.
+  Tests advance the clock + drain → deterministic firing, no wall-clock sleeps.
+  Matches the existing "explicit `correlate`/`drain` over `settle`" convention.
 
-- **Ship a separate `@rotorsoft/act-scheduler` package** that composes purely on
-  public APIs (commit `TimerSet`, a sweep reaction polls due timers). Genuinely
-  attractive and keeps core smaller. Rejected as the primary path **because
-  `.autocloses` already lives in core** — a second, weaker time mechanism in a
-  side package would be the inconsistency, and it couldn't reuse the
-  `next_attempt_at` lease path (it would re-poll via its own reaction stream).
-  If the project later decides autoclose itself should move out of core, this
-  flips to the preferred option.
+## Alternatives considered (rejected)
 
-- **A general workflow / durable-execution engine** (Temporal-style). Rejected
-  as out of scope — far more surface and semantics than the need. The goal is
-  "deliver this when due, at-least-once", not arbitrary durable control flow.
+- **A `schedules` store/table + new `Store` port method** (the earlier draft of
+  this RFC). Rejected: `next_attempt_at` already *is* per-stream timing
+  persistence; a new table duplicates it and makes cancellation a row-mutation
+  problem. Superseded by "defer the stream."
+- **Cron library / cron-string parsing.** Rejected: a dependency and brittle.
+  Structured `every` covers the common cases; full cron is userland.
+- **Sourceless / time-only reactions as ordinary reactions.** Rejected: a
+  reaction needs something to react to. Standalone timers instead deliver a
+  **non-sourced signal** (see "Signal events are not sourced events") — declarable
+  for `.on(...)` but synthesized transiently by the claim cycle, never committed.
+- **A committed seed/`Scheduled` event to bootstrap a timer stream** (an earlier
+  idea in this RFC). Rejected: it would put a synthetic, non-domain event in the
+  log, which then replays. The non-sourced signal avoids that entirely.
+- **Timers as `TimerSet`/`TimerFired` events on the log.** Rejected: scheduling
+  is mutable operational state (reschedule/cancel), not domain history. With the
+  defer model there is no schedule entity at all — only `next_attempt_at`; the
+  timer's *firings* are normal events.
 
 ## Stability / charter impact
 
-- **Category:** Builder API (`state` / reaction handler surface) and public
-  types — both charter-covered. Possibly a lifecycle event name if timers
-  surface as `TimerSet` / `TimerFired` on the public bus.
-- **Additive, not breaking.** Everything here is new optional surface; existing
-  builders, `.autocloses`, and drain semantics keep working unchanged. Ships as
-  a `feat`-driven **minor**. No `BREAKING CHANGE:` footer.
-- **No port method.** The intent is to express deferral and timers on existing
-  `Store` capabilities (commit + the watermark's `next_attempt_at`) so no
-  `Store` / `Cache` / `Logger` interface change and no TCK/adapter contract
-  change is required. If implementation proves a port method is unavoidable,
-  that is a charter change requiring its own sign-off and is called out as a
-  blocking open question before any code lands.
-- **TCK:** even without a port change, due-time delivery needs deterministic
-  time injection so the InMemory / act-pg / act-sqlite adapters can be tested
-  for identical firing semantics without wall-clock flakiness.
+- `defer` outcome + `when` options + builder validation = **additive** builder /
+  `IAct` surface → minor.
+- **No `Store` port change** (reuses `next_attempt_at`).
+- One internal change: the ack/lease path distinguishes a deliberate `defer`
+  (set `next_attempt_at`, no retry bump) from a backoff.
 
-## Open questions
+## Open questions (small, resolved during implementation)
 
-1. **Deferral surface shape.** `app.defer({ after })` helper vs. a returned
-   `Defer` sentinel from the handler vs. a `ReactionOptions` field. Which reads
-   best and threads cleanly through the existing drain finalizer?
-2. **Timer declaration.** Declarative `.schedules({...})` on `state`,
-   programmatic `app.schedule(...)`, or both? If declarative, what does the
-   predicate/payload look like next to `.autocloses`?
-3. **Timers as events vs. rows.** Model timers as first-class `TimerSet` /
-   `TimerFired` events on a dedicated stream (fully event-sourced, replayable,
-   but adds bus surface) vs. a due-time column the sweep scans (lighter, less
-   visible)? This drives whether a lifecycle event name joins the public surface.
-4. **Cancellation / rescheduling.** Setting a new timer for the same key should
-   replace the old one (like `.autocloses`' "second call replaces"); confirm the
-   semantics and how cancellation is expressed.
-5. **Time injection for tests.** A clock seam the orchestrator reads, vs. driving
-   `app.drain({ now })`. Whichever keeps the TCK deterministic without leaking a
-   clock into the public surface.
+1. **`defer` surface shape** — returned sentinel vs. `app.defer(...)`. Settle in
+   Slice 2.
+2. **Watermark key** — `stream` vs. `(stream, source)`. Spiked in Slice 1; it
+   decides whether a defer affects all reactions on a stream or one source's, and
+   shapes the builder validation rules.
+
+## Sequencing (epic #1049)
+
+1. **`defer` primitive + port autoclose** (proving ground; no new public
+   surface; autoclose's existing tests must pass on the new infra).
+2. **Public `defer(when)` — deadlines** + builder validation + TCK/scenario
+   tests.
+3. **Recurrence (`every`)** + builder validation + tests.
+4. **Standalone timer streams** — `app.schedule` arms a due-time on a timer
+   stream; the claim cycle delivers a **non-sourced signal** when due. Follow-up.
