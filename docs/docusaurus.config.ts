@@ -1,13 +1,26 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type * as Preset from "@docusaurus/preset-classic";
 import type { Config, Plugin } from "@docusaurus/types";
 import { themes as prismThemes } from "prism-react-renderer";
 
 // This runs in Node.js - Don't use client-side code here (browser APIs, JSX...)
 
+// Read the landing-page quickstart as raw source at build time. Reading it here
+// (Node, cwd = the docs site dir) guarantees the verbatim .ts text — types,
+// `as const`, hand layout and all. A webpack `?raw` import does NOT: Docusaurus's
+// babel/TS loader also matches the `.ts` file and transpiles it first, so `?raw`
+// yields stripped, re-printed JS. The file is still type-checked by check:snippets.
+const quickstartSource = readFileSync(
+  resolve(process.cwd(), "src/snippets/quickstart.ts"),
+  "utf8"
+);
+
 const config: Config = {
   title: "Act",
   tagline: "Fluent Event Sourcing for TypeScript",
   favicon: "img/favicon.ico",
+  customFields: { quickstartSource },
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -83,27 +96,6 @@ const config: Config = {
                 "Cross-Origin-Opener-Policy": "same-origin",
                 "Cross-Origin-Embedder-Policy": "require-corp",
               },
-            },
-          } as ReturnType<NonNullable<Plugin["configureWebpack"]>>;
-        },
-      };
-    },
-    // Let the landing page import real source files as raw text via a
-    // `?raw` query, so its code samples are the canonical, type-checked
-    // models (e.g. `@act/calculator`) rather than hand-written strings
-    // that drift. See `docs/src/pages/index.tsx`.
-    function rawSourcePlugin(): Plugin {
-      return {
-        name: "raw-source-loader",
-        configureWebpack() {
-          return {
-            module: {
-              rules: [
-                {
-                  resourceQuery: /raw/,
-                  type: "asset/source",
-                },
-              ],
             },
           } as ReturnType<NonNullable<Plugin["configureWebpack"]>>;
         },
