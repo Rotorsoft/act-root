@@ -71,6 +71,11 @@ export type {
   Store,
   StoreNotification,
 } from "@rotorsoft/act/types";
+export type {
+  CacheDifferentialTckOptions,
+  DifferentialCache,
+} from "./cache-differential-tck.js";
+export { runCacheDifferentialTck } from "./cache-differential-tck.js";
 export type { CacheTckOptions } from "./cache-tck.js";
 export { runCacheTck } from "./cache-tck.js";
 export type { CounterEvents } from "./fixtures/events.js";
@@ -93,6 +98,11 @@ export {
   reset,
   uid,
 } from "./fixtures/helpers.js";
+export type {
+  DifferentialLogger,
+  LoggerDifferentialTckOptions,
+} from "./logger-differential-tck.js";
+export { runLoggerDifferentialTck } from "./logger-differential-tck.js";
 export type { LoggerTckOptions } from "./logger-tck.js";
 export { runLoggerTck } from "./logger-tck.js";
 export type { StabilityTckOptions } from "./stability-tck.js";

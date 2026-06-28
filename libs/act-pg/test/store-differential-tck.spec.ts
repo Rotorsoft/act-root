@@ -2,16 +2,19 @@ import { InMemoryStore } from "@rotorsoft/act";
 import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
 import { PostgresStore } from "../src/index.js";
 
-// Cross-adapter differential (#1030): drive the same seeded workload
-// against the in-memory reference and Postgres, then compare normalized
-// outputs. Dedicated schema/table so the harness's drop+seed can't
-// clobber the example-based TCK running in a parallel worker.
+// Cross-adapter differential (#1030, fuzz workloads #1057): drive a family
+// of randomized seeded workloads against the in-memory reference and
+// Postgres, then compare normalized outputs. Dedicated schema/table so the
+// harness's drop+seed can't clobber the example-based TCK running in a
+// parallel worker.
 runStoreDifferentialTck({
   name: "InMemory vs Postgres",
-  // Explicit seed + stream count (the sqlite differential exercises the
-  // defaults) so both arms of the option fallbacks stay covered.
+  // Explicit seed + stream count + run count (the sqlite differential
+  // exercises the defaults) so both arms of the option fallbacks stay
+  // covered. Fewer runs keeps the durable round-trips bounded.
   seed: 0x1030,
   streams: 5,
+  runs: 5,
   stores: [
     { name: "InMemoryStore", factory: () => new InMemoryStore() },
     {

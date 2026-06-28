@@ -39,9 +39,12 @@ That's the whole integration. `run*Tck` calls vitest's `describe`/`it` internall
 ## API
 
 - **`runStoreTck(options)`** — every `Store` method, capability-gated where optional.
-- **`runStoreDifferentialTck(options)`** — drives one seeded workload against multiple `Store` instances and asserts identical normalized output (event order, `with_snaps` floor, `query_stats` / `query_streams`). Catches cross-adapter drift a single-adapter suite can't.
+- **`runStoreDifferentialTck(options)`** — drives a family of randomized, seeded workloads against multiple `Store` instances and asserts identical normalized output (event order, `with_snaps` floor, `query_stats` / `query_streams`) for every workload. Catches cross-adapter drift a single-adapter suite can't.
+- **`runStorePropertyTck(options)`** — property-based store invariants (commit version monotonicity, claim/lease no-leak, watermark monotonicity, block exclusion) over fast-check-generated sequences.
 - **`runCacheTck(options)`** — every `Cache` method, cross-stream isolation, dispose idempotency.
+- **`runCacheDifferentialTck(options)`** — drives randomized `set` / `invalidate` / `clear` workloads against multiple `Cache` instances and asserts identical observable `get()` after every op.
 - **`runLoggerTck(options)`** — structural smoke test of the `Logger` contract.
+- **`runLoggerDifferentialTck(options)`** — drives the identical call surface against multiple `Logger` instances and asserts robustness + structural parity (what throws, what conforms).
 - **`runStabilityTck(options)`** — snapshot-based public-API stability gate. Catches accidental rename / removal / signature drift on a package's public surface before it merges.
 - **`StoreCapabilities`** / **`CacheCapabilities`** / **`LoggerCapabilities`** — flag types for opting into optional surface (e.g., `Store.notify`).
 - Fixture helpers re-exported from `@rotorsoft/act-tck/fixtures` for adapter-specific tests that want the same Counter domain.
@@ -66,7 +69,7 @@ Every method on the `Store` interface in [`libs/act/src/types/ports.ts`](https:/
 
 ### `runStoreDifferentialTck`
 
-Where `runStoreTck` proves each adapter honors the contract in isolation, the differential harness proves they honor it _identically_. It replays one deterministic, seeded workload — commits, inline snapshots, truncates, subscriptions — against two or more `Store` instances (in-memory as the reference, durable adapters as comparands), then asserts their **normalized** outputs match exactly:
+Where `runStoreTck` proves each adapter honors the contract in isolation, the differential harness proves they honor it _identically_. It replays a **family of randomized, seeded workloads** — commits, inline snapshots, truncates, subscriptions, in a seed-varying order — against two or more `Store` instances (in-memory as the reference, durable adapters as comparands), then asserts their **normalized** outputs match exactly for every workload. Each workload runs from a distinct seed (`seed`, `seed + 1`, …, `seed + runs - 1`), so divergence is hunted across the input space rather than one fixed script; a failing workload names its seed for replay:
 
 - global forward `query` order
 - per-stream `with_snaps` snapshot floor
@@ -94,9 +97,45 @@ runStoreDifferentialTck({
 
 Every method on the `Cache` interface: `get` on unset stream returns `undefined`; `set` then `get` round-trip; `set` overwrites; `invalidate` removes one stream, leaves others; `invalidate`/`clear` no-op on absent state; `clear` empties every stream; cross-stream isolation; `dispose` idempotency.
 
+### `runCacheDifferentialTck`
+
+The `Cache` analog of the store differential. It drives a family of randomized, seeded workloads (`set` / `invalidate` / `clear` over a small key set kept within capacity, so eviction — an adapter policy, not a contract guarantee — never enters the comparison) against two or more `Cache` instances and asserts their observable `get()` snapshot is identical after **every** operation. A cache that mishandles overwrite ordering, leaks an invalidated key, or clears partially diverges on the exact op that broke it.
+
+```ts
+import { runCacheDifferentialTck } from "@rotorsoft/act-tck";
+import { InMemoryCache } from "@rotorsoft/act";
+import { RedisCache } from "../src/index.js";
+
+runCacheDifferentialTck({
+  name: "InMemory vs Redis",
+  caches: [
+    { name: "InMemoryCache", factory: () => new InMemoryCache({ maxSize: 1000 }) },
+    { name: "RedisCache", factory: () => new RedisCache({ /* … */ }) },
+  ],
+});
+```
+
 ### `runLoggerTck`
 
 Structural smoke test of the `Logger` interface: `level` is a non-empty string; every level method callable with both overload signatures; `null` and cyclic payloads don't throw; `child(bindings)` returns a Logger satisfying the same contract; `dispose` is idempotent and awaitable.
+
+### `runLoggerDifferentialTck`
+
+A logger has no portable output to byte-compare — its format is adapter-specific by design. The meaningful differential is **robustness and structural parity**: driven through the identical call surface (every level, both overloads, `null` + cyclic payloads, child spawning), two implementations must agree on what throws and what conforms. A logger that throws on a cyclic payload the reference tolerates, or returns a non-conforming child, diverges from the reference outcome vector.
+
+```ts
+import { runLoggerDifferentialTck } from "@rotorsoft/act-tck";
+import { ConsoleLogger } from "@rotorsoft/act";
+import { PinoLogger } from "../src/index.js";
+
+runLoggerDifferentialTck({
+  name: "Console vs Pino",
+  loggers: [
+    { name: "ConsoleLogger", factory: () => new ConsoleLogger({ level: "trace" }) },
+    { name: "PinoLogger", factory: () => new PinoLogger({ level: "trace" }) },
+  ],
+});
+```
 
 ### `runStabilityTck`
 
