@@ -1,7 +1,4 @@
-// Landing-page quickstart. This file is type-checked against the live
-// @rotorsoft/act API in CI (it's under the workspace tsconfig), so the
-// code shown on the home page can't drift from the framework. It's a
-// self-contained, trimmed version of the @act/calculator example model.
+// Landing-page quickstart — type-checked against the live @rotorsoft/act API in CI.
 import { act, state, ZodEmpty } from "@rotorsoft/act";
 import { z } from "zod";
 
@@ -33,14 +30,10 @@ const calc = state({ Calculator })
   })
   .patch({
     DigitPressed: ({ data }, s) =>
-      s.operator
-        ? { right: (s.right ?? "") + data.digit }
-        : { left: (s.left ?? "") + data.digit },
+      s.operator ? { right: (s.right ?? "") + data.digit } : { left: (s.left ?? "") + data.digit },
     OperatorPressed: ({ data }) => ({ operator: data.operator }),
     EqualsPressed: (_e, s) =>
-      s.operator && s.left && s.right
-        ? { result: ops[s.operator](Number(s.left), Number(s.right)) }
-        : {},
+      s.operator && s.left && s.right ? { result: ops[s.operator](Number(s.left), Number(s.right)) } : {},
   })
   .on({ PressKey: z.object({ key: z.enum([...DIGITS, ...OPERATORS, "="]) }) })
   .emit(({ key }) => {
@@ -55,11 +48,8 @@ const app = act().withState(calc).build();
 const actor = { id: "1", name: "User" };
 
 async function run() {
-  // 4 + 2 =
   for (const key of ["4", "+", "2", "="] as const)
     await app.do("PressKey", { stream: "calc-1", actor }, { key });
-
   console.log((await app.load(calc, "calc-1")).state.result); // 6
 }
-
 run();
