@@ -62,10 +62,37 @@ Full cron expressions stay **userland**: parse → compute the next `Date` →
 - **autoclose** (has a source): a reaction on the *terminal* event defers the
   close to `terminal + N days`, then closes on re-delivery. Source = terminal
   event, target = the stream. The bespoke sweep is removed.
-- **Standalone timer** (the only "no source" case): bootstrap with a seed event
-  on a dedicated stream (`app.schedule(stream, opts)` commits a `Scheduled`
-  event); a reaction on it defers/recurs. The seed event *is* the source; source
-  and target are both the timer stream. **Sugar — deferred to a follow-up.**
+- **Standalone timer** (the only "no source" case): no real event triggers it,
+  so the claim cycle delivers a **non-sourced signal** (see below) when the timer
+  stream is due. `app.schedule(stream, opts)` arms it; a reaction declared on the
+  signal does the work and may re-arm. Nothing is committed to the log.
+  **Sugar — deferred to a follow-up.**
+
+## Signal events are not sourced events
+
+A subtle but load-bearing distinction. An **event-sourced event** is a fact
+emitted by an action/reaction — persisted, immutable, replayable, reduced into
+state. A **timing signal** is none of those: it is a transient *trigger in the
+claim cycle* meaning "run this reaction now, because time T arrived." It carries
+no domain fact, so it **must never be committed to the log** — otherwise a
+projection rebuild would re-fire every historical timer and state would depend on
+wall-clock timing.
+
+The model: a **signal** is declarable so a reaction can target it (`.on(<signal>)`
+reads normally), but it is **never emitted by an action**. When the drain finds a
+timer stream due (`next_attempt_at ≤ now`) with no pending events, it synthesizes
+the signal *transiently* — not read from the store, not written back. The
+reaction's **output** (e.g. `OrderExpired`) is a real, sourced event. So:
+**trigger = ephemeral signal; outcome = durable event.**
+
+Consequences to document and uphold:
+
+- A signal never appears in `query`, never replays, never reduces into state.
+- Deadlines/recurrence (below) do **not** use signals — their trigger is a *real*
+  pending event re-delivered at `next_attempt_at`. Only standalone timers, which
+  have no domain event, use a signal.
+- Replay safety falls out for free: rebuilding a projection never re-fires timers,
+  because the signals were never in the log to begin with.
 
 ## Public surface added
 
@@ -102,8 +129,13 @@ Full cron expressions stay **userland**: parse → compute the next `Date` →
   problem. Superseded by "defer the stream."
 - **Cron library / cron-string parsing.** Rejected: a dependency and brittle.
   Structured `every` covers the common cases; full cron is userland.
-- **Sourceless / time-only reactions.** Rejected: breaks the `source → target`
-  model. Standalone timers use a seed event instead.
+- **Sourceless / time-only reactions as ordinary reactions.** Rejected: a
+  reaction needs something to react to. Standalone timers instead deliver a
+  **non-sourced signal** (see "Signal events are not sourced events") — declarable
+  for `.on(...)` but synthesized transiently by the claim cycle, never committed.
+- **A committed seed/`Scheduled` event to bootstrap a timer stream** (an earlier
+  idea in this RFC). Rejected: it would put a synthetic, non-domain event in the
+  log, which then replays. The non-sourced signal avoids that entirely.
 - **Timers as `TimerSet`/`TimerFired` events on the log.** Rejected: scheduling
   is mutable operational state (reschedule/cancel), not domain history. With the
   defer model there is no schedule entity at all — only `next_attempt_at`; the
@@ -132,4 +164,5 @@ Full cron expressions stay **userland**: parse → compute the next `Date` →
 2. **Public `defer(when)` — deadlines** + builder validation + TCK/scenario
    tests.
 3. **Recurrence (`every`)** + builder validation + tests.
-4. **Standalone timer streams** (`app.schedule` seed-event helper) — follow-up.
+4. **Standalone timer streams** — `app.schedule` arms a due-time on a timer
+   stream; the claim cycle delivers a **non-sourced signal** when due. Follow-up.
