@@ -2,19 +2,15 @@ name: Mutation
 
 # Mutation testing (StrykerJS) — issue #1028.
 #
-# NON-BLOCKING by design: this workflow PUBLISHES a mutation score per
-# package to the run summary but never fails the build. The per-package
-# Stryker configs set `thresholds.break: null` (see libs/*/stryker.conf.mjs),
-# so a low score is reported, not gated.
-#
-# TODO(#1028 follow-up): once a baseline mutation score lands for each
-# package, set `thresholds.break` in the package configs AND drop the
-# `continue-on-error` below so regressions fail the build.
+# WARNING, not a PR gate (issue #1056): this workflow runs weekly + on demand
+# only — never on pull_request — so it can NEVER block a PR or merge. The
+# per-package Stryker configs set a `thresholds.break` floor (libs/*/stryker.conf.mjs,
+# ~6 pts under the CI baseline); a real mutation-score regression makes this
+# weekly run go red (a visible signal in the Actions tab), instead of vanishing
+# into a green check. act-tck stays `break: null` until its baseline lands.
 #
 # Mutation runs are slow (a full pass mutates every source file and re-runs
-# the suite per mutant), so this is intentionally OFF the per-PR hot path:
-# it runs weekly and on demand. Per-PR gating is deferred until baselines +
-# tighter scoping make it fast enough to gate.
+# the suite per mutant), which is why this is off the per-PR hot path.
 
 permissions:
   contents: read
@@ -28,8 +24,6 @@ on:
 jobs:
   mutation:
     runs-on: ubuntu-latest
-    # Non-blocking: a failing/low-scoring mutation run never reds the build.
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -61,7 +55,6 @@ jobs:
       - run: pnpm install
 
       - name: Run mutation testing (${{ matrix.package }})
-        continue-on-error: true
         run: pnpm --filter @rotorsoft/${{ matrix.package }} run mutation
 
       # Compute the mutation score from Stryker's JSON report and append it
