@@ -227,6 +227,60 @@ describe("per-reaction backoff (integration)", () => {
     expect(attempts.late).toBe(1);
   });
 
+  it("effective floor is max(configured, leaseMillis) — the held lease dominates a short backoff", async () => {
+    // CLAUDE.md / error-handling.md guarantee: because the controller
+    // holds the lease for `leaseMillis` while a stream is deferred, the
+    // effective retry floor is `max(configured backoff, leaseMillis)`.
+    // Here the 20ms backoff is far shorter than the 500ms lease, so the
+    // held lease — not the backoff timer — gates the next attempt.
+    let attempts = 0;
+    const handler = vi.fn().mockImplementation(async () => {
+      attempts++;
+      throw new Error("transient");
+    });
+    Object.defineProperty(handler, "name", { value: "leaseFloored" });
+
+    const app = act()
+      .withState(counter)
+      .on("ticked")
+      .do(handler, {
+        maxRetries: 5,
+        backoff: { strategy: "fixed", baseMs: 20 },
+      })
+      .build();
+
+    // A real worker/commit keeps the controller armed; once a drain claims
+    // nothing (because the lease is still held) it self-disarms, so we
+    // re-arm before each probe to isolate the lease gate from the arm flag.
+    const ctrl = (
+      app as unknown as {
+        _drain_controllers: Map<string, { arm: () => void }>;
+      }
+    )._drain_controllers.get("default")!;
+
+    await app.do("tick", { stream: "floor", actor }, {});
+    await app.correlate();
+
+    // First attempt fails — stream is deferred AND leased for 500ms.
+    await app.drain({ leaseMillis: 500 });
+    expect(attempts).toBe(1);
+
+    // 120ms later: well past the 20ms backoff window, but the 500ms
+    // lease still holds the stream, so claim() can't return it. The
+    // backoff window expiring does NOT shorten the effective floor.
+    await sleep(120);
+    ctrl.arm();
+    await app.drain({ leaseMillis: 500 });
+    expect(attempts).toBe(1);
+
+    // Once the lease expires (>500ms total) the stream is claimable
+    // again → an armed drain re-attempts. Floor = max(20ms, 500ms).
+    await sleep(500);
+    ctrl.arm();
+    await app.drain({ leaseMillis: 500 });
+    expect(attempts).toBe(2);
+  });
+
   it("default (no backoff) preserves current rapid-retry behavior", async () => {
     let attempts = 0;
     const handler = vi.fn().mockImplementation(async () => {

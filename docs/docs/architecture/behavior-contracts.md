@@ -46,6 +46,9 @@ backed by unit/integration specs under `libs/act/test/`.
 | Backoff entry clears on a successful ack | `error-handling.md` | `backoff.spec.ts` → "clears backoff entry on successful ack" |
 | Backoff still blocks when retries are exhausted | `error-handling.md` | `backoff.spec.ts` → "preserves blocking behavior when retries are exhausted" |
 | `compute_backoff_delay` strategy/clamp/jitter semantics | `error-handling.md` | `backoff.spec.ts` → `compute_backoff_delay` unit block |
+| Backoff's effective floor is `max(configured, leaseMillis)` — when the lease outlasts the backoff window, the held lease (not the timer) gates the next attempt | `error-handling.md` "Backoff"; CLAUDE.md "Reaction backoff is per-worker" | `backoff.spec.ts` → "effective floor is max(configured, leaseMillis) — the held lease dominates a short backoff" **(gap filled — #1065)** |
+| `app.unblock` resumes a blocked stream from its watermark **without replaying history**; `app.reset` rewinds to -1 and replays everything (the resume-vs-rebuild distinction) | CLAUDE.md "Blocked-stream recovery"; `error-handling.md` | `non-retryable.spec.ts` → "recovers via app.unblock without replaying history"; `rebuild.spec.ts` → "should enable replay of projection after reset" **(gap filled — #1065)** |
+| Lanes drain in **parallel** — `_drain_all` runs every controller's `drain()` via `Promise.all`, so a stalled slow-lane handler does not block the fast lane | CLAUDE.md "Lanes give intra-process responsiveness"; `configuration.md` § Lanes | `lanes.spec.ts` → "drains lanes in parallel — a stalled slow handler does not block the fast lane" **(gap filled — #1065)** |
 
 ## Store contract (runs on all three adapters via the TCK)
 
@@ -55,6 +58,7 @@ backed by unit/integration specs under `libs/act/test/`.
 | `subscribe` keeps the **maximum** priority when a stream is re-subscribed with a different priority | `Store.subscribe` `priority` doc-comment | `store-tck.ts` → "keeps the maximum priority when a stream is re-subscribed" **(gap filled — #1029)** |
 | `prioritize` sets priority **directly**, overriding `subscribe`'s max() rule | `Store.prioritize` doc | `store-tck.ts` → "sets priority directly, overriding subscribe's max() rule" |
 | `unblock` returns 0 when the stream is not blocked; `reset`/`unblock` return 0 for unknown/empty input | `Store.unblock` / `Store.reset` docs | `store-tck.ts` → "returns 0 when the stream is not blocked", "returns 0 for unknown streams and empty input" |
+| `unblock` clears the blocked flag and **preserves** the watermark; `reset` rewinds it to -1 (resume-vs-rebuild at the port level) | `Store.unblock` / `Store.reset` docs | `store-tck.ts` → "clears blocked flag and preserves the watermark", "rewinds a stream watermark to -1", "clears blocked status when resetting" **(gap filled — #1065)** |
 | `truncate` deletes events, removes the stream entry, and seeds a snapshot or tombstone | `Store.truncate` doc | `store-tck.ts` → `truncate` describe block |
 | `forget_pii` wipes PII for every event and is idempotent (second call returns 0; no-PII stream returns 0) | `Store.forget_pii` doc | `store-tck.ts` → "wipes pii for every event on the stream via forget_pii", "is idempotent — second forget_pii returns 0, no error", "forget_pii on a stream with no pii events returns 0" |
 | `query_streams` reports `maxEventId` tracking the highest committed id | `Store.query_streams` doc | `store-tck.ts` → "maxEventId tracks the highest committed id" |
@@ -69,6 +73,7 @@ backed by unit/integration specs under `libs/act/test/`.
 | Single-key records (`.on`, `state(...)`) throw on zero or multiple keys | CLAUDE.md safety one-liner; `state-management.md` | `state-builder.spec.ts` → "should throw when .on() receives multiple keys", "should throw when record has more than one key", "should throw when record has zero keys" |
 | Same-name state partials sharing an event must reference the same Zod schema instance; mismatched references throw | CLAUDE.md safety one-liner; `state-management.md` | `slice.spec.ts` → "throws when same-name state partials use different schema references for the same event" |
 | Scoped Acts keep per-Act store and cache isolated (no cross-talk) | CLAUDE.md safety one-liner; `extension-points.md` | `scope.spec.ts` → "two Acts with their own scoped ports — no cross-talk", "scoped cache keeps per-Act snapshots isolated" |
+| Cross-process reactions: the orchestrator auto-wires `Store.notify` **at construction** when the store supports it and reactive events exist; it does not wire when the store lacks `notify` or there are no reactive events | CLAUDE.md "Cross-process reactions"; `cross-process-reactions.md` | `notify.spec.ts` → "subscribes when store has notify and reactions exist", "does not subscribe when store lacks notify", "does not subscribe when there are no reactive events" **(gap filled — #1065)** |
 
 ## Gaps closed by #1029
 
@@ -87,3 +92,26 @@ Two load-bearing claims had no executable backing before this checklist:
 
 No documented claim was found to be **false** against the code during this
 audit; both gaps were missing tests for behavior that already held.
+
+## Audit closed by #1065
+
+#1029 seeded the checklist; #1065 walked the remaining load-bearing
+documented runtime guarantees to exhaustion. Most already had backing tests
+that were simply not yet recorded here — the blocked-stream resume-vs-rebuild
+distinction (`non-retryable.spec.ts`, `store-tck.ts`, `rebuild.spec.ts`) and
+the cross-process `notify` auto-wiring contract (`notify.spec.ts`) are now
+mapped to their rows. Two guarantees had no executable backing and gained a
+focused test:
+
+- **Backoff's effective floor.** The docs guarantee the floor is
+  `max(configured, leaseMillis)` because the controller holds the lease for
+  the whole window. Every existing backoff test used `leaseMillis: 1`, so the
+  lease-dominates case was untested. Closed in `backoff.spec.ts` (a 20ms
+  backoff under a 500ms lease retries only after the lease expires).
+- **Lane drain parallelism.** `lanes.spec.ts` covered controller wiring,
+  arming, and worker lifecycle but never the actual concurrency guarantee:
+  that `_drain_all`'s `Promise.all` lets the fast lane complete while a
+  slow-lane handler is stalled. Closed with a gated-handler test.
+
+No documented claim was found **false** against the code during this audit;
+every remaining gap was a missing test for behavior that already held.
