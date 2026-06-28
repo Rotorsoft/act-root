@@ -10,7 +10,7 @@ const OPERATORS = ["+", "-", "*", "/"] as const;
 type Digit = (typeof DIGITS)[number];
 type Operator = (typeof OPERATORS)[number];
 
-const State = z.object({
+const Calculator = z.object({
   left: z.string().optional(),
   right: z.string().optional(),
   operator: z.enum(OPERATORS).optional(),
@@ -24,7 +24,7 @@ const ops: Record<Operator, (l: number, r: number) => number> = {
   "/": (l, r) => l / r,
 };
 
-const Calculator = state({ Calculator: State })
+const calc = state({ Calculator })
   .init(() => ({ result: 0 }))
   .emits({
     DigitPressed: z.object({ digit: z.enum(DIGITS) }),
@@ -51,7 +51,7 @@ const Calculator = state({ Calculator: State })
   })
   .build();
 
-const app = act().withState(Calculator).build();
+const app = act().withState(calc).build();
 const actor = { id: "1", name: "User" };
 
 async function run() {
@@ -59,7 +59,7 @@ async function run() {
   for (const key of ["4", "+", "2", "="] as const)
     await app.do("PressKey", { stream: "calc-1", actor }, { key });
 
-  console.log((await app.load(Calculator, "calc-1")).state.result); // 6
+  console.log((await app.load(calc, "calc-1")).state.result); // 6
 }
 
 run();
