@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.9.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.0...@rotorsoft/act-pg-v1.9.1) (2026-06-28)
+
+
+### Bug Fixes
+
+* **act-pg:** stop the perf-bench notify scenario from hanging ([f3d1e3c](https://github.com/rotorsoft/act-root/commit/f3d1e3c08e1c5bb53312d5481409fa22e2df5941)), closes [#1031](https://github.com/rotorsoft/act-root/issues/1031)
+
 # [@rotorsoft/act-pg-v1.9.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.8.0...@rotorsoft/act-pg-v1.9.0) (2026-06-27)
 
 
