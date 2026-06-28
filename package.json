@@ -43,6 +43,8 @@
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
     "check:readmes": "node scripts/check-lib-readmes.mjs",
+    "paths:sync": "node scripts/derive-tsconfig-paths.mjs --write",
+    "paths:check": "node scripts/derive-tsconfig-paths.mjs --check",
     "check:rfc-gate": "node scripts/check-rfc-gate.mjs",
     "prepare": "simple-git-hooks",
     "dev:calculator": "pnpm -F calculator dev",

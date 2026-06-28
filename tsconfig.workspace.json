@@ -14,6 +14,9 @@
       "@rotorsoft/act/test": ["./libs/act/src/test/index.ts"],
       "@rotorsoft/act/types": ["./libs/act/src/types/index.ts"],
       "@rotorsoft/act-crypto": ["./libs/act-crypto/src/index.ts"],
+      "@rotorsoft/act-http/api": ["./libs/act-http/src/api/index.ts"],
+      "@rotorsoft/act-http/hono": ["./libs/act-http/src/hono/index.ts"],
+      "@rotorsoft/act-http/openapi": ["./libs/act-http/src/openapi/index.ts"],
       "@rotorsoft/act-http/receiver": ["./libs/act-http/src/receiver/index.ts"],
       "@rotorsoft/act-http/receiver/express": [
         "./libs/act-http/src/receiver/express/index.ts"
@@ -27,8 +30,6 @@
       "@rotorsoft/act-http/receiver/trpc": [
         "./libs/act-http/src/receiver/trpc/index.ts"
       ],
-      "@rotorsoft/act-http/hono": ["./libs/act-http/src/hono/index.ts"],
-      "@rotorsoft/act-http/openapi": ["./libs/act-http/src/openapi/index.ts"],
       "@rotorsoft/act-http/sse": ["./libs/act-http/src/sse/index.ts"],
       "@rotorsoft/act-http/trpc": ["./libs/act-http/src/trpc/index.ts"],
       "@rotorsoft/act-http/webhook": ["./libs/act-http/src/webhook/index.ts"],
