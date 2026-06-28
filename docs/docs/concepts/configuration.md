@@ -30,8 +30,9 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 Read-model updaters that react to events:
 
-```typescript no-check
+```typescript
 import { projection } from "@rotorsoft/act";
+import { z } from "zod";
 
 const CounterProjection = projection("counters")
   .on({ Incremented: z.object({ amount: z.number() }) })
@@ -68,8 +69,21 @@ const TicketProjection = projection("tickets")
 
 Vertical feature modules grouping states, projections, and reactions:
 
-```typescript no-check
-import { slice } from "@rotorsoft/act";
+```typescript
+import { projection, slice, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+
+const CounterProjection = projection("counters")
+  .on({ Incremented: z.object({ amount: z.number() }) })
+    .do(async ({ stream, data }) => { /* update read model */ })
+  .build();
 
 const CounterSlice = slice()
   .withState(Counter)
@@ -101,7 +115,17 @@ const app = act()
 
 `act().build(options?)` accepts a small `ActOptions` object for tuning the orchestrator:
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+
 const app = act()
   .withState(Counter)
   .build({
@@ -122,7 +146,17 @@ const app = act()
 
 Every `Act` owns one circuit breaker, shared by the drain, settle, and autoclose loops. After `failureThreshold` consecutive store failures it **opens** — those loops skip the store while it's open instead of hammering a down backend — and `cooldownMs` later it **schedules its own retry** (a drain attempt): a pass closes it, a failure re-opens it and reschedules. So recovery is automatic regardless of lane configuration. While the store stays down it keeps probing once per `cooldownMs` (each failed probe re-emits the [`error` event](./error-handling#store-failures-and-the-circuit-breaker)); the timer is `unref()`'d and cleared on recovery or `dispose()`. See [Store failures and the circuit breaker](./error-handling#store-failures-and-the-circuit-breaker).
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+
 const app = act()
   .withState(Counter)
   .build({ circuitBreaker: { failureThreshold: 3, cooldownMs: 10_000 } });
@@ -144,14 +178,26 @@ The two flags are orthogonal — independent costs, independent toggles:
 | `false` | `false` | Pure writer fleet (write-heavy frontend, ingest worker, API server). Notifies on commit but doesn't react. |
 | `true` | `false` | Observability sidecar. Sees every cross-process commit via the `notified` lifecycle event without processing it. |
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Order = state({ Order: z.object({ placed: z.boolean() }) })
+  .init(() => ({ placed: false }))
+  .emits({ OrderPlaced: z.object({ sku: z.string() }) })
+  .on({ placeOrder: z.object({ sku: z.string() }) })
+    .emit("OrderPlaced")
+  .build();
+
 // Writer fleet — scales horizontally without touching the subscriber budget.
 const writer = act().withState(Order).build({ listen: false, drain: false });
 
 // Reactive fleet — same codebase, opposite flags. Sized to the reaction workload.
 const reactor = act()
   .withState(Order)
-  .on("OrderPlaced").do(reduceInventory).to("inventory")
+  .on("OrderPlaced")
+    .do(async (event) => { /* reduce inventory */ })
+    .to("inventory")
   .build(); // defaults: listen + drain
 ```
 

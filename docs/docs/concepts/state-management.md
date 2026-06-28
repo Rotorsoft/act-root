@@ -43,7 +43,10 @@ const Counter = state({ Counter: z.object({ count: z.number() }) })
 
 Multiple states sharing the same name merge automatically when composed in slices or the act orchestrator:
 
-```typescript no-check
+```typescript
+import { state } from "@rotorsoft/act";
+import { z } from "zod";
+
 const TicketCreation = state({ Ticket: z.object({ title: z.string() }) })
   .init(() => ({ title: "" }))
   .emits({ TicketOpened: z.object({ title: z.string() }) })
@@ -224,8 +227,16 @@ type Snapshot<TState> = {
 
 Extract inferred types from built State objects:
 
-```typescript no-check
-import type { InferEvents, InferActions } from "@rotorsoft/act";
+```typescript
+import { state, type InferEvents, type InferActions } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
 
 type Events = InferEvents<typeof Counter>;
 type Actions = InferActions<typeof Counter>;
