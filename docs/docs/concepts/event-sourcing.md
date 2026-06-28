@@ -62,7 +62,18 @@ cache(new RedisCache({ url: "redis://localhost:6379" }));
 
 `load()` accepts an optional `asOf` argument for reading historical state. The framework bypasses the cache, replays events from the start with snapshots, and applies the cutoff filters:
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
+const app = act().withState(Counter).build();
+
 // Snapshot just before event id 5000
 await app.load(Counter, "counter-1", undefined, { before: 5000 });
 
@@ -122,12 +133,37 @@ Act handles event-driven workflows through atomic stream claiming and correlatio
 
 Reactions are asynchronous handlers triggered by events. They can update other state streams, trigger external integrations, or drive cross-aggregate workflows:
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Account = state({ Account: z.object({ balance: z.number() }) })
+  .init(() => ({ balance: 0 }))
+  .emits({ Deposited: z.object({ amount: z.number() }) })
+  .patch({ Deposited: ({ data }, s) => ({ balance: s.balance + data.amount }) })
+  .on({ deposit: z.object({ amount: z.number() }) })
+    .emit("Deposited")
+  .build();
+
+const Audit = state({ Audit: z.object({ entries: z.number() }) })
+  .init(() => ({ entries: 0 }))
+  .emits({ Logged: z.object({ message: z.string() }) })
+  .patch({ Logged: (_e, s) => ({ entries: s.entries + 1 }) })
+  .on({ log: z.object({ message: z.string() }) })
+    .emit("Logged")
+  .build();
+
 const app = act()
   .withState(Account)
+  .withState(Audit)
   .on("Deposited")
     .do(async (event, stream, app) => {
-      await app.do("LogEntry", target, { message: `Deposit: ${event.data.amount}` }, { reactingTo: event });
+      await app.do(
+        "log",
+        { stream, actor: { id: "system", name: "audit" } },
+        { message: `Deposit: ${event.data.amount}` },
+        { reactingTo: event }
+      );
     })
     .to((event) => ({ target: `audit-${event.stream}` }))
   .build();
@@ -160,13 +196,23 @@ By default Act produces a readable, time-monotonic, lowercase id of the form `{s
 
 Apps that need a different scheme plug a delegate in via `ActOptions.correlator`:
 
-```ts no-check
-import { act, type Correlator } from "@rotorsoft/act";
+```ts
+import { act, state, type Correlator } from "@rotorsoft/act";
+import { z } from "zod";
+
+type TenantActor = { id: string; name: string; tenantId: string };
 
 const tenantPrefixed: Correlator = ({ state, action, actor }) => {
   const tenant = (actor as TenantActor).tenantId.slice(0, 6);
   return `${tenant}-${state.slice(0, 4)}-${action.slice(0, 4)}-${Date.now().toString(36)}`;
 };
+
+const Counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ Incremented: z.object({ amount: z.number() }) })
+  .on({ increment: z.object({ by: z.number() }) })
+    .emit((action) => ["Incremented", { amount: action.by }])
+  .build();
 
 const app = act()
   .withState(Counter)
@@ -193,7 +239,11 @@ The delegate is only consulted on **originating actions** and on **close-the-boo
 4. **Handle** — execute reaction handlers
 5. **Ack/Block** — release successful claims or block failed streams
 
-```typescript no-check
+```typescript
+import { act } from "@rotorsoft/act";
+
+const app = act().build();
+
 // In tests — explicit, deterministic
 await app.correlate();
 await app.drain();
@@ -215,7 +265,21 @@ The ratio adapts dynamically based on event pressure (clamped between 20-80%).
 
 The recommended production pattern. `settle()` is a debounced wrapper that coalesces bursts of commits into a single `correlate → drain` pass, then loops the pair until the system is consistent and emits the `"settled"` lifecycle event. The canonical wiring is to subscribe to `"committed"` once at bootstrap and let it trigger automatically — actions never call `settle()` directly:
 
-```typescript no-check
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Item = state({ Item: z.object({ name: z.string() }) })
+  .init(() => ({ name: "" }))
+  .emits({ ItemCreated: z.object({ name: z.string() }) })
+  .on({ CreateItem: z.object({ name: z.string() }) })
+    .emit("ItemCreated")
+  .build();
+
+const app = act().withState(Item).build();
+const target = { stream: "item-1", actor: { id: "1", name: "User" } };
+const input = { name: "Test" };
+
 // At app bootstrap — wire once
 app.on("committed", () => app.settle());
 
@@ -242,7 +306,11 @@ await app.do("CreateItem", target, input);
 
 Projections are derived data — disposable by design. To replay a projection from scratch (after a code change, schema fix, or new aggregation):
 
-```typescript no-check
+```typescript
+import { act } from "@rotorsoft/act";
+
+const app = act().build();
+
 // 1. Reset the projection's reaction watermarks AND arm the drain flag
 await app.reset(["my-projection"]);
 
@@ -285,8 +353,10 @@ After `close()`, tombstoned streams throw `StreamClosedError` on any subsequent 
 
 `app.restore(source, opts?, sink?)` is the offline wipe-and-rebuild primitive — atomically replace the contents of a store from an event source. Use it for CSV-driven backups, cross-adapter migrations (PG → SQLite or vice versa), or compaction passes that drop `__snapshot__` events to shrink the log.
 
-```typescript no-check
-import { CsvFile } from "@rotorsoft/act";
+```typescript
+import { act, cache, CsvFile } from "@rotorsoft/act";
+
+const app = act().build();
 
 // Restore from a CSV file on disk into the connected store
 const result = await app.restore(new CsvFile({ path: "./backup.csv" }));
@@ -312,10 +382,12 @@ await app.reset({ stream: "^proj-" });
 
 The source and sink slots accept anything implementing `EventSource` and `EventSink` respectively. The framework's `Store` adapters implement both (read end is `query`, write end is the optional `restore` capability). `CsvFile` ships in `@rotorsoft/act` and implements both ends so CSV files can sit in either slot:
 
-```typescript no-check
-import { CsvFile, store } from "@rotorsoft/act";
+```typescript
+import { act, CsvFile } from "@rotorsoft/act";
 import { PostgresStore } from "@rotorsoft/act-pg";
 import { SqliteStore } from "@rotorsoft/act-sqlite";
+
+const app = act().build();
 
 // PG → SQLite (cross-adapter): both endpoints constructed inline
 const pg = new PostgresStore({ /* … */ });
@@ -348,9 +420,13 @@ Omit the third argument to default to the connected store as sink. Pass an expli
 
 Transfer-time migrations let you reshape events as part of a `Act.restore(source, opts, sink)` call — typically when moving from an old store to a new (empty) store via the inspector. The connected (live) store is never modified; migrations apply only to the events that flow through `scan` into `sink`.
 
-```typescript no-check
+```typescript
 import { z } from "zod";
-import type { EventMigration } from "@rotorsoft/act";
+import { act, CsvFile, type EventMigration } from "@rotorsoft/act";
+
+const app = act().build();
+const source = new CsvFile({ path: "./old.csv" });
+const sink = new CsvFile({ path: "./new.csv" });
 
 const OrderPaidMigration: EventMigration<
   { amount: number },
@@ -400,8 +476,19 @@ Common confusions worth naming:
 
 ## Testing
 
-```typescript no-check
-import { store, dispose } from "@rotorsoft/act";
+```typescript
+import { act, state, store, dispose } from "@rotorsoft/act";
+import { z } from "zod";
+
+const Item = state({ Item: z.object({ name: z.string() }) })
+  .init(() => ({ name: "" }))
+  .emits({ ItemCreated: z.object({ name: z.string() }) })
+  .on({ CreateItem: z.object({ name: z.string() }) })
+    .emit("ItemCreated")
+  .build();
+
+const app = act().withState(Item).build();
+const target = { stream: "item-1", actor: { id: "1", name: "Tester" } };
 
 beforeEach(async () => {
   await store().seed();
