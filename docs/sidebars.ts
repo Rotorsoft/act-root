@@ -21,6 +21,7 @@ const sidebars: SidebarsConfig = {
         "guides/writing-a-cache",
         "guides/writing-a-logger",
         "guides/tck-conformance",
+        "guides/migrating-to-1.x",
       ],
     },
     {
