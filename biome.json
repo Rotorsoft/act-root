@@ -108,6 +108,11 @@
       }
     },
     {
+      "includes": ["docs/src/snippets/**"],
+      "formatter": { "enabled": false },
+      "assist": { "enabled": false }
+    },
+    {
       "includes": ["libs/act/src/**/*.ts", "!libs/act/src/internal/**"],
       "linter": {
         "rules": {
