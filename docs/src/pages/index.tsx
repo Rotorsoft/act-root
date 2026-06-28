@@ -8,14 +8,11 @@ import type { JSX } from "react";
 import { useEffect, useRef, useState } from "react";
 import sdk from "@stackblitz/sdk";
 import styles from "./index.module.css";
-// Real, type-checked source (CI checks it against the live @rotorsoft/act
-// API), imported as text so the quickstart on this page can't drift.
-import quickstartSource from "../snippets/quickstart.ts?raw";
-
 const QUICKSTART_INSTALL = `npm install @rotorsoft/act zod`;
 
-// Drop the file's leading `//` header comment so only the example shows.
-const QUICKSTART_APP = quickstartSource.replace(/^(?:\/\/.*\n)+\n?/, "").trimEnd();
+// The verbatim quickstart source is read at build time in docusaurus.config.ts
+// (as raw .ts text, not transpiled) and threaded through siteConfig.customFields;
+// the Quickstart component drops the leading `//` header so only the example shows.
 
 const GENERATED_TRANSPORTS_CODE = `import { trpc } from "@rotorsoft/act-http/trpc";
 import { hono } from "@rotorsoft/act-http/hono";
@@ -294,6 +291,10 @@ function Hero() {
 
 function Quickstart() {
   const getStartedUrl = useBaseUrl("/docs/intro");
+  const { siteConfig } = useDocusaurusContext();
+  const quickstartApp = (siteConfig.customFields?.quickstartSource as string)
+    .replace(/^(?:\/\/.*\n)+\n?/, "")
+    .trimEnd();
   return (
     <section className={styles.section}>
       <div className={styles.sectionHeader}>
@@ -314,7 +315,7 @@ function Quickstart() {
           <span className={styles.qsStepNum}>2</span>
           <span className={styles.qsStepLabel}>Define a state and run an action</span>
         </div>
-        <CodeBlock language="typescript">{QUICKSTART_APP}</CodeBlock>
+        <CodeBlock language="typescript">{quickstartApp}</CodeBlock>
 
         <div className={styles.qsStep}>
           <span className={styles.qsStepNum}>3</span>

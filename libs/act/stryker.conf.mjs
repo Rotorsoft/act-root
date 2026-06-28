@@ -3,11 +3,10 @@
 /**
  * StrykerJS mutation testing — @rotorsoft/act (issue #1028).
  *
- * NON-BLOCKING baseline: `thresholds.break` is null, so CI reports the
- * mutation score but never fails the build.
- *
- * TODO(#1028 follow-up): once a baseline score lands, set a per-package
- * `thresholds.break` floor so a drop in mutation score fails the build.
+ * Weekly/dispatch only (see mutation.yml) — never a PR check, so a break
+ * never blocks a PR or merge. `thresholds.break` is the floor below which the
+ * weekly run goes red, surfacing a real mutation-score regression. Set ~6 pts
+ * under the CI baseline (#1056) to absorb run-to-run noise: act baseline 85.7%.
  * Triage focus per the issue: surviving mutants on the with_snaps seek and
  * close/drain paths.
  *
@@ -38,7 +37,7 @@ export default {
   htmlReporter: {
     fileName: "reports/mutation/index.html",
   },
-  // Non-blocking: no `break` threshold yet (see file header).
-  thresholds: { high: 80, low: 60, break: null },
+  // Weekly-only gate floor (see file header). Baseline 85.7% → break 80.
+  thresholds: { high: 86, low: 70, break: 80 },
   tempDirName: ".stryker-tmp",
 };

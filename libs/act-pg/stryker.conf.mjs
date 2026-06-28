@@ -39,7 +39,7 @@ export default {
   htmlReporter: {
     fileName: "reports/mutation/index.html",
   },
-  // Non-blocking: no `break` threshold yet (see file header).
-  thresholds: { high: 80, low: 60, break: null },
+  // Weekly-only gate floor (#1056). Baseline 94.4% → break 88.
+  thresholds: { high: 94, low: 85, break: 88 },
   tempDirName: ".stryker-tmp",
 };
