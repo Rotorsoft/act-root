@@ -15,6 +15,10 @@ docs/.snippets/
 # Perf bench output is per-run; baseline is checked in.
 libs/act/perf-result.json
 libs/act/realistic-result.json
+libs/act-pg/perf-result.json
+libs/act-sqlite/perf-result.json
+# act-sqlite perf bench scratch DB (+ WAL/SHM sidecars).
+libs/act-sqlite/scripts/perf-bench.db*
 package-lock.json
 
 # StrykerJS mutation testing — per-run reports + sandbox temp dirs.
