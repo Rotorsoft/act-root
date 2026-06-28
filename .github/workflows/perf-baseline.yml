@@ -1,0 +1,53 @@
+name: Perf Baseline
+
+# Manually-dispatched: regenerates the adapter perf baselines on a CI runner
+# (issue #1062) so the gate in ci-cd.yml compares like-for-like hardware.
+# A laptop-generated baseline would false-fail the slower shared runner at
+# the 2.0x tolerance, so the authoritative baseline must be produced here.
+# Outputs the updated perf-baseline.json files as an artifact; a maintainer
+# downloads, commits them, and flips the ci-cd perf steps from report-only
+# to blocking.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SKIP_SIMPLE_GIT_HOOKS: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5431:5432
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          run_install: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.0
+          cache: "pnpm"
+      - run: pnpm install
+      - run: pnpm -F @rotorsoft/act-pg bench:update
+      - run: pnpm -F @rotorsoft/act-sqlite bench:update
+      - uses: actions/upload-artifact@v4
+        with:
+          name: perf-baselines
+          path: |
+            libs/act-pg/perf-baseline.json
+            libs/act-sqlite/perf-baseline.json
+          if-no-files-found: error
