@@ -168,7 +168,7 @@ Each lands as a separate spec; the assertion is always the same — `kept === 0`
 
 ### Differential testing against the reference adapter
 
-`runStoreTck` proves your adapter honors the contract in isolation. `runStoreDifferentialTck` proves it honors the contract _identically to the in-memory reference_ — the failure mode (ordering, `with_snaps` floor, `query_stats` / `query_streams` shape drift) that a single-adapter suite can't see. It replays one deterministic, seeded workload against every store you pass and compares their normalized outputs:
+`runStoreTck` proves your adapter honors the contract in isolation. `runStoreDifferentialTck` proves it honors the contract _identically to the in-memory reference_ — the failure mode (ordering, `with_snaps` floor, `query_stats` / `query_streams` shape drift) that a single-adapter suite can't see. It replays a **family of randomized, seeded workloads** against every store you pass and compares their normalized outputs for each one:
 
 ```ts no-check
 import { runStoreDifferentialTck } from "@rotorsoft/act-tck";
@@ -178,6 +178,7 @@ import { MysqlStore } from "../src/index.js";
 runStoreDifferentialTck({
   name: "InMemory vs Mysql",
   // First entry is the reference; every other store must match it.
+  runs: 6, // durable adapter: fewer workloads keep the suite fast
   stores: [
     { name: "InMemoryStore", factory: () => new InMemoryStore() },
     { name: "MysqlStore", factory: () => new MysqlStore({ /* … */ }) },
@@ -185,7 +186,7 @@ runStoreDifferentialTck({
 });
 ```
 
-Normalization drops only the fields that legitimately differ between stores (absolute event ids, `created` timestamps, correlation/causation uuids); everything that defines correctness — stream, version, name, data, emission order — must be byte-for-byte equal. The in-tree adapters wire it as `store-differential-tck.spec.ts` alongside `store-tck.spec.ts`.
+Each workload is its own seeded plan (`seed`, `seed + 1`, …): the operation sequence — and even its length — varies by seed, so divergence is hunted across a slice of the input space rather than one fixed script. The seeds are deterministic, so a failing workload (named with its seed in the describe block) is always replayable. Normalization drops only the fields that legitimately differ between stores (absolute event ids, `created` timestamps, correlation/causation uuids); everything that defines correctness — stream, version, name, data, emission order — must be byte-for-byte equal. The in-tree adapters wire it as `store-differential-tck.spec.ts` alongside `store-tck.spec.ts`.
 
 ## Scaffolding `@rotorsoft/act-mysql` (worked example)
 

@@ -81,6 +81,27 @@ runCacheTck({
 ```
 ````
 
+## Differential testing against the reference cache
+
+`runCacheTck` proves your cache honors the contract in isolation. `runCacheDifferentialTck` proves it honors the contract _identically to a reference cache_. It drives a family of randomized, seeded workloads (`set` / `invalidate` / `clear` over a small key set kept within capacity, so eviction — your adapter's policy, not a contract guarantee — never enters the comparison) against every cache you pass and asserts their observable `get()` snapshot is identical after **every** operation:
+
+```ts no-check
+import { runCacheDifferentialTck } from "@rotorsoft/act-tck";
+import { InMemoryCache } from "@rotorsoft/act";
+import { RedisCache } from "../src/index.js";
+
+runCacheDifferentialTck({
+  name: "InMemory vs Redis",
+  // First entry is the reference; every other cache must match it.
+  caches: [
+    { name: "InMemoryCache", factory: () => new InMemoryCache({ maxSize: 1000 }) },
+    { name: "RedisCache", factory: () => new RedisCache({ /* … */ }) },
+  ],
+});
+```
+
+A cache that mishandles overwrite ordering, leaks an invalidated key, or clears partially diverges from the reference on the exact operation that broke it — with the seed in the describe block for replay.
+
 ## When the Cache port changes
 
 If the framework extends the Cache interface (a TTL primitive, a multi-get for batched rehydration, etc.), the corresponding cases land in `libs/act-tck/src/cache-tck.ts`. New optional methods are gated behind a `Capabilities` flag so existing adapters keep passing until they opt in.

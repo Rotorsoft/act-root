@@ -41,15 +41,24 @@ export type StoreDifferentialTckOptions = {
    */
   readonly stores: ReadonlyArray<DifferentialStore>;
   /**
-   * PRNG seed for the generated workload. Same seed ⇒ same workload, so
-   * a divergence is always reproducible. Default `0xac7`.
+   * Base PRNG seed. Workload `r` of {@link StoreDifferentialTckOptions.runs}
+   * is built from `seed + r`, so the whole fuzz campaign is reproducible:
+   * the same `seed` ⇒ the same family of workloads ⇒ any divergence is
+   * deterministically replayable. Default `0xac7`.
    */
   readonly seed?: number;
   /**
-   * Number of distinct event-bearing streams in the workload.
+   * Number of distinct event-bearing streams per workload.
    * Default `4`.
    */
   readonly streams?: number;
+  /**
+   * How many independent randomized workloads to generate and compare,
+   * each from a distinct seed (`seed`, `seed + 1`, …, `seed + runs - 1`).
+   * More runs widen the slice of the input space the differential
+   * explores; fewer keep durable-adapter suites fast. Default `8`.
+   */
+  readonly runs?: number;
 };
 
 /**
@@ -118,18 +127,25 @@ type Plan = {
 };
 
 /**
- * Build a deterministic, seeded workload. The structure is fixed (so the
- * snapshot floor and truncate reset are always exercised) while the event
- * payloads vary by seed. Event types cycle inc → dec → reset so all three
- * are always present regardless of seed.
+ * Build a deterministic, seeded workload with a **randomized** operation
+ * sequence. Unlike a fixed script, the middle of each plan is a seeded
+ * shuffle of `commit` / `snapshot` / `truncate` across random streams, so
+ * different seeds probe different interleavings — pre/post-snapshot
+ * commits, back-to-back truncates, a snapshot landing immediately after a
+ * truncate, and so on. The same seed always reproduces the same sequence,
+ * so any divergence the fuzz finds is replayable.
  *
- * The shape per stream, interleaved across streams phase-by-phase so the
- * global event-id order mixes streams:
+ * Two invariants are pinned regardless of seed so the comparison stays
+ * well-defined across adapters:
  *
- *   batch → inline snapshot → batch → truncate(+snapshot) → batch
+ *   - an **opening** commit per stream — every stream is non-empty before
+ *     a snapshot or truncate can reference it;
+ *   - a **closing** commit per stream — every stream ends with real
+ *     (non-snapshot) events, so `query_stats` head/tail are defined even
+ *     when a truncate was the last randomized touch.
  *
- * That covers pre-snapshot events, an inline snapshot floor, post-snapshot
- * events, a truncate that re-bases the floor, and post-truncate events.
+ * Event types cycle inc → dec → reset via a shared cursor, so all three
+ * payload shapes appear in every plan.
  */
 const build_plan = (seed: number, stream_count: number): Plan => {
   const rng = mulberry32(seed);
@@ -149,21 +165,30 @@ const build_plan = (seed: number, stream_count: number): Plan => {
   };
   const batch = (): CounterMessage[] =>
     Array.from({ length: 1 + Math.floor(rng() * 3) }, next_msg);
+  const pick_stream = (): string =>
+    event_streams[Math.floor(rng() * event_streams.length)];
 
   const ops: PlanOp[] = [];
-  // Phase 1: every stream commits a batch.
+  // Opening: every stream commits a batch so it exists before any
+  // snapshot/truncate references it.
   for (const stream of event_streams)
     ops.push({ t: "commit", stream, msgs: batch() });
-  // Phase 2: every stream gets an inline snapshot.
-  for (const stream of event_streams)
-    ops.push({ t: "snapshot", stream, count: Math.floor(rng() * 1000) });
-  // Phase 3: every stream commits another batch (after the snapshot floor).
-  for (const stream of event_streams)
-    ops.push({ t: "commit", stream, msgs: batch() });
-  // Phase 4: every stream is truncated (re-bases the snapshot floor).
-  for (const stream of event_streams)
-    ops.push({ t: "truncate", stream, count: Math.floor(rng() * 1000) });
-  // Phase 5: every stream commits a final batch (after the truncate floor).
+
+  // Randomized middle: a seeded sequence of commits, inline snapshots, and
+  // truncates against random streams. Length varies by seed (8..23) so the
+  // operation count itself is part of the explored input space.
+  const middle = 8 + Math.floor(rng() * 16);
+  for (let i = 0; i < middle; i++) {
+    const stream = pick_stream();
+    const kind = Math.floor(rng() * 3);
+    if (kind === 0) ops.push({ t: "commit", stream, msgs: batch() });
+    else if (kind === 1)
+      ops.push({ t: "snapshot", stream, count: Math.floor(rng() * 1000) });
+    else ops.push({ t: "truncate", stream, count: Math.floor(rng() * 1000) });
+  }
+
+  // Closing: every stream commits a final batch so it ends with real
+  // events — keeps query_stats head/tail well-defined after any truncate.
   for (const stream of event_streams)
     ops.push({ t: "commit", stream, msgs: batch() });
 
@@ -214,21 +239,27 @@ const apply_plan = async (store: Store, plan: Plan): Promise<void> => {
 };
 
 /**
- * Cross-adapter differential contract (#1030).
+ * Cross-adapter differential contract (#1030, fuzz workloads #1057).
  *
  * Adapters can drift in ways per-adapter cases don't catch — event
  * ordering, the `with_snaps` snapshot floor, the exact shape of
- * `query_stats` / `query_streams` output. This harness drives the **same**
- * deterministic, seeded workload (commits, inline snapshots, truncates,
+ * `query_stats` / `query_streams` output. This harness drives a **family
+ * of randomized, seeded workloads** (commits, inline snapshots, truncates,
  * subscriptions) against every store in `options.stores`, then asserts
- * their **normalized** outputs are byte-for-byte identical.
+ * their **normalized** outputs are byte-for-byte identical for every
+ * workload.
+ *
+ * Each workload is its own seeded plan (`seed`, `seed + 1`, …): the
+ * operation sequence — and even its length — varies by seed, so divergence
+ * is hunted across a slice of the input space rather than one fixed script.
+ * The seeds are deterministic, so a failing workload is always replayable.
  *
  * Normalization drops only the fields that legitimately differ between
  * stores (absolute event ids, `created` timestamps, correlation/causation
  * uuids) and keeps everything that defines correctness (stream, version,
  * name, data, and emission order). A one-adapter `with_snaps` regression —
  * the canonical failure mode — surfaces as a diff against the in-memory
- * reference.
+ * reference, with the offending seed in the describe block.
  *
  * Wire it with the in-memory store as the reference and one or more
  * durable adapters as comparands:
@@ -241,6 +272,7 @@ const apply_plan = async (store: Store, plan: Plan): Promise<void> => {
  *
  * runStoreDifferentialTck({
  *   name: "InMemory vs Postgres",
+ *   runs: 6, // durable adapter: fewer workloads keep the suite fast
  *   stores: [
  *     { name: "InMemoryStore", factory: () => new InMemoryStore() },
  *     { name: "PostgresStore", factory: () => new PostgresStore({ ... }) },
@@ -252,7 +284,11 @@ export const runStoreDifferentialTck = (
   options: StoreDifferentialTckOptions
 ): void => {
   describe(`TCK / Store differential / ${options.name}`, () => {
-    const plan = build_plan(options.seed ?? 0xac7, options.streams ?? 4);
+    const base_seed = options.seed ?? 0xac7;
+    const stream_count = options.streams ?? 4;
+    const plans = Array.from({ length: options.runs ?? 8 }, (_, r) =>
+      build_plan(base_seed + r, stream_count)
+    );
     const live: Array<{ name: string; store: Store }> = [];
 
     beforeAll(async () => {
@@ -260,7 +296,10 @@ export const runStoreDifferentialTck = (
         const store = await spec.factory();
         await store.drop();
         await store.seed();
-        await apply_plan(store, plan);
+        // Each plan namespaces its streams with a unique tag, so every
+        // workload coexists in one store — a single drop+seed per store
+        // keeps the durable-adapter cost flat regardless of `runs`.
+        for (const plan of plans) await apply_plan(store, plan);
         live.push({ name: spec.name, store });
       }
     });
@@ -289,118 +328,125 @@ export const runStoreDifferentialTck = (
       }
     };
 
-    it("yields identical event order under a global forward query", async () => {
-      await assert_identical("forward query", async (store) => {
-        const out: NormalizedEvent[] = [];
-        await store.query<Schemas>(
-          (e) => {
-            out.push(normalize_event(e));
-          },
-          { stream: `^${plan.event_prefix}` }
-        );
-        return out;
-      });
-    });
+    plans.forEach((plan, run) => {
+      const seed_hex = `0x${(base_seed + run).toString(16)}`;
+      describe(`workload ${run} (seed ${seed_hex})`, () => {
+        it("yields identical event order under a global forward query", async () => {
+          await assert_identical("forward query", async (store) => {
+            const out: NormalizedEvent[] = [];
+            await store.query<Schemas>(
+              (e) => {
+                out.push(normalize_event(e));
+              },
+              { stream: `^${plan.event_prefix}` }
+            );
+            return out;
+          });
+        });
 
-    it("yields identical snapshot floors under with_snaps", async () => {
-      await assert_identical("with_snaps floor", async (store) => {
-        const by_stream: Record<string, NormalizedEvent[]> = {};
-        for (const stream of plan.event_streams) {
-          const out: NormalizedEvent[] = [];
-          await store.query<Schemas>(
-            (e) => {
-              out.push(normalize_event(e));
-            },
-            { stream, stream_exact: true, with_snaps: true }
-          );
-          by_stream[stream] = out;
-        }
-        return by_stream;
-      });
-    });
+        it("yields identical snapshot floors under with_snaps", async () => {
+          await assert_identical("with_snaps floor", async (store) => {
+            const by_stream: Record<string, NormalizedEvent[]> = {};
+            for (const stream of plan.event_streams) {
+              const out: NormalizedEvent[] = [];
+              await store.query<Schemas>(
+                (e) => {
+                  out.push(normalize_event(e));
+                },
+                { stream, stream_exact: true, with_snaps: true }
+              );
+              by_stream[stream] = out;
+            }
+            return by_stream;
+          });
+        });
 
-    it("yields identical order under backward traversal", async () => {
-      await assert_identical("backward query", async (store) => {
-        const by_stream: Record<string, NormalizedEvent[]> = {};
-        for (const stream of plan.event_streams) {
-          const out: NormalizedEvent[] = [];
-          await store.query<Schemas>(
-            (e) => {
-              out.push(normalize_event(e));
-            },
-            { stream, stream_exact: true, backward: true }
-          );
-          by_stream[stream] = out;
-        }
-        return by_stream;
-      });
-    });
+        it("yields identical order under backward traversal", async () => {
+          await assert_identical("backward query", async (store) => {
+            const by_stream: Record<string, NormalizedEvent[]> = {};
+            for (const stream of plan.event_streams) {
+              const out: NormalizedEvent[] = [];
+              await store.query<Schemas>(
+                (e) => {
+                  out.push(normalize_event(e));
+                },
+                { stream, stream_exact: true, backward: true }
+              );
+              by_stream[stream] = out;
+            }
+            return by_stream;
+          });
+        });
 
-    it("yields identical query_stats output (head/tail/count/names)", async () => {
-      await assert_identical("query_stats", async (store) => {
-        const stats = await store.query_stats<Schemas>(
-          { stream: `^${plan.event_prefix}` },
-          { tail: true, count: true, names: true }
-        );
-        // Capture key order (query_stats filter form orders by stream
-        // name — a contract) alongside normalized per-stream content.
-        const keys = [...stats.keys()];
-        const content: Record<
-          string,
-          {
-            head: NormalizedEvent;
-            tail: NormalizedEvent;
-            count: number | undefined;
-            names: Readonly<Record<string, number>> | undefined;
-          }
-        > = {};
-        for (const [stream, s] of stats) {
-          // `tail: true` is requested, so every returned stream carries a
-          // tail. A store that omits it is itself a divergence — let the
-          // non-null access surface it loudly rather than masking it with a
-          // fallback the workload can never otherwise reach.
-          content[stream] = {
-            head: normalize_event(s.head),
-            tail: normalize_event(s.tail as Committed<Schemas, keyof Schemas>),
-            count: s.count,
-            names: s.names as Record<string, number> | undefined,
-          };
-        }
-        return { keys, content };
-      });
-    });
+        it("yields identical query_stats output (head/tail/count/names)", async () => {
+          await assert_identical("query_stats", async (store) => {
+            const stats = await store.query_stats<Schemas>(
+              { stream: `^${plan.event_prefix}` },
+              { tail: true, count: true, names: true }
+            );
+            // Capture key order (query_stats filter form orders by stream
+            // name — a contract) alongside normalized per-stream content.
+            const keys = [...stats.keys()];
+            const content: Record<
+              string,
+              {
+                head: NormalizedEvent;
+                tail: NormalizedEvent;
+                count: number | undefined;
+                names: Readonly<Record<string, number>> | undefined;
+              }
+            > = {};
+            for (const [stream, s] of stats) {
+              // `tail: true` is requested, so every returned stream carries
+              // a tail. A store that omits it is itself a divergence — let
+              // the non-null access surface it loudly rather than masking it
+              // with a fallback the workload can never otherwise reach.
+              content[stream] = {
+                head: normalize_event(s.head),
+                tail: normalize_event(
+                  s.tail as Committed<Schemas, keyof Schemas>
+                ),
+                count: s.count,
+                names: s.names as Record<string, number> | undefined,
+              };
+            }
+            return { keys, content };
+          });
+        });
 
-    it("yields identical query_streams output", async () => {
-      await assert_identical("query_streams", async (store) => {
-        const rows: Array<{
-          stream: string;
-          source: string | undefined;
-          at: number;
-          blocked: boolean;
-          priority: number;
-          lane: string | undefined;
-        }> = [];
-        // Every subscription in the plan carries an explicit source and
-        // lane, so both are always present here — read them straight
-        // through. The differential still catches drift in how a provided
-        // source/lane is stored and returned across adapters.
-        const { count } = await store.query_streams(
-          (p) => {
-            rows.push({
-              stream: p.stream,
-              source: p.source,
-              at: p.at,
-              blocked: p.blocked,
-              priority: p.priority,
-              lane: p.lane,
-            });
-          },
-          { stream: `^${plan.sub_prefix}`, limit: 1000 }
-        );
-        // Branchless, locale-stable ordering so the comparison is
-        // independent of whatever order each adapter streams rows in.
-        rows.sort((a, b) => a.stream.localeCompare(b.stream));
-        return { count, rows };
+        it("yields identical query_streams output", async () => {
+          await assert_identical("query_streams", async (store) => {
+            const rows: Array<{
+              stream: string;
+              source: string | undefined;
+              at: number;
+              blocked: boolean;
+              priority: number;
+              lane: string | undefined;
+            }> = [];
+            // Every subscription in the plan carries an explicit source and
+            // lane, so both are always present here — read them straight
+            // through. The differential still catches drift in how a
+            // provided source/lane is stored and returned across adapters.
+            const { count } = await store.query_streams(
+              (p) => {
+                rows.push({
+                  stream: p.stream,
+                  source: p.source,
+                  at: p.at,
+                  blocked: p.blocked,
+                  priority: p.priority,
+                  lane: p.lane,
+                });
+              },
+              { stream: `^${plan.sub_prefix}`, limit: 1000 }
+            );
+            // Branchless, locale-stable ordering so the comparison is
+            // independent of whatever order each adapter streams rows in.
+            rows.sort((a, b) => a.stream.localeCompare(b.stream));
+            return { count, rows };
+          });
+        });
       });
     });
   });

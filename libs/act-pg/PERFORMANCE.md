@@ -231,3 +231,67 @@ Callers that already pass `limit ≤ batch_size` (aggregate
 path) hit the loop once and return after one round trip, same
 as a bare `pool.query`. Operators can tune `batch_size` per
 `Act.restore` call to trade round trips against memory.
+
+## ACT-1031 — per-adapter perf regression gate
+
+The core framework gate (`libs/act/scripts/perf-bench.ts`) runs against
+`InMemoryStore` — the fastest possible read/write path, with no SQL
+planner, indexes, locks, or connection pool. Adapter-level regressions
+(a dropped index, a reintroduced N+1, a snapshot-floor read that
+silently degrades to a full-stream scan — the #1024 class of bug) are
+invisible there. This gate runs the same harness shape against a **real
+Postgres** (the docker service on `localhost:5431` the test suite
+already uses).
+
+### Harness
+
+`scripts/perf-bench.ts` measures p50/p95/mean over a fixed iteration
+count per scenario and writes `perf-result.json`. `scripts/perf-check.ts`
+compares it against the checked-in `perf-baseline.json`.
+
+| Scenario | What it guards |
+|---|---|
+| `commit: single event` | single-row durable write (INSERT + version bump + notify, one round trip) |
+| `commit: 50-event batch` | multi-row INSERT — guards against a per-event round-trip regression |
+| `load: cold replay over snapshot floor` | the **#1024 path** — cold `load()` must read only the snapshot + tail, not the whole stream |
+| `drain: correlate+drain 50 events` | `claim()` (FOR UPDATE SKIP LOCKED) + replay query + `ack()` competing-consumer loop |
+| `query_stats: page of 50 (count+names)` | the DISTINCT ON / CTE plan stays indexed as the streams table grows |
+| `notify: commit→listener latency` | cross-process LISTEN/NOTIFY commit→wakeup round trip |
+
+### Budget
+
+- **Metric:** p50 latency per scenario.
+- **Tolerance:** p50 may rise to **2.0×** the baseline before the gate
+  fails. A real DB over docker has a wide noise band (pool scheduling,
+  autovacuum, OS page cache, CI neighbours); 2.0× still catches an
+  order-of-magnitude regression without flapping.
+- **Absolute floor:** scenarios whose **baseline** p50 is below **1.0 ms**
+  skip the ratio check entirely — sub-ms ops are noise-dominated, so a
+  0.3 → 0.7 ms swing (2.3×) is meaningless. They are reported but never
+  fail the gate.
+
+### Rollout
+
+The gate is **report-only** in CI (`continue-on-error: true`) until the
+baseline proves stable across a few runs, then it flips to blocking.
+The baseline ships **empty** (`{"results":[]}`) — a real local Docker PG
+is needed to generate it, so until CI or a maintainer runs
+`pnpm -F @rotorsoft/act-pg bench:update` against `localhost:5431` every
+scenario is reported as `NEW` and the gate is a no-op. **No pg numbers
+have been fabricated.**
+
+### Refreshing the baseline
+
+Run `pnpm -F @rotorsoft/act-pg bench:update` against a real PG in a PR
+labeled `perf-baseline-update`, with the rationale documented here.
+
+### #1024 cold-load before/after (pg) — _reserved_
+
+> **TODO (fill when the pg baseline is generated):** the #1024 fix made
+> cold `load()` resume from the latest snapshot floor instead of
+> replaying the whole stream. The numbers below are to be captured by
+> running `bench:update` on a real Postgres — do not invent them.
+>
+> | Path | p50 (before #1024) | p50 (after #1024) |
+> |---|---|---|
+> | `load: cold replay over snapshot floor` | _TBD_ | _TBD_ |

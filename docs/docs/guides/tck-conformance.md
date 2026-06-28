@@ -167,5 +167,3 @@ Clone one, read its `test/*-tck.spec.ts`, and you have the exact shape your own 
 - The contracts themselves: [extension-points](../architecture/extension-points.md) and [`libs/act/src/types/ports.ts`](https://github.com/Rotorsoft/act-root/blob/master/libs/act/src/types/ports.ts)
 - TCK source: [`libs/act-tck/src`](https://github.com/Rotorsoft/act-root/tree/master/libs/act-tck/src)
 - Contributing an adapter back to the monorepo instead: [contributing-new-package](contributing-new-package.md)
-</content>
-</invoke>

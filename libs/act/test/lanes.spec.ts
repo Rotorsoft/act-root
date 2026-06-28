@@ -580,4 +580,70 @@ describe("lanes (ACT-1103, slice 1)", () => {
     expect(ctrl?._stopped).toBe(true);
     expect(ctrl?._worker).toBeUndefined();
   });
+
+  it("drains lanes in parallel — a stalled slow handler does not block the fast lane", async () => {
+    // The load-bearing lane guarantee: `_drain_all` runs every
+    // controller's drain() via Promise.all, so a slow handler holding the
+    // slow lane's lease does not block the fast lane's claim/dispatch/ack
+    // cycle. Here the slow handler hangs on a gate; the fast handler must
+    // still complete while the slow one is confirmed in-flight.
+    const TwoEvents = state({ TwoEvents: z.object({ count: z.number() }) })
+      .init(() => ({ count: 0 }))
+      .emits({ FastTick: ZodEmpty, SlowTick: ZodEmpty })
+      .patch({
+        FastTick: (_, s) => ({ count: s.count + 1 }),
+        SlowTick: (_, s) => ({ count: s.count + 1 }),
+      })
+      .on({ fastTick: ZodEmpty })
+      .emit(() => ["FastTick", {}])
+      .on({ slowTick: ZodEmpty })
+      .emit(() => ["SlowTick", {}])
+      .build();
+
+    let slowEntered = false;
+    let fastDone = 0;
+    let releaseSlow!: () => void;
+    const slowGate = new Promise<void>((resolve) => {
+      releaseSlow = resolve;
+    });
+
+    const app = act()
+      .withState(TwoEvents)
+      .withLane({ name: "slow" })
+      .withLane({ name: "fast" })
+      .on("FastTick")
+      .do(async function fastHandler() {
+        fastDone++;
+      })
+      .to({ target: "fast-out", lane: "fast" })
+      .on("SlowTick")
+      .do(async function slowHandler() {
+        slowEntered = true;
+        await slowGate;
+      })
+      .to({ target: "slow-out", lane: "slow" })
+      .build();
+
+    const actor = { id: "a", name: "a" };
+    await app.do("slowTick", { stream: "src", actor }, {});
+    await app.do("fastTick", { stream: "src", actor }, {});
+    await app.correlate();
+
+    // Fire the aggregate drain but don't await — the slow lane's handler
+    // hangs on the gate, so the returned promise won't settle yet.
+    const draining = app.drain({ leaseMillis: 5_000 });
+
+    // The fast lane must finish while the slow handler is still blocked.
+    const deadline = Date.now() + 2_000;
+    while ((fastDone === 0 || !slowEntered) && Date.now() < deadline) {
+      await new Promise<void>((r) => setTimeout(r, 5));
+    }
+    expect(fastDone).toBe(1); // fast lane completed...
+    expect(slowEntered).toBe(true); // ...while the slow handler is blocked
+
+    // Release the gate and let the aggregate drain settle cleanly.
+    releaseSlow();
+    const result = await draining;
+    expect(result.acked.length).toBeGreaterThanOrEqual(1);
+  });
 });

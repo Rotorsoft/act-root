@@ -83,6 +83,28 @@ runLoggerTck({
 ```
 ````
 
+## Differential testing against a reference logger
+
+A logger has no portable output to byte-compare — its format is adapter-specific by design, which is exactly why `runLoggerTck` checks shape rather than bytes. `runLoggerDifferentialTck` adds the cross-implementation angle that _is_ portable: **robustness and structural parity**. Driven through the identical call surface (every level, both overloads, `null` + cyclic payloads, child spawning), two implementations must agree on what throws and what conforms:
+
+```ts no-check
+import { runLoggerDifferentialTck } from "@rotorsoft/act-tck";
+import { ConsoleLogger } from "@rotorsoft/act";
+import { MyLogger } from "../src/index.js";
+
+runLoggerDifferentialTck({
+  name: "Console vs MyLogger",
+  // First entry is the reference; every other logger must match its
+  // robustness/structural outcome vector.
+  loggers: [
+    { name: "ConsoleLogger", factory: () => new ConsoleLogger({ level: "trace" }) },
+    { name: "MyLogger", factory: () => new MyLogger({ level: "trace" }) },
+  ],
+});
+```
+
+A logger that throws on a cyclic payload the reference tolerates, or returns a non-conforming child, diverges from the reference outcome vector.
+
 ## When the Logger port changes
 
 If the framework extends the Logger interface, matching cases land in `libs/act-tck/src/logger-tck.ts`. Because the contract is narrow, breaking changes are rare — the most likely evolution is a new structured method (`flush`, `withSpan`, …) added behind a capability flag.

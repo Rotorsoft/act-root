@@ -115,6 +115,8 @@ Every breaking (major) release ships a migration guide in the **same PR** that l
 
 The documentation site is [versioned](https://docusaurus.io/docs/versioning): the live `docs/` folder is the **Current** set and tracks the latest API, while each released line is snapshotted under `docs/versioned_docs/` and selectable from the navbar version dropdown. Older-major users get a pinned reference; the migration guide for a release sits next to the API docs it describes.
 
+The first such page is [Migrating to 1.x](docs/docs/guides/migrating-to-1.x.md): the `1.x` line ships no breaking change, so the guide documents the upgrade-within-major policy and how to read the versioned docs, and proves the template end to end for the next breaking release to fill in.
+
 ## Per-library status
 
 | Package | Tracks core 1.0? |
