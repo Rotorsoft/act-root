@@ -18,4 +18,4 @@ Use `Closes #N` with the GitHub issue number (not the project key).
 
 <!-- Additive vs. breaking, with files touched. Skip if no charter-covered files changed. -->
 
-- [ ] This PR adds new public surface (export, builder method, port method, or lifecycle event) and links an [RFC](../rfcs/README.md) — or it adds none.
+- [ ] This PR adds new public surface (export, builder method, port method, or lifecycle event) and links an [RFC](../rfcs/README.md) — or it adds none. <!-- CI's `rfc-gate` job (scripts/check-rfc-gate.mjs) fails surface-growing PRs that add or link no `rfcs/NNNN-*.md`. -->

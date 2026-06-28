@@ -86,6 +86,26 @@ jobs:
             act-diagram: ['libs/act-diagram/**']
             act-tck:     ['libs/act-tck/**']
 
+  # RFC gate (#1061). Enforces the `rfcs/` process mechanically: if a PR grows
+  # the public-surface stability snapshot (new export / builder method / port
+  # method / lifecycle event) without adding or linking an `rfcs/NNNN-*.md`, it
+  # fails. Pure renames/removals and non-surface diffs pass — the charter and
+  # the snapshot diff itself already cover those. Runs on PRs only; needs full
+  # history to diff against the base branch. Dependency-free (git + node), so no
+  # install/build step. See scripts/check-rfc-gate.mjs and rfcs/README.md.
+  rfc-gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: enforce RFC gate for public-surface additions
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-rfc-gate.mjs
+
   ci:
     needs: changes
     if: needs.changes.outputs.src-changed == 'true'
