@@ -226,25 +226,23 @@ jobs:
       # ratio check when the baseline p50 is below a 1.0 ms absolute floor
       # (sub-ms ops are noise-dominated). See each package's perf-check.ts.
       #
-      # REPORT-ONLY for now (`continue-on-error: true`): a breach annotates
-      # the run but does NOT fail the build. This is intentional during
-      # rollout — the act-pg baseline ships empty (`{"results":[]}`) and is
-      # populated by CI / a maintainer running `bench:update` on a real DB,
-      # so the budget can't engage until the numbers prove stable across a
-      # few runs. Flip these to blocking (drop `continue-on-error`) once the
-      # baselines have a track record. The pg connection needs no extra env:
-      # PostgresStore defaults (host/db/user/password = postgres, the docker
-      # service's settings) already match, exactly like the act-pg tests.
-      - name: act-pg perf gate (report-only)
+      # BLOCKING (#1094): a budget breach fails the PR. Baselines were
+      # generated on this CI runner via the perf-baseline.yml workflow, so they
+      # match the hardware the gate runs on — the laptop-vs-runner mismatch that
+      # report-only guarded against is gone, and the 2.0×/1.5× tolerances + the
+      # 1.0 ms floor absorb run-to-run variance. If a scenario proves noisy,
+      # refresh the baseline (re-run perf-baseline.yml) or widen its budget —
+      # don't silence the gate. The pg connection needs no extra env:
+      # PostgresStore defaults (host/db/user/password = postgres) match the
+      # docker service.
+      - name: act-pg perf gate
         if: needs.changes.outputs.perf-changed == 'true'
-        continue-on-error: true
         run: |
           set -o pipefail
           pnpm -F @rotorsoft/act-pg bench:run
           pnpm -F @rotorsoft/act-pg bench:check 2>&1 | tee bench-pg.log
-      - name: act-sqlite perf gate (report-only)
+      - name: act-sqlite perf gate
         if: needs.changes.outputs.perf-changed == 'true'
-        continue-on-error: true
         run: |
           set -o pipefail
           pnpm -F @rotorsoft/act-sqlite bench:run
@@ -255,11 +253,10 @@ jobs:
           needs.changes.outputs.perf-changed == 'true'
         run: |
           {
-            echo "## Adapter perf gate (report-only)"
+            echo "## Adapter perf gate"
             echo ""
             echo "Real-adapter p50 regression budgets — act-pg 2.0×, act-sqlite"
-            echo "1.5×, both with a 1.0 ms absolute floor. Report-only until the"
-            echo "baselines prove stable, then flipped to blocking."
+            echo "1.5×, both with a 1.0 ms absolute floor. A breach fails the PR."
             echo ""
             echo "### act-pg"
             echo '```'
