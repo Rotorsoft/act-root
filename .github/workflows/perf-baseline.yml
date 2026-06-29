@@ -44,7 +44,7 @@ jobs:
       - run: pnpm install
       - run: pnpm -F @rotorsoft/act-pg bench:update
       - run: pnpm -F @rotorsoft/act-sqlite bench:update
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: perf-baselines
           path: |
