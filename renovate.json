@@ -33,6 +33,12 @@
       "matchManagers": ["github-actions"],
       "matchPackageNames": ["node"],
       "minimumReleaseAge": "30 days"
+    },
+    {
+      "description": "pnpm.overrides are security pins, not feature upgrades. They force a transitive dep to the latest *patch within its current major* (the CVE fix). A major bump jumps the override target past the major its consumers (Docusaurus, webpack-dev-server, babel-7 plugins) are written against, leaving peers unsatisfied and breaking the docs build. Closed #1102/#1103/#1104 for exactly this. Patch/minor on overrides is still fine.",
+      "matchDepTypes": ["pnpm.overrides"],
+      "matchUpdateTypes": ["major"],
+      "enabled": false
     }
   ],
   "lockFileMaintenance": {
