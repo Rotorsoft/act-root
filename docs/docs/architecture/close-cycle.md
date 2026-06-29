@@ -178,88 +178,92 @@ For a stream that's been *restarted* but not tombstoned (one `__snapshot__` even
 
 ## Online close-the-books
 
-`Act.close(targets)` is the **explicit** close path — the operator hands the framework a list of stream names, the cycle runs once, the streams get truncated. Online close is the **declarative** version of the same primitive: each state's builder declares a predicate, the framework polls candidates on a background ticker, and eligible streams pass through the same `run_close_cycle` pipeline above.
+`Act.close(targets)` is the **explicit** close path — the operator hands the framework a list of stream names, the cycle runs once, the streams get truncated. Online close is the **declarative** version of the same primitive: a state declares a close policy, and the framework retires eligible streams without anyone calling `close`. As of [#1090](https://github.com/Rotorsoft/act-root/issues/1090) it is no longer a background sweep. `.autocloses(policy)` compiles to an internal **reaction** that rides the same drain the rest of the app already runs, and that reaction reuses `run_close_cycle` (phases 0–6 above) when a stream finally qualifies.
 
 ### Surface
 
 Two state-builder declarators:
 
-- `.autocloses(predicate)` — `(stream, head: Committed<TEvents,...>, count) => boolean`. The cycle calls this once per candidate stream; truthy results queue for truncate.
+- `.autocloses(policy)` — a declarative `AutoclosePolicy` object (`{ is, after, reaches, or }`). The opaque function-predicate form is gone; see [the migration note in the close-policies guide](../guides/close-policies.md#migrating-from-the-function-predicate-form).
 - `.archives(fn)` — `(stream, head) => Promise<void>`. Optional companion. Runs while the stream is guarded but **before** truncate so the host can persist events to durable storage (S3, cold tier) before the tombstone lands.
 
-Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.discloses`). Absent → the state opts out of online close entirely (zero per-tick cost).
+Both are state-level (one per state, last-write-wins, mirror of `.snap` / `.discloses`). Absent → the state opts out of online close entirely; the orchestrator synthesizes no reaction for it and pays nothing.
 
-Autoclose is low-urgency housekeeping, so each run sweeps the whole store and the cadence is how often that repeats — a couple of times a day, not a hot path. Five `ActOptions` knobs, validated at `act().build()`:
+### Autoclose as a synthesized reaction
 
-- `autocloseCycleMinutes` — how often a sweep runs, in minutes. Default 720 (12 h), range `[1, 1440]` (1 minute to 24 hours).
-- `closeBatchSize` — the per-batch page size within a run. A run pages through the whole store this many streams at a time, bounding memory and the per-batch write burst. Default 64, range `[1, 1024]`.
-- `closeYieldMs` — delay between batches. Default 0, range `[0, 1000]`. SQLite operators raise this to release the writer lock.
-- `closeOnError` — whether a thrown predicate counts as "close this stream". Default false (skip the stream, log the error).
-- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. A tick only sweeps when the current hour is inside `[start, end)`; hours are `[0, 23]` integers in `timeZone` (IANA, default UTC, DST-correct), and `start > end` is an overnight window. Omit to sweep on every tick.
+At construction (before `classify_registry`, so its dynamic resolver is discovered and its target subscribed), the orchestrator walks every state that declared `.autocloses(policy)` and injects one reaction registered against every event that state owns. The handler doesn't sweep anything — it fires when the aggregate commits, evaluates the policy against the aggregate's **live head**, and either closes, defers, or does nothing.
 
-### A run
+The subtle part is *where* the reaction runs. It runs on a **synthetic per-aggregate stream**: `target = __autoclose__:<stream>`, `source = <stream>`. Keeping the autoclose lease off the aggregate's own watermark is load-bearing — if it shared a watermark with the aggregate's other reactions, an autoclose deferral would hold all of them back too (a deferral parks the whole stream). The synthetic target isolates the autoclose lease so it can defer freely; the close still *targets* the aggregate.
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│  AutocloseController.run_once                           │
-│  ─ guard against overlapping runs                       │
-│  ─ skip if the off-hours window excludes the current hr  │
-│  ─ compute close_correlation(correlator, $autoclose)    │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  run_autoclose_cycle — page through the whole store      │
-│  loop until a short page ends the sweep:                 │
-│    Store.query_stats({}, { count: true,                 │
-│      exclude: [TOMBSTONE_EVENT],                        │
-│      after: cursor, limit: closeBatchSize })            │
-│    for each stream on the page:                          │
-│      owner = event_to_state.get(head.name)              │
-│      predicate = registry.autoclose_policy(owner.name)  │
-│      if predicate(stream, head, count) → candidate      │
-│      (state.archive threaded as CloseTarget.archive)    │
-│    flush this page's candidates as ONE batch via        │
-│      run_close_cycle (phases 0-6 above) → ONE probe     │
-│    yield closeYieldMs; advance cursor to the last stream │
-└────────────────────────┬────────────────────────────────┘
-                         │
-                         ▼
-┌─────────────────────────────────────────────────────────┐
-│  Controller: if truncated.size > 0 →                    │
-│    emit("closed", close_result)                         │
-└─────────────────────────────────────────────────────────┘
+            aggregate commits event e
+                       │
+                       ▼  (synthetic stream __autoclose__:<e.stream>, source = e.stream)
+          ┌────────────────────────────────────────────┐
+          │ off-hours window check                      │  outside the window →
+          │   in_autoclose_window(autocloseWindow, now) │  DeferSignal(now + cycleMinutes)
+          └───────────────────┬────────────────────────┘
+                              │ in window
+                              ▼
+          ┌────────────────────────────────────────────┐
+          │ query_stats([aggregate], {count,            │  no live (non-tombstone)
+          │   exclude:[TOMBSTONE_EVENT]})               │  head → return (already closed)
+          └───────────────────┬────────────────────────┘
+                              │ live head + count
+                              ▼
+          ┌────────────────────────────────────────────┐
+          │ policy(aggregate, head, count) ?            │
+          └───────┬───────────────────────┬────────────┘
+            true  │                        │ false
+                  ▼                        ▼
+       CloseSignal({ stream,    policy has a time gate (after) ?
+         archive, at: head.id })   yes → DeferSignal(head.created + min after)
+                  │                  no  → ack, wait for the next event
+                  ▼
+       DrainController.on_close → run_close_cycle(targets) → emit("closed")
 ```
 
-The crucial composition: **online close doesn't reinvent any phase**. It builds a candidate list and hands it to `run_close_cycle`. Safety-partition, tombstone-guard, archive-while-guarded, atomic truncate — all the invariants on this page apply to the autoclose path unchanged.
+Because the policy is re-evaluated against the live head on every visit, a **reopened** stream re-evaluates correctly: a ticket resolved and then reopened has `Opened` at head, so an `is: "Resolved"` policy no longer holds and the stream is not closed. The handler runs with `blockOnError: false` and `maxRetries: 3` — a transient `query_stats`/store error retries rather than quarantining the synthetic stream, and a stream that vanishes mid-cycle (a competing worker truncated it) yields an empty `query_stats` result and the handler simply returns.
 
-Closed streams are tombstoned and excluded from `query_stats`, and they sort behind the cursor, so the forward scan never revisits them. Each page is one batch is one safety probe; the `closeBatchSize` paging keeps a run from materializing every candidate or truncating thousands at once, even though a single run covers the whole store.
+### Defer, not poll
 
-### Sweep latency
+When the policy hasn't matched yet but has a time component (`after`), the handler throws `DeferSignal(head.created + min_after_ms)` — the earliest instant the time gate could open. That becomes a `HandleResult.defer`: the drain does **not** advance the watermark and does **not** bump `retry`, persists the due-time via `Store.defer`, and `claim` skips the synthetic stream until the due-time passes. The persisted `deferred_at` is the correctness mechanism — it holds across every competing worker. A per-worker `DeferTimer` is layered on top purely as an optimization, waking the local worker promptly at the due-time instead of on the next ordinary cycle; it clamps long horizons to `setTimeout`'s ~24.8-day ceiling and re-arms, since the persisted column is what actually gates the re-claim. Policies with no time gate (`is` / `reaches` only) don't park on a due-time at all — they ack and wait for the next event on the aggregate to re-trigger.
 
-A stream isn't closed the instant it qualifies — it closes on the next run, up to one `autocloseCycleMinutes` away (and only during the off-hours window, if one is set). This fits autoclose semantics: eligibility always means "old" (past a retention age, or terminal-plus-grace), never "right this second." Tighten the window by shortening `autocloseCycleMinutes`.
+When the policy *does* match, the handler throws `CloseSignal({ stream, archive, at: head.id })`. `build_handle` turns it into a `HandleResult.close`, the drain acks the synthetic reaction to the live head id (`at`) so the close-cycle safety probe — which matches subscriptions by `source = aggregate` — sees autoclose caught up instead of blocking its own close, and `DrainController.on_close` hands the target to the orchestrator's `run_close_cycle`. From there the explicit-close phases run unchanged: safety partition, tombstone guard, archive-while-guarded, atomic truncate, then `emit("closed", result)`.
 
-### Lifecycle
+The crucial composition is the same as before: **online close doesn't reinvent any phase.** It reaches the candidate a different way (a reaction firing on commit, deferring across the cooldown) but closes through the identical `run_close_cycle` machinery `app.close` uses.
 
-- Construction-time: the orchestrator builds the controller only when at least one state declares `.autocloses(...)`. Otherwise `_autoclose` stays `undefined` and the orchestrator pays zero per-tick cost.
-- `start_correlations()` starts the ticker; `stop_correlations()` (and therefore `shutdown()` / `dispose()`) stops it.
-- The ticker `unref()`s its Timeout so a forgotten autoclose worker doesn't keep the process alive after the rest of the app shuts down.
+### Config knobs
+
+`.autocloses` still reads a handful of `ActOptions`, validated at `act().build()` (a `ZodError` at build, never on the first cycle):
+
+- `autocloseWindow` — optional off-hours gate, `{ start, end, timeZone? }`. When the current hour is outside `[start, end)` the handler defers to the next cycle instead of closing. Hours are `[0, 23]` integers in `timeZone` (IANA, default UTC, DST-correct); `start > end` is an overnight window. Omit to evaluate on every commit.
+- `autocloseCycleMinutes` — the re-check cadence used by the off-hours gate. When a commit lands outside the window, the handler defers by this many minutes rather than closing. Default 720 (12 h), range `[1, 1440]`. It is no longer a full-store sweep interval.
+- `closeBatchSize` / `closeYieldMs` / `closeOnError` — retained on `ActOptions`; with the sweep removed, `closeBatchSize` and `closeYieldMs` now matter only when an explicit bulk `app.close` truncates many streams at once.
+
+### Latency
+
+A stream closes shortly after it qualifies, not on a fixed sweep boundary: the reaction fires on the aggregate's own commits, and for `after`-style cooldowns the persisted defer wakes the worker at the exact cooldown instant (modulo the off-hours window, which pushes the re-check to the next in-window cycle). Eligibility still means "old" — terminal-plus-grace or past a retention age — so the close lands when the cooldown elapses rather than "right this second."
 
 ### What's NOT online-close
 
 - **Restarting** streams. Online close always tombstones — `restart: true` is an explicit-close-only feature. Hosts that want "rotate this stream every 24h" run an explicit `app.close({ stream, restart: true })` from their own scheduler.
-- **Cross-state coordination**. Each state's predicate sees only its own candidates. There's no "close stream A only if stream B is closed" primitive — the host runs that policy explicitly if they need it.
-- **Per-tick partial commits**. The cycle either succeeds or fails per batch; a thrown predicate inside a batch logs and skips the stream (or closes it, under `closeOnError: true`). The batch itself never half-truncates.
+- **Cross-state coordination**. Each state's policy sees only its own aggregate's head. There's no "close stream A only if stream B is closed" primitive — the host runs that policy explicitly if they need it.
+- **Arbitrary conditions**. The declarative policy derives a due-time and a terminal set; conditions it can't express (per-stream metadata, a saga waiting on the *absence* of an event) belong in your own logic or scheduler calling `app.close`.
 
 ### Pointers
 
-- `libs/act/src/internal/autoclose-cycle.ts` — `run_autoclose_cycle` + `AutocloseController`
+- `libs/act/src/act.ts` — autoclose-reaction synthesis (`__autoclose__:` synthetic stream, off-hours gate, defer-to-cooldown, `CloseSignal`) and the `DrainController.on_close` → `run_close_cycle` wiring
+- `libs/act/src/internal/defer-signal.ts` / `close-signal.ts` — the control-flow signals a reaction throws to defer or close
+- `libs/act/src/internal/defer-timer.ts` — the per-worker wake optimization over `stream → due-time` (clamped to `setTimeout`'s ceiling)
+- `libs/act/src/internal/autoclose-policy.ts` — `AutoclosePolicy` schema, `compile_autoclose_policy`, `policy_min_after_ms`
+- `libs/act/src/internal/autoclose-config.ts` — `autocloseWindow` / `autocloseCycleMinutes` resolver + `in_autoclose_window`
 - `libs/act/src/builders/state-builder.ts` — `.autocloses` / `.archives` declarators
-- `libs/act/test/autoclose-builder.spec.ts` — declarator + registry + validation
-- `libs/act/test/autoclose-cycle.spec.ts` — cycle behavior against `InMemoryStore`
-- `libs/act/test/autoclose-controller.spec.ts` — controller lifecycle + reentrancy + ticker error handling
+- `libs/act/test/autoclose-reaction.spec.ts` — synthesized-reaction behavior (immediate close, live-head reopen, cooldown park, threshold, off-hours defer)
+- `libs/act/test/autoclose-policy.spec.ts` / `autoclose-builder.spec.ts` — policy compilation + declarator validation
+- `libs/act/test/defer-outcome.spec.ts` / `defer-timer.spec.ts` — the `defer` outcome and the wake timer
 - `libs/act-pg/test/autoclose.spec.ts` / `libs/act-sqlite/test/autoclose.spec.ts` — adapter integration
-- [Online close-the-books policies](../guides/close-policies.md) — operator-facing guide for picking and writing predicates
+- [Online close-the-books policies](../guides/close-policies.md) — operator-facing guide for writing policies
 
 ## Pointers
 
