@@ -60,7 +60,7 @@
     "@rotorsoft/act-pg": "workspace:^"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.0",
+    "@biomejs/biome": "^2.5.1",
     "@commitlint/cli": "^21.0.2",
     "@commitlint/config-conventional": "^21.0.2",
     "@fast-check/vitest": "^0.4.1",
@@ -81,7 +81,7 @@
     "chance": "^1.1.13",
     "concurrently": "^10.0.3",
     "fast-check": "^4.8.0",
-    "lint-staged": "^17.0.7",
+    "lint-staged": "^17.0.8",
     "semantic-release": "^25.0.5",
     "semantic-release-monorepo": "^8.0.2",
     "simple-git-hooks": "^2.13.1",
