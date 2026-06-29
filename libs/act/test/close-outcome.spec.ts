@@ -58,8 +58,10 @@ describe("close outcome (integration)", () => {
   it("runs the archiver carried by the signal before truncating", async () => {
     const archived: string[] = [];
     const closing = async (_e: unknown, stream: string) => {
-      throw new CloseSignal(async () => {
-        archived.push(stream);
+      throw new CloseSignal({
+        archive: async () => {
+          archived.push(stream);
+        },
       });
     };
 

@@ -125,4 +125,24 @@ describe("DeferTimer", () => {
     // parked set is left intact for a later reschedule
     expect(t.size).toBe(1);
   });
+
+  it("clamps a far-future due-time to the 32-bit timer ceiling and re-arms", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    let wakes = 0;
+    const t = new DeferTimer(() => {
+      wakes++;
+    });
+    // 90 days out — well past setTimeout's ~24.8-day ceiling.
+    t.set("far", 90 * 86_400_000);
+    t.schedule();
+    // Does not fire before the ceiling (would overflow → fire-now without the clamp).
+    vi.advanceTimersByTime(2_147_483_646);
+    expect(wakes).toBe(0);
+    // Wakes at the ceiling; the still-future entry survives for a re-arm.
+    vi.advanceTimersByTime(1);
+    expect(wakes).toBe(1);
+    expect(t.size).toBe(1);
+    expect(t.is_deferred("far")).toBe(true);
+  });
 });

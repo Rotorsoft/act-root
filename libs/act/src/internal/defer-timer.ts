@@ -33,6 +33,15 @@
  *
  * @internal
  */
+
+/**
+ * Node's `setTimeout` delay is a 32-bit signed int (~24.8 days). A larger
+ * delay overflows and fires immediately, so we cap at this and re-arm.
+ *
+ * @internal
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export class DeferTimer {
   private readonly _due = new Map<string, number>();
   private _timer: ReturnType<typeof setTimeout> | undefined;
@@ -93,7 +102,16 @@ export class DeferTimer {
     }
     let earliest = Number.POSITIVE_INFINITY;
     for (const t of this._due.values()) if (t < earliest) earliest = t;
-    const delay = Math.max(0, earliest - Date.now());
+    // Clamp to setTimeout's 32-bit ceiling (~24.8 days). A longer due-time
+    // (e.g. a 90-day autoclose cooldown) would otherwise overflow and Node
+    // fires it immediately, busy-looping. Instead we wake at the ceiling and
+    // re-arm: the GC below keeps the still-future entry, `on_wake` re-schedules
+    // for the remaining span, and (for persisted defers) `claim` skips the
+    // stream until its real due-time anyway.
+    const delay = Math.min(
+      Math.max(0, earliest - Date.now()),
+      MAX_TIMER_DELAY_MS
+    );
     this._timer = setTimeout(() => {
       this._timer = undefined;
       // Garbage-collect the entries that have come due so the consumer's

@@ -181,7 +181,10 @@ export function build_handle<
             // Advance to the live head the handler evaluated against (when
             // provided) so the close-cycle guard sees this reaction caught up.
             acked_at: error.at ?? event.id,
-            close: { stream, archive: error.archive },
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream.
+            close: { stream: error.stream ?? stream, archive: error.archive },
           };
         return finalize(
           lease,
