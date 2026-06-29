@@ -323,6 +323,29 @@ describe("PostgresStore", () => {
     });
   });
 
+  describe("defer", () => {
+    it("returns 0 when rowCount is undefined for array form (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.defer(["never-deferred"], Date.now());
+      expect(result).toBe(0);
+    });
+
+    it("returns 0 when rowCount is undefined for filter form (defensive)", async () => {
+      vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
+        // @ts-expect-error mock — pg type says rowCount: number | null
+        { rowCount: null }
+      );
+      const result = await store.defer(
+        { stream: "^never-deferred-" },
+        Date.now()
+      );
+      expect(result).toBe(0);
+    });
+  });
+
   describe("forget_pii", () => {
     it("returns 0 when rowCount is undefined (defensive)", async () => {
       vi.spyOn(pg.Pool.prototype, "query").mockResolvedValue(
