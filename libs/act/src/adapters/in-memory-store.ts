@@ -100,10 +100,6 @@ class InMemoryStream {
     );
   }
 
-  get deferred_at() {
-    return this._deferred_at;
-  }
-
   /**
    * Hold this stream out of `claim` until `deferred_at` (ms since epoch).
    * Set by a deliberate `defer` outcome — not a failure, so retry/blocked

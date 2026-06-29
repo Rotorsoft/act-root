@@ -124,6 +124,14 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
 
+/**
+ * Prefix for the synthetic per-aggregate stream the autoclose reaction (#1090)
+ * runs on. `target = \`${AUTOCLOSE_TARGET_PREFIX}${aggregate}\``, `source =
+ * aggregate` — a watermark distinct from the aggregate's own reactions, so an
+ * autoclose defer never short-circuits them. Internal; not a public surface.
+ */
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
+
 // Re-export the autoclose config surface so operators can
 // `import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
 // from "@rotorsoft/act"`. The implementation lives in
@@ -562,11 +570,21 @@ export class Act<
       const after_ms = st.autoclose_after_ms;
       const archiver = st.archive;
       const reaction: Reaction<TEvents> = {
-        resolver: (e) => ({ target: e.stream, source: e.stream }),
-        // Never block a stream on autoclose: a transient query/store error
-        // should retry, not quarantine the aggregate's own stream.
+        // Run on a SYNTHETIC stream — `source` is the aggregate, `target` is a
+        // per-aggregate `__autoclose__` key — so the autoclose reaction never
+        // shares a watermark with the aggregate's own reactions. A shared
+        // watermark would let autoclose's defer short-circuit the aggregate's
+        // other reactions (the "a defer affects all reactions on a stream"
+        // hazard). The close still targets the aggregate (`source`).
+        resolver: (e) => ({
+          target: `${AUTOCLOSE_TARGET_PREFIX}${e.stream}`,
+          source: e.stream,
+        }),
+        // Never block on autoclose: a transient query/store error should retry,
+        // not quarantine the synthetic stream.
         options: { blockOnError: false, maxRetries: 3 },
-        handler: async (_event, stream) => {
+        handler: async (event) => {
+          const aggregate = event.stream;
           const config = this._autoclose_config;
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
@@ -574,23 +592,25 @@ export class Act<
             throw new DeferSignal(
               Date.now() + config.autocloseCycleMinutes * 60_000
             );
-          const stats = await store().query_stats([stream], {
+          const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
           });
-          const entry = stats.get(stream);
+          const entry = stats.get(aggregate);
           // No live (non-tombstone) head → already closed, nothing to do.
           if (!entry) return;
           const head = entry.head;
           // `count` is always present — query_stats is called with
           // `count: true` above, so the option contract guarantees it.
-          if (predicate(stream, head, entry.count!))
-            throw new CloseSignal(
-              archiver ? () => archiver(stream, head) : undefined,
-              // Ack to the live head so the close-cycle guard sees this
-              // reaction caught up (it evaluated against head, not `_event`).
-              head.id
-            );
+          if (predicate(aggregate, head, entry.count!))
+            throw new CloseSignal({
+              stream: aggregate,
+              archive: archiver ? () => archiver(aggregate, head) : undefined,
+              // Ack this reaction's own watermark to the live head so the
+              // close-cycle guard (which matches subscriptions by source =
+              // aggregate) sees it caught up instead of blocking its own close.
+              at: head.id,
+            });
           // Not eligible yet: park on the cooldown's earliest opening when the
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a `reaches` threshold).
