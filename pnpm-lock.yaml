@@ -30,7 +30,7 @@ overrides:
   webpack-dev-server@<=5.2.3: '>=5.2.5'
   uuid@<11.1.1: '>=14.0.0'
   ws@>=7.0.0 <7.5.11: '>=7.5.11'
-  http-proxy-middleware@>=0.16.0 <2.0.10: 2.0.10
+  http-proxy-middleware@>=0.16.0 <2.0.10: 4.1.1
   markdown-it@<=14.1.1: 14.2.0
   launch-editor@<=2.14.0: 2.14.1
   js-yaml@>=4.0.0 <=4.1.1: 4.2.0
@@ -4160,9 +4160,6 @@ packages:
   '@types/http-errors@2.0.5':
     resolution: {integrity: sha512-r8Tayk8HJnX0FztbZN7oVqGccWgw98T/0neJphO91KkmOzug1KkofZURD4UaD5uH8AqcFLfdPErnBod0u71/qg==}
 
-  '@types/http-proxy@1.17.17':
-    resolution: {integrity: sha512-ED6LB+Z1AVylNTu7hdzuBqOgMnvG/ld6wGCG8wFnAzKX5uyW2K3WD52v0gnLCTK/VLpXtKckgWuyScYK6cSPaw==}
-
   '@types/istanbul-lib-coverage@2.0.6':
     resolution: {integrity: sha512-2QF/t/auWm0lsy8XtKVPG19v3sSOQlJe/YHZgfjb/KBBHOGSV+J2q/S671rcq9uTBrLAXmZpqJiaQbMT+zNU1w==}
 
@@ -5855,15 +5852,6 @@ packages:
     resolution: {integrity: sha512-b6suED+5/3rTpUBdG1gupIl8MPFCAMA0QXwmljLhvCUKcUvdE4gWky9zpuGCcXHOsz4J9wPGNWq6OKpmIzz3hQ==}
     hasBin: true
 
-  follow-redirects@1.16.0:
-    resolution: {integrity: sha512-y5rN/uOsadFT/JfYwhxRS5R7Qce+g3zG97+JrtFZlC9klX/W5hD7iiLzScI4nZqUS7DNUdhPgw4xI8W2LuXlUw==}
-    engines: {node: '>=4.0'}
-    peerDependencies:
-      debug: '*'
-    peerDependenciesMeta:
-      debug:
-        optional: true
-
   form-data-encoder@2.1.4:
     resolution: {integrity: sha512-yDYSgNMraqvnxiEXO4hi88+YZxaHC6QKzb5N84iRCTDeRO7ZALpir/lVmf/uXUhnwUr2O4HU8s/n6x+yNjQkHw==}
     engines: {node: '>= 14.17'}
@@ -5954,6 +5942,7 @@ packages:
   git-raw-commits@5.0.1:
     resolution: {integrity: sha512-Y+csSm2GD/PCSh6Isd/WiMjNAydu0VBiG9J7EdQsNA5P9uXvLayqjmTsNlK5Gs9IhblFZqOU0yid5Il5JPoLiQ==}
     engines: {node: '>=18'}
+    deprecated: Deprecated and no longer maintained. Use @conventional-changelog/git-client instead.
     hasBin: true
 
   github-slugger@1.5.0:
@@ -6170,18 +6159,9 @@ packages:
     resolution: {integrity: sha512-FcF8VhXYLQcxWCnt/cCpT2apKsRDUGeVEeMqGu4HSTu29U8Yw0TLOjdYIlDsYk3IkUh+taX4IDWpPcCqKDhCjA==}
     engines: {node: '>= 20'}
 
-  http-proxy-middleware@2.0.10:
-    resolution: {integrity: sha512-RKzRWNPxUZqbuk3BC5mGVJbBnWgr+diEnjJexIOytFbBzDy88Fbh/YvBr3DsNrl1jYAfjWfpATEv0NO35FDuPQ==}
-    engines: {node: '>=12.0.0'}
-    peerDependencies:
-      '@types/express': ^4.17.13
-    peerDependenciesMeta:
-      '@types/express':
-        optional: true
-
-  http-proxy@1.18.1:
-    resolution: {integrity: sha512-7mz/721AbnJwIVbnaSv1Cz3Am0ZLT/UBwkC92VlxhXv/k/BBQfM2fXElQNC27BVGr0uwUpplYPQM9LnaBMR5NQ==}
-    engines: {node: '>=8.0.0'}
+  http-proxy-middleware@4.1.1:
+    resolution: {integrity: sha512-KX5ZofGXLFXqFAkQoOWZ+rTtaLTut7m0gyL+QzJrdejtIZ+F4bPPDoe7reISg2+v0CAz5OfVwEJEhty7X+e57g==}
+    engines: {node: ^22.15.0 || ^24.0.0 || >=26.0.0}
 
   http2-wrapper@2.2.1:
     resolution: {integrity: sha512-V5nVw1PAOgfI3Lmeaj2Exmeg7fenjhRUgz1lPSezy1CuhPYbgQtbQj4jZfEAEMlaL+vupsvhjqCyjzob0yxsmQ==}
@@ -6190,6 +6170,9 @@ packages:
   https-proxy-agent@9.0.0:
     resolution: {integrity: sha512-/MVmHp58WkOypgFhCLk4fzpPcFQvTJ/e6LBI7irpIO2HfxUbpmYoHF+KzipzJpxxzJu7aJNWQ0xojJ/dzV2G5g==}
     engines: {node: '>= 20'}
+
+  httpxy@0.5.3:
+    resolution: {integrity: sha512-SMS9V6Sn7VWaS11lYhoAr0ceoaiolTWf4jYdJn0NJhCdKMu9R2H9Fh0LBDWBHQF6HRLI1PmaePYsjanSpE5PEw==}
 
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
@@ -6390,10 +6373,6 @@ packages:
   is-path-inside@3.0.3:
     resolution: {integrity: sha512-Fd4gABb+ycGAmKou8eMftCupSir5lRxqf4aD/vd0cD2qc4HL07OjCeuHMr8Ro4CoMaeCKDB0/ECBOVWjTwUvPQ==}
     engines: {node: '>=8'}
-
-  is-plain-obj@3.0.0:
-    resolution: {integrity: sha512-gwsOE28k+23GP1B6vFl1oVh/WOzmawBrKwo5Ev6wMKzPkaXaCDIQKzLnvsA42DRlbVTWorkgTKIviAKCWkfUwA==}
-    engines: {node: '>=10'}
 
   is-plain-obj@4.1.0:
     resolution: {integrity: sha512-+Pgi+vMuUNkJyExiMBt5IlFoMyKnr5zhJ4Uspz58WOhBF5QoIZkFyNHIbBAtHwzVAgk5RtndVNsDRN61/mmDqg==}
@@ -8362,9 +8341,6 @@ packages:
 
   require-like@0.1.2:
     resolution: {integrity: sha512-oyrU88skkMtDdauHDuKVrgR+zuItqr6/c//FXzvmxRGMexSDc6hNvJInGW3LL46n+8b50RykrvwSUIIQH2LQ5A==}
-
-  requires-port@1.0.0:
-    resolution: {integrity: sha512-KigOCHcocU3XODJxsu8i/j8T9tzT4adHiecwORRQ0ZZFcp7ahwXuRU1m+yuO90C5ZUyGeGfocHDI14M3L3yDAQ==}
 
   resolve-alpn@1.2.1:
     resolution: {integrity: sha512-0a1F4l73/ZFZOakJnQ3FvkJ2+gSTQWz/r2KE5OdDY0TxPm5h4GkqkWWfM47T7HsbnOtcJVEF4epCVy6u7Q3K+g==}
@@ -11463,7 +11439,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11588,7 +11563,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11628,7 +11602,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11658,7 +11631,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11683,7 +11655,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - react
@@ -11713,7 +11684,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11739,7 +11709,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11766,7 +11735,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11792,7 +11760,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11823,7 +11790,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11853,7 +11819,6 @@ snapshots:
       - '@swc/css'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -11892,7 +11857,6 @@ snapshots:
       - '@types/react'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - search-insights
@@ -11946,7 +11910,6 @@ snapshots:
       - '@types/react'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - supports-color
@@ -12011,7 +11974,6 @@ snapshots:
       - '@types/react'
       - bufferutil
       - csso
-      - debug
       - esbuild
       - lightningcss
       - search-insights
@@ -13904,10 +13866,6 @@ snapshots:
 
   '@types/http-errors@2.0.5': {}
 
-  '@types/http-proxy@1.17.17':
-    dependencies:
-      '@types/node': 25.9.3
-
   '@types/istanbul-lib-coverage@2.0.6': {}
 
   '@types/istanbul-lib-report@3.0.3':
@@ -15746,8 +15704,6 @@ snapshots:
 
   flat@5.0.2: {}
 
-  follow-redirects@1.16.0: {}
-
   form-data-encoder@2.1.4: {}
 
   format@0.2.2: {}
@@ -16159,25 +16115,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  http-proxy-middleware@2.0.10(@types/express@4.17.25):
+  http-proxy-middleware@4.1.1:
     dependencies:
-      '@types/http-proxy': 1.17.17
-      http-proxy: 1.18.1
+      debug: 4.4.3
+      httpxy: 0.5.3
       is-glob: 4.0.3
-      is-plain-obj: 3.0.0
+      is-plain-obj: 4.1.0
       micromatch: 4.0.8
-    optionalDependencies:
-      '@types/express': 4.17.25
     transitivePeerDependencies:
-      - debug
-
-  http-proxy@1.18.1:
-    dependencies:
-      eventemitter3: 4.0.7
-      follow-redirects: 1.16.0
-      requires-port: 1.0.0
-    transitivePeerDependencies:
-      - debug
+      - supports-color
 
   http2-wrapper@2.2.1:
     dependencies:
@@ -16190,6 +16136,8 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+
+  httpxy@0.5.3: {}
 
   human-signals@2.1.0: {}
 
@@ -16327,8 +16275,6 @@ snapshots:
   is-path-cwd@2.2.0: {}
 
   is-path-inside@3.0.3: {}
-
-  is-plain-obj@3.0.0: {}
 
   is-plain-obj@4.1.0: {}
 
@@ -18590,8 +18536,6 @@ snapshots:
 
   require-like@0.1.2: {}
 
-  requires-port@1.0.0: {}
-
   resolve-alpn@1.2.1: {}
 
   resolve-from@4.0.0: {}
@@ -19786,7 +19730,7 @@ snapshots:
       connect-history-api-fallback: 2.0.0
       express: 4.22.1
       graceful-fs: 4.2.11
-      http-proxy-middleware: 2.0.10(@types/express@4.17.25)
+      http-proxy-middleware: 4.1.1
       ipaddr.js: 2.3.0
       launch-editor: 2.14.1
       open: 10.2.0
@@ -19802,7 +19746,6 @@ snapshots:
       webpack: 5.105.4(@swc/core@1.15.24)(esbuild@0.28.1)
     transitivePeerDependencies:
       - bufferutil
-      - debug
       - supports-color
       - tslib
       - utf-8-validate
