@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import type {
   BatchHandler,
   BlockedLease,
+  CloseTarget,
   Drain,
   DrainOptions,
   Fetch,
@@ -74,6 +75,16 @@ export type HandleResult = Readonly<{
    */
   defer?: number;
   /**
+   * Close request (#1090). Set when a handler throws `CloseSignal` to retire
+   * its stream: the triggering event is acked (so the closing reaction isn't
+   * seen as an in-flight consumer by the close-cycle safety guard) and the
+   * drain hands this {@link CloseTarget} to the orchestrator's `on_close`,
+   * which runs `run_close_cycle`. Carries the optional archiver from the
+   * signal. Distinct from {@link defer} (hold for later) — a close advances
+   * and retires.
+   */
+  close?: CloseTarget;
+  /**
    * Event id that threw, when a handler error occurred. Distinct from
    * {@link acked_at}: `failed_at = acked_at + 1` in dense streams, but
    * adapters with sparse ids give the trace the exact position. Always
@@ -115,6 +126,8 @@ export type DrainCycle<TEvents extends Schemas> = {
   readonly handled: HandleResult[];
   readonly acked: Lease[];
   readonly blocked: BlockedLease[];
+  /** Streams a handler asked to close this cycle (#1090) — handed to `on_close`. */
+  readonly closeable: CloseTarget[];
 };
 
 /**
@@ -174,6 +187,7 @@ export async function run_drain_cycle<
       handled: [],
       acked: [],
       blocked: [],
+      closeable: [],
     };
   }
 
@@ -266,7 +280,16 @@ export async function run_drain_cycle<
     for (const [at, streams] of by_time) await ops.defer(streams, at);
   }
 
-  return { leased, fetched, handled, acked, blocked };
+  // Collect close requests (#1090). A close result was already acked above
+  // (its event made progress, `defer === undefined`), which advances the
+  // requesting reaction past the terminal event so the close-cycle safety
+  // guard doesn't count it as an in-flight consumer. The orchestrator's
+  // `on_close` runs the actual `run_close_cycle`.
+  const closeable = handled
+    .filter((h) => h.close !== undefined)
+    .map((h) => h.close!);
+
+  return { leased, fetched, handled, acked, blocked, closeable };
 }
 
 /**
@@ -303,6 +326,13 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Close requested by a reaction (#1090). The controller calls this with the
+   * cycle's {@link CloseTarget}s after acks/blocks land; the orchestrator wires
+   * it to its `run_close_cycle` machinery (same path as `app.close`). Awaited so
+   * a slow close doesn't overlap the next cycle's claim on the controller.
+   */
+  readonly on_close: (targets: CloseTarget[]) => Promise<void>;
   /**
    * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
    * repeated store failures so the drain loop stops hammering a down
@@ -470,7 +500,7 @@ export class DrainController<
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
-      const { leased, fetched, handled, acked, blocked } = cycle;
+      const { leased, fetched, handled, acked, blocked, closeable } = cycle;
 
       // Cycle-level trace (ACT-1103) — one log line per drain pass:
       // claim + fetch + outcomes folded together so the operator sees
@@ -499,6 +529,11 @@ export class DrainController<
 
       if (acked.length) this._deps.on_acked(acked);
       if (blocked.length) this._deps.on_blocked(blocked);
+      // Run reaction-requested closes after acks land (#1090) — the close
+      // targets were acked above, so the close-cycle guard sees the requesting
+      // reaction as caught up. Awaited so a slow close doesn't overlap the
+      // next claim.
+      if (closeable.length) await this._deps.on_close(closeable);
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.

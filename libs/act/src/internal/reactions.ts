@@ -32,6 +32,7 @@ import {
   type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
+import { CloseSignal } from "./close-signal.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -170,6 +171,16 @@ export function build_handle<
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
           return { lease, handled, acked_at: at, defer: error.defer_at };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            acked_at: event.id,
+            close: { stream, archive: error.archive },
+          };
         return finalize(
           lease,
           handled,

@@ -610,6 +610,22 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        // Reaction-requested close (#1090). Runs the same close machinery as
+        // `app.close` (tombstone guard + archive + atomic truncate) for the
+        // targets a handler signalled via `CloseSignal`. No `correlate()` here
+        // — the drain that produced these targets has already correlated.
+        on_close: async (targets) => {
+          const close_actor = { id: "$close", name: "close" };
+          const result = await run_close_cycle(targets, {
+            reactive_events_size: this._reactive_events.size,
+            event_to_state: this._event_to_state,
+            load: this._es.load,
+            tombstone: this._es.tombstone,
+            logger: this._logger,
+            correlation: close_correlation(this._correlator, close_actor),
+          });
+          this.emit("closed", result);
+        },
         breaker: this._breaker,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
