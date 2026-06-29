@@ -219,10 +219,19 @@ Consequences to document and uphold:
    defer affects every reaction draining that stream — which is why independent
    schedules are separate streams, and why the builder must reject configurations
    that would put conflicting deadlines on one stream (Slice 2 validation).
-3. **Close from a reaction** — the reaction-scoped `IAct` exposes no `close`, so
-   autoclose's compiled reaction can't close directly. Settle the primitive in
-   Slice 1d (a close-from-reaction signal handled by the orchestrator, or adding
-   `close` to the scoped app).
+3. **Close from a reaction** — ~~the reaction-scoped `IAct` exposes no `close`~~.
+   **Resolved (Slice 1d): a `CloseSignal`**, mirroring `DeferSignal`. The
+   decider is lifecycle timing: a reaction handler is registered at **build
+   time**, but `Act.close` only exists at **construction time** (the orchestrator
+   is built *after* the registry), so a synthesized autoclose handler cannot
+   capture `close` directly. Instead it throws `CloseSignal` (optionally carrying
+   an archiver); `build_handle` turns it into a `HandleResult.close`,
+   `run_drain_cycle` collects the close targets, and the `DrainController` hands
+   them to an `on_close` callback the orchestrator wires to its existing
+   `run_close_cycle` (the same machinery `app.close` uses — tombstone guard +
+   archive-while-guarded + atomic truncate all carry over). No public `IAct`
+   surface expansion: closing stays an orchestrator capability, reactions only
+   *signal* the intent.
 
 ## Sequencing (epic #1049)
 
