@@ -1,3 +1,10 @@
+# [@rotorsoft/act-pg-v1.9.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.1...@rotorsoft/act-pg-v1.9.2) (2026-06-29)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1098](https://github.com/rotorsoft/act-root/issues/1098)) ([1d9d491](https://github.com/rotorsoft/act-root/commit/1d9d49111f86d74d79078355bb3f756ccc730e73))
+
 # [@rotorsoft/act-pg-v1.9.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.0...@rotorsoft/act-pg-v1.9.1) (2026-06-28)
 
 
