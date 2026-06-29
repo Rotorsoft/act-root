@@ -1,17 +1,11 @@
 /**
- * Online close-the-books (#837 / epic #802) — `PostgresStore`
- * adapter-specific integration. The cycle's logic lives in
- * `libs/act/src/internal/autoclose-cycle.ts` and is exhaustively
- * unit-tested against the InMemory store; this file proves the
- * end-to-end shape works against a real Postgres backend without
- * adapter-specific surprises (commit / query_stats / truncate
- * combine the same way under `query_stats({}, {count: true})`-then-
- * `truncate(targets)`).
- *
- * The autoclose primitive does NOT add a new `Store` contract — it
- * composes the existing `query_stats` + `truncate` + the
- * `run_close_cycle` pipeline. No TCK extension needed; this file
- * is the integration smoke test.
+ * Online autoclose (#1090) — `PostgresStore` integration. Autoclose is now a
+ * synthesized reaction that defers/closes via the persisted-defer + close
+ * mechanic (the unit behavior is covered against InMemory in
+ * `libs/act/test/autoclose-reaction.spec.ts`); this file proves the end-to-end
+ * shape works against a real Postgres backend — `query_stats` + `truncate` +
+ * the `run_close_cycle` pipeline combine the same way, driven by
+ * `correlate()` + `drain()` instead of a bespoke sweep.
  */
 import {
   act,
@@ -42,7 +36,8 @@ const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
   .emit((a) => ["TicketOpened", { title: a.title }])
   .on({ ResolveTicket: ZodEmpty })
   .emit(() => ["TicketResolved", {}])
-  .autocloses((_stream, head) => head.name === "TicketResolved")
+  // Close immediately once the terminal event is the head (no cooldown).
+  .autocloses({ is: "TicketResolved" })
   .build();
 
 const actor = { id: "pg-test", name: "pg-test" };
@@ -66,42 +61,34 @@ describe("PostgresStore — online autoclose integration", () => {
 
   it("truncates predicate-eligible streams against a Postgres backend", async () => {
     const app = act().withState(Ticket).build();
+    const closed: Array<{ truncated: Map<string, unknown> }> = [];
+    app.on("closed", (r) =>
+      closed.push(r as { truncated: Map<string, unknown> })
+    );
+
     await app.do("OpenTicket", { stream: "t-pg-1", actor }, { title: "a" });
     await app.do("ResolveTicket", { stream: "t-pg-1", actor }, {});
 
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
-    const closed_events: Array<{ truncated: Map<string, unknown> }> = [];
-    app.on("closed", (r) =>
-      closed_events.push(r as { truncated: Map<string, unknown> })
-    );
+    await app.correlate();
+    await app.drain();
 
-    const result = (await controller.run_once()) as {
-      close_result: { truncated: Map<string, unknown> };
-    };
-
-    expect(result.close_result.truncated.has("t-pg-1")).toBe(true);
-    expect(closed_events).toHaveLength(1);
-    expect(closed_events[0].truncated.has("t-pg-1")).toBe(true);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].truncated.has("t-pg-1")).toBe(true);
   });
 
   it("leaves predicate-ineligible streams intact (head event is not the terminal one)", async () => {
     const app = act().withState(Ticket).build();
+    const closed: Array<{ truncated: Map<string, unknown> }> = [];
+    app.on("closed", (r) =>
+      closed.push(r as { truncated: Map<string, unknown> })
+    );
+
     await app.do("OpenTicket", { stream: "t-pg-2", actor }, { title: "a" });
 
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
-    const result = (await controller.run_once()) as {
-      close_result: { truncated: Map<string, unknown> };
-    };
+    await app.correlate();
+    await app.drain();
 
-    expect(result.close_result.truncated.has("t-pg-2")).toBe(false);
+    expect(closed.some((r) => r.truncated.has("t-pg-2"))).toBe(false);
   });
 
   it("leaves a tombstone behind in the events table after truncate", async () => {
@@ -109,12 +96,8 @@ describe("PostgresStore — online autoclose integration", () => {
     await app.do("OpenTicket", { stream: "t-pg-3", actor }, { title: "a" });
     await app.do("ResolveTicket", { stream: "t-pg-3", actor }, {});
 
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
-    await controller.run_once();
+    await app.correlate();
+    await app.drain();
 
     // Tombstone marker remains; original events are deleted.
     const surviving: string[] = [];

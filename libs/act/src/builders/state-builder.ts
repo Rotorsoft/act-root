@@ -8,6 +8,7 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_min_after_ms,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -489,7 +490,7 @@ export type ActionBuilder<
    * ```
    */
   autocloses: (
-    predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
+    policy: AutoclosePolicy
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -822,33 +823,32 @@ function action_builder<
       return builder;
     },
 
-    autocloses(
-      predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
-    ) {
-      // Function form → use as-is. Object form → compile through the
-      // policy resolver (Zod-validates + builds the predicate). Reject
-      // anything else (numbers, strings, null) with a typeof-based
-      // message that points at the supported shapes.
-      let predicate: AutoclosePredicate<TEvents>;
-      if (typeof predicate_or_policy === "function") {
-        predicate = predicate_or_policy;
-      } else if (
-        predicate_or_policy !== null &&
-        typeof predicate_or_policy === "object"
-      ) {
-        predicate = compile_autoclose_policy(
-          predicate_or_policy
-        ) as AutoclosePredicate<TEvents>;
-      } else {
+    autocloses(policy: AutoclosePolicy) {
+      // Declarative policy only (#1090). The online path is a synthesized
+      // reaction that defers to a derivable due-time and closes — an opaque
+      // function predicate has no terminal event to react to nor a window to
+      // derive, so it's no longer accepted online. Operators who need custom
+      // logic call `app.close(...)` from their own reaction.
+      if (typeof policy === "function") {
         throw new Error(
-          ".autocloses(...) requires a function or a policy object; got " +
-            typeof predicate_or_policy
+          ".autocloses(fn) is no longer supported — pass a declarative policy " +
+            "({ after, is, reaches, or }) or call app.close(...) from your own " +
+            "reaction for custom logic."
+        );
+      }
+      if (policy === null || typeof policy !== "object") {
+        throw new Error(
+          ".autocloses(...) requires a policy object; got " + typeof policy
         );
       }
       // Replace on every call — matches snap / discloses state-level
-      // semantics. Operators with multi-condition policies AND/OR
-      // inside one predicate.
-      internal.autoclose = predicate;
+      // semantics. Compile to the predicate the reaction evaluates, and
+      // cache the policy's min `after` window so the reaction knows whether
+      // to park on a due-time or wait for the next event.
+      internal.autoclose = compile_autoclose_policy(
+        policy
+      ) as AutoclosePredicate<TEvents>;
+      internal.autoclose_after_ms = policy_min_after_ms(policy);
       return builder;
     },
 

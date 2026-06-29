@@ -663,6 +663,15 @@ export type State<
     count: number
   ): boolean;
   /**
+   * The smallest `after` window (ms) of the `.autocloses({...})` policy,
+   * or `undefined` when the policy has no time component (#1090). The
+   * synthesized autoclose reaction uses it to defer its re-check to
+   * `head.created + autoclose_after_ms`; a policy without an `after` waits
+   * for the next event instead of parking on a due-time. Set alongside
+   * `autoclose` by the builder.
+   */
+  autoclose_after_ms?: number;
+  /**
    * Archiver set by `.archives(fn)`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
    * stages, so the existing close-cycle's archive-while-guarded

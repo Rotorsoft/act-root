@@ -15,8 +15,6 @@
  *   (c) cache `after: cached.event_id` — a cache-warm load queries the
  *       store with `after` set and replays zero pre-cache rows
  *       (event-sourcing.ts `load()` query options).
- *   (d) autoclose sweep bound — every `query_stats` page is capped at
- *       `closeBatchSize` (autoclose-cycle.ts `run_autoclose_cycle`).
  *
  * The EXPLAIN guards for the #1024 partial snapshot index live in the
  * adapter packages (act-pg / act-sqlite) — InMemoryStore has no planner.
@@ -25,16 +23,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
   act,
-  cache,
   dispose,
   projection,
-  resolveAutocloseConfig,
   SNAP_EVENT,
   state,
   store,
   ZodEmpty,
 } from "../src/index.js";
-import { run_autoclose_cycle } from "../src/internal/autoclose-cycle.js";
 import { sandbox } from "../src/test/index.js";
 
 const actor = { id: "a", name: "a" };
@@ -204,93 +199,6 @@ describe("ACT-1032 optimization guards", () => {
         expect(cold.replayed).toBe(5);
       } finally {
         await dispose();
-      }
-    });
-  });
-
-  describe("(d) autoclose sweep stays bounded to the page size", () => {
-    const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
-      .init(() => ({ open: false }))
-      .emits({
-        TicketOpened: z.object({ title: z.string() }),
-        TicketResolved: ZodEmpty,
-      })
-      .patch({
-        TicketOpened: () => ({ open: true }),
-        TicketResolved: () => ({ open: false }),
-      })
-      .on({ OpenTicket: z.object({ title: z.string() }) })
-      .emit((a) => ["TicketOpened", { title: a.title }])
-      .on({ ResolveTicket: ZodEmpty })
-      .emit(() => ["TicketResolved", {}])
-      .autocloses((_stream, head) => head.name === "TicketResolved")
-      .build();
-
-    beforeEach(async () => {
-      await store().drop();
-      await cache().clear();
-    });
-
-    afterEach(async () => {
-      await dispose()();
-    });
-
-    it("caps every query_stats page at closeBatchSize while paging the whole store", async () => {
-      const app = act().withState(Ticket).build();
-      // 5 resolvable streams, page size 2 → pages of 2, 2, 1.
-      for (let i = 0; i < 5; i++) {
-        await app.do("OpenTicket", { stream: `t-${i}`, actor }, { title: "a" });
-        await app.do("ResolveTicket", { stream: `t-${i}`, actor }, {});
-      }
-
-      const statsSpy = vi.spyOn(store(), "query_stats");
-
-      const internals = app as unknown as {
-        _event_to_state: never;
-        _es: { load: never; tombstone: never };
-        _logger: never;
-        _reactive_events: { size: number };
-      };
-      const result = await run_autoclose_cycle({
-        autoclose_policy: app.registry.autoclose_policy as never,
-        autoclose_archiver: app.registry.autoclose_archiver as never,
-        event_to_state: internals._event_to_state,
-        reactive_events_size: internals._reactive_events.size,
-        load: internals._es.load,
-        tombstone: internals._es.tombstone,
-        logger: internals._logger,
-        config: resolveAutocloseConfig({ closeBatchSize: 2 }),
-        correlation: "act-1032-page-bound",
-      });
-
-      // Every stream got closed in this one run.
-      expect(result.inspected).toBe(5);
-      expect(result.close_result.truncated.size).toBe(5);
-
-      // The guard targets the pager's own query_stats calls — the ones
-      // carrying a `limit`. (run_close_cycle issues its own unbounded
-      // safety-probe query_stats per batch; that's a different concern and
-      // is excluded by the `limit !== undefined` filter.)
-      const pagerCalls = statsSpy.mock.calls
-        .map((call, i) => ({
-          options: call[1],
-          result: statsSpy.mock.results[i],
-        }))
-        .filter((c) => (c.options as { limit?: number })?.limit !== undefined);
-
-      // Pagination actually happened (5 streams / page 2 → 3 pages), and
-      // every page request is capped at closeBatchSize. A regression that
-      // dropped the `limit` would fetch all 5 in one unbounded query.
-      expect(pagerCalls.length).toBeGreaterThan(1);
-      for (const { options } of pagerCalls) {
-        expect(options).toMatchObject({ limit: 2 });
-      }
-      // No page ever materialized more than the page size.
-      for (const { result } of pagerCalls) {
-        if (result.type === "return") {
-          const page = await result.value;
-          expect((page as Map<string, unknown>).size).toBeLessThanOrEqual(2);
-        }
       }
     });
   });
