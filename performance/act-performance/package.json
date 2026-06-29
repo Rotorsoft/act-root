@@ -11,11 +11,11 @@
     "throughput:parallel": "docker compose run --rm k6 run --out influxdb=http://influxdb:8086/k6 /scripts/throughput.js"
   },
   "dependencies": {
-    "@rotorsoft/act": ">=1.12.1",
-    "@rotorsoft/act-pg": ">=1.5.2",
+    "@rotorsoft/act": ">=1.15.0",
+    "@rotorsoft/act-pg": ">=1.8.0",
     "cli-table3": "^0.6.5",
     "express": "^5.2.1",
-    "pg": "^8.21.0",
+    "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
