@@ -84,7 +84,7 @@
   },
   "sideEffects": false,
   "engines": {
-    "node": ">=22.23.0"
+    "node": ">=22.23.1"
   },
   "publishConfig": {
     "access": "public"
@@ -95,13 +95,13 @@
     "build": "pnpm clean && tsup && pnpm types"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.0.5",
+    "@hono/node-server": "^2.0.6",
     "@rotorsoft/act": "workspace:^",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": ">=11.18.0",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
-    "hono": "^4.12.26"
+    "hono": "^4.12.27"
   },
   "peerDependenciesMeta": {
     "@rotorsoft/act-ops": {
