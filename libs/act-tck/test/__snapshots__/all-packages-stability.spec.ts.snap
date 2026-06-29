@@ -45137,16 +45137,22 @@ export const runStoreTck = (options: StoreTckOptions): void => {
     describe("defer", () => {
       it("hides a stream from claim until its deferred_at passes", async () => {
         const s = \`defer-\${uid()}\`;
-        await store.subscribe([{ stream: s }]);
-        await store.commit<CounterEvents>(
-          s,
-          [inc(1)],
-          make_meta({ stream: s })
-        );
+        // A claimable control stream guarantees the claim result is non-empty,
+        // so the membership checks below actually run (and prove \`s\` is the one
+        // being skipped, not that nothing was claimable).
+        const ctl = \`defer-ctl-\${uid()}\`;
+        await store.subscribe([{ stream: s }, { stream: ctl }]);
+        for (const st of [s, ctl])
+          await store.commit<CounterEvents>(
+            st,
+            [inc(1)],
+            make_meta({ stream: st })
+          );
         // Defer far into the future — claim must skip it.
         expect(await store.defer([s], Date.now() + 3_600_000)).toBe(1);
-        const skipped = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
-        expect(skipped.find((l) => l.stream === s)).toBeUndefined();
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(leased.find((l) => l.stream === ctl)).toBeDefined();
+        expect(leased.find((l) => l.stream === s)).toBeUndefined();
       });
 
       it("makes a stream claimable once the deferred_at is in the past", async () => {
@@ -45217,12 +45223,22 @@ export const runStoreTck = (options: StoreTckOptions): void => {
             [inc(1)],
             make_meta({ stream: s })
           );
+        // A claimable control stream outside the filter keeps the claim result
+        // non-empty, so the membership checks below run against real rows.
+        const ctl = \`defer-filterctl-\${tag}\`;
+        await store.subscribe([{ stream: ctl }]);
+        await store.commit<CounterEvents>(
+          ctl,
+          [inc(1)],
+          make_meta({ stream: ctl })
+        );
         const n = await store.defer(
           { stream: \`^deferfilter-\${tag}-\`, stream_exact: false },
           Date.now() + 3_600_000
         );
         expect(n).toBe(2);
         const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(leased.find((l) => l.stream === ctl)).toBeDefined();
         expect(leased.find((l) => l.stream === a)).toBeUndefined();
         expect(leased.find((l) => l.stream === b)).toBeUndefined();
       });
