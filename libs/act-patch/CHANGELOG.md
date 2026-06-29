@@ -1,3 +1,10 @@
+# [@rotorsoft/act-patch-v1.2.5](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.4...@rotorsoft/act-patch-v1.2.5) (2026-06-29)
+
+
+### Bug Fixes
+
+* **deps:** update non-major dependencies ([#1098](https://github.com/rotorsoft/act-root/issues/1098)) ([1d9d491](https://github.com/rotorsoft/act-root/commit/1d9d49111f86d74d79078355bb3f756ccc730e73))
+
 # [@rotorsoft/act-patch-v1.2.4](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.3...@rotorsoft/act-patch-v1.2.4) (2026-06-07)
 
 # [@rotorsoft/act-patch-v1.2.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-patch-v1.2.2...@rotorsoft/act-patch-v1.2.3) (2026-05-31)
