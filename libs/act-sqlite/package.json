@@ -1,7 +1,7 @@
 {
   "name": "@rotorsoft/act-sqlite",
   "type": "module",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "act sqlite adapters",
   "keywords": [
     "typescript",
