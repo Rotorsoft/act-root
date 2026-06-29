@@ -13,8 +13,8 @@
  *   })
  *
  * A resolved/closed ticket sits in primary storage for the 90-day
- * return / dispute / customer-success window, then retires itself on
- * the next autoclose sweep. The `or` backstop catches tickets that
+ * return / dispute / customer-success window, then retires itself when
+ * the autoclose reaction's cooldown elapses. The `or` backstop catches tickets that
  * never reach a terminal event so abandoned streams can't linger past
  * a year. This file is a minimal harness that confirms the policy is
  * wired on the real model.

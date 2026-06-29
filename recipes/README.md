@@ -37,7 +37,7 @@ Numbers above are macOS 25.4 (Apple Silicon) against the docker PG used by the a
 
 ## Reach for close-the-books before anything else
 
-Almost every "my events table is growing" symptom is solved by retiring streams that have finished their business lifecycle. Resolved tickets, completed orders, expired sessions, abandoned carts — the events stay correct and the stream stays auditable, but the row count comes back to the framework for the next live stream. The mechanism is `Act.close()` plus the declarative `.autocloses({...})` policy that runs the same primitive on a background cycle.
+Almost every "my events table is growing" symptom is solved by retiring streams that have finished their business lifecycle. Resolved tickets, completed orders, expired sessions, abandoned carts — the events stay correct and the stream stays auditable, but the row count comes back to the framework for the next live stream. The mechanism is `Act.close()` plus the declarative `.autocloses({...})` policy, which compiles to a synthesized reaction that defers to the cooldown and then runs the same close primitive — no background sweep.
 
 ```ts
 const Ticket = state({ Ticket: ticketSchema })

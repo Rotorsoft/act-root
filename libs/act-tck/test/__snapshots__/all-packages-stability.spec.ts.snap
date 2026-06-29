@@ -14222,24 +14222,23 @@ export type ActionBuilder<
    * per-event). Absent → the state opts out of online close entirely;
    * the cycle skips it and pays zero per-tick cost for it.
    *
-   * Two forms:
+   * Pass a declarative {@link AutoclosePolicy} object literal covering the
+   * three operational pressure points (\`after\`, \`is\`, \`reaches\`). Top-level
+   * fields combine with AND; an optional \`or: {...}\` block opens an
+   * alternative OR path. Validated via Zod at build time; misconfiguration
+   * throws before \`act().build()\` completes.
    *
-   * - **Declarative** — pass an {@link AutoclosePolicy} object literal
-   *   covering the three operational pressure points (\`after\`, \`is\`,
-   *   \`reaches\`). Top-level fields combine with AND; an optional
-   *   \`or: {...}\` block opens an alternative OR path. Validated via
-   *   Zod at build time; misconfiguration throws before \`act().build()\`
-   *   completes. Covers the 90% case.
-   * - **Function** — pass a \`(stream, head, count) => boolean\`
-   *   predicate. Drops out to the full power of JS for per-stream
-   *   metadata predicates, multi-branch policies (different cooldowns
-   *   per terminal event), or anything the declarative form doesn't
-   *   cover. The predicate receives \`head: Committed<TEvents, ...>\`
-   *   so reading \`head.name\` autocompletes to the state's declared
-   *   event union.
+   * Under the hood this compiles to a synthesized reaction (#1090) that runs
+   * on a per-aggregate synthetic stream: it defers to \`head.created + the
+   * policy's min after\` while the cooldown holds and closes the stream once
+   * the policy matches. There is no background sweep.
    *
-   * @param predicate_or_policy Function form: predicate as above.
-   *   Object form: declarative {@link AutoclosePolicy} bag.
+   * **The function-predicate form was removed (#1090).** \`.autocloses\` no
+   * longer accepts \`(stream, head, count) => boolean\`; an opaque predicate has
+   * no derivable due-time or terminal event to react to. For conditions the
+   * declarative form can't express, call \`app.close(...)\` from your own logic.
+   *
+   * @param policy The declarative {@link AutoclosePolicy} bag.
    * @returns The ActionBuilder for chaining.
    *
    * @example Declarative — cooldown after terminal (a Ticket closes
@@ -14278,12 +14277,6 @@ export type ActionBuilder<
    *   cooldown).
    * \`\`\`typescript
    * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
-   * \`\`\`
-   *
-   * @example Function — custom predicate the declarative form can't
-   *   express (per-stream metadata or per-terminal cooldown).
-   * \`\`\`typescript
-   * .autocloses((stream, head) => stream.startsWith("ephemeral:"))
    * \`\`\`
    */
   autocloses: (

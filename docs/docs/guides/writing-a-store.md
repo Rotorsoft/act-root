@@ -17,6 +17,7 @@ The interface lives in [`libs/act/src/types/ports.ts`](https://github.com/Rotors
 - `claim(lagging, leading, by, millis, lane?)` — atomically discover and lease streams for reaction processing (the workhorse of `drain`); optional `lane` filter for ACT-1103 drain lanes
 - `subscribe(streams)` — register streams so they become claimable; each row carries optional `lane` that the adapter UPSERTs on every call (restart-driven re-laning)
 - `ack(leases)` / `block(leases)` — release a lease normally or after persistent failure
+- `defer(input, deferred_at)` — park streams until a future wall-clock time without advancing their watermark (the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)); covered below
 - `reset(streams)` / `prioritize(filter, n)` / `truncate(targets)` — operator-facing primitives; the `StreamFilter` shape carries an optional `lane` exact-match
 - `query_streams(callback, query?)` — read-only introspection (operational dashboards); positions carry their `lane`. The query gained an optional `source_matches` filter — covered below
 - `notify(handler)` — *optional* cross-process commit notifications
@@ -66,6 +67,33 @@ runStoreTck({
 When `notify: true`, the TCK runs a structural smoke test (subscribe → dispose) to confirm the optional API is present and well-shaped. Cross-process LISTEN/NOTIFY semantics need two processes and stay in your adapter's own tests.
 
 The `restore` capability is the other opt-in today. Skip it (`capabilities.restore: false` or just omit) and the TCK's restore cases stay parked. Flip it on once you've implemented `Store.restore` — see the next section for the contract.
+
+## Deferring a stream (`defer` and the `claim` skip)
+
+`defer` is the persistence behind the deferred-reaction outcome ([#1090](https://github.com/Rotorsoft/act-root/issues/1090)). A reaction handler can decide it has nothing useful to do until some future moment — a cooldown hasn't elapsed, a deadline is still hours out — and ask to be revisited then instead of acking (which would consume the event) or failing (which would burn a retry). The store is what makes that decision durable: an in-process timer alone would forget the deferral on restart and would not stop a *different* worker from re-claiming the same stream a millisecond later.
+
+Two pieces implement it. First, a `deferred_at` column on the streams/subscriptions row, and a `defer(input, deferred_at)` method that bulk-sets it over the same `string[] | StreamFilter` selector `reset` and `unblock` already accept:
+
+```sql no-check
+-- defer(input, deferred_at): one bulk UPDATE, returns the affected count
+UPDATE streams
+   SET deferred_at = $deferred_at,
+       retry_count = -1            -- a defer is not a failure; clear the retry counter
+ WHERE stream = ANY($streams)      -- or the StreamFilter's compiled predicate
+```
+
+Second, the `claim` query gains a guard that skips any stream still parked in the future:
+
+```sql no-check
+-- inside claim(...), alongside the blocked = false and lease-expiry predicates
+AND (deferred_at IS NULL OR deferred_at <= $now)
+```
+
+That guard is the whole correctness story. Because the skip lives in the shared store and not in worker memory, every competing consumer honors the same deferral — this is durable shared state, not the in-process pacing that reaction backoff does. When the due-time passes, the next `claim` from any worker picks the stream up again at the unchanged watermark, so the same pending event is re-delivered and the handler gets another chance to decide.
+
+`deferred_at` is transient: it must clear the moment the stream makes progress or is recovered. `ack` (the watermark advanced), `block` (the stream is quarantined), `reset` (rewind to replay), and `unblock` (operator recovery) all set it back to `NULL`. Re-deferring simply overwrites it. Keep these clears in lockstep with how you already clear `retry_count` and `error` on those verbs — the same rows, the same statements.
+
+The TCK pins all of this. `store-tck.ts` has a `describe("defer")` block that asserts a deferred stream is hidden from `claim` until its `deferred_at` passes, becomes claimable once the time is in the past, never bumps `retry` while deferred, gets its defer cleared by `reset`, and counts the streams a filter matched. If your adapter passes that block, the deferred-reaction outcome works on your backend with no further wiring.
 
 ## Paginating `query_stats` and the `source_matches` hint
 
