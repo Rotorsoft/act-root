@@ -3,7 +3,6 @@ import {
   ALL_LANES,
   type AuditDeps,
   type AutocloseConfig,
-  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -12,9 +11,11 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
+  CloseSignal,
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DeferSignal,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -22,6 +23,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  in_autoclose_window,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   run_close_cycle,
@@ -32,7 +34,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -56,6 +66,7 @@ import type {
   LoadTarget,
   Logger,
   Query,
+  Reaction,
   Registry,
   ScanOptions,
   ScanResult,
@@ -362,15 +373,6 @@ export class Act<
    * @internal
    */
   private readonly _autoclose_config: AutocloseConfig;
-  /**
-   * App-level autoclose controller. `undefined` when no state declares
-   * `.autocloses(...)` — the controller is never constructed, so
-   * `start_correlations()` / `stop_correlations()` skip the autoclose
-   * lifecycle and the orchestrator pays zero per-tick cost.
-   *
-   * @internal
-   */
-  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -547,6 +549,64 @@ export class Act<
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
+    // #1090 — synthesize the autoclose reaction. `.autocloses(policy)` is no
+    // longer a sweep: it's a reaction on every event the state owns that
+    // evaluates the policy against the LIVE head (so a reopened stream
+    // re-evaluates correctly), defers to the cooldown's earliest opening
+    // (`head.created + the policy's min after`), and closes via `CloseSignal`
+    // once the policy holds. Injected here — before `classify_registry` — so
+    // its dynamic resolver is discovered and its target stream subscribed.
+    for (const st of this._states.values()) {
+      const predicate = st.autoclose;
+      if (!predicate) continue;
+      const after_ms = st.autoclose_after_ms;
+      const archiver = st.archive;
+      const reaction: Reaction<TEvents> = {
+        resolver: (e) => ({ target: e.stream, source: e.stream }),
+        // Never block a stream on autoclose: a transient query/store error
+        // should retry, not quarantine the aggregate's own stream.
+        options: { blockOnError: false, maxRetries: 3 },
+        handler: async (_event, stream) => {
+          const config = this._autoclose_config;
+          // Off-hours gating preserved from the sweep: outside the window,
+          // re-check next cycle instead of closing.
+          if (!in_autoclose_window(config.autocloseWindow, new Date()))
+            throw new DeferSignal(
+              Date.now() + config.autocloseCycleMinutes * 60_000
+            );
+          const stats = await store().query_stats([stream], {
+            count: true,
+            exclude: [TOMBSTONE_EVENT],
+          });
+          const entry = stats.get(stream);
+          // No live (non-tombstone) head → already closed, nothing to do.
+          if (!entry) return;
+          const head = entry.head;
+          // `count` is always present — query_stats is called with
+          // `count: true` above, so the option contract guarantees it.
+          if (predicate(stream, head, entry.count!))
+            throw new CloseSignal(
+              archiver ? () => archiver(stream, head) : undefined,
+              // Ack to the live head so the close-cycle guard sees this
+              // reaction caught up (it evaluated against head, not `_event`).
+              head.id
+            );
+          // Not eligible yet: park on the cooldown's earliest opening when the
+          // policy has a time gate; otherwise wait for the next event to
+          // re-trigger (e.g. a `reaches` threshold).
+          if (after_ms !== undefined)
+            throw new DeferSignal(head.created.getTime() + after_ms);
+        },
+      };
+      const key = `__autoclose_${st.name}`;
+      for (const event_name of Object.keys(st.events)) {
+        this.registry.events[event_name as keyof TEvents]?.reactions.set(
+          key,
+          reaction as Reaction<TEvents, keyof TEvents>
+        );
+      }
+    }
+
     const {
       static_targets,
       has_dynamic_resolvers,
@@ -685,36 +745,6 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
-
-    // #837 — construct the autoclose controller only when at least one
-    // state declared `.autocloses(...)`. Zero-cost otherwise: the
-    // controller field stays `undefined` and `start_correlations()` /
-    // `stop_correlations()` skip the autoclose lifecycle entirely.
-    const states_with_policy = [...this._states.values()].filter(
-      (s) => s.autoclose
-    );
-    this._autoclose = states_with_policy.length
-      ? new AutocloseController({
-          // Internal cycle takes the loose `(string) => …` signature; the
-          // public `registry.autoclose_policy` narrows to
-          // `keyof TStateMap & string`. Thin lambdas bridge across the
-          // narrowing — runtime semantics are unchanged.
-          autoclose_policy: (name) =>
-            this.registry.autoclose_policy(name as keyof TStateMap & string),
-          autoclose_archiver: (name) =>
-            this.registry.autoclose_archiver(name as keyof TStateMap & string),
-          event_to_state: this._event_to_state,
-          reactive_events_size: this._reactive_events.size,
-          load: this._es.load,
-          tombstone: this._es.tombstone,
-          logger: this._logger,
-          config: this._autoclose_config,
-          correlator: this._correlator,
-          close_actor: { id: "$autoclose", name: "autoclose" },
-          on_closed: (result) => this.emit("closed", result),
-          breaker: this._breaker,
-        })
-      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late `store(adapter)` injection after build won't
@@ -1366,10 +1396,6 @@ export class Act<
     callback?: (subscribed: number) => void
   ): boolean {
     const started = this._correlate.start_polling(query, frequency, callback);
-    // #837 — start the autoclose ticker on the same lifecycle hook
-    // operators already call for the correlate worker. `undefined`
-    // when no state declares `.autocloses(...)` (zero-cost path).
-    this._autoclose?.start();
     return started;
   }
 
@@ -1392,7 +1418,6 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
-    this._autoclose?.stop();
   }
 
   /**

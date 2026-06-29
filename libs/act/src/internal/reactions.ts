@@ -178,7 +178,9 @@ export function build_handle<
           return {
             lease,
             handled: handled + 1,
-            acked_at: event.id,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
             close: { stream, archive: error.archive },
           };
         return finalize(

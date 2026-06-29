@@ -23,10 +23,20 @@
 export class CloseSignal extends Error {
   /** Optional archive callback to run while the stream is guarded. */
   readonly archive?: () => Promise<void>;
+  /**
+   * Watermark to ack the requesting reaction to before the close runs.
+   * The close-cycle safety guard skips a stream whose subscriptions lag
+   * the head, so a handler that evaluated against the *live* head (not just
+   * the triggering event) must advance its watermark to that head id —
+   * otherwise it blocks its own close. Defaults to the triggering event id
+   * when omitted.
+   */
+  readonly at?: number;
 
-  constructor(archive?: () => Promise<void>) {
+  constructor(archive?: () => Promise<void>, at?: number) {
     super("reaction requested close");
     this.name = "CloseSignal";
     this.archive = archive;
+    this.at = at;
   }
 }

@@ -23,18 +23,14 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  hour_in_zone,
+  in_autoclose_window,
   resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {
-  AutocloseController,
-  type AutocloseControllerDeps,
-  type AutocloseCycleDeps,
-  type AutocloseCycleResult,
-  run_autoclose_cycle,
-} from "./autoclose-cycle.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_min_after_ms,
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
@@ -46,8 +42,10 @@ export {
   resolveCircuitBreakerConfig,
 } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
+export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,

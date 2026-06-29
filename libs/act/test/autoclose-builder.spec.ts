@@ -38,53 +38,69 @@ const make_ticket = () =>
     .on({ ResolveTicket: ZodEmpty })
     .emit(() => ["TicketResolved", {}]);
 
-describe(".autocloses(predicate) — declarator", () => {
-  it("registers the predicate on the built state", () => {
-    const pred = () => true;
-    const Ticket = make_ticket().autocloses(pred).build();
-    expect(Ticket.autoclose).toBe(pred);
+describe(".autocloses(policy) — declarator", () => {
+  it("compiles the policy into a predicate on the built state", () => {
+    const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
+    expect(Ticket.autoclose).toBeInstanceOf(Function);
+  });
+
+  it("caches the policy's min `after` window (ms)", () => {
+    const Ticket = make_ticket()
+      .autocloses({ after: { days: 2 } })
+      .build();
+    expect(Ticket.autoclose_after_ms).toBe(2 * 86_400_000);
+  });
+
+  it("leaves autoclose_after_ms undefined for a policy with no `after`", () => {
+    const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
+    expect(Ticket.autoclose_after_ms).toBeUndefined();
+  });
+
+  it("takes the smallest `after` across top-level and the `or` block", () => {
+    const Ticket = make_ticket()
+      .autocloses({ after: { days: 90 }, or: { after: { days: 7 } } })
+      .build();
+    expect(Ticket.autoclose_after_ms).toBe(7 * 86_400_000);
   });
 
   it("is absent on states that didn't declare it", () => {
     const Ticket = make_ticket().build();
     expect(Ticket.autoclose).toBeUndefined();
+    expect(Ticket.autoclose_after_ms).toBeUndefined();
   });
 
   it("replaces an earlier declaration (state-level, last-write-wins)", () => {
-    const first = () => false;
-    const second = () => true;
-    const Ticket = make_ticket().autocloses(first).autocloses(second).build();
-    expect(Ticket.autoclose).toBe(second);
+    // First sets an `after` window; the second (is-only) must clear it.
+    const Ticket = make_ticket()
+      .autocloses({ after: { days: 1 } })
+      .autocloses({ is: "TicketResolved" })
+      .build();
+    expect(Ticket.autoclose_after_ms).toBeUndefined();
   });
 
-  it("throws synchronously when the argument isn't a function or policy object", () => {
+  it("rejects the legacy function-predicate form with a migration message", () => {
     expect(() =>
-      make_ticket().autocloses("not a function" as unknown as never)
-    ).toThrow(/requires a function or a policy object/);
+      make_ticket().autocloses((() => true) as unknown as never)
+    ).toThrow(/no longer supported/);
+  });
+
+  it("throws synchronously when the argument isn't a policy object", () => {
+    expect(() =>
+      make_ticket().autocloses("not a policy" as unknown as never)
+    ).toThrow(/requires a policy object/);
     expect(() => make_ticket().autocloses(42 as unknown as never)).toThrow(
-      /requires a function or a policy object/
+      /requires a policy object/
     );
     expect(() => make_ticket().autocloses(null as unknown as never)).toThrow(
-      /requires a function or a policy object/
+      /requires a policy object/
     );
   });
 
   it("returns the same builder so chaining stays fluent", () => {
     const builder = make_ticket();
-    const after = builder.autocloses(() => false);
+    const after = builder.autocloses({ is: "TicketResolved" });
     // Same identity — `.autocloses(...)` doesn't allocate a new builder.
     expect(after).toBe(builder);
-  });
-
-  it("the predicate's `head.event.name` is typed against the state's event union", () => {
-    // Type-only assertion — compiles iff the union is threaded. Runtime
-    // value is irrelevant; the check is the inference at the call site.
-    make_ticket().autocloses((_stream, head) => {
-      // @ts-expect-error — "Nope" is not in the state's event union
-      const _bad = head.name === "Nope";
-      const ok = head.name === "TicketOpened" || head.name === "TicketResolved";
-      return ok;
-    });
   });
 });
 
@@ -114,13 +130,12 @@ describe(".archives(archive) — declarator", () => {
   });
 
   it("composes with .autocloses on the same builder", () => {
-    const predicate = () => true;
     const archive = async () => {};
     const Ticket = make_ticket()
-      .autocloses(predicate)
+      .autocloses({ is: "TicketResolved" })
       .archives(archive)
       .build();
-    expect(Ticket.autoclose).toBe(predicate);
+    expect(Ticket.autoclose).toBeInstanceOf(Function);
     expect(Ticket.archive).toBe(archive);
   });
 
@@ -138,11 +153,10 @@ describe(".archives(archive) — declarator", () => {
 });
 
 describe("registry.autoclose_policy(state_name) — lookup", () => {
-  it("returns the predicate the state declared", () => {
-    const pred = () => true;
-    const Ticket = make_ticket().autocloses(pred).build();
+  it("returns the compiled predicate the state declared", () => {
+    const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
     const app = act().withState(Ticket).build();
-    expect(app.registry.autoclose_policy("Ticket")).toBe(pred);
+    expect(app.registry.autoclose_policy("Ticket")).toBeInstanceOf(Function);
   });
 
   it("returns null for states without a predicate", () => {
@@ -353,9 +367,7 @@ describe("act().build() — autoclose validation runs at build time", () => {
   });
 
   it("valid knobs construct an Act successfully", () => {
-    const Ticket = make_ticket()
-      .autocloses((_stream, head) => head.name === "TicketResolved")
-      .build();
+    const Ticket = make_ticket().autocloses({ is: "TicketResolved" }).build();
     const app = act().withState(Ticket).build({
       autocloseCycleMinutes: 600,
       closeBatchSize: 32,

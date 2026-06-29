@@ -37,7 +37,7 @@ const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
   .emit((a) => ["TicketOpened", { title: a.title }])
   .on({ ResolveTicket: ZodEmpty })
   .emit(() => ["TicketResolved", {}])
-  .autocloses((_stream, head) => head.name === "TicketResolved")
+  .autocloses({ is: "TicketResolved" })
   .build();
 
 const actor = { id: "sqlite-test", name: "sqlite-test" };
