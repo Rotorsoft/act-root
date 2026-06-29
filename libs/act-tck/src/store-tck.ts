@@ -889,6 +889,105 @@ export const runStoreTck = (options: StoreTckOptions): void => {
       });
     });
 
+    describe("defer", () => {
+      it("hides a stream from claim until its deferred_at passes", async () => {
+        const s = `defer-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // Defer far into the future — claim must skip it.
+        expect(await store.defer([s], Date.now() + 3_600_000)).toBe(1);
+        const skipped = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        expect(skipped.find((l) => l.stream === s)).toBeUndefined();
+      });
+
+      it("makes a stream claimable once the deferred_at is in the past", async () => {
+        const s = `defer-past-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A due-time already in the past is not a constraint.
+        expect(await store.defer([s], Date.now() - 1_000)).toBe(1);
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        // ack clears the schedule and does not bump retry past the claim.
+        await store.ack(
+          leased.filter((l) => l.stream !== s).concat(mine as Lease)
+        );
+      });
+
+      it("does not bump retry while a stream is deferred", async () => {
+        const s = `defer-retry-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.defer([s], Date.now() + 3_600_000);
+        // Several claim attempts while deferred — none should touch the row.
+        await store.claim(100, 100, `w1-${uid()}`, 100_000);
+        await store.claim(100, 100, `w2-${uid()}`, 100_000);
+        // Re-defer into the past so it becomes claimable, then observe retry.
+        await store.defer([s], Date.now() - 1_000);
+        const leased = await store.claim(100, 100, `w3-${uid()}`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        // First real claim → retry 0, proving the deferred claims didn't bump it.
+        expect(mine!.retry).toBe(0);
+        await store.ack(
+          leased.filter((l) => l.stream !== s).concat(mine as Lease)
+        );
+      });
+
+      it("reset clears a pending defer", async () => {
+        const s = `defer-reset-${uid()}`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.defer([s], Date.now() + 3_600_000);
+        expect(await store.reset([s])).toBe(1);
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        expect(leased.find((l) => l.stream === s)).toBeDefined();
+      });
+
+      it("defers streams matching a filter and counts matches", async () => {
+        const tag = uid();
+        const a = `deferfilter-${tag}-a`;
+        const b = `deferfilter-${tag}-b`;
+        await store.subscribe([{ stream: a }, { stream: b }]);
+        for (const s of [a, b])
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        const n = await store.defer(
+          { stream: `^deferfilter-${tag}-`, stream_exact: false },
+          Date.now() + 3_600_000
+        );
+        expect(n).toBe(2);
+        const leased = await store.claim(100, 100, `w-${uid()}`, 100_000);
+        expect(leased.find((l) => l.stream === a)).toBeUndefined();
+        expect(leased.find((l) => l.stream === b)).toBeUndefined();
+      });
+
+      it("returns 0 for unknown streams and empty input", async () => {
+        expect(await store.defer([`missing-${uid()}`], Date.now())).toBe(0);
+        expect(await store.defer([], Date.now())).toBe(0);
+      });
+    });
+
     describe("reset", () => {
       it("rewinds a stream watermark to -1", async () => {
         const s = `reset-${uid()}`;

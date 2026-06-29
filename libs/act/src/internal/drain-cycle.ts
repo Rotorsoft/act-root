@@ -30,6 +30,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -60,6 +61,18 @@ export type HandleResult = Readonly<{
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
   next_attempt_at?: number;
+  /**
+   * Wall-clock timestamp (ms since epoch) at which this stream should be
+   * re-visited. Set by a handler that *defers* instead of acking or
+   * failing: the triggering events stay pending (watermark not advanced),
+   * `retry` is not bumped (a defer is not a failure), and the drain holds
+   * the stream until `defer` elapses, then redelivers so the handler can
+   * re-evaluate. This is the timing primitive autoclose rides (#1090);
+   * unlike {@link next_attempt_at} (a retry-only backoff), a defer carries
+   * no error and never blocks. When present, the result is excluded from
+   * ack and block — it neither advances nor terminates the watermark.
+   */
+  defer?: number;
   /**
    * Event id that threw, when a handler error occurred. Distinct from
    * {@link acked_at}: `failed_at = acked_at + 1` in dense streams, but
@@ -221,9 +234,13 @@ export async function run_drain_cycle<
   // string is no longer the "skip ack" signal; `handled > 0 || !error`
   // is. Partial-success-then-block now lands in both `acked` and
   // `blocked` arrays for the same stream — by design.
+  //
+  // A *deferred* result (#1090) is held out of ack entirely: the handler
+  // chose to re-visit the stream later without advancing the watermark, so
+  // the pending events must stay pending for the redelivery.
   const acked = await ops.ack(
     handled
-      .filter((h) => h.handled > 0 || !h.error)
+      .filter((h) => h.defer === undefined && (h.handled > 0 || !h.error))
       .map((h) => ({ ...h.lease, at: h.acked_at }))
   );
 
@@ -232,6 +249,22 @@ export async function run_drain_cycle<
       .filter(({ block }) => block)
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
+
+  // Persist deferred streams' next-visit time (#1090). `claim()` skips a
+  // stream until its `deferred_at` passes, so the defer holds across every
+  // competing worker (the durable counterpart to the in-process wake timer)
+  // and the stream isn't re-claimed — `retry` stays untouched. `defer()`
+  // sets one time per call, so group streams by their due-time.
+  const deferrals = handled.filter((h) => h.defer !== undefined);
+  if (deferrals.length) {
+    const by_time = new Map<number, string[]>();
+    for (const h of deferrals) {
+      const list = by_time.get(h.defer!);
+      if (list) list.push(h.lease.stream);
+      else by_time.set(h.defer!, [h.lease.stream]);
+    }
+    for (const [at, streams] of by_time) await ops.defer(streams, at);
+  }
 
   return { leased, fetched, handled, acked, blocked };
 }
@@ -310,14 +343,16 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Per-stream backoff: `stream → next_attempt_at` (ms since epoch). Set by
-   * `_finalize` via `HandleResult.next_attempt_at`; cleared on successful
-   * ack or terminal block. Lives in process memory — per-worker pacing
-   * by design (see {@link BackoffOptions} for the multi-worker trade-off).
+   * Per-stream re-visit schedule (#1090): `stream → next visit` (ms since
+   * epoch). Holds both retry backoff (`HandleResult.next_attempt_at`) and the
+   * `defer` outcome; cleared on successful ack or terminal block. Lives in
+   * process memory — per-worker pacing by design (see {@link BackoffOptions}
+   * for the multi-worker trade-off). Its wake re-arms drain at the earliest
+   * pending visit.
    */
-  private _backoff = new Map<string, number>();
-  /** Timer re-arming drain at the earliest pending `next_attempt_at`. */
-  private _backoff_timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly _defer = new DeferTimer(() => {
+    this._armed = true;
+  });
   /** Worker timer (ACT-1103). Set when `start()` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
@@ -340,42 +375,6 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
-  }
-
-  /** Returns true when `stream` is currently within a backoff window. */
-  private is_deferred = (stream: string): boolean => {
-    const next = this._backoff.get(stream);
-    return next !== undefined && next > Date.now();
-  };
-
-  /**
-   * Schedule the next drain re-arm at the earliest pending backoff
-   * expiry. Called only when the backoff map is non-empty (caller guard).
-   * Idempotent — collapses many simultaneously deferred streams into a
-   * single timer.
-   */
-  private schedule_backoff_wake(): void {
-    if (this._backoff_timer) clearTimeout(this._backoff_timer);
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const t of this._backoff.values()) if (t < earliest) earliest = t;
-    const delay = Math.max(0, earliest - Date.now());
-    this._backoff_timer = setTimeout(() => {
-      this._backoff_timer = undefined;
-      // Garbage-collect expired entries so the next cycle sees ready
-      // streams as active. Drain will be re-triggered by whoever owns the
-      // settle loop (or by the next commit). Re-arm here so a debounced
-      // settle picks it up.
-      const now = Date.now();
-      for (const [stream, at] of this._backoff) {
-        if (at <= now) this._backoff.delete(stream);
-      }
-      this._armed = true;
-    }, delay);
-    // Don't keep the event loop alive solely for backoff timers — letting
-    // a process exit during retry pacing is the right default. Safe to call
-    // unconditionally: Node's `setTimeout` always returns a Timeout with
-    // `unref()`.
-    this._backoff_timer.unref();
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -417,6 +416,9 @@ export class DrainController<
       clearTimeout(this._worker);
       this._worker = undefined;
     }
+    // Drop any pending re-visit wake — the parked set is process-local and
+    // rebuilt from the log on the next start (#1090).
+    this._defer.stop();
   }
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
@@ -454,7 +456,7 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.is_deferred : undefined,
+        this._defer.size > 0 ? this._defer.is_deferred : undefined,
         this._deps.lane
       );
 
@@ -479,17 +481,21 @@ export class DrainController<
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
-      // Refresh per-stream backoff state from this cycle's outcomes.
+      // Refresh per-stream re-visit state from this cycle's outcomes.
       // Successful acks and terminal blocks both clear the window;
-      // retry-not-block results carry a `next_attempt_at` set by `_finalize`.
-      for (const lease of acked) this._backoff.delete(lease.stream);
-      for (const lease of blocked) this._backoff.delete(lease.stream);
+      // retry-not-block results carry a `next_attempt_at` set by `_finalize`,
+      // and deferred results carry a `defer` due-time (#1090). Both park the
+      // stream in `_defer` so the shared wake timer re-arms drain at the
+      // earliest pending visit. `handle` already reconciles a stream's
+      // reactions into a single result per cycle, so the value written here
+      // is authoritative for the stream — a plain overwrite, not a merge.
+      for (const lease of acked) this._defer.delete(lease.stream);
+      for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        if (h.next_attempt_at !== undefined && !h.block) {
-          this._backoff.set(h.lease.stream, h.next_attempt_at);
-        }
+        const next = h.defer ?? (h.block ? undefined : h.next_attempt_at);
+        if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
-      if (this._backoff.size > 0) this.schedule_backoff_wake();
+      if (this._defer.size > 0) this._defer.schedule();
 
       if (acked.length) this._deps.on_acked(acked);
       if (blocked.length) this._deps.on_blocked(blocked);

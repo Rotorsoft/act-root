@@ -32,6 +32,7 @@ import {
   type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
+import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -163,6 +164,12 @@ export function build_handle<
         at = event.id;
         handled++;
       } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via `defer`), don't bump `retry`, and re-visit
+        // the stream at the carried due-time (#1090). `acked_at` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return { lease, handled, acked_at: at, defer: error.defer_at };
         return finalize(
           lease,
           handled,

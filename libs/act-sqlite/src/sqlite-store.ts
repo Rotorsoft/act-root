@@ -230,7 +230,8 @@ export class SqliteStore implements Store {
         leased_by TEXT,
         leased_until TEXT,
         priority INTEGER NOT NULL DEFAULT 0,
-        lane TEXT NOT NULL DEFAULT 'default'
+        lane TEXT NOT NULL DEFAULT 'default',
+        deferred_at TEXT
       )
     `);
     // Migration for tables created before priority lanes (ACT-102).
@@ -239,6 +240,14 @@ export class SqliteStore implements Store {
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
+      );
+    } catch {
+      // already present
+    }
+    // Migration for tables created before deferred reactions (#1090).
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN deferred_at TEXT"
       );
     } catch {
       // already present
@@ -488,9 +497,10 @@ export class SqliteStore implements Store {
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
       const result = await tx.execute({
         sql: `SELECT stream, source, at, priority, lane FROM streams
-              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)${lane_clause}
+              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
+                AND (deferred_at IS NULL OR deferred_at <= ?)${lane_clause}
               ORDER BY priority DESC, at ASC`,
-        args: lane !== undefined ? [now, lane] : [now],
+        args: lane !== undefined ? [now, now, lane] : [now, now],
       });
 
       const candidates: {
@@ -582,7 +592,7 @@ export class SqliteStore implements Store {
       const result: Lease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
-          sql: `UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1
+          sql: `UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1, deferred_at = NULL
                 WHERE stream = ? AND leased_by = ?`,
           args: [l.at, l.stream, l.by],
         });
@@ -603,7 +613,7 @@ export class SqliteStore implements Store {
       const result: BlockedLease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
-          sql: `UPDATE streams SET blocked = 1, error = ?
+          sql: `UPDATE streams SET blocked = 1, error = ?, deferred_at = NULL
                 WHERE stream = ? AND leased_by = ? AND blocked = 0`,
           args: [l.error, l.stream, l.by],
         });
@@ -614,6 +624,39 @@ export class SqliteStore implements Store {
     } catch (e) {
       await tx.rollback();
       throw new StoreError("block", { cause: e });
+    }
+  }
+
+  // --- defer: hold streams out of claim until deferred_at (#1090) ---
+  // Persisted as an ISO string (like leased_until) so claim's
+  // `deferred_at <= now` comparison is a lexicographic string compare.
+  // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
+  async defer(input: string[] | StreamFilter, deferred_at: number) {
+    const at_iso = new Date(deferred_at).toISOString();
+    const tx = await this.client.transaction("write");
+    try {
+      let count = 0;
+      if (Array.isArray(input)) {
+        for (const stream of input) {
+          const r = await tx.execute({
+            sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?`,
+            args: [at_iso, stream],
+          });
+          count += r.rowsAffected;
+        }
+      } else {
+        const { clause, args } = this._filter_clause(input);
+        const r = await tx.execute({
+          sql: `UPDATE streams SET deferred_at = ?, retry = -1 WHERE ${clause}`,
+          args: [at_iso, ...args] as any[],
+        });
+        count = r.rowsAffected;
+      }
+      await tx.commit();
+      return count;
+    } catch (e) {
+      await tx.rollback();
+      throw new StoreError("defer", { cause: e });
     }
   }
 
@@ -661,7 +704,7 @@ export class SqliteStore implements Store {
   // --- reset: transactional, accepts names or filter ---
   async reset(input: string[] | StreamFilter) {
     const set_clause = `SET at = -1, retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
@@ -694,7 +737,7 @@ export class SqliteStore implements Store {
   // matching the InMemoryStore convention.
   async unblock(input: string[] | StreamFilter) {
     const set_clause = `SET retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
     const tx = await this.client.transaction("write");
     try {
       let count = 0;

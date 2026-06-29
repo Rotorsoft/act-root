@@ -44,6 +44,11 @@ class InMemoryStream {
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
   private _lane: string = DEFAULT_LANE;
+  // Persisted next-visit time (#1090). When set and still in the future, the
+  // stream is held out of `claim` entirely — so a deferred reaction is not
+  // re-claimed (and `retry` is never bumped) until its due-time passes. Unlike
+  // in-process backoff, this is durable store state shared across workers.
+  private _deferred_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -89,8 +94,26 @@ class InMemoryStream {
   get is_available() {
     return (
       !this._blocked &&
-      (!this._leased_until || this._leased_until <= new Date())
+      (!this._leased_until || this._leased_until <= new Date()) &&
+      // A stream deferred to a future time is not claimable until due (#1090).
+      (!this._deferred_at || this._deferred_at <= Date.now())
     );
+  }
+
+  get deferred_at() {
+    return this._deferred_at;
+  }
+
+  /**
+   * Hold this stream out of `claim` until `deferred_at` (ms since epoch).
+   * Set by a deliberate `defer` outcome — not a failure, so retry/blocked
+   * state is untouched. Cleared by ack/block/reset/unblock.
+   */
+  defer(deferred_at: number) {
+    this._deferred_at = deferred_at;
+    // A defer is not a failure: reset retry so the redelivery after the
+    // due-time is a fresh attempt, never accumulating toward maxRetries.
+    this._retry = -1;
   }
 
   get at() {
@@ -150,6 +173,8 @@ class InMemoryStream {
       this._leased_until = undefined;
       this._at = lease.at;
       this._retry = -1;
+      // Advancing the watermark ends any active defer schedule (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -171,6 +196,8 @@ class InMemoryStream {
     if (this._leased_by === lease.by) {
       this._blocked = true;
       this._error = error;
+      // A blocked stream is poison; clear any pending defer (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -196,6 +223,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
   }
 
   /**
@@ -210,6 +238,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
     return true;
   }
 }
@@ -633,6 +662,38 @@ export class InMemoryStore implements Store {
     return leases
       .map((l) => this._streams.get(l.stream)?.block(l, l.error))
       .filter((l) => !!l);
+  }
+
+  /**
+   * Hold the matched streams out of {@link claim} until `deferred_at`
+   * (ms since epoch) — see {@link Store.defer}. Accepts an explicit list
+   * of names or a {@link StreamFilter}, mirroring {@link reset}/{@link unblock}.
+   * Persisted store state (unlike in-process backoff), so the skip is honored
+   * by every competing worker. Unknown names are silently skipped.
+   *
+   * @returns Count of streams whose `deferred_at` was set.
+   */
+  async defer(input: string[] | StreamFilter, deferred_at: number) {
+    await sleep();
+    let count = 0;
+    if (Array.isArray(input)) {
+      for (const name of input) {
+        const s = this._streams.get(name);
+        if (s) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    } else {
+      const matches = this._filter_predicate(input);
+      for (const s of this._streams.values()) {
+        if (matches(s)) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    }
+    return count;
   }
 
   /**

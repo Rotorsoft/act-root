@@ -622,6 +622,41 @@ export interface Store extends Disposable, EventSource {
   block: (leases: BlockedLease[]) => Promise<BlockedLease[]>;
 
   /**
+   * Defers streams' next visit to a future time without advancing their
+   * watermark — the persistence behind the `defer` reaction outcome (#1090).
+   *
+   * Sets `deferred_at` on each matched stream. {@link claim} **skips** any
+   * stream whose `deferred_at` is still in the future, so a deferred reaction
+   * is not re-claimed (and `retry` is never bumped) until the due-time passes,
+   * at which point the same pending event is re-delivered. Unlike in-process
+   * backoff, this is durable, shared store state — every competing worker
+   * honors the skip, which is what makes a deferral correct across a
+   * multi-worker deployment.
+   *
+   * The schedule is cleared whenever the watermark moves or the stream is
+   * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
+   * all reset `deferred_at`. Re-deferring simply overwrites it.
+   *
+   * Accepts an explicit list of stream names or a {@link StreamFilter}
+   * (regex by default), the same shape as {@link reset}/{@link unblock}.
+   * Joins the watermark verb family: **claim / ack / block / defer**.
+   *
+   * @param input - Stream names or a {@link StreamFilter} selecting streams
+   * @param deferred_at - Wall-clock time (ms since epoch) to revisit the streams
+   * @returns Count of streams whose `deferred_at` was set
+   *
+   * @example
+   * ```typescript
+   * // Hold a stream until a 30-minute deadline elapses
+   * await store().defer(["order-42"], Date.now() + 30 * 60_000);
+   * ```
+   */
+  defer: (
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ) => Promise<number>;
+
+  /**
    * Resets watermarks for the given streams to -1, making them eligible
    * for replay from the beginning. Also clears retry, blocked, error,
    * and lease state so the streams can be claimed immediately.
