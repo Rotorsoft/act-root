@@ -127,14 +127,14 @@
     "@rotorsoft/act-patch": "workspace:^"
   },
   "devDependencies": {
-    "@hono/node-server": "^2.0.5",
+    "@hono/node-server": "^2.0.6",
     "@hono/zod-validator": "^0.8.0",
     "@rotorsoft/act-ops": "workspace:^",
     "@trpc/server": "^11.18.0",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "fastify": "^5.8.5",
-    "hono": "^4.12.26",
+    "hono": "^4.12.27",
     "zod": "^4.4.3"
   }
 }
