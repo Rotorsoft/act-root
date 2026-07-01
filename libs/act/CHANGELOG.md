@@ -1,3 +1,17 @@
+# [@rotorsoft/act-v1.17.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.16.1...@rotorsoft/act-v1.17.0) (2026-07-01)
+
+
+### Bug Fixes
+
+* **act:** run autoclose on a synthetic stream; clamp long defer timers ([#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([d93bfbb](https://github.com/rotorsoft/act-root/commit/d93bfbb67d1ec4ef4245bbc642fdce22c6d0c07e))
+
+
+### Features
+
+* **act:** add persisted defer outcome + Store.defer (slice 1a-1c, [#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([c5c46ce](https://github.com/rotorsoft/act-root/commit/c5c46cef7a03c2853434b9e289315d91d2165c59))
+* **act:** close-from-reaction mechanic via CloseSignal (slice 1d part 1, [#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([eb68839](https://github.com/rotorsoft/act-root/commit/eb68839e267966fe211b90a8fd7b850273544873))
+* **act:** port autocloses to a synthesized defer/close reaction (slice 1d part 2, [#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([832844a](https://github.com/rotorsoft/act-root/commit/832844a1dffb3ec28fe426de1e1de4c0af8c7267))
+
 # [@rotorsoft/act-v1.16.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.16.0...@rotorsoft/act-v1.16.1) (2026-06-29)
 
 
