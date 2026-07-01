@@ -1,3 +1,11 @@
+# [@rotorsoft/act-pg-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.3...@rotorsoft/act-pg-v1.10.0) (2026-07-01)
+
+
+### Features
+
+* **act:** add persisted defer outcome + Store.defer (slice 1a-1c, [#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([c5c46ce](https://github.com/rotorsoft/act-root/commit/c5c46cef7a03c2853434b9e289315d91d2165c59))
+* **act:** port autocloses to a synthesized defer/close reaction (slice 1d part 2, [#1090](https://github.com/rotorsoft/act-root/issues/1090)) ([832844a](https://github.com/rotorsoft/act-root/commit/832844a1dffb3ec28fe426de1e1de4c0af8c7267))
+
 # [@rotorsoft/act-pg-v1.9.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.2...@rotorsoft/act-pg-v1.9.3) (2026-06-29)
 
 
