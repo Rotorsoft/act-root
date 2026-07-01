@@ -144,10 +144,23 @@ Consequences to document and uphold:
   `deferred_at` column on the watermark and `claim()`'s skip-until-due behavior.
   Charter-covered `Store` change; lands with TCK coverage and all three in-tree
   adapters in lockstep (a required method can't be staged adapter-by-adapter).
-- **Reaction outcome `defer(when)`** (exact public shape — returned sentinel vs.
-  `app.defer(...)` — settled during Slice 2; internally a `DeferSignal`).
-- **`when` options type** (`after` / `at` / `every`), Zod-validated per the
-  config-validation standard.
+- **Two `defer` surfaces, for expressivity and flexibility.** Both compile to
+  the same `defer` outcome (internally a `DeferSignal`); they differ in whether
+  the schedule is declared or computed.
+  - **Declarative reaction step `.defer(when)`** between `.on(...)` and
+    `.do(...)`. It arms the reaction on its triggering event and runs the
+    handler when due, and it **auto-isolates** the reaction onto its own stream
+    (sourced from the trigger) so a pending timer never holds the aggregate's
+    other reactions. This is the front door for static timing (a fixed deadline,
+    a fixed interval) and removes the manual `.to(...)` boilerplate. Symmetric
+    with `.autocloses(policy)` on state: declarative timing on a reaction.
+  - **Imperative outcome `app.defer(when)`** callable inside a `.do(...)`
+    handler, for due-times computed at runtime from loaded state, or to
+    conditionally re-arm. The escape hatch when the schedule isn't statically
+    known.
+- **`when` options type** (`after` / `at` / `every`, where `at` accepts a `Date`
+  or a function of the triggering event so the due-time stays derivable),
+  Zod-validated per the config-validation standard, shared by both surfaces.
 - **Builder validation** rejecting invalid scheduling/`source`/`target`
   configurations at `.build()` (same family as the cross-slice-schema throw and
   the lane-disagreement throw).
@@ -211,8 +224,13 @@ Consequences to document and uphold:
 
 ## Open questions
 
-1. **`defer` surface shape** — returned sentinel vs. `app.defer(...)`. Settle in
-   Slice 2. (Internally already a `DeferSignal` thrown by the handler.)
+1. **`defer` surface shape** — ~~returned sentinel vs. `app.defer(...)`~~.
+   **Resolved: ship both.** A declarative `.defer(when)` reaction-builder step
+   for static timing (which also auto-isolates the reaction's stream), and an
+   imperative `app.defer(when)` outcome inside `.do(...)` for runtime-computed
+   due-times. Both compile to the same `DeferSignal`. Chosen to maximize
+   expressivity and flexibility rather than force one shape. Details land in
+   Slice 2.
 2. **Watermark key** — ~~`stream` vs. `(stream, source)`~~. **Resolved (Slice 1
    spike):** the watermark/lease is keyed by **`stream` alone**; `source` is a
    filter, not part of the key. So one pending `deferred_at` per stream, and a
