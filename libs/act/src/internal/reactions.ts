@@ -32,6 +32,8 @@ import {
   type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
+import { CloseSignal } from "./close-signal.js";
+import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -163,6 +165,27 @@ export function build_handle<
         at = event.id;
         handled++;
       } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via `defer`), don't bump `retry`, and re-visit
+        // the stream at the carried due-time (#1090). `acked_at` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return { lease, handled, acked_at: at, defer: error.defer_at };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream.
+            close: { stream: error.stream ?? stream, archive: error.archive },
+          };
         return finalize(
           lease,
           handled,

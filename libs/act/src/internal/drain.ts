@@ -26,6 +26,7 @@ import type {
   Fetch,
   Lease,
   Schemas,
+  StreamFilter,
 } from "../types/index.js";
 
 /** @internal */
@@ -34,6 +35,7 @@ export interface DrainOps<TEvents extends Schemas> {
   fetch: typeof fetch<TEvents>;
   ack: typeof ack;
   block: typeof block;
+  defer: typeof defer;
   subscribe: typeof subscribe;
 }
 
@@ -66,6 +68,11 @@ export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
 export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
+
+export const defer = (
+  input: string[] | StreamFilter,
+  deferred_at: number
+): Promise<number> => store().defer(input, deferred_at);
 
 export const subscribe = (
   streams: Array<{

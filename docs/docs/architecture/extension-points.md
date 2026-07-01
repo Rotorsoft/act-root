@@ -49,6 +49,7 @@ interface Store extends Disposable, EventSource {
   subscribe(streams): Promise<{ subscribed; watermark }>;
   ack(leases): Promise<Lease[]>;
   block(leases): Promise<BlockedLease[]>;
+  defer(input: string[] | StreamFilter, deferred_at): Promise<number>;
   reset(input: string[] | StreamFilter): Promise<number>;
   unblock(input: string[] | StreamFilter): Promise<number>;
   prioritize(filter: StreamFilter, priority): Promise<number>;
@@ -63,6 +64,8 @@ interface Store extends Disposable, EventSource {
 ```
 
 `reset`, `unblock`, and `prioritize` share the same `StreamFilter` shape (`stream` / `stream_exact` / `source` / `source_exact` / `blocked` / `lane`). `reset` and `unblock` also accept a plain `string[]` for targeted operations. `unblock` always restricts to blocked streams regardless of what the filter passes — there's no "unblock unblocked streams" use case. `reset` is for projection rebuilds (watermark → -1); `unblock` is for poison-message recovery (watermark preserved).
+
+`defer` (added with the deferred-reaction outcome, [#1090](https://github.com/Rotorsoft/act-root/issues/1090)) rounds out the watermark verb family: **claim / ack / block / defer**. It stamps a `deferred_at` wall-clock time on each matching stream, and `claim` skips any stream whose `deferred_at` is still in the future. The defer therefore holds across every competing worker — it is durable shared state, not in-process pacing like reaction backoff. A defer is not a failure: it never bumps `retry`, and `defer` itself resets `retry` to `-1`. The schedule clears whenever the watermark moves or the stream is recovered, so `ack`, `block`, `reset`, and `unblock` all wipe `deferred_at`. An adapter implements it as one bulk `UPDATE … SET deferred_at = ?` over the same `string[] | StreamFilter` selector `reset`/`unblock` use, plus the `deferred_at IS NULL OR deferred_at <= now()` guard in the `claim` query.
 
 `claim` takes an optional `lane` filter (ACT-1103). When set, only streams in the named lane are eligible; when omitted, the claim spans every lane — preserving pre-1103 behavior. Adapters that haven't migrated yet can leave `lane` unread on the SQL side and still satisfy the contract until they opt in. `subscribe`'s row shape gained an optional `lane` field for the same release; adapters UPSERT it on every call so a restarted Act with a new lane assignment moves streams without a manual migration.
 

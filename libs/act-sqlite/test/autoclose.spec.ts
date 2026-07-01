@@ -37,7 +37,7 @@ const Ticket = state({ Ticket: z.object({ open: z.boolean() }) })
   .emit((a) => ["TicketOpened", { title: a.title }])
   .on({ ResolveTicket: ZodEmpty })
   .emit(() => ["TicketResolved", {}])
-  .autocloses((_stream, head) => head.name === "TicketResolved")
+  .autocloses({ is: "TicketResolved" })
   .build();
 
 const actor = { id: "sqlite-test", name: "sqlite-test" };
@@ -66,42 +66,34 @@ describe("SqliteStore — online autoclose integration", () => {
 
   it("truncates predicate-eligible streams against a SQLite backend", async () => {
     const app = act().withState(Ticket).build();
-    await app.do("OpenTicket", { stream: "t-sq-1", actor }, { title: "a" });
-    await app.do("ResolveTicket", { stream: "t-sq-1", actor }, {});
-
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
     const closed_events: Array<{ truncated: Map<string, unknown> }> = [];
     app.on("closed", (r) =>
       closed_events.push(r as { truncated: Map<string, unknown> })
     );
 
-    const result = (await controller.run_once()) as {
-      close_result: { truncated: Map<string, unknown> };
-    };
+    await app.do("OpenTicket", { stream: "t-sq-1", actor }, { title: "a" });
+    await app.do("ResolveTicket", { stream: "t-sq-1", actor }, {});
 
-    expect(result.close_result.truncated.has("t-sq-1")).toBe(true);
+    await app.correlate();
+    await app.drain();
+
     expect(closed_events).toHaveLength(1);
     expect(closed_events[0].truncated.has("t-sq-1")).toBe(true);
   });
 
   it("leaves predicate-ineligible streams intact (head event is not the terminal one)", async () => {
     const app = act().withState(Ticket).build();
+    const closed_events: Array<{ truncated: Map<string, unknown> }> = [];
+    app.on("closed", (r) =>
+      closed_events.push(r as { truncated: Map<string, unknown> })
+    );
+
     await app.do("OpenTicket", { stream: "t-sq-2", actor }, { title: "a" });
 
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
-    const result = (await controller.run_once()) as {
-      close_result: { truncated: Map<string, unknown> };
-    };
+    await app.correlate();
+    await app.drain();
 
-    expect(result.close_result.truncated.has("t-sq-2")).toBe(false);
+    expect(closed_events.some((r) => r.truncated.has("t-sq-2"))).toBe(false);
   });
 
   it("leaves a tombstone behind in the events table after truncate", async () => {
@@ -109,12 +101,8 @@ describe("SqliteStore — online autoclose integration", () => {
     await app.do("OpenTicket", { stream: "t-sq-3", actor }, { title: "a" });
     await app.do("ResolveTicket", { stream: "t-sq-3", actor }, {});
 
-    const controller = (
-      app as unknown as {
-        _autoclose: { run_once: () => Promise<unknown> };
-      }
-    )._autoclose;
-    await controller.run_once();
+    await app.correlate();
+    await app.drain();
 
     const surviving: string[] = [];
     await store().query((e) => surviving.push(String(e.name)), {

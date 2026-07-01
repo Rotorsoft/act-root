@@ -197,6 +197,13 @@ describe("SqliteStore error paths", () => {
     expect(client._tx.rollback).toHaveBeenCalled();
   });
 
+  it("defer: rolls back and wraps UPDATE failure in StoreError", async () => {
+    const client = mockClientFailOn("UPDATE streams SET deferred_at");
+    (db as unknown as { client: unknown }).client = client;
+    await expect(db.defer(["x"], Date.now())).rejects.toThrow(StoreError);
+    expect(client._tx.rollback).toHaveBeenCalled();
+  });
+
   it("reset: rolls back and rethrows on UPDATE failure", async () => {
     const client = mockClientFailOn("UPDATE streams SET at = -1");
     (db as unknown as { client: unknown }).client = client;

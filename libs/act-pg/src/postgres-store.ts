@@ -426,7 +426,8 @@ export class PostgresStore implements Store {
           leased_by text,
           leased_until timestamptz,
           priority int NOT NULL DEFAULT 0,
-          lane text NOT NULL DEFAULT 'default'
+          lane text NOT NULL DEFAULT 'default',
+          deferred_at timestamptz
         ) TABLESPACE pg_default;`
       );
       // Migration for tables created before priority lanes (ACT-102).
@@ -440,6 +441,11 @@ export class PostgresStore implements Store {
       await client.query(
         `ALTER TABLE ${this._fqs}
          ADD COLUMN IF NOT EXISTS lane text NOT NULL DEFAULT 'default';`
+      );
+      // Migration for tables created before deferred reactions (#1090).
+      await client.query(
+        `ALTER TABLE ${this._fqs}
+         ADD COLUMN IF NOT EXISTS deferred_at timestamptz;`
       );
 
       // Composite index for `claim()` — `(blocked, priority DESC, at)`
@@ -768,6 +774,7 @@ export class PostgresStore implements Store {
           WHERE blocked = false
             ${lane_clause}
             AND (leased_by IS NULL OR leased_until <= NOW())
+            AND (deferred_at IS NULL OR deferred_at <= NOW())
             AND (s.at < 0 OR EXISTS (
               SELECT 1 FROM ${this._fqt} e
               WHERE e.id > s.at
@@ -933,7 +940,8 @@ export class PostgresStore implements Store {
         at = i.at,
         retry = -1,
         leased_by = NULL,
-        leased_until = NULL
+        leased_until = NULL,
+        deferred_at = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
       RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane
@@ -984,7 +992,7 @@ export class PostgresStore implements Store {
         AS x(stream text, by text, error text, lagging boolean)
       )
       UPDATE ${this._fqs} AS s
-      SET blocked = true, error = i.error
+      SET blocked = true, error = i.error, deferred_at = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
       RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error, i.lagging, s.lane
@@ -1009,6 +1017,39 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Hold the matched streams out of {@link claim} until `deferred_at`
+   * (ms since epoch) — see {@link Store.defer}. Persists `deferred_at`
+   * (as a `timestamptz`) so the skip is honored by every competing
+   * worker; `claim` filters on `deferred_at <= NOW()`. Accepts an
+   * explicit list of names or a {@link StreamFilter}, mirroring
+   * {@link reset}/{@link prioritize}. Cleared by ack/block/reset/unblock.
+   *
+   * @returns Count of streams whose `deferred_at` was set.
+   */
+  async defer(
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ): Promise<number> {
+    // Reset retry too: a defer is a deliberate "come back later," not a
+    // failure, so the redelivery after the due-time is a fresh attempt.
+    const set_clause = `SET deferred_at = to_timestamp($1 / 1000.0), retry = -1`;
+    if (Array.isArray(input)) {
+      if (!input.length) return 0;
+      const { rowCount } = await this._pool.query(
+        `UPDATE ${this._fqs} ${set_clause} WHERE stream = ANY($2)`,
+        [deferred_at, input]
+      );
+      return rowCount ?? 0;
+    }
+    const { clause, values } = this._filter_clause(input, 2);
+    const { rowCount } = await this._pool.query(
+      `UPDATE ${this._fqs} ${set_clause} WHERE ${clause}`,
+      [deferred_at, ...values]
+    );
+    return rowCount ?? 0;
   }
 
   /**
@@ -1062,7 +1103,7 @@ export class PostgresStore implements Store {
 
   async reset(input: string[] | StreamFilter): Promise<number> {
     const set_clause = `SET at = -1, retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(
@@ -1096,7 +1137,7 @@ export class PostgresStore implements Store {
    */
   async unblock(input: string[] | StreamFilter): Promise<number> {
     const set_clause = `SET retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(

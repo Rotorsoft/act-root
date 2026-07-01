@@ -682,7 +682,6 @@ import {
   ALL_LANES,
   type AuditDeps,
   type AutocloseConfig,
-  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -691,9 +690,11 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
+  CloseSignal,
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DeferSignal,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -701,6 +702,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  in_autoclose_window,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   run_close_cycle,
@@ -711,7 +713,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -735,6 +745,7 @@ import type {
   LoadTarget,
   Logger,
   Query,
+  Reaction,
   Registry,
   ScanOptions,
   ScanResult,
@@ -791,6 +802,14 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the \`"settled"\` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+/**
+ * Prefix for the synthetic per-aggregate stream the autoclose reaction (#1090)
+ * runs on. \`target = \\\`\${AUTOCLOSE_TARGET_PREFIX}\${aggregate}\\\`\`, \`source =
+ * aggregate\` — a watermark distinct from the aggregate's own reactions, so an
+ * autoclose defer never short-circuits them. Internal; not a public surface.
+ */
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
@@ -1041,15 +1060,6 @@ export class Act<
    * @internal
    */
   private readonly _autoclose_config: AutocloseConfig;
-  /**
-   * App-level autoclose controller. \`undefined\` when no state declares
-   * \`.autocloses(...)\` — the controller is never constructed, so
-   * \`start_correlations()\` / \`stop_correlations()\` skip the autoclose
-   * lifecycle and the orchestrator pays zero per-tick cost.
-   *
-   * @internal
-   */
-  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -1226,6 +1236,76 @@ export class Act<
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
+    // #1090 — synthesize the autoclose reaction. \`.autocloses(policy)\` is no
+    // longer a sweep: it's a reaction on every event the state owns that
+    // evaluates the policy against the LIVE head (so a reopened stream
+    // re-evaluates correctly), defers to the cooldown's earliest opening
+    // (\`head.created + the policy's min after\`), and closes via \`CloseSignal\`
+    // once the policy holds. Injected here — before \`classify_registry\` — so
+    // its dynamic resolver is discovered and its target stream subscribed.
+    for (const st of this._states.values()) {
+      const predicate = st.autoclose;
+      if (!predicate) continue;
+      const after_ms = st.autoclose_after_ms;
+      const archiver = st.archive;
+      const reaction: Reaction<TEvents> = {
+        // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
+        // per-aggregate \`__autoclose__\` key — so the autoclose reaction never
+        // shares a watermark with the aggregate's own reactions. A shared
+        // watermark would let autoclose's defer short-circuit the aggregate's
+        // other reactions (the "a defer affects all reactions on a stream"
+        // hazard). The close still targets the aggregate (\`source\`).
+        resolver: (e) => ({
+          target: \`\${AUTOCLOSE_TARGET_PREFIX}\${e.stream}\`,
+          source: e.stream,
+        }),
+        // Never block on autoclose: a transient query/store error should retry,
+        // not quarantine the synthetic stream.
+        options: { blockOnError: false, maxRetries: 3 },
+        handler: async (event) => {
+          const aggregate = event.stream;
+          const config = this._autoclose_config;
+          // Off-hours gating preserved from the sweep: outside the window,
+          // re-check next cycle instead of closing.
+          if (!in_autoclose_window(config.autocloseWindow, new Date()))
+            throw new DeferSignal(
+              Date.now() + config.autocloseCycleMinutes * 60_000
+            );
+          const stats = await store().query_stats([aggregate], {
+            count: true,
+            exclude: [TOMBSTONE_EVENT],
+          });
+          const entry = stats.get(aggregate);
+          // No live (non-tombstone) head → already closed, nothing to do.
+          if (!entry) return;
+          const head = entry.head;
+          // \`count\` is always present — query_stats is called with
+          // \`count: true\` above, so the option contract guarantees it.
+          if (predicate(aggregate, head, entry.count!))
+            throw new CloseSignal({
+              stream: aggregate,
+              archive: archiver ? () => archiver(aggregate, head) : undefined,
+              // Ack this reaction's own watermark to the live head so the
+              // close-cycle guard (which matches subscriptions by source =
+              // aggregate) sees it caught up instead of blocking its own close.
+              at: head.id,
+            });
+          // Not eligible yet: park on the cooldown's earliest opening when the
+          // policy has a time gate; otherwise wait for the next event to
+          // re-trigger (e.g. a \`reaches\` threshold).
+          if (after_ms !== undefined)
+            throw new DeferSignal(head.created.getTime() + after_ms);
+        },
+      };
+      const key = \`__autoclose_\${st.name}\`;
+      for (const event_name of Object.keys(st.events)) {
+        this.registry.events[event_name as keyof TEvents]?.reactions.set(
+          key,
+          reaction as Reaction<TEvents, keyof TEvents>
+        );
+      }
+    }
+
     const {
       static_targets,
       has_dynamic_resolvers,
@@ -1289,6 +1369,22 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        // Reaction-requested close (#1090). Runs the same close machinery as
+        // \`app.close\` (tombstone guard + archive + atomic truncate) for the
+        // targets a handler signalled via \`CloseSignal\`. No \`correlate()\` here
+        // — the drain that produced these targets has already correlated.
+        on_close: async (targets) => {
+          const close_actor = { id: "$close", name: "close" };
+          const result = await run_close_cycle(targets, {
+            reactive_events_size: this._reactive_events.size,
+            event_to_state: this._event_to_state,
+            load: this._es.load,
+            tombstone: this._es.tombstone,
+            logger: this._logger,
+            correlation: close_correlation(this._correlator, close_actor),
+          });
+          this.emit("closed", result);
+        },
         breaker: this._breaker,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
@@ -1348,36 +1444,6 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
-
-    // #837 — construct the autoclose controller only when at least one
-    // state declared \`.autocloses(...)\`. Zero-cost otherwise: the
-    // controller field stays \`undefined\` and \`start_correlations()\` /
-    // \`stop_correlations()\` skip the autoclose lifecycle entirely.
-    const states_with_policy = [...this._states.values()].filter(
-      (s) => s.autoclose
-    );
-    this._autoclose = states_with_policy.length
-      ? new AutocloseController({
-          // Internal cycle takes the loose \`(string) => …\` signature; the
-          // public \`registry.autoclose_policy\` narrows to
-          // \`keyof TStateMap & string\`. Thin lambdas bridge across the
-          // narrowing — runtime semantics are unchanged.
-          autoclose_policy: (name) =>
-            this.registry.autoclose_policy(name as keyof TStateMap & string),
-          autoclose_archiver: (name) =>
-            this.registry.autoclose_archiver(name as keyof TStateMap & string),
-          event_to_state: this._event_to_state,
-          reactive_events_size: this._reactive_events.size,
-          load: this._es.load,
-          tombstone: this._es.tombstone,
-          logger: this._logger,
-          config: this._autoclose_config,
-          correlator: this._correlator,
-          close_actor: { id: "$autoclose", name: "autoclose" },
-          on_closed: (result) => this.emit("closed", result),
-          breaker: this._breaker,
-        })
-      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
@@ -2029,10 +2095,6 @@ export class Act<
     callback?: (subscribed: number) => void
   ): boolean {
     const started = this._correlate.start_polling(query, frequency, callback);
-    // #837 — start the autoclose ticker on the same lifecycle hook
-    // operators already call for the correlate worker. \`undefined\`
-    // when no state declares \`.autocloses(...)\` (zero-cost path).
-    this._autoclose?.start();
     return started;
   }
 
@@ -2055,7 +2117,6 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
-    this._autoclose?.stop();
   }
 
   /**
@@ -3112,6 +3173,15 @@ export type State<
     head: Committed<TEvents, keyof TEvents>,
     count: number
   ): boolean;
+  /**
+   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
+   * or \`undefined\` when the policy has no time component (#1090). The
+   * synthesized autoclose reaction uses it to defer its re-check to
+   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
+   * for the next event instead of parking on a due-time. Set alongside
+   * \`autoclose\` by the builder.
+   */
+  autoclose_after_ms?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -4553,381 +4623,6 @@ export function in_autoclose_window(
     : hour >= window.start || hour < window.end;
 }
 
-// === autoclose-cycle.ts ===
-/**
- * @module autoclose-cycle
- * @category Internal
- *
- * The online close-the-books cycle (#837 / epic #802). Paginates the
- * store's streams, applies each state's \`.autocloses(predicate)\` to
- * the matching candidates, then hands the eligible streams to the
- * existing {@link run_close_cycle} so the tombstone-guard +
- * archive-while-guarded + atomic-truncate invariants carry over from
- * the explicit \`app.close(targets)\` path.
- *
- * Pure orchestration. The caller (the app-level controller in slice
- * 3) owns the cadence (\`setInterval(...)\`), the lifecycle events
- * (\`emit("closed", ...)\`), and the per-tick correlation id.
- *
- * Zero-cost when no state declares \`.autocloses(...)\` — the caller
- * never invokes this function in that case (the controller isn't
- * constructed).
- *
- * @internal
- */
-
-import type { AutocloseConfig } from "../act.js";
-import { store, TOMBSTONE_EVENT } from "../ports.js";
-import type {
-  Actor,
-  CloseResult,
-  CloseTarget,
-  Correlator,
-  Logger,
-  State,
-  TruncateResult,
-} from "../types/index.js";
-import { in_autoclose_window } from "./autoclose-config.js";
-import type { CircuitBreaker } from "./circuit-breaker.js";
-import { run_close_cycle } from "./close-cycle.js";
-import { close_correlation } from "./correlator.js";
-import type { EsOps } from "./event-sourcing.js";
-
-/**
- * Dependencies the autoclose cycle needs. Decoupled from \`Act\` so
- * the cycle can be exercised from tests in isolation against an
- * \`InMemoryStore\` without spinning a full Act.
- *
- * @internal
- */
-export type AutocloseCycleDeps = {
-  /**
-   * Lookup of \`.autocloses(predicate)\` per state name. The cycle
-   * skips streams whose owning state returns \`null\` here, so opt-out
-   * states pay zero per-stream cost beyond the \`event_to_state\`
-   * lookup.
-   */
-  readonly autoclose_policy: (
-    state_name: string
-  ) => ((stream: string, head: any, count: number) => boolean) | null;
-  /**
-   * Lookup of \`.archives(fn)\` per state name. When present, the
-   * cycle threads it into the corresponding {@link CloseTarget.archive}
-   * so the existing close-cycle's archive-while-guarded invariant
-   * applies — a thrown archiver leaves the stream guarded but
-   * un-truncated, and the cycle re-evaluates the candidate next
-   * tick.
-   */
-  readonly autoclose_archiver: (
-    state_name: string
-  ) => ((stream: string, head: any) => Promise<void>) | null;
-  /** event-name → owning-state lookup (already computed at build). */
-  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
-  /** Reactive-event count, forwarded to {@link run_close_cycle}. */
-  readonly reactive_events_size: number;
-  /** \`EsOps.load\`, forwarded to {@link run_close_cycle}. */
-  readonly load: EsOps["load"];
-  /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
-  readonly tombstone: EsOps["tombstone"];
-  readonly logger: Logger;
-  readonly config: AutocloseConfig;
-  /**
-   * Correlation id for this tick. The caller computes it via the
-   * configured {@link Correlator}; every truncate the cycle stages
-   * shares this id so close-cycle commits land under one correlation
-   * key (matching the existing \`app.close(targets)\` behavior).
-   */
-  readonly correlation: string;
-};
-
-/**
- * Aggregated result of one autoclose tick. The caller forwards
- * \`close_result\` to the \`closed\` lifecycle event; \`inspected\` /
- * \`evaluated\` / \`predicate_errors\` feed observability sidecars.
- *
- * @internal
- */
-export type AutocloseCycleResult = {
-  /** Total streams the cycle paginated through this tick. */
-  readonly inspected: number;
-  /** Streams whose owning state had a policy and the predicate ran. */
-  readonly evaluated: number;
-  /** Predicate exceptions caught + classified per \`closeOnError\`. */
-  readonly predicate_errors: number;
-  /** Forwarded from {@link run_close_cycle} — truncated + skipped. */
-  readonly close_result: CloseResult;
-};
-
-/**
- * Yield to the event loop for \`ms\` milliseconds (or one microtask
- * tick when \`ms === 0\`). The autoclose cycle inserts this between
- * truncate batches so SQLite operators can let the writer lock
- * release between rows — PG / InMemory don't serialize writers
- * globally and run with \`ms = 0\` (microtask yield only).
- *
- * @internal
- */
-function yield_between_batches(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Run one autoclose tick against the configured store. Each tick
- * fetches a single bounded page of streams — those sorting after
- * {@link AutocloseCycleDeps.after}, up to \`closeBatchSize\` — applies
- * each state's predicate, and hands that page's eligible candidates to
- * {@link run_close_cycle} as one batch (one safety probe per batch).
- * It pages through the whole store via the keyset cursor, yielding
- * \`closeYieldMs\` between batches, so a single run reaches every
- * eligible stream while bounding per-batch memory and write burst.
- *
- * The cycle never throws — predicate exceptions are caught and
- * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
- * whether they count as "close this stream"). Store errors during
- * a page query propagate to the caller (the controller logs them and
- * skips to the next run).
- *
- * @internal
- */
-export async function run_autoclose_cycle(
-  deps: AutocloseCycleDeps
-): Promise<AutocloseCycleResult> {
-  const s = store();
-  let inspected = 0;
-  let evaluated = 0;
-  let predicate_errors = 0;
-  const truncated: TruncateResult = new Map();
-  const skipped: string[] = [];
-
-  const page = deps.config.closeBatchSize;
-  // Page through the whole store one \`closeBatchSize\` batch at a time,
-  // closing each batch before fetching the next. Closed streams are
-  // tombstoned (excluded here) and sit behind the cursor, so the
-  // forward scan never revisits them.
-  let after: string | undefined;
-  for (;;) {
-    const stats = await s.query_stats(
-      {},
-      { count: true, exclude: [TOMBSTONE_EVENT], after, limit: page }
-    );
-    if (stats.size === 0) break;
-    inspected += stats.size;
-
-    const candidates: CloseTarget[] = [];
-    for (const [stream, { head, count }] of stats) {
-      // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
-      // includes streams with at least one non-excluded event.
-      const owner = deps.event_to_state.get(head.name);
-      if (!owner) continue;
-      const predicate = deps.autoclose_policy(owner.name);
-      if (!predicate) continue;
-
-      let close = false;
-      try {
-        close = predicate(stream, head, count ?? 0);
-        evaluated += 1;
-      } catch (err) {
-        predicate_errors += 1;
-        deps.logger.error(
-          \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
-            err instanceof Error ? err.message : String(err)
-          }\`
-        );
-        close = deps.config.closeOnError;
-      }
-
-      if (!close) continue;
-
-      const archiver = deps.autoclose_archiver(owner.name);
-      const archive = archiver ? () => archiver(stream, head) : undefined;
-      candidates.push({ stream, archive });
-    }
-
-    // One batch → one safety probe. The page size bounds the count.
-    if (candidates.length > 0) {
-      const result = await run_close_cycle(candidates, {
-        reactive_events_size: deps.reactive_events_size,
-        event_to_state: deps.event_to_state,
-        load: deps.load,
-        tombstone: deps.tombstone,
-        logger: deps.logger,
-        correlation: deps.correlation,
-      });
-      for (const [stream, entry] of result.truncated)
-        truncated.set(stream, entry);
-      for (const stream of result.skipped) skipped.push(stream);
-      await yield_between_batches(deps.config.closeYieldMs);
-    }
-
-    // Short page → end of the sweep.
-    if (stats.size < page) break;
-    after = [...stats.keys()].at(-1);
-  }
-
-  return {
-    inspected,
-    evaluated,
-    predicate_errors,
-    close_result: { truncated, skipped },
-  };
-}
-
-/**
- * Dependencies the app-level autoclose controller needs. Same shape
- * as {@link AutocloseCycleDeps} minus \`correlation\` (the controller
- * computes one per tick from the supplied {@link Correlator}) and
- * plus the lifecycle-event sink (\`on_closed\`) and the actor sentinel
- * for the correlator (\`close_actor\`).
- *
- * @internal
- */
-export type AutocloseControllerDeps = Omit<
-  AutocloseCycleDeps,
-  "correlation" | "after"
-> & {
-  /**
-   * Correlator the controller invokes per tick to stamp the cycle's
-   * truncate commits. Reuses the orchestrator's configured
-   * correlator so close commits share the app's id scheme — same as
-   * the existing \`app.close(targets)\` path.
-   */
-  readonly correlator: Correlator;
-  /** Sentinel actor for the close correlation (matches \`Act.close\`). */
-  readonly close_actor: Actor;
-  /**
-   * Fan-out for the per-tick result. The controller calls this once
-   * per tick that closes at least one stream, with the cycle's
-   * {@link CloseResult}. The Act orchestrator wires this to
-   * \`emit("closed", result)\`.
-   */
-  readonly on_closed: (result: CloseResult) => void;
-  /**
-   * Shared orchestrator circuit breaker (ACT-984). The autoclose ticker is
-   * a periodic store poller like the drain loop, so it consults the same
-   * breaker: it skips a tick while the breaker is open and records the
-   * outcome of each tick it runs (\`failed(now, err)\` also surfaces the
-   * failure to the orchestrator's \`error\` lifecycle event).
-   */
-  readonly breaker: CircuitBreaker;
-};
-
-/**
- * App-level autoclose controller. Owns the ticker (\`setInterval\`),
- * the per-tick reentrancy guard (a slow tick doesn't pile on the
- * next interval), and the lifecycle-event fan-out. Tests invoke
- * {@link run_once} directly; the orchestrator's
- * \`start_correlations()\` / \`stop_correlations()\` lifecycle starts +
- * stops the ticker.
- *
- * @internal
- */
-export class AutocloseController {
-  public readonly deps: AutocloseControllerDeps;
-  private _timer: ReturnType<typeof setInterval> | undefined;
-  /**
-   * Reentrancy guard. The interval fires the next tick on cadence
-   * regardless of how long the previous one took; this flag drops
-   * overlapping ticks so the cycle stays sequential per controller.
-   */
-  private _running = false;
-
-  constructor(deps: AutocloseControllerDeps) {
-    this.deps = deps;
-  }
-
-  /**
-   * Start the cycle ticker. Returns \`false\` if already running so
-   * accidental double-start doesn't stack timers (matches
-   * \`_correlate.start_polling\` semantics).
-   */
-  start(): boolean {
-    if (this._timer) return false;
-    // Fire-and-forget interval — swallow rejections so a thrown cycle
-    // doesn't kill the timer. The error is already recorded on the shared
-    // breaker (which logs it and surfaces the \`error\` lifecycle event) by
-    // \`run_once\`, so there's nothing left to do here but keep ticking.
-    this._timer = setInterval(() => {
-      this.run_once().catch(() => {});
-    }, this.deps.config.autocloseCycleMinutes * 60_000);
-    // Don't let the interval keep the process alive — Node's
-    // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
-    // targets Node ≥22, so the runtime guard is unnecessary).
-    this._timer.unref();
-    return true;
-  }
-
-  /**
-   * Stop the cycle ticker. Idempotent.
-   */
-  stop(): void {
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = undefined;
-    }
-  }
-
-  /**
-   * Whether the ticker is currently running.
-   */
-  get is_running(): boolean {
-    return this._timer !== undefined;
-  }
-
-  /**
-   * Run one cycle synchronously. The controller's interval callback
-   * delegates here; tests can invoke it directly to deterministically
-   * exercise the cycle without spinning real timers.
-   *
-   * Overlapping invocations short-circuit: if a previous tick is
-   * still running, this one drops and returns \`null\`. The orchestrator
-   * never sees a queue of pending ticks regardless of how slow the
-   * predicate / archive / truncate are.
-   */
-  async run_once(): Promise<AutocloseCycleResult | null> {
-    if (this._running) return null;
-    // Circuit open: the store is failing, skip this tick rather than pile
-    // load on a down backend. The next tick after the cooldown retries.
-    if (this.deps.breaker.state(Date.now()) === "open") return null;
-    // Off-hours window: outside it, this tick does nothing. The ticker
-    // keeps firing; only the sweep is gated.
-    if (!in_autoclose_window(this.deps.config.autocloseWindow, new Date()))
-      return null;
-    this._running = true;
-    try {
-      const correlation = close_correlation(
-        this.deps.correlator,
-        this.deps.close_actor
-      );
-      const result = await run_autoclose_cycle({
-        autoclose_policy: this.deps.autoclose_policy,
-        autoclose_archiver: this.deps.autoclose_archiver,
-        event_to_state: this.deps.event_to_state,
-        reactive_events_size: this.deps.reactive_events_size,
-        load: this.deps.load,
-        tombstone: this.deps.tombstone,
-        logger: this.deps.logger,
-        config: this.deps.config,
-        correlation,
-      });
-      // The store responded — reset the shared breaker.
-      this.deps.breaker.passed();
-      if (result.close_result.truncated.size > 0) {
-        this.deps.on_closed(result.close_result);
-      }
-      return result;
-    } catch (error) {
-      // A store op failed mid-tick. Record on the shared breaker, which
-      // logs it and surfaces the \`error\` lifecycle event, then rethrow so
-      // the interval callback can swallow it and keep the timer alive.
-      this.deps.breaker.failed(Date.now(), error);
-      throw error;
-    } finally {
-      this._running = false;
-    }
-  }
-}
-
 // === autoclose-policy.ts ===
 /**
  * @module autoclose-policy
@@ -5136,6 +4831,31 @@ function compile_reaches(
  *
  * @internal
  */
+/**
+ * The smallest \`after\` window (in ms) anywhere in a policy — across the
+ * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
+ * policy has no time component.
+ *
+ * The synthesized autoclose reaction (#1090) uses this to decide how to
+ * wait: a policy with an \`after\` defers its re-check to \`head.created +
+ * min_after_ms\` (the earliest its time gate could open); a policy without
+ * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
+ * for the next event to re-trigger rather than parking on a due-time.
+ * Conservative — the min across branches never defers past the soonest a
+ * branch could fire.
+ *
+ * @internal
+ */
+export function policy_min_after_ms(
+  options: AutoclosePolicy
+): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  const windows: number[] = [];
+  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
+  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  return windows.length ? Math.min(...windows) : undefined;
+}
+
 export function compile_autoclose_policy(
   options: AutoclosePolicy
 ): AutoclosePredicate<Schemas> {
@@ -5901,6 +5621,65 @@ async function truncate_and_warm_cache(
   );
 
   return truncated;
+}
+
+// === close-signal.ts ===
+/**
+ * @module close-signal
+ * @category Internal
+ *
+ * The control-flow signal a reaction handler throws to *close* a stream
+ * (#1090). Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
+ * \`try/catch\`, but where a defer holds the stream for later, a close asks the
+ * orchestrator to retire it: \`build_handle\` turns the signal into a
+ * \`HandleResult.close\` (a {@link CloseTarget}), \`run_drain_cycle\` acks the
+ * triggering event and collects the target, and the \`DrainController\` hands it
+ * to the orchestrator's \`on_close\` callback, which runs the same
+ * \`run_close_cycle\` machinery as \`app.close\`.
+ *
+ * Internal: the compiled autoclose reaction throws it. Closing stays an
+ * orchestrator capability — reactions only *signal* the intent, so the public
+ * reaction-scoped \`IAct\` gains no \`close\`.
+ *
+ * The autoclose reaction runs on a **synthetic stream** (\`source\` = the
+ * aggregate, \`target\` = a per-aggregate \`__autoclose__\` key) so it never
+ * shares a watermark with the aggregate's own reactions. That makes the close
+ * *target* distinct from the reaction's lease stream, so the signal carries the
+ * stream to close explicitly (\`stream\`); when omitted (a user reaction closing
+ * its own stream) it defaults to the lease stream.
+ *
+ * @internal
+ */
+export class CloseSignal extends Error {
+  /**
+   * Stream to close. Omitted → the reaction's own lease stream (a self-close).
+   * The synthesized autoclose reaction sets it to the aggregate stream, since
+   * its lease runs on a synthetic \`__autoclose__\` target.
+   */
+  readonly stream?: string;
+  /** Optional archive callback to run while the stream is guarded. */
+  readonly archive?: () => Promise<void>;
+  /**
+   * Watermark to ack the requesting reaction to before the close runs. The
+   * close-cycle safety guard skips a stream whose subscriptions (matched by
+   * source) lag the head; the autoclose reaction's \`source\` is the aggregate,
+   * so it must advance its own watermark to the live head id it evaluated
+   * against — otherwise it blocks its own close. Defaults to the triggering
+   * event id when omitted.
+   */
+  readonly at?: number;
+
+  constructor(opts?: {
+    stream?: string;
+    archive?: () => Promise<void>;
+    at?: number;
+  }) {
+    super("reaction requested close");
+    this.name = "CloseSignal";
+    this.stream = opts?.stream;
+    this.archive = opts?.archive;
+    this.at = opts?.at;
+  }
 }
 
 // === config.ts ===
@@ -6819,6 +6598,175 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
   });
 }
 
+// === defer-signal.ts ===
+/**
+ * @module defer-signal
+ * @category Internal
+ *
+ * The control-flow signal a reaction handler throws to *defer* itself
+ * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * ({@link "reactions".build_handle}) catches it and produces a
+ * \`HandleResult.defer\` — the triggering events stay pending (watermark not
+ * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
+ * carried due-time.
+ *
+ * Internal for now: the compiled autoclose reaction throws it directly. The
+ * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
+ * so the dispatcher needs to recognize only this one type either way.
+ *
+ * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
+ * existing \`try/catch\` in the handler loop instead of needing a separate
+ * return channel through every dispatcher signature.
+ *
+ * @internal
+ */
+export class DeferSignal extends Error {
+  /** Wall-clock time (ms since epoch) to re-visit the stream. */
+  readonly defer_at: number;
+
+  constructor(defer_at: number) {
+    super("reaction deferred");
+    this.name = "DeferSignal";
+    this.defer_at = defer_at;
+  }
+}
+
+// === defer-timer.ts ===
+/**
+ * @module defer-timer
+ * @category Internal
+ *
+ * The shared "next visit time" primitive (#1090). A \`DeferTimer\` holds a
+ * \`stream → due-time\` map and a single collapsed wake timer: it parks
+ * streams that should be re-visited later and fires one \`on_wake\` callback
+ * at the earliest pending due-time, garbage-collecting the entries that have
+ * come due.
+ *
+ * Two consumers ride it:
+ *
+ * - the {@link "drain-cycle".DrainController} — for per-reaction backoff (a
+ *   retry's \`next_attempt_at\`) and, once handlers can express it, the
+ *   \`defer\` outcome that holds a stream pending without advancing the
+ *   watermark or bumping \`retry\`.
+ * - the autoclose controller — to schedule its next eligibility check at the
+ *   precise time an \`after\`-style cooldown elapses, instead of a blind
+ *   fixed-interval sweep.
+ *
+ * Lives in process memory, per worker — the same per-worker pacing trade-off
+ * documented for backoff. Durability comes from the data the due-time is
+ * *derived* from (an un-advanced watermark, an event's \`created\` timestamp),
+ * not from the map: a restart rebuilds it from the log.
+ *
+ * @internal
+ */
+
+/**
+ * A min-heap-free scheduler over a small \`stream → due-time\` map. The maps
+ * are bounded by the worker's claim/stream limits, so a linear scan for the
+ * earliest entry is cheaper than maintaining a heap.
+ *
+ * @internal
+ */
+
+/**
+ * Node's \`setTimeout\` delay is a 32-bit signed int (~24.8 days). A larger
+ * delay overflows and fires immediately, so we cap at this and re-arm.
+ *
+ * @internal
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export class DeferTimer {
+  private readonly _due = new Map<string, number>();
+  private _timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly _on_wake: () => void;
+
+  /**
+   * @param on_wake - invoked once each time the earliest due-time elapses,
+   *   after the come-due entries have been removed. Consumers use it to
+   *   re-arm their loop (the drain sets its \`armed\` flag; autoclose runs a
+   *   tick).
+   */
+  constructor(on_wake: () => void) {
+    this._on_wake = on_wake;
+  }
+
+  /** Number of currently parked streams. */
+  get size(): number {
+    return this._due.size;
+  }
+
+  /**
+   * True while \`stream\` is parked with a due-time still in the future.
+   * Consumers skip work for deferred streams until their window elapses.
+   */
+  is_deferred = (stream: string): boolean => {
+    const next = this._due.get(stream);
+    return next !== undefined && next > Date.now();
+  };
+
+  /**
+   * Park \`stream\` for a re-visit at \`at\` (ms since epoch). A plain
+   * overwrite: the caller computes the authoritative next-visit for the
+   * stream (the drain's \`handle\` already reconciles a stream's reactions
+   * into one result per cycle), so there is no stale value to merge against.
+   */
+  set(stream: string, at: number): void {
+    this._due.set(stream, at);
+  }
+
+  /** Drop \`stream\` from the parked set (e.g. on a successful ack or block). */
+  delete(stream: string): void {
+    this._due.delete(stream);
+  }
+
+  /**
+   * (Re)schedule the wake timer at the earliest pending due-time. Idempotent
+   * — collapses many parked streams into a single timer. A no-op clears any
+   * pending timer when the map is empty.
+   *
+   * The timer is \`unref()\`-ed so pending re-visits never keep the process
+   * alive on their own.
+   */
+  schedule(): void {
+    if (this._timer) clearTimeout(this._timer);
+    if (this._due.size === 0) {
+      this._timer = undefined;
+      return;
+    }
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const t of this._due.values()) if (t < earliest) earliest = t;
+    // Clamp to setTimeout's 32-bit ceiling (~24.8 days). A longer due-time
+    // (e.g. a 90-day autoclose cooldown) would otherwise overflow and Node
+    // fires it immediately, busy-looping. Instead we wake at the ceiling and
+    // re-arm: the GC below keeps the still-future entry, \`on_wake\` re-schedules
+    // for the remaining span, and (for persisted defers) \`claim\` skips the
+    // stream until its real due-time anyway.
+    const delay = Math.min(
+      Math.max(0, earliest - Date.now()),
+      MAX_TIMER_DELAY_MS
+    );
+    this._timer = setTimeout(() => {
+      this._timer = undefined;
+      // Garbage-collect the entries that have come due so the consumer's
+      // next pass sees them as active again.
+      const now = Date.now();
+      for (const [stream, at] of this._due)
+        if (at <= now) this._due.delete(stream);
+      this._on_wake();
+    }, delay);
+    this._timer.unref();
+  }
+
+  /** Cancel any pending wake timer. Idempotent. Leaves the parked set intact. */
+  stop(): void {
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = undefined;
+    }
+  }
+}
+
 // === drain-cycle.ts ===
 /**
  * @module drain-cycle
@@ -6841,6 +6789,7 @@ import { randomUUID } from "node:crypto";
 import type {
   BatchHandler,
   BlockedLease,
+  CloseTarget,
   Drain,
   DrainOptions,
   Fetch,
@@ -6852,6 +6801,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -6882,6 +6832,28 @@ export type HandleResult = Readonly<{
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
   next_attempt_at?: number;
+  /**
+   * Wall-clock timestamp (ms since epoch) at which this stream should be
+   * re-visited. Set by a handler that *defers* instead of acking or
+   * failing: the triggering events stay pending (watermark not advanced),
+   * \`retry\` is not bumped (a defer is not a failure), and the drain holds
+   * the stream until \`defer\` elapses, then redelivers so the handler can
+   * re-evaluate. This is the timing primitive autoclose rides (#1090);
+   * unlike {@link next_attempt_at} (a retry-only backoff), a defer carries
+   * no error and never blocks. When present, the result is excluded from
+   * ack and block — it neither advances nor terminates the watermark.
+   */
+  defer?: number;
+  /**
+   * Close request (#1090). Set when a handler throws \`CloseSignal\` to retire
+   * its stream: the triggering event is acked (so the closing reaction isn't
+   * seen as an in-flight consumer by the close-cycle safety guard) and the
+   * drain hands this {@link CloseTarget} to the orchestrator's \`on_close\`,
+   * which runs \`run_close_cycle\`. Carries the optional archiver from the
+   * signal. Distinct from {@link defer} (hold for later) — a close advances
+   * and retires.
+   */
+  close?: CloseTarget;
   /**
    * Event id that threw, when a handler error occurred. Distinct from
    * {@link acked_at}: \`failed_at = acked_at + 1\` in dense streams, but
@@ -6924,6 +6896,8 @@ export type DrainCycle<TEvents extends Schemas> = {
   readonly handled: HandleResult[];
   readonly acked: Lease[];
   readonly blocked: BlockedLease[];
+  /** Streams a handler asked to close this cycle (#1090) — handed to \`on_close\`. */
+  readonly closeable: CloseTarget[];
 };
 
 /**
@@ -6983,6 +6957,7 @@ export async function run_drain_cycle<
       handled: [],
       acked: [],
       blocked: [],
+      closeable: [],
     };
   }
 
@@ -7043,9 +7018,13 @@ export async function run_drain_cycle<
   // string is no longer the "skip ack" signal; \`handled > 0 || !error\`
   // is. Partial-success-then-block now lands in both \`acked\` and
   // \`blocked\` arrays for the same stream — by design.
+  //
+  // A *deferred* result (#1090) is held out of ack entirely: the handler
+  // chose to re-visit the stream later without advancing the watermark, so
+  // the pending events must stay pending for the redelivery.
   const acked = await ops.ack(
     handled
-      .filter((h) => h.handled > 0 || !h.error)
+      .filter((h) => h.defer === undefined && (h.handled > 0 || !h.error))
       .map((h) => ({ ...h.lease, at: h.acked_at }))
   );
 
@@ -7055,7 +7034,32 @@ export async function run_drain_cycle<
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
-  return { leased, fetched, handled, acked, blocked };
+  // Persist deferred streams' next-visit time (#1090). \`claim()\` skips a
+  // stream until its \`deferred_at\` passes, so the defer holds across every
+  // competing worker (the durable counterpart to the in-process wake timer)
+  // and the stream isn't re-claimed — \`retry\` stays untouched. \`defer()\`
+  // sets one time per call, so group streams by their due-time.
+  const deferrals = handled.filter((h) => h.defer !== undefined);
+  if (deferrals.length) {
+    const by_time = new Map<number, string[]>();
+    for (const h of deferrals) {
+      const list = by_time.get(h.defer!);
+      if (list) list.push(h.lease.stream);
+      else by_time.set(h.defer!, [h.lease.stream]);
+    }
+    for (const [at, streams] of by_time) await ops.defer(streams, at);
+  }
+
+  // Collect close requests (#1090). A close result was already acked above
+  // (its event made progress, \`defer === undefined\`), which advances the
+  // requesting reaction past the terminal event so the close-cycle safety
+  // guard doesn't count it as an in-flight consumer. The orchestrator's
+  // \`on_close\` runs the actual \`run_close_cycle\`.
+  const closeable = handled
+    .filter((h) => h.close !== undefined)
+    .map((h) => h.close!);
+
+  return { leased, fetched, handled, acked, blocked, closeable };
 }
 
 /**
@@ -7092,6 +7096,13 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Close requested by a reaction (#1090). The controller calls this with the
+   * cycle's {@link CloseTarget}s after acks/blocks land; the orchestrator wires
+   * it to its \`run_close_cycle\` machinery (same path as \`app.close\`). Awaited so
+   * a slow close doesn't overlap the next cycle's claim on the controller.
+   */
+  readonly on_close: (targets: CloseTarget[]) => Promise<void>;
   /**
    * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
    * repeated store failures so the drain loop stops hammering a down
@@ -7132,14 +7143,16 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Per-stream backoff: \`stream → next_attempt_at\` (ms since epoch). Set by
-   * \`_finalize\` via \`HandleResult.next_attempt_at\`; cleared on successful
-   * ack or terminal block. Lives in process memory — per-worker pacing
-   * by design (see {@link BackoffOptions} for the multi-worker trade-off).
+   * Per-stream re-visit schedule (#1090): \`stream → next visit\` (ms since
+   * epoch). Holds both retry backoff (\`HandleResult.next_attempt_at\`) and the
+   * \`defer\` outcome; cleared on successful ack or terminal block. Lives in
+   * process memory — per-worker pacing by design (see {@link BackoffOptions}
+   * for the multi-worker trade-off). Its wake re-arms drain at the earliest
+   * pending visit.
    */
-  private _backoff = new Map<string, number>();
-  /** Timer re-arming drain at the earliest pending \`next_attempt_at\`. */
-  private _backoff_timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly _defer = new DeferTimer(() => {
+    this._armed = true;
+  });
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
@@ -7162,42 +7175,6 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
-  }
-
-  /** Returns true when \`stream\` is currently within a backoff window. */
-  private is_deferred = (stream: string): boolean => {
-    const next = this._backoff.get(stream);
-    return next !== undefined && next > Date.now();
-  };
-
-  /**
-   * Schedule the next drain re-arm at the earliest pending backoff
-   * expiry. Called only when the backoff map is non-empty (caller guard).
-   * Idempotent — collapses many simultaneously deferred streams into a
-   * single timer.
-   */
-  private schedule_backoff_wake(): void {
-    if (this._backoff_timer) clearTimeout(this._backoff_timer);
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const t of this._backoff.values()) if (t < earliest) earliest = t;
-    const delay = Math.max(0, earliest - Date.now());
-    this._backoff_timer = setTimeout(() => {
-      this._backoff_timer = undefined;
-      // Garbage-collect expired entries so the next cycle sees ready
-      // streams as active. Drain will be re-triggered by whoever owns the
-      // settle loop (or by the next commit). Re-arm here so a debounced
-      // settle picks it up.
-      const now = Date.now();
-      for (const [stream, at] of this._backoff) {
-        if (at <= now) this._backoff.delete(stream);
-      }
-      this._armed = true;
-    }, delay);
-    // Don't keep the event loop alive solely for backoff timers — letting
-    // a process exit during retry pacing is the right default. Safe to call
-    // unconditionally: Node's \`setTimeout\` always returns a Timeout with
-    // \`unref()\`.
-    this._backoff_timer.unref();
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -7239,6 +7216,9 @@ export class DrainController<
       clearTimeout(this._worker);
       this._worker = undefined;
     }
+    // Drop any pending re-visit wake — the parked set is process-local and
+    // rebuilt from the log on the next start (#1090).
+    this._defer.stop();
   }
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
@@ -7276,7 +7256,7 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.is_deferred : undefined,
+        this._defer.size > 0 ? this._defer.is_deferred : undefined,
         this._deps.lane
       );
 
@@ -7290,7 +7270,7 @@ export class DrainController<
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
-      const { leased, fetched, handled, acked, blocked } = cycle;
+      const { leased, fetched, handled, acked, blocked, closeable } = cycle;
 
       // Cycle-level trace (ACT-1103) — one log line per drain pass:
       // claim + fetch + outcomes folded together so the operator sees
@@ -7301,20 +7281,29 @@ export class DrainController<
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
-      // Refresh per-stream backoff state from this cycle's outcomes.
+      // Refresh per-stream re-visit state from this cycle's outcomes.
       // Successful acks and terminal blocks both clear the window;
-      // retry-not-block results carry a \`next_attempt_at\` set by \`_finalize\`.
-      for (const lease of acked) this._backoff.delete(lease.stream);
-      for (const lease of blocked) this._backoff.delete(lease.stream);
+      // retry-not-block results carry a \`next_attempt_at\` set by \`_finalize\`,
+      // and deferred results carry a \`defer\` due-time (#1090). Both park the
+      // stream in \`_defer\` so the shared wake timer re-arms drain at the
+      // earliest pending visit. \`handle\` already reconciles a stream's
+      // reactions into a single result per cycle, so the value written here
+      // is authoritative for the stream — a plain overwrite, not a merge.
+      for (const lease of acked) this._defer.delete(lease.stream);
+      for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        if (h.next_attempt_at !== undefined && !h.block) {
-          this._backoff.set(h.lease.stream, h.next_attempt_at);
-        }
+        const next = h.defer ?? (h.block ? undefined : h.next_attempt_at);
+        if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
-      if (this._backoff.size > 0) this.schedule_backoff_wake();
+      if (this._defer.size > 0) this._defer.schedule();
 
       if (acked.length) this._deps.on_acked(acked);
       if (blocked.length) this._deps.on_blocked(blocked);
+      // Run reaction-requested closes after acks land (#1090) — the close
+      // targets were acked above, so the close-cycle guard sees the requesting
+      // reaction as caught up. Awaited so a slow close doesn't overlap the
+      // next claim.
+      if (closeable.length) await this._deps.on_close(closeable);
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
@@ -7415,6 +7404,7 @@ import type {
   Fetch,
   Lease,
   Schemas,
+  StreamFilter,
 } from "../types/index.js";
 
 /** @internal */
@@ -7423,6 +7413,7 @@ export interface DrainOps<TEvents extends Schemas> {
   fetch: typeof fetch<TEvents>;
   ack: typeof ack;
   block: typeof block;
+  defer: typeof defer;
   subscribe: typeof subscribe;
 }
 
@@ -7455,6 +7446,11 @@ export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
 export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
+
+export const defer = (
+  input: string[] | StreamFilter,
+  deferred_at: number
+): Promise<number> => store().defer(input, deferred_at);
 
 export const subscribe = (
   streams: Array<{
@@ -8761,6 +8757,11 @@ class InMemoryStream {
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
   private _lane: string = DEFAULT_LANE;
+  // Persisted next-visit time (#1090). When set and still in the future, the
+  // stream is held out of \`claim\` entirely — so a deferred reaction is not
+  // re-claimed (and \`retry\` is never bumped) until its due-time passes. Unlike
+  // in-process backoff, this is durable store state shared across workers.
+  private _deferred_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -8806,8 +8807,22 @@ class InMemoryStream {
   get is_available() {
     return (
       !this._blocked &&
-      (!this._leased_until || this._leased_until <= new Date())
+      (!this._leased_until || this._leased_until <= new Date()) &&
+      // A stream deferred to a future time is not claimable until due (#1090).
+      (!this._deferred_at || this._deferred_at <= Date.now())
     );
+  }
+
+  /**
+   * Hold this stream out of \`claim\` until \`deferred_at\` (ms since epoch).
+   * Set by a deliberate \`defer\` outcome — not a failure, so retry/blocked
+   * state is untouched. Cleared by ack/block/reset/unblock.
+   */
+  defer(deferred_at: number) {
+    this._deferred_at = deferred_at;
+    // A defer is not a failure: reset retry so the redelivery after the
+    // due-time is a fresh attempt, never accumulating toward maxRetries.
+    this._retry = -1;
   }
 
   get at() {
@@ -8867,6 +8882,8 @@ class InMemoryStream {
       this._leased_until = undefined;
       this._at = lease.at;
       this._retry = -1;
+      // Advancing the watermark ends any active defer schedule (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -8888,6 +8905,8 @@ class InMemoryStream {
     if (this._leased_by === lease.by) {
       this._blocked = true;
       this._error = error;
+      // A blocked stream is poison; clear any pending defer (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -8913,6 +8932,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
   }
 
   /**
@@ -8927,6 +8947,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
     return true;
   }
 }
@@ -9350,6 +9371,38 @@ export class InMemoryStore implements Store {
     return leases
       .map((l) => this._streams.get(l.stream)?.block(l, l.error))
       .filter((l) => !!l);
+  }
+
+  /**
+   * Hold the matched streams out of {@link claim} until \`deferred_at\`
+   * (ms since epoch) — see {@link Store.defer}. Accepts an explicit list
+   * of names or a {@link StreamFilter}, mirroring {@link reset}/{@link unblock}.
+   * Persisted store state (unlike in-process backoff), so the skip is honored
+   * by every competing worker. Unknown names are silently skipped.
+   *
+   * @returns Count of streams whose \`deferred_at\` was set.
+   */
+  async defer(input: string[] | StreamFilter, deferred_at: number) {
+    await sleep();
+    let count = 0;
+    if (Array.isArray(input)) {
+      for (const name of input) {
+        const s = this._streams.get(name);
+        if (s) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    } else {
+      const matches = this._filter_predicate(input);
+      for (const s of this._streams.values()) {
+        if (matches(s)) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    }
+    return count;
   }
 
   /**
@@ -9845,18 +9898,14 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  hour_in_zone,
+  in_autoclose_window,
   resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {
-  AutocloseController,
-  type AutocloseControllerDeps,
-  type AutocloseCycleDeps,
-  type AutocloseCycleResult,
-  run_autoclose_cycle,
-} from "./autoclose-cycle.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_min_after_ms,
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
@@ -9868,8 +9917,10 @@ export {
   resolveCircuitBreakerConfig,
 } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
+export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -10986,6 +11037,41 @@ export interface Store extends Disposable, EventSource {
   block: (leases: BlockedLease[]) => Promise<BlockedLease[]>;
 
   /**
+   * Defers streams' next visit to a future time without advancing their
+   * watermark — the persistence behind the \`defer\` reaction outcome (#1090).
+   *
+   * Sets \`deferred_at\` on each matched stream. {@link claim} **skips** any
+   * stream whose \`deferred_at\` is still in the future, so a deferred reaction
+   * is not re-claimed (and \`retry\` is never bumped) until the due-time passes,
+   * at which point the same pending event is re-delivered. Unlike in-process
+   * backoff, this is durable, shared store state — every competing worker
+   * honors the skip, which is what makes a deferral correct across a
+   * multi-worker deployment.
+   *
+   * The schedule is cleared whenever the watermark moves or the stream is
+   * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
+   * all reset \`deferred_at\`. Re-deferring simply overwrites it.
+   *
+   * Accepts an explicit list of stream names or a {@link StreamFilter}
+   * (regex by default), the same shape as {@link reset}/{@link unblock}.
+   * Joins the watermark verb family: **claim / ack / block / defer**.
+   *
+   * @param input - Stream names or a {@link StreamFilter} selecting streams
+   * @param deferred_at - Wall-clock time (ms since epoch) to revisit the streams
+   * @returns Count of streams whose \`deferred_at\` was set
+   *
+   * @example
+   * \`\`\`typescript
+   * // Hold a stream until a 30-minute deadline elapses
+   * await store().defer(["order-42"], Date.now() + 30 * 60_000);
+   * \`\`\`
+   */
+  defer: (
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ) => Promise<number>;
+
+  /**
    * Resets watermarks for the given streams to -1, making them eligible
    * for replay from the beginning. Also clears retry, blocked, error,
    * and lease state so the streams can be claimed immediately.
@@ -12521,6 +12607,8 @@ import {
   type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
+import { CloseSignal } from "./close-signal.js";
+import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -12652,6 +12740,27 @@ export function build_handle<
         at = event.id;
         handled++;
       } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
+        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return { lease, handled, acked_at: at, defer: error.defer_at };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream.
+            close: { stream: error.stream ?? stream, archive: error.archive },
+          };
         return finalize(
           lease,
           handled,
@@ -13696,6 +13805,7 @@ import type { ZodType } from "zod";
 import {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_min_after_ms,
 } from "../internal/index.js";
 import type {
   ActionHandler,
@@ -14112,24 +14222,23 @@ export type ActionBuilder<
    * per-event). Absent → the state opts out of online close entirely;
    * the cycle skips it and pays zero per-tick cost for it.
    *
-   * Two forms:
+   * Pass a declarative {@link AutoclosePolicy} object literal covering the
+   * three operational pressure points (\`after\`, \`is\`, \`reaches\`). Top-level
+   * fields combine with AND; an optional \`or: {...}\` block opens an
+   * alternative OR path. Validated via Zod at build time; misconfiguration
+   * throws before \`act().build()\` completes.
    *
-   * - **Declarative** — pass an {@link AutoclosePolicy} object literal
-   *   covering the three operational pressure points (\`after\`, \`is\`,
-   *   \`reaches\`). Top-level fields combine with AND; an optional
-   *   \`or: {...}\` block opens an alternative OR path. Validated via
-   *   Zod at build time; misconfiguration throws before \`act().build()\`
-   *   completes. Covers the 90% case.
-   * - **Function** — pass a \`(stream, head, count) => boolean\`
-   *   predicate. Drops out to the full power of JS for per-stream
-   *   metadata predicates, multi-branch policies (different cooldowns
-   *   per terminal event), or anything the declarative form doesn't
-   *   cover. The predicate receives \`head: Committed<TEvents, ...>\`
-   *   so reading \`head.name\` autocompletes to the state's declared
-   *   event union.
+   * Under the hood this compiles to a synthesized reaction (#1090) that runs
+   * on a per-aggregate synthetic stream: it defers to \`head.created + the
+   * policy's min after\` while the cooldown holds and closes the stream once
+   * the policy matches. There is no background sweep.
    *
-   * @param predicate_or_policy Function form: predicate as above.
-   *   Object form: declarative {@link AutoclosePolicy} bag.
+   * **The function-predicate form was removed (#1090).** \`.autocloses\` no
+   * longer accepts \`(stream, head, count) => boolean\`; an opaque predicate has
+   * no derivable due-time or terminal event to react to. For conditions the
+   * declarative form can't express, call \`app.close(...)\` from your own logic.
+   *
+   * @param policy The declarative {@link AutoclosePolicy} bag.
    * @returns The ActionBuilder for chaining.
    *
    * @example Declarative — cooldown after terminal (a Ticket closes
@@ -14169,15 +14278,9 @@ export type ActionBuilder<
    * \`\`\`typescript
    * .autocloses({ or: { is: "TicketResolved", reaches: 10_000 } })
    * \`\`\`
-   *
-   * @example Function — custom predicate the declarative form can't
-   *   express (per-stream metadata or per-terminal cooldown).
-   * \`\`\`typescript
-   * .autocloses((stream, head) => stream.startsWith("ephemeral:"))
-   * \`\`\`
    */
   autocloses: (
-    predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
+    policy: AutoclosePolicy
   ) => ActionBuilder<TState, TEvents, TActions, TName>;
   /**
    * Declares the archiver the online close cycle runs **before**
@@ -14510,33 +14613,32 @@ function action_builder<
       return builder;
     },
 
-    autocloses(
-      predicate_or_policy: AutoclosePredicate<TEvents> | AutoclosePolicy
-    ) {
-      // Function form → use as-is. Object form → compile through the
-      // policy resolver (Zod-validates + builds the predicate). Reject
-      // anything else (numbers, strings, null) with a typeof-based
-      // message that points at the supported shapes.
-      let predicate: AutoclosePredicate<TEvents>;
-      if (typeof predicate_or_policy === "function") {
-        predicate = predicate_or_policy;
-      } else if (
-        predicate_or_policy !== null &&
-        typeof predicate_or_policy === "object"
-      ) {
-        predicate = compile_autoclose_policy(
-          predicate_or_policy
-        ) as AutoclosePredicate<TEvents>;
-      } else {
+    autocloses(policy: AutoclosePolicy) {
+      // Declarative policy only (#1090). The online path is a synthesized
+      // reaction that defers to a derivable due-time and closes — an opaque
+      // function predicate has no terminal event to react to nor a window to
+      // derive, so it's no longer accepted online. Operators who need custom
+      // logic call \`app.close(...)\` from their own reaction.
+      if (typeof policy === "function") {
         throw new Error(
-          ".autocloses(...) requires a function or a policy object; got " +
-            typeof predicate_or_policy
+          ".autocloses(fn) is no longer supported — pass a declarative policy " +
+            "({ after, is, reaches, or }) or call app.close(...) from your own " +
+            "reaction for custom logic."
+        );
+      }
+      if (policy === null || typeof policy !== "object") {
+        throw new Error(
+          ".autocloses(...) requires a policy object; got " + typeof policy
         );
       }
       // Replace on every call — matches snap / discloses state-level
-      // semantics. Operators with multi-condition policies AND/OR
-      // inside one predicate.
-      internal.autoclose = predicate;
+      // semantics. Compile to the predicate the reaction evaluates, and
+      // cache the policy's min \`after\` window so the reaction knows whether
+      // to park on a due-time or wait for the next event.
+      internal.autoclose = compile_autoclose_policy(
+        policy
+      ) as AutoclosePredicate<TEvents>;
+      internal.autoclose_after_ms = policy_min_after_ms(policy);
       return builder;
     },
 
@@ -14824,6 +14926,7 @@ export function build_drain<TEvents extends Schemas>(
     fetch: drain.fetch,
     ack: drain.ack,
     block: drain.block,
+    defer: drain.defer,
     subscribe:
       logger.level !== "trace"
         ? drain.subscribe
@@ -15053,7 +15156,6 @@ import {
   ALL_LANES,
   type AuditDeps,
   type AutocloseConfig,
-  AutocloseController,
   audit,
   build_drain,
   build_es,
@@ -15062,9 +15164,11 @@ import {
   CircuitBreaker,
   type CircuitBreakerOptions,
   type CircuitState,
+  CloseSignal,
   CorrelateCycle,
   classify_registry,
   close_correlation,
+  DeferSignal,
   DrainController,
   type DrainOps,
   default_correlator,
@@ -15072,6 +15176,7 @@ import {
   type EventLaneSet,
   type Handle,
   type HandleBatch,
+  in_autoclose_window,
   resolveAutocloseConfig,
   resolveCircuitBreakerConfig,
   run_close_cycle,
@@ -15082,7 +15187,15 @@ import {
 // Public re-exports: these appear in ActOptions / ActLifecycleEvents above.
 export type { CircuitBreakerOptions, CircuitState } from "./internal/index.js";
 
-import { cache, dispose, log, type Scoped, scoped, store } from "./ports.js";
+import {
+  cache,
+  dispose,
+  log,
+  type Scoped,
+  scoped,
+  store,
+  TOMBSTONE_EVENT,
+} from "./ports.js";
 import type {
   Actor,
   AsOf,
@@ -15106,6 +15219,7 @@ import type {
   LoadTarget,
   Logger,
   Query,
+  Reaction,
   Registry,
   ScanOptions,
   ScanResult,
@@ -15162,6 +15276,14 @@ export const DEFAULT_MAX_SUBSCRIBED_STREAMS = 1000;
  * latency on the \`"settled"\` signal.
  */
 export const DEFAULT_SETTLE_DEBOUNCE_MS = 10;
+
+/**
+ * Prefix for the synthetic per-aggregate stream the autoclose reaction (#1090)
+ * runs on. \`target = \\\`\${AUTOCLOSE_TARGET_PREFIX}\${aggregate}\\\`\`, \`source =
+ * aggregate\` — a watermark distinct from the aggregate's own reactions, so an
+ * autoclose defer never short-circuits them. Internal; not a public surface.
+ */
+const AUTOCLOSE_TARGET_PREFIX = "__autoclose__:";
 
 // Re-export the autoclose config surface so operators can
 // \`import { DEFAULT_AUTOCLOSE_CYCLE_MINUTES, resolveAutocloseConfig }
@@ -15412,15 +15534,6 @@ export class Act<
    * @internal
    */
   private readonly _autoclose_config: AutocloseConfig;
-  /**
-   * App-level autoclose controller. \`undefined\` when no state declares
-   * \`.autocloses(...)\` — the controller is never constructed, so
-   * \`start_correlations()\` / \`stop_correlations()\` skip the autoclose
-   * lifecycle and the orchestrator pays zero per-tick cost.
-   *
-   * @internal
-   */
-  private readonly _autoclose: AutocloseController | undefined;
 
   /**
    * Emit a lifecycle event. The payload type is inferred from the event name
@@ -15597,6 +15710,76 @@ export class Act<
     });
     this._handle_batch = build_handle_batch<TEvents>(this._logger);
 
+    // #1090 — synthesize the autoclose reaction. \`.autocloses(policy)\` is no
+    // longer a sweep: it's a reaction on every event the state owns that
+    // evaluates the policy against the LIVE head (so a reopened stream
+    // re-evaluates correctly), defers to the cooldown's earliest opening
+    // (\`head.created + the policy's min after\`), and closes via \`CloseSignal\`
+    // once the policy holds. Injected here — before \`classify_registry\` — so
+    // its dynamic resolver is discovered and its target stream subscribed.
+    for (const st of this._states.values()) {
+      const predicate = st.autoclose;
+      if (!predicate) continue;
+      const after_ms = st.autoclose_after_ms;
+      const archiver = st.archive;
+      const reaction: Reaction<TEvents> = {
+        // Run on a SYNTHETIC stream — \`source\` is the aggregate, \`target\` is a
+        // per-aggregate \`__autoclose__\` key — so the autoclose reaction never
+        // shares a watermark with the aggregate's own reactions. A shared
+        // watermark would let autoclose's defer short-circuit the aggregate's
+        // other reactions (the "a defer affects all reactions on a stream"
+        // hazard). The close still targets the aggregate (\`source\`).
+        resolver: (e) => ({
+          target: \`\${AUTOCLOSE_TARGET_PREFIX}\${e.stream}\`,
+          source: e.stream,
+        }),
+        // Never block on autoclose: a transient query/store error should retry,
+        // not quarantine the synthetic stream.
+        options: { blockOnError: false, maxRetries: 3 },
+        handler: async (event) => {
+          const aggregate = event.stream;
+          const config = this._autoclose_config;
+          // Off-hours gating preserved from the sweep: outside the window,
+          // re-check next cycle instead of closing.
+          if (!in_autoclose_window(config.autocloseWindow, new Date()))
+            throw new DeferSignal(
+              Date.now() + config.autocloseCycleMinutes * 60_000
+            );
+          const stats = await store().query_stats([aggregate], {
+            count: true,
+            exclude: [TOMBSTONE_EVENT],
+          });
+          const entry = stats.get(aggregate);
+          // No live (non-tombstone) head → already closed, nothing to do.
+          if (!entry) return;
+          const head = entry.head;
+          // \`count\` is always present — query_stats is called with
+          // \`count: true\` above, so the option contract guarantees it.
+          if (predicate(aggregate, head, entry.count!))
+            throw new CloseSignal({
+              stream: aggregate,
+              archive: archiver ? () => archiver(aggregate, head) : undefined,
+              // Ack this reaction's own watermark to the live head so the
+              // close-cycle guard (which matches subscriptions by source =
+              // aggregate) sees it caught up instead of blocking its own close.
+              at: head.id,
+            });
+          // Not eligible yet: park on the cooldown's earliest opening when the
+          // policy has a time gate; otherwise wait for the next event to
+          // re-trigger (e.g. a \`reaches\` threshold).
+          if (after_ms !== undefined)
+            throw new DeferSignal(head.created.getTime() + after_ms);
+        },
+      };
+      const key = \`__autoclose_\${st.name}\`;
+      for (const event_name of Object.keys(st.events)) {
+        this.registry.events[event_name as keyof TEvents]?.reactions.set(
+          key,
+          reaction as Reaction<TEvents, keyof TEvents>
+        );
+      }
+    }
+
     const {
       static_targets,
       has_dynamic_resolvers,
@@ -15660,6 +15843,22 @@ export class Act<
         handle_batch: this._handle_batch,
         on_acked: (acked) => this.emit("acked", acked),
         on_blocked: (blocked) => this.emit("blocked", blocked),
+        // Reaction-requested close (#1090). Runs the same close machinery as
+        // \`app.close\` (tombstone guard + archive + atomic truncate) for the
+        // targets a handler signalled via \`CloseSignal\`. No \`correlate()\` here
+        // — the drain that produced these targets has already correlated.
+        on_close: async (targets) => {
+          const close_actor = { id: "$close", name: "close" };
+          const result = await run_close_cycle(targets, {
+            reactive_events_size: this._reactive_events.size,
+            event_to_state: this._event_to_state,
+            load: this._es.load,
+            tombstone: this._es.tombstone,
+            logger: this._logger,
+            correlation: close_correlation(this._correlator, close_actor),
+          });
+          this.emit("closed", result);
+        },
         breaker: this._breaker,
         // Pass lane only when a true per-lane controller is active.
         // The all-lanes (single default) case keeps lane=undefined so
@@ -15719,36 +15918,6 @@ export class Act<
       },
       options.settleDebounceMs ?? DEFAULT_SETTLE_DEBOUNCE_MS
     );
-
-    // #837 — construct the autoclose controller only when at least one
-    // state declared \`.autocloses(...)\`. Zero-cost otherwise: the
-    // controller field stays \`undefined\` and \`start_correlations()\` /
-    // \`stop_correlations()\` skip the autoclose lifecycle entirely.
-    const states_with_policy = [...this._states.values()].filter(
-      (s) => s.autoclose
-    );
-    this._autoclose = states_with_policy.length
-      ? new AutocloseController({
-          // Internal cycle takes the loose \`(string) => …\` signature; the
-          // public \`registry.autoclose_policy\` narrows to
-          // \`keyof TStateMap & string\`. Thin lambdas bridge across the
-          // narrowing — runtime semantics are unchanged.
-          autoclose_policy: (name) =>
-            this.registry.autoclose_policy(name as keyof TStateMap & string),
-          autoclose_archiver: (name) =>
-            this.registry.autoclose_archiver(name as keyof TStateMap & string),
-          event_to_state: this._event_to_state,
-          reactive_events_size: this._reactive_events.size,
-          load: this._es.load,
-          tombstone: this._es.tombstone,
-          logger: this._logger,
-          config: this._autoclose_config,
-          correlator: this._correlator,
-          close_actor: { id: "$autoclose", name: "autoclose" },
-          on_closed: (result) => this.emit("closed", result),
-          breaker: this._breaker,
-        })
-      : undefined;
 
     // Auto-wire cross-process notify when the store supports it. Bound at
     // construction time — late \`store(adapter)\` injection after build won't
@@ -16400,10 +16569,6 @@ export class Act<
     callback?: (subscribed: number) => void
   ): boolean {
     const started = this._correlate.start_polling(query, frequency, callback);
-    // #837 — start the autoclose ticker on the same lifecycle hook
-    // operators already call for the correlate worker. \`undefined\`
-    // when no state declares \`.autocloses(...)\` (zero-cost path).
-    this._autoclose?.start();
     return started;
   }
 
@@ -16426,7 +16591,6 @@ export class Act<
    */
   stop_correlations() {
     this._correlate.stop_polling();
-    this._autoclose?.stop();
   }
 
   /**
@@ -17483,6 +17647,15 @@ export type State<
     head: Committed<TEvents, keyof TEvents>,
     count: number
   ): boolean;
+  /**
+   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
+   * or \`undefined\` when the policy has no time component (#1090). The
+   * synthesized autoclose reaction uses it to defer its re-check to
+   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
+   * for the next event instead of parking on a due-time. Set alongside
+   * \`autoclose\` by the builder.
+   */
+  autoclose_after_ms?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -18924,381 +19097,6 @@ export function in_autoclose_window(
     : hour >= window.start || hour < window.end;
 }
 
-// === autoclose-cycle.ts ===
-/**
- * @module autoclose-cycle
- * @category Internal
- *
- * The online close-the-books cycle (#837 / epic #802). Paginates the
- * store's streams, applies each state's \`.autocloses(predicate)\` to
- * the matching candidates, then hands the eligible streams to the
- * existing {@link run_close_cycle} so the tombstone-guard +
- * archive-while-guarded + atomic-truncate invariants carry over from
- * the explicit \`app.close(targets)\` path.
- *
- * Pure orchestration. The caller (the app-level controller in slice
- * 3) owns the cadence (\`setInterval(...)\`), the lifecycle events
- * (\`emit("closed", ...)\`), and the per-tick correlation id.
- *
- * Zero-cost when no state declares \`.autocloses(...)\` — the caller
- * never invokes this function in that case (the controller isn't
- * constructed).
- *
- * @internal
- */
-
-import type { AutocloseConfig } from "../act.js";
-import { store, TOMBSTONE_EVENT } from "../ports.js";
-import type {
-  Actor,
-  CloseResult,
-  CloseTarget,
-  Correlator,
-  Logger,
-  State,
-  TruncateResult,
-} from "../types/index.js";
-import { in_autoclose_window } from "./autoclose-config.js";
-import type { CircuitBreaker } from "./circuit-breaker.js";
-import { run_close_cycle } from "./close-cycle.js";
-import { close_correlation } from "./correlator.js";
-import type { EsOps } from "./event-sourcing.js";
-
-/**
- * Dependencies the autoclose cycle needs. Decoupled from \`Act\` so
- * the cycle can be exercised from tests in isolation against an
- * \`InMemoryStore\` without spinning a full Act.
- *
- * @internal
- */
-export type AutocloseCycleDeps = {
-  /**
-   * Lookup of \`.autocloses(predicate)\` per state name. The cycle
-   * skips streams whose owning state returns \`null\` here, so opt-out
-   * states pay zero per-stream cost beyond the \`event_to_state\`
-   * lookup.
-   */
-  readonly autoclose_policy: (
-    state_name: string
-  ) => ((stream: string, head: any, count: number) => boolean) | null;
-  /**
-   * Lookup of \`.archives(fn)\` per state name. When present, the
-   * cycle threads it into the corresponding {@link CloseTarget.archive}
-   * so the existing close-cycle's archive-while-guarded invariant
-   * applies — a thrown archiver leaves the stream guarded but
-   * un-truncated, and the cycle re-evaluates the candidate next
-   * tick.
-   */
-  readonly autoclose_archiver: (
-    state_name: string
-  ) => ((stream: string, head: any) => Promise<void>) | null;
-  /** event-name → owning-state lookup (already computed at build). */
-  readonly event_to_state: ReadonlyMap<string, State<any, any, any>>;
-  /** Reactive-event count, forwarded to {@link run_close_cycle}. */
-  readonly reactive_events_size: number;
-  /** \`EsOps.load\`, forwarded to {@link run_close_cycle}. */
-  readonly load: EsOps["load"];
-  /** \`EsOps.tombstone\`, forwarded to {@link run_close_cycle}. */
-  readonly tombstone: EsOps["tombstone"];
-  readonly logger: Logger;
-  readonly config: AutocloseConfig;
-  /**
-   * Correlation id for this tick. The caller computes it via the
-   * configured {@link Correlator}; every truncate the cycle stages
-   * shares this id so close-cycle commits land under one correlation
-   * key (matching the existing \`app.close(targets)\` behavior).
-   */
-  readonly correlation: string;
-};
-
-/**
- * Aggregated result of one autoclose tick. The caller forwards
- * \`close_result\` to the \`closed\` lifecycle event; \`inspected\` /
- * \`evaluated\` / \`predicate_errors\` feed observability sidecars.
- *
- * @internal
- */
-export type AutocloseCycleResult = {
-  /** Total streams the cycle paginated through this tick. */
-  readonly inspected: number;
-  /** Streams whose owning state had a policy and the predicate ran. */
-  readonly evaluated: number;
-  /** Predicate exceptions caught + classified per \`closeOnError\`. */
-  readonly predicate_errors: number;
-  /** Forwarded from {@link run_close_cycle} — truncated + skipped. */
-  readonly close_result: CloseResult;
-};
-
-/**
- * Yield to the event loop for \`ms\` milliseconds (or one microtask
- * tick when \`ms === 0\`). The autoclose cycle inserts this between
- * truncate batches so SQLite operators can let the writer lock
- * release between rows — PG / InMemory don't serialize writers
- * globally and run with \`ms = 0\` (microtask yield only).
- *
- * @internal
- */
-function yield_between_batches(ms: number): Promise<void> {
-  if (ms <= 0) return Promise.resolve();
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Run one autoclose tick against the configured store. Each tick
- * fetches a single bounded page of streams — those sorting after
- * {@link AutocloseCycleDeps.after}, up to \`closeBatchSize\` — applies
- * each state's predicate, and hands that page's eligible candidates to
- * {@link run_close_cycle} as one batch (one safety probe per batch).
- * It pages through the whole store via the keyset cursor, yielding
- * \`closeYieldMs\` between batches, so a single run reaches every
- * eligible stream while bounding per-batch memory and write burst.
- *
- * The cycle never throws — predicate exceptions are caught and
- * logged (counted in \`predicate_errors\`; \`closeOnError\` controls
- * whether they count as "close this stream"). Store errors during
- * a page query propagate to the caller (the controller logs them and
- * skips to the next run).
- *
- * @internal
- */
-export async function run_autoclose_cycle(
-  deps: AutocloseCycleDeps
-): Promise<AutocloseCycleResult> {
-  const s = store();
-  let inspected = 0;
-  let evaluated = 0;
-  let predicate_errors = 0;
-  const truncated: TruncateResult = new Map();
-  const skipped: string[] = [];
-
-  const page = deps.config.closeBatchSize;
-  // Page through the whole store one \`closeBatchSize\` batch at a time,
-  // closing each batch before fetching the next. Closed streams are
-  // tombstoned (excluded here) and sit behind the cursor, so the
-  // forward scan never revisits them.
-  let after: string | undefined;
-  for (;;) {
-    const stats = await s.query_stats(
-      {},
-      { count: true, exclude: [TOMBSTONE_EVENT], after, limit: page }
-    );
-    if (stats.size === 0) break;
-    inspected += stats.size;
-
-    const candidates: CloseTarget[] = [];
-    for (const [stream, { head, count }] of stats) {
-      // \`head\` is non-optional on \`StreamStats\` — \`query_stats\` only
-      // includes streams with at least one non-excluded event.
-      const owner = deps.event_to_state.get(head.name);
-      if (!owner) continue;
-      const predicate = deps.autoclose_policy(owner.name);
-      if (!predicate) continue;
-
-      let close = false;
-      try {
-        close = predicate(stream, head, count ?? 0);
-        evaluated += 1;
-      } catch (err) {
-        predicate_errors += 1;
-        deps.logger.error(
-          \`Autoclose predicate for state "\${owner.name}" threw on stream "\${stream}": \${
-            err instanceof Error ? err.message : String(err)
-          }\`
-        );
-        close = deps.config.closeOnError;
-      }
-
-      if (!close) continue;
-
-      const archiver = deps.autoclose_archiver(owner.name);
-      const archive = archiver ? () => archiver(stream, head) : undefined;
-      candidates.push({ stream, archive });
-    }
-
-    // One batch → one safety probe. The page size bounds the count.
-    if (candidates.length > 0) {
-      const result = await run_close_cycle(candidates, {
-        reactive_events_size: deps.reactive_events_size,
-        event_to_state: deps.event_to_state,
-        load: deps.load,
-        tombstone: deps.tombstone,
-        logger: deps.logger,
-        correlation: deps.correlation,
-      });
-      for (const [stream, entry] of result.truncated)
-        truncated.set(stream, entry);
-      for (const stream of result.skipped) skipped.push(stream);
-      await yield_between_batches(deps.config.closeYieldMs);
-    }
-
-    // Short page → end of the sweep.
-    if (stats.size < page) break;
-    after = [...stats.keys()].at(-1);
-  }
-
-  return {
-    inspected,
-    evaluated,
-    predicate_errors,
-    close_result: { truncated, skipped },
-  };
-}
-
-/**
- * Dependencies the app-level autoclose controller needs. Same shape
- * as {@link AutocloseCycleDeps} minus \`correlation\` (the controller
- * computes one per tick from the supplied {@link Correlator}) and
- * plus the lifecycle-event sink (\`on_closed\`) and the actor sentinel
- * for the correlator (\`close_actor\`).
- *
- * @internal
- */
-export type AutocloseControllerDeps = Omit<
-  AutocloseCycleDeps,
-  "correlation" | "after"
-> & {
-  /**
-   * Correlator the controller invokes per tick to stamp the cycle's
-   * truncate commits. Reuses the orchestrator's configured
-   * correlator so close commits share the app's id scheme — same as
-   * the existing \`app.close(targets)\` path.
-   */
-  readonly correlator: Correlator;
-  /** Sentinel actor for the close correlation (matches \`Act.close\`). */
-  readonly close_actor: Actor;
-  /**
-   * Fan-out for the per-tick result. The controller calls this once
-   * per tick that closes at least one stream, with the cycle's
-   * {@link CloseResult}. The Act orchestrator wires this to
-   * \`emit("closed", result)\`.
-   */
-  readonly on_closed: (result: CloseResult) => void;
-  /**
-   * Shared orchestrator circuit breaker (ACT-984). The autoclose ticker is
-   * a periodic store poller like the drain loop, so it consults the same
-   * breaker: it skips a tick while the breaker is open and records the
-   * outcome of each tick it runs (\`failed(now, err)\` also surfaces the
-   * failure to the orchestrator's \`error\` lifecycle event).
-   */
-  readonly breaker: CircuitBreaker;
-};
-
-/**
- * App-level autoclose controller. Owns the ticker (\`setInterval\`),
- * the per-tick reentrancy guard (a slow tick doesn't pile on the
- * next interval), and the lifecycle-event fan-out. Tests invoke
- * {@link run_once} directly; the orchestrator's
- * \`start_correlations()\` / \`stop_correlations()\` lifecycle starts +
- * stops the ticker.
- *
- * @internal
- */
-export class AutocloseController {
-  public readonly deps: AutocloseControllerDeps;
-  private _timer: ReturnType<typeof setInterval> | undefined;
-  /**
-   * Reentrancy guard. The interval fires the next tick on cadence
-   * regardless of how long the previous one took; this flag drops
-   * overlapping ticks so the cycle stays sequential per controller.
-   */
-  private _running = false;
-
-  constructor(deps: AutocloseControllerDeps) {
-    this.deps = deps;
-  }
-
-  /**
-   * Start the cycle ticker. Returns \`false\` if already running so
-   * accidental double-start doesn't stack timers (matches
-   * \`_correlate.start_polling\` semantics).
-   */
-  start(): boolean {
-    if (this._timer) return false;
-    // Fire-and-forget interval — swallow rejections so a thrown cycle
-    // doesn't kill the timer. The error is already recorded on the shared
-    // breaker (which logs it and surfaces the \`error\` lifecycle event) by
-    // \`run_once\`, so there's nothing left to do here but keep ticking.
-    this._timer = setInterval(() => {
-      this.run_once().catch(() => {});
-    }, this.deps.config.autocloseCycleMinutes * 60_000);
-    // Don't let the interval keep the process alive — Node's
-    // \`setInterval\` returns a \`Timeout\` with \`unref()\` (the package
-    // targets Node ≥22, so the runtime guard is unnecessary).
-    this._timer.unref();
-    return true;
-  }
-
-  /**
-   * Stop the cycle ticker. Idempotent.
-   */
-  stop(): void {
-    if (this._timer) {
-      clearInterval(this._timer);
-      this._timer = undefined;
-    }
-  }
-
-  /**
-   * Whether the ticker is currently running.
-   */
-  get is_running(): boolean {
-    return this._timer !== undefined;
-  }
-
-  /**
-   * Run one cycle synchronously. The controller's interval callback
-   * delegates here; tests can invoke it directly to deterministically
-   * exercise the cycle without spinning real timers.
-   *
-   * Overlapping invocations short-circuit: if a previous tick is
-   * still running, this one drops and returns \`null\`. The orchestrator
-   * never sees a queue of pending ticks regardless of how slow the
-   * predicate / archive / truncate are.
-   */
-  async run_once(): Promise<AutocloseCycleResult | null> {
-    if (this._running) return null;
-    // Circuit open: the store is failing, skip this tick rather than pile
-    // load on a down backend. The next tick after the cooldown retries.
-    if (this.deps.breaker.state(Date.now()) === "open") return null;
-    // Off-hours window: outside it, this tick does nothing. The ticker
-    // keeps firing; only the sweep is gated.
-    if (!in_autoclose_window(this.deps.config.autocloseWindow, new Date()))
-      return null;
-    this._running = true;
-    try {
-      const correlation = close_correlation(
-        this.deps.correlator,
-        this.deps.close_actor
-      );
-      const result = await run_autoclose_cycle({
-        autoclose_policy: this.deps.autoclose_policy,
-        autoclose_archiver: this.deps.autoclose_archiver,
-        event_to_state: this.deps.event_to_state,
-        reactive_events_size: this.deps.reactive_events_size,
-        load: this.deps.load,
-        tombstone: this.deps.tombstone,
-        logger: this.deps.logger,
-        config: this.deps.config,
-        correlation,
-      });
-      // The store responded — reset the shared breaker.
-      this.deps.breaker.passed();
-      if (result.close_result.truncated.size > 0) {
-        this.deps.on_closed(result.close_result);
-      }
-      return result;
-    } catch (error) {
-      // A store op failed mid-tick. Record on the shared breaker, which
-      // logs it and surfaces the \`error\` lifecycle event, then rethrow so
-      // the interval callback can swallow it and keep the timer alive.
-      this.deps.breaker.failed(Date.now(), error);
-      throw error;
-    } finally {
-      this._running = false;
-    }
-  }
-}
-
 // === autoclose-policy.ts ===
 /**
  * @module autoclose-policy
@@ -19507,6 +19305,31 @@ function compile_reaches(
  *
  * @internal
  */
+/**
+ * The smallest \`after\` window (in ms) anywhere in a policy — across the
+ * top-level \`after\` and the \`or.after\` block — or \`undefined\` when the
+ * policy has no time component.
+ *
+ * The synthesized autoclose reaction (#1090) uses this to decide how to
+ * wait: a policy with an \`after\` defers its re-check to \`head.created +
+ * min_after_ms\` (the earliest its time gate could open); a policy without
+ * one (\`is\` / \`reaches\` only) has no time gate, so the reaction just waits
+ * for the next event to re-trigger rather than parking on a due-time.
+ * Conservative — the min across branches never defers past the soonest a
+ * branch could fire.
+ *
+ * @internal
+ */
+export function policy_min_after_ms(
+  options: AutoclosePolicy
+): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  const windows: number[] = [];
+  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
+  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  return windows.length ? Math.min(...windows) : undefined;
+}
+
 export function compile_autoclose_policy(
   options: AutoclosePolicy
 ): AutoclosePredicate<Schemas> {
@@ -20274,6 +20097,65 @@ async function truncate_and_warm_cache(
   return truncated;
 }
 
+// === close-signal.ts ===
+/**
+ * @module close-signal
+ * @category Internal
+ *
+ * The control-flow signal a reaction handler throws to *close* a stream
+ * (#1090). Like {@link "defer-signal".DeferSignal} it rides the dispatcher's
+ * \`try/catch\`, but where a defer holds the stream for later, a close asks the
+ * orchestrator to retire it: \`build_handle\` turns the signal into a
+ * \`HandleResult.close\` (a {@link CloseTarget}), \`run_drain_cycle\` acks the
+ * triggering event and collects the target, and the \`DrainController\` hands it
+ * to the orchestrator's \`on_close\` callback, which runs the same
+ * \`run_close_cycle\` machinery as \`app.close\`.
+ *
+ * Internal: the compiled autoclose reaction throws it. Closing stays an
+ * orchestrator capability — reactions only *signal* the intent, so the public
+ * reaction-scoped \`IAct\` gains no \`close\`.
+ *
+ * The autoclose reaction runs on a **synthetic stream** (\`source\` = the
+ * aggregate, \`target\` = a per-aggregate \`__autoclose__\` key) so it never
+ * shares a watermark with the aggregate's own reactions. That makes the close
+ * *target* distinct from the reaction's lease stream, so the signal carries the
+ * stream to close explicitly (\`stream\`); when omitted (a user reaction closing
+ * its own stream) it defaults to the lease stream.
+ *
+ * @internal
+ */
+export class CloseSignal extends Error {
+  /**
+   * Stream to close. Omitted → the reaction's own lease stream (a self-close).
+   * The synthesized autoclose reaction sets it to the aggregate stream, since
+   * its lease runs on a synthetic \`__autoclose__\` target.
+   */
+  readonly stream?: string;
+  /** Optional archive callback to run while the stream is guarded. */
+  readonly archive?: () => Promise<void>;
+  /**
+   * Watermark to ack the requesting reaction to before the close runs. The
+   * close-cycle safety guard skips a stream whose subscriptions (matched by
+   * source) lag the head; the autoclose reaction's \`source\` is the aggregate,
+   * so it must advance its own watermark to the live head id it evaluated
+   * against — otherwise it blocks its own close. Defaults to the triggering
+   * event id when omitted.
+   */
+  readonly at?: number;
+
+  constructor(opts?: {
+    stream?: string;
+    archive?: () => Promise<void>;
+    at?: number;
+  }) {
+    super("reaction requested close");
+    this.name = "CloseSignal";
+    this.stream = opts?.stream;
+    this.archive = opts?.archive;
+    this.at = opts?.at;
+  }
+}
+
 // === config.ts ===
 /**
  * @packageDocumentation
@@ -20967,6 +20849,175 @@ export function close_correlation(
   });
 }
 
+// === defer-signal.ts ===
+/**
+ * @module defer-signal
+ * @category Internal
+ *
+ * The control-flow signal a reaction handler throws to *defer* itself
+ * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * ({@link "reactions".build_handle}) catches it and produces a
+ * \`HandleResult.defer\` — the triggering events stay pending (watermark not
+ * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
+ * carried due-time.
+ *
+ * Internal for now: the compiled autoclose reaction throws it directly. The
+ * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
+ * so the dispatcher needs to recognize only this one type either way.
+ *
+ * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
+ * existing \`try/catch\` in the handler loop instead of needing a separate
+ * return channel through every dispatcher signature.
+ *
+ * @internal
+ */
+export class DeferSignal extends Error {
+  /** Wall-clock time (ms since epoch) to re-visit the stream. */
+  readonly defer_at: number;
+
+  constructor(defer_at: number) {
+    super("reaction deferred");
+    this.name = "DeferSignal";
+    this.defer_at = defer_at;
+  }
+}
+
+// === defer-timer.ts ===
+/**
+ * @module defer-timer
+ * @category Internal
+ *
+ * The shared "next visit time" primitive (#1090). A \`DeferTimer\` holds a
+ * \`stream → due-time\` map and a single collapsed wake timer: it parks
+ * streams that should be re-visited later and fires one \`on_wake\` callback
+ * at the earliest pending due-time, garbage-collecting the entries that have
+ * come due.
+ *
+ * Two consumers ride it:
+ *
+ * - the {@link "drain-cycle".DrainController} — for per-reaction backoff (a
+ *   retry's \`next_attempt_at\`) and, once handlers can express it, the
+ *   \`defer\` outcome that holds a stream pending without advancing the
+ *   watermark or bumping \`retry\`.
+ * - the autoclose controller — to schedule its next eligibility check at the
+ *   precise time an \`after\`-style cooldown elapses, instead of a blind
+ *   fixed-interval sweep.
+ *
+ * Lives in process memory, per worker — the same per-worker pacing trade-off
+ * documented for backoff. Durability comes from the data the due-time is
+ * *derived* from (an un-advanced watermark, an event's \`created\` timestamp),
+ * not from the map: a restart rebuilds it from the log.
+ *
+ * @internal
+ */
+
+/**
+ * A min-heap-free scheduler over a small \`stream → due-time\` map. The maps
+ * are bounded by the worker's claim/stream limits, so a linear scan for the
+ * earliest entry is cheaper than maintaining a heap.
+ *
+ * @internal
+ */
+
+/**
+ * Node's \`setTimeout\` delay is a 32-bit signed int (~24.8 days). A larger
+ * delay overflows and fires immediately, so we cap at this and re-arm.
+ *
+ * @internal
+ */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+export class DeferTimer {
+  private readonly _due = new Map<string, number>();
+  private _timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly _on_wake: () => void;
+
+  /**
+   * @param on_wake - invoked once each time the earliest due-time elapses,
+   *   after the come-due entries have been removed. Consumers use it to
+   *   re-arm their loop (the drain sets its \`armed\` flag; autoclose runs a
+   *   tick).
+   */
+  constructor(on_wake: () => void) {
+    this._on_wake = on_wake;
+  }
+
+  /** Number of currently parked streams. */
+  get size(): number {
+    return this._due.size;
+  }
+
+  /**
+   * True while \`stream\` is parked with a due-time still in the future.
+   * Consumers skip work for deferred streams until their window elapses.
+   */
+  is_deferred = (stream: string): boolean => {
+    const next = this._due.get(stream);
+    return next !== undefined && next > Date.now();
+  };
+
+  /**
+   * Park \`stream\` for a re-visit at \`at\` (ms since epoch). A plain
+   * overwrite: the caller computes the authoritative next-visit for the
+   * stream (the drain's \`handle\` already reconciles a stream's reactions
+   * into one result per cycle), so there is no stale value to merge against.
+   */
+  set(stream: string, at: number): void {
+    this._due.set(stream, at);
+  }
+
+  /** Drop \`stream\` from the parked set (e.g. on a successful ack or block). */
+  delete(stream: string): void {
+    this._due.delete(stream);
+  }
+
+  /**
+   * (Re)schedule the wake timer at the earliest pending due-time. Idempotent
+   * — collapses many parked streams into a single timer. A no-op clears any
+   * pending timer when the map is empty.
+   *
+   * The timer is \`unref()\`-ed so pending re-visits never keep the process
+   * alive on their own.
+   */
+  schedule(): void {
+    if (this._timer) clearTimeout(this._timer);
+    if (this._due.size === 0) {
+      this._timer = undefined;
+      return;
+    }
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const t of this._due.values()) if (t < earliest) earliest = t;
+    // Clamp to setTimeout's 32-bit ceiling (~24.8 days). A longer due-time
+    // (e.g. a 90-day autoclose cooldown) would otherwise overflow and Node
+    // fires it immediately, busy-looping. Instead we wake at the ceiling and
+    // re-arm: the GC below keeps the still-future entry, \`on_wake\` re-schedules
+    // for the remaining span, and (for persisted defers) \`claim\` skips the
+    // stream until its real due-time anyway.
+    const delay = Math.min(
+      Math.max(0, earliest - Date.now()),
+      MAX_TIMER_DELAY_MS
+    );
+    this._timer = setTimeout(() => {
+      this._timer = undefined;
+      // Garbage-collect the entries that have come due so the consumer's
+      // next pass sees them as active again.
+      const now = Date.now();
+      for (const [stream, at] of this._due)
+        if (at <= now) this._due.delete(stream);
+      this._on_wake();
+    }, delay);
+    this._timer.unref();
+  }
+
+  /** Cancel any pending wake timer. Idempotent. Leaves the parked set intact. */
+  stop(): void {
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = undefined;
+    }
+  }
+}
+
 // === drain-cycle.ts ===
 /**
  * @module drain-cycle
@@ -20989,6 +21040,7 @@ import { randomUUID } from "node:crypto";
 import type {
   BatchHandler,
   BlockedLease,
+  CloseTarget,
   Drain,
   DrainOptions,
   Fetch,
@@ -21000,6 +21052,7 @@ import type {
   Schemas,
 } from "../types/index.js";
 import type { CircuitBreaker } from "./circuit-breaker.js";
+import { DeferTimer } from "./defer-timer.js";
 import type { DrainOps } from "./drain.js";
 import { compute_lag_lead_ratio } from "./drain-ratio.js";
 import { trace_cycle } from "./tracing.js";
@@ -21030,6 +21083,28 @@ export type HandleResult = Readonly<{
    * backoff configured" — drain re-attempts as soon as the lease expires.
    */
   next_attempt_at?: number;
+  /**
+   * Wall-clock timestamp (ms since epoch) at which this stream should be
+   * re-visited. Set by a handler that *defers* instead of acking or
+   * failing: the triggering events stay pending (watermark not advanced),
+   * \`retry\` is not bumped (a defer is not a failure), and the drain holds
+   * the stream until \`defer\` elapses, then redelivers so the handler can
+   * re-evaluate. This is the timing primitive autoclose rides (#1090);
+   * unlike {@link next_attempt_at} (a retry-only backoff), a defer carries
+   * no error and never blocks. When present, the result is excluded from
+   * ack and block — it neither advances nor terminates the watermark.
+   */
+  defer?: number;
+  /**
+   * Close request (#1090). Set when a handler throws \`CloseSignal\` to retire
+   * its stream: the triggering event is acked (so the closing reaction isn't
+   * seen as an in-flight consumer by the close-cycle safety guard) and the
+   * drain hands this {@link CloseTarget} to the orchestrator's \`on_close\`,
+   * which runs \`run_close_cycle\`. Carries the optional archiver from the
+   * signal. Distinct from {@link defer} (hold for later) — a close advances
+   * and retires.
+   */
+  close?: CloseTarget;
   /**
    * Event id that threw, when a handler error occurred. Distinct from
    * {@link acked_at}: \`failed_at = acked_at + 1\` in dense streams, but
@@ -21072,6 +21147,8 @@ export type DrainCycle<TEvents extends Schemas> = {
   readonly handled: HandleResult[];
   readonly acked: Lease[];
   readonly blocked: BlockedLease[];
+  /** Streams a handler asked to close this cycle (#1090) — handed to \`on_close\`. */
+  readonly closeable: CloseTarget[];
 };
 
 /**
@@ -21131,6 +21208,7 @@ export async function run_drain_cycle<
       handled: [],
       acked: [],
       blocked: [],
+      closeable: [],
     };
   }
 
@@ -21191,9 +21269,13 @@ export async function run_drain_cycle<
   // string is no longer the "skip ack" signal; \`handled > 0 || !error\`
   // is. Partial-success-then-block now lands in both \`acked\` and
   // \`blocked\` arrays for the same stream — by design.
+  //
+  // A *deferred* result (#1090) is held out of ack entirely: the handler
+  // chose to re-visit the stream later without advancing the watermark, so
+  // the pending events must stay pending for the redelivery.
   const acked = await ops.ack(
     handled
-      .filter((h) => h.handled > 0 || !h.error)
+      .filter((h) => h.defer === undefined && (h.handled > 0 || !h.error))
       .map((h) => ({ ...h.lease, at: h.acked_at }))
   );
 
@@ -21203,7 +21285,32 @@ export async function run_drain_cycle<
       .map(({ lease, error }) => ({ ...lease, error: error! }))
   );
 
-  return { leased, fetched, handled, acked, blocked };
+  // Persist deferred streams' next-visit time (#1090). \`claim()\` skips a
+  // stream until its \`deferred_at\` passes, so the defer holds across every
+  // competing worker (the durable counterpart to the in-process wake timer)
+  // and the stream isn't re-claimed — \`retry\` stays untouched. \`defer()\`
+  // sets one time per call, so group streams by their due-time.
+  const deferrals = handled.filter((h) => h.defer !== undefined);
+  if (deferrals.length) {
+    const by_time = new Map<number, string[]>();
+    for (const h of deferrals) {
+      const list = by_time.get(h.defer!);
+      if (list) list.push(h.lease.stream);
+      else by_time.set(h.defer!, [h.lease.stream]);
+    }
+    for (const [at, streams] of by_time) await ops.defer(streams, at);
+  }
+
+  // Collect close requests (#1090). A close result was already acked above
+  // (its event made progress, \`defer === undefined\`), which advances the
+  // requesting reaction past the terminal event so the close-cycle safety
+  // guard doesn't count it as an in-flight consumer. The orchestrator's
+  // \`on_close\` runs the actual \`run_close_cycle\`.
+  const closeable = handled
+    .filter((h) => h.close !== undefined)
+    .map((h) => h.close!);
+
+  return { leased, fetched, handled, acked, blocked, closeable };
 }
 
 /**
@@ -21240,6 +21347,13 @@ export type DrainControllerDeps<
   readonly handle_batch: HandleBatch<TEvents>;
   readonly on_acked: (acked: Lease[]) => void;
   readonly on_blocked: (blocked: BlockedLease[]) => void;
+  /**
+   * Close requested by a reaction (#1090). The controller calls this with the
+   * cycle's {@link CloseTarget}s after acks/blocks land; the orchestrator wires
+   * it to its \`run_close_cycle\` machinery (same path as \`app.close\`). Awaited so
+   * a slow close doesn't overlap the next cycle's claim on the controller.
+   */
+  readonly on_close: (targets: CloseTarget[]) => Promise<void>;
   /**
    * Shared, orchestrator-owned circuit breaker (ACT-984). Trips after
    * repeated store failures so the drain loop stops hammering a down
@@ -21280,14 +21394,16 @@ export class DrainController<
   private _locked = false;
   private _ratio = 0.5;
   /**
-   * Per-stream backoff: \`stream → next_attempt_at\` (ms since epoch). Set by
-   * \`_finalize\` via \`HandleResult.next_attempt_at\`; cleared on successful
-   * ack or terminal block. Lives in process memory — per-worker pacing
-   * by design (see {@link BackoffOptions} for the multi-worker trade-off).
+   * Per-stream re-visit schedule (#1090): \`stream → next visit\` (ms since
+   * epoch). Holds both retry backoff (\`HandleResult.next_attempt_at\`) and the
+   * \`defer\` outcome; cleared on successful ack or terminal block. Lives in
+   * process memory — per-worker pacing by design (see {@link BackoffOptions}
+   * for the multi-worker trade-off). Its wake re-arms drain at the earliest
+   * pending visit.
    */
-  private _backoff = new Map<string, number>();
-  /** Timer re-arming drain at the earliest pending \`next_attempt_at\`. */
-  private _backoff_timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly _defer = new DeferTimer(() => {
+    this._armed = true;
+  });
   /** Worker timer (ACT-1103). Set when \`start()\` is active, undefined otherwise. */
   private _worker: ReturnType<typeof setTimeout> | undefined;
   private _stopped = false;
@@ -21310,42 +21426,6 @@ export class DrainController<
   /** Read-only flag — true while a commit / reset is unprocessed. */
   get armed(): boolean {
     return this._armed;
-  }
-
-  /** Returns true when \`stream\` is currently within a backoff window. */
-  private is_deferred = (stream: string): boolean => {
-    const next = this._backoff.get(stream);
-    return next !== undefined && next > Date.now();
-  };
-
-  /**
-   * Schedule the next drain re-arm at the earliest pending backoff
-   * expiry. Called only when the backoff map is non-empty (caller guard).
-   * Idempotent — collapses many simultaneously deferred streams into a
-   * single timer.
-   */
-  private schedule_backoff_wake(): void {
-    if (this._backoff_timer) clearTimeout(this._backoff_timer);
-    let earliest = Number.POSITIVE_INFINITY;
-    for (const t of this._backoff.values()) if (t < earliest) earliest = t;
-    const delay = Math.max(0, earliest - Date.now());
-    this._backoff_timer = setTimeout(() => {
-      this._backoff_timer = undefined;
-      // Garbage-collect expired entries so the next cycle sees ready
-      // streams as active. Drain will be re-triggered by whoever owns the
-      // settle loop (or by the next commit). Re-arm here so a debounced
-      // settle picks it up.
-      const now = Date.now();
-      for (const [stream, at] of this._backoff) {
-        if (at <= now) this._backoff.delete(stream);
-      }
-      this._armed = true;
-    }, delay);
-    // Don't keep the event loop alive solely for backoff timers — letting
-    // a process exit during retry pacing is the right default. Safe to call
-    // unconditionally: Node's \`setTimeout\` always returns a Timeout with
-    // \`unref()\`.
-    this._backoff_timer.unref();
   }
 
   /** Lane this controller drains (undefined = legacy single-lane span). */
@@ -21387,6 +21467,9 @@ export class DrainController<
       clearTimeout(this._worker);
       this._worker = undefined;
     }
+    // Drop any pending re-visit wake — the parked set is process-local and
+    // rebuilt from the log on the next start (#1090).
+    this._defer.stop();
   }
 
   /** Run one drain pass. Short-circuits when not armed or already running. */
@@ -21424,7 +21507,7 @@ export class DrainController<
         leading,
         eventLimit,
         leaseMillis,
-        this._backoff.size > 0 ? this.is_deferred : undefined,
+        this._defer.size > 0 ? this._defer.is_deferred : undefined,
         this._deps.lane
       );
 
@@ -21438,7 +21521,7 @@ export class DrainController<
         return EMPTY_DRAIN as Drain<TEvents>;
       }
 
-      const { leased, fetched, handled, acked, blocked } = cycle;
+      const { leased, fetched, handled, acked, blocked, closeable } = cycle;
 
       // Cycle-level trace (ACT-1103) — one log line per drain pass:
       // claim + fetch + outcomes folded together so the operator sees
@@ -21449,20 +21532,29 @@ export class DrainController<
       // Adapt next cycle's frontier split to where the pressure is.
       this._ratio = compute_lag_lead_ratio(handled, lagging, leading);
 
-      // Refresh per-stream backoff state from this cycle's outcomes.
+      // Refresh per-stream re-visit state from this cycle's outcomes.
       // Successful acks and terminal blocks both clear the window;
-      // retry-not-block results carry a \`next_attempt_at\` set by \`_finalize\`.
-      for (const lease of acked) this._backoff.delete(lease.stream);
-      for (const lease of blocked) this._backoff.delete(lease.stream);
+      // retry-not-block results carry a \`next_attempt_at\` set by \`_finalize\`,
+      // and deferred results carry a \`defer\` due-time (#1090). Both park the
+      // stream in \`_defer\` so the shared wake timer re-arms drain at the
+      // earliest pending visit. \`handle\` already reconciles a stream's
+      // reactions into a single result per cycle, so the value written here
+      // is authoritative for the stream — a plain overwrite, not a merge.
+      for (const lease of acked) this._defer.delete(lease.stream);
+      for (const lease of blocked) this._defer.delete(lease.stream);
       for (const h of handled) {
-        if (h.next_attempt_at !== undefined && !h.block) {
-          this._backoff.set(h.lease.stream, h.next_attempt_at);
-        }
+        const next = h.defer ?? (h.block ? undefined : h.next_attempt_at);
+        if (next !== undefined) this._defer.set(h.lease.stream, next);
       }
-      if (this._backoff.size > 0) this.schedule_backoff_wake();
+      if (this._defer.size > 0) this._defer.schedule();
 
       if (acked.length) this._deps.on_acked(acked);
       if (blocked.length) this._deps.on_blocked(blocked);
+      // Run reaction-requested closes after acks land (#1090) — the close
+      // targets were acked above, so the close-cycle guard sees the requesting
+      // reaction as caught up. Awaited so a slow close doesn't overlap the
+      // next claim.
+      if (closeable.length) await this._deps.on_close(closeable);
 
       // Disarm only when fully caught up. Errors keep the flag set so
       // retries flow through the next drain.
@@ -21563,6 +21655,7 @@ import type {
   Fetch,
   Lease,
   Schemas,
+  StreamFilter,
 } from "../types/index.js";
 
 /** @internal */
@@ -21571,6 +21664,7 @@ export interface DrainOps<TEvents extends Schemas> {
   fetch: typeof fetch<TEvents>;
   ack: typeof ack;
   block: typeof block;
+  defer: typeof defer;
   subscribe: typeof subscribe;
 }
 
@@ -21603,6 +21697,11 @@ export const ack = (leases: Lease[]): Promise<Lease[]> => store().ack(leases);
 
 export const block = (leases: BlockedLease[]): Promise<BlockedLease[]> =>
   store().block(leases);
+
+export const defer = (
+  input: string[] | StreamFilter,
+  deferred_at: number
+): Promise<number> => store().defer(input, deferred_at);
 
 export const subscribe = (
   streams: Array<{
@@ -22909,6 +23008,11 @@ class InMemoryStream {
   private _leased_until: Date | undefined = undefined;
   private _priority = 0;
   private _lane: string = DEFAULT_LANE;
+  // Persisted next-visit time (#1090). When set and still in the future, the
+  // stream is held out of \`claim\` entirely — so a deferred reaction is not
+  // re-claimed (and \`retry\` is never bumped) until its due-time passes. Unlike
+  // in-process backoff, this is durable store state shared across workers.
+  private _deferred_at: number | undefined = undefined;
 
   constructor(
     stream: string,
@@ -22954,8 +23058,22 @@ class InMemoryStream {
   get is_available() {
     return (
       !this._blocked &&
-      (!this._leased_until || this._leased_until <= new Date())
+      (!this._leased_until || this._leased_until <= new Date()) &&
+      // A stream deferred to a future time is not claimable until due (#1090).
+      (!this._deferred_at || this._deferred_at <= Date.now())
     );
+  }
+
+  /**
+   * Hold this stream out of \`claim\` until \`deferred_at\` (ms since epoch).
+   * Set by a deliberate \`defer\` outcome — not a failure, so retry/blocked
+   * state is untouched. Cleared by ack/block/reset/unblock.
+   */
+  defer(deferred_at: number) {
+    this._deferred_at = deferred_at;
+    // A defer is not a failure: reset retry so the redelivery after the
+    // due-time is a fresh attempt, never accumulating toward maxRetries.
+    this._retry = -1;
   }
 
   get at() {
@@ -23015,6 +23133,8 @@ class InMemoryStream {
       this._leased_until = undefined;
       this._at = lease.at;
       this._retry = -1;
+      // Advancing the watermark ends any active defer schedule (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -23036,6 +23156,8 @@ class InMemoryStream {
     if (this._leased_by === lease.by) {
       this._blocked = true;
       this._error = error;
+      // A blocked stream is poison; clear any pending defer (#1090).
+      this._deferred_at = undefined;
       return {
         stream: this.stream,
         source: this.source,
@@ -23061,6 +23183,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
   }
 
   /**
@@ -23075,6 +23198,7 @@ class InMemoryStream {
     this._error = "";
     this._leased_by = undefined;
     this._leased_until = undefined;
+    this._deferred_at = undefined;
     return true;
   }
 }
@@ -23498,6 +23622,38 @@ export class InMemoryStore implements Store {
     return leases
       .map((l) => this._streams.get(l.stream)?.block(l, l.error))
       .filter((l) => !!l);
+  }
+
+  /**
+   * Hold the matched streams out of {@link claim} until \`deferred_at\`
+   * (ms since epoch) — see {@link Store.defer}. Accepts an explicit list
+   * of names or a {@link StreamFilter}, mirroring {@link reset}/{@link unblock}.
+   * Persisted store state (unlike in-process backoff), so the skip is honored
+   * by every competing worker. Unknown names are silently skipped.
+   *
+   * @returns Count of streams whose \`deferred_at\` was set.
+   */
+  async defer(input: string[] | StreamFilter, deferred_at: number) {
+    await sleep();
+    let count = 0;
+    if (Array.isArray(input)) {
+      for (const name of input) {
+        const s = this._streams.get(name);
+        if (s) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    } else {
+      const matches = this._filter_predicate(input);
+      for (const s of this._streams.values()) {
+        if (matches(s)) {
+          s.defer(deferred_at);
+          count++;
+        }
+      }
+    }
+    return count;
   }
 
   /**
@@ -23979,18 +24135,14 @@ export {
   DEFAULT_AUTOCLOSE_CYCLE_MINUTES,
   DEFAULT_CLOSE_BATCH_SIZE,
   DEFAULT_CLOSE_YIELD_MS,
+  hour_in_zone,
+  in_autoclose_window,
   resolveAutocloseConfig,
 } from "./autoclose-config.js";
 export {
-  AutocloseController,
-  type AutocloseControllerDeps,
-  type AutocloseCycleDeps,
-  type AutocloseCycleResult,
-  run_autoclose_cycle,
-} from "./autoclose-cycle.js";
-export {
   type AutoclosePolicy,
   compile_autoclose_policy,
+  policy_min_after_ms,
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
@@ -24002,8 +24154,10 @@ export {
   resolveCircuitBreakerConfig,
 } from "./circuit-breaker.js";
 export { run_close_cycle } from "./close-cycle.js";
+export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
   DrainController,
@@ -25099,6 +25253,41 @@ export interface Store extends Disposable, EventSource {
    * @see {@link claim} for lease management
    */
   block: (leases: BlockedLease[]) => Promise<BlockedLease[]>;
+
+  /**
+   * Defers streams' next visit to a future time without advancing their
+   * watermark — the persistence behind the \`defer\` reaction outcome (#1090).
+   *
+   * Sets \`deferred_at\` on each matched stream. {@link claim} **skips** any
+   * stream whose \`deferred_at\` is still in the future, so a deferred reaction
+   * is not re-claimed (and \`retry\` is never bumped) until the due-time passes,
+   * at which point the same pending event is re-delivered. Unlike in-process
+   * backoff, this is durable, shared store state — every competing worker
+   * honors the skip, which is what makes a deferral correct across a
+   * multi-worker deployment.
+   *
+   * The schedule is cleared whenever the watermark moves or the stream is
+   * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
+   * all reset \`deferred_at\`. Re-deferring simply overwrites it.
+   *
+   * Accepts an explicit list of stream names or a {@link StreamFilter}
+   * (regex by default), the same shape as {@link reset}/{@link unblock}.
+   * Joins the watermark verb family: **claim / ack / block / defer**.
+   *
+   * @param input - Stream names or a {@link StreamFilter} selecting streams
+   * @param deferred_at - Wall-clock time (ms since epoch) to revisit the streams
+   * @returns Count of streams whose \`deferred_at\` was set
+   *
+   * @example
+   * \`\`\`typescript
+   * // Hold a stream until a 30-minute deadline elapses
+   * await store().defer(["order-42"], Date.now() + 30 * 60_000);
+   * \`\`\`
+   */
+  defer: (
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ) => Promise<number>;
 
   /**
    * Resets watermarks for the given streams to -1, making them eligible
@@ -26636,6 +26825,8 @@ import {
   type Target,
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
+import { CloseSignal } from "./close-signal.js";
+import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
 /**
@@ -26767,6 +26958,27 @@ export function build_handle<
         at = event.id;
         handled++;
       } catch (error) {
+        // A defer is not a failure: hold the triggering events pending
+        // (exclude from ack via \`defer\`), don't bump \`retry\`, and re-visit
+        // the stream at the carried due-time (#1090). \`acked_at\` is unused on
+        // the defer path — drain never acks a deferred result.
+        if (error instanceof DeferSignal)
+          return { lease, handled, acked_at: at, defer: error.defer_at };
+        // A close request advances past the triggering event (so the
+        // requesting reaction isn't counted as in-flight by the close-cycle
+        // guard) and hands the target to the orchestrator's on_close (#1090).
+        if (error instanceof CloseSignal)
+          return {
+            lease,
+            handled: handled + 1,
+            // Advance to the live head the handler evaluated against (when
+            // provided) so the close-cycle guard sees this reaction caught up.
+            acked_at: error.at ?? event.id,
+            // Close the signalled stream (the autoclose reaction's aggregate,
+            // which differs from its synthetic lease stream); a self-closing
+            // user reaction omits it and closes its own lease stream.
+            close: { stream: error.stream ?? stream, archive: error.archive },
+          };
         return finalize(
           lease,
           handled,
@@ -27929,6 +28141,7 @@ export function build_drain<TEvents extends Schemas>(
     fetch: drain.fetch,
     ack: drain.ack,
     block: drain.block,
+    defer: drain.defer,
     subscribe:
       logger.level !== "trace"
         ? drain.subscribe
@@ -28817,6 +29030,15 @@ export type State<
     head: Committed<TEvents, keyof TEvents>,
     count: number
   ): boolean;
+  /**
+   * The smallest \`after\` window (ms) of the \`.autocloses({...})\` policy,
+   * or \`undefined\` when the policy has no time component (#1090). The
+   * synthesized autoclose reaction uses it to defer its re-check to
+   * \`head.created + autoclose_after_ms\`; a policy without an \`after\` waits
+   * for the next event instead of parking on a due-time. Set alongside
+   * \`autoclose\` by the builder.
+   */
+  autoclose_after_ms?: number;
   /**
    * Archiver set by \`.archives(fn)\`. The online close cycle threads
    * this into {@link CloseTarget.archive} for every truncate it
@@ -30505,6 +30727,41 @@ export interface Store extends Disposable, EventSource {
    * @see {@link claim} for lease management
    */
   block: (leases: BlockedLease[]) => Promise<BlockedLease[]>;
+
+  /**
+   * Defers streams' next visit to a future time without advancing their
+   * watermark — the persistence behind the \`defer\` reaction outcome (#1090).
+   *
+   * Sets \`deferred_at\` on each matched stream. {@link claim} **skips** any
+   * stream whose \`deferred_at\` is still in the future, so a deferred reaction
+   * is not re-claimed (and \`retry\` is never bumped) until the due-time passes,
+   * at which point the same pending event is re-delivered. Unlike in-process
+   * backoff, this is durable, shared store state — every competing worker
+   * honors the skip, which is what makes a deferral correct across a
+   * multi-worker deployment.
+   *
+   * The schedule is cleared whenever the watermark moves or the stream is
+   * recovered: {@link ack}, {@link block}, {@link reset}, and {@link unblock}
+   * all reset \`deferred_at\`. Re-deferring simply overwrites it.
+   *
+   * Accepts an explicit list of stream names or a {@link StreamFilter}
+   * (regex by default), the same shape as {@link reset}/{@link unblock}.
+   * Joins the watermark verb family: **claim / ack / block / defer**.
+   *
+   * @param input - Stream names or a {@link StreamFilter} selecting streams
+   * @param deferred_at - Wall-clock time (ms since epoch) to revisit the streams
+   * @returns Count of streams whose \`deferred_at\` was set
+   *
+   * @example
+   * \`\`\`typescript
+   * // Hold a stream until a 30-minute deadline elapses
+   * await store().defer(["order-42"], Date.now() + 30 * 60_000);
+   * \`\`\`
+   */
+  defer: (
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ) => Promise<number>;
 
   /**
    * Resets watermarks for the given streams to -1, making them eligible
@@ -39399,7 +39656,8 @@ export class PostgresStore implements Store {
           leased_by text,
           leased_until timestamptz,
           priority int NOT NULL DEFAULT 0,
-          lane text NOT NULL DEFAULT 'default'
+          lane text NOT NULL DEFAULT 'default',
+          deferred_at timestamptz
         ) TABLESPACE pg_default;\`
       );
       // Migration for tables created before priority lanes (ACT-102).
@@ -39413,6 +39671,11 @@ export class PostgresStore implements Store {
       await client.query(
         \`ALTER TABLE \${this._fqs}
          ADD COLUMN IF NOT EXISTS lane text NOT NULL DEFAULT 'default';\`
+      );
+      // Migration for tables created before deferred reactions (#1090).
+      await client.query(
+        \`ALTER TABLE \${this._fqs}
+         ADD COLUMN IF NOT EXISTS deferred_at timestamptz;\`
       );
 
       // Composite index for \`claim()\` — \`(blocked, priority DESC, at)\`
@@ -39741,6 +40004,7 @@ export class PostgresStore implements Store {
           WHERE blocked = false
             \${lane_clause}
             AND (leased_by IS NULL OR leased_until <= NOW())
+            AND (deferred_at IS NULL OR deferred_at <= NOW())
             AND (s.at < 0 OR EXISTS (
               SELECT 1 FROM \${this._fqt} e
               WHERE e.id > s.at
@@ -39906,7 +40170,8 @@ export class PostgresStore implements Store {
         at = i.at,
         retry = -1,
         leased_by = NULL,
-        leased_until = NULL
+        leased_until = NULL,
+        deferred_at = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by
       RETURNING s.stream, s.source, s.at, i.by, s.retry, i.lagging, s.lane
@@ -39957,7 +40222,7 @@ export class PostgresStore implements Store {
         AS x(stream text, by text, error text, lagging boolean)
       )
       UPDATE \${this._fqs} AS s
-      SET blocked = true, error = i.error
+      SET blocked = true, error = i.error, deferred_at = NULL
       FROM input i
       WHERE s.stream = i.stream AND s.leased_by = i.by AND s.blocked = false
       RETURNING s.stream, s.source, s.at, i.by, s.retry, s.error, i.lagging, s.lane
@@ -39982,6 +40247,39 @@ export class PostgresStore implements Store {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Hold the matched streams out of {@link claim} until \`deferred_at\`
+   * (ms since epoch) — see {@link Store.defer}. Persists \`deferred_at\`
+   * (as a \`timestamptz\`) so the skip is honored by every competing
+   * worker; \`claim\` filters on \`deferred_at <= NOW()\`. Accepts an
+   * explicit list of names or a {@link StreamFilter}, mirroring
+   * {@link reset}/{@link prioritize}. Cleared by ack/block/reset/unblock.
+   *
+   * @returns Count of streams whose \`deferred_at\` was set.
+   */
+  async defer(
+    input: string[] | StreamFilter,
+    deferred_at: number
+  ): Promise<number> {
+    // Reset retry too: a defer is a deliberate "come back later," not a
+    // failure, so the redelivery after the due-time is a fresh attempt.
+    const set_clause = \`SET deferred_at = to_timestamp($1 / 1000.0), retry = -1\`;
+    if (Array.isArray(input)) {
+      if (!input.length) return 0;
+      const { rowCount } = await this._pool.query(
+        \`UPDATE \${this._fqs} \${set_clause} WHERE stream = ANY($2)\`,
+        [deferred_at, input]
+      );
+      return rowCount ?? 0;
+    }
+    const { clause, values } = this._filter_clause(input, 2);
+    const { rowCount } = await this._pool.query(
+      \`UPDATE \${this._fqs} \${set_clause} WHERE \${clause}\`,
+      [deferred_at, ...values]
+    );
+    return rowCount ?? 0;
   }
 
   /**
@@ -40035,7 +40333,7 @@ export class PostgresStore implements Store {
 
   async reset(input: string[] | StreamFilter): Promise<number> {
     const set_clause = \`SET at = -1, retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL\`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(
@@ -40069,7 +40367,7 @@ export class PostgresStore implements Store {
    */
   async unblock(input: string[] | StreamFilter): Promise<number> {
     const set_clause = \`SET retry = -1, blocked = false, error = NULL,
-                          leased_by = NULL, leased_until = NULL\`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
     if (Array.isArray(input)) {
       if (!input.length) return 0;
       const { rowCount } = await this._pool.query(
@@ -41154,7 +41452,8 @@ export class SqliteStore implements Store {
         leased_by TEXT,
         leased_until TEXT,
         priority INTEGER NOT NULL DEFAULT 0,
-        lane TEXT NOT NULL DEFAULT 'default'
+        lane TEXT NOT NULL DEFAULT 'default',
+        deferred_at TEXT
       )
     \`);
     // Migration for tables created before priority lanes (ACT-102).
@@ -41163,6 +41462,14 @@ export class SqliteStore implements Store {
     try {
       await this.client.execute(
         "ALTER TABLE streams ADD COLUMN priority INTEGER NOT NULL DEFAULT 0"
+      );
+    } catch {
+      // already present
+    }
+    // Migration for tables created before deferred reactions (#1090).
+    try {
+      await this.client.execute(
+        "ALTER TABLE streams ADD COLUMN deferred_at TEXT"
       );
     } catch {
       // already present
@@ -41412,9 +41719,10 @@ export class SqliteStore implements Store {
       const lane_clause = lane !== undefined ? " AND lane = ?" : "";
       const result = await tx.execute({
         sql: \`SELECT stream, source, at, priority, lane FROM streams
-              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)\${lane_clause}
+              WHERE blocked = 0 AND (leased_until IS NULL OR leased_until <= ?)
+                AND (deferred_at IS NULL OR deferred_at <= ?)\${lane_clause}
               ORDER BY priority DESC, at ASC\`,
-        args: lane !== undefined ? [now, lane] : [now],
+        args: lane !== undefined ? [now, now, lane] : [now, now],
       });
 
       const candidates: {
@@ -41506,7 +41814,7 @@ export class SqliteStore implements Store {
       const result: Lease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
-          sql: \`UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1
+          sql: \`UPDATE streams SET at = ?, leased_by = NULL, leased_until = NULL, retry = -1, deferred_at = NULL
                 WHERE stream = ? AND leased_by = ?\`,
           args: [l.at, l.stream, l.by],
         });
@@ -41527,7 +41835,7 @@ export class SqliteStore implements Store {
       const result: BlockedLease[] = [];
       for (const l of leases) {
         const r = await tx.execute({
-          sql: \`UPDATE streams SET blocked = 1, error = ?
+          sql: \`UPDATE streams SET blocked = 1, error = ?, deferred_at = NULL
                 WHERE stream = ? AND leased_by = ? AND blocked = 0\`,
           args: [l.error, l.stream, l.by],
         });
@@ -41538,6 +41846,39 @@ export class SqliteStore implements Store {
     } catch (e) {
       await tx.rollback();
       throw new StoreError("block", { cause: e });
+    }
+  }
+
+  // --- defer: hold streams out of claim until deferred_at (#1090) ---
+  // Persisted as an ISO string (like leased_until) so claim's
+  // \`deferred_at <= now\` comparison is a lexicographic string compare.
+  // Cleared by ack/block/reset/unblock. See {@link Store.defer}.
+  async defer(input: string[] | StreamFilter, deferred_at: number) {
+    const at_iso = new Date(deferred_at).toISOString();
+    const tx = await this.client.transaction("write");
+    try {
+      let count = 0;
+      if (Array.isArray(input)) {
+        for (const stream of input) {
+          const r = await tx.execute({
+            sql: \`UPDATE streams SET deferred_at = ?, retry = -1 WHERE stream = ?\`,
+            args: [at_iso, stream],
+          });
+          count += r.rowsAffected;
+        }
+      } else {
+        const { clause, args } = this._filter_clause(input);
+        const r = await tx.execute({
+          sql: \`UPDATE streams SET deferred_at = ?, retry = -1 WHERE \${clause}\`,
+          args: [at_iso, ...args] as any[],
+        });
+        count = r.rowsAffected;
+      }
+      await tx.commit();
+      return count;
+    } catch (e) {
+      await tx.rollback();
+      throw new StoreError("defer", { cause: e });
     }
   }
 
@@ -41585,7 +41926,7 @@ export class SqliteStore implements Store {
   // --- reset: transactional, accepts names or filter ---
   async reset(input: string[] | StreamFilter) {
     const set_clause = \`SET at = -1, retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL\`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
@@ -41618,7 +41959,7 @@ export class SqliteStore implements Store {
   // matching the InMemoryStore convention.
   async unblock(input: string[] | StreamFilter) {
     const set_clause = \`SET retry = -1, blocked = 0, error = '',
-                          leased_by = NULL, leased_until = NULL\`;
+                          leased_by = NULL, leased_until = NULL, deferred_at = NULL\`;
     const tx = await this.client.transaction("write");
     try {
       let count = 0;
@@ -44790,6 +45131,121 @@ export const runStoreTck = (options: StoreTckOptions): void => {
           { ...(mine as Lease), by: "imposter", error: "no" },
         ]);
         expect(blocked).toHaveLength(0);
+      });
+    });
+
+    describe("defer", () => {
+      it("hides a stream from claim until its deferred_at passes", async () => {
+        const s = \`defer-\${uid()}\`;
+        // A claimable control stream guarantees the claim result is non-empty,
+        // so the membership checks below actually run (and prove \`s\` is the one
+        // being skipped, not that nothing was claimable).
+        const ctl = \`defer-ctl-\${uid()}\`;
+        await store.subscribe([{ stream: s }, { stream: ctl }]);
+        for (const st of [s, ctl])
+          await store.commit<CounterEvents>(
+            st,
+            [inc(1)],
+            make_meta({ stream: st })
+          );
+        // Defer far into the future — claim must skip it.
+        expect(await store.defer([s], Date.now() + 3_600_000)).toBe(1);
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(leased.find((l) => l.stream === ctl)).toBeDefined();
+        expect(leased.find((l) => l.stream === s)).toBeUndefined();
+      });
+
+      it("makes a stream claimable once the deferred_at is in the past", async () => {
+        const s = \`defer-past-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        // A due-time already in the past is not a constraint.
+        expect(await store.defer([s], Date.now() - 1_000)).toBe(1);
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        // ack clears the schedule and does not bump retry past the claim.
+        await store.ack(
+          leased.filter((l) => l.stream !== s).concat(mine as Lease)
+        );
+      });
+
+      it("does not bump retry while a stream is deferred", async () => {
+        const s = \`defer-retry-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.defer([s], Date.now() + 3_600_000);
+        // Several claim attempts while deferred — none should touch the row.
+        await store.claim(100, 100, \`w1-\${uid()}\`, 100_000);
+        await store.claim(100, 100, \`w2-\${uid()}\`, 100_000);
+        // Re-defer into the past so it becomes claimable, then observe retry.
+        await store.defer([s], Date.now() - 1_000);
+        const leased = await store.claim(100, 100, \`w3-\${uid()}\`, 100_000);
+        const mine = leased.find((l) => l.stream === s);
+        expect(mine).toBeDefined();
+        // First real claim → retry 0, proving the deferred claims didn't bump it.
+        expect(mine!.retry).toBe(0);
+        await store.ack(
+          leased.filter((l) => l.stream !== s).concat(mine as Lease)
+        );
+      });
+
+      it("reset clears a pending defer", async () => {
+        const s = \`defer-reset-\${uid()}\`;
+        await store.subscribe([{ stream: s }]);
+        await store.commit<CounterEvents>(
+          s,
+          [inc(1)],
+          make_meta({ stream: s })
+        );
+        await store.defer([s], Date.now() + 3_600_000);
+        expect(await store.reset([s])).toBe(1);
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(leased.find((l) => l.stream === s)).toBeDefined();
+      });
+
+      it("defers streams matching a filter and counts matches", async () => {
+        const tag = uid();
+        const a = \`deferfilter-\${tag}-a\`;
+        const b = \`deferfilter-\${tag}-b\`;
+        await store.subscribe([{ stream: a }, { stream: b }]);
+        for (const s of [a, b])
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+        // A claimable control stream outside the filter keeps the claim result
+        // non-empty, so the membership checks below run against real rows.
+        const ctl = \`defer-filterctl-\${tag}\`;
+        await store.subscribe([{ stream: ctl }]);
+        await store.commit<CounterEvents>(
+          ctl,
+          [inc(1)],
+          make_meta({ stream: ctl })
+        );
+        const n = await store.defer(
+          { stream: \`^deferfilter-\${tag}-\`, stream_exact: false },
+          Date.now() + 3_600_000
+        );
+        expect(n).toBe(2);
+        const leased = await store.claim(100, 100, \`w-\${uid()}\`, 100_000);
+        expect(leased.find((l) => l.stream === ctl)).toBeDefined();
+        expect(leased.find((l) => l.stream === a)).toBeUndefined();
+        expect(leased.find((l) => l.stream === b)).toBeUndefined();
+      });
+
+      it("returns 0 for unknown streams and empty input", async () => {
+        expect(await store.defer([\`missing-\${uid()}\`], Date.now())).toBe(0);
+        expect(await store.defer([], Date.now())).toBe(0);
       });
     });
 

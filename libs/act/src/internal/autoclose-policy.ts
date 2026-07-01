@@ -205,6 +205,31 @@ function compile_reaches(
  *
  * @internal
  */
+/**
+ * The smallest `after` window (in ms) anywhere in a policy — across the
+ * top-level `after` and the `or.after` block — or `undefined` when the
+ * policy has no time component.
+ *
+ * The synthesized autoclose reaction (#1090) uses this to decide how to
+ * wait: a policy with an `after` defers its re-check to `head.created +
+ * min_after_ms` (the earliest its time gate could open); a policy without
+ * one (`is` / `reaches` only) has no time gate, so the reaction just waits
+ * for the next event to re-trigger rather than parking on a due-time.
+ * Conservative — the min across branches never defers past the soonest a
+ * branch could fire.
+ *
+ * @internal
+ */
+export function policy_min_after_ms(
+  options: AutoclosePolicy
+): number | undefined {
+  const parsed = AutoclosePolicySchema.parse(options);
+  const windows: number[] = [];
+  if (parsed.after) windows.push(parsed.after.days * 86_400_000);
+  if (parsed.or?.after) windows.push(parsed.or.after.days * 86_400_000);
+  return windows.length ? Math.min(...windows) : undefined;
+}
+
 export function compile_autoclose_policy(
   options: AutoclosePolicy
 ): AutoclosePredicate<Schemas> {
