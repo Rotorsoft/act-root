@@ -112,6 +112,21 @@ dependency and is brittle):
 Full cron expressions stay **userland**: parse → compute the next `Date` →
 `defer({ at })`. Core stays dependency-free.
 
+> **Amended (Slice 2, #1091 / Slice 3):** the *shipped* `when` is
+> `{ after: {…} } | { at: Date }` only, and the two public surfaces are the
+> declarative `.defer(when)` step and the imperative `throw new DeferSignal(when)`
+> — there is **no `app.defer`**. The `at` **function form** below was dropped:
+> the triggering event is always in hand (the `(event) => when` arg of `.defer`,
+> the handler scope for the throw), so a payload- or state-derived deadline is
+> just `{ at: computedDate }`. The **`{ every }`** recurrence form was also
+> dropped: holding one event to re-fire it forever pins the stream's watermark,
+> so recurrence instead ships as a documented **pattern** (react to a tick,
+> one-shot `.defer`, emit the next tick, ack) in
+> `recipes/temporal/recurring-timers/`. The **standalone-timer / `app.schedule`**
+> case (the "no source" bullet below) is **dropped from this epic** and can be
+> revived as its own RFC if an event-less/cron timer need appears. The narrative
+> below is the original proposal, kept for history.
+
 ## How every case falls out — no sourceless timers
 
 - **Deadline** (has a source): react to `OrderPlaced`; if unpaid,
