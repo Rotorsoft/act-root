@@ -1038,6 +1038,27 @@ export interface EventSink extends Disposable {
   ): Promise<void>;
 }
 
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative `.defer(when)` builder step and the imperative `DeferSignal`
+ * escape hatch. Exactly one form:
+ *
+ * - `{ after }` — a span measured from the triggering event's `created` time
+ *   (`{ hours: 1, minutes: 30 }` is 90 minutes).
+ * - `{ at }` — an absolute `Date`, or a function of the triggering event
+ *   returning one.
+ *
+ * `after` and the `at` function form derive from the event, never from
+ * wall-clock at call time, so a worker that re-claims the stream after the
+ * wait computes the same due-time. Genuinely dynamic times (a deadline read
+ * off loaded state) go through `{ at: someDate }`.
+ *
+ * @typeParam TEvent - the triggering event, typing `at`'s function form.
+ */
+export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date | ((event: TEvent) => Date); after?: never };
+
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,

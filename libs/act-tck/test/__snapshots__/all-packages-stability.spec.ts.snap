@@ -1268,9 +1268,9 @@ export class Act<
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
           if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal(
-              Date.now() + config.autocloseCycleMinutes * 60_000
-            );
+            throw new DeferSignal({
+              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            });
           const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
@@ -1294,7 +1294,9 @@ export class Act<
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a \`reaches\` threshold).
           if (after_ms !== undefined)
-            throw new DeferSignal(head.created.getTime() + after_ms);
+            throw new DeferSignal({
+              at: new Date(head.created.getTime() + after_ms),
+            });
         },
       };
       const key = \`__autoclose_\${st.name}\`;
@@ -3548,6 +3550,27 @@ export interface EventSink extends Disposable {
     ) => Promise<void>
   ): Promise<void>;
 }
+
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
+ * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
+ *   returning one.
+ *
+ * \`after\` and the \`at\` function form derive from the event, never from
+ * wall-clock at call time, so a worker that re-claims the stream after the
+ * wait computes the same due-time. Genuinely dynamic times (a deadline read
+ * off loaded state) go through \`{ at: someDate }\`.
+ *
+ * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ */
+export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date | ((event: TEvent) => Date); after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,
@@ -6598,36 +6621,150 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
   });
 }
 
+// === defer-config.ts ===
+/**
+ * @module defer-config
+ * @category Internal
+ *
+ * The \`when\` options for the public \`defer\` surface (#1091, RFC 0001). A
+ * reaction defers itself to a future time either declaratively (the
+ * \`.defer(when)\` builder step) or imperatively (\`throw new DeferSignal(when)\`
+ * inside a handler); both resolve \`when\` through here.
+ *
+ * The load-bearing rule is **derivability**. A deferred stream's due-time must
+ * be recomputable by whichever worker re-claims it after the wait, so \`when\`
+ * never resolves against \`Date.now()\`. \`after\` is measured from the triggering
+ * event's \`created\` timestamp, and \`at\` is either a fixed \`Date\` or a pure
+ * function of the event. Either way, re-delivering the same event yields the
+ * same due-time, which is what makes a defer correct across restarts and
+ * competing workers.
+ *
+ * Validation follows the config-schema standard (CLAUDE.md): an internal
+ * \`*OptionsSchema\` const, a public inferred type, and a resolver. Slice 2
+ * ships \`after\` / \`at\`; recurrence (\`every\`) extends this in Slice 3 (#1092).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+
+/**
+ * A relative span, measured from the triggering event's \`created\` time. At
+ * least one field is required; fields are additive (\`{ hours: 1, minutes: 30 }\`
+ * is 90 minutes).
+ */
+const DeferDurationSchema = z
+  .object({
+    days: z.number().positive().optional(),
+    hours: z.number().positive().optional(),
+    minutes: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
+    message: "defer: a duration needs at least one of days, hours, or minutes",
+  });
+
+/**
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`.
+ * \`at\` is a \`Date\` or a function of the event (checked structurally, since a
+ * function can't be introspected further). Internal per the config standard;
+ * the public surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ *
+ * @internal
+ */
+const DeferWhenSchema = z
+  .object({
+    after: DeferDurationSchema.optional(),
+    at: z
+      .union([
+        z.date(),
+        z.custom<(event: Committed<Schemas, string>) => Date>(
+          (v) => typeof v === "function"
+        ),
+      ])
+      .optional(),
+  })
+  .strict()
+  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
+    message: "defer: specify exactly one of \`after\` or \`at\`",
+  });
+
+/** Sum a duration bag to milliseconds. @internal */
+function duration_ms(d: {
+  days?: number;
+  hours?: number;
+  minutes?: number;
+}): number {
+  return (
+    (d.days ?? 0) * 86_400_000 +
+    (d.hours ?? 0) * 3_600_000 +
+    (d.minutes ?? 0) * 60_000
+  );
+}
+
+/**
+ * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
+ * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
+ * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
+ * from the \`Date\` or from calling its function with the event. Never reads
+ * \`Date.now()\`, so the result is stable across re-delivery.
+ *
+ * @internal
+ */
+export function resolve_defer_at<E extends Schemas>(
+  when: DeferWhen<Committed<E, keyof E>>,
+  event: Committed<E, keyof E>
+): number {
+  const parsed = DeferWhenSchema.parse(when);
+  if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
+  const at = parsed.at!;
+  const date =
+    typeof at === "function"
+      ? (at as (e: Committed<E, keyof E>) => Date)(event)
+      : at;
+  return date.getTime();
+}
+
 // === defer-signal.ts ===
 /**
  * @module defer-signal
  * @category Internal
  *
  * The control-flow signal a reaction handler throws to *defer* itself
- * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reactions".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
- * carried due-time.
+ * resolved due-time.
  *
- * Internal for now: the compiled autoclose reaction throws it directly. The
- * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
- * so the dispatcher needs to recognize only this one type either way.
+ * \`DeferSignal\` is the **imperative escape hatch** and is re-exported from the
+ * package root, so reaction code can throw it directly when a static
+ * \`.defer(when)\` step isn't expressive enough (a deadline computed from loaded
+ * state, say). It carries the *unresolved* {@link DeferWhen}; the dispatcher
+ * resolves it against the triggering event it is already dispatching (via
+ * \`resolve_defer_at\`), which is what anchors \`{ after }\` and the \`at\` function
+ * form to that event and keeps the due-time derivable. Fully dynamic times go
+ * through \`{ at: someDate }\`.
  *
  * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
  * existing \`try/catch\` in the handler loop instead of needing a separate
- * return channel through every dispatcher signature.
- *
- * @internal
+ * return channel through every dispatcher signature. The compiled autoclose
+ * reaction throws the same signal.
  */
-export class DeferSignal extends Error {
-  /** Wall-clock time (ms since epoch) to re-visit the stream. */
-  readonly defer_at: number;
+import type { DeferWhen } from "../types/index.js";
 
-  constructor(defer_at: number) {
+export class DeferSignal extends Error {
+  /**
+   * The unresolved schedule. The dispatcher turns this into an absolute
+   * due-time by resolving it against the triggering event.
+   */
+  readonly when: DeferWhen;
+
+  constructor(when: DeferWhen) {
     super("reaction deferred");
     this.name = "DeferSignal";
-    this.defer_at = defer_at;
+    this.when = when;
   }
 }
 
@@ -9866,6 +10003,10 @@ import "./signals.js";
 export * from "./act.js";
 export * from "./adapters/index.js";
 export * from "./builders/index.js";
+// The imperative defer escape hatch (#1091): a reaction throws this with a
+// \`DeferWhen\` (see ./types/action.ts) to hold itself until the resolved
+// due-time. The declarative \`.defer(when)\` builder step is the common path.
+export { DeferSignal } from "./internal/defer-signal.js";
 export * from "./config.js";
 export * from "./csv.js";
 export * from "./ports.js";
@@ -12596,6 +12737,7 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
+  type DeferWhen,
   type DoOptions,
   type IAct,
   type Lease,
@@ -12608,6 +12750,7 @@ import {
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
+import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -12745,7 +12888,15 @@ export function build_handle<
         // the stream at the carried due-time (#1090). \`acked_at\` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
-          return { lease, handled, acked_at: at, defer: error.defer_at };
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(
+              error.when as DeferWhen<Committed<TEvents, keyof TEvents>>,
+              event
+            ),
+          };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close (#1090).
@@ -15742,9 +15893,9 @@ export class Act<
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
           if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal(
-              Date.now() + config.autocloseCycleMinutes * 60_000
-            );
+            throw new DeferSignal({
+              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            });
           const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
@@ -15768,7 +15919,9 @@ export class Act<
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a \`reaches\` threshold).
           if (after_ms !== undefined)
-            throw new DeferSignal(head.created.getTime() + after_ms);
+            throw new DeferSignal({
+              at: new Date(head.created.getTime() + after_ms),
+            });
         },
       };
       const key = \`__autoclose_\${st.name}\`;
@@ -18022,6 +18175,27 @@ export interface EventSink extends Disposable {
     ) => Promise<void>
   ): Promise<void>;
 }
+
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
+ * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
+ *   returning one.
+ *
+ * \`after\` and the \`at\` function form derive from the event, never from
+ * wall-clock at call time, so a worker that re-claims the stream after the
+ * wait computes the same due-time. Genuinely dynamic times (a deadline read
+ * off loaded state) go through \`{ at: someDate }\`.
+ *
+ * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ */
+export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date | ((event: TEvent) => Date); after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,
@@ -20849,36 +21023,150 @@ export function close_correlation(
   });
 }
 
+// === defer-config.ts ===
+/**
+ * @module defer-config
+ * @category Internal
+ *
+ * The \`when\` options for the public \`defer\` surface (#1091, RFC 0001). A
+ * reaction defers itself to a future time either declaratively (the
+ * \`.defer(when)\` builder step) or imperatively (\`throw new DeferSignal(when)\`
+ * inside a handler); both resolve \`when\` through here.
+ *
+ * The load-bearing rule is **derivability**. A deferred stream's due-time must
+ * be recomputable by whichever worker re-claims it after the wait, so \`when\`
+ * never resolves against \`Date.now()\`. \`after\` is measured from the triggering
+ * event's \`created\` timestamp, and \`at\` is either a fixed \`Date\` or a pure
+ * function of the event. Either way, re-delivering the same event yields the
+ * same due-time, which is what makes a defer correct across restarts and
+ * competing workers.
+ *
+ * Validation follows the config-schema standard (CLAUDE.md): an internal
+ * \`*OptionsSchema\` const, a public inferred type, and a resolver. Slice 2
+ * ships \`after\` / \`at\`; recurrence (\`every\`) extends this in Slice 3 (#1092).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+
+/**
+ * A relative span, measured from the triggering event's \`created\` time. At
+ * least one field is required; fields are additive (\`{ hours: 1, minutes: 30 }\`
+ * is 90 minutes).
+ */
+const DeferDurationSchema = z
+  .object({
+    days: z.number().positive().optional(),
+    hours: z.number().positive().optional(),
+    minutes: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
+    message: "defer: a duration needs at least one of days, hours, or minutes",
+  });
+
+/**
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`.
+ * \`at\` is a \`Date\` or a function of the event (checked structurally, since a
+ * function can't be introspected further). Internal per the config standard;
+ * the public surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ *
+ * @internal
+ */
+const DeferWhenSchema = z
+  .object({
+    after: DeferDurationSchema.optional(),
+    at: z
+      .union([
+        z.date(),
+        z.custom<(event: Committed<Schemas, string>) => Date>(
+          (v) => typeof v === "function"
+        ),
+      ])
+      .optional(),
+  })
+  .strict()
+  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
+    message: "defer: specify exactly one of \`after\` or \`at\`",
+  });
+
+/** Sum a duration bag to milliseconds. @internal */
+function duration_ms(d: {
+  days?: number;
+  hours?: number;
+  minutes?: number;
+}): number {
+  return (
+    (d.days ?? 0) * 86_400_000 +
+    (d.hours ?? 0) * 3_600_000 +
+    (d.minutes ?? 0) * 60_000
+  );
+}
+
+/**
+ * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
+ * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
+ * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
+ * from the \`Date\` or from calling its function with the event. Never reads
+ * \`Date.now()\`, so the result is stable across re-delivery.
+ *
+ * @internal
+ */
+export function resolve_defer_at<E extends Schemas>(
+  when: DeferWhen<Committed<E, keyof E>>,
+  event: Committed<E, keyof E>
+): number {
+  const parsed = DeferWhenSchema.parse(when);
+  if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
+  const at = parsed.at!;
+  const date =
+    typeof at === "function"
+      ? (at as (e: Committed<E, keyof E>) => Date)(event)
+      : at;
+  return date.getTime();
+}
+
 // === defer-signal.ts ===
 /**
  * @module defer-signal
  * @category Internal
  *
  * The control-flow signal a reaction handler throws to *defer* itself
- * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reactions".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
- * carried due-time.
+ * resolved due-time.
  *
- * Internal for now: the compiled autoclose reaction throws it directly. The
- * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
- * so the dispatcher needs to recognize only this one type either way.
+ * \`DeferSignal\` is the **imperative escape hatch** and is re-exported from the
+ * package root, so reaction code can throw it directly when a static
+ * \`.defer(when)\` step isn't expressive enough (a deadline computed from loaded
+ * state, say). It carries the *unresolved* {@link DeferWhen}; the dispatcher
+ * resolves it against the triggering event it is already dispatching (via
+ * \`resolve_defer_at\`), which is what anchors \`{ after }\` and the \`at\` function
+ * form to that event and keeps the due-time derivable. Fully dynamic times go
+ * through \`{ at: someDate }\`.
  *
  * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
  * existing \`try/catch\` in the handler loop instead of needing a separate
- * return channel through every dispatcher signature.
- *
- * @internal
+ * return channel through every dispatcher signature. The compiled autoclose
+ * reaction throws the same signal.
  */
-export class DeferSignal extends Error {
-  /** Wall-clock time (ms since epoch) to re-visit the stream. */
-  readonly defer_at: number;
+import type { DeferWhen } from "../types/index.js";
 
-  constructor(defer_at: number) {
+export class DeferSignal extends Error {
+  /**
+   * The unresolved schedule. The dispatcher turns this into an absolute
+   * due-time by resolving it against the triggering event.
+   */
+  readonly when: DeferWhen;
+
+  constructor(when: DeferWhen) {
     super("reaction deferred");
     this.name = "DeferSignal";
-    this.defer_at = defer_at;
+    this.when = when;
   }
 }
 
@@ -26814,6 +27102,7 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
+  type DeferWhen,
   type DoOptions,
   type IAct,
   type Lease,
@@ -26826,6 +27115,7 @@ import {
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
+import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -26963,7 +27253,15 @@ export function build_handle<
         // the stream at the carried due-time (#1090). \`acked_at\` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
-          return { lease, handled, acked_at: at, defer: error.defer_at };
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(
+              error.when as DeferWhen<Committed<TEvents, keyof TEvents>>,
+              event
+            ),
+          };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close (#1090).
@@ -29405,6 +29703,27 @@ export interface EventSink extends Disposable {
     ) => Promise<void>
   ): Promise<void>;
 }
+
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
+ * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
+ *   returning one.
+ *
+ * \`after\` and the \`at\` function form derive from the event, never from
+ * wall-clock at call time, so a worker that re-claims the stream after the
+ * wait computes the same due-time. Genuinely dynamic times (a deadline read
+ * off loaded state) go through \`{ at: someDate }\`.
+ *
+ * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ */
+export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date | ((event: TEvent) => Date); after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,
