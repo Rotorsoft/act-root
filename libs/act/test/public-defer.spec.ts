@@ -55,17 +55,15 @@ describe("imperative DeferSignal(when)", () => {
     expect(done.acked.some((l) => l.stream === "at1")).toBe(true);
   });
 
-  it("{ at: (event) => Date } derives the due-time from the triggering event", async () => {
+  it("{ at: Date } derived from the event in the handler", async () => {
     let attempts = 0;
     const app = act()
       .withState(counter)
       .on("ticked")
       .do(async function deadlineFn(event) {
         attempts++;
-        if (Date.now() < event.created.getTime() + 100)
-          throw new DeferSignal({
-            at: (e) => new Date(e.created.getTime() + 100),
-          });
+        const due = event.created.getTime() + 100;
+        if (Date.now() < due) throw new DeferSignal({ at: new Date(due) });
       })
       .build();
 

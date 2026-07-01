@@ -1044,20 +1044,19 @@ export interface EventSink extends Disposable {
  * escape hatch. Exactly one form:
  *
  * - `{ after }` — a span measured from the triggering event's `created` time
- *   (`{ hours: 1, minutes: 30 }` is 90 minutes).
- * - `{ at }` — an absolute `Date`, or a function of the triggering event
- *   returning one.
+ *   (`{ hours: 1, minutes: 30 }` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - `{ at }` — an absolute `Date`.
  *
- * `after` and the `at` function form derive from the event, never from
- * wall-clock at call time, so a worker that re-claims the stream after the
- * wait computes the same due-time. Genuinely dynamic times (a deadline read
- * off loaded state) go through `{ at: someDate }`.
- *
- * @typeParam TEvent - the triggering event, typing `at`'s function form.
+ * The triggering event is always in hand where a schedule is chosen — the
+ * `(event) => DeferWhen` form of `.defer` declaratively, the handler scope
+ * imperatively — so there is no function form of `at`: a payload- or
+ * state-derived deadline is just `{ at: computedDate }`.
  */
-export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
-  | { at: Date | ((event: TEvent) => Date); after?: never };
+  | { at: Date; after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,

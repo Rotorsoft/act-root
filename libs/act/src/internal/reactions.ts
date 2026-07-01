@@ -21,7 +21,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type DeferWhen,
   type DoOptions,
   type IAct,
   type Lease,
@@ -176,10 +175,7 @@ export function build_handle<
             lease,
             handled,
             acked_at: at,
-            defer: resolve_defer_at<TEvents>(
-              error.when as DeferWhen<Committed<TEvents, keyof TEvents>>,
-              event
-            ),
+            defer: resolve_defer_at<TEvents>(error.when, event),
           };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle

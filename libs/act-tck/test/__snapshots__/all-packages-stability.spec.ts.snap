@@ -11,8 +11,11 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
 import { Act, type ActOptions } from "../act.js";
 import {
   _this_,
+  assert_defer_when,
   current_version_of,
+  type DeferSchedule,
   deprecated_event_names,
+  make_deferred,
   merge_event_register,
   merge_projection,
   pii_fields,
@@ -26,6 +29,7 @@ import type {
   Actor,
   BatchHandler,
   Committed,
+  DeferWhen,
   EventRegister,
   IAct,
   LaneConfig,
@@ -112,6 +116,32 @@ function validate_lane_references(
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
  */
+/**
+ * The \`.do(handler)\` step returned by both \`.on(event)\` and
+ * \`.on(event).defer(schedule)\`: registers a reaction and exposes \`.to(...)\` for
+ * routing. Factored out so the immediate and deferred paths share one shape.
+ */
+type ActReactionDo<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TStateMap extends Record<string, Schema>,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = (
+  handler: (
+    event: Committed<TEvents, TKey>,
+    stream: string,
+    app: IAct<TEvents, TActions, TActor>
+  ) => Promise<Snapshot<Schema, TEvents> | void>,
+  options?: Partial<ReactionOptions>
+) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes> & {
+  to: (
+    resolver: ReactionResolver<TEvents, TKey, TLanes> | string
+  ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
+};
+
 export type ActBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -260,24 +290,27 @@ export type ActBuilder<
   on: <TKey extends keyof TEvents>(
     event: TKey
   ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => ActBuilder<
+    do: ActReactionDo<
       TSchemaReg,
       TEvents,
       TActions,
       TStateMap,
       TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
+      TLanes,
+      TKey
+    >;
+    defer: (
+      schedule: DeferWhen | ((event: Committed<TEvents, TKey>) => DeferWhen)
+    ) => {
+      do: ActReactionDo<
+        TSchemaReg,
+        TEvents,
+        TActions,
+        TStateMap,
+        TActor,
+        TLanes,
+        TKey
+      >;
     };
   };
   /**
@@ -501,24 +534,19 @@ export function act<
         lanes.push(config);
         return builder as never;
       },
-      on: <TKey extends keyof TEvents>(event: TKey) => ({
-        do: (
-          handler: (
-            event: Committed<TEvents, TKey>,
-            stream: string,
-            app: IAct<TEvents, TActions, TActor>
-          ) => Promise<Snapshot<Schema, TEvents> | void>,
-          options?: Partial<ReactionOptions>
+      on: <TKey extends keyof TEvents>(event: TKey) => {
+        type Handler = (
+          event: Committed<TEvents, TKey>,
+          stream: string,
+          app: IAct<TEvents, TActions, TActor>
+        ) => Promise<Snapshot<Schema, TEvents> | void>;
+        // Shared registration for both \`.do(...)\` and \`.defer(...).do(...)\`.
+        // \`schedule\` (when present) wraps the handler so it holds until due.
+        const register = (
+          handler: Handler,
+          options?: Partial<ReactionOptions>,
+          schedule?: DeferSchedule<Committed<TEvents, TKey>>
         ) => {
-          const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler,
-            resolver: _this_,
-            options: {
-              blockOnError: options?.blockOnError ?? true,
-              maxRetries: options?.maxRetries ?? 3,
-              backoff: options?.backoff,
-            },
-          };
           if (!handler.name)
             throw new Error(
               \`Reaction handler for "\${String(event)}" must be a named function\`
@@ -528,6 +556,19 @@ export function act<
               \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
                 \`Reaction handlers are keyed by function name; rename one of them.\`
             );
+          // Fail fast on a bad literal schedule; the function form is checked
+          // when it runs (no event to resolve against at build time).
+          if (schedule && typeof schedule !== "function")
+            assert_defer_when(schedule);
+          const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
+            handler: schedule ? make_deferred(handler, schedule) : handler,
+            resolver: _this_,
+            options: {
+              blockOnError: options?.blockOnError ?? true,
+              maxRetries: options?.maxRetries ?? 3,
+              backoff: options?.backoff,
+            },
+          };
           // Register once with the default _this_ resolver. If \`.to()\` is
           // chained next, it patches the same reaction's resolver in place
           // — no second Map.set() round-trip.
@@ -539,8 +580,16 @@ export function act<
               return builder;
             },
           });
-        },
-      }),
+        };
+        return {
+          do: (handler: Handler, options?: Partial<ReactionOptions>) =>
+            register(handler, options),
+          defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
+            do: (handler: Handler, options?: Partial<ReactionOptions>) =>
+              register(handler, options, schedule),
+          }),
+        };
+      },
       build: (options?: ActOptions) => {
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
@@ -3557,20 +3606,19 @@ export interface EventSink extends Disposable {
  * escape hatch. Exactly one form:
  *
  * - \`{ after }\` — a span measured from the triggering event's \`created\` time
- *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
- * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
- *   returning one.
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
  *
- * \`after\` and the \`at\` function form derive from the event, never from
- * wall-clock at call time, so a worker that re-claims the stream after the
- * wait computes the same due-time. Genuinely dynamic times (a deadline read
- * off loaded state) go through \`{ at: someDate }\`.
- *
- * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
  */
-export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
-  | { at: Date | ((event: TEvent) => Date); after?: never };
+  | { at: Date; after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,
@@ -6648,6 +6696,7 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
 
 import { z } from "zod";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+import { DeferSignal } from "./defer-signal.js";
 
 /**
  * A relative span, measured from the triggering event's \`created\` time. At
@@ -6666,24 +6715,16 @@ const DeferDurationSchema = z
   });
 
 /**
- * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`.
- * \`at\` is a \`Date\` or a function of the event (checked structurally, since a
- * function can't be introspected further). Internal per the config standard;
- * the public surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`;
+ * \`at\` is an absolute \`Date\`. Internal per the config standard; the public
+ * surface is {@link DeferWhen} and {@link resolve_defer_at}.
  *
  * @internal
  */
 const DeferWhenSchema = z
   .object({
     after: DeferDurationSchema.optional(),
-    at: z
-      .union([
-        z.date(),
-        z.custom<(event: Committed<Schemas, string>) => Date>(
-          (v) => typeof v === "function"
-        ),
-      ])
-      .optional(),
+    at: z.date().optional(),
   })
   .strict()
   .refine((w) => (w.after === undefined) !== (w.at === undefined), {
@@ -6707,23 +6748,70 @@ function duration_ms(d: {
  * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
  * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
  * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
- * from the \`Date\` or from calling its function with the event. Never reads
- * \`Date.now()\`, so the result is stable across re-delivery.
+ * from its absolute \`Date\`. Never reads \`Date.now()\`, so the result is stable
+ * across re-delivery.
  *
  * @internal
  */
 export function resolve_defer_at<E extends Schemas>(
-  when: DeferWhen<Committed<E, keyof E>>,
+  when: DeferWhen,
   event: Committed<E, keyof E>
 ): number {
   const parsed = DeferWhenSchema.parse(when);
   if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
-  const at = parsed.at!;
-  const date =
-    typeof at === "function"
-      ? (at as (e: Committed<E, keyof E>) => Date)(event)
-      : at;
-  return date.getTime();
+  return parsed.at!.getTime();
+}
+
+/**
+ * The schedule handed to the declarative \`.defer\` builder step: either a
+ * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
+ * triggering event (read the payload to choose the schedule).
+ *
+ * @internal
+ */
+export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
+
+/**
+ * Validate a literal \`when\` at build time (fail fast, per the config-schema
+ * standard) — throws \`ZodError\` on a bad shape (both/neither of \`after\`/\`at\`,
+ * an empty or non-positive duration). The function form of a \`.defer\` schedule
+ * can only be checked when it runs, so builders pass just the literal here.
+ *
+ * @internal
+ */
+export function assert_defer_when(when: DeferWhen): void {
+  DeferWhenSchema.parse(when);
+}
+
+/**
+ * Wrap a reaction handler so it holds until its schedule is due, then runs.
+ * On each delivery it resolves the schedule against the triggering event; if
+ * the due-time hasn't arrived it throws {@link DeferSignal} (the drain holds
+ * the stream, no watermark advance, no retry bump), otherwise it runs the
+ * real handler. The wrapper keeps the original handler's \`name\` so reaction
+ * registration and de-dup are unaffected, and preserves the handler's exact
+ * type so the builder step is transparent.
+ *
+ * @internal
+ */
+// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
+// handler signature so the builder step is type-transparent.
+export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
+  handler: H,
+  schedule: DeferSchedule<Parameters<H>[0]>
+): H {
+  const call = handler as (...args: unknown[]) => Promise<unknown>;
+  const deferred = async (
+    event: Parameters<H>[0],
+    stream: string,
+    app: unknown
+  ) => {
+    const when = typeof schedule === "function" ? schedule(event) : schedule;
+    if (Date.now() < resolve_defer_at(when, event)) throw new DeferSignal(when);
+    return call(event, stream, app);
+  };
+  Object.defineProperty(deferred, "name", { value: handler.name });
+  return deferred as unknown as H;
 }
 
 // === defer-signal.ts ===
@@ -10003,12 +10091,12 @@ import "./signals.js";
 export * from "./act.js";
 export * from "./adapters/index.js";
 export * from "./builders/index.js";
+export * from "./config.js";
+export * from "./csv.js";
 // The imperative defer escape hatch (#1091): a reaction throws this with a
 // \`DeferWhen\` (see ./types/action.ts) to hold itself until the resolved
 // due-time. The declarative \`.defer(when)\` builder step is the common path.
-export { DeferSignal } from "./internal/defer-signal.js";
-export * from "./config.js";
-export * from "./csv.js";
+export { DeferSignal } from "./internal/index.js";
 export * from "./ports.js";
 export * from "./types/index.js";
 export * from "./utils.js";
@@ -10061,6 +10149,12 @@ export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
@@ -12737,7 +12831,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type DeferWhen,
   type DoOptions,
   type IAct,
   type Lease,
@@ -12892,10 +12985,7 @@ export function build_handle<
             lease,
             handled,
             acked_at: at,
-            defer: resolve_defer_at<TEvents>(
-              error.when as DeferWhen<Committed<TEvents, keyof TEvents>>,
-              event
-            ),
+            defer: resolve_defer_at<TEvents>(error.when, event),
           };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
@@ -13646,11 +13736,18 @@ export class SettleLoop<TEvents extends Schemas> {
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, register_state } from "../internal/index.js";
+import {
+  _this_,
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  register_state,
+} from "../internal/index.js";
 import { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
   Committed,
+  DeferWhen,
   EventRegister,
   IAct,
   LaneConfig,
@@ -13704,6 +13801,32 @@ export type Slice<
   readonly _TActor?: TActor;
   /** @internal phantom field for type-level lane union tracking */
   readonly _TLanes?: TLanes;
+};
+
+/**
+ * The \`.do(handler)\` step returned by both \`.on(event)\` and
+ * \`.on(event).defer(schedule)\`: registers a reaction and exposes \`.to(...)\` for
+ * routing. Factored out so the immediate and deferred paths share one shape.
+ */
+type ReactionDo<
+  TSchemaReg extends SchemaRegister<TActions>,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TStateMap extends Record<string, Schema>,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = (
+  handler: (
+    event: Committed<TEvents, TKey>,
+    stream: string,
+    app: IAct<TEvents, TActions, TActor>
+  ) => Promise<Snapshot<Schema, TEvents> | void>,
+  options?: Partial<ReactionOptions>
+) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes> & {
+  to: (
+    resolver: ReactionResolver<TEvents, TKey, TLanes> | string
+  ) => SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
 };
 
 /**
@@ -13775,35 +13898,35 @@ export type SliceBuilder<
     TLanes | TConfig["name"]
   >;
   /**
-   * Begins defining a reaction scoped to this slice's events.
+   * Begins defining a reaction scoped to this slice's events. Chain \`.do(...)\`
+   * to run immediately, or \`.defer(when).do(...)\` to hold the reaction until a
+   * schedule is due (#1091). \`.to(...)\` follows \`.do(...)\` in both cases and,
+   * for a deferred reaction, is how you route it onto its own target when you
+   * don't want the hold to stall the aggregate's other reactions.
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
   ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => SliceBuilder<
+    do: ReactionDo<
       TSchemaReg,
       TEvents,
       TActions,
       TStateMap,
       TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => SliceBuilder<
+      TLanes,
+      TKey
+    >;
+    defer: (
+      schedule: DeferWhen | ((event: Committed<TEvents, TKey>) => DeferWhen)
+    ) => {
+      do: ReactionDo<
         TSchemaReg,
         TEvents,
         TActions,
         TStateMap,
         TActor,
-        TLanes
+        TLanes,
+        TKey
       >;
     };
   };
@@ -13893,24 +14016,19 @@ export function slice<
       lanes.push(config);
       return builder as never;
     },
-    on: <TKey extends keyof TEvents>(event: TKey) => ({
-      do: (
-        handler: (
-          event: Committed<TEvents, TKey>,
-          stream: string,
-          app: IAct<TEvents, TActions, TActor>
-        ) => Promise<Snapshot<Schema, TEvents> | void>,
-        options?: Partial<ReactionOptions>
+    on: <TKey extends keyof TEvents>(event: TKey) => {
+      type Handler = (
+        event: Committed<TEvents, TKey>,
+        stream: string,
+        app: IAct<TEvents, TActions, TActor>
+      ) => Promise<Snapshot<Schema, TEvents> | void>;
+      // Shared registration for both \`.do(...)\` and \`.defer(...).do(...)\`.
+      // \`schedule\` (when present) wraps the handler so it holds until due.
+      const register = (
+        handler: Handler,
+        options?: Partial<ReactionOptions>,
+        schedule?: DeferSchedule<Committed<TEvents, TKey>>
       ) => {
-        const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-          handler,
-          resolver: _this_,
-          options: {
-            blockOnError: options?.blockOnError ?? true,
-            maxRetries: options?.maxRetries ?? 3,
-            backoff: options?.backoff,
-          },
-        };
         if (!handler.name)
           throw new Error(
             \`Reaction handler for "\${String(event)}" must be a named function\`
@@ -13920,6 +14038,19 @@ export function slice<
             \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
               \`Reaction handlers are keyed by function name; rename one of them.\`
           );
+        // Fail fast on a bad literal schedule; the function form is checked
+        // when it runs (no event to resolve against at build time).
+        if (schedule && typeof schedule !== "function")
+          assert_defer_when(schedule);
+        const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
+          handler: schedule ? make_deferred(handler, schedule) : handler,
+          resolver: _this_,
+          options: {
+            blockOnError: options?.blockOnError ?? true,
+            maxRetries: options?.maxRetries ?? 3,
+            backoff: options?.backoff,
+          },
+        };
         // Register once with the default _this_ resolver. If \`.to()\` is
         // chained next, it patches the same reaction's resolver in place
         // — no second Map.set() round-trip.
@@ -13931,8 +14062,16 @@ export function slice<
             return builder;
           },
         });
-      },
-    }),
+      };
+      return {
+        do: (handler: Handler, options?: Partial<ReactionOptions>) =>
+          register(handler, options),
+        defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
+          do: (handler: Handler, options?: Partial<ReactionOptions>) =>
+            register(handler, options, schedule),
+        }),
+      };
+    },
     build: () => ({
       _tag: "Slice" as const,
       states,
@@ -18182,20 +18321,19 @@ export interface EventSink extends Disposable {
  * escape hatch. Exactly one form:
  *
  * - \`{ after }\` — a span measured from the triggering event's \`created\` time
- *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
- * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
- *   returning one.
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
  *
- * \`after\` and the \`at\` function form derive from the event, never from
- * wall-clock at call time, so a worker that re-claims the stream after the
- * wait computes the same due-time. Genuinely dynamic times (a deadline read
- * off loaded state) go through \`{ at: someDate }\`.
- *
- * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
  */
-export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
-  | { at: Date | ((event: TEvent) => Date); after?: never };
+  | { at: Date; after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,
@@ -21050,6 +21188,7 @@ export function close_correlation(
 
 import { z } from "zod";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+import { DeferSignal } from "./defer-signal.js";
 
 /**
  * A relative span, measured from the triggering event's \`created\` time. At
@@ -21068,24 +21207,16 @@ const DeferDurationSchema = z
   });
 
 /**
- * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`.
- * \`at\` is a \`Date\` or a function of the event (checked structurally, since a
- * function can't be introspected further). Internal per the config standard;
- * the public surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`;
+ * \`at\` is an absolute \`Date\`. Internal per the config standard; the public
+ * surface is {@link DeferWhen} and {@link resolve_defer_at}.
  *
  * @internal
  */
 const DeferWhenSchema = z
   .object({
     after: DeferDurationSchema.optional(),
-    at: z
-      .union([
-        z.date(),
-        z.custom<(event: Committed<Schemas, string>) => Date>(
-          (v) => typeof v === "function"
-        ),
-      ])
-      .optional(),
+    at: z.date().optional(),
   })
   .strict()
   .refine((w) => (w.after === undefined) !== (w.at === undefined), {
@@ -21109,23 +21240,70 @@ function duration_ms(d: {
  * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
  * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
  * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
- * from the \`Date\` or from calling its function with the event. Never reads
- * \`Date.now()\`, so the result is stable across re-delivery.
+ * from its absolute \`Date\`. Never reads \`Date.now()\`, so the result is stable
+ * across re-delivery.
  *
  * @internal
  */
 export function resolve_defer_at<E extends Schemas>(
-  when: DeferWhen<Committed<E, keyof E>>,
+  when: DeferWhen,
   event: Committed<E, keyof E>
 ): number {
   const parsed = DeferWhenSchema.parse(when);
   if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
-  const at = parsed.at!;
-  const date =
-    typeof at === "function"
-      ? (at as (e: Committed<E, keyof E>) => Date)(event)
-      : at;
-  return date.getTime();
+  return parsed.at!.getTime();
+}
+
+/**
+ * The schedule handed to the declarative \`.defer\` builder step: either a
+ * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
+ * triggering event (read the payload to choose the schedule).
+ *
+ * @internal
+ */
+export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
+
+/**
+ * Validate a literal \`when\` at build time (fail fast, per the config-schema
+ * standard) — throws \`ZodError\` on a bad shape (both/neither of \`after\`/\`at\`,
+ * an empty or non-positive duration). The function form of a \`.defer\` schedule
+ * can only be checked when it runs, so builders pass just the literal here.
+ *
+ * @internal
+ */
+export function assert_defer_when(when: DeferWhen): void {
+  DeferWhenSchema.parse(when);
+}
+
+/**
+ * Wrap a reaction handler so it holds until its schedule is due, then runs.
+ * On each delivery it resolves the schedule against the triggering event; if
+ * the due-time hasn't arrived it throws {@link DeferSignal} (the drain holds
+ * the stream, no watermark advance, no retry bump), otherwise it runs the
+ * real handler. The wrapper keeps the original handler's \`name\` so reaction
+ * registration and de-dup are unaffected, and preserves the handler's exact
+ * type so the builder step is transparent.
+ *
+ * @internal
+ */
+// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
+// handler signature so the builder step is type-transparent.
+export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
+  handler: H,
+  schedule: DeferSchedule<Parameters<H>[0]>
+): H {
+  const call = handler as (...args: unknown[]) => Promise<unknown>;
+  const deferred = async (
+    event: Parameters<H>[0],
+    stream: string,
+    app: unknown
+  ) => {
+    const when = typeof schedule === "function" ? schedule(event) : schedule;
+    if (Date.now() < resolve_defer_at(when, event)) throw new DeferSignal(when);
+    return call(event, stream, app);
+  };
+  Object.defineProperty(deferred, "name", { value: handler.name });
+  return deferred as unknown as H;
 }
 
 // === defer-signal.ts ===
@@ -24445,6 +24623,12 @@ export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
@@ -27102,7 +27286,6 @@ import {
   type Actor,
   type BatchHandler,
   type Committed,
-  type DeferWhen,
   type DoOptions,
   type IAct,
   type Lease,
@@ -27257,10 +27440,7 @@ export function build_handle<
             lease,
             handled,
             acked_at: at,
-            defer: resolve_defer_at<TEvents>(
-              error.when as DeferWhen<Committed<TEvents, keyof TEvents>>,
-              event
-            ),
+            defer: resolve_defer_at<TEvents>(error.when, event),
           };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
@@ -29710,20 +29890,19 @@ export interface EventSink extends Disposable {
  * escape hatch. Exactly one form:
  *
  * - \`{ after }\` — a span measured from the triggering event's \`created\` time
- *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes).
- * - \`{ at }\` — an absolute \`Date\`, or a function of the triggering event
- *   returning one.
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
  *
- * \`after\` and the \`at\` function form derive from the event, never from
- * wall-clock at call time, so a worker that re-claims the stream after the
- * wait computes the same due-time. Genuinely dynamic times (a deadline read
- * off loaded state) go through \`{ at: someDate }\`.
- *
- * @typeParam TEvent - the triggering event, typing \`at\`'s function form.
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
  */
-export type DeferWhen<TEvent = Committed<Schemas, keyof Schemas>> =
+export type DeferWhen =
   | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
-  | { at: Date | ((event: TEvent) => Date); after?: never };
+  | { at: Date; after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,

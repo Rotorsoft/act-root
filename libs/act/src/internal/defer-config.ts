@@ -24,6 +24,7 @@
 
 import { z } from "zod";
 import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+import { DeferSignal } from "./defer-signal.js";
 
 /**
  * A relative span, measured from the triggering event's `created` time. At
@@ -42,24 +43,16 @@ const DeferDurationSchema = z
   });
 
 /**
- * Zod schema for the `defer(when)` options bag. Exactly one of `after` / `at`.
- * `at` is a `Date` or a function of the event (checked structurally, since a
- * function can't be introspected further). Internal per the config standard;
- * the public surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ * Zod schema for the `defer(when)` options bag. Exactly one of `after` / `at`;
+ * `at` is an absolute `Date`. Internal per the config standard; the public
+ * surface is {@link DeferWhen} and {@link resolve_defer_at}.
  *
  * @internal
  */
 const DeferWhenSchema = z
   .object({
     after: DeferDurationSchema.optional(),
-    at: z
-      .union([
-        z.date(),
-        z.custom<(event: Committed<Schemas, string>) => Date>(
-          (v) => typeof v === "function"
-        ),
-      ])
-      .optional(),
+    at: z.date().optional(),
   })
   .strict()
   .refine((w) => (w.after === undefined) !== (w.at === undefined), {
@@ -83,21 +76,68 @@ function duration_ms(d: {
  * Resolve `when` to an absolute due-time (ms since epoch) for a given
  * triggering event. Validates via {@link DeferWhenSchema} (throws `ZodError`
  * on a bad shape), then derives the time: `after` from `event.created`, `at`
- * from the `Date` or from calling its function with the event. Never reads
- * `Date.now()`, so the result is stable across re-delivery.
+ * from its absolute `Date`. Never reads `Date.now()`, so the result is stable
+ * across re-delivery.
  *
  * @internal
  */
 export function resolve_defer_at<E extends Schemas>(
-  when: DeferWhen<Committed<E, keyof E>>,
+  when: DeferWhen,
   event: Committed<E, keyof E>
 ): number {
   const parsed = DeferWhenSchema.parse(when);
   if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
-  const at = parsed.at!;
-  const date =
-    typeof at === "function"
-      ? (at as (e: Committed<E, keyof E>) => Date)(event)
-      : at;
-  return date.getTime();
+  return parsed.at!.getTime();
+}
+
+/**
+ * The schedule handed to the declarative `.defer` builder step: either a
+ * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
+ * triggering event (read the payload to choose the schedule).
+ *
+ * @internal
+ */
+export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
+
+/**
+ * Validate a literal `when` at build time (fail fast, per the config-schema
+ * standard) — throws `ZodError` on a bad shape (both/neither of `after`/`at`,
+ * an empty or non-positive duration). The function form of a `.defer` schedule
+ * can only be checked when it runs, so builders pass just the literal here.
+ *
+ * @internal
+ */
+export function assert_defer_when(when: DeferWhen): void {
+  DeferWhenSchema.parse(when);
+}
+
+/**
+ * Wrap a reaction handler so it holds until its schedule is due, then runs.
+ * On each delivery it resolves the schedule against the triggering event; if
+ * the due-time hasn't arrived it throws {@link DeferSignal} (the drain holds
+ * the stream, no watermark advance, no retry bump), otherwise it runs the
+ * real handler. The wrapper keeps the original handler's `name` so reaction
+ * registration and de-dup are unaffected, and preserves the handler's exact
+ * type so the builder step is transparent.
+ *
+ * @internal
+ */
+// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
+// handler signature so the builder step is type-transparent.
+export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
+  handler: H,
+  schedule: DeferSchedule<Parameters<H>[0]>
+): H {
+  const call = handler as (...args: unknown[]) => Promise<unknown>;
+  const deferred = async (
+    event: Parameters<H>[0],
+    stream: string,
+    app: unknown
+  ) => {
+    const when = typeof schedule === "function" ? schedule(event) : schedule;
+    if (Date.now() < resolve_defer_at(when, event)) throw new DeferSignal(when);
+    return call(event, stream, app);
+  };
+  Object.defineProperty(deferred, "name", { value: handler.name });
+  return deferred as unknown as H;
 }
