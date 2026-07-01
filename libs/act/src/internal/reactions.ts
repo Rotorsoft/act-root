@@ -33,6 +33,7 @@ import {
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
+import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -170,7 +171,12 @@ export function build_handle<
         // the stream at the carried due-time (#1090). `acked_at` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
-          return { lease, handled, acked_at: at, defer: error.defer_at };
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(error.when, event),
+          };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close (#1090).

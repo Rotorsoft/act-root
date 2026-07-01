@@ -5,7 +5,7 @@ title: WolfDesk
 
 # WolfDesk Example
 
-A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, invariants with actor context, and background jobs.
+A complex ticketing system demonstrating advanced Act patterns: partial states, vertical slices, cross-aggregate reactions, projections, invariants with actor context, and deferred-reaction timers.
 
 Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Khononov.
 
@@ -14,15 +14,15 @@ Inspired by the ticketing system from "Learning Domain-Driven Design" by Vlad Kh
 ## Architecture
 
 ```
-bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSlice(Ops).withProjection(Projection).build()
+bootstrap.ts          → act().withSlice(Creation).withSlice(Messaging).withSlice(Ops).withSlice(Timers).withProjection(Projection).build()
 ticket-creation.ts    → TicketCreation state + TicketCreationSlice
 ticket-messaging.ts   → TicketMessaging state + TicketMessagingSlice
 ticket-operations.ts  → TicketOperations state + TicketOpsSlice
+ticket-timers.ts      → TicketTimersSlice (deferred escalate / reassign / close timers)
 ticket-projections.ts → TicketProjection (read model)
 ticket-invariants.ts  → Business rules
 schemas/              → Zod schemas for actions, events, state
 services/             → External service stubs (agent assignment, notifications)
-jobs.ts               → Background processing
 ```
 
 ## Patterns Demonstrated
@@ -145,6 +145,23 @@ export const TicketProjection = projection("tickets")
   .build();
 ```
 
+### Deferred-Reaction Timers
+
+The ticket lifecycle needs a few things to happen on a clock: escalate an unanswered ticket after its SLA window, reassign an escalated ticket the user still hasn't answered, and close a ticket that's gone quiet. Wolfdesk drives all three from `ticket-timers.ts` as deferred reactions rather than a background polling loop. Each deadline already rides on the ticket's events, so `TicketTimersSlice` `.defer`s to that instant, sleeps, and re-checks live state when it wakes. That wake-time check is the same load-and-guard a polling job would run against the read model, without the periodic scan.
+
+Each automation leases its own per-ticket target (`escalate:<id>`, `reassign:<id>`, `close:<id>`), so a pending wait never blocks the ticket's hot-path reactions like assignment, messaging, and webhooks. The handler reads the source ticket from `event.stream`, not the synthetic target it holds.
+
+Escalation is a one-shot that reacts to `TicketAssigned` and defers to the event's `escalateAfter`:
+
+```typescript no-check
+.on("TicketAssigned")
+.defer((event) => ({ at: event.data.escalateAfter }))
+.do(autoEscalate)
+.to((event) => ({ target: `escalate:${event.stream}`, source: event.stream }))
+```
+
+Reassignment is a recurring chain. Both `TicketEscalated` and `TicketReassigned` land on the `reassign:<id>` target; because the escalation event carries no deadline, the handler reads `reassignAfter` from live state and re-arms imperatively with `throw new DeferSignal({ at: state.reassignAfter })`. Each `ReassignTicket` moves the deadline forward, so the resulting `TicketReassigned` schedules the next wait, and the loop stops once the user is answered or the ticket closes. Close-on-inactivity reacts to `TicketOpened` and defers to the open event's optional `closeAfter`, closing the ticket on waking if it's still open.
+
 ### Composition
 
 Everything is wired together in `bootstrap.ts`:
@@ -154,6 +171,7 @@ export const app = act()
   .withSlice(TicketCreationSlice)
   .withSlice(TicketMessagingSlice)
   .withSlice(TicketOpsSlice)
+  .withSlice(TicketTimersSlice)
   .withProjection(TicketProjection)
   .build();
 ```

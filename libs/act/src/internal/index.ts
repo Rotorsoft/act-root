@@ -45,6 +45,12 @@ export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
+export {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+  resolve_defer_at,
+} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {

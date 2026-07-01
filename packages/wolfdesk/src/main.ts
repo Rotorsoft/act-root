@@ -10,7 +10,6 @@ import { PostgresStore } from "@rotorsoft/act-pg";
 import { Chance } from "chance";
 import { app } from "./bootstrap.js";
 import { db, tickets } from "./drizzle/index.js";
-import { start_jobs } from "./jobs.js";
 import { Priority } from "./schemas/index.js";
 
 const chance = new Chance();
@@ -31,7 +30,8 @@ async function main() {
   await db.delete(tickets).execute();
 
   const actor: Actor = { id: randomUUID(), name: "WolfDesk" };
-  start_jobs();
+  // Timing automations are now deferred reactions wired into the Act app
+  // (see ticket-timers.ts), so there's no polling loop to start here.
   app.on("acked", async () => {
     const all = await db.select().from(tickets).execute();
     console.table(all);

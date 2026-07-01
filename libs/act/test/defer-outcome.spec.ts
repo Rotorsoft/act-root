@@ -31,7 +31,7 @@ describe("defer outcome (integration)", () => {
       attempts++;
       // Derivable due-time (not Date.now()-relative at call): re-evaluated on
       // every redelivery so the decision survives a re-claim.
-      if (Date.now() < until) throw new DeferSignal(until);
+      if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
     };
 
     const app = act().withState(counter).on("ticked").do(deferring).build();
@@ -64,7 +64,7 @@ describe("defer outcome (integration)", () => {
     const seen = new Set<string>();
     const deferring = async (_e: unknown, stream: string) => {
       seen.add(stream);
-      if (Date.now() < until) throw new DeferSignal(until);
+      if (Date.now() < until) throw new DeferSignal({ at: new Date(until) });
     };
 
     const app = act().withState(counter).on("ticked").do(deferring).build();
