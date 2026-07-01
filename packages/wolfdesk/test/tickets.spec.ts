@@ -3,16 +3,13 @@ import { Chance } from "chance";
 import { eq } from "drizzle-orm";
 import { app } from "../src/bootstrap.js";
 import { db, init_tickets_db, tickets } from "../src/drizzle/index.js";
-import { AutoClose, AutoEscalate, AutoReassign } from "../src/jobs.js";
 import { Priority } from "../src/schemas/index.js";
 import {
   addMessage,
   assignTicket,
-  closeTicket,
   escalateTicket,
   markTicketResolved,
   openTicket,
-  reassignTicket,
   requestTicketEscalation,
   target,
 } from "./actions.js";
@@ -37,25 +34,39 @@ describe("tickets", () => {
     await dispose()();
   });
 
+  const DAY = 24 * 60 * 60 * 1000;
+  const future = () => new Date(Date.now() + DAY);
+  // A few correlate+drain passes let a defer chain settle (each pass wakes the
+  // streams whose due-time has passed and runs the next hop).
+  const settle = async () => {
+    for (let i = 0; i < 3; i++) {
+      await app.correlate({ limit: 200 });
+      await app.drain({ streamLimit: 100, eventLimit: 100, leaseMillis: 50 });
+    }
+  };
+
   it("projection", async () => {
+    const now = new Date();
     const t = target(chance.guid(), "projecting");
     const title = "projecting";
     const message = "opening a new ticket for projection";
 
-    await openTicket(t, title, message);
+    // Due-now deadlines so the deferred escalate/reassign/close automations all
+    // fire and populate every projection column. The manual assign is committed
+    // before the first drain, so its escalate defer is the one that fires now.
+    await openTicket(
+      t,
+      title,
+      message,
+      chance.guid(),
+      chance.guid(),
+      Priority.Low,
+      now
+    );
+    await assignTicket(t, chance.guid(), now, now);
     await addMessage(t, "first message");
-    await app.correlate();
-    await app.drain();
-
-    await escalateTicket(t);
-    await app.correlate();
-    await app.drain();
-
-    await reassignTicket(t);
     await markTicketResolved(t);
-    await closeTicket(t);
-    await app.correlate();
-    await app.drain();
+    await settle();
 
     const ticket = await findTicket(t.stream);
     expect(ticket?.id).toBe(t.stream);
@@ -69,54 +80,35 @@ describe("tickets", () => {
     expect(ticket?.closeAfter).toBeDefined();
     expect(ticket?.escalateAfter).toBeDefined();
     expect(ticket?.reassignAfter).toBeDefined();
-    // just to check projection while preparing test
-    // console.table(ticket); // uncomment to inspect projection state
   });
 
-  describe("automations", () => {
-    it("should escalate ticket", async () => {
+  // Timing automations are now deferred reactions (src/ticket-timers.ts), not
+  // polling jobs. Each test sets a due-now deadline so the reaction fires on the
+  // next drain; a few correlate+drain passes let the defer chain settle.
+  describe("automations (deferred reactions)", () => {
+    it("should escalate ticket at its escalateAfter", async () => {
       const now = new Date();
       const t = target(chance.guid(), "auto escalate");
 
-      // open and assign with immediate escalate and reassign dates
+      // Assign with an immediate escalate deadline (reassign stays in the
+      // future). The manual assign is committed before the first drain, so its
+      // escalate defer is the first the escalate:<id> target sees and fires now.
       await openTicket(t, "auto escalate", "Hello");
-      await assignTicket(t, chance.guid(), now, now);
+      await assignTicket(t, chance.guid(), now);
+      await settle();
 
-      // project and verify agent and escalate after
-      await app.correlate();
-      await app.drain({
-        streamLimit: 100,
-        eventLimit: 100,
-        leaseMillis: 10_000,
-      });
-      let ticket = await findTicket(t.stream);
+      const ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
-      expect(ticket?.escalateAfter).toBe(now.getTime());
-      expect(ticket?.reassignAfter).toBe(now.getTime());
-
-      // trigger automation
-      await AutoEscalate(1).catch(console.error);
-
-      // project and verify escalation id
-      await app.correlate();
-      await app.drain({
-        streamLimit: 100,
-        eventLimit: 100,
-        leaseMillis: 10_000,
-      });
-      ticket = await findTicket(t.stream);
       expect(ticket?.escalationId).toBeDefined();
 
-      // load state and verify escalation id
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.escalationId).toBeDefined();
     });
 
-    it("should close ticket", async () => {
+    it("should close ticket at its closeAfter", async () => {
       const t = target(chance.guid(), "auto close me");
       const now = new Date();
 
-      // open and resolve with immediate close after date
       await openTicket(
         t,
         "auto close me",
@@ -129,74 +121,44 @@ describe("tickets", () => {
       const [snap] = await markTicketResolved(t);
       expect(snap.state.resolvedById).toBeDefined();
 
-      // project and verify
-      await app.correlate();
-      const drained = await app.drain();
-      expect(drained.acked.length).toBeGreaterThan(0);
+      await settle();
 
-      let ticket = await findTicket(t.stream);
-      // console.table(ticket); // uncomment to inspect projection state
+      const ticket = await findTicket(t.stream);
       expect(ticket?.resolvedById).toBeDefined();
       expect(ticket?.closeAfter).toBe(now.getTime());
-
-      // trigger automation
-      await AutoClose(1);
-
-      // project and verify closed by
-      await app.correlate();
-      await app.drain();
-      ticket = await findTicket(t.stream);
       expect(ticket?.closedById).toBeDefined();
 
-      // load state and verify closed by
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.closedById).toBeDefined();
     });
 
-    it("should reassign ticket", async () => {
+    it("should reassign an escalated, unanswered ticket", async () => {
       const now = new Date();
       const t = target(chance.guid(), "auto re-assign me");
       const agentId = chance.guid();
 
-      // open and assign with immediate escalate and reassign dates
+      // Let the assign-on-open reaction assign first (future deadlines), then
+      // manually assign LAST with a due-now reassignAfter (a far-future escalate
+      // so nothing auto-escalates), so live state carries the due-now deadline.
       await openTicket(t, "auto re-assign me", "Hello");
-      await assignTicket(t, agentId, now, now);
-
-      // project and verify agent and escalate after
-      await app.correlate({ limit: 120 }); // 120 to reach the previous event
+      await app.correlate({ limit: 200 });
       await app.drain();
-      let ticket = await findTicket(t.stream);
-      expect(ticket?.agentId).toBeDefined();
-      expect(ticket?.escalateAfter).toBe(now.getTime());
-      expect(ticket?.reassignAfter).toBe(now.getTime());
+      await assignTicket(t, agentId, future(), now);
 
-      // manually escalate
+      // Escalation is the precondition for reassignment; the reassign defer
+      // reads reassignAfter from state and fires because it's already due.
       await escalateTicket(t);
+      await settle();
 
-      // project and verify escalation id
-      await app.drain();
-      ticket = await findTicket(t.stream);
-      expect(ticket?.escalationId).toBeDefined();
-
-      // trigger automation
-      await AutoReassign(1);
-
-      // project and verify new agent and reassign after date
-      await app.drain();
-      ticket = await findTicket(t.stream);
+      const ticket = await findTicket(t.stream);
       expect(ticket?.agentId).toBeDefined();
       expect(ticket?.agentId).not.toEqual(agentId);
       expect(ticket?.reassignAfter).toBeGreaterThan(now.getTime());
-      expect(ticket?.escalateAfter).toBeGreaterThan(now.getTime());
 
-      // load state and verify new agent and reassign after date
       const snapshot = await app.load("Ticket", t.stream);
       expect(snapshot.state.agentId).toBeDefined();
       expect(snapshot.state.agentId).not.toEqual(agentId);
       expect(snapshot.state.reassignAfter?.getTime()).toBeGreaterThan(
-        now.getTime()
-      );
-      expect(snapshot.state.escalateAfter?.getTime()).toBeGreaterThan(
         now.getTime()
       );
     });
