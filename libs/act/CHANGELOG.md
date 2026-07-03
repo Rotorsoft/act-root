@@ -1,3 +1,11 @@
+# [@rotorsoft/act-v1.18.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.17.0...@rotorsoft/act-v1.18.0) (2026-07-03)
+
+
+### Features
+
+* **act:** declarative .defer(when) builder step (slice 2, [#1091](https://github.com/rotorsoft/act-root/issues/1091)) ([50e59c3](https://github.com/rotorsoft/act-root/commit/50e59c390fc5fae42d3ebc52b81f5eee29348bdf))
+* **act:** public DeferSignal throw for imperative defer (slice 2, [#1091](https://github.com/rotorsoft/act-root/issues/1091)) ([7280560](https://github.com/rotorsoft/act-root/commit/7280560b8c212478bd02f6ab6c2696478fad012d))
+
 # [@rotorsoft/act-v1.17.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-v1.16.1...@rotorsoft/act-v1.17.0) (2026-07-01)
 
 
