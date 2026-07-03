@@ -35,6 +35,11 @@ export {
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+} from "./builder-utils.js";
+export {
   CircuitBreaker,
   type CircuitBreakerConfig,
   type CircuitBreakerOptions,
@@ -49,7 +54,6 @@ export {
   assert_defer_when,
   type DeferSchedule,
   make_deferred,
-  resolve_defer_at,
 } from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";

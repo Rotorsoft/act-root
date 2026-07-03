@@ -6,37 +6,30 @@
  */
 import { Act, type ActOptions } from "../act.js";
 import {
-  _this_,
-  assert_defer_when,
   current_version_of,
-  type DeferSchedule,
   deprecated_event_names,
-  make_deferred,
   merge_event_register,
   merge_projection,
   pii_fields,
   pii_gate,
   pii_split,
   pii_strip,
+  type ReactionOn,
+  reaction_on,
+  register_lane,
   register_state,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
-  Committed,
-  DeferWhen,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
-  ReactionOptions,
-  ReactionResolver,
   Registry,
   Schema,
   SchemaRegister,
   Schemas,
-  Snapshot,
   State,
 } from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
@@ -112,32 +105,6 @@ function validate_lane_references(
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
  */
-/**
- * The `.do(handler)` step returned by both `.on(event)` and
- * `.on(event).defer(schedule)`: registers a reaction and exposes `.to(...)` for
- * routing. Factored out so the immediate and deferred paths share one shape.
- */
-type ActReactionDo<
-  TSchemaReg extends SchemaRegister<TActions>,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TStateMap extends Record<string, Schema>,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = (
-  handler: (
-    event: Committed<TEvents, TKey>,
-    stream: string,
-    app: IAct<TEvents, TActions, TActor>
-  ) => Promise<Snapshot<Schema, TEvents> | void>,
-  options?: Partial<ReactionOptions>
-) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes> & {
-  to: (
-    resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-  ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
-};
-
 export type ActBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
@@ -285,30 +252,14 @@ export type ActBuilder<
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
-  ) => {
-    do: ActReactionDo<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      TStateMap,
-      TActor,
-      TLanes,
-      TKey
-    >;
-    defer: (
-      schedule: DeferWhen | ((event: Committed<TEvents, TKey>) => DeferWhen)
-    ) => {
-      do: ActReactionDo<
-        TSchemaReg,
-        TEvents,
-        TActions,
-        TStateMap,
-        TActor,
-        TLanes,
-        TKey
-      >;
-    };
-  };
+  ) => ReactionOn<
+    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes,
+    TKey
+  >;
   /**
    * Builds and returns the Act orchestrator instance.
    *
@@ -523,69 +474,11 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        if (config.name === DEFAULT_LANE)
-          throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
-        if (lanes.some((l) => l.name === config.name))
-          throw new Error(`Lane "${config.name}" was already declared`);
-        lanes.push(config);
+        register_lane(config, lanes);
         return builder as never;
       },
-      on: <TKey extends keyof TEvents>(event: TKey) => {
-        type Handler = (
-          event: Committed<TEvents, TKey>,
-          stream: string,
-          app: IAct<TEvents, TActions, TActor>
-        ) => Promise<Snapshot<Schema, TEvents> | void>;
-        // Shared registration for both `.do(...)` and `.defer(...).do(...)`.
-        // `schedule` (when present) wraps the handler so it holds until due.
-        const register = (
-          handler: Handler,
-          options?: Partial<ReactionOptions>,
-          schedule?: DeferSchedule<Committed<TEvents, TKey>>
-        ) => {
-          if (!handler.name)
-            throw new Error(
-              `Reaction handler for "${String(event)}" must be a named function`
-            );
-          if (registry.events[event].reactions.has(handler.name))
-            throw new Error(
-              `Duplicate reaction "${handler.name}" for event "${String(event)}". ` +
-                `Reaction handlers are keyed by function name; rename one of them.`
-            );
-          // Fail fast on a bad literal schedule; the function form is checked
-          // when it runs (no event to resolve against at build time).
-          if (schedule && typeof schedule !== "function")
-            assert_defer_when(schedule);
-          const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler: schedule ? make_deferred(handler, schedule) : handler,
-            resolver: _this_,
-            options: {
-              blockOnError: options?.blockOnError ?? true,
-              maxRetries: options?.maxRetries ?? 3,
-              backoff: options?.backoff,
-            },
-          };
-          // Register once with the default _this_ resolver. If `.to()` is
-          // chained next, it patches the same reaction's resolver in place
-          // — no second Map.set() round-trip.
-          registry.events[event].reactions.set(handler.name, reaction);
-          return Object.assign(builder, {
-            to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              reaction.resolver =
-                typeof resolver === "string" ? { target: resolver } : resolver;
-              return builder;
-            },
-          });
-        };
-        return {
-          do: (handler: Handler, options?: Partial<ReactionOptions>) =>
-            register(handler, options),
-          defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
-            do: (handler: Handler, options?: Partial<ReactionOptions>) =>
-              register(handler, options, schedule),
-          }),
-        };
-      },
+      on: <TKey extends keyof TEvents>(event: TKey) =>
+        reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
