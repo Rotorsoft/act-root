@@ -14,7 +14,6 @@ import {
   pii_gate,
   pii_split,
   pii_strip,
-  type ReactionOn,
   reaction_on,
   register_lane,
   register_state,
@@ -23,7 +22,6 @@ import { DEFAULT_LANE, log } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
-  EventRegister,
   LaneConfig,
   Reaction,
   Registry,
@@ -32,6 +30,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
+import type { BuilderCore } from "./builder-core.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 
@@ -105,7 +104,7 @@ function validate_lane_references(
  * @see {@link act} for usage examples
  * @see {@link Act} for the built orchestrator API
  */
-export type ActBuilder<
+export interface ActBuilder<
   TSchemaReg extends SchemaRegister<TActions>,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -113,7 +112,13 @@ export type ActBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
-> = {
+> extends BuilderCore<
+    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes
+  > {
   /**
    * Registers a state definition with the builder.
    *
@@ -169,17 +174,6 @@ export type ActBuilder<
     TActor,
     TLanes | TNewLanes
   >;
-  /**
-   * Registers a standalone projection with the builder.
-   *
-   * The projection's events must be a subset of events already registered
-   * via `.withState()` or `.withSlice()`.
-   */
-  withProjection: <TNewEvents extends Schemas>(
-    projection: [Exclude<keyof TNewEvents, keyof TEvents>] extends [never]
-      ? Projection<TNewEvents>
-      : never
-  ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
   /**
    * Locks a custom actor type for this application.
    *
@@ -240,27 +234,6 @@ export type ActBuilder<
     TLanes | TConfig["name"]
   >;
   /**
-   * Begins defining a reaction to a specific event.
-   *
-   * Reactions are event handlers that respond to state changes. They can trigger
-   * additional actions, update external systems, or perform side effects. Reactions
-   * are processed asynchronously during drain cycles.
-   *
-   * @template TKey - Event name (must be a registered event)
-   * @param event - The event name to react to
-   * @returns An object with `.do()` method to define the reaction handler
-   */
-  on: <TKey extends keyof TEvents>(
-    event: TKey
-  ) => ReactionOn<
-    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
-    TEvents,
-    TActions,
-    TActor,
-    TLanes,
-    TKey
-  >;
-  /**
    * Builds and returns the Act orchestrator instance.
    *
    * @param options - Optional runtime overrides (see {@link ActOptions}).
@@ -274,11 +247,7 @@ export type ActBuilder<
   build: (
     options?: ActOptions<TLanes>
   ) => Act<TSchemaReg, TEvents, TActions, TStateMap, TActor>;
-  /**
-   * The registered event schemas and their reaction maps.
-   */
-  readonly events: EventRegister<TEvents>;
-};
+}
 
 /* eslint-disable @typescript-eslint/no-empty-object-type -- {} used as generic defaults */
 
