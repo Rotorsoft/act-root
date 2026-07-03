@@ -41,7 +41,6 @@ export {
 } from "./builder-utils.js";
 export {
   CircuitBreaker,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   type CircuitState,
   resolveCircuitBreakerConfig,
@@ -50,11 +49,6 @@ export { run_close_cycle } from "./close-cycle.js";
 export { CloseSignal } from "./close-signal.js";
 export { CorrelateCycle } from "./correlate-cycle.js";
 export { close_correlation, default_correlator } from "./correlator.js";
-export {
-  assert_defer_when,
-  type DeferSchedule,
-  make_deferred,
-} from "./defer-config.js";
 export { DeferSignal } from "./defer-signal.js";
 export type { DrainOps } from "./drain.js";
 export {
@@ -62,7 +56,7 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { BoundAction, EsOps } from "./event-sourcing.js";
+export type { EsOps } from "./event-sourcing.js";
 export { scan } from "./event-sourcing.js";
 export {
   current_version_of,
