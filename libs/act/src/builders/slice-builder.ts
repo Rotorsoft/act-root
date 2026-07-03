@@ -5,21 +5,20 @@
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, register_state } from "../internal/index.js";
-import { DEFAULT_LANE } from "../ports.js";
+import {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+  register_state,
+} from "../internal/index.js";
+import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
-  Committed,
   EventRegister,
-  IAct,
   LaneConfig,
-  Reaction,
-  ReactionOptions,
-  ReactionResolver,
   Schema,
   SchemaRegister,
   Schemas,
-  Snapshot,
   State,
 } from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
@@ -134,38 +133,22 @@ export type SliceBuilder<
     TLanes | TConfig["name"]
   >;
   /**
-   * Begins defining a reaction scoped to this slice's events.
+   * Begins defining a reaction scoped to this slice's events. Chain `.do(...)`
+   * to run immediately, or `.defer(when).do(...)` to hold the reaction until a
+   * schedule is due (#1091). `.to(...)` follows `.do(...)` in both cases and,
+   * for a deferred reaction, is how you route it onto its own target when you
+   * don't want the hold to stall the aggregate's other reactions.
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
-  ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => SliceBuilder<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      TStateMap,
-      TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => SliceBuilder<
-        TSchemaReg,
-        TEvents,
-        TActions,
-        TStateMap,
-        TActor,
-        TLanes
-      >;
-    };
-  };
+  ) => ReactionOn<
+    SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes,
+    TKey
+  >;
   /**
    * Builds and returns the Slice data structure.
    */
@@ -245,53 +228,11 @@ export function slice<
       return builder;
     },
     withLane: (config) => {
-      if (config.name === DEFAULT_LANE)
-        throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
-      if (lanes.some((l) => l.name === config.name))
-        throw new Error(`Lane "${config.name}" was already declared`);
-      lanes.push(config);
+      register_lane(config, lanes);
       return builder as never;
     },
-    on: <TKey extends keyof TEvents>(event: TKey) => ({
-      do: (
-        handler: (
-          event: Committed<TEvents, TKey>,
-          stream: string,
-          app: IAct<TEvents, TActions, TActor>
-        ) => Promise<Snapshot<Schema, TEvents> | void>,
-        options?: Partial<ReactionOptions>
-      ) => {
-        const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-          handler,
-          resolver: _this_,
-          options: {
-            blockOnError: options?.blockOnError ?? true,
-            maxRetries: options?.maxRetries ?? 3,
-            backoff: options?.backoff,
-          },
-        };
-        if (!handler.name)
-          throw new Error(
-            `Reaction handler for "${String(event)}" must be a named function`
-          );
-        if (events[event].reactions.has(handler.name))
-          throw new Error(
-            `Duplicate reaction "${handler.name}" for event "${String(event)}". ` +
-              `Reaction handlers are keyed by function name; rename one of them.`
-          );
-        // Register once with the default _this_ resolver. If `.to()` is
-        // chained next, it patches the same reaction's resolver in place
-        // — no second Map.set() round-trip.
-        events[event].reactions.set(handler.name, reaction);
-        return Object.assign(builder, {
-          to(resolver: ReactionResolver<TEvents, TKey> | string) {
-            reaction.resolver =
-              typeof resolver === "string" ? { target: resolver } : resolver;
-            return builder;
-          },
-        });
-      },
-    }),
+    on: <TKey extends keyof TEvents>(event: TKey) =>
+      reaction_on(event, events, builder) as never,
     build: () => ({
       _tag: "Slice" as const,
       states,

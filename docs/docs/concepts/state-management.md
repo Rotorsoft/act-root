@@ -189,6 +189,102 @@ Slice handlers receive `(event, stream, app)` where `app` implements `IAct` (`do
 
 When a slice handler calls `app.do(action, target, payload)` without the fourth `options` argument, the framework automatically threads the triggering event in as `reactingTo`, propagating the correlation chain (`correlation` and `causation.event`) through the new commit. Pass `{ reactingTo: someOtherEvent }` explicitly only if you want to override that default — e.g., to attribute a side-effect commit to a different upstream event.
 
+## Deferred reactions
+
+Every reaction so far runs the instant its triggering event arrives. Some workflows want the opposite. Something should happen *because time passed* and no event showed up: hold an order for thirty minutes and expire it if it is still unpaid, ping a customer a day after a ticket goes quiet, wait out a cooldown before the follow-up. A reaction can defer itself to a future time. The drain holds the triggering event pending, advances nothing, and delivers it again once the due-time arrives, at which point the handler runs.
+
+The common way to say this is the declarative `.defer(when)` step. It sits between `.on(event)` and `.do(handler)` on both the `act()` and the `slice()` builders, and it turns the reaction into a one-shot delay-then-run: the schedule holds the reaction until it is due, then the handler fires once.
+
+```typescript
+import { act, state } from "@rotorsoft/act";
+import { z } from "zod";
+
+const job = state({ Job: z.object({ status: z.string() }) })
+  .init(() => ({ status: "" }))
+  .emits({ queued: z.object({ delayMs: z.number() }) })
+  .patch({ queued: () => ({ status: "queued" }) })
+  .on({ enqueue: z.object({ delayMs: z.number() }) })
+    .emit((a) => ["queued", a])
+  .build();
+
+const app = act()
+  .withState(job)
+  .on("queued")
+    .defer((event) => ({
+      at: new Date(event.created.getTime() + event.data.delayMs),
+    }))
+    .do(async function start() {
+      // runs once, after the payload-derived delay has elapsed
+    })
+  .build();
+```
+
+`when` is either a literal schedule or a function of the triggering event, so the handler above reads `event.data.delayMs` off the payload to decide how long to wait. A literal schedule (`.defer({ after: { minutes: 30 } })`) is validated at build time, so a malformed one throws a `ZodError` the moment you call `.build()` rather than silently misbehaving on the first drain. The function form can only be checked when it runs, since its shape depends on the event.
+
+### The `when` vocabulary
+
+A schedule takes exactly one of two shapes:
+
+```typescript no-check
+type DeferWhen =
+  | { after: { days?: number; hours?: number; minutes?: number } }
+  | { at: Date };
+```
+
+`{ after }` is a span measured from the triggering event's `created` time, so `{ hours: 1, minutes: 30 }` means ninety minutes past that event. The drain anchors the wait to the event, not to when the handler happened to run. `{ at }` is an absolute `Date`.
+
+There is deliberately no function form of `at`. Wherever you choose a schedule the triggering event is already in hand: as the `(event) =>` argument in the declarative form, and in the handler's own scope in the imperative form below. A deadline computed from the payload or from loaded state is therefore just `{ at: computedDate }`, with no callback needed.
+
+That shape enforces the one load-bearing rule of the whole feature, **derivability**: a due-time must derive from event data and never from `Date.now()`. Because watermarks and leases last only seconds while a defer can last days, a competing worker will re-claim the stream long before the wait is over. When it re-resolves the schedule against the same triggering event it must land on the same due-time as the worker that first deferred, otherwise the deferral fires early or drifts. Anchoring `{ after }` to `event.created` and deriving every `{ at }` from event data is what keeps a defer correct across restarts and across competing consumers.
+
+### The `DeferSignal` escape hatch
+
+When a static schedule is not expressive enough, throw `DeferSignal` from inside the handler. It is exported from `@rotorsoft/act` and carries an unresolved `when`; the drain resolves it against the triggering event it is already dispatching.
+
+```typescript
+import { act, state, DeferSignal, ZodEmpty } from "@rotorsoft/act";
+import { z } from "zod";
+
+const counter = state({ Counter: z.object({ count: z.number() }) })
+  .init(() => ({ count: 0 }))
+  .emits({ ticked: ZodEmpty })
+  .patch({ ticked: () => ({}) })
+  .on({ tick: ZodEmpty })
+    .emit(() => ["ticked", {}])
+  .build();
+
+const app = act()
+  .withState(counter)
+  .on("ticked")
+    .do(async function deadline(event) {
+      const due = event.created.getTime() + 100;
+      if (Date.now() < due) throw new DeferSignal({ at: new Date(due) });
+      // the deadline has passed — do the real work here
+    })
+  .build();
+```
+
+Reach for the signal when a fixed schedule cannot express the wait: the due-time depends on loaded state or a query, the defer is conditional, the cadence is computed per attempt, or the deadline hangs off another stream. The compiled autoclose reaction is the in-tree precedent, throwing `DeferSignal` anchored to the live stream head rather than to the event that triggered it.
+
+The boundary between the two surfaces is worth stating plainly. If the due-time is a pure function of the triggering event and the wait is unconditional, use `.defer(when)`. The moment you need loaded state, a query, another stream, prior attempts, or a runtime branch to decide, throw `DeferSignal`.
+
+### Isolating a defer with `.to`
+
+A watermark is keyed by its target stream, so every reaction that shares a target shares a lease. A deferred reaction consequently holds its target stream for the whole wait, which parks the aggregate's other reactions on that stream right along with it. That is often fine, but when a slow deadline shouldn't stall everything else, route the defer onto a stream of its own with `.to(...)`. Isolation here is opt-in, not something the framework does behind your back.
+
+```typescript no-check
+.on("ticked")
+  .defer({ after: { days: 90 } })
+  .do(async function archive() {
+    // holds "counter-deadlines", not the source stream
+  })
+  .to("counter-deadlines")
+```
+
+The mechanic underneath both surfaces (the pending hold, the persisted `deferred_at`, and the claim-skips-until-due behavior) is covered in [Correlation & drain](../architecture/correlation-and-drain.md) and the [close-cycle](../architecture/close-cycle.md) reference.
+
+Both surfaces are one-shot on purpose. There is no `{ every }` recurrence form, because holding one event forever to re-fire it would pin the stream's watermark. When you need a timer that repeats on a cadence, build it as a reaction that one-shot-defers a tick and then emits the next tick, following the [recurring-timers recipe](https://github.com/Rotorsoft/act-root/tree/master/recipes/temporal/recurring-timers).
+
 ## Act Orchestrator
 
 The orchestrator composes everything:

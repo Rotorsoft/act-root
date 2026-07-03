@@ -6,7 +6,6 @@
  */
 import { Act, type ActOptions } from "../act.js";
 import {
-  _this_,
   current_version_of,
   deprecated_event_names,
   merge_event_register,
@@ -15,24 +14,22 @@ import {
   pii_gate,
   pii_split,
   pii_strip,
+  type ReactionOn,
+  reaction_on,
+  register_lane,
   register_state,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
-  Committed,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
-  ReactionOptions,
-  ReactionResolver,
   Registry,
   Schema,
   SchemaRegister,
   Schemas,
-  Snapshot,
   State,
 } from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
@@ -255,27 +252,14 @@ export type ActBuilder<
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
-  ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => ActBuilder<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      TStateMap,
-      TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
-    };
-  };
+  ) => ReactionOn<
+    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes,
+    TKey
+  >;
   /**
    * Builds and returns the Act orchestrator instance.
    *
@@ -490,53 +474,11 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        if (config.name === DEFAULT_LANE)
-          throw new Error(`Lane "${DEFAULT_LANE}" is reserved`);
-        if (lanes.some((l) => l.name === config.name))
-          throw new Error(`Lane "${config.name}" was already declared`);
-        lanes.push(config);
+        register_lane(config, lanes);
         return builder as never;
       },
-      on: <TKey extends keyof TEvents>(event: TKey) => ({
-        do: (
-          handler: (
-            event: Committed<TEvents, TKey>,
-            stream: string,
-            app: IAct<TEvents, TActions, TActor>
-          ) => Promise<Snapshot<Schema, TEvents> | void>,
-          options?: Partial<ReactionOptions>
-        ) => {
-          const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler,
-            resolver: _this_,
-            options: {
-              blockOnError: options?.blockOnError ?? true,
-              maxRetries: options?.maxRetries ?? 3,
-              backoff: options?.backoff,
-            },
-          };
-          if (!handler.name)
-            throw new Error(
-              `Reaction handler for "${String(event)}" must be a named function`
-            );
-          if (registry.events[event].reactions.has(handler.name))
-            throw new Error(
-              `Duplicate reaction "${handler.name}" for event "${String(event)}". ` +
-                `Reaction handlers are keyed by function name; rename one of them.`
-            );
-          // Register once with the default _this_ resolver. If `.to()` is
-          // chained next, it patches the same reaction's resolver in place
-          // — no second Map.set() round-trip.
-          registry.events[event].reactions.set(handler.name, reaction);
-          return Object.assign(builder, {
-            to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              reaction.resolver =
-                typeof resolver === "string" ? { target: resolver } : resolver;
-              return builder;
-            },
-          });
-        },
-      }),
+      on: <TKey extends keyof TEvents>(event: TKey) =>
+        reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling

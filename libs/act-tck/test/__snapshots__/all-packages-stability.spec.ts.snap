@@ -10,7 +10,6 @@ exports[`@rotorsoft/act — public API stability > stable public surface for (ro
  */
 import { Act, type ActOptions } from "../act.js";
 import {
-  _this_,
   current_version_of,
   deprecated_event_names,
   merge_event_register,
@@ -19,24 +18,22 @@ import {
   pii_gate,
   pii_split,
   pii_strip,
+  type ReactionOn,
+  reaction_on,
+  register_lane,
   register_state,
 } from "../internal/index.js";
 import { DEFAULT_LANE, log } from "../ports.js";
 import type {
   Actor,
   BatchHandler,
-  Committed,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
-  ReactionOptions,
-  ReactionResolver,
   Registry,
   Schema,
   SchemaRegister,
   Schemas,
-  Snapshot,
   State,
 } from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
@@ -259,27 +256,14 @@ export type ActBuilder<
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
-  ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => ActBuilder<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      TStateMap,
-      TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>;
-    };
-  };
+  ) => ReactionOn<
+    ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes,
+    TKey
+  >;
   /**
    * Builds and returns the Act orchestrator instance.
    *
@@ -494,53 +478,11 @@ export function act<
           TNewActor
         >,
       withLane: (config) => {
-        if (config.name === DEFAULT_LANE)
-          throw new Error(\`Lane "\${DEFAULT_LANE}" is reserved\`);
-        if (lanes.some((l) => l.name === config.name))
-          throw new Error(\`Lane "\${config.name}" was already declared\`);
-        lanes.push(config);
+        register_lane(config, lanes);
         return builder as never;
       },
-      on: <TKey extends keyof TEvents>(event: TKey) => ({
-        do: (
-          handler: (
-            event: Committed<TEvents, TKey>,
-            stream: string,
-            app: IAct<TEvents, TActions, TActor>
-          ) => Promise<Snapshot<Schema, TEvents> | void>,
-          options?: Partial<ReactionOptions>
-        ) => {
-          const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-            handler,
-            resolver: _this_,
-            options: {
-              blockOnError: options?.blockOnError ?? true,
-              maxRetries: options?.maxRetries ?? 3,
-              backoff: options?.backoff,
-            },
-          };
-          if (!handler.name)
-            throw new Error(
-              \`Reaction handler for "\${String(event)}" must be a named function\`
-            );
-          if (registry.events[event].reactions.has(handler.name))
-            throw new Error(
-              \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
-                \`Reaction handlers are keyed by function name; rename one of them.\`
-            );
-          // Register once with the default _this_ resolver. If \`.to()\` is
-          // chained next, it patches the same reaction's resolver in place
-          // — no second Map.set() round-trip.
-          registry.events[event].reactions.set(handler.name, reaction);
-          return Object.assign(builder, {
-            to(resolver: ReactionResolver<TEvents, TKey> | string) {
-              reaction.resolver =
-                typeof resolver === "string" ? { target: resolver } : resolver;
-              return builder;
-            },
-          });
-        },
-      }),
+      on: <TKey extends keyof TEvents>(event: TKey) =>
+        reaction_on(event, registry.events, builder) as never,
       build: (options?: ActOptions) => {
         // One-time finalize: merge pending projections and run the
         // deprecation scan + advisory log exactly once. Calling
@@ -1268,9 +1210,9 @@ export class Act<
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
           if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal(
-              Date.now() + config.autocloseCycleMinutes * 60_000
-            );
+            throw new DeferSignal({
+              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            });
           const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
@@ -1294,7 +1236,9 @@ export class Act<
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a \`reaches\` threshold).
           if (after_ms !== undefined)
-            throw new DeferSignal(head.created.getTime() + after_ms);
+            throw new DeferSignal({
+              at: new Date(head.created.getTime() + after_ms),
+            });
         },
       };
       const key = \`__autoclose_\${st.name}\`;
@@ -3549,6 +3493,26 @@ export interface EventSink extends Disposable {
   ): Promise<void>;
 }
 
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
+ *
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
+ */
+export type DeferWhen =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date; after?: never };
+
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
@@ -5088,6 +5052,168 @@ export function classify_registry<
   };
 }
 
+// === builder-utils.ts ===
+/**
+ * @module builder-utils
+ * @category Internal
+ *
+ * Shared builder machinery reused by both \`act-builder.ts\` and
+ * \`slice-builder.ts\`. The two builders expose the same reaction-registration
+ * and lane-declaration surface and differ only in the concrete builder type
+ * they return (\`ActBuilder\` vs \`SliceBuilder\`) and the event register they
+ * write into (\`registry.events\` vs the slice's \`events\`). This module owns the
+ * one copy of that logic so the builders stay thin delegations.
+ *
+ * @internal
+ */
+
+import { DEFAULT_LANE } from "../ports.js";
+import type {
+  Actor,
+  Committed,
+  EventRegister,
+  IAct,
+  LaneConfig,
+  Reaction,
+  ReactionHandler,
+  ReactionOptions,
+  ReactionResolver,
+  Schema,
+  Schemas,
+  Snapshot,
+} from "../types/index.js";
+import {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+} from "./defer-config.js";
+import { _this_ } from "./merge.js";
+
+/**
+ * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
+ * Identical for both builders modulo that return type.
+ */
+type ReactionDo<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = (
+  handler: (
+    event: Committed<TEvents, TKey>,
+    stream: string,
+    app: IAct<TEvents, TActions, TActor>
+  ) => Promise<Snapshot<Schema, TEvents> | void>,
+  options?: Partial<ReactionOptions>
+) => TReturn & {
+  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
+};
+
+/**
+ * The object \`.on(event)\` returns: run immediately with \`.do(...)\`, or hold
+ * with \`.defer(when).do(...)\`. Parameterized by the return builder so
+ * \`act()\` and \`slice()\` share one shape.
+ */
+export type ReactionOn<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = {
+  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => {
+    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  };
+};
+
+/**
+ * Validate and register a drain lane (ACT-1103): the \`"default"\` name is
+ * reserved and each lane name must be unique. Mutates \`lanes\` in place; the
+ * caller returns its own builder for chaining.
+ *
+ * @internal
+ */
+export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
+  if (config.name === DEFAULT_LANE)
+    throw new Error(\`Lane "\${DEFAULT_LANE}" is reserved\`);
+  if (lanes.some((l) => l.name === config.name))
+    throw new Error(\`Lane "\${config.name}" was already declared\`);
+  lanes.push(config);
+}
+
+/**
+ * Build the \`.on(event)\` step shared by both builders. Registers a reaction
+ * (named-function + duplicate guards, fail-fast literal-schedule validation,
+ * the default \`_this_\` resolver, and the \`.defer\` handler wrap) into
+ * \`events[event].reactions\`, and hands back \`builder\` patched with \`.to(...)\`
+ * for in-place resolver routing.
+ *
+ * The strict, builder-specific type is supplied by each builder's own \`on\`
+ * signature ({@link ReactionOn}); the runtime here is builder-agnostic.
+ *
+ * @internal
+ */
+export function reaction_on<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+  TBuilder,
+>(event: TKey, events: EventRegister<TEvents>, builder: TBuilder) {
+  const register = (
+    handler: ReactionHandler<TEvents, TKey>,
+    options?: Partial<ReactionOptions>,
+    schedule?: DeferSchedule<Committed<TEvents, TKey>>
+  ) => {
+    if (!handler.name)
+      throw new Error(
+        \`Reaction handler for "\${String(event)}" must be a named function\`
+      );
+    if (events[event].reactions.has(handler.name))
+      throw new Error(
+        \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
+          \`Reaction handlers are keyed by function name; rename one of them.\`
+      );
+    // Fail fast on a bad literal schedule; the function form is checked when it
+    // runs (no event to resolve against at build time).
+    if (schedule && typeof schedule !== "function") assert_defer_when(schedule);
+    const reaction: Reaction<TEvents, TKey> = {
+      handler: schedule ? make_deferred(handler, schedule) : handler,
+      resolver: _this_,
+      options: {
+        blockOnError: options?.blockOnError ?? true,
+        maxRetries: options?.maxRetries ?? 3,
+        backoff: options?.backoff,
+      },
+    };
+    // Register once with the default _this_ resolver. If \`.to()\` is chained
+    // next, it patches the same reaction's resolver in place — no second
+    // Map.set() round-trip.
+    events[event].reactions.set(handler.name, reaction);
+    return Object.assign(builder as object, {
+      to(resolver: ReactionResolver<TEvents, TKey> | string) {
+        reaction.resolver =
+          typeof resolver === "string" ? { target: resolver } : resolver;
+        return builder;
+      },
+    });
+  };
+  return {
+    do: (
+      handler: ReactionHandler<TEvents, TKey>,
+      options?: Partial<ReactionOptions>
+    ) => register(handler, options),
+    defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
+      do: (
+        handler: ReactionHandler<TEvents, TKey>,
+        options?: Partial<ReactionOptions>
+      ) => register(handler, options, schedule),
+    }),
+  };
+}
+
 // === circuit-breaker.ts ===
 /**
  * @module internal/circuit-breaker
@@ -6598,36 +6724,190 @@ function write_line(writer: WriteStream, line: string): Promise<void> {
   });
 }
 
+// === defer-config.ts ===
+/**
+ * @module defer-config
+ * @category Internal
+ *
+ * The \`when\` options for the public \`defer\` surface (#1091, RFC 0001). A
+ * reaction defers itself to a future time either declaratively (the
+ * \`.defer(when)\` builder step) or imperatively (\`throw new DeferSignal(when)\`
+ * inside a handler); both resolve \`when\` through here.
+ *
+ * The load-bearing rule is **derivability**. A deferred stream's due-time must
+ * be recomputable by whichever worker re-claims it after the wait, so \`when\`
+ * never resolves against \`Date.now()\`. \`after\` is measured from the triggering
+ * event's \`created\` timestamp, and \`at\` is either a fixed \`Date\` or a pure
+ * function of the event. Either way, re-delivering the same event yields the
+ * same due-time, which is what makes a defer correct across restarts and
+ * competing workers.
+ *
+ * Validation follows the config-schema standard (CLAUDE.md): an internal
+ * \`*OptionsSchema\` const, a public inferred type, and a resolver. Slice 2
+ * ships \`after\` / \`at\`; recurrence (\`every\`) extends this in Slice 3 (#1092).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+import { DeferSignal } from "./defer-signal.js";
+
+/**
+ * A relative span, measured from the triggering event's \`created\` time. At
+ * least one field is required; fields are additive (\`{ hours: 1, minutes: 30 }\`
+ * is 90 minutes).
+ */
+const DeferDurationSchema = z
+  .object({
+    days: z.number().positive().optional(),
+    hours: z.number().positive().optional(),
+    minutes: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
+    message: "defer: a duration needs at least one of days, hours, or minutes",
+  });
+
+/**
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`;
+ * \`at\` is an absolute \`Date\`. Internal per the config standard; the public
+ * surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ *
+ * @internal
+ */
+const DeferWhenSchema = z
+  .object({
+    after: DeferDurationSchema.optional(),
+    at: z.date().optional(),
+  })
+  .strict()
+  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
+    message: "defer: specify exactly one of \`after\` or \`at\`",
+  });
+
+/** Sum a duration bag to milliseconds. @internal */
+function duration_ms(d: {
+  days?: number;
+  hours?: number;
+  minutes?: number;
+}): number {
+  return (
+    (d.days ?? 0) * 86_400_000 +
+    (d.hours ?? 0) * 3_600_000 +
+    (d.minutes ?? 0) * 60_000
+  );
+}
+
+/**
+ * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
+ * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
+ * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
+ * from its absolute \`Date\`. Never reads \`Date.now()\`, so the result is stable
+ * across re-delivery.
+ *
+ * @internal
+ */
+export function resolve_defer_at<E extends Schemas>(
+  when: DeferWhen,
+  event: Committed<E, keyof E>
+): number {
+  const parsed = DeferWhenSchema.parse(when);
+  if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
+  return parsed.at!.getTime();
+}
+
+/**
+ * The schedule handed to the declarative \`.defer\` builder step: either a
+ * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
+ * triggering event (read the payload to choose the schedule).
+ *
+ * @internal
+ */
+export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
+
+/**
+ * Validate a literal \`when\` at build time (fail fast, per the config-schema
+ * standard) — throws \`ZodError\` on a bad shape (both/neither of \`after\`/\`at\`,
+ * an empty or non-positive duration). The function form of a \`.defer\` schedule
+ * can only be checked when it runs, so builders pass just the literal here.
+ *
+ * @internal
+ */
+export function assert_defer_when(when: DeferWhen): void {
+  DeferWhenSchema.parse(when);
+}
+
+/**
+ * Wrap a reaction handler so it holds until its schedule is due, then runs.
+ * On each delivery it resolves the schedule against the triggering event; if
+ * the due-time hasn't arrived it throws {@link DeferSignal} (the drain holds
+ * the stream, no watermark advance, no retry bump), otherwise it runs the
+ * real handler. The wrapper keeps the original handler's \`name\` so reaction
+ * registration and de-dup are unaffected, and preserves the handler's exact
+ * type so the builder step is transparent.
+ *
+ * @internal
+ */
+// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
+// handler signature so the builder step is type-transparent.
+export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
+  handler: H,
+  schedule: DeferSchedule<Parameters<H>[0]>
+): H {
+  const call = handler as (...args: unknown[]) => Promise<unknown>;
+  const deferred = async (
+    event: Parameters<H>[0],
+    stream: string,
+    app: unknown
+  ) => {
+    const when = typeof schedule === "function" ? schedule(event) : schedule;
+    if (Date.now() < resolve_defer_at(when, event)) throw new DeferSignal(when);
+    return call(event, stream, app);
+  };
+  Object.defineProperty(deferred, "name", { value: handler.name });
+  return deferred as unknown as H;
+}
+
 // === defer-signal.ts ===
 /**
  * @module defer-signal
  * @category Internal
  *
  * The control-flow signal a reaction handler throws to *defer* itself
- * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reactions".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
- * carried due-time.
+ * resolved due-time.
  *
- * Internal for now: the compiled autoclose reaction throws it directly. The
- * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
- * so the dispatcher needs to recognize only this one type either way.
+ * \`DeferSignal\` is the **imperative escape hatch** and is re-exported from the
+ * package root, so reaction code can throw it directly when a static
+ * \`.defer(when)\` step isn't expressive enough (a deadline computed from loaded
+ * state, say). It carries the *unresolved* {@link DeferWhen}; the dispatcher
+ * resolves it against the triggering event it is already dispatching (via
+ * \`resolve_defer_at\`), which is what anchors \`{ after }\` and the \`at\` function
+ * form to that event and keeps the due-time derivable. Fully dynamic times go
+ * through \`{ at: someDate }\`.
  *
  * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
  * existing \`try/catch\` in the handler loop instead of needing a separate
- * return channel through every dispatcher signature.
- *
- * @internal
+ * return channel through every dispatcher signature. The compiled autoclose
+ * reaction throws the same signal.
  */
-export class DeferSignal extends Error {
-  /** Wall-clock time (ms since epoch) to re-visit the stream. */
-  readonly defer_at: number;
+import type { DeferWhen } from "../types/index.js";
 
-  constructor(defer_at: number) {
+export class DeferSignal extends Error {
+  /**
+   * The unresolved schedule. The dispatcher turns this into an absolute
+   * due-time by resolving it against the triggering event.
+   */
+  readonly when: DeferWhen;
+
+  constructor(when: DeferWhen) {
     super("reaction deferred");
     this.name = "DeferSignal";
-    this.defer_at = defer_at;
+    this.when = when;
   }
 }
 
@@ -9868,6 +10148,10 @@ export * from "./adapters/index.js";
 export * from "./builders/index.js";
 export * from "./config.js";
 export * from "./csv.js";
+// The imperative defer escape hatch (#1091): a reaction throws this with a
+// \`DeferWhen\` (see ./types/action.ts) to hold itself until the resolved
+// due-time. The declarative \`.defer(when)\` builder step is the common path.
+export { DeferSignal } from "./internal/index.js";
 export * from "./ports.js";
 export * from "./types/index.js";
 export * from "./utils.js";
@@ -9910,8 +10194,12 @@ export {
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+} from "./builder-utils.js";
+export {
   CircuitBreaker,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   type CircuitState,
   resolveCircuitBreakerConfig,
@@ -9927,7 +10215,7 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { BoundAction, EsOps } from "./event-sourcing.js";
+export type { EsOps } from "./event-sourcing.js";
 export { scan } from "./event-sourcing.js";
 export {
   current_version_of,
@@ -12608,6 +12896,7 @@ import {
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
+import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -12745,7 +13034,12 @@ export function build_handle<
         // the stream at the carried due-time (#1090). \`acked_at\` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
-          return { lease, handled, acked_at: at, defer: error.defer_at };
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(error.when, event),
+          };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close (#1090).
@@ -13495,21 +13789,20 @@ export class SettleLoop<TEvents extends Schemas> {
  * Fluent builder for composing partial states with scoped reactions into
  * self-contained functional slices (vertical slice architecture).
  */
-import { _this_, register_state } from "../internal/index.js";
-import { DEFAULT_LANE } from "../ports.js";
+import {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+  register_state,
+} from "../internal/index.js";
+import type { DEFAULT_LANE } from "../ports.js";
 import type {
   Actor,
-  Committed,
   EventRegister,
-  IAct,
   LaneConfig,
-  Reaction,
-  ReactionOptions,
-  ReactionResolver,
   Schema,
   SchemaRegister,
   Schemas,
-  Snapshot,
   State,
 } from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
@@ -13624,38 +13917,22 @@ export type SliceBuilder<
     TLanes | TConfig["name"]
   >;
   /**
-   * Begins defining a reaction scoped to this slice's events.
+   * Begins defining a reaction scoped to this slice's events. Chain \`.do(...)\`
+   * to run immediately, or \`.defer(when).do(...)\` to hold the reaction until a
+   * schedule is due (#1091). \`.to(...)\` follows \`.do(...)\` in both cases and,
+   * for a deferred reaction, is how you route it onto its own target when you
+   * don't want the hold to stall the aggregate's other reactions.
    */
   on: <TKey extends keyof TEvents>(
     event: TKey
-  ) => {
-    do: (
-      handler: (
-        event: Committed<TEvents, TKey>,
-        stream: string,
-        app: IAct<TEvents, TActions, TActor>
-      ) => Promise<Snapshot<Schema, TEvents> | void>,
-      options?: Partial<ReactionOptions>
-    ) => SliceBuilder<
-      TSchemaReg,
-      TEvents,
-      TActions,
-      TStateMap,
-      TActor,
-      TLanes
-    > & {
-      to: (
-        resolver: ReactionResolver<TEvents, TKey, TLanes> | string
-      ) => SliceBuilder<
-        TSchemaReg,
-        TEvents,
-        TActions,
-        TStateMap,
-        TActor,
-        TLanes
-      >;
-    };
-  };
+  ) => ReactionOn<
+    SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
+    TEvents,
+    TActions,
+    TActor,
+    TLanes,
+    TKey
+  >;
   /**
    * Builds and returns the Slice data structure.
    */
@@ -13735,53 +14012,11 @@ export function slice<
       return builder;
     },
     withLane: (config) => {
-      if (config.name === DEFAULT_LANE)
-        throw new Error(\`Lane "\${DEFAULT_LANE}" is reserved\`);
-      if (lanes.some((l) => l.name === config.name))
-        throw new Error(\`Lane "\${config.name}" was already declared\`);
-      lanes.push(config);
+      register_lane(config, lanes);
       return builder as never;
     },
-    on: <TKey extends keyof TEvents>(event: TKey) => ({
-      do: (
-        handler: (
-          event: Committed<TEvents, TKey>,
-          stream: string,
-          app: IAct<TEvents, TActions, TActor>
-        ) => Promise<Snapshot<Schema, TEvents> | void>,
-        options?: Partial<ReactionOptions>
-      ) => {
-        const reaction: Reaction<TEvents, TKey, TActions, TActor> = {
-          handler,
-          resolver: _this_,
-          options: {
-            blockOnError: options?.blockOnError ?? true,
-            maxRetries: options?.maxRetries ?? 3,
-            backoff: options?.backoff,
-          },
-        };
-        if (!handler.name)
-          throw new Error(
-            \`Reaction handler for "\${String(event)}" must be a named function\`
-          );
-        if (events[event].reactions.has(handler.name))
-          throw new Error(
-            \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
-              \`Reaction handlers are keyed by function name; rename one of them.\`
-          );
-        // Register once with the default _this_ resolver. If \`.to()\` is
-        // chained next, it patches the same reaction's resolver in place
-        // — no second Map.set() round-trip.
-        events[event].reactions.set(handler.name, reaction);
-        return Object.assign(builder, {
-          to(resolver: ReactionResolver<TEvents, TKey> | string) {
-            reaction.resolver =
-              typeof resolver === "string" ? { target: resolver } : resolver;
-            return builder;
-          },
-        });
-      },
-    }),
+    on: <TKey extends keyof TEvents>(event: TKey) =>
+      reaction_on(event, events, builder) as never,
     build: () => ({
       _tag: "Slice" as const,
       states,
@@ -15742,9 +15977,9 @@ export class Act<
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
           if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal(
-              Date.now() + config.autocloseCycleMinutes * 60_000
-            );
+            throw new DeferSignal({
+              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            });
           const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
@@ -15768,7 +16003,9 @@ export class Act<
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a \`reaches\` threshold).
           if (after_ms !== undefined)
-            throw new DeferSignal(head.created.getTime() + after_ms);
+            throw new DeferSignal({
+              at: new Date(head.created.getTime() + after_ms),
+            });
         },
       };
       const key = \`__autoclose_\${st.name}\`;
@@ -18023,6 +18260,26 @@ export interface EventSink extends Disposable {
   ): Promise<void>;
 }
 
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
+ *
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
+ */
+export type DeferWhen =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date; after?: never };
+
 export interface IAct<
   TEvents extends Schemas = Schemas,
   TActions extends Schemas = Schemas,
@@ -19562,6 +19819,168 @@ export function classify_registry<
   };
 }
 
+// === builder-utils.ts ===
+/**
+ * @module builder-utils
+ * @category Internal
+ *
+ * Shared builder machinery reused by both \`act-builder.ts\` and
+ * \`slice-builder.ts\`. The two builders expose the same reaction-registration
+ * and lane-declaration surface and differ only in the concrete builder type
+ * they return (\`ActBuilder\` vs \`SliceBuilder\`) and the event register they
+ * write into (\`registry.events\` vs the slice's \`events\`). This module owns the
+ * one copy of that logic so the builders stay thin delegations.
+ *
+ * @internal
+ */
+
+import { DEFAULT_LANE } from "../ports.js";
+import type {
+  Actor,
+  Committed,
+  EventRegister,
+  IAct,
+  LaneConfig,
+  Reaction,
+  ReactionHandler,
+  ReactionOptions,
+  ReactionResolver,
+  Schema,
+  Schemas,
+  Snapshot,
+} from "../types/index.js";
+import {
+  assert_defer_when,
+  type DeferSchedule,
+  make_deferred,
+} from "./defer-config.js";
+import { _this_ } from "./merge.js";
+
+/**
+ * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
+ * Identical for both builders modulo that return type.
+ */
+type ReactionDo<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = (
+  handler: (
+    event: Committed<TEvents, TKey>,
+    stream: string,
+    app: IAct<TEvents, TActions, TActor>
+  ) => Promise<Snapshot<Schema, TEvents> | void>,
+  options?: Partial<ReactionOptions>
+) => TReturn & {
+  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
+};
+
+/**
+ * The object \`.on(event)\` returns: run immediately with \`.do(...)\`, or hold
+ * with \`.defer(when).do(...)\`. Parameterized by the return builder so
+ * \`act()\` and \`slice()\` share one shape.
+ */
+export type ReactionOn<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = {
+  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => {
+    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  };
+};
+
+/**
+ * Validate and register a drain lane (ACT-1103): the \`"default"\` name is
+ * reserved and each lane name must be unique. Mutates \`lanes\` in place; the
+ * caller returns its own builder for chaining.
+ *
+ * @internal
+ */
+export function register_lane(config: LaneConfig, lanes: LaneConfig[]): void {
+  if (config.name === DEFAULT_LANE)
+    throw new Error(\`Lane "\${DEFAULT_LANE}" is reserved\`);
+  if (lanes.some((l) => l.name === config.name))
+    throw new Error(\`Lane "\${config.name}" was already declared\`);
+  lanes.push(config);
+}
+
+/**
+ * Build the \`.on(event)\` step shared by both builders. Registers a reaction
+ * (named-function + duplicate guards, fail-fast literal-schedule validation,
+ * the default \`_this_\` resolver, and the \`.defer\` handler wrap) into
+ * \`events[event].reactions\`, and hands back \`builder\` patched with \`.to(...)\`
+ * for in-place resolver routing.
+ *
+ * The strict, builder-specific type is supplied by each builder's own \`on\`
+ * signature ({@link ReactionOn}); the runtime here is builder-agnostic.
+ *
+ * @internal
+ */
+export function reaction_on<
+  TEvents extends Schemas,
+  TKey extends keyof TEvents,
+  TBuilder,
+>(event: TKey, events: EventRegister<TEvents>, builder: TBuilder) {
+  const register = (
+    handler: ReactionHandler<TEvents, TKey>,
+    options?: Partial<ReactionOptions>,
+    schedule?: DeferSchedule<Committed<TEvents, TKey>>
+  ) => {
+    if (!handler.name)
+      throw new Error(
+        \`Reaction handler for "\${String(event)}" must be a named function\`
+      );
+    if (events[event].reactions.has(handler.name))
+      throw new Error(
+        \`Duplicate reaction "\${handler.name}" for event "\${String(event)}". \` +
+          \`Reaction handlers are keyed by function name; rename one of them.\`
+      );
+    // Fail fast on a bad literal schedule; the function form is checked when it
+    // runs (no event to resolve against at build time).
+    if (schedule && typeof schedule !== "function") assert_defer_when(schedule);
+    const reaction: Reaction<TEvents, TKey> = {
+      handler: schedule ? make_deferred(handler, schedule) : handler,
+      resolver: _this_,
+      options: {
+        blockOnError: options?.blockOnError ?? true,
+        maxRetries: options?.maxRetries ?? 3,
+        backoff: options?.backoff,
+      },
+    };
+    // Register once with the default _this_ resolver. If \`.to()\` is chained
+    // next, it patches the same reaction's resolver in place — no second
+    // Map.set() round-trip.
+    events[event].reactions.set(handler.name, reaction);
+    return Object.assign(builder as object, {
+      to(resolver: ReactionResolver<TEvents, TKey> | string) {
+        reaction.resolver =
+          typeof resolver === "string" ? { target: resolver } : resolver;
+        return builder;
+      },
+    });
+  };
+  return {
+    do: (
+      handler: ReactionHandler<TEvents, TKey>,
+      options?: Partial<ReactionOptions>
+    ) => register(handler, options),
+    defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => ({
+      do: (
+        handler: ReactionHandler<TEvents, TKey>,
+        options?: Partial<ReactionOptions>
+      ) => register(handler, options, schedule),
+    }),
+  };
+}
+
 // === circuit-breaker.ts ===
 /**
  * @module internal/circuit-breaker
@@ -20849,36 +21268,190 @@ export function close_correlation(
   });
 }
 
+// === defer-config.ts ===
+/**
+ * @module defer-config
+ * @category Internal
+ *
+ * The \`when\` options for the public \`defer\` surface (#1091, RFC 0001). A
+ * reaction defers itself to a future time either declaratively (the
+ * \`.defer(when)\` builder step) or imperatively (\`throw new DeferSignal(when)\`
+ * inside a handler); both resolve \`when\` through here.
+ *
+ * The load-bearing rule is **derivability**. A deferred stream's due-time must
+ * be recomputable by whichever worker re-claims it after the wait, so \`when\`
+ * never resolves against \`Date.now()\`. \`after\` is measured from the triggering
+ * event's \`created\` timestamp, and \`at\` is either a fixed \`Date\` or a pure
+ * function of the event. Either way, re-delivering the same event yields the
+ * same due-time, which is what makes a defer correct across restarts and
+ * competing workers.
+ *
+ * Validation follows the config-schema standard (CLAUDE.md): an internal
+ * \`*OptionsSchema\` const, a public inferred type, and a resolver. Slice 2
+ * ships \`after\` / \`at\`; recurrence (\`every\`) extends this in Slice 3 (#1092).
+ *
+ * @internal
+ */
+
+import { z } from "zod";
+import type { Committed, DeferWhen, Schemas } from "../types/index.js";
+import { DeferSignal } from "./defer-signal.js";
+
+/**
+ * A relative span, measured from the triggering event's \`created\` time. At
+ * least one field is required; fields are additive (\`{ hours: 1, minutes: 30 }\`
+ * is 90 minutes).
+ */
+const DeferDurationSchema = z
+  .object({
+    days: z.number().positive().optional(),
+    hours: z.number().positive().optional(),
+    minutes: z.number().positive().optional(),
+  })
+  .strict()
+  .refine((d) => d.days != null || d.hours != null || d.minutes != null, {
+    message: "defer: a duration needs at least one of days, hours, or minutes",
+  });
+
+/**
+ * Zod schema for the \`defer(when)\` options bag. Exactly one of \`after\` / \`at\`;
+ * \`at\` is an absolute \`Date\`. Internal per the config standard; the public
+ * surface is {@link DeferWhen} and {@link resolve_defer_at}.
+ *
+ * @internal
+ */
+const DeferWhenSchema = z
+  .object({
+    after: DeferDurationSchema.optional(),
+    at: z.date().optional(),
+  })
+  .strict()
+  .refine((w) => (w.after === undefined) !== (w.at === undefined), {
+    message: "defer: specify exactly one of \`after\` or \`at\`",
+  });
+
+/** Sum a duration bag to milliseconds. @internal */
+function duration_ms(d: {
+  days?: number;
+  hours?: number;
+  minutes?: number;
+}): number {
+  return (
+    (d.days ?? 0) * 86_400_000 +
+    (d.hours ?? 0) * 3_600_000 +
+    (d.minutes ?? 0) * 60_000
+  );
+}
+
+/**
+ * Resolve \`when\` to an absolute due-time (ms since epoch) for a given
+ * triggering event. Validates via {@link DeferWhenSchema} (throws \`ZodError\`
+ * on a bad shape), then derives the time: \`after\` from \`event.created\`, \`at\`
+ * from its absolute \`Date\`. Never reads \`Date.now()\`, so the result is stable
+ * across re-delivery.
+ *
+ * @internal
+ */
+export function resolve_defer_at<E extends Schemas>(
+  when: DeferWhen,
+  event: Committed<E, keyof E>
+): number {
+  const parsed = DeferWhenSchema.parse(when);
+  if (parsed.after) return event.created.getTime() + duration_ms(parsed.after);
+  return parsed.at!.getTime();
+}
+
+/**
+ * The schedule handed to the declarative \`.defer\` builder step: either a
+ * literal {@link DeferWhen} (fixed cooldown/deadline) or a function of the
+ * triggering event (read the payload to choose the schedule).
+ *
+ * @internal
+ */
+export type DeferSchedule<TEvent> = DeferWhen | ((event: TEvent) => DeferWhen);
+
+/**
+ * Validate a literal \`when\` at build time (fail fast, per the config-schema
+ * standard) — throws \`ZodError\` on a bad shape (both/neither of \`after\`/\`at\`,
+ * an empty or non-positive duration). The function form of a \`.defer\` schedule
+ * can only be checked when it runs, so builders pass just the literal here.
+ *
+ * @internal
+ */
+export function assert_defer_when(when: DeferWhen): void {
+  DeferWhenSchema.parse(when);
+}
+
+/**
+ * Wrap a reaction handler so it holds until its schedule is due, then runs.
+ * On each delivery it resolves the schedule against the triggering event; if
+ * the due-time hasn't arrived it throws {@link DeferSignal} (the drain holds
+ * the stream, no watermark advance, no retry bump), otherwise it runs the
+ * real handler. The wrapper keeps the original handler's \`name\` so reaction
+ * registration and de-dup are unaffected, and preserves the handler's exact
+ * type so the builder step is transparent.
+ *
+ * @internal
+ */
+// biome-ignore lint/suspicious/noExplicitAny: preserve the caller's exact
+// handler signature so the builder step is type-transparent.
+export function make_deferred<H extends (...args: any[]) => Promise<unknown>>(
+  handler: H,
+  schedule: DeferSchedule<Parameters<H>[0]>
+): H {
+  const call = handler as (...args: unknown[]) => Promise<unknown>;
+  const deferred = async (
+    event: Parameters<H>[0],
+    stream: string,
+    app: unknown
+  ) => {
+    const when = typeof schedule === "function" ? schedule(event) : schedule;
+    if (Date.now() < resolve_defer_at(when, event)) throw new DeferSignal(when);
+    return call(event, stream, app);
+  };
+  Object.defineProperty(deferred, "name", { value: handler.name });
+  return deferred as unknown as H;
+}
+
 // === defer-signal.ts ===
 /**
  * @module defer-signal
  * @category Internal
  *
  * The control-flow signal a reaction handler throws to *defer* itself
- * (#1090). Unlike an error, a defer is not a failure: the dispatcher
+ * (#1090, #1091). Unlike an error, a defer is not a failure: the dispatcher
  * ({@link "reactions".build_handle}) catches it and produces a
  * \`HandleResult.defer\` — the triggering events stay pending (watermark not
  * advanced), \`retry\` is not bumped, and the drain re-visits the stream at the
- * carried due-time.
+ * resolved due-time.
  *
- * Internal for now: the compiled autoclose reaction throws it directly. The
- * public \`app.defer(when)\` surface (a later slice) will throw the same signal,
- * so the dispatcher needs to recognize only this one type either way.
+ * \`DeferSignal\` is the **imperative escape hatch** and is re-exported from the
+ * package root, so reaction code can throw it directly when a static
+ * \`.defer(when)\` step isn't expressive enough (a deadline computed from loaded
+ * state, say). It carries the *unresolved* {@link DeferWhen}; the dispatcher
+ * resolves it against the triggering event it is already dispatching (via
+ * \`resolve_defer_at\`), which is what anchors \`{ after }\` and the \`at\` function
+ * form to that event and keeps the due-time derivable. Fully dynamic times go
+ * through \`{ at: someDate }\`.
  *
  * Modeled as an \`Error\` subclass — like \`NonRetryableError\` — so it rides the
  * existing \`try/catch\` in the handler loop instead of needing a separate
- * return channel through every dispatcher signature.
- *
- * @internal
+ * return channel through every dispatcher signature. The compiled autoclose
+ * reaction throws the same signal.
  */
-export class DeferSignal extends Error {
-  /** Wall-clock time (ms since epoch) to re-visit the stream. */
-  readonly defer_at: number;
+import type { DeferWhen } from "../types/index.js";
 
-  constructor(defer_at: number) {
+export class DeferSignal extends Error {
+  /**
+   * The unresolved schedule. The dispatcher turns this into an absolute
+   * due-time by resolving it against the triggering event.
+   */
+  readonly when: DeferWhen;
+
+  constructor(when: DeferWhen) {
     super("reaction deferred");
     this.name = "DeferSignal";
-    this.defer_at = defer_at;
+    this.when = when;
   }
 }
 
@@ -24147,8 +24720,12 @@ export {
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+} from "./builder-utils.js";
+export {
   CircuitBreaker,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   type CircuitState,
   resolveCircuitBreakerConfig,
@@ -24164,7 +24741,7 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { BoundAction, EsOps } from "./event-sourcing.js";
+export type { EsOps } from "./event-sourcing.js";
 export { scan } from "./event-sourcing.js";
 export {
   current_version_of,
@@ -26826,6 +27403,7 @@ import {
 } from "../types/index.js";
 import { compute_backoff_delay } from "./backoff.js";
 import { CloseSignal } from "./close-signal.js";
+import { resolve_defer_at } from "./defer-config.js";
 import { DeferSignal } from "./defer-signal.js";
 import type { Handle, HandleBatch, HandleResult } from "./drain-cycle.js";
 
@@ -26963,7 +27541,12 @@ export function build_handle<
         // the stream at the carried due-time (#1090). \`acked_at\` is unused on
         // the defer path — drain never acks a deferred result.
         if (error instanceof DeferSignal)
-          return { lease, handled, acked_at: at, defer: error.defer_at };
+          return {
+            lease,
+            handled,
+            acked_at: at,
+            defer: resolve_defer_at<TEvents>(error.when, event),
+          };
         // A close request advances past the triggering event (so the
         // requesting reaction isn't counted as in-flight by the close-cycle
         // guard) and hands the target to the orchestrator's on_close (#1090).
@@ -29405,6 +29988,26 @@ export interface EventSink extends Disposable {
     ) => Promise<void>
   ): Promise<void>;
 }
+
+/**
+ * The schedule for a deferred reaction (#1091, RFC 0001), used by both the
+ * declarative \`.defer(when)\` builder step and the imperative \`DeferSignal\`
+ * escape hatch. Exactly one form:
+ *
+ * - \`{ after }\` — a span measured from the triggering event's \`created\` time
+ *   (\`{ hours: 1, minutes: 30 }\` is 90 minutes). The drain anchors it to that
+ *   event, so a worker re-claiming the stream after the wait computes the same
+ *   due-time.
+ * - \`{ at }\` — an absolute \`Date\`.
+ *
+ * The triggering event is always in hand where a schedule is chosen — the
+ * \`(event) => DeferWhen\` form of \`.defer\` declaratively, the handler scope
+ * imperatively — so there is no function form of \`at\`: a payload- or
+ * state-derived deadline is just \`{ at: computedDate }\`.
+ */
+export type DeferWhen =
+  | { after: { days?: number; hours?: number; minutes?: number }; at?: never }
+  | { at: Date; after?: never };
 
 export interface IAct<
   TEvents extends Schemas = Schemas,

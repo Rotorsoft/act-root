@@ -4,7 +4,7 @@
 - **Issue:** #1049
 - **Author:** rotorsoft
 - **Created:** 2026-06-27
-- **Amended:** 2026-06-29 (Slice 1 implementation, #1090)
+- **Amended:** 2026-06-29 (Slice 1 implementation, #1090); 2026-07-01 (Slice 2 public defer surface, #1091); 2026-07-01 (recurrence-as-pattern, Slice 4 dropped, #1091)
 
 > **Amendment (2026-06-29).** Implementing Slice 1 disproved this RFC's
 > load-bearing premise that `next_attempt_at` is a *persisted* per-stream
@@ -21,6 +21,26 @@
 > design ("scheduling is a stream's next-visit time," no cron, no `schedules`
 > table, signals-are-not-sourced) is unchanged — only the persistence mechanism
 > and the (now non-zero) `Store` surface.
+
+> **Amendment (2026-07-01).** Two rollout decisions land here. First,
+> **recurrence is delivered as a documented pattern, not a primitive.** The
+> `{ every }` schedule form sketched in the design sections below was evaluated
+> against the shipped one-shot defer and rejected: re-delivering one held event
+> each interval would pin the stream's watermark at that event for the life of
+> the schedule, parking every other reaction on the stream behind a timer that
+> never advances. The composition that ships instead has a reaction one-shot-
+> `.defer` a tick, do its work, and emit the *next* tick before it acks, so the
+> watermark advances every cycle and the stream keeps moving. That pattern is
+> documented in [`recipes/temporal/recurring-timers/`](../recipes/temporal/recurring-timers/README.md)
+> with a runnable, tested example; it adds **no new public surface**, so the
+> stability impact of recurrence is **none** (not even the minor bump the
+> earlier `every` extension would have carried). Second, **the standalone-timer
+> slice (event-less / cron timers, formerly "Slice 4") is dropped from this
+> epic.** No shipped need drove an event-less timer, and the non-sourced-signal
+> machinery it required is a large surface to carry speculatively. It can be
+> revived as its own RFC if a genuine event-less timing need appears. The
+> `{ every }` mentions in the sections below are preserved as the historical
+> design record; treat this amendment and the Sequencing section as authoritative.
 
 ## Motivation
 
@@ -92,6 +112,21 @@ dependency and is brittle):
 Full cron expressions stay **userland**: parse → compute the next `Date` →
 `defer({ at })`. Core stays dependency-free.
 
+> **Amended (Slice 2, #1091 / Slice 3):** the *shipped* `when` is
+> `{ after: {…} } | { at: Date }` only, and the two public surfaces are the
+> declarative `.defer(when)` step and the imperative `throw new DeferSignal(when)`
+> — there is **no `app.defer`**. The `at` **function form** below was dropped:
+> the triggering event is always in hand (the `(event) => when` arg of `.defer`,
+> the handler scope for the throw), so a payload- or state-derived deadline is
+> just `{ at: computedDate }`. The **`{ every }`** recurrence form was also
+> dropped: holding one event to re-fire it forever pins the stream's watermark,
+> so recurrence instead ships as a documented **pattern** (react to a tick,
+> one-shot `.defer`, emit the next tick, ack) in
+> `recipes/temporal/recurring-timers/`. The **standalone-timer / `app.schedule`**
+> case (the "no source" bullet below) is **dropped from this epic** and can be
+> revived as its own RFC if an event-less/cron timer need appears. The narrative
+> below is the original proposal, kept for history.
+
 ## How every case falls out — no sourceless timers
 
 - **Deadline** (has a source): react to `OrderPlaced`; if unpaid,
@@ -144,26 +179,40 @@ Consequences to document and uphold:
   `deferred_at` column on the watermark and `claim()`'s skip-until-due behavior.
   Charter-covered `Store` change; lands with TCK coverage and all three in-tree
   adapters in lockstep (a required method can't be staged adapter-by-adapter).
-- **Two `defer` surfaces, for expressivity and flexibility.** Both compile to
-  the same `defer` outcome (internally a `DeferSignal`); they differ in whether
-  the schedule is declared or computed.
-  - **Declarative reaction step `.defer(when)`** between `.on(...)` and
-    `.do(...)`. It arms the reaction on its triggering event and runs the
-    handler when due, and it **auto-isolates** the reaction onto its own stream
-    (sourced from the trigger) so a pending timer never holds the aggregate's
-    other reactions. This is the front door for static timing (a fixed deadline,
-    a fixed interval) and removes the manual `.to(...)` boilerplate. Symmetric
-    with `.autocloses(policy)` on state: declarative timing on a reaction.
-  - **Imperative outcome `app.defer(when)`** callable inside a `.do(...)`
-    handler, for due-times computed at runtime from loaded state, or to
-    conditionally re-arm. The escape hatch when the schedule isn't statically
-    known.
-- **`when` options type** (`after` / `at` / `every`, where `at` accepts a `Date`
-  or a function of the triggering event so the due-time stays derivable),
-  Zod-validated per the config-validation standard, shared by both surfaces.
-- **Builder validation** rejecting invalid scheduling/`source`/`target`
-  configurations at `.build()` (same family as the cross-slice-schema throw and
-  the lane-disagreement throw).
+- **Two defer surfaces, settled in Slice 2 (#1091).** The open question below is
+  resolved: the feature ships **both** a declarative builder step **and** an
+  imperative throwable, and there is **no `app.defer(...)` method** — deferral is
+  a property of a reaction, not an orchestrator call.
+  - **Declarative `.defer(when)` builder step**, sitting between `.on(event)` and
+    `.do(handler)` on both the `act()` and `slice()` builders. It holds the
+    reaction until its schedule is due, then runs the handler once (one-shot
+    delay-then-run). `when` is a literal `DeferWhen` or a function of the
+    triggering event `(event) => DeferWhen`. A literal schedule is validated at
+    build time (throws `ZodError`); the function form is validated when it runs.
+  - **Imperative `throw new DeferSignal(when)`**, the escape hatch thrown from
+    inside a `.do` handler. `DeferSignal` is exported from `@rotorsoft/act` and
+    carries an *unresolved* `when` the drain resolves against the triggering
+    event. Use it when a static schedule can't express the wait (the due-time
+    depends on loaded state, a query, another stream, prior attempts, or a
+    runtime branch). The compiled autoclose reaction throws it, anchored to the
+    live head.
+- **`DeferWhen` options type**, exported from `@rotorsoft/act` and Zod-validated
+  per the config-validation standard. Slice 2 ships the two-form shape `{ after:
+  { days?; hours?; minutes? } } | { at: Date }`, exactly one form. **There is no
+  function form of `at`**: the triggering event is always in hand (the
+  `(event) =>` argument declaratively, the handler scope imperatively), so a
+  payload- or state-derived deadline is just `{ at: computedDate }`. **There is
+  no `every` form** — recurrence ships as a composition pattern over one-shot
+  defer (see the 2026-07-01 amendment above and the Sequencing section), adding
+  nothing to this type.
+- **No auto-isolation.** Watermarks key by target stream, so a deferred reaction
+  holds its target stream until due, parking that stream's other reactions with
+  it. Isolation is opt-in: route the defer onto its own target with `.to(...)`.
+  (The synthetic-stream auto-isolation floated earlier was rejected; the
+  autoclose reaction's internal `__autoclose__` stream is a separate Slice-1
+  concern, not a `.defer` feature.)
+- **Builder validation** rejecting an invalid literal schedule at `.build()`
+  (same family as the cross-slice-schema throw and the lane-disagreement throw).
 - *(follow-up)* `app.schedule(stream, opts)` / `app.unschedule(stream, key)`.
 - **No `schedules` table** — the due-time is one column on the existing watermark
   row, not a separate entity.
@@ -225,12 +274,14 @@ Consequences to document and uphold:
 ## Open questions
 
 1. **`defer` surface shape** — ~~returned sentinel vs. `app.defer(...)`~~.
-   **Resolved: ship both.** A declarative `.defer(when)` reaction-builder step
-   for static timing (which also auto-isolates the reaction's stream), and an
-   imperative `app.defer(when)` outcome inside `.do(...)` for runtime-computed
-   due-times. Both compile to the same `DeferSignal`. Chosen to maximize
-   expressivity and flexibility rather than force one shape. Details land in
-   Slice 2.
+   **Resolved (Slice 2, #1091):** neither of the earlier candidates. The feature
+   ships **both** a declarative `.defer(when)` builder step (the common path) and
+   an imperative public `DeferSignal` throw (the escape hatch), with `DeferWhen`
+   exported alongside. There is **no `app.defer(...)` method** — deferral is a
+   property of a reaction, not an orchestrator call. The `when` type is
+   simplified to `{ after } | { at: Date }` (no `at` function form), and a defer
+   does **not** auto-isolate its stream (route with `.to(...)` to opt in). See
+   "Public surface added" above.
 2. **Watermark key** — ~~`stream` vs. `(stream, source)`~~. **Resolved (Slice 1
    spike):** the watermark/lease is keyed by **`stream` alone**; `source` is a
    filter, not part of the key. So one pending `deferred_at` per stream, and a
@@ -261,6 +312,16 @@ Consequences to document and uphold:
    `DeferSignal`, the `DrainController` refactor) is already built.
 2. **Public `defer(when)` — deadlines** + builder validation + TCK/scenario
    tests.
-3. **Recurrence (`every`)** + builder validation + tests.
-4. **Standalone timer streams** — `app.schedule` arms a due-time on a timer
-   stream; the claim cycle delivers a **non-sourced signal** when due. Follow-up.
+3. **Recurrence — delivered as a documented pattern, not a primitive** (#1091).
+   A `{ every }` schedule form was evaluated and rejected: re-delivering one held
+   event each interval pins the stream's watermark and stalls the stream's other
+   reactions. Recurrence ships instead as a reaction that one-shot-`.defer`s a
+   tick, does its work, and emits the *next* tick before it acks, so the
+   watermark advances every cycle. Documented with a runnable, tested example in
+   [`recipes/temporal/recurring-timers/`](../recipes/temporal/recurring-timers/README.md).
+   No new public surface; stability impact none.
+4. ~~**Standalone timer streams**~~ — **dropped from this epic.** The event-less
+   / cron-timer case (`app.schedule` arming a due-time on a timer stream, the
+   claim cycle delivering a **non-sourced signal** when due) has no shipped
+   driver and carries a large speculative surface. It can be revived as its own
+   RFC if a genuine event-less timing need appears.

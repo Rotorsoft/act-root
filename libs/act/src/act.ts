@@ -589,9 +589,9 @@ export class Act<
           // Off-hours gating preserved from the sweep: outside the window,
           // re-check next cycle instead of closing.
           if (!in_autoclose_window(config.autocloseWindow, new Date()))
-            throw new DeferSignal(
-              Date.now() + config.autocloseCycleMinutes * 60_000
-            );
+            throw new DeferSignal({
+              at: new Date(Date.now() + config.autocloseCycleMinutes * 60_000),
+            });
           const stats = await store().query_stats([aggregate], {
             count: true,
             exclude: [TOMBSTONE_EVENT],
@@ -615,7 +615,9 @@ export class Act<
           // policy has a time gate; otherwise wait for the next event to
           // re-trigger (e.g. a `reaches` threshold).
           if (after_ms !== undefined)
-            throw new DeferSignal(head.created.getTime() + after_ms);
+            throw new DeferSignal({
+              at: new Date(head.created.getTime() + after_ms),
+            });
         },
       };
       const key = `__autoclose_${st.name}`;

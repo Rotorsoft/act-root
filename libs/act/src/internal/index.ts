@@ -35,8 +35,12 @@ export {
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
 export {
+  type ReactionOn,
+  reaction_on,
+  register_lane,
+} from "./builder-utils.js";
+export {
   CircuitBreaker,
-  type CircuitBreakerConfig,
   type CircuitBreakerOptions,
   type CircuitState,
   resolveCircuitBreakerConfig,
@@ -52,7 +56,7 @@ export {
   type Handle,
   type HandleBatch,
 } from "./drain-cycle.js";
-export type { BoundAction, EsOps } from "./event-sourcing.js";
+export type { EsOps } from "./event-sourcing.js";
 export { scan } from "./event-sourcing.js";
 export {
   current_version_of,
