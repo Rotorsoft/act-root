@@ -20,7 +20,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { BuilderCore } from "./builder-core.js";
+import type { BuilderBase } from "./builder-base.js";
 import type { Projection } from "./projection-builder.js";
 
 /**
@@ -84,7 +84,7 @@ export interface SliceBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
-> extends BuilderCore<
+> extends BuilderBase<
     SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
     TEvents,
     TActions,

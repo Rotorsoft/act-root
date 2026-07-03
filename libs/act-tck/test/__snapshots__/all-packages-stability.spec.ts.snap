@@ -34,7 +34,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { BuilderCore } from "./builder-core.js";
+import type { BuilderBase } from "./builder-base.js";
 import type { Projection } from "./projection-builder.js";
 import type { Slice } from "./slice-builder.js";
 
@@ -116,7 +116,7 @@ export interface ActBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
-> extends BuilderCore<
+> extends BuilderBase<
     ActBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
     TEvents,
     TActions,
@@ -5021,30 +5021,88 @@ export function classify_registry<
   };
 }
 
-// === builder-core.ts ===
+// === builder-base.ts ===
 /**
- * @module builder-core
+ * @module builder-base
  * @category Builders
  *
- * The builder members shared by \`SliceBuilder\` and \`ActBuilder\` whose return
- * type is the builder itself with the **same** generics (\`Self\`), factored out
- * via plain F-bounded polymorphism. Each builder passes its own concrete type
- * as \`Self\`, so error messages still resolve to \`SliceBuilder<…>\` /
+ * The builder types shared by \`SliceBuilder\` and \`ActBuilder\`: the \`.on(...)\`
+ * reaction step ({@link ReactionOn}) and the base of members whose return type
+ * is the builder itself with the **same** generics ({@link BuilderBase}). Both
+ * are parameterized on the concrete builder (\`TReturn\` / \`Self\`) via plain
+ * F-bounded polymorphism, so error messages resolve to \`SliceBuilder<…>\` /
  * \`ActBuilder<…>\` rather than an abstract base.
  *
- * \`withState\` and \`withLane\` are intentionally **not** here: they *widen* the
- * generics (return a different instantiation), which a shared signature could
- * only express with HKT emulation, and that degrades the public builder's hover
- * and error output. That trade isn't worth deduping two declarative signatures,
- * so they stay declared per-builder (#1110).
+ * These live in the builders layer (not \`internal/\`) because they reference
+ * \`Projection\`, a builders-layer type; the runtime that fills them
+ * (\`reaction_on\`, \`register_lane\`) stays in \`internal/builder-utils.ts\`.
+ *
+ * \`withState\` and \`withLane\` are intentionally **not** in \`BuilderBase\`: they
+ * *widen* the generics (return a different instantiation), which a shared
+ * signature could only express with HKT emulation, and that degrades the public
+ * builder's hover and error output. That trade isn't worth deduping two
+ * declarative signatures, so they stay declared per-builder (#1110).
  */
 
-import type { ReactionOn } from "../internal/index.js";
-import type { Actor, EventRegister, Schemas } from "../types/index.js";
+import type {
+  Actor,
+  Committed,
+  DeferWhen,
+  EventRegister,
+  IAct,
+  ReactionOptions,
+  ReactionResolver,
+  Schema,
+  Schemas,
+  Snapshot,
+} from "../types/index.js";
 import type { Projection } from "./projection-builder.js";
 
 /**
- * Builder members that return \`Self\` unchanged. Shared by both builders.
+ * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
+ * Identical for both builders modulo that return type.
+ */
+type ReactionDo<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = (
+  handler: (
+    event: Committed<TEvents, TKey>,
+    stream: string,
+    app: IAct<TEvents, TActions, TActor>
+  ) => Promise<Snapshot<Schema, TEvents> | void>,
+  options?: Partial<ReactionOptions>
+) => TReturn & {
+  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
+};
+
+/**
+ * The object \`.on(event)\` returns: run immediately with \`.do(...)\`, or hold
+ * with \`.defer(when).do(...)\`. Parameterized by the return builder so
+ * \`act()\` and \`slice()\` share one shape.
+ */
+export type ReactionOn<
+  TReturn,
+  TEvents extends Schemas,
+  TActions extends Schemas,
+  TActor extends Actor,
+  TLanes extends string,
+  TKey extends keyof TEvents,
+> = {
+  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  defer: (
+    schedule: DeferWhen | ((event: Committed<TEvents, TKey>) => DeferWhen)
+  ) => {
+    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
+  };
+};
+
+/**
+ * Builder members that return \`Self\` unchanged — shared by both builders.
  *
  * @template Self - the concrete builder type returned for chaining
  * @template TEvents - event schemas
@@ -5052,7 +5110,7 @@ import type { Projection } from "./projection-builder.js";
  * @template TActor - actor type
  * @template TLanes - declared lane-name union
  */
-export interface BuilderCore<
+export interface BuilderBase<
   Self,
   TEvents extends Schemas,
   TActions extends Schemas,
@@ -5100,18 +5158,14 @@ export interface BuilderCore<
 
 import { DEFAULT_LANE } from "../ports.js";
 import type {
-  Actor,
   Committed,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
   ReactionHandler,
   ReactionOptions,
   ReactionResolver,
-  Schema,
   Schemas,
-  Snapshot,
 } from "../types/index.js";
 import {
   assert_defer_when,
@@ -5119,47 +5173,6 @@ import {
   make_deferred,
 } from "./defer-config.js";
 import { _this_ } from "./merge.js";
-
-/**
- * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
- * Identical for both builders modulo that return type.
- */
-type ReactionDo<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = (
-  handler: (
-    event: Committed<TEvents, TKey>,
-    stream: string,
-    app: IAct<TEvents, TActions, TActor>
-  ) => Promise<Snapshot<Schema, TEvents> | void>,
-  options?: Partial<ReactionOptions>
-) => TReturn & {
-  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
-};
-
-/**
- * The object \`.on(event)\` returns: run immediately with \`.do(...)\`, or hold
- * with \`.defer(when).do(...)\`. Parameterized by the return builder so
- * \`act()\` and \`slice()\` share one shape.
- */
-export type ReactionOn<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = {
-  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => {
-    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  };
-};
 
 /**
  * Validate and register a drain lane (ACT-1103): the \`"default"\` name is
@@ -10224,11 +10237,7 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
-export {
-  type ReactionOn,
-  reaction_on,
-  register_lane,
-} from "./builder-utils.js";
+export { reaction_on, register_lane } from "./builder-utils.js";
 export {
   CircuitBreaker,
   type CircuitBreakerOptions,
@@ -13835,7 +13844,7 @@ import type {
   Schemas,
   State,
 } from "../types/index.js";
-import type { BuilderCore } from "./builder-core.js";
+import type { BuilderBase } from "./builder-base.js";
 import type { Projection } from "./projection-builder.js";
 
 /**
@@ -13899,7 +13908,7 @@ export interface SliceBuilder<
   TStateMap extends Record<string, Schema> = {},
   TActor extends Actor = Actor,
   TLanes extends string = typeof DEFAULT_LANE,
-> extends BuilderCore<
+> extends BuilderBase<
     SliceBuilder<TSchemaReg, TEvents, TActions, TStateMap, TActor, TLanes>,
     TEvents,
     TActions,
@@ -19841,18 +19850,14 @@ export function classify_registry<
 
 import { DEFAULT_LANE } from "../ports.js";
 import type {
-  Actor,
   Committed,
   EventRegister,
-  IAct,
   LaneConfig,
   Reaction,
   ReactionHandler,
   ReactionOptions,
   ReactionResolver,
-  Schema,
   Schemas,
-  Snapshot,
 } from "../types/index.js";
 import {
   assert_defer_when,
@@ -19860,47 +19865,6 @@ import {
   make_deferred,
 } from "./defer-config.js";
 import { _this_ } from "./merge.js";
-
-/**
- * The \`.do(handler)\` step, parameterized by the builder it returns (\`TReturn\`).
- * Identical for both builders modulo that return type.
- */
-type ReactionDo<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = (
-  handler: (
-    event: Committed<TEvents, TKey>,
-    stream: string,
-    app: IAct<TEvents, TActions, TActor>
-  ) => Promise<Snapshot<Schema, TEvents> | void>,
-  options?: Partial<ReactionOptions>
-) => TReturn & {
-  to: (resolver: ReactionResolver<TEvents, TKey, TLanes> | string) => TReturn;
-};
-
-/**
- * The object \`.on(event)\` returns: run immediately with \`.do(...)\`, or hold
- * with \`.defer(when).do(...)\`. Parameterized by the return builder so
- * \`act()\` and \`slice()\` share one shape.
- */
-export type ReactionOn<
-  TReturn,
-  TEvents extends Schemas,
-  TActions extends Schemas,
-  TActor extends Actor,
-  TLanes extends string,
-  TKey extends keyof TEvents,
-> = {
-  do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  defer: (schedule: DeferSchedule<Committed<TEvents, TKey>>) => {
-    do: ReactionDo<TReturn, TEvents, TActions, TActor, TLanes, TKey>;
-  };
-};
 
 /**
  * Validate and register a drain lane (ACT-1103): the \`"default"\` name is
@@ -24724,11 +24688,7 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
-export {
-  type ReactionOn,
-  reaction_on,
-  register_lane,
-} from "./builder-utils.js";
+export { reaction_on, register_lane } from "./builder-utils.js";
 export {
   CircuitBreaker,
   type CircuitBreakerOptions,

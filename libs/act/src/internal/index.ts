@@ -34,11 +34,7 @@ export {
 } from "./autoclose-policy.js";
 export type { EventLaneSet } from "./build-classify.js";
 export { ALL_LANES, classify_registry } from "./build-classify.js";
-export {
-  type ReactionOn,
-  reaction_on,
-  register_lane,
-} from "./builder-utils.js";
+export { reaction_on, register_lane } from "./builder-utils.js";
 export {
   CircuitBreaker,
   type CircuitBreakerOptions,
