@@ -628,11 +628,10 @@ export async function action<
       const last = snapshots.at(-1)!;
       const snapped = me.snap?.(last);
 
-      // #861: `has_open_pii` was set above during `emitted.map` — when
-      // any commit carries open PII the derived state may hold plaintext
-      // (reducers that copy sensitive fields into state against the soft
-      // rule), so we refuse to populate the cache. Post-forget commits
-      // never have pii; cache populates normally on the next access.
+      // #861: pii-aware states (any event declaring `sensitive(...)`
+      // fields) never populate the snapshot cache — state evolves from
+      // the actor-gated event view, so the cached state would vary by
+      // caller. Pure states cache normally.
       // Update cache with post-commit state (reset patches if snapped).
       // Fire-and-forget — log but don't fail the action on cache write errors
       // (e.g., transient network failures in a custom Cache adapter).

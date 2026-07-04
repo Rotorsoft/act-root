@@ -515,7 +515,7 @@ export type ActionBuilder<
    * state({ Ticket: ticketSchema })
    *   .emits({ TicketOpened, TicketResolved })
    *   // ...
-   *   .autocloses((_stream, head) => head.name === "TicketResolved")
+   *   .autocloses({ is: "TicketResolved" })
    *   .archives(async (stream) => {
    *     const events = await loadEvents(stream);
    *     await s3.upload(`tickets/${stream}.jsonl`, events);

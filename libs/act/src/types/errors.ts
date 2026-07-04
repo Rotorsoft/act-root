@@ -337,13 +337,13 @@ export class StreamClosedError extends Error {
  * Adapters wrap their driver errors in `StoreError` (preserving the
  * original via `cause`) so the orchestrator can distinguish a degraded
  * backend from "no work" and react accordingly — see the drain circuit
- * breaker, which trips on repeated `StoreError`s and surfaces a
- * `drain_error` lifecycle event instead of silently spinning on a down
+ * breaker, which trips on repeated `StoreError`s and surfaces an
+ * `error` lifecycle event instead of silently spinning on a down
  * database.
  *
  * @example
  * ```typescript
- * app.on("drain_error", ({ error, circuit }) => {
+ * app.on("error", ({ error, circuit }) => {
  *   if (error instanceof StoreError)
  *     alert(`store ${error.operation} failing; circuit=${circuit}`);
  * });
