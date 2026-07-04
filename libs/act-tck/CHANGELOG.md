@@ -1,3 +1,10 @@
+# [@rotorsoft/act-tck-v1.19.3](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.2...@rotorsoft/act-tck-v1.19.3) (2026-07-04)
+
+
+### Bug Fixes
+
+* **act-pg:** skip oversize notify payloads so commits never abort ([#1120](https://github.com/rotorsoft/act-root/issues/1120)) ([982a224](https://github.com/rotorsoft/act-root/commit/982a224a3f8ce2811b783570b33f69154087e43a))
+
 # [@rotorsoft/act-tck-v1.19.2](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-tck-v1.19.1...@rotorsoft/act-tck-v1.19.2) (2026-07-04)
 
 
