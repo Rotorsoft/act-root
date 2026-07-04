@@ -1,3 +1,11 @@
+# [@rotorsoft/act-pg-v1.10.1](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.10.0...@rotorsoft/act-pg-v1.10.1) (2026-07-04)
+
+
+### Bug Fixes
+
+* **act-pg:** opinionated pool defaults and clear acquisition errors ([#1119](https://github.com/rotorsoft/act-root/issues/1119)) ([c1acdb5](https://github.com/rotorsoft/act-root/commit/c1acdb5c0d1489dfc1f4faa69bc413a06d06a32f))
+* **act-pg:** skip oversize notify payloads so commits never abort ([#1120](https://github.com/rotorsoft/act-root/issues/1120)) ([982a224](https://github.com/rotorsoft/act-root/commit/982a224a3f8ce2811b783570b33f69154087e43a))
+
 # [@rotorsoft/act-pg-v1.10.0](https://github.com/rotorsoft/act-root/compare/@rotorsoft/act-pg-v1.9.3...@rotorsoft/act-pg-v1.10.0) (2026-07-01)
 
 
