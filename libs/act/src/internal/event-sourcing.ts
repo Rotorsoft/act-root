@@ -98,8 +98,8 @@ export interface EsOps {
 export async function snap<TState extends Schema, TEvents extends Schemas>(
   snapshot: Snapshot<TState, TEvents>
 ): Promise<void> {
+  const { id, stream, name, meta, version } = snapshot.event!;
   try {
-    const { id, stream, name, meta, version } = snapshot.event!;
     await store().commit(
       stream,
       [{ name: SNAP_EVENT, data: snapshot.state }],
@@ -110,7 +110,13 @@ export async function snap<TState extends Schema, TEvents extends Schemas>(
       version // IMPORTANT! - state events are committed right after the snapshot event
     );
   } catch (error) {
-    log().error(error);
+    // Swallow by design — a failed snapshot must never fail the action.
+    // But surface an operator signal: a persistently failing snapshot
+    // write silently degrades every cold start to full replay.
+    const reason = error instanceof Error ? error.message : String(error);
+    log().warn(
+      `Snapshot write failed on stream "${stream}": ${reason} — cold starts will replay full history until snapshots succeed.`
+    );
   }
 }
 

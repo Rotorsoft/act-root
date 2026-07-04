@@ -86,7 +86,7 @@ Reasonable starting policies:
 - **`s.patches >= 500`** for long-lived streams (counters, inventory items): fewer snapshots, smaller event log.
 - **No snap policy** for streams with bounded length (single-day TTLs, capped event count): cheaper than snapping.
 
-Snapshot writes are fire-and-forget; they don't block the action's return. Failures log via `snap()`'s try/catch but never propagate.
+Snapshot writes are fire-and-forget; they don't block the action's return. Failures log at **warn** level (stream, reason, and the full-replay consequence) but never propagate — alert on that line, because persistent snapshot failures degrade every cold start to full replay.
 
 ## 5. Idempotency at the API edge
 
