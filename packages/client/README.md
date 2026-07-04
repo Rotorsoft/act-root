@@ -10,6 +10,7 @@ A minimal React + Vite client for the calculator example. Demonstrates how to ca
 - In tRPC mode: calls `PressKey` / `Clear` mutations on the server-hosted `calculatorRouter`
 - In REST mode: `POST`s to `/api/actions/PressKey` / `/api/actions/Clear` against the same server
 - Displays the latest snapshot returned from each mutation (`{ left, operator, right }`)
+- Shows a **live SSE panel** under the keypad: `src/useSse.ts` opens an `EventSource` on the server's generated `GET /api/sse/Calculator?stream=calculator` endpoint and applies incremental patches with `applyPatchMessage` from `@rotorsoft/act-http/sse` — state updates on every commit without refetching, from either transport or another tab
 - Reuses **types from the calculator package** (`Digits`, `Operators`, `CalculatorRouter`) — no duplicated schemas, no codegen
 
 ## Quickstart
@@ -35,7 +36,8 @@ packages/client/
 ├── src/
 │   ├── main.tsx           # Mounts <App />
 │   ├── App.tsx            # Wraps Calculator in trpc.Provider + QueryClientProvider
-│   ├── Calculator.tsx     # Keypad UI + useMutation hooks
+│   ├── Calculator.tsx     # Keypad UI + useMutation hooks + SSE live panel
+│   ├── useSse.ts          # EventSource hook (state/patch frames + applyPatchMessage)
 │   ├── trpc.ts            # createTRPCReact<CalculatorRouter>() + httpLink
 │   ├── App.css, index.css # Styles
 │   └── assets/            # Static assets

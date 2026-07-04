@@ -69,3 +69,20 @@
   color: #fff;
   border-color: #88a;
 }
+
+.sse-panel {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #666;
+}
+.sse-panel .sse-label {
+  font-size: 0.8em;
+  color: #aaa;
+  text-align: left;
+  padding-bottom: 4px;
+}
+.sse-panel .sse-display {
+  height: auto;
+  font-size: 1.2rem;
+  margin-bottom: 0;
+}

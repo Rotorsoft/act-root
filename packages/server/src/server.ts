@@ -1,23 +1,29 @@
-import { calculatorApp, calculatorRouter } from "@act/calculator";
+import {
+  calculatorApp,
+  calculatorRouter,
+  type Operators,
+} from "@act/calculator";
 import { serve } from "@hono/node-server";
 import { hono as honoTransport } from "@rotorsoft/act-http/hono";
 import { openapi } from "@rotorsoft/act-http/openapi";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
 import { fetchRequestHandler } from "@trpc/server/adapters/fetch";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 /**
- * Multi-transport demo (#847). One Act instance, three transports
- * mounted side-by-side on a single Hono root app — the integration
- * test for the cross-transport-consistency claim made by #843
- * (tRPC), #844 (Hono REST), and #845 (OpenAPI). Every transport
- * walks the same `calculatorApp` registry; the OpenAPI doc
- * describes the REST routes the Hono adapter actually serves;
- * tRPC consumers use `typeof calculatorRouter` for their typed
- * client (no codegen).
+ * Multi-transport demo (#847, #1123). One Act instance, four
+ * transports mounted side-by-side on a single Hono root app — the
+ * integration test for the cross-transport-consistency claim made
+ * by #843 (tRPC), #844 (Hono REST), #845 (OpenAPI), and #846 (SSE).
+ * Every transport walks the same `calculatorApp` registry; the
+ * OpenAPI doc describes the REST routes the Hono adapter actually
+ * serves; tRPC consumers use `typeof calculatorRouter` for their
+ * typed client (no codegen).
  *
  *   POST /trpc/PressKey, /trpc/Clear   ← tRPC procedures
  *   POST /api/actions/PressKey, ...    ← REST routes
+ *   GET  /api/sse/Calculator?stream=…  ← SSE live-state stream
  *   GET  /openapi.json                 ← OpenAPI 3.1 document
  *   GET  /                             ← landing page with links
  *
@@ -28,10 +34,51 @@ import { cors } from "hono/cors";
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "http://localhost:5173";
 
+/**
+ * The broadcast view of the calculator: the domain state plus the
+ * `_v` version contract (`_v` is always `snap.event.version` — the
+ * event store's stream version is the single source of truth).
+ */
+type CalculatorLiveState = {
+  _v: number;
+  left?: string;
+  right?: string;
+  operator?: Operators;
+  result: number;
+};
+
+// SSE broadcast (#1123). One in-memory channel shared with the
+// generated Hono surface below, which mounts one streaming
+// `GET /api/sse/<stateName>?stream=<streamId>` per registered state.
+// Publication is host-owned: every local commit — tRPC bridge and
+// REST alike, both funnel through `calculatorApp.do` — lands here
+// via the `committed` lifecycle event and fans out to subscribers
+// as version-keyed domain patches.
+const broadcast = new BroadcastChannel<CalculatorLiveState>();
+calculatorApp.on("committed", (snapshots) => {
+  // The lifecycle event is typed against the whole schema registry;
+  // this app registers a single state, so narrow to its shape once.
+  const snaps = snapshots as unknown as {
+    state: Omit<CalculatorLiveState, "_v">;
+    event?: { stream: string; version: number };
+    patch?: Partial<CalculatorLiveState>;
+  }[];
+  const last = snaps.at(-1);
+  if (!last?.event) return;
+  broadcast.publish(
+    last.event.stream,
+    { ...last.state, _v: last.event.version },
+    snaps
+      .map((s) => s.patch)
+      .filter((p): p is Partial<CalculatorLiveState> => p !== undefined)
+  );
+});
+
 const restApi = honoTransport(calculatorApp, {
   actor: () => ({ id: "1", name: "Calculator" }),
   stream: () => "calculator",
   expectedVersion: () => undefined,
+  sse: { channel: broadcast },
 });
 
 const apiDoc = openapi(calculatorApp, {
@@ -116,11 +163,12 @@ app.get("/", (c) =>
 </style>
 </head><body>
 <h1>Calculator multi-transport demo</h1>
-<p>One <code>Act</code> instance — three transports walking the same registry.</p>
+<p>One <code>Act</code> instance — four transports walking the same registry.</p>
 <ul>
   <li><span class="label">tRPC client</span> <a href="http://localhost:3000">http://localhost:3000</a> — typed React UI with a transport toggle</li>
   <li><span class="label">tRPC procedures</span> <code>POST /trpc/PressKey</code>, <code>POST /trpc/Clear</code></li>
   <li><span class="label">Hono REST</span> <code>POST /api/actions/PressKey</code>, <code>POST /api/actions/Clear</code></li>
+  <li><span class="label">SSE stream</span> <code>GET /api/sse/Calculator?stream=calculator</code> — live state patches over <code>text/event-stream</code></li>
   <li><span class="label">API docs</span> <a href="/docs">/docs</a> — interactive Scalar reference (try it from the browser)</li>
   <li><span class="label">OpenAPI spec</span> <a href="/openapi.json">/openapi.json</a> — raw JSON describing the REST routes</li>
 </ul>
