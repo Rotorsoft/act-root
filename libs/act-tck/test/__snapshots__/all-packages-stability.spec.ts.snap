@@ -2539,7 +2539,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 /**
  * Query options for event store queries.
  *
- * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. Semantics are identical across all stores.
+ * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
  * @property \`names?\` - Filter by event names
  * @property \`before?\` - Filter events before this id
@@ -10905,12 +10905,21 @@ export type StreamPosition = {
  *   whole-string match. A plain string \`foo\` is a substring match
  *   (matches any stream containing \`foo\`). Pass \`stream_exact: true\`
  *   for a fast literal-equality comparison that skips regex compilation.
+ *   **Portable grammar:** the subset guaranteed to match identically on
+ *   every adapter is \`^\` / \`$\` anchors, \`.\` (any single character),
+ *   \`.*\` (any run of characters), and literal characters. Adapters
+ *   whose native engine compiles richer regex (PG POSIX, InMemory
+ *   \`RegExp\`) MAY accept more; an adapter that cannot express a pattern
+ *   exactly MUST throw \`ValidationError\` rather than silently
+ *   approximate — a silently-wrong match is the worst failure mode when
+ *   the filter drives \`reset\` / \`unblock\`. Pinned by the TCK's
+ *   stream-filter-grammar suite.
  * @property stream_exact - Treat \`stream\` as a literal string instead
  *   of a regex.
- * @property source - Source-stream filter. Same anchor semantics as
- *   \`stream\`. Useful to isolate dynamic-reaction subscriptions tied to
- *   a particular aggregate stream. Pass \`source_exact: true\` for
- *   literal equality.
+ * @property source - Source-stream filter. Same anchor semantics and
+ *   portable grammar as \`stream\`. Useful to isolate dynamic-reaction
+ *   subscriptions tied to a particular aggregate stream. Pass
+ *   \`source_exact: true\` for literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
  * @property source_matches - **Best-effort** reverse-match narrowing:
@@ -10973,10 +10982,14 @@ export type QueryStreamsResult = {
  * registered stream; treat as a footgun and use sparingly.
  *
  * @property stream - Stream-name filter (regex by default; \`stream_exact\`
- *   for equality).
+ *   for equality). Same portable grammar as {@link QueryStreams.stream}:
+ *   \`^\` / \`$\` anchors, \`.\`, \`.*\`, and literal characters are guaranteed
+ *   across adapters; anything richer either matches with full regex
+ *   semantics or throws \`ValidationError\` — never a silent
+ *   approximation, since these filters drive bulk \`reset\` / \`unblock\`.
  * @property stream_exact - Exact-match instead of regex.
  * @property source - Source-stream filter (regex by default;
- *   \`source_exact\` for equality).
+ *   \`source_exact\` for equality). Same portable grammar as \`stream\`.
  * @property source_exact - Exact-match instead of regex.
  * @property blocked - Restrict to blocked / unblocked streams. Omit
  *   for both.
@@ -17356,7 +17369,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 /**
  * Query options for event store queries.
  *
- * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. Semantics are identical across all stores.
+ * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
  * @property \`names?\` - Filter by event names
  * @property \`before?\` - Filter events before this id
@@ -25342,12 +25355,21 @@ export type StreamPosition = {
  *   whole-string match. A plain string \`foo\` is a substring match
  *   (matches any stream containing \`foo\`). Pass \`stream_exact: true\`
  *   for a fast literal-equality comparison that skips regex compilation.
+ *   **Portable grammar:** the subset guaranteed to match identically on
+ *   every adapter is \`^\` / \`$\` anchors, \`.\` (any single character),
+ *   \`.*\` (any run of characters), and literal characters. Adapters
+ *   whose native engine compiles richer regex (PG POSIX, InMemory
+ *   \`RegExp\`) MAY accept more; an adapter that cannot express a pattern
+ *   exactly MUST throw \`ValidationError\` rather than silently
+ *   approximate — a silently-wrong match is the worst failure mode when
+ *   the filter drives \`reset\` / \`unblock\`. Pinned by the TCK's
+ *   stream-filter-grammar suite.
  * @property stream_exact - Treat \`stream\` as a literal string instead
  *   of a regex.
- * @property source - Source-stream filter. Same anchor semantics as
- *   \`stream\`. Useful to isolate dynamic-reaction subscriptions tied to
- *   a particular aggregate stream. Pass \`source_exact: true\` for
- *   literal equality.
+ * @property source - Source-stream filter. Same anchor semantics and
+ *   portable grammar as \`stream\`. Useful to isolate dynamic-reaction
+ *   subscriptions tied to a particular aggregate stream. Pass
+ *   \`source_exact: true\` for literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
  * @property source_matches - **Best-effort** reverse-match narrowing:
@@ -25410,10 +25432,14 @@ export type QueryStreamsResult = {
  * registered stream; treat as a footgun and use sparingly.
  *
  * @property stream - Stream-name filter (regex by default; \`stream_exact\`
- *   for equality).
+ *   for equality). Same portable grammar as {@link QueryStreams.stream}:
+ *   \`^\` / \`$\` anchors, \`.\`, \`.*\`, and literal characters are guaranteed
+ *   across adapters; anything richer either matches with full regex
+ *   semantics or throws \`ValidationError\` — never a silent
+ *   approximation, since these filters drive bulk \`reset\` / \`unblock\`.
  * @property stream_exact - Exact-match instead of regex.
  * @property source - Source-stream filter (regex by default;
- *   \`source_exact\` for equality).
+ *   \`source_exact\` for equality). Same portable grammar as \`stream\`.
  * @property source_exact - Exact-match instead of regex.
  * @property blocked - Restrict to blocked / unblocked streams. Omit
  *   for both.
@@ -29041,7 +29067,7 @@ export type CommittedMeta = z.infer<typeof CommittedMetaSchema>;
 /**
  * Query options for event store queries.
  *
- * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. Semantics are identical across all stores.
+ * @property \`stream?\` - Filter by stream name. Interpreted as a regex by default — anchors are caller-controlled (\`^foo\` prefix, \`foo$\` suffix, \`^foo$\` whole-string). A plain string \`foo\` matches any stream containing it. The portable grammar guaranteed identical across all stores is \`^\` / \`$\` anchors, \`.\` (any single character), \`.*\` (any run), and literal characters; adapters that cannot express a richer pattern exactly MUST throw \`ValidationError\` rather than silently approximate.
  * @property \`stream_exact?\` - When true, treat \`stream\` as a literal string and use fast equality instead of regex compilation.
  * @property \`names?\` - Filter by event names
  * @property \`before?\` - Filter events before this id
@@ -30842,12 +30868,21 @@ export type StreamPosition = {
  *   whole-string match. A plain string \`foo\` is a substring match
  *   (matches any stream containing \`foo\`). Pass \`stream_exact: true\`
  *   for a fast literal-equality comparison that skips regex compilation.
+ *   **Portable grammar:** the subset guaranteed to match identically on
+ *   every adapter is \`^\` / \`$\` anchors, \`.\` (any single character),
+ *   \`.*\` (any run of characters), and literal characters. Adapters
+ *   whose native engine compiles richer regex (PG POSIX, InMemory
+ *   \`RegExp\`) MAY accept more; an adapter that cannot express a pattern
+ *   exactly MUST throw \`ValidationError\` rather than silently
+ *   approximate — a silently-wrong match is the worst failure mode when
+ *   the filter drives \`reset\` / \`unblock\`. Pinned by the TCK's
+ *   stream-filter-grammar suite.
  * @property stream_exact - Treat \`stream\` as a literal string instead
  *   of a regex.
- * @property source - Source-stream filter. Same anchor semantics as
- *   \`stream\`. Useful to isolate dynamic-reaction subscriptions tied to
- *   a particular aggregate stream. Pass \`source_exact: true\` for
- *   literal equality.
+ * @property source - Source-stream filter. Same anchor semantics and
+ *   portable grammar as \`stream\`. Useful to isolate dynamic-reaction
+ *   subscriptions tied to a particular aggregate stream. Pass
+ *   \`source_exact: true\` for literal equality.
  * @property source_exact - Use exact match instead of pattern match for
  *   \`source\`.
  * @property source_matches - **Best-effort** reverse-match narrowing:
@@ -30910,10 +30945,14 @@ export type QueryStreamsResult = {
  * registered stream; treat as a footgun and use sparingly.
  *
  * @property stream - Stream-name filter (regex by default; \`stream_exact\`
- *   for equality).
+ *   for equality). Same portable grammar as {@link QueryStreams.stream}:
+ *   \`^\` / \`$\` anchors, \`.\`, \`.*\`, and literal characters are guaranteed
+ *   across adapters; anything richer either matches with full regex
+ *   semantics or throws \`ValidationError\` — never a silent
+ *   approximation, since these filters drive bulk \`reset\` / \`unblock\`.
  * @property stream_exact - Exact-match instead of regex.
  * @property source - Source-stream filter (regex by default;
- *   \`source_exact\` for equality).
+ *   \`source_exact\` for equality). Same portable grammar as \`stream\`.
  * @property source_exact - Exact-match instead of regex.
  * @property blocked - Restrict to blocked / unblocked streams. Omit
  *   for both.
@@ -41815,7 +41854,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { StoreError } from "@rotorsoft/act";
+import { StoreError, ValidationError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -41864,9 +41903,27 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/** Portable stream-filter body grammar: literal characters, \`.\` (any
+ *  single character), and \`.*\` (any run). Everything else — escapes
+ *  (\`\\.\`), character classes (\`[0-9]\`), grouping/alternation (\`(a|b)\`),
+ *  quantifiers (\`+ ? { }\`), and mid-pattern anchors — has no faithful
+ *  \`LIKE\` translation and must throw instead of silently mis-matching.
+ *  @internal
+ */
+const PORTABLE_BODY = /^(?:\\.\\*|\\.|[^\\\\^$.()[\\]{}|+?*])*$/;
+
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQL LIKE pattern. Honors \`^\` / \`$\` anchors and converts \`.*\` → \`%\`,
  *  \`.\` → \`_\`. Unanchored input gets \`%\` wildcards on both sides.
+ *  Literal \`%\` / \`_\` in the pattern are escaped with \`\\\` so they match
+ *  themselves — every consumer appends \`ESCAPE '\\'\` to its \`LIKE\`.
+ *
+ *  Only the portable filter grammar documented on
+ *  {@link QueryStreams.stream} is convertible: \`^\` / \`$\` anchors, \`.\`,
+ *  \`.*\`, and literal characters. Any richer regex syntax throws
+ *  {@link ValidationError} — a lossy approximation would silently
+ *  return wrong rows, the worst available failure mode when the filter
+ *  drives \`reset\` / \`unblock\`.
  *
  *  Examples:
  *  - \`^abc$\`  → \`abc\`        (exact)
@@ -41874,6 +41931,8 @@ const DEFAULT_CONFIG: SqliteConfig = {
  *  - \`.*abc$\` → \`%abc\`       (ends-with)
  *  - \`abc\`    → \`%abc%\`      (contains)
  *  - \`a.c\`    → \`%a_c%\`      (single-char wildcard, contains)
+ *  - \`^a_c$\`  → \`a\\_c\`       (literal underscore, escaped for LIKE)
+ *  - \`(a|b)\`  → throws {@link ValidationError}
  *
  *  @internal exported for testing
  */
@@ -41883,11 +41942,35 @@ export function streamPatternToLike(input: string): string {
   const end = s.endsWith("$");
   if (start) s = s.slice(1);
   if (end) s = s.slice(0, -1);
-  s = s.replace(/\\.\\*/g, "%").replace(/\\./g, "_");
-  const out = (start ? "" : "%") + s + (end ? "" : "%");
-  // Collapse adjacent \`%\` — e.g. \`^a.*\` would otherwise yield \`a%%\`.
-  // Same matching semantics, cleaner output.
-  return out.replace(/%+/g, "%");
+  if (!PORTABLE_BODY.test(s))
+    throw new ValidationError(
+      \`stream filter pattern "\${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to LIKE; use stream_exact/source_exact for literal names\`,
+      input,
+      "non-portable stream filter pattern"
+    );
+  const tokens: string[] = [];
+  if (!start) tokens.push("%");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === ".") {
+      if (s[i + 1] === "*") {
+        tokens.push("%");
+        i++;
+      } else tokens.push("_");
+    } else if (c === "%" || c === "_") tokens.push(\`\\\\\${c}\`);
+    else tokens.push(c);
+  }
+  if (!end) tokens.push("%");
+  // Collapse adjacent \`%\` wildcards — e.g. \`^a.*\` would otherwise yield
+  // \`a%%\`. Token-level so escaped literals (\`\\%\`) are never merged.
+  let out = "";
+  let prev = "";
+  for (const t of tokens) {
+    if (t === "%" && prev === "%") continue;
+    out += t;
+    prev = t;
+  }
+  return out;
 }
 
 /**
@@ -42159,7 +42242,7 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ?";
+        sql += " AND stream LIKE ? ESCAPE '\\\\'";
         args.push(streamPatternToLike(query.stream));
       }
     }
@@ -42318,7 +42401,7 @@ export class SqliteStore implements Store {
         let has_events: boolean;
         if (source) {
           const check = await tx.execute({
-            sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? LIMIT 1\`,
+            sql: \`SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\\\' LIMIT 1\`,
             args: [at, streamPatternToLike(source)],
           });
           has_events = check.rows.length > 0;
@@ -42476,7 +42559,7 @@ export class SqliteStore implements Store {
         conditions.push("stream = ?");
         args.push(filter.stream);
       } else {
-        conditions.push("stream LIKE ?");
+        conditions.push("stream LIKE ? ESCAPE '\\\\'");
         args.push(streamPatternToLike(filter.stream));
       }
     }
@@ -42486,7 +42569,7 @@ export class SqliteStore implements Store {
         conditions.push("source = ?");
         args.push(filter.source);
       } else {
-        conditions.push("source LIKE ?");
+        conditions.push("source LIKE ? ESCAPE '\\\\'");
         args.push(streamPatternToLike(filter.source));
       }
     }
@@ -42586,7 +42669,7 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ?";
+        sql += " AND stream LIKE ? ESCAPE '\\\\'";
         args.push(streamPatternToLike(query.stream));
       }
     }
@@ -42596,7 +42679,7 @@ export class SqliteStore implements Store {
         sql += " AND source = ?";
         args.push(query.source);
       } else {
-        sql += " AND source LIKE ?";
+        sql += " AND source LIKE ? ESCAPE '\\\\'";
         args.push(streamPatternToLike(query.source));
       }
     }
@@ -42699,7 +42782,7 @@ export class SqliteStore implements Store {
         where.push(\`e.stream = ?\`);
         args.push(input.stream);
       } else {
-        where.push(\`e.stream LIKE ?\`);
+        where.push(\`e.stream LIKE ? ESCAPE '\\\\'\`);
         args.push(streamPatternToLike(input.stream));
       }
     }
@@ -44827,6 +44910,7 @@ import {
   InMemoryCache,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
+  ValidationError,
 } from "@rotorsoft/act";
 import type {
   BlockedLease,
@@ -44939,6 +45023,10 @@ export type StoreTckOptions = {
  * - \`commit\` — single + multi-event commits, optimistic concurrency
  * - \`query\` — stream, names, correlation, before, after, created_after,
  *   created_before, limit, with_snaps, stream_exact, backward traversal
+ * - stream filter grammar — the portable regex subset (\`^\`, \`$\`, \`.\`,
+ *   \`.*\`, literal characters) matches identically everywhere; richer
+ *   patterns either match with full regex semantics or throw
+ *   \`ValidationError\` — never a silent approximation
  * - \`subscribe\` — idempotent re-subscribe, watermark return value
  * - \`claim\` / \`ack\` — lease lifecycle, dual frontiers, leased streams
  *   not double-claimed
@@ -45372,6 +45460,137 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         const got = await collect(store, { stream: \`^qr-\${tag}-pfx-\` });
         expect(got.map((e) => e.stream).sort()).toEqual([a, b].sort());
+      });
+    });
+
+    // Stream-filter grammar conformance. The portable subset — \`^\` / \`$\`
+    // anchors, \`.\` (any single character), \`.*\` (any run), and literal
+    // characters — must produce identical matches on every adapter
+    // (PG POSIX \`~\`, InMemory \`RegExp\`, SQLite anchor-aware \`LIKE\`).
+    // Richer regex is adapter-optional: an adapter either matches it
+    // with full regex semantics or throws \`ValidationError\`. Silently
+    // returning wrong rows (e.g. from a lossy LIKE approximation) is a
+    // contract violation — and the worst one available when the filter
+    // drives \`reset\` / \`unblock\`.
+    describe("stream filter grammar", () => {
+      const seed_streams = async (streams: string[]) => {
+        for (const s of streams)
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+      };
+
+      const streams_matching = async (pattern: string) =>
+        (await collect(store, { stream: pattern })).map((e) => e.stream).sort();
+
+      // A non-portable pattern must never silently mis-match: the store
+      // either returns exactly the full-regex-semantics result set or
+      // throws ValidationError at the call site.
+      const match_exactly_or_throw = async (
+        pattern: string,
+        expected: string[]
+      ) => {
+        let matched: string[] | undefined;
+        let error: unknown;
+        try {
+          matched = await streams_matching(pattern);
+        } catch (e) {
+          error = e;
+        }
+        if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
+        else expect(matched).toEqual(expected.sort());
+      };
+
+      it("portable subset: anchors, \`.\`, and \`.*\` match identically", async () => {
+        const tag = uid();
+        const plain = \`g-\${tag}-plain\`;
+        const dotted = \`g-\${tag}.dot\`;
+        const scored = \`g-\${tag}_us\`;
+        const pct = \`g-\${tag}%pc\`;
+        await seed_streams([plain, dotted, scored, pct]);
+
+        // ^prefix — all four, regex-significant literals included
+        expect(await streams_matching(\`^g-\${tag}\`)).toEqual(
+          [plain, dotted, scored, pct].sort()
+        );
+        // suffix$ — one
+        expect(await streams_matching(\`\${tag}-plain$\`)).toEqual([plain]);
+        // ^exact$ — one
+        expect(await streams_matching(\`^g-\${tag}-plain$\`)).toEqual([plain]);
+        // single \`.\` is a one-character wildcard: matches the literal
+        // dot in \`dotted\` and the \`-\` in \`plain\`
+        expect(await streams_matching(\`^g-\${tag}.dot$\`)).toEqual([dotted]);
+        expect(await streams_matching(\`^g-\${tag}.plain$\`)).toEqual([plain]);
+        // \`.*\` — any run
+        expect(await streams_matching(\`^g-\${tag}.*dot$\`)).toEqual([dotted]);
+      });
+
+      it("literal \`_\` and \`%\` in patterns are not wildcards", async () => {
+        const tag = uid();
+        const scored = \`u-\${tag}_x\`;
+        const scored_decoy = \`u-\${tag}Zx\`;
+        const pct = \`p-\${tag}%y\`;
+        const pct_decoy = \`p-\${tag}ZZy\`;
+        await seed_streams([scored, scored_decoy, pct, pct_decoy]);
+
+        // \`_\` is a literal in the regex grammar — a store translating to
+        // LIKE must escape it or it single-char-wildcards into the decoy
+        expect(await streams_matching(\`^u-\${tag}_x$\`)).toEqual([scored]);
+        // \`%\` is a literal in the regex grammar — unescaped LIKE would
+        // any-run-wildcard into the decoy
+        expect(await streams_matching(\`^p-\${tag}%y$\`)).toEqual([pct]);
+      });
+
+      it("portable subset applies to stream-position filters", async () => {
+        const tag = uid();
+        const scored = \`sf-\${tag}_a\`;
+        const decoy = \`sf-\${tag}Za\`;
+        await store.subscribe([{ stream: scored }, { stream: decoy }]);
+
+        const got: string[] = [];
+        await store.query_streams((p) => got.push(p.stream), {
+          stream: \`^sf-\${tag}_a$\`,
+        });
+        expect(got).toEqual([scored]);
+      });
+
+      it("non-portable patterns match with full regex semantics or throw", async () => {
+        const tag = uid();
+        const a = \`np-\${tag}-a\`;
+        const b = \`np-\${tag}-b\`;
+        const c = \`np-\${tag}-c\`;
+        const one = \`np-\${tag}-1\`;
+        const aaa = \`np-\${tag}-aaa\`;
+        const dot = \`e-\${tag}.d\`;
+        const dot_decoy = \`e-\${tag}xd\`;
+        await seed_streams([a, b, c, one, aaa, dot, dot_decoy]);
+
+        // alternation
+        await match_exactly_or_throw(\`^np-\${tag}-(a|b)$\`, [a, b]);
+        // character class
+        await match_exactly_or_throw(\`^np-\${tag}-[0-9]$\`, [one]);
+        // quantifier
+        await match_exactly_or_throw(\`^np-\${tag}-a+$\`, [a, aaa]);
+        // escaped dot — a literal-dot match, not a one-char wildcard
+        await match_exactly_or_throw(\`^e-\${tag}\\\\.d$\`, [dot]);
+      });
+
+      it("bulk stream ops reject non-portable filters instead of mis-matching", async () => {
+        const tag = uid();
+        const s = \`bo-\${tag}-a\`;
+        await store.subscribe([{ stream: s }]);
+
+        let count: number | undefined;
+        let error: unknown;
+        try {
+          count = await store.reset({ stream: \`^bo-\${tag}-(a|b)$\` });
+        } catch (e) {
+          error = e;
+        }
+        if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
+        else expect(count).toBe(1);
       });
     });
 

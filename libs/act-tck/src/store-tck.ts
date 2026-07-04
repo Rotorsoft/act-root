@@ -4,6 +4,7 @@ import {
   InMemoryCache,
   SNAP_EVENT,
   TOMBSTONE_EVENT,
+  ValidationError,
 } from "@rotorsoft/act";
 import type {
   BlockedLease,
@@ -116,6 +117,10 @@ export type StoreTckOptions = {
  * - `commit` — single + multi-event commits, optimistic concurrency
  * - `query` — stream, names, correlation, before, after, created_after,
  *   created_before, limit, with_snaps, stream_exact, backward traversal
+ * - stream filter grammar — the portable regex subset (`^`, `$`, `.`,
+ *   `.*`, literal characters) matches identically everywhere; richer
+ *   patterns either match with full regex semantics or throw
+ *   `ValidationError` — never a silent approximation
  * - `subscribe` — idempotent re-subscribe, watermark return value
  * - `claim` / `ack` — lease lifecycle, dual frontiers, leased streams
  *   not double-claimed
@@ -549,6 +554,137 @@ export const runStoreTck = (options: StoreTckOptions): void => {
         );
         const got = await collect(store, { stream: `^qr-${tag}-pfx-` });
         expect(got.map((e) => e.stream).sort()).toEqual([a, b].sort());
+      });
+    });
+
+    // Stream-filter grammar conformance. The portable subset — `^` / `$`
+    // anchors, `.` (any single character), `.*` (any run), and literal
+    // characters — must produce identical matches on every adapter
+    // (PG POSIX `~`, InMemory `RegExp`, SQLite anchor-aware `LIKE`).
+    // Richer regex is adapter-optional: an adapter either matches it
+    // with full regex semantics or throws `ValidationError`. Silently
+    // returning wrong rows (e.g. from a lossy LIKE approximation) is a
+    // contract violation — and the worst one available when the filter
+    // drives `reset` / `unblock`.
+    describe("stream filter grammar", () => {
+      const seed_streams = async (streams: string[]) => {
+        for (const s of streams)
+          await store.commit<CounterEvents>(
+            s,
+            [inc(1)],
+            make_meta({ stream: s })
+          );
+      };
+
+      const streams_matching = async (pattern: string) =>
+        (await collect(store, { stream: pattern })).map((e) => e.stream).sort();
+
+      // A non-portable pattern must never silently mis-match: the store
+      // either returns exactly the full-regex-semantics result set or
+      // throws ValidationError at the call site.
+      const match_exactly_or_throw = async (
+        pattern: string,
+        expected: string[]
+      ) => {
+        let matched: string[] | undefined;
+        let error: unknown;
+        try {
+          matched = await streams_matching(pattern);
+        } catch (e) {
+          error = e;
+        }
+        if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
+        else expect(matched).toEqual(expected.sort());
+      };
+
+      it("portable subset: anchors, `.`, and `.*` match identically", async () => {
+        const tag = uid();
+        const plain = `g-${tag}-plain`;
+        const dotted = `g-${tag}.dot`;
+        const scored = `g-${tag}_us`;
+        const pct = `g-${tag}%pc`;
+        await seed_streams([plain, dotted, scored, pct]);
+
+        // ^prefix — all four, regex-significant literals included
+        expect(await streams_matching(`^g-${tag}`)).toEqual(
+          [plain, dotted, scored, pct].sort()
+        );
+        // suffix$ — one
+        expect(await streams_matching(`${tag}-plain$`)).toEqual([plain]);
+        // ^exact$ — one
+        expect(await streams_matching(`^g-${tag}-plain$`)).toEqual([plain]);
+        // single `.` is a one-character wildcard: matches the literal
+        // dot in `dotted` and the `-` in `plain`
+        expect(await streams_matching(`^g-${tag}.dot$`)).toEqual([dotted]);
+        expect(await streams_matching(`^g-${tag}.plain$`)).toEqual([plain]);
+        // `.*` — any run
+        expect(await streams_matching(`^g-${tag}.*dot$`)).toEqual([dotted]);
+      });
+
+      it("literal `_` and `%` in patterns are not wildcards", async () => {
+        const tag = uid();
+        const scored = `u-${tag}_x`;
+        const scored_decoy = `u-${tag}Zx`;
+        const pct = `p-${tag}%y`;
+        const pct_decoy = `p-${tag}ZZy`;
+        await seed_streams([scored, scored_decoy, pct, pct_decoy]);
+
+        // `_` is a literal in the regex grammar — a store translating to
+        // LIKE must escape it or it single-char-wildcards into the decoy
+        expect(await streams_matching(`^u-${tag}_x$`)).toEqual([scored]);
+        // `%` is a literal in the regex grammar — unescaped LIKE would
+        // any-run-wildcard into the decoy
+        expect(await streams_matching(`^p-${tag}%y$`)).toEqual([pct]);
+      });
+
+      it("portable subset applies to stream-position filters", async () => {
+        const tag = uid();
+        const scored = `sf-${tag}_a`;
+        const decoy = `sf-${tag}Za`;
+        await store.subscribe([{ stream: scored }, { stream: decoy }]);
+
+        const got: string[] = [];
+        await store.query_streams((p) => got.push(p.stream), {
+          stream: `^sf-${tag}_a$`,
+        });
+        expect(got).toEqual([scored]);
+      });
+
+      it("non-portable patterns match with full regex semantics or throw", async () => {
+        const tag = uid();
+        const a = `np-${tag}-a`;
+        const b = `np-${tag}-b`;
+        const c = `np-${tag}-c`;
+        const one = `np-${tag}-1`;
+        const aaa = `np-${tag}-aaa`;
+        const dot = `e-${tag}.d`;
+        const dot_decoy = `e-${tag}xd`;
+        await seed_streams([a, b, c, one, aaa, dot, dot_decoy]);
+
+        // alternation
+        await match_exactly_or_throw(`^np-${tag}-(a|b)$`, [a, b]);
+        // character class
+        await match_exactly_or_throw(`^np-${tag}-[0-9]$`, [one]);
+        // quantifier
+        await match_exactly_or_throw(`^np-${tag}-a+$`, [a, aaa]);
+        // escaped dot — a literal-dot match, not a one-char wildcard
+        await match_exactly_or_throw(`^e-${tag}\\.d$`, [dot]);
+      });
+
+      it("bulk stream ops reject non-portable filters instead of mis-matching", async () => {
+        const tag = uid();
+        const s = `bo-${tag}-a`;
+        await store.subscribe([{ stream: s }]);
+
+        let count: number | undefined;
+        let error: unknown;
+        try {
+          count = await store.reset({ stream: `^bo-${tag}-(a|b)$` });
+        } catch (e) {
+          error = e;
+        }
+        if (error !== undefined) expect(error).toBeInstanceOf(ValidationError);
+        else expect(count).toBe(1);
       });
     });
 

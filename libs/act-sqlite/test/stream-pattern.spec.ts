@@ -1,3 +1,4 @@
+import { ValidationError } from "@rotorsoft/act";
 import { streamPatternToLike } from "../src/sqlite-store.js";
 
 describe("streamPatternToLike", () => {
@@ -65,6 +66,62 @@ describe("streamPatternToLike", () => {
 
     it("contains via plain substring", () => {
       expect(streamPatternToLike("user")).toBe("%user%");
+    });
+  });
+
+  describe("LIKE metacharacter escaping", () => {
+    it("escapes literal underscore so it is not a single-char wildcard", () => {
+      expect(streamPatternToLike("^user_1$")).toBe("user\\_1");
+    });
+
+    it("escapes literal percent so it is not an any-run wildcard", () => {
+      expect(streamPatternToLike("^disc%off$")).toBe("disc\\%off");
+    });
+
+    it("escapes metacharacters in unanchored (contains) patterns", () => {
+      expect(streamPatternToLike("a_b%c")).toBe("%a\\_b\\%c%");
+    });
+
+    it("does not collapse an escaped % into an adjacent wildcard", () => {
+      // contains "a%" — the escaped literal must survive next to the
+      // trailing any-run wildcard
+      expect(streamPatternToLike("a%")).toBe("%a\\%%");
+    });
+  });
+
+  describe("non-portable patterns throw ValidationError", () => {
+    const cases = [
+      ["alternation", "^order-(a|b)$"],
+      ["character class", "^order-[0-9]$"],
+      ["plus quantifier", "^a+$"],
+      ["optional quantifier", "^ab?$"],
+      ["bounded quantifier", "^a{2}$"],
+      ["bare star quantifier", "^ab*$"],
+      ["escaped dot", "^a\\.b$"],
+      ["escape sequence", "^\\d+$"],
+      ["mid-pattern caret", "a^b"],
+      ["mid-pattern dollar", "a$b"],
+    ] as const;
+
+    it.each(cases)("throws on %s", (_label, pattern) => {
+      expect(() => streamPatternToLike(pattern)).toThrow(ValidationError);
+    });
+
+    it("names the offending pattern and enumerates the supported subset", () => {
+      try {
+        streamPatternToLike("^a-(x|y)$");
+        expect.unreachable("should have thrown");
+      } catch (error) {
+        expect(error).toBeInstanceOf(ValidationError);
+        const message = (error as ValidationError).message;
+        expect(message).toContain('"^a-(x|y)$"');
+        expect(message).toContain('"^"');
+        expect(message).toContain('"$"');
+        expect(message).toContain('"."');
+        expect(message).toContain('".*"');
+        expect(message).toContain("literal characters");
+        expect((error as ValidationError).payload).toBe("^a-(x|y)$");
+      }
     });
   });
 });

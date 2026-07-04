@@ -15,7 +15,7 @@ import type {
   StreamPosition,
   StreamStats,
 } from "@rotorsoft/act";
-import { StoreError } from "@rotorsoft/act";
+import { StoreError, ValidationError } from "@rotorsoft/act";
 import {
   decrypt,
   type Encryption,
@@ -64,9 +64,27 @@ const DEFAULT_CONFIG: SqliteConfig = {
   url: "file::memory:",
 };
 
+/** Portable stream-filter body grammar: literal characters, `.` (any
+ *  single character), and `.*` (any run). Everything else — escapes
+ *  (`\.`), character classes (`[0-9]`), grouping/alternation (`(a|b)`),
+ *  quantifiers (`+ ? { }`), and mid-pattern anchors — has no faithful
+ *  `LIKE` translation and must throw instead of silently mis-matching.
+ *  @internal
+ */
+const PORTABLE_BODY = /^(?:\.\*|\.|[^\\^$.()[\]{}|+?*])*$/;
+
 /** Translate a stream filter (regex-shaped or plain substring) into a
  *  SQL LIKE pattern. Honors `^` / `$` anchors and converts `.*` → `%`,
  *  `.` → `_`. Unanchored input gets `%` wildcards on both sides.
+ *  Literal `%` / `_` in the pattern are escaped with `\` so they match
+ *  themselves — every consumer appends `ESCAPE '\'` to its `LIKE`.
+ *
+ *  Only the portable filter grammar documented on
+ *  {@link QueryStreams.stream} is convertible: `^` / `$` anchors, `.`,
+ *  `.*`, and literal characters. Any richer regex syntax throws
+ *  {@link ValidationError} — a lossy approximation would silently
+ *  return wrong rows, the worst available failure mode when the filter
+ *  drives `reset` / `unblock`.
  *
  *  Examples:
  *  - `^abc$`  → `abc`        (exact)
@@ -74,6 +92,8 @@ const DEFAULT_CONFIG: SqliteConfig = {
  *  - `.*abc$` → `%abc`       (ends-with)
  *  - `abc`    → `%abc%`      (contains)
  *  - `a.c`    → `%a_c%`      (single-char wildcard, contains)
+ *  - `^a_c$`  → `a\_c`       (literal underscore, escaped for LIKE)
+ *  - `(a|b)`  → throws {@link ValidationError}
  *
  *  @internal exported for testing
  */
@@ -83,11 +103,35 @@ export function streamPatternToLike(input: string): string {
   const end = s.endsWith("$");
   if (start) s = s.slice(1);
   if (end) s = s.slice(0, -1);
-  s = s.replace(/\.\*/g, "%").replace(/\./g, "_");
-  const out = (start ? "" : "%") + s + (end ? "" : "%");
-  // Collapse adjacent `%` — e.g. `^a.*` would otherwise yield `a%%`.
-  // Same matching semantics, cleaner output.
-  return out.replace(/%+/g, "%");
+  if (!PORTABLE_BODY.test(s))
+    throw new ValidationError(
+      `stream filter pattern "${input}" — the SQLite adapter supports only the portable subset: "^" and "$" anchors, "." (any single character), ".*" (any run), and literal characters. Escapes, character classes, grouping, alternation, and quantifiers cannot be converted to LIKE; use stream_exact/source_exact for literal names`,
+      input,
+      "non-portable stream filter pattern"
+    );
+  const tokens: string[] = [];
+  if (!start) tokens.push("%");
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === ".") {
+      if (s[i + 1] === "*") {
+        tokens.push("%");
+        i++;
+      } else tokens.push("_");
+    } else if (c === "%" || c === "_") tokens.push(`\\${c}`);
+    else tokens.push(c);
+  }
+  if (!end) tokens.push("%");
+  // Collapse adjacent `%` wildcards — e.g. `^a.*` would otherwise yield
+  // `a%%`. Token-level so escaped literals (`\%`) are never merged.
+  let out = "";
+  let prev = "";
+  for (const t of tokens) {
+    if (t === "%" && prev === "%") continue;
+    out += t;
+    prev = t;
+  }
+  return out;
 }
 
 /**
@@ -359,7 +403,7 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ?";
+        sql += " AND stream LIKE ? ESCAPE '\\'";
         args.push(streamPatternToLike(query.stream));
       }
     }
@@ -518,7 +562,7 @@ export class SqliteStore implements Store {
         let has_events: boolean;
         if (source) {
           const check = await tx.execute({
-            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? LIMIT 1`,
+            sql: `SELECT 1 FROM events WHERE id > ? AND name != '__snapshot__' AND stream LIKE ? ESCAPE '\\' LIMIT 1`,
             args: [at, streamPatternToLike(source)],
           });
           has_events = check.rows.length > 0;
@@ -676,7 +720,7 @@ export class SqliteStore implements Store {
         conditions.push("stream = ?");
         args.push(filter.stream);
       } else {
-        conditions.push("stream LIKE ?");
+        conditions.push("stream LIKE ? ESCAPE '\\'");
         args.push(streamPatternToLike(filter.stream));
       }
     }
@@ -686,7 +730,7 @@ export class SqliteStore implements Store {
         conditions.push("source = ?");
         args.push(filter.source);
       } else {
-        conditions.push("source LIKE ?");
+        conditions.push("source LIKE ? ESCAPE '\\'");
         args.push(streamPatternToLike(filter.source));
       }
     }
@@ -786,7 +830,7 @@ export class SqliteStore implements Store {
         sql += " AND stream = ?";
         args.push(query.stream);
       } else {
-        sql += " AND stream LIKE ?";
+        sql += " AND stream LIKE ? ESCAPE '\\'";
         args.push(streamPatternToLike(query.stream));
       }
     }
@@ -796,7 +840,7 @@ export class SqliteStore implements Store {
         sql += " AND source = ?";
         args.push(query.source);
       } else {
-        sql += " AND source LIKE ?";
+        sql += " AND source LIKE ? ESCAPE '\\'";
         args.push(streamPatternToLike(query.source));
       }
     }
@@ -899,7 +943,7 @@ export class SqliteStore implements Store {
         where.push(`e.stream = ?`);
         args.push(input.stream);
       } else {
-        where.push(`e.stream LIKE ?`);
+        where.push(`e.stream LIKE ? ESCAPE '\\'`);
         args.push(streamPatternToLike(input.stream));
       }
     }
