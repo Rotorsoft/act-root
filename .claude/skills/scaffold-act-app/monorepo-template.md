@@ -152,7 +152,7 @@ export default defineConfig({
   "dependencies": {
     "@my-app/domain": "workspace:*",
     "@rotorsoft/act": "^0.20.0",
-    "@rotorsoft/act-http/sse": "^0.1.0",
+    "@rotorsoft/act-http": "^1.7.0",
     "@tanstack/react-query": "^5.90.21",
     "@trpc/client": "11.10.0",
     "@trpc/react-query": "11.10.0",
@@ -270,6 +270,6 @@ pnpm -F @my-app/domain add @rotorsoft/act drizzle-orm postgres zod
 pnpm -F @my-app/domain add -D drizzle-kit
 
 # App (server + client combined)
-pnpm -F @my-app/app add @my-app/domain @rotorsoft/act @rotorsoft/act-http/sse @trpc/server @trpc/client @trpc/react-query @tanstack/react-query cors react react-dom zod
+pnpm -F @my-app/app add @my-app/domain @rotorsoft/act @rotorsoft/act-http @trpc/server @trpc/client @trpc/react-query @tanstack/react-query cors react react-dom zod
 pnpm -F @my-app/app add -D @types/cors @types/react @types/react-dom @vitejs/plugin-react typescript vite
 ```

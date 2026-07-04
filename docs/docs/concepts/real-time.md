@@ -3,15 +3,17 @@ id: real-time
 title: Real-Time with SSE
 ---
 
-# Real-Time with act-sse
+# Real-Time with act-http/sse
 
-`@rotorsoft/act-sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
+`@rotorsoft/act-http/sse` broadcasts incremental state updates over Server-Sent Events. Each event-sourced commit emits a *domain patch* (a partial state update); the broadcast layer forwards those patches keyed by event version, so subscribers can apply them to their cached state without ever refetching.
 
 > SSE is one of two HTTP-shaped integration paths. For the outbound side — webhooks, downstream services, message buses — see [External integration patterns](../guides/external-integration). The two are independent; an app can run both.
 
 ```bash
-npm install @rotorsoft/act-sse
+npm install @rotorsoft/act-http
 ```
+
+> **Migrating from `@rotorsoft/act-sse`?** The standalone package is deprecated — it's now a thin re-export shim over `@rotorsoft/act-http/sse` (the canonical home) and is scheduled for removal. The surface is identical; swap the import specifier and you're done. See the [1.x migration guide](../guides/migrating-to-1.x).
 
 ## See it running
 
@@ -57,8 +59,8 @@ Run `pnpm dev:http` from the repo root and press keys at [http://localhost:3000]
 Manages per-stream subscriber sets and an LRU state cache for reconnects:
 
 ```typescript no-check
-import { BroadcastChannel } from "@rotorsoft/act-sse";
-import type { BroadcastState, PatchMessage } from "@rotorsoft/act-sse";
+import { BroadcastChannel } from "@rotorsoft/act-http/sse";
+import type { BroadcastState, PatchMessage } from "@rotorsoft/act-http/sse";
 
 type AppState = BroadcastState & {
   // your domain state fields
@@ -67,7 +69,7 @@ type AppState = BroadcastState & {
 };
 
 const broadcast = new BroadcastChannel<AppState>({
-  cacheSize: 50, // LRU entries; default 50
+  cache_size: 50, // LRU entries; default 50
 });
 ```
 
@@ -100,11 +102,11 @@ broadcast.publish(streamId, state, patches);
 
 ### Overlays (non-event state changes)
 
-Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `publishOverlay()`:
+Some state changes don't have a corresponding event — typically presence ("alice is online") or computed-field refreshes. Use `publish_overlay()`:
 
 ```typescript no-check
-broadcast.publishOverlay(streamId, {
-  onlineUsers: presence.getOnline(streamId),
+broadcast.publish_overlay(streamId, {
+  onlineUsers: presence.get_online(streamId),
 });
 ```
 
@@ -115,7 +117,7 @@ This applies the overlay to the cached state, leaves `_v` unchanged, and emits a
 `PresenceTracker` is a ref-counted online-status tracker designed for multi-tab clients (each tab opens its own SSE; `add` / `remove` maintain a per-identity counter):
 
 ```typescript no-check
-import { PresenceTracker } from "@rotorsoft/act-sse";
+import { PresenceTracker } from "@rotorsoft/act-http/sse";
 
 const presence = new PresenceTracker();
 
@@ -126,16 +128,22 @@ presence.add(streamId, identityId);
 presence.remove(streamId, identityId);
 
 // Query
-presence.getOnline(streamId); // Set<string>
-presence.isOnline(streamId, identityId); // boolean
+presence.get_online(streamId); // Set<string>
+presence.is_online(streamId, identityId); // boolean
 ```
 
-### tRPC subscription
+### If you use the generated transports
 
-`act-sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
+You may not need to write a subscription handler at all. Both `trpc(app, { sse })` and `hono(app, { sse })` from `@rotorsoft/act-http` accept an `sse: { channel: broadcast }` option that walks the registry and emits one subscription — or one streaming `GET /api/sse/<stateName>?stream=<id>` endpoint — per registered state, all reading from your `BroadcastChannel`. You keep owning publication (`broadcast.publish(...)` after commits); the generator owns subscription, accounting, cleanup, and the wire format. See [Auto-generated API surfaces § Real-time subscriptions](../guides/auto-generated-api#real-time-subscriptions), and the runnable demo in `packages/server` + `packages/client` (`pnpm dev:http` from the repo root).
+
+The section below is the custom-server path — the same loop the generator writes for you, hand-rolled for hosts the generators don't cover.
+
+### tRPC subscription (custom server)
+
+`act-http/sse` doesn't dictate the wire format — your tRPC handler decides. A typical pattern yields the cached state on connect, then forwards each patch message. Wrap the two shapes in a small app-level envelope so the client can tell them apart:
 
 ```typescript no-check
-import type { PatchMessage } from "@rotorsoft/act-sse";
+import type { PatchMessage } from "@rotorsoft/act-http/sse";
 
 type Envelope<S> =
   | { kind: "snap"; state: S }
@@ -158,7 +166,7 @@ export const onStateChange = publicProcedure
 
     try {
       // Initial snapshot for first paint
-      const cached = broadcast.getState(streamId);
+      const cached = broadcast.get_state(streamId);
       if (cached) yield { kind: "snap", state: cached } satisfies Envelope<AppState>;
 
       while (!signal?.aborted) {
@@ -187,7 +195,7 @@ export const onStateChange = publicProcedure
 ### applyPatchMessage
 
 ```typescript no-check
-import { applyPatchMessage } from "@rotorsoft/act-sse";
+import { applyPatchMessage } from "@rotorsoft/act-http/sse";
 
 onData: (env) => {
   if (env.kind === "snap") {
@@ -217,7 +225,7 @@ onData: (env) => {
 1. **`_v` is `snap.event.version`** — the event store's stream version is the single source of truth. Never invent a version.
 2. **One broadcast function** — every code path that calls `app.do()` should funnel through the same publish helper. Multiple publish sites with different state shapes is how double-apply bugs start.
 3. **Broadcast from snapshots, not projections** — projections are eventually consistent and may lag. Broadcast from the snapshots returned by `app.do()`.
-4. **Presence is an overlay, not an event** — use `publishOverlay()` so connect/disconnect doesn't pollute the event log.
+4. **Presence is an overlay, not an event** — use `publish_overlay()` so connect/disconnect doesn't pollute the event log.
 
 ## The double-apply bug
 
@@ -225,7 +233,7 @@ If a projection falls back to the broadcast cache on a miss, it reads state that
 
 ```typescript no-check
 // BUG — broadcast cache holds post-event snapshots
-let state = projCache.get(id) ?? broadcast.getState(id); // ← already patched!
+let state = projCache.get(id) ?? broadcast.get_state(id); // ← already patched!
 mutator(state); // patches applied a second time
 
 // FIX — fall back to durable storage only
@@ -233,4 +241,4 @@ let state = projCache.get(id) ?? (await db.select(id)) ?? defaultState();
 mutator(state);
 ```
 
-The broadcast cache exists for *reconnect seeding* and for `publishOverlay()`'s read-modify-write. Everything else should go through the database.
+The broadcast cache exists for *reconnect seeding* and for `publish_overlay()`'s read-modify-write. Everything else should go through the database.
